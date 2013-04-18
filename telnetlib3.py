@@ -9,15 +9,19 @@ This project requires python 3.3.
 the 'tulip' module is included, retrieved Apr. 2013
 """
 import collections
-#import logging
+import logging
 #import codecs
 import sys
-import os
+#import os
 
 assert sys.version >= '3.3', 'Please use Python 3.3 or higher.'
 import tulip
-import logger
 
+# missing support:
+# AUTHENTICATION, TSPEED, LFLOW, SE, NOP, DM, BRK, IP, AO, AYT, EC, EL, GA!
+# extended LINEMODE negotiation, ENCRYPT
+
+# That is a lot !!
 from telnetlib import LINEMODE, NAWS, NEW_ENVIRON, ENCRYPT, AUTHENTICATION
 from telnetlib import BINARY, SGA, ECHO, STATUS, TTYPE, TSPEED, LFLOW
 from telnetlib import XDISPLOC, IAC, DONT, DO, WONT, WILL, SE, NOP, DM
@@ -32,8 +36,8 @@ def name_command(cmd):
     This is only be used for identifying unknown byte sequences.
     """
     values = ';?'.join([k for k, v in globals().iteritems()
-                        if option == v and k not in ('SEND', 'IS',)])
-    return values if values != '' else str(ord(option))
+                        if cmd == v and k not in ('SEND', 'IS',)])
+    return values if values != '' else str(ord(cmd))
 
 class TelnetServerProtocol(tulip.Protocol):
     def __init__(self, log=logging, debug=False):
@@ -215,7 +219,7 @@ class TelnetStreamReader(tulip.StreamReader):
             # in-bound data
             self.buffer.append(byte)
 
-    def iac(cmd, opt):
+    def iac(self, cmd, opt):
         """ Send IAC <cmd> <opt> to remote end.
 
         For iac ``cmd`` DO and DONT, ``self.pending_option[cmd + opt]``
@@ -229,7 +233,7 @@ class TelnetStreamReader(tulip.StreamReader):
                 or cmd == DONT and remote_opt in (True, None)):
             self.pending_option[cmd + opt] = True
 
-    def parse_iac_command(byte):
+    def parse_iac_command(self, byte):
         """ XXX
 
         Only IAC DO, DONT, WILL, WONT, SB, or SE is supported.
@@ -237,9 +241,9 @@ class TelnetStreamReader(tulip.StreamReader):
         Any other bytes are passed to this method, which raises a ValueError.
         Implementors of additional options should derive this method.
         """
-        raise ValueError('IAC %r unexpected' % (cmd,))
+        raise ValueError('IAC %r unexpected' % (byte,))
 
-    def parse_subnegotiation(buf):
+    def parse_subnegotiation(self, buf):
         """ Callback containing the sub-negotiation buffer. Called after
         IAC + SE is received, indicating the end of sub-negotiation command.
 
@@ -275,22 +279,23 @@ class TelnetStreamReader(tulip.StreamReader):
 
     def _send_status(self):
         """ Respond after DO STATUS received by DE (rfc859). """
-        # XXX
         assert self.local_option.get('STATUS', None) is True, (
                 u'Only the sender of IAC WILL STATUS may send '
-                + u'IAC SB STATUS IS. IAC WILL STATUS is only '
-                + u'sent in response to IAC DO STATUS.')
+                u'IAC SB STATUS IS.')
         response = collections.deque(bytes([IAC, SB, STATUS, IS]))
         for opt, status in self.local_option.items():
             # status is 'WILL' for local option states that are True,
-            # or for any options pending reply,
-            if status or opt in self.pending_option:
-                response.append(bytes([WILL, opt]))
+            # and 'WONT' for options that are False.
+            response.append(bytes([WILL if status else WONT, opt]))
         for opt, status in self.remote_option.items():
             # status is 'DO' for remote option states that are True,
-            # or for any options pending reply
-            if status or (opt in self.pending_option:
+            # or for any DO option requests pending reply. status is
+            # 'DONT' for any remote option states that are False,
+            # or for any DONT option requests pending reply.
+            if status or DO + opt in self.pending_option:
                 response.append(bytes([DO, opt]))
+            elif not status or DONT + opt in self.pending_option:
+                response.append(bytes([DONT, opt]))
         response.append(bytes([IAC, SE]))
         self.transport.write(response)
 
@@ -352,7 +357,7 @@ class TelnetStreamReader(tulip.StreamReader):
             if self.check_local_opt(opt) is None:
                 self._set_local_opt(opt, False)
                 self.iac(WONT, opt)
-                raise ValueError('Unhandled: DO %s.' % (name_option(opt),))
+                raise ValueError('Unhandled: DO %s.' % (name_command(opt),))
 
     def handle_dont(self, opt):
         """ Process byte 3 of series (IAC, DONT, opt) received by remote end.
@@ -410,11 +415,11 @@ class TelnetStreamReader(tulip.StreamReader):
             if not self.remote_option.get(opt, None):
                 self.remote_option[opt] = True
                 self.transport.write(
-                        bytes([IAC, SB, NEW_ENIRON, SEND, IS,]))
+                        bytes([IAC, SB, NEW_ENVIRON, SEND, IS,]))
                 self.transport.write(
                         b'\x00'.join(self.request_env))
                 self.transport.write(
-                        bytes([b'\x03', IAC, SE,])
+                        bytes([b'\x03', IAC, SE,]))
                 # set pending for SB NEW_ENVIRON
                 self.pending_option[SB + opt] = True
         elif opt == XDISPLOC:
@@ -434,7 +439,7 @@ class TelnetStreamReader(tulip.StreamReader):
         else:
             self.remote_option[opt] = False
             self.iac(DONT, opt)
-            raise ValueError('Unhandled: WILL %s.' % (name_option(opt),))
+            raise ValueError('Unhandled: WILL %s.' % (name_command(opt),))
 
     def handle_wont(self, opt):
         """ Process byte 3 of series (IAC, WONT, opt) received by remote end.
@@ -451,7 +456,7 @@ class TelnetStreamReader(tulip.StreamReader):
 
 class TelnetProtocol(tulip.Protocol):
     def __init__(self, log=logging, debug=False):
-        self.log = logging
+        self.log = log
         self.debug = debug
 
     def connection_made(self, transport):
@@ -472,19 +477,3 @@ class TelnetProtocol(tulip.Protocol):
 
     def close(self):
         self._closing = True
-
-    def handle_request(self, request_info, message):
-        raise tulip.http.HttpStatusException(404)
-        response = tulip.http.Response(self.transport, 200)
-            try:
-                with open(path, 'rb') as fp:
-                    chunk = fp.read(8196)
-                    while chunk:
-                        if not response.write(chunk):
-                            break
-                        chunk = fp.read(8196)
-            except OSError:
-                response.write(b'Cannot open')
-
-        response.write_eof()
-        self.close()
