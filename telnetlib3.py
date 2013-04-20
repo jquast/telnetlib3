@@ -10,87 +10,35 @@ the 'tulip' module is included, retrieved Apr. 2013
 """
 import collections
 import logging
-#import codecs
+import argparse
 import sys
-#import os
 
 assert sys.version >= '3.3', 'Please use Python 3.3 or higher.'
 import tulip
 
-# missing support:
-# AUTHENTICATION, TSPEED, LFLOW, SE, NOP, DM, BRK, IP, AO, AYT, EC, EL, GA!
-# extended LINEMODE negotiation, ENCRYPT
-
-# That is a lot !!
 from telnetlib import LINEMODE, NAWS, NEW_ENVIRON, ENCRYPT, AUTHENTICATION
 from telnetlib import BINARY, SGA, ECHO, STATUS, TTYPE, TSPEED, LFLOW
-from telnetlib import XDISPLOC, IAC, DONT, DO, WONT, WILL, SE, NOP, DM
-from telnetlib import BRK, IP, AO, AYT, EC, EL, GA, SB
+from telnetlib import XDISPLOC, IAC, DONT, DO, WONT, WILL, SE, NOP, DM, TM
+from telnetlib import BRK, IP, AO, AYT, EC, EL, EOR, GA, SB
 IS = bytes([0])
 SEND = bytes([1])
+EOF = bytes([236])
+SUSP = bytes([237])
+ABORT = bytes([238])
 
-def name_command(cmd):
-    """
-    Perform introspection of global CONSTANTS for equivalent values,
-    and return a string that displays its possible meanings.
-    This is only be used for identifying unknown byte sequences.
-    """
-    values = ';?'.join([k for k, v in globals().iteritems()
-                        if cmd == v and k not in ('SEND', 'IS',)])
-    return values if values != '' else str(ord(cmd))
+_DEBUG_OPTS = dict([(value, key)
+    for key, value in globals().items() if key in
+    ('LINEMODE', 'NAWS', 'NEW_ENVIRON', 'ENCRYPT', 'AUTHENTICATION',
+        'BINARY', 'SGA', 'ECHO', 'STATUS', 'TTYPE', 'TSPEED', 'LFLOW',
+        'XDISPLOC', 'IAC', 'DONT', 'DO', 'WONT', 'WILL', 'SE', 'NOP',
+        'DM', 'TM', 'BRK', 'IP', 'ABORT', 'AO', 'AYT', 'EC', 'EL',
+        'EOR', 'GA', 'SB', 'EOF', 'SUSP', 'ABORT',)])
 
-class TelnetServerProtocol(tulip.Protocol):
-    def __init__(self, log=logging, debug=False):
-        self.log = log
-        self.debug = debug
 
-    def connection_made(self, transport):
-        self.transport = transport
-        self.stream = TelnetStreamReader(self.transport, server=True)
-        self.stream.debug = self.debug
-        self.banner()
-        self.start()
 
-    def banner(self):
-        """ XXX
-        """
-        self.transport.write('Welcome to %s\r\n' % (__file__,))
+def name_command(byte):
+    return repr(byte) if byte not in _DEBUG_OPTS else _DEBUG_OPTS[byte]
 
-    def handle_line(self, buf):
-        if self.stream.local_option.get(ECHO, None):
-            self.transport.write('%s\r\n' % (buf.rstrip(),))
-        for byte in buf:
-            self.handle_input(byte)
-
-    def handle_input(self, byte):
-        if self.stream.local_option.get(ECHO, None):
-            self.transport.write(byte)
-        print('Client input: %r' % (byte,))
-
-    def start(self):
-        """ Start processing of incoming bytes.
-
-        If stream.local_option[LINEMODE] becomes True, this class
-        calls the ``handle_line`` callback for each line of input
-        received. Otherwise, ``handle_input`` callback for each
-        in-band byte recieved. """
-        while True:
-            try:
-                if self.local_option.get('LINEMODE', None):
-                    buf = yield from self.stream.readline()
-                    self.handle_line(buf)
-                else:
-                    byte = yield from self.stream.read(1)
-                    self.handle_input(byte)
-            except tulip.CancelledError:
-                self.log_debug('Ignored premature client disconnection.')
-                break
-            except Exception as exc:
-                self.log_err(exc)
-            finally:
-                if self._closing:
-                    self.transport.close()
-                    break
 
 class TelnetStreamReader(tulip.StreamReader):
     """
@@ -110,7 +58,8 @@ class TelnetStreamReader(tulip.StreamReader):
     # request_env only applicable for server mode.
     request_env = "USER TERM COLUMNS LINES DISPLAY LANG".split()
 
-    def __init__(self, transport, client=-1, server=-1):
+    def __init__(self, transport, client=-1, server=-1,
+            debug=False, log=logging):
         """ This stream decodes bytes as seen by ``TelnetProtocol``.
 
         This is generally instantiated by connection_made(self, transport)
@@ -128,6 +77,8 @@ class TelnetStreamReader(tulip.StreamReader):
                        or client == False)
         self.transport = transport  # necessary for replies
         self._sb_buffer = collections.deque()  # sub-negotiation buffer
+        self.debug = debug
+        self.log = log
         tulip.StreamReader.__init__(self)
 
     def feed_data(self, data):
@@ -162,6 +113,8 @@ class TelnetStreamReader(tulip.StreamReader):
         and ``self.remote_option``. Pending replies are noted with
         dict ``self.pending_option``.
         """
+        byte = bytes([byte])
+        print('parse: %r (%s).' %(byte, name_command(byte),))
         if byte == IAC:
             self._iac_received = (not self._iac_received)
             if not self._iac_received:
@@ -226,22 +179,48 @@ class TelnetStreamReader(tulip.StreamReader):
         is set True if ``self.remote_option[opt]`` is not set, or remote
         option value is the inverse value of option requested.
         """
-        assert cmd in (DO, DONT, WILL, WONT), ('Illegal IAC cmd, %r.' % (cmd,))
-        self.transport.write(IAC + cmd + opt)
+        assert cmd in (DO, DONT, WILL, WONT), (
+                'Illegal IAC cmd, %r.' % (cmd,))
         remote_opt = self.remote_option.get(opt, None)
         if (cmd == DO and remote_opt in (False, None)
                 or cmd == DONT and remote_opt in (True, None)):
             self.pending_option[cmd + opt] = True
+        elif(cmd == WILL and self.local_option.get(opt, None) != True):
+            self.local_option[opt] = True
+        elif(cmd == WONT and self.local_option.get(opt, None) != False):
+            self.local_option[opt] = False
+        self.transport.write(IAC + cmd + opt)
+        print('send IAC %s %s' % (name_command(cmd), name_command(opt),))
 
-    def parse_iac_command(self, byte):
-        """ XXX
-
-        Only IAC DO, DONT, WILL, WONT, SB, or SE is supported.
-
-        Any other bytes are passed to this method, which raises a ValueError.
-        Implementors of additional options should derive this method.
+    def parse_iac_command(self, cmd):
         """
-        raise ValueError('IAC %r unexpected' % (byte,))
+        Handle IAC commands BRK, IP, AO, AYT, EC, EL.
+
+        Implementors of these options should derive this method.
+        """
+        print('recv IAC %s' % (name_command(cmd),))
+        if cmd == BRK:
+            self.handle_brk()
+        elif cmd == IP:
+            self.handle_ip()
+        elif cmd == AO:
+            self.handle_ao()
+        elif cmd == AYT:
+            self.handle_ayt()
+        elif cmd == EC:
+            self.handle_ec()
+        elif cmd == EL:
+            self.handle_el()
+        elif cmd == EOR:
+            self.handle_eor()
+        elif cmd == EOF:
+            self.handle_eof()
+        elif cmd == SUSP:
+            self.handle_susp()
+        elif cmd == ABORT:
+            self.handle_abort()
+        elif cmd == NOP:
+            pass
 
     def parse_subnegotiation(self, buf):
         """ Callback containing the sub-negotiation buffer. Called after
@@ -317,8 +296,9 @@ class TelnetStreamReader(tulip.StreamReader):
     def handle_do(self, opt):
         """ Process byte 3 of series (IAC, DO, opt) received by remote end.
 
-        answer WILL ECHO for servers, and BINARY, SGA, and STATUS for clients
-        or servers. Answer WONT for LINEMODE, ENCRYPT, or any other capability.
+        answer WILL ECHO for servers, and BINARY, SGA, TM, LINEMODE, and
+        STATUS for both clients and servers. Answer WONT for ENCRYPT, or
+        any other capability.
 
         This method can be derived to modify or extend protocol capabilities.
         The result of a supported capability is a response of (IAC, WILL, opt)
@@ -326,6 +306,7 @@ class TelnetStreamReader(tulip.StreamReader):
         unsupported capabilities, RFC specifies a response of (IAC, WONT, opt).
         Similarly, set ``self.local_option[opt]`` to ``False``.
         """
+        print('handle_do(%s)' % (name_command(opt)))
         # options that we support
         if opt == ECHO:
             if not self.server:
@@ -334,10 +315,9 @@ class TelnetStreamReader(tulip.StreamReader):
             if not self.local_option.get(opt, None):
                 self.local_option[opt] = True
                 self.iac(WILL, opt)
-        elif opt in (BINARY, SGA):
-            # remote end requests to recv BINARY or supress GA,
+        elif opt in (BINARY, SGA, LINEMODE, TM):
             if not self.local_option.get(opt, None):
-                self._set_local_opt(opt, True)
+                self.local_option[opt] = True
                 self.iac(WILL, opt)
         elif opt == STATUS:
             # IAC DO STATUS is used to obtain request to have server
@@ -347,15 +327,15 @@ class TelnetStreamReader(tulip.StreamReader):
                 self.local_option[opt] = True
                 self.iac(WILL, STATUS)
                 self._send_status()
-        elif opt in (LINEMODE, ENCRYPT):
+        elif opt in (ENCRYPT):
             # remote end wants to do linemode editing, we don't yet, as a
             # complex matrix of linemode subnegotation follows
             if not self.local_option.get(opt, None):
                 self.local_option[opt] = False
                 self.iac(WONT, opt)
         else:
-            if self.check_local_opt(opt) is None:
-                self._set_local_opt(opt, False)
+            if self.local_option.get(opt, None) is None:
+                self.local_option[opt] = False
                 self.iac(WONT, opt)
                 raise ValueError('Unhandled: DO %s.' % (name_command(opt),))
 
@@ -368,6 +348,7 @@ class TelnetStreamReader(tulip.StreamReader):
         ``self.local_option[opt]`` is set ``False`` for the telnet command
         option byte, ``opt`` to note local option.
         """
+        print('handle_dont(%s)' % (name_command(opt)))
         if self.local_option.get(opt, None) in (True, None):
             # option is unknown or True
             self.local_option[opt] = False
@@ -392,6 +373,7 @@ class TelnetStreamReader(tulip.StreamReader):
         and the setting of ``self.remote_option[opt]`` of ``True``. For
         unsupported capabilities, RFC specifies a response of (IAC, DONT, opt).
         Similarly, set ``self.remote_option[opt]`` to ``False``.  """
+        print('handle_will(%s)' % (name_command(opt)))
         if opt == ECHO and self.server:
             raise ValueError('WILL ECHO received on server stream')
         elif opt == NAWS and not self.server:
@@ -400,7 +382,7 @@ class TelnetStreamReader(tulip.StreamReader):
             raise ValueError('WILL XDISPLOC received on client stream')
         elif opt == TTYPE and not self.server:
             raise ValueError('WILL TTYPE received on client stream')
-        elif opt in (BINARY, SGA, ECHO, NAWS):
+        elif opt in (BINARY, SGA, ECHO, NAWS, LINEMODE):
             if not self.remote_option.get(opt, None):
                 self.remote_option[opt] = True
                 self.iac(DO, opt)
@@ -450,30 +432,220 @@ class TelnetStreamReader(tulip.StreamReader):
 
         The default implementation agrees DONT for all capabilities.
         """
+        print('handle_wont(%s)' % (name_command(opt)))
         if self.remote_option.get(opt, None) in (True, None):
             self.remote_option[opt] = False
             self.iac(DONT, opt)
 
-class TelnetProtocol(tulip.Protocol):
+    def handle_ip(self):
+        """ XXX
+
+        Handle Interrupt Process (IAC, IP), sent by clients by ^c. """
+        self.buffer.append(b'\x03')
+
+    def handle_abort(self):
+        """ XXX
+
+        Handle Abort (IAC, ABORT). Similar to "IAC IP", but means only to
+        abort or terminate the process to which the NVT is connected.  """
+        self.buffer.append(b'\x03')
+
+    def handle_susp(self):
+        """ XXX
+
+        Handle Suspend Process (IAC, SUSP). Suspend the execution of the
+        current process attached to the NVT in such a way that another
+        process will take over control of the NVT, and the suspended
+        process can be resumed at a later time.  If the receiving system
+        does not support this functionality, it should be ignored.
+        """
+        self.buffer.append(b'\x1a')
+
+
+    def handle_ao(self):
+        """ XXX
+
+        Handle Abort Output (IAC, AO), sent by clients to discard any remaining
+        output. If the AO were received ... a reasonable implementation would
+        be to suppress the remainder of the text string, but transmit the
+        prompt character and the preceding <CR><LF>.
+        """
+        self.transport._buffer.clear()
+
+    def handle_brk(self):
+        """ XXX
+
+        Handle Break (IAC, BRK), sent by clients to indicate BREAK keypress,
+        this is *not* ctrl+c.  """
+        pass
+
+    def handle_ayt(self):
+        """ XXX
+        Handle Are You There (IAC, AYT), which provides the user with some
+        visible (e.g., printable) evidence that the system is still up and
+        running.  """
+        pass
+
+    def handle_ec(self):
+        """ XXX
+        Handle Erase Character (IAC, EC). Provides a function which deletes
+        the last preceding undeleted character from the stream of data being
+        supplied by the user ("Print position" is not calculated).  """
+        try:
+            self.buffer.pop()
+        except IndexError:
+            pass
+
+    def handle_el(self):
+        """ XXX
+        Handle Erase Line (IAC, EL). Provides a function which deletes all
+        the data in the current "line" of input. """
+        byte = None
+        while byte != '\r':
+            try:
+                byte = self.buffer.pop()
+            except IndexError:
+                break
+
+    def handle_eor(self):
+        """ XXX
+        Handle End of Record (IAC, EOR). rfc885
+        """
+        pass
+
+    def handle_eof(self):
+        """ XXX
+        Handle End of Record (IAC, EOR). rfc885
+        """
+        self.buffer.append(b'\x04')
+
+
+class TelnetServer(tulip.protocols.Protocol):
     def __init__(self, log=logging, debug=False):
         self.log = log
         self.debug = debug
 
     def connection_made(self, transport):
         self.transport = transport
-        self.stream = TelnetStreamReader(transport)
+        self.stream = TelnetStreamReader(transport, server=True)
+        self.banner()
         self._request_handle = self.start()
 
     def data_received(self, data):
+        print('recv', repr(data))
         self.stream.feed_data(data)
 
-    def connection_lost(self, exc):
-        if self._request_handle is not None:
-            self._request_handle.cancel()
-            self._request_handle = None
-
     def eof_received(self):
-        self.stream.feed_eof()
+        print('eof')
 
     def close(self):
         self._closing = True
+
+    def banner(self):
+        """ XXX
+        """
+        self.transport.write(b'Welcome to telnetlib3\r\n')
+
+    def prompt(self):
+        """ XXX
+        """
+        self.transport.write(b'\r\n >')
+        if self.stream.local_option.get(SGA, None) != True:
+            self.transport.write(GA)
+
+    def handle_line(self, buf):
+        if self.stream.local_option.get(ECHO, None):
+            self.transport.write(buf.rstrip() + b'\r\n')
+        for byte in buf:
+            self.handle_input(byte)
+        self.prompt()
+
+    def handle_input(self, byte):
+        if self.stream.local_option.get(ECHO, None):
+            self.transport.write(byte)
+        print('Client input: %r' % (byte,))
+
+    @tulip.task
+    def start(self):
+        """ Start processing of incoming bytes.
+
+        If stream.local_option[LINEMODE] becomes True, this class
+        calls the ``handle_line`` callback for each line of input
+        received. Otherwise, ``handle_input`` callback for each
+        in-band byte recieved. """
+        self.banner()
+        def is_linemode():
+            # the combination of DO(ECHO) and DO(SGA) sent by
+            # server is the equivalent of entering full-duplex,
+            # character-at-a-time mode.
+            print(self.local_option.get('LINEMODE', None))
+            if (self.local_option.get('LINEMODE', None) in (None, False)
+                    or (self.local_option.get('ECHO', None) and
+                        self.local_option.get('SGA', None))):
+                return False
+            return True
+        while True:
+            try:
+                # by default, telnet runs in a half-duplex linemode option,
+                # which does not process input until a CR is received.
+                if is_linemode():
+                    buf = list()
+                    while True:  # per rfc 854
+                        # ... "CR LF" must be treated as a single "new line"
+                        # character ...  the sequence "CR NUL" must be used
+                        # where a carriage return alone is actually desired;
+                        # ... CR character must be avoided in other contexts.
+                        byte = yield from self.stream.read(1)
+                        if byte == b'\r':
+                            nbyte = yield from self.stream.read(1)
+                            assert nbyte in (b'\n', b'\x00'), (
+                                    'LF or NUL must follow CR: %r' % (nbyte,))
+                        if byte in (IAC, u'\r'):
+                            break
+                    self.handle_line(b''.join(buf))
+                else:
+                    byte = yield from self.stream.read(1)
+                    self.handle_input(byte)
+            except tulip.CancelledError:
+                self.log_debug('Ignored premature client disconnection.')
+                break
+            except Exception as exc:
+                self.log_err(exc)
+            finally:
+                if self._closing:
+                    self.transport.close()
+                    break
+        self._request_handle = None
+
+
+ARGS = argparse.ArgumentParser(description="Run simple telnet server.")
+ARGS.add_argument(
+    '--host', action="store", dest='host',
+    default='127.0.0.1', help='Host name')
+ARGS.add_argument(
+    '--port', action="store", dest='port',
+    default=6023, type=int, help='Port number')
+#    '--opt', action="store_true", dest='bool_name', help='desc')
+#    '--opt', action="store", dest='value_name', help='desc')
+
+
+def main():
+    args = ARGS.parse_args()
+
+    if ':' in args.host:
+        args.host, port = args.host.split(':', 1)
+        args.port = int(port)
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    loop = tulip.get_event_loop()
+    # 'start_serving' receives a Protocol class reference as arg1;
+    # we use lambda to cause TelnetServer to be instantiated with
+    # flag debug=True.
+    f = loop.start_serving(
+            lambda: TelnetServer(debug=True), args.host, args.port)
+    x = loop.run_until_complete(f)
+    print('serving on', x.getsockname())
+    loop.run_forever()
+
+if __name__ == '__main__':
+    main()
