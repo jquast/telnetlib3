@@ -30,39 +30,75 @@ TODO:
     of mode. Withholding on implementation: reaching for clarity without
     brevity.
 
-CHECKLIST, per RFC1123:
- [x] Every Telnet implementation MUST include option negotiation and
-      subnegotiation machinery [TELNET:2].
- [x] A host MUST carefully follow the rules of RFC-854 to avoid
-     option-negotiation loops.  A host MUST refuse (i.e, reply WONT/DONT to
-     a DO/WILL) an unsupported option.  Option negotiation SHOULD continue to
-     function (even if all requests are refused) throughout the lifetime of a
-     Telnet connection.
- [x] If all option negotiations fail, a Telnet implementation MUST default to,
-     and support, an NVT.
- [x] On a host that never sends the Telnet command Go Ahead (GA), the Telnet
-     Server MUST attempt to negotiate the Suppress Go Ahead option (i.e.,
-     send "WILL Suppress Go Ahead").
- [x] The list of Telnet commands has been extended to include EOR
-     (End-of-Record), with code 239 [TELNET:9].
- [x] Both User and Server Telnets MAY support the control functions EOR, EC,
-     EL, and Break, and MUST support AO, AYT, DM, IP, NOP, SB, and SE.
- [x] A host MUST be able to receive and ignore any Telnet control
-     functions that it does not support.
- [ ] When it receives "urgent" TCP data, a User or Server Telnet MUST discard
-     all data except Telnet commands until the DM (and end of urgent) is
-     reached.
- [ ] When it sends Telnet IP (Interrupt Process), a User Telnet SHOULD follow
-     it by the Telnet "Synch" sequence, i.e., send as TCP urgent data the
-     sequence "IAC IP IAC DM".  The TCP urgent pointer points to the DM octet.
- [ ] When it receives a Telnet IP command, a Server Telnet MAY send a Telnet
-     "Synch" sequence back to the user, to flush the output stream.  The
-     choice ought to be consistent with the way the server operating system
-     behaves when a local user interrupts a process.
- [ ] When it receives a Telnet AO command, a Server Telnet MUST send a Telnet
-     "Synch" sequence back to the user, to flush the output stream.
- [ ] A User Telnet SHOULD have the capability of flushing output when it
-     sends a Telnet IP;
+CHECKLIST, per RFC 1123, 3.5. TELNET REQUIREMENTS SUMMARY
+                                                             /must
+                                                            / /should
+                                                           / / /may
+                                                          / / / /should not
+                                                         / / / / /must not
+FEATURE                                         |SECTION/ / / / / /
+------------------------------------------------|-------|-|-|-|-|-|
+                                                |       | | | | | |
+Option Negotiation                              | 3.2.1 |x| | | | |
+  Avoid negotiation loops                       | 3.2.1 |x| | | | |*
+  Refuse unsupported options                    | 3.2.1 |x| | | | |
+  Negotiation OK anytime on connection          | 3.2.1 | |x| | | |*
+  Default to NVT                                | 3.2.1 |x| | | | |
+  Send official name in Term-Type option        | 3.2.8 |x| | | | |
+  Accept any name in Term-Type option           | 3.2.8 |x| | | | |
+  Implement Binary, Suppress-GA options         | 3.3.3 |x| | | | |*
+  Echo, Status, EOL, Ext-Opt-List options       | 3.3.3 | |x| | | |*
+  Implement Window-Size option if appropriate   | 3.3.3 | |x| | | |
+  Server initiate mode negotiations             | 3.3.4 | |x| | | |
+  User can enable/disable init negotiations     | 3.3.4 | |x| | | |*
+                                                |       | | | | | |
+Go-Aheads                                       |       | | | | | |
+  Non-GA server negotiate SUPPRESS-GA option    | 3.2.2 |x| | | | |*
+  User or Server accept SUPPRESS-GA option      | 3.2.2 |x| | | | |*
+  User Telnet ignore GA's                       | 3.2.2 | | |x| | |
+                                                |       | | | | | |
+Control Functions                               |       | | | | | |
+  Support SE NOP DM IP AO AYT SB                | 3.2.3 |x| | | | |*
+  Support EOR EC EL Break                       | 3.2.3 | | |x| | |*
+  Ignore unsupported control functions          | 3.2.3 |x| | | | |*
+  User, Server discard urgent data up to DM     | 3.2.4 |x| | | | |*
+  User Telnet send "Synch" after IP, AO, AYT    | 3.2.4 | |x| | | |*
+  Server Telnet reply Synch to IP               | 3.2.4 | | |x| | |*
+  Server Telnet reply Synch to AO               | 3.2.4 |x| | | | |*
+  User Telnet can flush output when send IP     | 3.2.4 | |x| | | |*
+                                                |       | | | | | |
+Encoding                                        |       | | | | | |
+  Send high-order bit in NVT mode               | 3.2.5 | | | |x| |
+  Send high-order bit as parity bit             | 3.2.5 | | | | |x|
+  Negot. BINARY if pass high-ord. bit to applic | 3.2.5 | |x| | | |
+  Always double IAC data byte                   | 3.2.6 |x| | | | |*
+  Double IAC data byte in binary mode           | 3.2.7 |x| | | | |*
+  Obey Telnet cmds in binary mode               | 3.2.7 |x| | | | |*
+  End-of-line, CR NUL in binary mode            | 3.2.7 | | | | |x|
+                                                |       | | | | | |
+End-of-Line                                     |       | | | | | |
+  EOL at Server same as local end-of-line       | 3.3.1 |x| | | | |
+  ASCII Server accept CR LF or CR NUL for EOL   | 3.3.1 |x| | | | |
+  User Telnet able to send CR LF, CR NUL, or LF | 3.3.1 |x| | | | |
+    ASCII user able to select CR LF/CR NUL      | 3.3.1 | |x| | | |
+    User Telnet default mode is CR LF           | 3.3.1 | |x| | | |
+  Non-interactive uses CR LF for EOL            | 3.3.1 |x| | | | |
+                                                |       | | | | | |
+User Telnet interface                           |       | | | | | |*
+  Input & output all 7-bit characters           | 3.4.1 | |x| | | |*
+  Bypass local op sys interpretation            | 3.4.1 | |x| | | |*
+  Escape character                              | 3.4.1 |x| | | | |*
+     User-settable escape character             | 3.4.1 | |x| | | |*
+  Escape to enter 8-bit values                  | 3.4.1 | | |x| | |*
+  Can input IP, AO, AYT                         | 3.4.2 |x| | | | |*
+  Can input EC, EL, Break                       | 3.4.2 | |x| | | |*
+  Report TCP connection errors to user          | 3.4.3 | |x| | | |*
+  Optional non-default contact port             | 3.4.4 | |x| | | |*
+  Can spec: output flushed when IP sent         | 3.4.5 | |x| | | |*
+  Can manually restore output mode              | 3.4.5 | |x| | | |*
+
+o= OK
+*= MISSING
 """
 import collections
 import logging
@@ -264,21 +300,22 @@ class TelnetStreamReader(tulip.StreamReader):
         elif self._cmd_received:
             cmd, opt = self._cmd_received, byte
             print('recv IAC %s %s' % (name_command(cmd), name_command(opt),))
+            print('%r' % (self.pending_option,))
             if cmd == WONT:
-                if (DO, cmd) in self.pending_option:
+                if DO + opt in self.pending_option:
                     self.pending_option[DO + opt] = False
                     print('set_pending_option[%s + %s] = False' % (
                         'DO', name_command(opt),))
-                if (DONT, cmd) in self.pending_option:
+                if DONT + opt in self.pending_option:
                     self.pending_option[DONT + opt] = False
                     print('set_pending_option[%s + %s] = False' % (
                         'DONT', name_command(opt),))
             if cmd == WILL:
-                if (DO, cmd) in self.pending_option:
+                if DO + opt in self.pending_option:
                     self.pending_option[DO + opt] = False
                     print('set_pending_option[%s + %s] = False' % (
                         'DO', name_command(opt),))
-                if (DONT, cmd) in self.pending_option:
+                if DONT + opt in self.pending_option:
                     # This end previously requested remote end *not* to
                     # perform a a capability, but remote end has replied
                     # with a WILL. Occurs due to poor timing at negotiation
@@ -351,11 +388,15 @@ class TelnetStreamReader(tulip.StreamReader):
             tx += value.decode('ascii')
         self.handle_tspeed(int(rx), int(tx))
 
+    def handle_sb_xdisploc(self, buf):
+        assert buf.popleft() == XDISPLOC
+        assert buf.popleft() == IS
+        self.handle_xdisploc(b''.join(buf).decode('ascii'))
+
     def handle_sb_ttype(self, buf):
         assert buf.popleft() == TTYPE
         assert buf.popleft() == IS
-#        print('ttype: %r' % (buf,))
-        self.handle_ttype(buf)
+        self.handle_ttype(b''.join(buf).decode('ascii'))
 
 
     def handle_sb_newenv(self, buf):
@@ -447,6 +488,8 @@ class TelnetStreamReader(tulip.StreamReader):
         elif len(buf) < 2:
             raise ValueError('SE: buffer too short: %r' % (buf,))
         elif buf[0] == LINEMODE:
+            self.pending_option[DO + LINEMODE] = False
+            print('set_pending_option[DO + LINEMODE] = False')
             self.handle_sb_linemode(buf)
         elif buf[0] == LFLOW:
             self.handle_sb_lflow(buf)
@@ -455,22 +498,32 @@ class TelnetStreamReader(tulip.StreamReader):
         elif buf[0] == NAWS:
             if not self.server:
                 raise ValueError('SE: received from server: NAWS')
+            self.pending_option[DO + NAWS] = False
+            print('set_pending_option[DO + NAWS] = False')
             self.handle_sb_naws(buf)
         elif buf[0] == NEW_ENVIRON:
             if not self.server:
                 raise ValueError('SE: received from server: NEW_ENVIRON IS')
+            self.pending_option[DO + NEW_ENVIRON] = False
+            print('set_pending_option[DO + NEW_ENVIRON] = False')
             self.handle_sb_newenv(buf)
         elif (buf[0], buf[1]) == (TTYPE, IS):
             if not self.server:
                 raise ValueError('SE: received from server: TTYPE IS')
+            self.pending_option[DO + TTYPE] = False
+            print('set_pending_option[DO + TTYPE] = False')
             self.handle_sb_ttype(buf)
         elif (buf[0], buf[1]) == (TSPEED, IS):
             if not self.server:
                 raise ValueError('SE: received from server: TSPEED IS')
+            self.pending_option[DO + TSPEED] = False
+            print('set_pending_option[DO + TSPEED] = False')
             self.handle_sb_tspeed(buf)
         elif (buf[0], buf[1]) == (XDISPLOC, IS):
             if not self.server:
                 raise ValueError('SE: received from server: XDISPLOC IS')
+            self.pending_option[DO + XDISPLOC] = False
+            print('set_pending_option[DO + XDISPLOC] = False')
             self.handle_sb_xdisploc(buf)
         elif (buf[0], buf[1]) == (STATUS, SEND):
             self.handle_sb_status()
@@ -600,7 +653,7 @@ class TelnetStreamReader(tulip.StreamReader):
         elif opt in (BINARY, SGA, ECHO, NAWS, LINEMODE):
             if not self.remote_option.get(opt, None):
                 self.remote_option[opt] = True
-            self.iac(DO, opt)
+                self.iac(DO, opt)
         elif opt == TM:
             print('WILL TIMING-MARK')
             self._tm_sent = False
@@ -747,6 +800,10 @@ class TelnetStreamReader(tulip.StreamReader):
         Handle End of Record (IAC, EOR). rfc885 """
         self.buffer.append(b'\x04')
 
+    def handle_xdisploc(self, buf):
+        """ XXX
+        Receive new window size from NAWS protocol. """
+        pass
 
     def handle_naws(self, width, height):
         """ XXX
@@ -773,6 +830,7 @@ class TelnetServer(tulip.protocols.Protocol):
     def connection_made(self, transport):
         self.transport = transport
         self.stream = TelnetStreamReader(transport, server=True)
+        self.stream.handle_xdisploc = self.handle_xdisploc
         self.stream.handle_tspeed = self.handle_tspeed
         self.stream.handle_ttype = self.handle_ttype
         self.stream.handle_naws = self.handle_winresize
@@ -780,7 +838,7 @@ class TelnetServer(tulip.protocols.Protocol):
         self._request_handle = self.start()
 
     def data_received(self, data):
-        #print('recv', repr(data))
+        print('recv(%r)' % (data,))
         self.stream.feed_data(data)
 
     def eof_received(self):
@@ -797,10 +855,12 @@ class TelnetServer(tulip.protocols.Protocol):
         self.stream.iac(DO, TSPEED)
         self.stream.iac(DO, NEW_ENVIRON)
         self.stream.iac(DO, NAWS)
+        self.stream.iac(DO, XDISPLOC)
         self.stream.iac(DO, LINEMODE)
         self.stream.iac(DO, BINARY)
         self.stream.iac(WILL, BINARY)
         self.stream.iac(WONT, ENCRYPT)
+        self.stream.iac(WONT, AUTHENTICATION)
 
     def prompt(self):
         """ XXX
@@ -814,6 +874,9 @@ class TelnetServer(tulip.protocols.Protocol):
 
     def handle_env(self, env):
         print("env update: '%r'" % (env,))
+
+    def handle_xdisploc(self, buf):
+        print("xdisploc: %s" % (buf,))
 
     def handle_tspeed(self, rx, tx):
         print("tspeed: %drx %dtx" % (rx, tx,))
