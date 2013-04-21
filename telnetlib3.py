@@ -26,6 +26,17 @@ EOF = bytes([236])
 SUSP = bytes([237])
 ABORT = bytes([238])
 
+(SLC_SYNCH, SLC_BRK, SLC_IP, SLC_AO, SLC_AYT, SLC_EOR, SLC_ABORT,
+        SLC_EOF, SLC_SUSP, SLC_EC, SLC_EL, SLC_EW, SLC_RP, SLC_LNEXT,
+        SLC_XON, SLC_XOFF, SLC_FORW1, SLC_FORW2
+        ) = (bytes([const]) for const in range(1,19))
+(SLC_FLUSHIN, SLC_FLUSHOUT, SLC_ACK
+        ) = (bytes([32]), bytes([64]), bytes([128]))
+(SLC_NOSUPPORT, SLC_CANTCHANGE, SLC_VALUE, SLC_DEFAULT
+        ) = (bytes([const]) for const in range(4))
+(LFLOW_OFF, LFLOW_ON, LFLOW_RESTART_ANY, LFLOW_RESTART_XON
+        ) = (bytes([const]) for const in range(4))
+
 _DEBUG_OPTS = dict([(value, key)
     for key, value in globals().items() if key in
     ('LINEMODE', 'NAWS', 'NEW_ENVIRON', 'ENCRYPT', 'AUTHENTICATION',
@@ -33,11 +44,34 @@ _DEBUG_OPTS = dict([(value, key)
         'XDISPLOC', 'IAC', 'DONT', 'DO', 'WONT', 'WILL', 'SE', 'NOP',
         'DM', 'TM', 'BRK', 'IP', 'ABORT', 'AO', 'AYT', 'EC', 'EL',
         'EOR', 'GA', 'SB', 'EOF', 'SUSP', 'ABORT',)])
+_DEBUG_SLC_OPTS = dict([(value, key)
+    for key, value in locals().items() if key in
+    ('SLC_SYNCH', 'SLC_BRK', 'SLC_IP', 'SLC_AO', 'SLC_AYT', 'SLC_EOR',
+        'SLC_ABORT', 'SLC_EOF', 'SLC_SUSP', 'SLC_EC', 'SLC_EL',
+        'SLC_EW', 'SLC_RP', 'SLC_LNEXT', 'SLC_XON', 'SLC_XOFF',
+        'SLC_FORW1', 'SLC_FORW2',)])
+_DEBUG_SLC_BITMASK = dict([(value, key)
+    for key, value in locals().items() if key in
+    ('SLC_FLUSHIN', 'SLC_FLUSHOUT', 'SLC_ACK',)])
+_DEBUG_SLC_MODIFIERS = dict([(value, key)
+    for key, value in locals().items() if key in
+    ('SLC_NOSUPPORT', 'SLC_CANTCHANGE', 'SLC_VALUE', 'SLC_DEFAULT',)])
 
+def name_slc_command(byte):
+    return (repr(byte) if byte not in _DEBUG_SLC_OPTS
+            else _DEBUG_SLC_OPTS[byte])
 
+def name_slc_modifier(byte):
+    debug_str = (repr(byte) if byte not in _DEBUG_SLC_MODIFIERS
+            else _DEBUG_SLC_MODIFIERS[byte])
+    for modifier, key in _DEBUG_SLC_BITMASK.items():
+        if ord(byte) & ord(modifier):
+            debug_str += ',%s' % (key,)
+    return debug_str
 
 def name_command(byte):
-    return repr(byte) if byte not in _DEBUG_OPTS else _DEBUG_OPTS[byte]
+    return (repr(byte) if byte not in _DEBUG_OPTS
+            else _DEBUG_OPTS[byte])
 
 
 class TelnetStreamReader(tulip.StreamReader):
@@ -55,28 +89,22 @@ class TelnetStreamReader(tulip.StreamReader):
     pending_option = {}
     local_option = {}
     remote_option = {}
-    # request_env only applicable for server mode.
-    request_env = "USER TERM COLUMNS LINES DISPLAY LANG".split()
+    request_env = "USER HOSTNAME UID TERM COLUMNS LINES DISPLAY LANG".split()
 
-    def __init__(self, transport, client=-1, server=-1,
+    def __init__(self, transport, client=None, server=None,
             debug=False, log=logging):
         """ This stream decodes bytes as seen by ``TelnetProtocol``.
 
-        This is generally instantiated by connection_made(self, transport)
-        of the ServerTelnetProtocol or ServerClientProtocol.
-
         Because Server and Client support different capabilities,
         the mutually exclusive booleans ``client`` and ``server``
-        indicate if this stream is attached to the server end and
-        reads from a client (default), or attached to the client
-        end (client=True). There are few differences. Notably, only
-        the server may respond to ``DO ECHO``.  """
-        assert client == -1 or server == -1, (
+        indicates which end the protocol is attached to. The default
+        is server, meaning, this stream reads _from_ a telnet clients. """
+        assert client == None or server == None, (
                 'Only client= or server= should be set, not both.')
-        self.server = ((client == -1 and server in (-1, True))
+        self.server = ((client == None and server in (None, True))
                        or client == False)
-        self.transport = transport  # necessary for replies
-        self._sb_buffer = collections.deque()  # sub-negotiation buffer
+        self.transport = transport
+        self._sb_buffer = collections.deque()
         self.debug = debug
         self.log = log
         tulip.StreamReader.__init__(self)
@@ -114,7 +142,7 @@ class TelnetStreamReader(tulip.StreamReader):
         dict ``self.pending_option``.
         """
         byte = bytes([byte])
-        print('parse: %r (%s).' %(byte, name_command(byte),))
+#        print('parse: %r (%s).' % (byte, name_command(byte),))
         if byte == IAC:
             self._iac_received = (not self._iac_received)
             if not self._iac_received:
@@ -130,6 +158,7 @@ class TelnetStreamReader(tulip.StreamReader):
             elif cmd == SE:
                 self.parse_subnegotiation(self._sb_buffer)
                 self._sb_buffer.clear()
+                self._sb_received = False
             else:
                 self.parse_iac_command(byte)
             self._iac_received = False
@@ -222,35 +251,125 @@ class TelnetStreamReader(tulip.StreamReader):
         elif cmd == NOP:
             pass
 
+    def handle_sb_tspeed(self, buf):
+        assert buf.popleft() == TSPEED
+        print('tspeed: %r' % (buf,))
+
+    def handle_sb_newenv(self, buf):
+        assert buf.popleft() == NEW_ENVIRON
+        chk_byte = buf.popleft()
+        if not chk_byte in bytes([0, 2]):
+            raise ValueError('Expected IS or INFO after IAC SB NEW_ENVIRON, '
+                    'got %s' % (name_command(chk_byte),))
+        breaks = list([idx for (idx, byte) in enumerate(buf)
+                       if byte in (b'\x00', b'\x03')])
+        for start, end in zip(breaks, breaks[1:]):
+            # not desirable, how do we splice & split bytes ..?
+            decoded = bytes([ord(byte) for byte in buf]).decode('ascii')
+            pair = decoded[start + 1:end].split('\x01', 1)
+            if 1 == len(pair):
+                self.handle_env(pair[0], '')
+            else:
+                key, value = pair
+                self.handle_env(key, value)
+
+
+    def handle_sb_naws(self, buf):
+        assert buf.popleft() == NAWS
+        columns = str((256 * ord(buf[0])) + ord(buf[1]))
+        rows = str((256 * ord(buf[2])) + ord(buf[3]))
+        self.handle_naws(columns, rows)
+
+    def handle_sb_lflow(self, buf):
+        assert buf.popleft() == LFLOW
+        assert self.local_option.get(LFLOW, None) is True, (
+                'received IAC SB LFLOW wihout IAC DO LFLOW')
+
+    def handle_sb_linemode(self, buf):
+        print('linemode: %r' % (buf,))
+        assert buf.popleft() == LINEMODE
+        assert self.local_option.get(LINEMODE, None) is True, (
+                'received IAC SB LINEMODE wihout IAC DO LINEMODE')
+        MODE = bytes([1])
+        EDIT = bytes([1])
+        TRAPSIG = bytes([2])
+        MODE_ACK = bytes([4])
+        FORWARDMASK = bytes([2])
+        SLC = bytes([3])
+        cmd = buf.popleft()
+        if cmd == MODE:
+            mask = ord(buf.popleft())
+            self.linemode['edit'] = bool(mask & ord(EDIT))
+            self.linemode['trapsig'] = bool(mask & ord(TRAPSIG))
+            self.linemode['mode_ack'] = bool(mask & ord(MODE_ACK))
+        elif cmd == SLC:
+            self.handle_sb_linemode_slc(buf)
+        elif cmd in (DO, DONT, WILL, WONT):
+            opt = buf.popleft()
+            assert opt == FORWARDMASK, ('Illegal IAC SB LINEMODE %s %r' % (
+                name_command(cmd), opt))
+            if cmd == DO:
+                self.handle_sb_linemode_forwardmask(buf)
+            assert buf[1] == SLC
+
+    def handle_sb_linemode_slc(self, buf):
+        print('handle_sb_linemode_slc: %r' % (buf,))
+        while True:
+            func = buf.popleft()
+            if ord(func) == 0:
+                assert 0 == len(buf)
+                return
+            modifier = buf.popleft()
+            char = buf.popleft()
+            print('(func, modifier, char): (%s, %r, %r)' % (
+                name_slc_command(func), name_slc_modifier(modifier), char))
+
+    def handle_sb_linemode_forwardmask(self, buf):
+        print('handle_sb_linemode_forwardmask: %r' % (buf,))
+
     def parse_subnegotiation(self, buf):
         """ Callback containing the sub-negotiation buffer. Called after
         IAC + SE is received, indicating the end of sub-negotiation command.
 
         SB options TTYPE, XDISPLOC, NEW_ENVIRON, NAWS, and STATUS, are
         supported. Changes to the default responses should derive callbacks
-        ``handle_sb_ttype``, ``handle_sb_xdisploc``, ``handle_sb_newenviron``,
-        ``handle_sb_status``, and ``handle_sb_news``. Implementors of
-        additional SB options should extend this method. """
+        ``handle_linemode``, ``handle_sb_ttype``, ``handle_sb_xdisploc``,
+        ``handle_sb_newenviron``, ``handle_sb_status``, and ``handle_sb_news``.
+
+        Implementors of additional SB options should extend this method. """
+#        print('parse_sb: %r' % (buf,))
         if not buf:
             raise ValueError('SE: buffer empty')
-        if buf[0] == b'\x00':
+        elif buf[0] == b'\x00':
             raise ValueError('SE: buffer is NUL')
-        if len(buf) < 2:
+        elif len(buf) < 2:
             raise ValueError('SE: buffer too short: %r' % (buf,))
-        if (buf[0], buf[1]) == (TTYPE, IS):
+        elif buf[0] == LINEMODE:
+            self.handle_sb_linemode(buf)
+        elif buf[0] == LFLOW:
+            self.handle_sb_lflow(buf)
+            if not self.server:
+                raise ValueError('SE: received from server: LFLOW')
+        elif buf[0] == NAWS:
+            if not self.server:
+                raise ValueError('SE: received from server: NAWS')
+            self.handle_sb_naws(buf)
+        elif buf[0] == NEW_ENVIRON:
+            if not self.server:
+                raise ValueError('SE: received from server: NEW_ENVIRON IS')
+            self.handle_sb_newenv(buf)
+        elif (buf[0], buf[1]) == (TTYPE, IS):
             if not self.server:
                 raise ValueError('SE: received from server: TTYPE IS')
-            self.handle_sb_ttype(b''.join(buf[2:]))
+            self.handle_sb_ttype(buf)
+        elif (buf[0], buf[1]) == (TSPEED, IS):
+            if not self.server:
+                raise ValueError('SE: received from server: TSPEED IS')
+            self.handle_sb_tspeed(buf)
         elif (buf[0], buf[1]) == (XDISPLOC, IS):
             if not self.server:
                 raise ValueError('SE: received from server: XDISPLOC IS')
-            self.handle_sb_xdisploc(b''.join(buf[2:]))
-        elif (buf[0], buf[1],) == (NEW_ENVIRON, IS):
-            if not self.server:
-                raise ValueError('SE: received from server: NEW_ENVIRON IS')
-            self.handle_sb_newenv(b''.join(buf[2:]))
-        elif (buf[0],) == (NAWS,):
-            self.handle_sb_naws(buf)
+            self.handle_sb_xdisploc(buf)
         elif (buf[0], buf[1]) == (STATUS, SEND):
             self.handle_sb_status()
         else:
@@ -288,7 +407,7 @@ class TelnetStreamReader(tulip.StreamReader):
             return
         self.pending_option[SB + NEW_ENVIRON] = True
         response = collections.deque(bytes([IAC, SB, STATUS, IS,]))
-        response.append(bytes([IAC, SB, NEW_ENVIRON, SEND, 0,]))
+        response.append(b''.join(([IAC, SB, NEW_ENVIRON, SEND, bytes([0])])))
         response.append(b'\x00'.join(self.request_env))
         response.append([b'\x03', IAC, SE,])
         self.transport.write(response)
@@ -308,14 +427,11 @@ class TelnetStreamReader(tulip.StreamReader):
         """
         print('handle_do(%s)' % (name_command(opt)))
         # options that we support
-        if opt == ECHO:
-            if not self.server:
-                # DO ECHO may only be received by server end.
-                raise ValueError('DO ECHO received on client stream')
-            if not self.local_option.get(opt, None):
-                self.local_option[opt] = True
-                self.iac(WILL, opt)
-        elif opt in (BINARY, SGA, LINEMODE, TM):
+        if opt == ECHO and not self.server:
+                raise ValueError('DO ECHO received on server end.')
+        if opt == LINEMODE and self.server:
+                raise ValueError('DO LINEMODE received on client end.')
+        if opt in (ECHO, LINEMODE, BINARY, SGA, TM, LFLOW):
             if not self.local_option.get(opt, None):
                 self.local_option[opt] = True
                 self.iac(WILL, opt)
@@ -326,13 +442,7 @@ class TelnetStreamReader(tulip.StreamReader):
             if not self.local_option.get(opt, None):
                 self.local_option[opt] = True
                 self.iac(WILL, STATUS)
-                self._send_status()
-        elif opt in (ENCRYPT):
-            # remote end wants to do linemode editing, we don't yet, as a
-            # complex matrix of linemode subnegotation follows
-            if not self.local_option.get(opt, None):
-                self.local_option[opt] = False
-                self.iac(WONT, opt)
+            self._send_status()
         else:
             if self.local_option.get(opt, None) is None:
                 self.local_option[opt] = False
@@ -352,7 +462,7 @@ class TelnetStreamReader(tulip.StreamReader):
         if self.local_option.get(opt, None) in (True, None):
             # option is unknown or True
             self.local_option[opt] = False
-            self.iac(WONT, ECHO)
+        self.iac(WONT, opt)
 
     def handle_will(self, opt):
         """ Process byte 3 of series (IAC, DONT, opt) received by remote end.
@@ -385,39 +495,47 @@ class TelnetStreamReader(tulip.StreamReader):
         elif opt in (BINARY, SGA, ECHO, NAWS, LINEMODE):
             if not self.remote_option.get(opt, None):
                 self.remote_option[opt] = True
-                self.iac(DO, opt)
+            self.iac(DO, opt)
         elif opt == STATUS:
             if not self.remote_option.get(opt, None):
                 self.remote_option[opt] = True
-                self.transport.write(
-                        bytes([IAC, SB, STATUS, SEND, IAC, SE,]))
-                # set pending for SB STATUS
-                self.pending_option[SB + opt] = True
+            self.transport.write(
+                    b''.join([IAC, SB, STATUS, SEND, IAC, SE,]))
+            # set pending for SB STATUS
+            self.pending_option[SB + opt] = True
         elif opt == NEW_ENVIRON:
             if not self.remote_option.get(opt, None):
                 self.remote_option[opt] = True
-                self.transport.write(
-                        bytes([IAC, SB, NEW_ENVIRON, SEND, IS,]))
-                self.transport.write(
-                        b'\x00'.join(self.request_env))
-                self.transport.write(
-                        bytes([b'\x03', IAC, SE,]))
-                # set pending for SB NEW_ENVIRON
-                self.pending_option[SB + opt] = True
+            self.transport.write(
+                    b''.join([IAC, SB, NEW_ENVIRON, SEND, IS,]))
+            self.transport.write(
+                    b'\x00'.join([bytes(env, 'ascii')
+                        for env in self.request_env]))
+            self.transport.write(
+                    b''.join([b'\x03', IAC, SE,]))
+            # set pending for SB NEW_ENVIRON
+            self.pending_option[SB + opt] = True
         elif opt == XDISPLOC:
             if not self.remote_option.get(opt, None):
                 self.remote_option[opt] = True
-                self.transport.write(
-                        bytes([IAC, SB, XDISPLOC, SEND, IAC, SE,]))
-                # set pending for SB XDISPLOC
-                self.pending_option[SB + opt] = True
+            self.transport.write(
+                    b''.join([IAC, SB, XDISPLOC, SEND, IAC, SE,]))
+            # set pending for SB XDISPLOC
+            self.pending_option[SB + opt] = True
         elif opt == TTYPE:
             if not self.remote_option.get(opt, None):
                 self.remote_option[opt] = True
-                self.transport.write(
-                        bytes([IAC, SB, TTYPE, SEND, IAC, SE,]))
-                # set pending for SB TTYPE
-                self.pending_option[SB + opt] = True
+            self.transport.write(
+                    b''.join([IAC, SB, TTYPE, SEND, IAC, SE,]))
+            # set pending for SB TTYPE
+            self.pending_option[SB + opt] = True
+        elif opt == TSPEED:
+            if not self.remote_option.get(opt, None):
+                self.remote_option[opt] = True
+            self.transport.write(
+                    b''.join([IAC, SB, TSPEED, SEND, IAC, SE,]))
+            # set pending for SB TSPEED
+            self.pending_option[SB + opt] = True
         else:
             self.remote_option[opt] = False
             self.iac(DONT, opt)
@@ -435,7 +553,7 @@ class TelnetStreamReader(tulip.StreamReader):
         print('handle_wont(%s)' % (name_command(opt)))
         if self.remote_option.get(opt, None) in (True, None):
             self.remote_option[opt] = False
-            self.iac(DONT, opt)
+        self.iac(DONT, opt)
 
     def handle_ip(self):
         """ XXX
@@ -509,15 +627,24 @@ class TelnetStreamReader(tulip.StreamReader):
 
     def handle_eor(self):
         """ XXX
-        Handle End of Record (IAC, EOR). rfc885
-        """
+        Handle End of Record (IAC, EOR). rfc885 """
         pass
 
     def handle_eof(self):
         """ XXX
-        Handle End of Record (IAC, EOR). rfc885
-        """
+        Handle End of Record (IAC, EOR). rfc885 """
         self.buffer.append(b'\x04')
+
+
+    def handle_naws(self, width, height):
+        """ XXX
+        Receive new window size from NAWS protocol. """
+        pass
+
+    def handle_env(self, key, value):
+        """ XXX
+        Receive new environment variable value. """
+        pass
 
 
 class TelnetServer(tulip.protocols.Protocol):
@@ -528,7 +655,8 @@ class TelnetServer(tulip.protocols.Protocol):
     def connection_made(self, transport):
         self.transport = transport
         self.stream = TelnetStreamReader(transport, server=True)
-        self.banner()
+        self.stream.handle_naws = self.handle_winresize
+        self.stream.handle_env = self.handle_env
         self._request_handle = self.start()
 
     def data_received(self, data):
@@ -545,6 +673,13 @@ class TelnetServer(tulip.protocols.Protocol):
         """ XXX
         """
         self.transport.write(b'Welcome to telnetlib3\r\n')
+        self.stream.iac(WILL, BINARY)
+        self.stream.iac(WILL, TM)
+        self.stream.iac(WILL, LINEMODE)
+        self.stream.iac(WONT, ENCRYPT)
+        self.stream.iac(DO, TSPEED)
+        self.stream.iac(DO, NAWS)
+        self.stream.iac(DO, NEW_ENVIRON)
 
     def prompt(self):
         """ XXX
@@ -552,6 +687,12 @@ class TelnetServer(tulip.protocols.Protocol):
         self.transport.write(b'\r\n >')
         if self.stream.local_option.get(SGA, None) != True:
             self.transport.write(GA)
+
+    def handle_winresize(self, width, height):
+        print('window size change, COLUMNS=%s, LINES=%s' % (width, height,))
+
+    def handle_env(self, key, value):
+        print("ENV['%s'] = '%s'" % (key, value,))
 
     def handle_line(self, buf):
         if self.stream.local_option.get(ECHO, None):
