@@ -351,28 +351,25 @@ class TelnetStreamReader(tulip.StreamReader):
         """ Return time since bytes last received by remote end """
         return time.time() - self._last_input_time
 
-    def feed_data(self, data):
-        """ Receiving bytes arrived by ``TelnetProtocol.data_received()``.
+    def feed_byte(self, byte):
+        """ Receive byte arrived by ``TelnetProtocol.data_received()``.
 
         Copy bytes from ``data`` into ``self.buffer`` through a state-logic
         flow, detecting and handling telnet commands and negotiation options.
 
-        During subnegotiation, bytes received are buffered into
-        ``self._sb_buffer``. The same maximum buffer size, ``self.limit``,
-        applies as it does to ``self.buffer``.
-        """
-        if not data:
-            return
-        self.byte_count += len(data)
+        Returns True if byte is par of out of band sequence (and should not
+        be echoed when ECHO is requested by client). """
+        assert type(byte) == bytes and len(byte) == 1
+        self.byte_count += 1
         self._last_input_time = time.time()
-
-        for byte in data:
-            self._parser(byte)
+        return self._parser(byte)
 
     def _parser(self, byte):
         """ This parser processes all telnet data, tracks state, and when
         out-of-band Telnet data, marked by byte IAC arrives, susbsequent
         bytes toggle or process negotiation through callbacks.
+
+        Returns True if out of band data was handled, otherwise False.
 
         Extending or changing protocol capabilities shouldn't necessarily
         require deriving this method, but the methods it delegates to, mainly
@@ -389,11 +386,13 @@ class TelnetStreamReader(tulip.StreamReader):
         and ``self.remote_option``. Pending replies are noted with
         ``self.pending_option``, keyed by option byte.
         """
-        byte = bytes([byte])
         if byte == IAC:
             self._iac_received = (not self._iac_received)
             if not self._iac_received:
-                self.buffer.append(IAC)
+                if self._sb_received:
+                    self._sb_buffer.append(IAC)
+                else:
+                    self.buffer.append(IAC)
 
         elif self._iac_received:
             # with IAC already received parse the 2nd byte,
@@ -440,7 +439,11 @@ class TelnetStreamReader(tulip.StreamReader):
                     self.log.debug('set local_option[%s] = False',
                         _name_command(opt),)
             elif self._cmd_received == WILL:
-                assert self.pending_option.get(DO + opt)
+                if not self.pending_option.get(DO + opt):
+                    self.log.debug('received unnegotiated WILL')
+                    assert opt in (LINEMODE,), (
+                            'Received WILL %s without corresponding DO' % (
+                                _name_command(opt),))
                 self.handle_will(opt)
                 if self.pending_option.get(DO + opt, False):
                     self.pending_option[DO + opt] = False
@@ -476,6 +479,8 @@ class TelnetStreamReader(tulip.StreamReader):
         else:
             # in-bound data
             self.buffer.append(byte)
+            return False
+        return True
 
     def parse_iac_command(self, cmd):
         """ Handle IAC commands, calling self.handle_<cmd> where <cmd> is
@@ -493,6 +498,69 @@ class TelnetStreamReader(tulip.StreamReader):
             self._iac_callbacks[cmd]()
         else:
             raise ValueError('unsupported IAC sequence, %r' % (cmd,))
+
+    def handle_sb_linemode_forwardmask(self, buf):
+        self.log.debug('handle_sb_linemode_forwardmask: %r' % (buf,))
+
+    def parse_subnegotiation(self, buf):
+        """ Callback containing the sub-negotiation buffer. Called after
+        IAC + SE is received, indicating the end of sub-negotiation command.
+
+        SB options TTYPE, XDISPLOC, NEW_ENVIRON, NAWS, and STATUS, are
+        supported. Changes to the default responses should derive callbacks
+        ``handle_ttype``, ``handle_xdisploc``, ``handle_env``, and
+        ``handle_naws``.
+
+        Implementors of additional SB options should extend this method. """
+        if not buf:
+            raise ValueError('SE: buffer empty')
+        elif buf[0] == b'\x00':
+            raise ValueError('SE: buffer is NUL')
+        elif len(buf) < 2:
+            raise ValueError('SE: buffer too short: %r' % (buf,))
+        elif buf[0] == LINEMODE:
+            if not self.server:
+                raise ValueError('SE: received from server: LINEMODE')
+            #self.log.debug('set pending_option[DO + LINEMODE] = False')
+            self._handle_sb_linemode(buf)
+        elif buf[0] == LFLOW:
+            self._handle_sb_lflow(buf)
+            if not self.server:
+                raise ValueError('SE: received from server: LFLOW')
+        elif buf[0] == NAWS:
+            if not self.server:
+                raise ValueError('SE: received from server: NAWS')
+            self._handle_sb_naws(buf)
+        elif buf[0] == NEW_ENVIRON:
+            if not self.server:
+                raise ValueError('SE: received from server: NEW_ENVIRON IS')
+#            self.pending_option[DO + NEW_ENVIRON] = False
+#            self.log.debug('set pending_option[DO + NEW_ENVIRON] = False')
+            self._handle_sb_newenv(buf)
+        elif (buf[0], buf[1]) == (TTYPE, IS):
+            if not self.server:
+                raise ValueError('SE: received from server: TTYPE IS')
+#            self.pending_option[DO + TTYPE] = False
+#            self.log.debug('set pending_option[DO + TTYPE] = False')
+            self._handle_sb_ttype(buf)
+        elif (buf[0], buf[1]) == (TSPEED, IS):
+            if not self.server:
+                raise ValueError('SE: received from server: TSPEED IS')
+#            self.pending_option[DO + TSPEED] = False
+#            #self.log.debug('set pending_option[DO + TSPEED] = False')
+            self._handle_sb_tspeed(buf)
+        elif (buf[0], buf[1]) == (XDISPLOC, IS):
+            if not self.server:
+                raise ValueError('SE: received from server: XDISPLOC IS')
+#            self.pending_option[DO + XDISPLOC] = False
+#            self.log.debug('set pending_option[DO + XDISPLOC] = False')
+            self._handle_sb_xdisploc(buf)
+        elif (buf[0], buf[1]) == (STATUS, SEND):
+            assert len(buf) == 2, (
+                    'IAC SB STATUS SEND not followed by IAC: %r' % (buf[2:]))
+            self._send_status()
+        else:
+            raise ValueError('SE: sub-negotiation unsupported: %r' % (buf,))
 
     def _handle_sb_tspeed(self, buf):
         assert buf.popleft() == TSPEED
@@ -617,77 +685,49 @@ class TelnetStreamReader(tulip.StreamReader):
 #        for slc, 
 
     def _handle_sb_linemode_slc(self, buf):
+        # IAC SB LINEMODE SLC
+        # *ff fb 22*ff fa 22 03
+        # SYNCH DEFAULT 0;
+        # > 01 03 00
+        # IP VARIABLE|FLUSHIN|FLUSHOUT 3;
+        # > 03 62 03
+        # AO VARIABLE 15;
+        # > 04 02 0f
+        # AYT VARIABLE 20;
+        # > 05 02 14
+        # ABORT VARIABLE|FLUSHIN|FLUSHOUT 28;
+        # > 07 62 1c
+        # EOF VARIABLE 4;
+        # > 08 02 04
+        # SUSP VARIABLE|FLUSHIN 26;
+        # > 09 42 1a
+        # EC VARIABLE 127;
+        # > 0a 02 7f
+        # EL VARIABLE 21;
+        # > 0b 02 15
+        # EW VARIABLE 23;
+        # > 0c 02 17
+        # RP VARIABLE 18;
+        # > 0d 02 12
+        # LNEXT VARIABLE 22;
+        # > 0e 02 16
+        # XON VARIABLE 17;
+        # > 0f 02 11
+        # XOFF VARIABLE 19;
+        # > 10 02  13
+        # FORW1 NOSUPPORT 255;
+        # > 11 00 *ff *ff
+        # FORW2 NOSUPPORT 255;
+        # > 12 00 *ff *ff
+        # IAC SB
+        # *ff f0
+        #print(repr(buf))
         while len(buf):
             func = buf.popleft()
-            if func == b'\x00' and len(buf) == 0:
-                break # EOF
             modifier = buf.popleft()
             char = buf.popleft()
-            self.log.debug('(func, modifier, char): (%s, %r, %r)' % (
+            self.log.debug('(func, modifier, char): (%s, %s, %r)' % (
                 _name_slc_command(func), _name_slc_modifier(modifier), char))
-
-    def handle_sb_linemode_forwardmask(self, buf):
-        self.log.debug('handle_sb_linemode_forwardmask: %r' % (buf,))
-
-    def parse_subnegotiation(self, buf):
-        """ Callback containing the sub-negotiation buffer. Called after
-        IAC + SE is received, indicating the end of sub-negotiation command.
-
-        SB options TTYPE, XDISPLOC, NEW_ENVIRON, NAWS, and STATUS, are
-        supported. Changes to the default responses should derive callbacks
-        ``handle_ttype``, ``handle_xdisploc``, ``handle_env``, and
-        ``handle_naws``.
-
-        Implementors of additional SB options should extend this method. """
-        if not buf:
-            raise ValueError('SE: buffer empty')
-        elif buf[0] == b'\x00':
-            raise ValueError('SE: buffer is NUL')
-        elif len(buf) < 2:
-            raise ValueError('SE: buffer too short: %r' % (buf,))
-        elif buf[0] == LINEMODE:
-            if not self.server:
-                raise ValueError('SE: received from server: LINEMODE')
-            #self.log.debug('set pending_option[DO + LINEMODE] = False')
-            self._handle_sb_linemode(buf)
-        elif buf[0] == LFLOW:
-            self._handle_sb_lflow(buf)
-            if not self.server:
-                raise ValueError('SE: received from server: LFLOW')
-        elif buf[0] == NAWS:
-            if not self.server:
-                raise ValueError('SE: received from server: NAWS')
-            self._handle_sb_naws(buf)
-        elif buf[0] == NEW_ENVIRON:
-            if not self.server:
-                raise ValueError('SE: received from server: NEW_ENVIRON IS')
-#            self.pending_option[DO + NEW_ENVIRON] = False
-#            self.log.debug('set pending_option[DO + NEW_ENVIRON] = False')
-            self._handle_sb_newenv(buf)
-        elif (buf[0], buf[1]) == (TTYPE, IS):
-            if not self.server:
-                raise ValueError('SE: received from server: TTYPE IS')
-#            self.pending_option[DO + TTYPE] = False
-#            self.log.debug('set pending_option[DO + TTYPE] = False')
-            self._handle_sb_ttype(buf)
-        elif (buf[0], buf[1]) == (TSPEED, IS):
-            if not self.server:
-                raise ValueError('SE: received from server: TSPEED IS')
-#            self.pending_option[DO + TSPEED] = False
-#            #self.log.debug('set pending_option[DO + TSPEED] = False')
-            self._handle_sb_tspeed(buf)
-        elif (buf[0], buf[1]) == (XDISPLOC, IS):
-            if not self.server:
-                raise ValueError('SE: received from server: XDISPLOC IS')
-#            self.pending_option[DO + XDISPLOC] = False
-#            self.log.debug('set pending_option[DO + XDISPLOC] = False')
-            self._handle_sb_xdisploc(buf)
-        elif (buf[0], buf[1]) == (STATUS, SEND):
-            assert len(buf) == 2, (
-                    'IAC SB STATUS SEND not followed by IAC: %r' % (buf[2:]))
-            self._send_status()
-        else:
-            raise ValueError('SE: sub-negotiation unsupported: %r' % (buf,))
 
     def _send_status(self):
         """ Respond after DO STATUS received by DE (rfc859). """
@@ -842,8 +882,7 @@ class TelnetStreamReader(tulip.StreamReader):
                     response.append(b'\x00')
             response.extend([b'\x03', IAC, SE])
             self.log.debug('send: %s, %r', ', '.join([
-                _name_command(byte) for byte in response[:3]]),
-                response[3:])
+                _name_command(byte) for byte in response[:3]]), response[3:],)
             self.transport.write(b''.join(response))
             # set pending for SB NEW_ENVIRON
             self.log.debug('set pending_option[SB + %s] = True' % (
@@ -1033,27 +1072,26 @@ class TelnetStreamReader(tulip.StreamReader):
 # `````````````````````````````````````````````````````````````````````````````
 
 class TelnetServer(tulip.protocols.Protocol):
+    _inp_cr = False
+    # newline byte sequence is extend to strings detected in linemode,
+    # it does not change carriage return processing behavior.
+    newline = bytes(os.linesep, 'ascii')
     def __init__(self, log=logging, debug=False):
         self.log = log
+        self.inp_command = collections.deque()
         self.debug = debug
+
+    def log_debug(self, *args, **kw):
+        if self.debug:
+            self.log.debug(*args, **kw)
 
     def connection_made(self, transport):
         self.transport = transport
         self.stream = TelnetStreamReader(transport, server=True, debug=True)
-        #self.stream.handle_xdisploc = self.handle_xdisploc
-        #self.stream.handle_tspeed = self.handle_tspeed
-        #self.stream.handle_ttype = self.handle_ttype
-        #self.stream.handle_naws = self.handle_winresize
-        #self.stream.handle_env = self.handle_env
-        self.inp_command = collections.deque()
-        self._request_handle = self.start()
-
-    def data_received(self, data):
-        #print('recv(%r)' % (data,))
-        self.stream.feed_data(data)
+        self.banner()
 
     def eof_received(self):
-        print('eof')
+        print('bye')
 
     def close(self):
         self._closing = True
@@ -1076,95 +1114,102 @@ class TelnetServer(tulip.protocols.Protocol):
         self.stream.iac(DO, LFLOW)
         # not yet testing or asserting
         #self.stream.iac(DO, BINARY)
-        self.stream.iac(WILL, BINARY)
+        #self.stream.iac(WILL, BINARY)
+        self.prompt()
+
     def prompt(self):
         """ XXX
         """
-        self.transport.write(b'\r\n >')
+        self.transport.write(b'\r\n ')
+        self.transport.write(bytes(__file__, 'ascii'))
+        self.transport.write(b'$ ')
         if self.stream.local_option.get(SGA, None) != True:
             self.transport.write(GA)
-
-    def handle_winresize(self, width, height):
-        print('window size change, COLUMNS=%s, LINES=%s' % (width, height,))
-
-    def handle_env(self, env):
-        print("env update: '%r'" % (env,))
-
-    def handle_ttype(self, ttype):
-        print("ttype: %s" % (ttype,))
-
-    def handle_xdisploc(self, buf):
-        print("xdisploc: %s" % (buf,))
-
-    def handle_tspeed(self, rx, tx):
-        print("tspeed: %drx %dtx" % (rx, tx,))
-
-    def handle_line(self, buf):
-        self.process_command(buf)
-        self.prompt()
+            self.log_debug('GA!')
+        self.log_debug('prompt')
 
     def handle_input(self, byte):
-        print("input: %r" % (byte,))
+        """ XXX
+        """
+        self.log_debug('recv: %r', byte)
 
-    def _handle_input(self, byte):
-        # echo back input if DO ECHO sent by client, and input
-        # byte received is printable. This is valid regardless of linemode
-        if (self.stream.local_option.get(ECHO, None)
-                and byte.decode('ascii').isprintable()):
-            self.transport.write(byte)
-        # character-at-a-time mode is essentially pass-thru
-        if (not self.remote_option.get(LINEMODE, None) or (
-                self.local_option.get(ECHO, None) and
-                self.local_option.get(SGA, None))):
-            return self.handle_input()
-        # linemode processing buffers input until '\r'
-        if not self._inp_cr and byte == b'\r':
-            self._inp_cr = True
-        elif self._inp_cr:
-# Binary mode removes the ambiguity by removing the requirement that CR be followed by either LF or NUL.
-# XXX
-            if not self.local_option.get(BINARY, None):
-                assert byte in (b'\n', b'\x00'), (
-                        'LF or NUL must follow CR, got %r' % (byte,))
-            if byte == b'\x00':
-                # "CR NUL" must be used where a CR alone is desired
-                # we simply toss '\x00', line is terminated as b'\r' (^M)
-                # '\r')
-                pass
-            elif byte == b'\n':
-                # "CR LF" must be treated as a single "new line" character;
-                # this implementation uses os.linesep, which is typically
-                # '\n' (^J) on posix systems, or '\r\n' (^M^J) on windows.
-                assert self.inp_command.pop() is b'\r'
-                self.inp_command.extend(
-                        bytes([ord(sep) for sep in os.linesep]))
-            self.handle_line(b''.join(self.inp_command).decode('ascii'))
-            self.inp_command.clear()
-            self._inp_cr = False
-        else:
-            # buffer command input
-            self.inp_command.append(byte)
+    def process_cmd(self, cmd):
+        cmd = cmd.rstrip()
+        try:
+            cmd, *args = cmd.split()
+        except ValueError:
+            args = []
+        self.transport.write(b'Command "')
+        self.transport.write(bytes(cmd, 'ascii'))
+        self.transport.write(b'" not understood.\r\n')
 
+    def handle_line(self, inp):
+        """ XXX
+        """
+        self.transport.write(b'\r\n')
+        self.log_debug('recv: %r', inp)
+        self.process_cmd(inp)
+        self.prompt()
 
-    @tulip.task
-    def start(self):
-        """ Start processing of incoming bytes, calling ``handle_input(byte)``
-        for each in-band NVT character received. """
-        self.banner()
-        while True:
-            try:
-                byte = yield from self.stream.read(1)
+    def data_received(self, data):
+        for byte in (bytes([value]) for value in data):
+            if self.stream.feed_byte(byte):
+                # processed telnet command
+                continue
+            # echo back input if DO ECHO sent by client, and input
+            # byte received is printable. This is valid regardless of linemode
+            if (self.stream.local_option.get(ECHO, None)
+                    and byte.decode('ascii').isprintable()):
+                self.transport.write(byte)
+            # character-at-a-time mode is essentially pass-thru callback
+            # to self.handle_input()
+            if (not self.stream.remote_option.get(LINEMODE, None) or (
+                    self.stream.local_option.get(ECHO, None) and
+                    self.stream.local_option.get(SGA, None))):
                 self.handle_input(byte)
-            except tulip.CancelledError:
-                self.log_debug('Ignored premature client disconnection.')
-                break
-            except Exception as exc:
-                self.log_err(exc)
-            finally:
-                if self._closing:
-                    self.transport.close()
-                    break
-        self._request_handle = None
+            # linemode processing buffers input until '\r'
+            if not self._inp_cr and byte == b'\r':
+                self._inp_cr = True
+                if not self.stream.local_option.get(BINARY, None):
+                    self.inp_command.append(self.newline)
+                else:
+                    self.inp_command.append(byte)
+                self.handle_line(b''.join(self.inp_command).decode('ascii'))
+                self.inp_command.clear()
+            elif self._inp_cr:
+                if not self.stream.local_option.get(BINARY, None):
+                    assert byte in (b'\n', b'\x00'), (
+                            'LF or NUL must follow CR, got %r' % (byte,))
+                else:
+                    # even though in linemode, with binary set, keep passing
+                    # bytes as we receive them, no matter their content, but
+                    # it is still buffered until next command byte or CR!
+                    self.inp_command.append(byte)
+                    # XXX: would \r\n be sent, leaving 'input\r', '\nmore\r'?
+                self._inp_cr = False
+            else:
+                # buffer command input
+                self.inp_command.append(byte)
+
+
+#    @tulip.task
+#    def start(self):
+#        """ Start processing of incoming bytes, calling ``handle_input(byte)``
+#        for each in-band NVT character received. The stream reader's"""
+#        self.banner()
+#        while True:
+#            try:
+#                yield from self.stream.read(1)
+#            except tulip.CancelledError:
+#                self.log_debug('Ignored premature client disconnection.')
+#                break
+#            except Exception as exc:
+#                self.log_err(exc)
+#            finally:
+#                if self._closing:
+#                    self.transport.close()
+#                    break
+#        self._request_handle = None
 
 
 # `````````````````````````````````````````````````````````````````````````````
@@ -1198,18 +1243,15 @@ def _name_slc_command(byte):
 
 def _name_slc_modifier(byte):
     """ Given an SLC byte, return string representing its modifiers. """
-    #print('xrepr(%r)'%(ord(byte),))
     value = ord(byte)
-    print(value)
     debug_str = ''
     for modifier, key in _DEBUG_SLC_BITMASK.items():
         if value & ord(modifier):
             debug_str += '%s,' % (key,)
             value = value ^ ord(modifier)
-            print(value)
-    debug_str += (repr(bytes([value]))
-            if byte not in _DEBUG_SLC_MODIFIERS
-                 else _DEBUG_SLC_MODIFIERS[byte])
+    byte = bytes([value])
+    debug_str += (repr(byte) if byte not in _DEBUG_SLC_MODIFIERS
+            else _DEBUG_SLC_MODIFIERS[byte])
     return debug_str
 
 
