@@ -710,9 +710,9 @@ class TelnetStreamReader(tulip.StreamReader):
         assert len(buf) > 1, ('SE: buffer too short: %r' % (buf,))
         cmd = buf[0]
         if self.pending_option.get(SB + cmd, False):
+            self.pending_option[SB + cmd] = False
             self.log.debug('set pending_option[SB + %s] = False',
                     _name_command(cmd))
-            self.pending_option[SB + cmd] = False
         else:
             self.log.warn('[SB + %s] unexpected', _name_command(cmd))
         if cmd == LINEMODE:
@@ -727,16 +727,16 @@ class TelnetStreamReader(tulip.StreamReader):
         elif cmd == NEW_ENVIRON:
             assert self.server, ('SE: cannot recv from server: NEW_ENVIRON')
             self._handle_sb_newenv(buf)
-        elif (cmd, bytes([buf[1]])) == (TTYPE, IS):
+        elif (cmd, buf[1]) == (TTYPE, IS):
             assert self.server, ('SE: cannot recv from server: TTYPE IS')
             self._handle_sb_ttype(buf)
-        elif (cmd, bytes([buf[1]])) == (TSPEED, IS):
+        elif (cmd, buf[1]) == (TSPEED, IS):
             assert self.server, ('SE: cannot recv from server: TSPEED IS')
             self._handle_sb_tspeed(buf)
-        elif (cmd, bytes([buf[1]])) == (XDISPLOC, IS):
+        elif (cmd, buf[1]) == (XDISPLOC, IS):
             assert self.server, ('SE: cannot recv from server: XDISPLOC IS')
             self._handle_sb_xdisploc(buf)
-        elif (cmd, bytes([buf[1]])) == (STATUS, SEND):
+        elif (cmd, buf[1]) == (STATUS, SEND):
             assert len(buf) == 2, ('SE: STATUS SEND size mismatch')
             self._send_status()
         else:
@@ -1085,6 +1085,8 @@ class TelnetStreamReader(tulip.StreamReader):
                 self.iac(DO, opt)
             if opt in (NAWS, LINEMODE):
                 self.pending_option[SB + opt] = True
+                self.log.debug('set pending_option[SB + %s] = False',
+                        _name_command(opt))
         elif opt == TM:
             self.log.debug('WILL TIMING-MARK')
             self._tm_sent = False
@@ -1152,7 +1154,7 @@ class TelnetStreamReader(tulip.StreamReader):
     def _send_status(self):
 # XXX CHECK
         """ Respond after DO STATUS received by DE (rfc859). """
-        assert self.local_option.get(STATUS, None) is True, (
+        assert self.pending_option.get(WILL + STATUS, None) is True, (
             u'Only the sender of IAC WILL STATUS may send '
             u'IAC SB STATUS IS.')
         response = collections.deque()
@@ -1174,15 +1176,18 @@ class TelnetStreamReader(tulip.StreamReader):
         self.log.debug('send: %s', ', '.join([
             _name_command(byte) for byte in response]))
         self.write_iac(bytes([ord(byte) for byte in response]))
+        if self.pending_option.get(WILL + STATUS, None):
+            self.log.debug('set pending_option[WILL + %s] = False',
+                    _name_command(STATUS))
+            self.pending_option[WILL + STATUS] = False
 
     def _request_sb_newenviron(self):
         """ Request sub-negotiation NEW_ENVIRON, RFC 1572. This should
         not be called directly, but by answer to WILL NEW_ENVIRON after DO
         request from server.
         """
-        if self.pending_option.get(SB + NEW_ENVIRON, False):
-            # avoid calling twice during pending reply
-            return
+        self.log.debug('set pending_option[SB + %s] = True' % (
+            _name_command(NEW_ENVIRON),))
         self.pending_option[SB + NEW_ENVIRON] = True
         response = collections.deque()
         response.extend([IAC, SB, NEW_ENVIRON, SEND, bytes([0])])
@@ -1198,6 +1203,8 @@ class TelnetStreamReader(tulip.StreamReader):
         self.write_iac(
             b''.join([IAC, SB, STATUS, SEND, IAC, SE]))
         # set pending for SB STATUS
+        self.log.debug('set pending_option[SB + %s] = True' % (
+            _name_command(STATUS),))
         self.pending_option[SB + STATUS] = True
 
     def send_lineflow_mode(self):
@@ -1425,7 +1432,7 @@ class BasicTelnetServer(tulip.protocols.Protocol):
     def connection_made(self, transport):
         self.transport = transport
         self.stream = TelnetStreamReader(transport, server=True, debug=True)
-        self.connect_time = time.time
+        self.connect_time = time.time()
         self.banner()
 
     def banner(self):
@@ -1612,7 +1619,40 @@ class BasicTelnetServer(tulip.protocols.Protocol):
         self.transport.close()
         self._closing = True
 
+class CharacterTelnetServer(BasicTelnetServer):
+    def banner(self):
+        self.stream.write(b'Welcome to ')
+        self.stream.write(bytes(__file__, 'ascii', 'replace'))
+        self.stream.write(b'\r\n')
+        self.stream.iac(WILL, ECHO)
+        self.stream.iac(WILL, SGA)
+        self._negotiate()
 
+class LinemodeTelnetServer(BasicTelnetServer):
+    def banner(self):
+        self.stream.write(b'Welcome to ')
+        self.stream.write(bytes(__file__, 'ascii', 'replace'))
+        self.stream.write(b'\r\n')
+        self.stream.iac(WONT, ECHO)
+        self.stream.iac(WILL, SGA)
+        self.stream.iac(DO, LINEMODE)
+        self._negotiate()
+
+class AdvancedTelnetServer(BasicTelnetServer):
+    def banner(self):
+        self.stream.write(b'Welcome to ')
+        self.stream.write(bytes(__file__, 'ascii', 'replace'))
+        self.stream.write(b'\r\n')
+        self.stream.iac(WILL, SGA)
+        self.stream.iac(DO, TTYPE)
+        self.stream.iac(DO, TSPEED)
+        self.stream.iac(DO, XDISPLOC)
+        self.stream.iac(DO, NEW_ENVIRON)
+        self.stream.iac(DO, LINEMODE)
+        self.stream.iac(DO, NAWS)
+        self.stream.iac(WILL, STATUS)
+        self.stream.iac(DO, LFLOW)
+        self._negotiate()
 
 # `````````````````````````````````````````````````````````````````````````````
 #
@@ -1680,7 +1720,6 @@ ARGS.add_argument(
 
 def main():
     args = ARGS.parse_args()
-
     if ':' in args.host:
         args.host, port = args.host.split(':', 1)
         args.port = int(port)
@@ -1691,85 +1730,10 @@ def main():
     # we use lambda to cause TelnetServer to be instantiated with
     # flag debug=True.
     f = loop.start_serving(
-        lambda: BasicTelnetServer(debug=True), args.host, args.port)
+        lambda: AdvancedTelnetServer(debug=True), args.host, args.port)
     x = loop.run_until_complete(f)
-    print('serving on', x.getsockname())
+    logger.info('serving on %s', x.getsockname())
     loop.run_forever()
 
 if __name__ == '__main__':
     main()
-        # self._tm_received = True
-
-
-
-
-
-
-
-# IAC SB LINEMODE SLC
-# *ff fb 22*ff fa 22 03
-# SYNCH DEFAULT 0;
-# > 01 03 00
-# IP VARIABLE|FLUSHIN|FLUSHOUT 3;
-# > 03 62 03
-# AO VARIABLE 15;
-# > 04 02 0f
-# AYT VARIABLE 20;
-# > 05 02 14
-# ABORT VARIABLE|FLUSHIN|FLUSHOUT 28;
-# > 07 62 1c
-# EOF VARIABLE 4;
-# > 08 02 04
-# SUSP VARIABLE|FLUSHIN 26;
-# > 09 42 1a
-# EC VARIABLE 127;
-# > 0a 02 7f
-# EL VARIABLE 21;
-# > 0b 02 15
-# EW VARIABLE 23;
-# > 0c 02 17
-# RP VARIABLE 18;
-# > 0d 02 12
-# LNEXT VARIABLE 22;
-# > 0e 02 16
-# XON VARIABLE 17;
-# > 0f 02 11
-# XOFF VARIABLE 19;
-# > 10 02  13
-# FORW1 NOSUPPORT 255;
-# > 11 00 *ff *ff
-# FORW2 NOSUPPORT 255;
-# > 12 00 *ff *ff
-# IAC SB
-# *ff f0
-
-
-
-
-                        #func
-            #self.log.debug('(func, modifier, char): (%s, %s, %r)' % (
-            #    _name_slc_command(func), _name_slc_modifier(modifier), char))
-            # in-bound data
-            # set default callback handlers for basic IAC commands
-            #for key, iac_cmd in (
-            #        ('brk', BRK), ('ip', IP), ('ao', AO),
-            #        ('ayt', AYT), ('ec', EC), ('el', EL),
-            #        ('eor', EOR), ('eof', EOF), ('susp', SUSP),
-            #        ('abort', ABORT), ('nop', NOP),
-            #        ):
-            #    self._iac_callbacks[iac_cmd] = getattr(self, 'handle_%s' % (key,))
-            # set default tabset for both clients and terminals; most can be
-            # changed by negotiation, but otherwise are not supported.
-            #nosupport = (b'\x00', SLC_NOSUPPORT)
-            #for slc in range(NSLC + 1):
-            #    self._slctab[slc] = DEFAULT_SLC_TAB.get(slc, nosupport)
-#
-#
-#
-    # windows telnet reply 'win32' for SYSTEMTYPE, other propriatary clients
-    # are often determined through the value of TERM. Syncterm is 'ansi',
-    # bsd telnet clients 'xterm-256color', 'xterm', 'vt220', etc.
-    #
-    # I've seen clients reply SSH_CLIENT, SSH_CONNECTION, HOME, seemingly
-    # anything! Listed here is a comprimise of asking for the rfc defaults
-    # and possible capability-telling values, but nothing too privacy-intrusive
