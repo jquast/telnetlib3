@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """
-Not yet for consumption.
-
-This project implements a Telnet client and server protocol,
+This project implements a Telnet client and server protocol.
 
 It uses Guido's 'tulip' project; the asynchronous networking model
 to become standard with python 3.4. *This project requires python 3.3*
 
 Guido's 'tulip' module is included, retrieved Apr. 2013
 
-[x] RFC 854  Telnet Protocol Specification                        May 1983
+http://www.ietf.org/rfc/rfc559.txt
+[*] RFC 854  Telnet Protocol Specification                        May 1983
 [x] RFC 855  Telnet Option Specification                          May 1983
 [x] RFC 856  Telnet Binary Transmission                           May 1983
 [x] RFC 857  Telnet Echo Option                                   May 1983
@@ -26,8 +25,8 @@ Guido's 'tulip' module is included, retrieved Apr. 2013
 [*] RFC 1116 Telnet Linemode Option                               Aug 1989
 [*] RFC 1123 Requirements for Internet Hosts                      Oct 1989 *
 [*] RFC 1143 The Q Method of Implementing .. Option Negotiation   Feb 1990
-[*] RFC 1080 Telnet Remote Flow Control Option                    Nov 1988 *
-[*] RFC 1372 Telnet Remote Flow Control Option                    Oct 1992 *
+[x] RFC 1080 Telnet Remote Flow Control Option                    Nov 1988 *
+[x] RFC 1372 Telnet Remote Flow Control Option                    Oct 1992 *
 
 x = complete
 * = in-progress
@@ -36,8 +35,16 @@ Additional Resources,
    "Telnet Protocol," MIL-STD-1782, U.S. Department of Defense, May 1984.
    "Mud Terminal Type Standard," http://tintin.sourceforge.net/mtts/
    "Telnet Protocol in C-Kermit 8.0 and Kermit 95 2.0 http://www.columbia.edu/kermit/telnet80.html
+   "Comments on the new TELNET Protocol and its Implementation," RFC 559
 
 TODO:
+
+    Issue with tulip -- doesn't handle OOB data, need to derive
+    BaseSelectorEventLoop, ovverride:
+        sock_recv(sock, n), _sock_recv(fut, registered, sock, n),
+        sock_sendall(sock, data), _sock_sendall(fut, registered, sock, data),
+    to accept additional argument [flags], like sock.send() and recv().
+    Then, have data_received receive additional argument, urgent=True ?
 
     Need to implement flow control (^s); cease sending bytes on transport
     until ^q is received, tulip does not provide this interface.  --
@@ -49,8 +56,6 @@ TODO:
     brevity.
 
     A simple telnet client .. with stdin as tulip  ..?
-
-    pending_option quirks for SB
 
 WONT:
 
@@ -72,13 +77,13 @@ Option Negotiation                              | 3.2.1 |x| | | | |
   Refuse unsupported options                    | 3.2.1 |x| | | | |
   Negotiation OK anytime on connection          | 3.2.1 | |x| | | |
   Default to NVT                                | 3.2.1 |x| | | | |
-  Send official name in Term-Type option        | 3.2.8 |x| | | | |*
+  Send official name in Term-Type option        | 3.2.8 |x| | | | |
   Accept any name in Term-Type option           | 3.2.8 |x| | | | |
   Implement Binary, Suppress-GA options         | 3.3.3 |x| | | | |
   Echo, Status, EOL, Ext-Opt-List options       | 3.3.3 | |x| | | |*
   Implement Window-Size option if appropriate   | 3.3.3 | |x| | | |
   Server initiate mode negotiations             | 3.3.4 | |x| | | |
-  User can enable/disable init negotiations     | 3.3.4 | |x| | | |*
+  User can enable/disable init negotiations     | 3.3.4 | |x| | | |
                                                 |       | | | | | |
 Go-Aheads                                       |       | | | | | |
   Non-GA server negotiate SUPPRESS-GA option    | 3.2.2 |x| | | | |*
@@ -301,6 +306,15 @@ class TelnetStreamReader(tulip.StreamReader):
         """
         self._iac_callbacks[cmd] = func
 
+    def ga(self):
+        """ Send IAC GA (Go-Ahead), if applicable. Follow rfc559: only
+        send GA when SGA is affirmed in the negative -- that is, by default,
+        don't send GA at all: "we would like to lobby for suppress GA the
+        default. It appears that only a few Hosts require the GA's
+        (AMES-67 and UCLA-CON). """
+        if not self.local_option.get(SGA, True):
+            self.transport.write(IAC + GA)
+
     def iac(self, cmd, opt):
         """ Send IAC <cmd> <opt> to remote end.
 
@@ -345,6 +359,17 @@ class TelnetStreamReader(tulip.StreamReader):
         self.transport.write(IAC + cmd + opt)
         self.log.debug('send IAC %s %s' % (
             _name_command(cmd), _name_command(opt),))
+
+    @property
+    def is_linemode(self):
+        """ Returns true if telnet stream appears to be in linemode.
+
+        The default Network Terminal is always in linemode, unless
+        explicitly set False (client sends: WONT, LINEMODE),
+        or implied by server (server ends: WILL ECHO, WILL SGA). """
+        return self.remote_option.get(LINEMODE, False) or not (
+                self.local_option.get(ECHO, None) and
+                self.local_option.get(SGA, None))
 
     @property
     def idle(self):
@@ -477,8 +502,37 @@ class TelnetStreamReader(tulip.StreamReader):
             # IAC WILL TM or IAC WONT TM is received by remote end.
             self.log.debug('discarded by timing-mark: %r' % (byte,))
         else:
-            # in-bound data
+            if self.is_linemode and byte != b'\x00':
+                # scan byte for SLC function mappings,
+                for slc, (value, flag) in self._slctab.items():
+                    if byte == value:
+                        print(repr(byte))
+                        print(repr(value))
+                        self.log.debug('(func, modifier, value): (%s, %s, %r)',
+                                _name_slc_command(bytes([slc])),
+                                _name_slc_modifier(flag),
+                                byte)
             self.buffer.append(byte)
+                        #func
+            #self.log.debug('(func, modifier, char): (%s, %s, %r)' % (
+            #    _name_slc_command(func), _name_slc_modifier(modifier), char))
+            # in-bound data
+            # set default callback handlers for basic IAC commands
+            #for key, iac_cmd in (
+            #        ('brk', BRK), ('ip', IP), ('ao', AO),
+            #        ('ayt', AYT), ('ec', EC), ('el', EL),
+            #        ('eor', EOR), ('eof', EOF), ('susp', SUSP),
+            #        ('abort', ABORT), ('nop', NOP),
+            #        ):
+            #    self._iac_callbacks[iac_cmd] = getattr(self, 'handle_%s' % (key,))
+            # set default tabset for both clients and terminals; most can be
+            # changed by negotiation, but otherwise are not supported.
+            #nosupport = (b'\x00', SLC_NOSUPPORT)
+            #for slc in range(NSLC + 1):
+            #    self._slctab[slc] = DEFAULT_SLC_TAB.get(slc, nosupport)
+#
+#
+#
             return False
         return True
 
@@ -682,7 +736,7 @@ class TelnetStreamReader(tulip.StreamReader):
 
 #    def _send_slc(self):
 #        """ Send all special characters that are supported """
-#        for slc, 
+#        for slc,
 
     def _handle_sb_linemode_slc(self, buf):
         # IAC SB LINEMODE SLC
@@ -860,70 +914,32 @@ class TelnetStreamReader(tulip.StreamReader):
             if not self.remote_option.get(opt, None):
                 self.remote_option[opt] = True
                 self.log.debug('remote_option[%s] = True', _name_command(opt))
-            self.transport.write(
-                b''.join([IAC, SB, STATUS, SEND, IAC, SE]))
-            # set pending for SB STATUS
-            self.pending_option[SB + opt] = True
+            self.request_status()
         elif opt == LFLOW:
             if not self.remote_option.get(opt, None):
                 self.remote_option[opt] = True
                 self.log.debug('remote_option[%s] = True', _name_command(opt))
-            mode = LFLOW_RESTART_ANY if self.lflow_any else LFLOW_RESTART_XON
-            self.transport.write(
-                    b''.join([IAC, SB, LFLOW, mode, IAC, SE]))
+            self.send_lineflow_mode()
         elif opt == NEW_ENVIRON:
             if not self.remote_option.get(opt, None):
                 self.remote_option[opt] = True
                 self.log.debug('remote_option[%s] = True', _name_command(opt))
-            response = [IAC, SB, NEW_ENVIRON, SEND, IS]
-            for idx, env in enumerate(self.request_env):
-                response.extend([bytes(char, 'ascii') for char in env])
-                if idx < len(self.request_env) - 1:
-                    response.append(b'\x00')
-            response.extend([b'\x03', IAC, SE])
-            self.log.debug('send: %s, %r', ', '.join([
-                _name_command(byte) for byte in response[:3]]), response[3:],)
-            self.transport.write(b''.join(response))
-            # set pending for SB NEW_ENVIRON
-            self.log.debug('set pending_option[SB + %s] = True' % (
-                _name_command(opt),))
-            self.pending_option[SB + opt] = True
+            self.request_new_environ()
         elif opt == XDISPLOC:
             if not self.remote_option.get(opt, None):
                 self.log.debug('remote_option[%s] = True', _name_command(opt))
                 self.remote_option[opt] = True
-            response = [IAC, SB, XDISPLOC, SEND, IAC, SE]
-            self.log.debug('send: %s', ', '.join([
-                _name_command(byte) for byte in response]))
-            self.transport.write(b''.join(response))
-            # set pending for SB XDISPLOC
-            self.log.debug('set pending_option[SB + %s] = True' % (
-                _name_command(opt),))
-            self.pending_option[SB + opt] = True
+            self.request_xdisploc()
         elif opt == TTYPE:
             if not self.remote_option.get(opt, None):
                 self.log.debug('remote_option[%s] = True', _name_command(opt))
                 self.remote_option[opt] = True
-            response = [IAC, SB, TTYPE, SEND, IAC, SE]
-            self.log.debug('send: %s', ', '.join([
-                _name_command(byte) for byte in response]))
-            self.transport.write(b''.join(response))
-            # set pending for SB TTYPE
-            self.log.debug('set pending_option[SB + %s] = True' % (
-                _name_command(opt),))
-            self.pending_option[SB + opt] = True
+            self.request_ttype()
         elif opt == TSPEED:
             if not self.remote_option.get(opt, None):
                 self.log.debug('remote_option[%s] = True', _name_command(opt))
                 self.remote_option[opt] = True
-            response = [IAC, SB, TSPEED, SEND, IAC, SE]
-            self.log.debug('send: %s', ', '.join([
-                _name_command(byte) for byte in response]))
-            self.transport.write(b''.join(response))
-            # set pending for SB TSPEED
-            self.log.debug('set pending_option[SB + %s] = True' % (
-                _name_command(opt),))
-            self.pending_option[SB + opt] = True
+            self.request_tspeed()
         else:
             self.log.debug('set remote_option[%s] = False' % (
                 _name_command(opt),))
@@ -951,6 +967,86 @@ class TelnetStreamReader(tulip.StreamReader):
             self.log.debug('set remote_option[%s] = False' % (
                 _name_command(opt),))
             self.remote_option[opt] = False
+
+    def request_status(self):
+        """ Send STATUS, SEND sub-negotiation, rfc859
+            Does nothing if (WILL, STATUS) has not yet been received. """
+        if not self.remote_option.get(STATUS, None):
+            return
+        self.transport.write(
+            b''.join([IAC, SB, STATUS, SEND, IAC, SE]))
+        # set pending for SB STATUS
+        self.pending_option[SB + STATUS] = True
+
+    def send_lineflow_mode(self):
+        """ Send LFLOW mode sub-negotiation, rfc1372
+            Does nothing if (WILL, LFLOW) has not yet been received. """
+        if not self.remote_option.get(LFLOW, None):
+            return
+        mode = LFLOW_RESTART_ANY if self.lflow_any else LFLOW_RESTART_XON
+        self.transport.write(
+                b''.join([IAC, SB, LFLOW, mode, IAC, SE]))
+
+    def request_tspeed(self):
+        """ Send TSPEED, SEND sub-negotiation, rfc1079.
+            Does nothing if (WILL, TSPEED) has not yet been received. """
+        if not self.remote_option.get(TSPEED, None):
+            return
+        response = [IAC, SB, TSPEED, SEND, IAC, SE]
+        self.log.debug('send: %s', ', '.join([
+            _name_command(byte) for byte in response]))
+        self.transport.write(b''.join(response))
+        # set pending for SB TSPEED
+        self.log.debug('set pending_option[SB + %s] = True' % (
+            _name_command(TSPEED),))
+        self.pending_option[SB + TSPEED] = True
+
+    def request_new_environ(self):
+        """ Send NEW_ENVIRON, SEND, IS sub-negotiation, rfc1086.
+            Does nothing if (WILL, NEW_ENVIRON) has not yet been received. """
+        if not self.remote_option.get(NEW_ENVIRON, None):
+            return
+        response = [IAC, SB, NEW_ENVIRON, SEND, IS]
+        for idx, env in enumerate(self.request_env):
+            response.extend([bytes(char, 'ascii') for char in env])
+            if idx < len(self.request_env) - 1:
+                response.append(b'\x00')
+        response.extend([b'\x03', IAC, SE])
+        self.log.debug('send: %s, %r', ', '.join([
+            _name_command(byte) for byte in response[:3]]), response[3:],)
+        self.transport.write(b''.join(response))
+        # set pending for SB NEW_ENVIRON
+        self.log.debug('set pending_option[SB + %s] = True' % (
+            _name_command(NEW_ENVIRON),))
+        self.pending_option[SB + NEW_ENVIRON] = True
+
+    def request_xdisploc(self):
+        """ Send XDISPLOC, SEND sub-negotiation, rfc1086.
+            Does nothing if (WILL, XDISPLOC) has not yet been received. """
+        if not self.remote_option.get(XDISPLOC, None):
+            return
+        response = [IAC, SB, XDISPLOC, SEND, IAC, SE]
+        self.log.debug('send: %s', ', '.join([
+            _name_command(byte) for byte in response]))
+        self.transport.write(b''.join(response))
+        # set pending for SB XDISPLOC
+        self.log.debug('set pending_option[SB + %s] = True' % (
+            _name_command(XDISPLOC),))
+        self.pending_option[SB + XDISPLOC] = True
+
+    def request_ttype(self):
+        """ Send TTYPE SEND sub-negotiation, rfc930.
+            Does nothing if (WILL, TTYPE) has not yet been received. """
+        if not self.remote_option.get(TTYPE, None):
+            return
+        response = [IAC, SB, TTYPE, SEND, IAC, SE]
+        self.log.debug('send: %s', ', '.join([
+            _name_command(byte) for byte in response]))
+        self.transport.write(b''.join(response))
+        # set pending for SB TTYPE
+        self.log.debug('set pending_option[SB + %s] = True' % (
+            _name_command(TTYPE),))
+        self.pending_option[SB + TTYPE] = True
 
     def handle_xdisploc(self, buf):
         """ XXX
@@ -1072,10 +1168,13 @@ class TelnetStreamReader(tulip.StreamReader):
 # `````````````````````````````````````````````````````````````````````````````
 
 class TelnetServer(tulip.protocols.Protocol):
-    _inp_cr = False
+    # toggled when '\r' is seen; for non-BINARY clients, assert that it must
+    # be followed by either '\n' or '\0'.
+    _carriage_returned = False
     # newline byte sequence is extend to strings detected in linemode,
     # it does not change carriage return processing behavior.
     newline = bytes(os.linesep, 'ascii')
+    NEGOTIATION_WAIT = 1.0
     def __init__(self, log=logging, debug=False):
         self.log = log
         self.inp_command = collections.deque()
@@ -1089,6 +1188,8 @@ class TelnetServer(tulip.protocols.Protocol):
         self.transport = transport
         self.stream = TelnetStreamReader(transport, server=True, debug=True)
         self.banner()
+        loop = tulip.get_event_loop()
+        loop.call_later(self.NEGOTIATION_WAIT, self.prompt)
 
     def eof_received(self):
         print('bye')
@@ -1108,6 +1209,7 @@ class TelnetServer(tulip.protocols.Protocol):
         self.stream.iac(DO, NEW_ENVIRON)
         #self.stream.iac(DO, ENVIRON)
         self.stream.iac(WILL, SGA)
+        #self.stream.iac(WILL, ECHO)
         self.stream.iac(DO, LINEMODE)
         self.stream.iac(DO, NAWS)
         self.stream.iac(WILL, STATUS)
@@ -1115,7 +1217,6 @@ class TelnetServer(tulip.protocols.Protocol):
         # not yet testing or asserting
         #self.stream.iac(DO, BINARY)
         #self.stream.iac(WILL, BINARY)
-        self.prompt()
 
     def prompt(self):
         """ XXX
@@ -1123,9 +1224,9 @@ class TelnetServer(tulip.protocols.Protocol):
         self.transport.write(b'\r\n ')
         self.transport.write(bytes(__file__, 'ascii'))
         self.transport.write(b'$ ')
-        if self.stream.local_option.get(SGA, None) != True:
-            self.transport.write(GA)
-            self.log_debug('GA!')
+        # unless (DO, SGA) is received by client, the 'GA' character must
+        # be sent, this indicates that server is ready to receive input.
+        self.stream.ga()
         self.log_debug('prompt')
 
     def handle_input(self, byte):
@@ -1139,9 +1240,13 @@ class TelnetServer(tulip.protocols.Protocol):
             cmd, *args = cmd.split()
         except ValueError:
             args = []
-        self.transport.write(b'Command "')
-        self.transport.write(bytes(cmd, 'ascii'))
-        self.transport.write(b'" not understood.\r\n')
+        if cmd == 'quit':
+            self.transport.write(b'\r\nBye!')
+            self.transport.close()
+        else:
+            self.transport.write(b'Command "')
+            self.transport.write(bytes(cmd, 'ascii'))
+            self.transport.write(b'" not understood.\r\n')
 
     def handle_line(self, inp):
         """ XXX
@@ -1158,58 +1263,31 @@ class TelnetServer(tulip.protocols.Protocol):
                 continue
             # echo back input if DO ECHO sent by client, and input
             # byte received is printable. This is valid regardless of linemode
+            # XXX really? seems you wouldn't want it ...
             if (self.stream.local_option.get(ECHO, None)
                     and byte.decode('ascii').isprintable()):
                 self.transport.write(byte)
-            # character-at-a-time mode is essentially pass-thru callback
+            # character-at-a-time mode is essentially pass-thru
             # to self.handle_input()
-            if (not self.stream.remote_option.get(LINEMODE, None) or (
-                    self.stream.local_option.get(ECHO, None) and
-                    self.stream.local_option.get(SGA, None))):
+            if not self.stream.is_linemode:
                 self.handle_input(byte)
             # linemode processing buffers input until '\r'
-            if not self._inp_cr and byte == b'\r':
-                self._inp_cr = True
-                if not self.stream.local_option.get(BINARY, None):
+            elif not self._carriage_returned and byte == b'\x0d':
+                if self.stream.local_option.get(BINARY, False):
+                    self.inp_command.append(byte)
+                else:
                     self.inp_command.append(self.newline)
-                else:
-                    self.inp_command.append(byte)
-                self.handle_line(b''.join(self.inp_command).decode('ascii'))
+                    self._carriage_returned = True
+                cmd = b''.join(self.inp_command).decode('ascii')
                 self.inp_command.clear()
-            elif self._inp_cr:
-                if not self.stream.local_option.get(BINARY, None):
-                    assert byte in (b'\n', b'\x00'), (
-                            'LF or NUL must follow CR, got %r' % (byte,))
-                else:
-                    # even though in linemode, with binary set, keep passing
-                    # bytes as we receive them, no matter their content, but
-                    # it is still buffered until next command byte or CR!
-                    self.inp_command.append(byte)
-                    # XXX: would \r\n be sent, leaving 'input\r', '\nmore\r'?
-                self._inp_cr = False
+                self.handle_line(cmd)
+            elif self._carriage_returned:
+                assert byte in (b'\x0a', b'\x00'), (
+                        'LF or NUL must follow CR, got %r' % (byte,))
+                self._carriage_returned = False
             else:
                 # buffer command input
                 self.inp_command.append(byte)
-
-
-#    @tulip.task
-#    def start(self):
-#        """ Start processing of incoming bytes, calling ``handle_input(byte)``
-#        for each in-band NVT character received. The stream reader's"""
-#        self.banner()
-#        while True:
-#            try:
-#                yield from self.stream.read(1)
-#            except tulip.CancelledError:
-#                self.log_debug('Ignored premature client disconnection.')
-#                break
-#            except Exception as exc:
-#                self.log_err(exc)
-#            finally:
-#                if self._closing:
-#                    self.transport.close()
-#                    break
-#        self._request_handle = None
 
 
 # `````````````````````````````````````````````````````````````````````````````
@@ -1224,10 +1302,14 @@ _DEBUG_OPTS = dict([(value, key)
                    'SUSP', 'ABORT',)])
 _DEBUG_SLC_OPTS = dict([(value, key)
                         for key, value in locals().items() if key in
-                      ('SLC_SYNCH', 'SLC_BRK', 'SLC_IP', 'SLC_AO', 'SLC_AYT',
-                       'SLC_EOR', 'SLC_ABORT', 'SLC_EOF', 'SLC_SUSP', 'SLC_EC',
-                       'SLC_EL', 'SLC_EW', 'SLC_RP', 'SLC_LNEXT', 'SLC_XON',
-                       'SLC_XOFF', 'SLC_FORW1', 'SLC_FORW2',)])
+                        ('SLC_SYNCH', 'SLC_BRK', 'SLC_IP', 'SLC_AO', 'SLC_AYT',
+                            'SLC_EOR', 'SLC_ABORT', 'SLC_EOF', 'SLC_SUSP',
+                            'SLC_EC', 'SLC_EL', 'SLC_EW', 'SLC_RP',
+                            'SLC_LNEXT', 'SLC_XON', 'SLC_XOFF', 'SLC_FORW1',
+                            'SLC_FORW2', 'SLC_MCL', 'SLC_MCR', 'SLC_MCWL',
+                            'SLC_MCWR', 'SLC_MCBOL', 'SLC_MCEOL', 'SLC_INSRT',
+                            'SLC_OVER', 'SLC_ECR', 'SLC_EWR', 'SLC_EBOL',
+                            'SLC_EEOL',)])
 _DEBUG_SLC_BITMASK = dict([(value, key)
                            for key, value in locals().items() if key in
                          ('SLC_FLUSHIN', 'SLC_FLUSHOUT', 'SLC_ACK',)])
