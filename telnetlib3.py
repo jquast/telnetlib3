@@ -488,7 +488,7 @@ class TelnetStreamReader(tulip.StreamReader):
             # away by sender of DO TM until replied by WILL or WONT TM.
             if cmd == DO:
                 self._tm_sent = True
-        elif cmd in (DO, DONT):
+        elif cmd in (DO, DONT, WILL, WONT):
             if self.pending_option.get(cmd + opt, False):
                 self.log.debug('skip %s + %s; pending_option = True',
                     _name_command(cmd), _name_command(opt))
@@ -496,13 +496,11 @@ class TelnetStreamReader(tulip.StreamReader):
             self.pending_option[cmd + opt] = True
             self.log.debug('set pending_option[%s + %s] = True' % (
                 _name_command(cmd), _name_command(opt),))
-        elif(cmd == WILL and self.local_option.get(opt, None) != True):
-            #self.local_option[opt] = True
+        elif cmd == WILL and not self.local_option.get(opt, None):
             self.pending_option[cmd + opt] = True
             self.log.debug('set pending_option[%s + %s] = True' % (
                 _name_command(cmd), _name_command(opt),))
         elif(cmd == WONT and self.local_option.get(opt, None) != False):
-            #self.local_option[opt] = False
             self.pending_option[cmd + opt] = True
             self.log.debug('set pending_option[%s + %s] = True' % (
                 _name_command(cmd), _name_command(opt),))
