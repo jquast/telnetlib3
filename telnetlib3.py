@@ -226,10 +226,11 @@ class SLC_definition(object):
         """
         return bytes([ord(self.mask) & SLC_LEVELBITS])
 
+    @property
     def nosupport(self):
         """ Returns True if SLC level is SLC_NOSUPPORT,
         """
-        return bool(ord(self.level))
+        return self.level == SLC_NOSUPPORT
 
     @property
     def ack(self):
@@ -499,8 +500,7 @@ class Forwardmask(object):
                 start = mask * 8
                 last = start + 7
                 characters = ', '.join([ _name_char(char)
-                    for char in range(start, last + 1)
-                    if self.__contains__(char)])
+                    for char in range(start, last + 1) if char in self])
                 result.append ('[%2d] %s %s' % (
                     mask, _bin8(byte), characters,))
         return result
@@ -587,7 +587,7 @@ class TelnetStreamReader(tulip.StreamReader):
         self._linemode = Linemode(bytes([0]))
         self._init_options()
         self._default_callbacks()
-        self._default_slc()
+        self._default_slc(DEFAULT_SLC_TAB)
         tulip.StreamReader.__init__(self)
 
     def _init_options(self):
@@ -612,7 +612,7 @@ class TelnetStreamReader(tulip.StreamReader):
         for ext_cmd, key in DEFAULT_EXT_CALLBACKS:
             self.set_ext_callback(ext_cmd, getattr(self, 'handle_%s' % (key,)))
 
-    def _default_slc(self, tabset=DEFAULT_SLC_TAB):
+    def _default_slc(self, tabset):
         """ set property ``_slctab`` to default SLC tabset, unless it
             is unlisted (as is the case for SLC_MCL+), then set as
             SLC_NOSUPPORT _POSIX_VDISABLE (0xff) which incidentently
@@ -622,8 +622,9 @@ class TelnetStreamReader(tulip.StreamReader):
             to a tuple of the handling character and support level.
         """
         self._slctab = {}
+        self._default_tabset = tabset
         for slc in range(NSLC + 1):
-            self._slctab[bytes([slc])] = DEFAULT_SLC_TAB.get(bytes([slc]),
+            self._slctab[bytes([slc])] = tabset.get(bytes([slc]),
                     SLC_definition(SLC_NOSUPPORT, _POSIX_VDISABLE))
 
     def set_iac_callback(self, cmd, func):
@@ -926,7 +927,8 @@ class TelnetStreamReader(tulip.StreamReader):
             (callback, slc_name, slc_def) = self._slc_snoop(byte)
             if slc_name is not None:
                 self.log.debug('_slc_snoop(%r): %s, callback is %s.',
-                        byte, _name_slc_command(slc_name), callback.__name__)
+                        byte, _name_slc_command(slc_name),
+                        callback.__name__ if callback is not None else None)
                 if slc_def.flushin:
                     # SLC_FLUSHIN not supported, requires SYNCH (urgent TCP).
                     #self.send_synch() XXX
@@ -1135,6 +1137,7 @@ class TelnetStreamReader(tulip.StreamReader):
             value = buf.popleft()
             self._slc_process(func, SLC_definition(flag, value))
         self._slc_end()
+        self.send_do_forwardmask()
 
     def _handle_sb_forwardmask(self, cmd, buf):
         # set and report about pending options by 2-byte opt,
@@ -1185,7 +1188,7 @@ class TelnetStreamReader(tulip.StreamReader):
 
     def send_do_forwardmask(self):
         """ Sends SLC Forwardmask appropriate for the currently registered
-        ``self._slctab`` to the client end.
+            ``self._slctab`` to the client end.
         """
         opt = LMODE_FORWARDMASK
         opt_desc = 'SB + LINEMODE + DO + LMODE_FORWARDMASK'
@@ -1210,8 +1213,7 @@ class TelnetStreamReader(tulip.StreamReader):
 
     @property
     def forwardmask(self):
-        """
-            Forwardmask is formed by a 32-byte representation of all 256
+        """ Forwardmask is formed by a 32-byte representation of all 256
             possible 8-bit keyboard input characters, or, when DONT BINARY
             has been transmitted, a 16-byte 7-bit representation, and whether
             or not they should be "forwarded" by the client on the transport
@@ -1316,7 +1318,7 @@ class TelnetStreamReader(tulip.StreamReader):
             if slc_def.level == SLC_DEFAULT:
                 # client requests we send our default tab,
                 self.log.info('SLC_DEFAULT')
-                self._default_slc()
+                self._default_slc(self._default_tabset)
                 self._slc_send()
             elif slc_def.level == SLC_VARIABLE:
                 # client requests we send our current tab,
@@ -1502,7 +1504,6 @@ class TelnetStreamReader(tulip.StreamReader):
                 if opt == LINEMODE:
                     # server sets the initial mode and sends forwardmask,
                     self.send_linemode()
-                    self.send_do_forwardmask()
         elif opt == TM:
             self.log.debug('WILL TIMING-MARK')
             self._tm_sent = False
@@ -2123,7 +2124,7 @@ class AdvancedTelnetServer(BasicTelnetServer):
 
     def connection_made(self, transport):
         BasicTelnetServer.connection_made(self, transport)
-        self.stream._default_slc(BSD_SLC_TAB)
+        self.stream._default_slc(DEFAULT_SLC_TAB)
 
     def banner(self):
         self.stream.write(b'Welcome to ')
