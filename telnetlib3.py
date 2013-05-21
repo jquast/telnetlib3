@@ -12,8 +12,6 @@ import shlex
 import time
 
 import tulip
-from tulip.unix_events import SelectorEventLoop
-from tulip.selector_events import _SelectorSocketTransport
 
 from telnetlib import LINEMODE, NAWS, NEW_ENVIRON, BINARY, SGA, ECHO, STATUS
 from telnetlib import TTYPE, TSPEED, LFLOW, XDISPLOC, IAC, DONT, DO, WONT
@@ -56,43 +54,6 @@ DEFAULT_SLC_CALLBACKS = (
 DEFAULT_EXT_CALLBACKS = (
         (TTYPE, 'ttype'), (TSPEED, 'tspeed'), (XDISPLOC, 'xdisploc'),
         (NEW_ENVIRON, 'env'), (NAWS, 'naws'), (LOGOUT, 'logout'),)
-
-# `````````````````````````````````````````````````````````````````````````````
-class FlowControlSocketTransport(_SelectorSocketTransport):
-    """ Implement XON, XOFF, and AO for _SelectorSocketTransport.
-    """
-    _xmit = True
-
-    def _write_ready(self):
-        return self._xmit and _SelectorSocketTransport._write_ready(self)
-
-    def write(self, data):
-        assert isinstance(data, (bytes, bytearray)), repr(data)
-        if self._xmit:
-            _SelectorSocketTransport.write(self, data)
-            return
-        self._buffer.append(data)
-
-    def abort_output(self):
-        """ Clear any data not yet written on the transport. """
-        self._buffer.clear()
-
-    def xon(self):
-        """ Resume writing on the transport (transmit-on). """
-        self._event_loop.add_writer(self._sock.fileno(), self._write_ready)
-        self._xmit = True
-
-    def xoff(self):
-        """ Stop transmission on the transport. All subsequent writes are
-            deferred untill ``xon()`` is called.  """
-        self._event_loop.remove_writer(self._sock.fileno())
-        self._xmit = False
-
-class FlowControlEventLoop(SelectorEventLoop):
-    """ Implement FlowControlSocketTransport for SelectorEventLoop """
-    def _make_socket_transport(self, sock, protocol, waiter=None, *,
-            extra=None):
-        return FlowControlSocketTransport(self, sock, protocol, waiter, extra)
 
 # `````````````````````````````````````````````````````````````````````````````
 class SLC_definition(object):
@@ -390,7 +351,7 @@ class Option(dict):
             self.log.debug('%s[%s] = %s', self.name, descr, value,)
         dict.__setitem__(self, key, value)
 
-class TelnetStreamReader(tulip.StreamReader):
+class TelnetStreamReader():
     """
     This differs from StreamReader by processing bytes for telnet protocols.
     Handles all of the option negotiation and various sub-negotiations.
@@ -948,8 +909,8 @@ class TelnetStreamReader(tulip.StreamReader):
                 # a pending option of value of 'False' means it previously
                 # completed, subsequent environment values should have been
                 # send as INFO ..
-                self.log.debug('%s IS already recv; should be INFO ',
-                        _name_command(opt))
+                self.log.debug('%s IS already recv; expected INFO.',
+                        _name_command(kind))
             breaks = list([idx for (idx, byte) in enumerate(buf)
                            if byte in (b'\x00', b'\x03')])
             env = {}
@@ -1741,13 +1702,13 @@ class TelnetStreamReader(tulip.StreamReader):
         """ Called when IAC + XON or SLC_XON is received.
         """
         self.log.debug('IAC XON: Transmit On')
-        self.transport.xon()
+        self.transport.resume_writing()
 
     def handle_xoff(self):
         """ Called when IAC + XOFF or SLC_XOFF is received.
         """
         self.log.debug('IAC XOFF: Transmit Off')
-        self.transport.xoff()
+        self.transport.pause_writing()
 
 # `````````````````````````````````````````````````````````````````````````````
 
@@ -1849,11 +1810,14 @@ class TelnetServer(tulip.protocols.Protocol):
         self.stream.iac(DO, TSPEED)
         self.stream.iac(DO, XDISPLOC)
         self.stream.iac(DO, NAWS)
-        self.stream.iac(DO, LFLOW)
+        #self.stream.iac(DO, LFLOW)
         # additional fingerprinting is possible:
         # send DO SGA (clients don't)
         # send DO ECHO (4.2 bsd client replies WILL ECHO)
-        # just send DO (1,42) :D
+        # just send DO (1,42) and see what happens !
+        # self.stream.iac(WILL, LFLOW) == 'we will handle flow control',
+        # this is done by callbacks for SLC_XON/XOFF or IAC XON/XOFF.
+        # send DO, LFLOW to allow client, instead, to block reading.
 
 
     def env_update(self, env):
@@ -1904,7 +1868,7 @@ class TelnetServer(tulip.protocols.Protocol):
         """
         # Note: abort output is suitable for a stuffed pipe that
         # cannot possibly eat another byte.
-        self.transport.abort_output()
+        self.transport.discard_output()
         self.prompt()
 
     def _negotiate(self, call_after=None):
@@ -2307,11 +2271,10 @@ def main():
         args.port = int(port)
     log = logging.getLogger()
     log.setLevel(logging.DEBUG)
-    tulip.events.set_event_loop(FlowControlEventLoop())
     loop = tulip.get_event_loop()
     func = loop.start_serving(TelnetServer, args.host, args.port)
-    server = loop.run_until_complete(func)
-    logging.debug('serving on %s', server.getsockname())
+    for sock in loop.run_until_complete(func):
+        logging.debug('serving on %s', sock.getsockname())
     loop.run_forever()
 
 if __name__ == '__main__':
