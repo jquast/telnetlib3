@@ -24,7 +24,7 @@ import uuid
 import urllib.parse
 
 import tulip
-from tulip.http import protocol
+import tulip.http
 
 
 @tulip.coroutine
@@ -41,7 +41,8 @@ def request(method, url, *,
             version=(1, 1),
             timeout=None,
             compress=None,
-            chunked=None):
+            chunked=None,
+            session=None):
     """Constructs and sends a request. Returns response object.
 
     method: http method
@@ -62,6 +63,8 @@ def request(method, url, *,
        with deflate encoding.
     chunked: Boolean or Integer. Set to chunk size for chunked
        transfer encoding.
+    session: tulip.http.Session instance to support connection pooling and
+       session cookies.
 
     Usage:
 
@@ -82,9 +85,14 @@ def request(method, url, *,
             cookies=cookies, files=files, auth=auth, encoding=encoding,
             version=version, compress=compress, chunked=chunked)
 
+        if session is None:
+            conn = start(req, loop)
+        else:
+            conn = session.start(req, loop)
+
         # connection timeout
         try:
-            resp = yield from tulip.Task(start(req, loop), timeout=timeout)
+            resp = yield from tulip.Task(conn, timeout=timeout)
         except tulip.CancelledError:
             raise tulip.TimeoutError from None
 
@@ -116,34 +124,16 @@ def request(method, url, *,
 @tulip.coroutine
 def start(req, loop):
     transport, p = yield from loop.create_connection(
-        HttpProtocol, req.host, req.port, ssl=req.ssl)
+        tulip.StreamProtocol, req.host, req.port, ssl=req.ssl)
+
     try:
         resp = req.send(transport)
-        yield from resp.start(p.stream, transport)
+        yield from resp.start(p, transport)
     except:
         transport.close()
         raise
 
     return resp
-
-
-class HttpProtocol(tulip.Protocol):
-
-    stream = None
-    transport = None
-
-    def connection_made(self, transport):
-        self.transport = transport
-        self.stream = protocol.HttpStreamReader()
-
-    def data_received(self, data):
-        self.stream.feed_data(data)
-
-    def eof_received(self):
-        self.stream.feed_eof()
-
-    def connection_lost(self, exc):
-        pass
 
 
 class HttpRequest:
@@ -178,7 +168,7 @@ class HttpRequest:
             v = [l.strip() for l in version.split('.', 1)]
             try:
                 version = int(v[0]), int(v[1])
-            except:
+            except ValueError:
                 raise ValueError(
                     'Can not parse http version number: {}'
                     .format(version)) from None
@@ -215,7 +205,7 @@ class HttpRequest:
             netloc, port_s = netloc.split(':', 1)
             try:
                 port = int(port_s)
-            except:
+            except ValueError:
                 raise ValueError(
                     'Port number could not be converted.') from None
         else:
@@ -269,18 +259,7 @@ class HttpRequest:
 
         # cookies
         if cookies:
-            c = http.cookies.SimpleCookie()
-            if 'cookie' in self.headers:
-                c.load(self.headers.get('cookie', ''))
-                del self.headers['cookie']
-
-            for name, value in cookies.items():
-                if isinstance(value, http.cookies.Morsel):
-                    dict.__setitem__(c, name, value)
-                else:
-                    c[name] = value
-
-            self.headers['cookie'] = c.output(header='', sep=';').strip()
+            self.update_cookies(cookies)
 
         # auth
         if auth:
@@ -293,24 +272,15 @@ class HttpRequest:
             else:
                 raise ValueError("Only basic auth is supported")
 
-        self._params = (chunked, compress, files, data, encoding)
-
-    def send(self, transport):
-        chunked, compress, files, data, encoding = self._params
-
-        request = tulip.http.Request(
-            transport, self.method, self.path, self.version)
-
         # Content-encoding
         enc = self.headers.get('Content-Encoding', '').lower()
         if enc:
             chunked = True  # enable chunked, no need to deal with length
-            request.add_compression_filter(enc)
+            compress = enc
         elif compress:
             chunked = True  # enable chunked, no need to deal with length
             compress = compress if isinstance(compress, str) else 'deflate'
             self.headers['Content-Encoding'] = compress
-            request.add_compression_filter(compress)
 
         # form data (x-www-form-urlencoded)
         if isinstance(data, dict):
@@ -325,7 +295,7 @@ class HttpRequest:
                 self.headers['content-type'] = (
                     'application/x-www-form-urlencoded')
             if 'content-length' not in self.headers and not chunked:
-                self.headers['content-length'] = len(self.body)
+                self.headers['content-length'] = str(len(self.body))
 
         # files (multipart/form-data)
         elif files:
@@ -373,16 +343,47 @@ class HttpRequest:
             if 'content-length' in self.headers:
                 del self.headers['content-length']
             if 'chunked' not in te:
-                self.headers['Transfer-encoding'] = 'chunked'
+                self.headers['transfer-encoding'] = 'chunked'
 
-            chunk_size = chunked if type(chunked) is int else 8196
-            request.add_chunking_filter(chunk_size)
+            chunked = chunked if type(chunked) is int else 8196
         else:
             if 'chunked' in te:
-                request.add_chunking_filter(8196)
+                chunked = 8196
             else:
-                chunked = False
-                self.headers['content-length'] = len(self.body)
+                chunked = None
+                self.headers['content-length'] = str(len(self.body))
+
+        self._chunked = chunked
+        self._compress = compress
+
+    def update_cookies(self, cookies):
+        """Update request cookies header."""
+        c = http.cookies.SimpleCookie()
+        if 'cookie' in self.headers:
+            c.load(self.headers.get('cookie', ''))
+            del self.headers['cookie']
+
+        if isinstance(cookies, dict):
+            cookies = cookies.items()
+
+        for name, value in cookies:
+            if isinstance(value, http.cookies.Morsel):
+                # use dict method because SimpleCookie class modifies value
+                dict.__setitem__(c, name, value)
+            else:
+                c[name] = value
+
+        self.headers['cookie'] = c.output(header='', sep=';').strip()
+
+    def send(self, transport):
+        request = tulip.http.Request(
+            transport, self.method, self.path, self.version)
+
+        if self._compress:
+            request.add_compression_filter(self._compress)
+
+        if self._chunked is not None:
+            request.add_chunking_filter(self._chunked)
 
         request.add_headers(*self.headers.items())
         request.send_headers()
@@ -400,15 +401,18 @@ class HttpRequest:
 
 class HttpResponse(http.client.HTTPMessage):
 
+    message = None  # RawResponseStatus object
+
     # from the Status-Line of the response
     version = None  # HTTP-Version
     status = None   # Status-Code
     reason = None   # Reason-Phrase
 
-    content = None  # payload stream
+    cookies = None  # Response cookies (Set-Cookie)
 
-    _content = None
-    _transport = None
+    content = None  # payload stream
+    stream = None   # input stream
+    transport = None  # current transport
 
     def __init__(self, method, url, host=''):
         super().__init__()
@@ -416,6 +420,10 @@ class HttpResponse(http.client.HTTPMessage):
         self.method = method
         self.url = url
         self.host = host
+        self._content = None
+
+    def __del__(self):
+        self.close()
 
     def __repr__(self):
         out = io.StringIO()
@@ -426,41 +434,60 @@ class HttpResponse(http.client.HTTPMessage):
 
     def start(self, stream, transport):
         """Start response processing."""
-        self._transport = transport
+        self.stream = stream
+        self.transport = transport
 
-        # read status
-        self.version, self.status, self.reason = (
-            yield from stream.read_response_status())
+        httpstream = stream.set_parser(tulip.http.http_response_parser())
 
-        # does the body have a fixed length? (of zero)
-        length = None
-        if (self.status == http.client.NO_CONTENT or
-                self.status == http.client.NOT_MODIFIED or
-                100 <= self.status < 200 or self.method == "HEAD"):
-            length = 0
+        # read response
+        self.message = yield from httpstream.read()
 
-        # http message
-        message = yield from stream.read_message(length=length)
+        # response status
+        self.version = self.message.version
+        self.status = self.message.code
+        self.reason = self.message.reason
 
         # headers
-        for hdr, val in message.headers:
+        for hdr, val in self.message.headers:
             self.add_header(hdr, val)
 
         # payload
-        self.content = message.payload
+        self.content = stream.set_parser(
+            tulip.http.http_payload_parser(self.message))
+
+        # cookies
+        self.cookies = http.cookies.SimpleCookie()
+        if 'Set-Cookie' in self:
+            for hdr in self.get_all('Set-Cookie'):
+                self.cookies.load(hdr)
 
         return self
 
     def close(self):
-        if self._transport is not None:
-            self._transport.close()
-            self._transport = None
+        if self.transport is not None:
+            self.transport.close()
+            self.transport = None
 
     @tulip.coroutine
     def read(self, decode=False):
         """Read response payload. Decode known types of content."""
         if self._content is None:
-            self._content = yield from self.content.read()
+            buf = []
+            total = 0
+            chunk = yield from self.content.read()
+            while chunk:
+                size = len(chunk)
+                buf.append((chunk, size))
+                total += size
+                chunk = yield from self.content.read()
+
+            self._content = bytearray(total)
+
+            idx = 0
+            content = memoryview(self._content)
+            for chunk, size in buf:
+                content[idx:idx+size] = chunk
+                idx += size
 
         data = self._content
 

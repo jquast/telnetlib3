@@ -72,22 +72,21 @@ class SelectorEventLoop(selector_events.BaseSelectorEventLoop):
             else:
                 raise
 
-        return handle
-
     def _handle_signal(self, sig, arg):
         """Internal helper that is the actual signal handler."""
         handle = self._signal_handlers.get(sig)
         if handle is None:
             return  # Assume it's some race condition.
-        if handle.cancelled:
+        if handle._cancelled:
             self.remove_signal_handler(sig)  # Remove it properly.
         else:
-            self.call_soon_threadsafe(handle)
+            self._add_callback_signalsafe(handle)
 
     def remove_signal_handler(self, sig):
         """Remove a handler for a signal.  UNIX only.
 
-        Return True if a signal handler was removed, False if not."""
+        Return True if a signal handler was removed, False if not.
+        """
         self._check_signal(sig)
         try:
             del self._signal_handlers[sig]
@@ -167,7 +166,7 @@ class _UnixReadPipeTransport(transports.ReadTransport):
     def _read_ready(self):
         try:
             data = os.read(self._fileno, self.max_size)
-        except BlockingIOError:
+        except (BlockingIOError, InterruptedError):
             pass
         except OSError as exc:
             self._fatal_error(exc)
@@ -238,7 +237,7 @@ class _UnixWritePipeTransport(transports.WriteTransport):
             # Attempt to send it right away first.
             try:
                 n = os.write(self._fileno, data)
-            except BlockingIOError:
+            except (BlockingIOError, InterruptedError):
                 n = 0
             except Exception as exc:
                 self._conn_lost += 1
@@ -254,12 +253,12 @@ class _UnixWritePipeTransport(transports.WriteTransport):
 
     def _write_ready(self):
         data = b''.join(self._buffer)
-        assert data, "Data should not be empty"
+        assert data, 'Data should not be empty'
 
         self._buffer.clear()
         try:
             n = os.write(self._fileno, data)
-        except BlockingIOError:
+        except (BlockingIOError, InterruptedError):
             self._buffer.append(data)
         except Exception as exc:
             self._conn_lost += 1

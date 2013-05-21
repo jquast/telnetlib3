@@ -2,11 +2,10 @@
 
 __all__ = ['CancelledError', 'TimeoutError',
            'InvalidStateError', 'InvalidTimeoutError',
-           'Future',
+           'Future', 'wrap_future',
            ]
 
 import concurrent.futures._base
-import io
 import logging
 import traceback
 
@@ -36,6 +35,79 @@ class InvalidTimeoutError(Error):
     # TODO: Print a nice error message.
 
 
+class _TracebackLogger:
+    """Helper to log a traceback upon destruction if not cleared.
+
+    This solves a nasty problem with Futures and Tasks that have an
+    exception set: if nobody asks for the exception, the exception is
+    never logged.  This violates the Zen of Python: 'Errors should
+    never pass silently.  Unless explicitly silenced.'
+
+    However, we don't want to log the exception as soon as
+    set_exception() is called: if the calling code is written
+    properly, it will get the exception and handle it properly.  But
+    we *do* want to log it if result() or exception() was never called
+    -- otherwise developers waste a lot of time wondering why their
+    buggy code fails silently.
+
+    An earlier attempt added a __del__() method to the Future class
+    itself, but this backfired because the presence of __del__()
+    prevents garbage collection from breaking cycles.  A way out of
+    this catch-22 is to avoid having a __del__() method on the Future
+    class itself, but instead to have a reference to a helper object
+    with a __del__() method that logs the traceback, where we ensure
+    that the helper object doesn't participate in cycles, and only the
+    Future has a reference to it.
+
+    The helper object is added when set_exception() is called.  When
+    the Future is collected, and the helper is present, the helper
+    object is also collected, and its __del__() method will log the
+    traceback.  When the Future's result() or exception() method is
+    called (and a helper object is present), it removes the the helper
+    object, after calling its clear() method to prevent it from
+    logging.
+
+    One downside is that we do a fair amount of work to extract the
+    traceback from the exception, even when it is never logged.  It
+    would seem cheaper to just store the exception object, but that
+    references the traceback, which references stack frames, which may
+    reference the Future, which references the _TracebackLogger, and
+    then the _TracebackLogger would be included in a cycle, which is
+    what we're trying to avoid!  As an optimization, we don't
+    immediately format the exception; we only do the work when
+    activate() is called, which call is delayed until after all the
+    Future's callbacks have run.  Since usually a Future has at least
+    one callback (typically set by 'yield from') and usually that
+    callback extracts the callback, thereby removing the need to
+    format the exception.
+
+    PS. I don't claim credit for this solution.  I first heard of it
+    in a discussion about closing files when they are collected.
+    """
+
+    __slots__ = ['exc', 'tb']
+
+    def __init__(self, exc):
+        self.exc = exc
+        self.tb = None
+
+    def activate(self):
+        exc = self.exc
+        if exc is not None:
+            self.exc = None
+            self.tb = traceback.format_exception(exc.__class__, exc,
+                                                 exc.__traceback__)
+
+    def clear(self):
+        self.exc = None
+        self.tb = None
+
+    def __del__(self):
+        if self.tb:
+            tulip_log.error('Future/Task exception was never retrieved:\n%s',
+                            ''.join(self.tb))
+
+
 class Future:
     """This class is *almost* compatible with concurrent.futures.Future.
 
@@ -57,37 +129,30 @@ class Future:
     _state = _PENDING
     _result = None
     _exception = None
+    _timeout = None
     _timeout_handle = None
-    _event_loop = None
+    _loop = None
 
     _blocking = False  # proper use of future (yield vs yield from)
 
-    # result of the future has to be requested
-    _debug_stack = None
-    _debug_result_requested = False
+    _tb_logger = None
 
-    def __init__(self, *, event_loop=None, timeout=None):
+    def __init__(self, *, loop=None, timeout=None):
         """Initialize the future.
 
         The optional event_loop argument allows to explicitly set the event
         loop object used by the future. If it's not provided, the future uses
         the default event loop.
         """
-        if event_loop is None:
-            self._event_loop = events.get_event_loop()
+        if loop is None:
+            self._loop = events.get_event_loop()
         else:
-            self._event_loop = event_loop
+            self._loop = loop
         self._callbacks = []
 
         if timeout is not None:
-            self._timeout_handle = self._event_loop.call_later(
-                timeout, self.cancel)
-
-        if __debug__:
-            if self._event_loop.get_log_level() <= STACK_DEBUG:
-                out = io.StringIO()
-                traceback.print_stack(file=out)
-                self._debug_stack = out.getvalue()
+            self._timeout = timeout
+            self._timeout_handle = self._loop.call_later(timeout, self.cancel)
 
     def __repr__(self):
         res = self.__class__.__name__
@@ -138,7 +203,7 @@ class Future:
 
         self._callbacks[:] = []
         for callback in callbacks:
-            self._event_loop.call_soon(callback, self)
+            self._loop.call_soon(callback, self)
 
     def cancelled(self):
         """Return True if the future was cancelled."""
@@ -168,14 +233,15 @@ class Future:
         the future is done and has an exception set, this exception is raised.
         Timeout values other than 0 are not supported.
         """
-        if __debug__:
-            self._debug_result_requested = True
         if timeout != 0:
             raise InvalidTimeoutError
         if self._state == _CANCELLED:
             raise CancelledError
         if self._state != _FINISHED:
             raise InvalidStateError
+        if self._tb_logger is not None:
+            self._tb_logger.clear()
+            self._tb_logger = None
         if self._exception is not None:
             raise self._exception
         return self._result
@@ -188,14 +254,15 @@ class Future:
         CancelledError.  If the future isn't done yet, raises
         InvalidStateError.  Timeout values other than 0 are not supported.
         """
-        if __debug__:
-            self._debug_result_requested = True
         if timeout != 0:
             raise InvalidTimeoutError
         if self._state == _CANCELLED:
             raise CancelledError
         if self._state != _FINISHED:
             raise InvalidStateError
+        if self._tb_logger is not None:
+            self._tb_logger.clear()
+            self._tb_logger = None
         return self._exception
 
     def add_done_callback(self, fn):
@@ -206,7 +273,7 @@ class Future:
         scheduled with call_soon.
         """
         if self._state != _PENDING:
-            self._event_loop.call_soon(fn, self)
+            self._loop.call_soon(fn, self)
         else:
             self._callbacks.append(fn)
 
@@ -246,8 +313,12 @@ class Future:
         if self._state != _PENDING:
             raise InvalidStateError
         self._exception = exception
+        self._tb_logger = _TracebackLogger(exception)
         self._state = _FINISHED
         self._schedule_callbacks()
+        # Arrange for the logger to be activated after all callbacks
+        # have had a chance to call result() or exception().
+        self._loop.call_soon(self._tb_logger.activate)
 
     # Truly internal methods.
 
@@ -275,35 +346,20 @@ class Future:
         assert self.done(), "yield from wasn't used with future"
         return self.result()  # May raise too.
 
-    if __debug__:
-        def __del__(self):
-            if (not self._debug_result_requested and
-                self._state != _CANCELLED and
-                self._event_loop is not None):
 
-                level = self._event_loop.get_log_level()
-                if level > logging.WARNING:
-                    return
+def wrap_future(fut, *, loop=None):
+    """Wrap concurrent.futures.Future object."""
+    if isinstance(fut, Future):
+        return fut
 
-                r_self = repr(self)
+    assert isinstance(fut, concurrent.futures.Future), \
+        'concurrent.futures.Future is expected, got {!r}'.format(fut)
 
-                if self._state == _PENDING:
-                    tulip_log.error(
-                        'Future abandoned before completion: %s', r_self)
-                    if (self._debug_stack and level <= STACK_DEBUG):
-                        tulip_log.error(self._debug_stack)
+    if loop is None:
+        loop = events.get_event_loop()
 
-                else:
-                    exc = self._exception
-                    if exc is not None:
-                        tulip_log.exception(
-                            'Future raised an exception and '
-                            'nobody caught it: %s', r_self,
-                            exc_info=(exc.__class__, exc, exc.__traceback__))
-                        if (self._debug_stack and level <= STACK_DEBUG):
-                            tulip_log.error(self._debug_stack)
-                    else:
-                        tulip_log.error(
-                            'Future result has not been requested: %s', r_self)
-                        if (self._debug_stack and level <= STACK_DEBUG):
-                            tulip_log.error(self._debug_stack)
+    new_future = Future(loop=loop)
+    fut.add_done_callback(
+        lambda future: loop.call_soon_threadsafe(
+            new_future._copy_state, fut))
+    return new_future

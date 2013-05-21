@@ -20,6 +20,8 @@ import heapq
 import logging
 import socket
 import time
+import os
+import sys
 
 from . import events
 from . import futures
@@ -88,45 +90,19 @@ class BaseEventLoop(events.AbstractEventLoop):
         """Process selector events."""
         raise NotImplementedError
 
-    def is_running(self):
-        """Returns running status of event loop."""
-        return self._running
-
-    def run(self):
-        """Run the event loop until nothing left to do or stop() called.
-
-        This keeps going as long as there are either readable and
-        writable file descriptors, or scheduled callbacks (of either
-        variety).
-
-        TODO: Give this a timeout too?
-        """
+    def run_forever(self):
+        """Run until stop() is called."""
         if self._running:
             raise RuntimeError('Event loop is running.')
-
         self._running = True
         try:
-            while (self._ready or
-                   self._scheduled or
-                   self._selector.registered_count() > 1):
+            while True:
                 try:
                     self._run_once()
                 except _StopError:
                     break
         finally:
             self._running = False
-
-    def run_forever(self):
-        """Run until stop() is called.
-
-        This only makes sense over run() if you have another thread
-        scheduling callbacks using call_soon_threadsafe().
-        """
-        handle = self.call_repeatedly(24*3600, lambda: None)
-        try:
-            self.run()
-        finally:
-            handle.cancel()
 
     def run_once(self, timeout=0):
         """Run through all callbacks and all I/O polls once.
@@ -156,12 +132,7 @@ class BaseEventLoop(events.AbstractEventLoop):
         Return the Future's result, or raise its exception.  If the
         timeout is reached or stop() is called, raise TimeoutError.
         """
-        if not isinstance(future, futures.Future):
-            if tasks.iscoroutine(future):
-                future = tasks.Task(future)
-            else:
-                assert False, 'A Future or coroutine is required'
-
+        future = tasks.async(future)
         handle_called = False
 
         def stop_loop():
@@ -192,11 +163,19 @@ class BaseEventLoop(events.AbstractEventLoop):
         """
         self.call_soon(_raise_stop_error)
 
+    def is_running(self):
+        """Returns running status of event loop."""
+        return self._running
+
+    def time(self):
+        """Return the time according to the event loop's clock."""
+        return time.monotonic()
+
     def call_later(self, delay, callback, *args):
         """Arrange for a callback to be called at a given time.
 
-        Return an object with a cancel() method that can be used to
-        cancel the call.
+        Return a Handle: an opaque object with a cancel() method that
+        can be used to cancel the call.
 
         The delay can be an int or float, expressed in seconds.  It is
         always a relative time.
@@ -205,34 +184,16 @@ class BaseEventLoop(events.AbstractEventLoop):
         are scheduled for exactly the same time, it undefined which
         will be called first.
 
-        Callbacks scheduled in the past are passed on to call_soon(),
-        so these will be called in the order in which they were
-        registered rather than by time due.  This is so you can't
-        cheat and insert yourself at the front of the ready queue by
-        using a negative time.
-
         Any positional arguments after the callback will be passed to
         the callback when it is called.
         """
-        if delay <= 0:
-            return self.call_soon(callback, *args)
+        return self.call_at(self.time() + delay, callback, *args)
 
-        handle = events.Timer(time.monotonic() + delay, callback, args)
-        heapq.heappush(self._scheduled, handle)
-        return handle
-
-    def call_repeatedly(self, interval, callback, *args):
-        """Call a callback every 'interval' seconds."""
-        assert interval > 0, 'Interval must be > 0: {!r}'.format(interval)
-        # TODO: What if callback is already a Handle?
-        def wrapper():
-            callback(*args)  # If this fails, the chain is broken.
-            handle._when = time.monotonic() + interval
-            heapq.heappush(self._scheduled, handle)
-
-        handle = events.Timer(time.monotonic() + interval, wrapper, ())
-        heapq.heappush(self._scheduled, handle)
-        return handle
+    def call_at(self, when, callback, *args):
+        """Like call_later(), but uses an absolute time."""
+        timer = events.TimerHandle(when, callback, args)
+        heapq.heappush(self._scheduled, timer)
+        return timer
 
     def call_soon(self, callback, *args):
         """Arrange for a callback to be called as soon as possible.
@@ -257,18 +218,18 @@ class BaseEventLoop(events.AbstractEventLoop):
     def run_in_executor(self, executor, callback, *args):
         if isinstance(callback, events.Handle):
             assert not args
-            assert not isinstance(callback, events.Timer)
-            if callback.cancelled:
+            assert not isinstance(callback, events.TimerHandle)
+            if callback._cancelled:
                 f = futures.Future()
                 f.set_result(None)
                 return f
-            callback, args = callback.callback, callback.args
+            callback, args = callback._callback, callback._args
         if executor is None:
             executor = self._default_executor
             if executor is None:
                 executor = concurrent.futures.ThreadPoolExecutor(_MAX_WORKERS)
                 self._default_executor = executor
-        return self.wrap_future(executor.submit(callback, *args))
+        return futures.wrap_future(executor.submit(callback, *args), loop=self)
 
     def set_default_executor(self, executor):
         self._default_executor = executor
@@ -283,25 +244,57 @@ class BaseEventLoop(events.AbstractEventLoop):
 
     @tasks.coroutine
     def create_connection(self, protocol_factory, host=None, port=None, *,
-                          ssl=False, family=0, proto=0, flags=0, sock=None):
+                          ssl=None, family=0, proto=0, flags=0, sock=None,
+                          local_addr=None):
         """XXX"""
         if host is not None or port is not None:
             if sock is not None:
                 raise ValueError(
-                    "host, port and sock can not be specified at the same time")
+                    'host/port and sock can not be specified at the same time')
 
-            infos = yield from self.getaddrinfo(
+            f1 = self.getaddrinfo(
                 host, port, family=family,
                 type=socket.SOCK_STREAM, proto=proto, flags=flags)
+            fs = [f1]
+            if local_addr is not None:
+                f2 = self.getaddrinfo(
+                    *local_addr, family=family,
+                    type=socket.SOCK_STREAM, proto=proto, flags=flags)
+                fs.append(f2)
+            else:
+                f2 = None
 
+            yield from tasks.wait(fs)
+
+            infos = f1.result()
             if not infos:
                 raise socket.error('getaddrinfo() returned empty list')
+            if f2 is not None:
+                laddr_infos = f2.result()
+                if not laddr_infos:
+                    raise socket.error('getaddrinfo() returned empty list')
 
             exceptions = []
             for family, type, proto, cname, address in infos:
                 try:
                     sock = socket.socket(family=family, type=type, proto=proto)
                     sock.setblocking(False)
+                    if f2 is not None:
+                        for _, _, _, _, laddr in laddr_infos:
+                            try:
+                                sock.bind(laddr)
+                                break
+                            except socket.error as exc:
+                                exc = socket.error(
+                                    exc.errno, 'error while '
+                                    'attempting to bind on address '
+                                    '{!r}: {}'.format(
+                                        laddr, exc.strerror.lower()))
+                                exceptions.append(exc)
+                        else:
+                            sock.close()
+                            sock = None
+                            continue
                     yield from self.sock_connect(sock, address)
                 except socket.error as exc:
                     if sock is not None:
@@ -324,7 +317,7 @@ class BaseEventLoop(events.AbstractEventLoop):
 
         elif sock is None:
             raise ValueError(
-                "host and port was not specified and no sock specified")
+                'host and port was not specified and no sock specified')
 
         sock.setblocking(False)
 
@@ -380,7 +373,8 @@ class BaseEventLoop(events.AbstractEventLoop):
 
         exceptions = []
 
-        for (family, proto), (local_address, remote_address) in addr_pairs_info:
+        for ((family, proto),
+             (local_address, remote_address)) in addr_pairs_info:
             sock = None
             l_addr = None
             r_addr = None
@@ -410,48 +404,67 @@ class BaseEventLoop(events.AbstractEventLoop):
             sock, protocol, r_addr, extra={'addr': l_addr})
         return transport, protocol
 
-    # TODO: Or create_server()?
     @tasks.task
     def start_serving(self, protocol_factory, host=None, port=None, *,
-                      family=0, proto=0, flags=0, backlog=100, sock=None,
-                      ssl=False):
+                      family=socket.AF_UNSPEC, flags=socket.AI_PASSIVE,
+                      sock=None, backlog=100, ssl=None, reuse_address=None):
         """XXX"""
         if host is not None or port is not None:
             if sock is not None:
                 raise ValueError(
-                    "host, port and sock can not be specified at the same time")
+                    'host/port and sock can not be specified at the same time')
+
+            AF_INET6 = getattr(socket, 'AF_INET6', 0)
+            if reuse_address is None:
+                reuse_address = os.name == 'posix' and sys.platform != 'cygwin'
+            sockets = []
+            if host == '':
+                host = None
 
             infos = yield from self.getaddrinfo(
                 host, port, family=family,
-                type=socket.SOCK_STREAM, proto=proto, flags=flags)
-
+                type=socket.SOCK_STREAM, proto=0, flags=flags)
             if not infos:
                 raise socket.error('getaddrinfo() returned empty list')
 
-            # TODO: Maybe we want to bind every address in the list
-            # instead of the first one that works?
-            exceptions = []
-            for family, type, proto, cname, address in infos:
-                sock = socket.socket(family=family, type=type, proto=proto)
-                try:
-                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                    sock.bind(address)
-                except socket.error as exc:
-                    sock.close()
-                    exceptions.append(exc)
-                else:
-                    break
-            else:
-                raise exceptions[0]
+            completed = False
+            try:
+                for res in infos:
+                    af, socktype, proto, canonname, sa = res
+                    sock = socket.socket(af, socktype, proto)
+                    sockets.append(sock)
+                    if reuse_address:
+                        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR,
+                                        True)
+                    # Disable IPv4/IPv6 dual stack support (enabled by
+                    # default on Linux) which makes a single socket
+                    # listen on both address families.
+                    if af == AF_INET6 and hasattr(socket, 'IPPROTO_IPV6'):
+                        sock.setsockopt(socket.IPPROTO_IPV6,
+                                        socket.IPV6_V6ONLY,
+                                        True)
+                    try:
+                        sock.bind(sa)
+                    except socket.error as err:
+                        raise socket.error(err.errno, 'error while attempting '
+                                           'to bind on address %r: %s'
+                                           % (sa, err.strerror.lower()))
+                completed = True
+            finally:
+                if not completed:
+                    for sock in sockets:
+                        sock.close()
+        else:
+            if sock is None:
+                raise ValueError(
+                    'host and port was not specified and no sock specified')
+            sockets = [sock]
 
-        elif sock is None:
-            raise ValueError(
-                "host and port was not specified and no sock specified")
-
-        sock.listen(backlog)
-        sock.setblocking(False)
-        self._start_serving(protocol_factory, sock, ssl)
-        return sock
+        for sock in sockets:
+            sock.listen(backlog)
+            sock.setblocking(False)
+            self._start_serving(protocol_factory, sock, ssl)
+        return sockets
 
     @tasks.coroutine
     def connect_read_pipe(self, protocol_factory, pipe):
@@ -473,22 +486,18 @@ class BaseEventLoop(events.AbstractEventLoop):
 
     def _add_callback(self, handle):
         """Add a Handle to ready or scheduled."""
-        if handle.cancelled:
+        assert isinstance(handle, events.Handle), 'A Handle is required here'
+        if handle._cancelled:
             return
-        if isinstance(handle, events.Timer):
+        if isinstance(handle, events.TimerHandle):
             heapq.heappush(self._scheduled, handle)
         else:
             self._ready.append(handle)
 
-    def wrap_future(self, future):
-        """XXX"""
-        if isinstance(future, futures.Future):
-            return future  # Don't wrap our own type of Future.
-        new_future = futures.Future(event_loop=self)
-        future.add_done_callback(
-            lambda future:
-                self.call_soon_threadsafe(new_future._copy_state, future))
-        return new_future
+    def _add_callback_signalsafe(self, handle):
+        """Like _add_callback() but called from a signal handler."""
+        self._add_callback(handle)
+        self._write_to_self()
 
     def _run_once(self, timeout=None):
         """Run one full iteration of the event loop.
@@ -497,29 +506,25 @@ class BaseEventLoop(events.AbstractEventLoop):
         schedules the resulting callbacks, and finally schedules
         'call_later' callbacks.
         """
-        # TODO: Break each of these into smaller pieces.
-        # TODO: Refactor to separate the callbacks from the readers/writers.
-        # TODO: An alternative API would be to do the *minimal* amount
-        # of work, e.g. one callback or one I/O poll.
-
         # Remove delayed calls that were cancelled from head of queue.
-        while self._scheduled and self._scheduled[0].cancelled:
+        while self._scheduled and self._scheduled[0]._cancelled:
             heapq.heappop(self._scheduled)
 
         if self._ready:
             timeout = 0
         elif self._scheduled:
             # Compute the desired timeout.
-            when = self._scheduled[0].when
-            deadline = max(0, when - time.monotonic())
+            when = self._scheduled[0]._when
+            deadline = max(0, when - self.time())
             if timeout is None:
                 timeout = deadline
             else:
                 timeout = min(timeout, deadline)
 
-        t0 = time.monotonic()
+        # TODO: Instrumentation only in debug mode?
+        t0 = self.time()
         event_list = self._selector.select(timeout)
-        t1 = time.monotonic()
+        t1 = self.time()
         argstr = '' if timeout is None else '{:.3f}'.format(timeout)
         if t1-t0 >= 1:
             level = logging.INFO
@@ -529,10 +534,10 @@ class BaseEventLoop(events.AbstractEventLoop):
         self._process_events(event_list)
 
         # Handle 'later' callbacks that are ready.
-        now = time.monotonic()
+        now = self.time()
         while self._scheduled:
             handle = self._scheduled[0]
-            if handle.when > now:
+            if handle._when > now:
                 break
             handle = heapq.heappop(self._scheduled)
             self._ready.append(handle)
@@ -546,14 +551,6 @@ class BaseEventLoop(events.AbstractEventLoop):
         ntodo = len(self._ready)
         for i in range(ntodo):
             handle = self._ready.popleft()
-            if not handle.cancelled:
-                handle.run()
-
-    # Future.__del__ uses log level
-    _log_level = logging.WARNING
-
-    def set_log_level(self, val):
-        self._log_level = val
-
-    def get_log_level(self):
-        return self._log_level
+            if not handle._cancelled:
+                handle._run()
+        handle = None  # Needed to break cycles when an exception occurs.

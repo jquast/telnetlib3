@@ -31,10 +31,18 @@ else:
     from socket import socketpair  # pragma: no cover
 
 
+def run_once(loop):
+    @tulip.task
+    def once():
+        pass
+    loop.run_until_complete(once())
+
+
 @contextlib.contextmanager
 def run_test_server(loop, *, host='127.0.0.1', port=0,
                     use_ssl=False, router=None):
     properties = {}
+    transports = []
 
     class HttpServer:
 
@@ -57,20 +65,32 @@ def run_test_server(loop, *, host='127.0.0.1', port=0,
 
     class TestHttpServer(tulip.http.ServerHttpProtocol):
 
-        def handle_request(self, info, message):
-            if properties.get('noresponse', False):
+        def connection_made(self, transport):
+            transports.append(transport)
+            super().connection_made(transport)
+
+        def handle_request(self, message, payload):
+            if properties.get('close', False):
                 return
 
+            if properties.get('noresponse', False):
+                yield from tulip.sleep(99999)
+
             if router is not None:
-                payload = io.BytesIO((yield from message.payload.read()))
+                body = bytearray()
+                chunk = yield from payload.read()
+                while chunk:
+                    body.extend(chunk)
+                    chunk = yield from payload.read()
+
                 rob = router(
-                    properties, self.transport,
-                    info, message.headers, payload, message.compression)
+                    self, properties,
+                    self.transport, message, bytes(body))
                 rob.dispatch()
 
             else:
                 response = tulip.http.Response(
-                    self.transport, 200, info.version)
+                    self.transport, 200, message.version)
 
                 text = b'Test message'
                 response.add_header('Content-type', 'text/plain')
@@ -79,8 +99,6 @@ def run_test_server(loop, *, host='127.0.0.1', port=0,
                 response.write(text)
                 response.write_eof()
 
-            self.transport.close()
-
     if use_ssl:
         here = os.path.join(os.path.dirname(__file__), '..', 'tests')
         keyfile = os.path.join(here, 'sample.key')
@@ -88,23 +106,34 @@ def run_test_server(loop, *, host='127.0.0.1', port=0,
         sslcontext = ssl.SSLContext(ssl.PROTOCOL_SSLv23)
         sslcontext.load_cert_chain(certfile, keyfile)
     else:
-        sslcontext = False
+        sslcontext = None
 
     def run(loop, fut):
         thread_loop = tulip.new_event_loop()
-        thread_loop.set_log_level(logging.CRITICAL)
         tulip.set_event_loop(thread_loop)
 
-        sock = thread_loop.run_until_complete(
+        socks = thread_loop.run_until_complete(
             thread_loop.start_serving(
-                TestHttpServer, host, port, ssl=sslcontext))
+                lambda: TestHttpServer(keep_alive=0.5),
+                host, port, ssl=sslcontext))
 
         waiter = tulip.Future()
         loop.call_soon_threadsafe(
-            fut.set_result, (thread_loop, waiter, sock.getsockname()))
+            fut.set_result, (thread_loop, waiter, socks[0].getsockname()))
 
         thread_loop.run_until_complete(waiter)
+
+        # close opened trnsports
+        for tr in transports:
+            tr.close()
+
+        for s in socks:
+            s.close()
+
+        run_once(thread_loop)  # call close callbacks
+
         thread_loop.stop()
+        thread_loop.close()
         gc.collect()
 
     fut = tulip.Future()
@@ -124,19 +153,20 @@ class Router:
     _response_version = "1.1"
     _responses = http.server.BaseHTTPRequestHandler.responses
 
-    def __init__(self, props, transport, rline, headers, body, cmode):
+    def __init__(self, srv, props, transport, message, payload):
         # headers
         self._headers = http.client.HTTPMessage()
-        for hdr, val in headers:
+        for hdr, val in message.headers:
             self._headers.add_header(hdr, val)
 
+        self._srv = srv
         self._props = props
         self._transport = transport
-        self._method = rline.method
-        self._uri = rline.uri
-        self._version = rline.version
-        self._compression = cmode
-        self._body = body.read()
+        self._method = message.method
+        self._uri = message.path
+        self._version = message.version
+        self._compression = message.compression
+        self._body = payload
 
         url = urllib.parse.urlsplit(self._uri)
         self._path = url.path
@@ -158,7 +188,7 @@ class Router:
             if match is not None:
                 try:
                     return getattr(self, fn)(match)
-                except:
+                except Exception:
                     out = io.StringIO()
                     traceback.print_exc(file=out)
                     self._response(500, out.getvalue())
@@ -251,3 +281,7 @@ class Router:
         # write payload
         response.write(client.str_to_bytes(body))
         response.write_eof()
+
+        # keep-alive
+        if response.keep_alive():
+            self._srv.keep_alive(True)

@@ -79,6 +79,20 @@ class WriteTransport(BaseTransport):
         """Return True if this protocol supports write_eof(), False if not."""
         raise NotImplementedError
 
+    def pause_writing(self):
+        """Pause transmission on the transport.
+
+        Later calls to write are deferred until resume_writing() is called.
+        """
+        raise NotImplementedError
+
+    def resume_writing(self):
+        """Resume transmission on the transport. """
+
+    def discard_output(self):
+        """Discard any buffered data awaiting transmission on the transport.
+        """
+
     def abort(self):
         """Closes the transport immediately.
 

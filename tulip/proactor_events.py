@@ -12,10 +12,10 @@ from .log import tulip_log
 
 class _ProactorSocketTransport(transports.Transport):
 
-    def __init__(self, event_loop, sock, protocol, waiter=None, extra=None):
+    def __init__(self, loop, sock, protocol, waiter=None, extra=None):
         super().__init__(extra)
         self._extra['socket'] = sock
-        self._event_loop = event_loop
+        self._loop = loop
         self._sock = sock
         self._protocol = protocol
         self._buffer = []
@@ -23,10 +23,10 @@ class _ProactorSocketTransport(transports.Transport):
         self._write_fut = None
         self._conn_lost = 0
         self._closing = False  # Set when close() called.
-        self._event_loop.call_soon(self._protocol.connection_made, self)
-        self._event_loop.call_soon(self._loop_reading)
+        self._loop.call_soon(self._protocol.connection_made, self)
+        self._loop.call_soon(self._loop_reading)
         if waiter is not None:
-            self._event_loop.call_soon(waiter.set_result, None)
+            self._loop.call_soon(waiter.set_result, None)
 
     def _loop_reading(self, fut=None):
         data = None
@@ -40,8 +40,8 @@ class _ProactorSocketTransport(transports.Transport):
                     self._read_fut = None
                     return
 
-            self._read_fut = self._event_loop._proactor.recv(self._sock, 4096)
-        except ConnectionAbortedError as exc:
+            self._read_fut = self._loop._proactor.recv(self._sock, 4096)
+        except (ConnectionAbortedError, ConnectionResetError) as exc:
             if not self._closing:
                 self._fatal_error(exc)
         except OSError as exc:
@@ -52,13 +52,16 @@ class _ProactorSocketTransport(transports.Transport):
             if data:
                 self._protocol.data_received(data)
             elif data is not None:
-                self._protocol.eof_received()
+                try:
+                    self._protocol.eof_received()
+                finally:
+                    self.close()
 
     def write(self, data):
         assert isinstance(data, bytes), repr(data)
-        assert not self._closing
         if not data:
             return
+
         if self._conn_lost:
             if self._conn_lost >= constants.LOG_THRESHOLD_FOR_CONNLOST_WRITES:
                 tulip_log.warning('socket.send() raised exception.')
@@ -77,10 +80,11 @@ class _ProactorSocketTransport(transports.Transport):
             self._buffer = []
             if not data:
                 self._write_fut = None
+                if self._closing:
+                    self._loop.call_soon(self._call_connection_lost, None)
                 return
-            self._write_fut = self._event_loop._proactor.send(self._sock, data)
+            self._write_fut = self._loop._proactor.send(self._sock, data)
         except OSError as exc:
-            self._conn_lost += 1
             self._fatal_error(exc)
         else:
             self._write_fut.add_done_callback(self._loop_writing)
@@ -88,24 +92,32 @@ class _ProactorSocketTransport(transports.Transport):
     # TODO: write_eof(), can_write_eof().
 
     def abort(self):
-        self._fatal_error(None)
+        self._force_close(None)
 
     def close(self):
+        if self._closing:
+            return
         self._closing = True
-        if self._write_fut:
-            self._write_fut.cancel()
-        if not self._buffer:
-            self._event_loop.call_soon(self._call_connection_lost, None)
+        self._conn_lost += 1
+        if not self._buffer and self._write_fut is None:
+            self._loop.call_soon(self._call_connection_lost, None)
 
     def _fatal_error(self, exc):
         tulip_log.exception('Fatal error for %s', self)
+        self._force_close(exc)
+
+    def _force_close(self, exc):
+        if self._closing:
+            return
+        self._closing = True
+        self._conn_lost += 1
         if self._write_fut:
             self._write_fut.cancel()
         if self._read_fut:            # XXX
             self._read_fut.cancel()
         self._write_fut = self._read_fut = None
         self._buffer = []
-        self._event_loop.call_soon(self._call_connection_lost, exc)
+        self._loop.call_soon(self._call_connection_lost, exc)
 
     def _call_connection_lost(self, exc):
         try:
@@ -177,7 +189,7 @@ class BaseProactorEventLoop(base_events.BaseEventLoop):
     def _write_to_self(self):
         self._csock.send(b'x')
 
-    def _start_serving(self, protocol_factory, sock, ssl=False):
+    def _start_serving(self, protocol_factory, sock, ssl=None):
         assert not ssl, 'IocpEventLoop imcompatible with SSL.'
 
         def loop(f=None):

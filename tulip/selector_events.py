@@ -5,7 +5,6 @@ also includes support for signal handling, see the unix_events sub-module.
 """
 
 import collections
-import errno
 import socket
 try:
     import ssl
@@ -44,7 +43,7 @@ class BaseSelectorEventLoop(base_events.BaseEventLoop):
         super().__init__()
 
         if selector is None:
-            selector = selectors.Selector()
+            selector = selectors.DefaultSelector()
         tulip_log.debug('Using selector: %s', selector.__class__.__name__)
         self._selector = selector
         self._make_self_pipe()
@@ -99,17 +98,17 @@ class BaseSelectorEventLoop(base_events.BaseEventLoop):
         except (BlockingIOError, InterruptedError):
             pass
 
-    def _start_serving(self, protocol_factory, sock, ssl=False):
+    def _start_serving(self, protocol_factory, sock, ssl=None):
         self.add_reader(sock.fileno(), self._accept_connection,
                         protocol_factory, sock, ssl)
 
-    def _accept_connection(self, protocol_factory, sock, ssl=False):
+    def _accept_connection(self, protocol_factory, sock, ssl=None):
         try:
             conn, addr = sock.accept()
             conn.setblocking(False)
         except (BlockingIOError, InterruptedError):
             pass  # False alarm.
-        except:
+        except Exception:
             # Bad error. Stop serving.
             self.remove_reader(sock.fileno())
             sock.close()
@@ -118,9 +117,8 @@ class BaseSelectorEventLoop(base_events.BaseEventLoop):
             tulip_log.exception('Accept failed')
         else:
             if ssl:
-                sslcontext = None if isinstance(ssl, bool) else ssl
                 self._make_ssl_transport(
-                    conn, protocol_factory(), sslcontext, None,
+                    conn, protocol_factory(), ssl, None,
                     server_side=True, extra={'addr': addr})
             else:
                 self._make_socket_transport(
@@ -128,7 +126,7 @@ class BaseSelectorEventLoop(base_events.BaseEventLoop):
         # It's now up to the protocol to handle the connection.
 
     def add_reader(self, fd, callback, *args):
-        """Add a reader callback.  Return a Handle instance."""
+        """Add a reader callback."""
         handle = events.make_handle(callback, args)
         try:
             mask, (reader, writer) = self._selector.get_info(fd)
@@ -140,8 +138,6 @@ class BaseSelectorEventLoop(base_events.BaseEventLoop):
                                   (handle, writer))
             if reader is not None:
                 reader.cancel()
-
-        return handle
 
     def remove_reader(self, fd):
         """Remove a reader callback."""
@@ -163,7 +159,7 @@ class BaseSelectorEventLoop(base_events.BaseEventLoop):
                 return False
 
     def add_writer(self, fd, callback, *args):
-        """Add a writer callback.  Return a Handle instance."""
+        """Add a writer callback.."""
         handle = events.make_handle(callback, args)
         try:
             mask, (reader, writer) = self._selector.get_info(fd)
@@ -175,8 +171,6 @@ class BaseSelectorEventLoop(base_events.BaseEventLoop):
                                   (reader, handle))
             if writer is not None:
                 writer.cancel()
-
-        return handle
 
     def remove_writer(self, fd):
         """Remove a writer callback."""
@@ -265,6 +259,13 @@ class BaseSelectorEventLoop(base_events.BaseEventLoop):
         return fut
 
     def _sock_connect(self, fut, registered, sock, address):
+        # TODO: Use getaddrinfo() to look up the address, to avoid the
+        # trap of hanging the entire event loop when the address
+        # requires doing a DNS lookup.  (OTOH, the caller should
+        # already have done this, so it would be nice if we could
+        # easily tell whether the address needs looking up or not.  I
+        # know how to do this for IPv4, but IPv6 addresses have many
+        # syntaxes.)
         fd = sock.fileno()
         if registered:
             self.remove_writer(fd)
@@ -309,12 +310,12 @@ class BaseSelectorEventLoop(base_events.BaseEventLoop):
     def _process_events(self, event_list):
         for fileobj, mask, (reader, writer) in event_list:
             if mask & selectors.EVENT_READ and reader is not None:
-                if reader.cancelled:
+                if reader._cancelled:
                     self.remove_reader(fileobj)
                 else:
                     self._add_callback(reader)
             if mask & selectors.EVENT_WRITE and writer is not None:
-                if writer.cancelled:
+                if writer._cancelled:
                     self.remove_writer(fileobj)
                 else:
                     self._add_callback(writer)
@@ -324,21 +325,64 @@ class BaseSelectorEventLoop(base_events.BaseEventLoop):
         sock.close()
 
 
-class _SelectorSocketTransport(transports.Transport):
+class _SelectorTransport(transports.Transport):
 
-    def __init__(self, event_loop, sock, protocol, waiter=None, extra=None):
+    def __init__(self, loop, sock, protocol, extra):
         super().__init__(extra)
         self._extra['socket'] = sock
-        self._event_loop = event_loop
+        self._loop = loop
         self._sock = sock
+        self._sock_fd = sock.fileno()
         self._protocol = protocol
         self._buffer = []
         self._conn_lost = 0
+        self._xmit = True
         self._closing = False  # Set when close() called.
-        self._event_loop.add_reader(self._sock.fileno(), self._read_ready)
-        self._event_loop.call_soon(self._protocol.connection_made, self)
+
+    def abort(self):
+        self._force_close(None)
+
+    def close(self):
+        if self._closing:
+            return
+        self._closing = True
+        self._conn_lost += 1
+        self._loop.remove_reader(self._sock_fd)
+        if not self._buffer:
+            self._loop.call_soon(self._call_connection_lost, None)
+
+    def _fatal_error(self, exc):
+        # should be called from exception handler only
+        tulip_log.exception('Fatal error for %s', self)
+        self._force_close(exc)
+
+    def _force_close(self, exc):
+        if self._closing:
+            return
+        self._closing = True
+        self._conn_lost += 1
+        self._loop.remove_writer(self._sock_fd)
+        self._loop.remove_reader(self._sock_fd)
+        self._buffer.clear()
+        self._loop.call_soon(self._call_connection_lost, exc)
+
+    def _call_connection_lost(self, exc):
+        try:
+            self._protocol.connection_lost(exc)
+        finally:
+            self._sock.close()
+            self._sock = None
+
+
+class _SelectorSocketTransport(_SelectorTransport):
+
+    def __init__(self, loop, sock, protocol, waiter=None, extra=None):
+        super().__init__(loop, sock, protocol, extra)
+
+        self._loop.add_reader(self._sock_fd, self._read_ready)
+        self._loop.call_soon(self._protocol.connection_made, self)
         if waiter is not None:
-            self._event_loop.call_soon(waiter.set_result, None)
+            self._loop.call_soon(waiter.set_result, None)
 
     def _read_ready(self):
         try:
@@ -351,12 +395,13 @@ class _SelectorSocketTransport(transports.Transport):
             if data:
                 self._protocol.data_received(data)
             else:
-                self._event_loop.remove_reader(self._sock.fileno())
-                self._protocol.eof_received()
+                try:
+                    self._protocol.eof_received()
+                finally:
+                    self.close()
 
     def write(self, data):
-        assert isinstance(data, (bytes, bytearray)), repr(data)
-        assert not self._closing
+        assert isinstance(data, bytes), repr(data)
         if not data:
             return
 
@@ -366,14 +411,13 @@ class _SelectorSocketTransport(transports.Transport):
             self._conn_lost += 1
             return
 
-        if not self._buffer:
+        if not self._buffer and self._xmit:
             # Attempt to send it right away first.
             try:
                 n = self._sock.send(data)
             except (BlockingIOError, InterruptedError):
                 n = 0
             except socket.error as exc:
-                self._conn_lost += 1
                 self._fatal_error(exc)
                 return
 
@@ -381,13 +425,16 @@ class _SelectorSocketTransport(transports.Transport):
                 return
             elif n:
                 data = data[n:]
-            self._event_loop.add_writer(self._sock.fileno(), self._write_ready)
+            self._loop.add_writer(self._sock_fd, self._write_ready)
 
         self._buffer.append(data)
 
     def _write_ready(self):
         data = b''.join(self._buffer)
-        assert data, "Data should not be empty"
+        assert data, 'Data should not be empty'
+
+        if not self._xmit:
+            return  # transmission off
 
         self._buffer.clear()
         try:
@@ -395,11 +442,10 @@ class _SelectorSocketTransport(transports.Transport):
         except (BlockingIOError, InterruptedError):
             self._buffer.append(data)
         except Exception as exc:
-            self._conn_lost += 1
             self._fatal_error(exc)
         else:
             if n == len(data):
-                self._event_loop.remove_writer(self._sock.fileno())
+                self._loop.remove_writer(self._sock.fileno())
                 if self._closing:
                     self._call_connection_lost(None)
                 return
@@ -408,84 +454,68 @@ class _SelectorSocketTransport(transports.Transport):
 
             self._buffer.append(data)  # Try again later.
 
-    # TODO: write_eof(), can_write_eof().
+    def pause_writing(self):
+        self._loop.remove_writer(self._sock.fileno())
+        self._xmit = False
+
+    def resume_writing(self):
+        self._loop.add_writer(self._sock.fileno(), self._write_ready)
+        self._xmit = True
+
+    def discard_output(self):
+        self._buffer.clear()
 
     def abort(self):
         self._close(None)
 
-    def close(self):
-        self._closing = True
-        self._event_loop.remove_reader(self._sock.fileno())
-        if not self._buffer:
-            self._event_loop.call_soon(self._call_connection_lost, None)
 
-    def _fatal_error(self, exc):
-        # should be called from exception handler only
-        tulip_log.exception('Fatal error for %s', self)
-        self._close(exc)
+class _SelectorSslTransport(_SelectorTransport):
 
-    def _close(self, exc):
-        self._event_loop.remove_writer(self._sock.fileno())
-        self._event_loop.remove_reader(self._sock.fileno())
-        self._buffer.clear()
-        self._event_loop.call_soon(self._call_connection_lost, exc)
-
-    def _call_connection_lost(self, exc):
-        try:
-            self._protocol.connection_lost(exc)
-        finally:
-            self._sock.close()
-
-
-class _SelectorSslTransport(transports.Transport):
-
-    def __init__(self, event_loop, rawsock, protocol, sslcontext, waiter=None,
+    def __init__(self, loop, rawsock, protocol, sslcontext, waiter=None,
                  server_side=False, extra=None):
-        super().__init__(extra)
-
-        self._event_loop = event_loop
-        self._rawsock = rawsock
-        self._protocol = protocol
-        sslcontext = sslcontext or ssl.SSLContext(ssl.PROTOCOL_SSLv23)
-        self._sslcontext = sslcontext
-        self._waiter = waiter
+        if server_side:
+            assert isinstance(
+                sslcontext, ssl.SSLContext), 'Must pass an SSLContext'
+        else:
+            # Client-side may pass ssl=True to use a default context.
+            sslcontext = sslcontext or ssl.SSLContext(ssl.PROTOCOL_SSLv23)
         sslsock = sslcontext.wrap_socket(rawsock, server_side=server_side,
                                          do_handshake_on_connect=False)
-        self._sslsock = sslsock
-        self._buffer = []
-        self._conn_lost = 0
-        self._closing = False  # Set when close() called.
-        self._extra['socket'] = sslsock
+
+        super().__init__(loop, sslsock, protocol, extra)
+
+        self._waiter = waiter
+        self._rawsock = rawsock
+        self._sslcontext = sslcontext
 
         self._on_handshake()
 
     def _on_handshake(self):
-        fd = self._sslsock.fileno()
         try:
-            self._sslsock.do_handshake()
+            self._sock.do_handshake()
         except ssl.SSLWantReadError:
-            self._event_loop.add_reader(fd, self._on_handshake)
+            self._loop.add_reader(self._sock_fd, self._on_handshake)
             return
         except ssl.SSLWantWriteError:
-            self._event_loop.add_writer(fd, self._on_handshake)
+            self._loop.add_writer(self._sock_fd, self._on_handshake)
             return
         except Exception as exc:
-            self._sslsock.close()
+            self._sock.close()
             if self._waiter is not None:
                 self._waiter.set_exception(exc)
             return
         except BaseException as exc:
-            self._sslsock.close()
+            self._sock.close()
             if self._waiter is not None:
                 self._waiter.set_exception(exc)
             raise
-        self._event_loop.remove_reader(fd)
-        self._event_loop.remove_writer(fd)
-        self._event_loop.add_reader(fd, self._on_ready)
-        self._event_loop.add_writer(fd, self._on_ready)
-        self._event_loop.call_soon(self._protocol.connection_made, self)
+        self._loop.remove_reader(self._sock_fd)
+        self._loop.remove_writer(self._sock_fd)
+        self._loop.add_reader(self._sock_fd, self._on_ready)
+        self._loop.add_writer(self._sock_fd, self._on_ready)
+        self._loop.call_soon(self._protocol.connection_made, self)
         if self._waiter is not None:
-            self._event_loop.call_soon(self._waiter.set_result, None)
+            self._loop.call_soon(self._waiter.set_result, None)
 
     def _on_ready(self):
         # Because of renegotiations (?), there's no difference between
@@ -493,63 +523,46 @@ class _SelectorSslTransport(transports.Transport):
         # incorrect; we probably need to keep state about what we
         # should do next.
 
-        # Maybe we're already closed...
-        fd = self._sslsock.fileno()
-        if fd < 0:
-            return
-
         # First try reading.
-        try:
-            data = self._sslsock.recv(8192)
-        except ssl.SSLWantReadError:
-            pass
-        except ssl.SSLWantWriteError:
-            pass
-        except (BlockingIOError, InterruptedError):
-            pass
-        except Exception as exc:
-            self._fatal_error(exc)
-        else:
-            if data:
-                self._protocol.data_received(data)
+        if not self._closing:
+            try:
+                data = self._sock.recv(8192)
+            except (BlockingIOError, InterruptedError,
+                    ssl.SSLWantReadError, ssl.SSLWantWriteError):
+                pass
+            except Exception as exc:
+                self._fatal_error(exc)
             else:
-                # TODO: Don't close when self._buffer is non-empty.
-                assert not self._buffer
-                self._event_loop.remove_reader(fd)
-                self._event_loop.remove_writer(fd)
-                self._sslsock.close()
-                self._protocol.connection_lost(None)
-                return
+                if data:
+                    self._protocol.data_received(data)
+                else:
+                    try:
+                        self._protocol.eof_received()
+                    finally:
+                        self.close()
 
         # Now try writing, if there's anything to write.
-        if not self._buffer:
-            return
+        if self._buffer:
+            data = b''.join(self._buffer)
+            self._buffer = []
+            try:
+                n = self._sock.send(data)
+            except (BlockingIOError, InterruptedError,
+                    ssl.SSLWantReadError, ssl.SSLWantWriteError):
+                n = 0
+            except Exception as exc:
+                self._fatal_error(exc)
+                return
 
-        data = b''.join(self._buffer)
-        self._buffer = []
-        try:
-            n = self._sslsock.send(data)
-        except ssl.SSLWantReadError:
-            n = 0
-        except ssl.SSLWantWriteError:
-            n = 0
-        except (BlockingIOError, InterruptedError):
-            n = 0
-        except Exception as exc:
-            self._conn_lost += 1
-            self._fatal_error(exc)
-            return
+            if n < len(data):
+                self._buffer.append(data[n:])
 
-        if n < len(data):
-            self._buffer.append(data[n:])
-        elif self._closing:
-            self._event_loop.remove_writer(self._sslsock.fileno())
-            self._sslsock.close()
-            self._protocol.connection_lost(None)
+        if self._closing and not self._buffer:
+            self._loop.remove_writer(self._sock_fd)
+            self._call_connection_lost(None)
 
     def write(self, data):
         assert isinstance(data, bytes), repr(data)
-        assert not self._closing
         if not data:
             return
 
@@ -562,45 +575,27 @@ class _SelectorSslTransport(transports.Transport):
         self._buffer.append(data)
         # We could optimize, but the callback can do this for now.
 
+    def close(self):
+        if self._closing:
+            return
+        self._closing = True
+        self._conn_lost += 1
+        self._loop.remove_reader(self._sock_fd)
+
     # TODO: write_eof(), can_write_eof().
 
-    def abort(self):
-        self._close(None)
 
-    def close(self):
-        self._closing = True
-        self._event_loop.remove_reader(self._sslsock.fileno())
-        if not self._buffer:
-            self._event_loop.call_soon(self._protocol.connection_lost, None)
-
-    def _fatal_error(self, exc):
-        tulip_log.exception('Fatal error for %s', self)
-        self._close(exc)
-
-    def _close(self, exc):
-        self._event_loop.remove_writer(self._sslsock.fileno())
-        self._event_loop.remove_reader(self._sslsock.fileno())
-        self._buffer = []
-        self._event_loop.call_soon(self._protocol.connection_lost, exc)
-
-
-class _SelectorDatagramTransport(transports.DatagramTransport):
+class _SelectorDatagramTransport(_SelectorTransport):
 
     max_size = 256 * 1024  # max bytes we read in one eventloop iteration
 
-    def __init__(self, event_loop, sock, protocol, address=None, extra=None):
-        super().__init__(extra)
-        self._extra['socket'] = sock
-        self._event_loop = event_loop
-        self._sock = sock
-        self._fileno = sock.fileno()
-        self._protocol = protocol
+    def __init__(self, loop, sock, protocol, address=None, extra=None):
+        super().__init__(loop, sock, protocol, extra)
+
         self._address = address
         self._buffer = collections.deque()
-        self._conn_lost = 0
-        self._closing = False  # Set when close() called.
-        self._event_loop.add_reader(self._fileno, self._read_ready)
-        self._event_loop.call_soon(self._protocol.connection_made, self)
+        self._loop.add_reader(self._sock_fd, self._read_ready)
+        self._loop.call_soon(self._protocol.connection_made, self)
 
     def _read_ready(self):
         try:
@@ -613,8 +608,7 @@ class _SelectorDatagramTransport(transports.DatagramTransport):
             self._protocol.datagram_received(data, addr)
 
     def sendto(self, data, addr=None):
-        assert isinstance(data, bytes)
-        assert not self._closing
+        assert isinstance(data, bytes), repr(data)
         if not data:
             return
 
@@ -637,13 +631,11 @@ class _SelectorDatagramTransport(transports.DatagramTransport):
                 return
             except ConnectionRefusedError as exc:
                 if self._address:
-                    self._conn_lost += 1
                     self._fatal_error(exc)
                 return
             except (BlockingIOError, InterruptedError):
-                self._event_loop.add_writer(self._fileno, self._sendto_ready)
+                self._loop.add_writer(self._sock_fd, self._sendto_ready)
             except Exception as exc:
-                self._conn_lost += 1
                 self._fatal_error(exc)
                 return
 
@@ -659,45 +651,22 @@ class _SelectorDatagramTransport(transports.DatagramTransport):
                     self._sock.sendto(data, addr)
             except ConnectionRefusedError as exc:
                 if self._address:
-                    self._conn_lost += 1
                     self._fatal_error(exc)
                 return
             except (BlockingIOError, InterruptedError):
                 self._buffer.appendleft((data, addr))  # Try again later.
                 break
             except Exception as exc:
-                self._conn_lost += 1
                 self._fatal_error(exc)
                 return
 
         if not self._buffer:
-            self._event_loop.remove_writer(self._fileno)
+            self._loop.remove_writer(self._sock_fd)
             if self._closing:
                 self._call_connection_lost(None)
 
-    def abort(self):
-        self._close(None)
-
-    def close(self):
-        self._closing = True
-        self._event_loop.remove_reader(self._fileno)
-        if not self._buffer:
-            self._event_loop.call_soon(self._call_connection_lost, None)
-
-    def _fatal_error(self, exc):
-        tulip_log.exception('Fatal error for %s', self)
-        self._close(exc)
-
-    def _close(self, exc):
-        self._buffer.clear()
-        self._event_loop.remove_writer(self._fileno)
-        self._event_loop.remove_reader(self._fileno)
+    def _force_close(self, exc):
         if self._address and isinstance(exc, ConnectionRefusedError):
             self._protocol.connection_refused(exc)
-        self._event_loop.call_soon(self._call_connection_lost, exc)
 
-    def _call_connection_lost(self, exc):
-        try:
-            self._protocol.connection_lost(exc)
-        finally:
-            self._sock.close()
+        super()._force_close(exc)

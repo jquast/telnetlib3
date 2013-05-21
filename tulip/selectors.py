@@ -125,6 +125,8 @@ class _BaseSelector:
         except KeyError:
             raise ValueError("{!r} is not registered".format(fileobj))
         if events != key.events or data != key.data:
+            # TODO: If only the data changed, use a shortcut that only
+            # updates the data.
             self.unregister(fileobj)
             return self.register(fileobj, events, data)
         else:
@@ -309,6 +311,9 @@ if 'epoll' in globals():
             super().__init__()
             self._epoll = epoll()
 
+        def fileno(self):
+            return self._epoll.fileno()
+
         def register(self, fileobj, events, data=None):
             key = super().register(fileobj, events, data)
             epoll_events = 0
@@ -358,6 +363,9 @@ if 'kqueue' in globals():
         def __init__(self):
             super().__init__()
             self._kqueue = kqueue()
+
+        def fileno(self):
+            return self._kqueue.fileno()
 
         def unregister(self, fileobj):
             key = super().unregister(fileobj)
@@ -409,10 +417,10 @@ if 'kqueue' in globals():
 # Choose the best implementation: roughly, epoll|kqueue > poll > select.
 # select() also can't accept a FD > FD_SETSIZE (usually around 1024)
 if 'KqueueSelector' in globals():
-    Selector = KqueueSelector
+    DefaultSelector = KqueueSelector
 elif 'EpollSelector' in globals():
-    Selector = EpollSelector
+    DefaultSelector = EpollSelector
 elif 'PollSelector' in globals():
-    Selector = PollSelector
+    DefaultSelector = PollSelector
 else:
-    Selector = SelectSelector
+    DefaultSelector = SelectSelector

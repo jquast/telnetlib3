@@ -1,5 +1,6 @@
 """Selector and proactor eventloops for Windows."""
 
+import errno
 import socket
 import weakref
 import struct
@@ -13,7 +14,7 @@ from . import _overlapped
 from .log import tulip_log
 
 
-__all__ = ['SelectorEventLoop', 'ProactorEventLoop']
+__all__ = ['SelectorEventLoop', 'ProactorEventLoop', 'IocpProactor']
 
 
 NULL = 0
@@ -75,7 +76,7 @@ class IocpProactor:
         ov.AcceptEx(listener.fileno(), conn.fileno())
 
         def finish_accept():
-            addr = ov.getresult()
+            ov.getresult()
             buf = struct.pack('@P', listener.fileno())
             conn.setsockopt(socket.SOL_SOCKET,
                             _overlapped.SO_UPDATE_ACCEPT_CONTEXT,
@@ -87,7 +88,15 @@ class IocpProactor:
 
     def connect(self, conn, address):
         self._register_with_iocp(conn)
-        _overlapped.BindLocal(conn.fileno(), len(address))
+        # the socket needs to be locally bound before we call ConnectEx()
+        try:
+            _overlapped.BindLocal(conn.fileno(), len(address))
+        except OSError as e:
+            if e.winerror != errno.WSAEINVAL:
+                raise
+            # probably already locally bound; check using getsockname()
+            if conn.getsockname()[1] == 0:
+                raise
         ov = _overlapped.Overlapped(NULL)
         ov.ConnectEx(conn.fileno(), address)
 
