@@ -18,7 +18,7 @@ from telnetlib import LINEMODE, NAWS, NEW_ENVIRON, BINARY, SGA, ECHO, STATUS
 from telnetlib import TTYPE, TSPEED, LFLOW, XDISPLOC, IAC, DONT, DO, WONT
 from telnetlib import WILL, SE, NOP, TM, DM, BRK, IP, AO, AYT, EC, EL, EOR
 from telnetlib import GA, SB, LOGOUT, EXOPL, CHARSET
-(EOF, SUSP, ABORT) = bytes([236]), bytes([237]), bytes([238])
+(EOF, SUSP, ABORT) = bytes([236]), bytes([237]), bytes([238])  # rfc1184
 (IS, SEND, INFO) = (bytes([const]) for const in range(3))
 (LFLOW_OFF, LFLOW_ON, LFLOW_RESTART_ANY, LFLOW_RESTART_XON) = (
         bytes([const]) for const in range(4))
@@ -1567,54 +1567,69 @@ class TelnetStreamReader():
 # `````````````````````````````````````````````````````````````````````````````
 
     def handle_xdisploc(self, xdisploc):
-        """ Receive XDISPLAY using XDISPLOC protocol as string format
-            '<host>:<dispnum>[.<screennum>]'.
+        """ XXX Receive XDISPLAY value ``xdisploc``, rfc1096.
+
+            xdisploc string format is '<host>:<dispnum>[.<screennum>]'.
         """
         self.log.debug('X Display is %r', xdisploc)
 
     def handle_ttype(self, ttype):
-        """ Receive terminal type (TERM on unix systems) as string.
+        """ XXX Receive TTYPE value ``ttype, rfc1091.
+
+            Often value of TERM, or analogous to client's emulation capability,
+            common values for non-posix client replies are 'VT100', 'VT102',
+            'ANSI', 'ANSI-BBS', or even a mud client identifier. RFC allows
+            subsequent requests, the client may solicit multiple times, and
+            the client indicates 'end of list' by cycling the return value.
         """
         self.log.debug('Terminal type is %r', ttype)
 
     def handle_naws(self, width, height):
-        """ Receive window size from NAWS protocol as integers.
+        """ XXX Receive window size from NAWS protocol as integers.
         """
         self.log.debug('Terminal cols=%d, rows=%d', width, height)
 
     def handle_env(self, env):
-        """ Receive environment variables from OLD andNEW_ENVIRON protocol
+        """ XXX Receive environment variables from OLD andNEW_ENVIRON protocol
             negotiation, as dictionary.
         """
         self.log.debug('env=%r', env)
 
     def handle_tspeed(self, rx, tx):
-        """ Receive terminal speed from TSPEED protocol as integers.
+        """ XXX Receive terminal speed from TSPEED protocol as integers.
         """
         self.log.debug('Terminal Speed rx:%d, tx:%d', rx, tx)
 
     def handle_ip(self):
-        """ Handle Interrupt Process (IAC, IP) or SLC_IP.
+        """ XXX Handle Interrupt Process (IAC, IP) or SLC_IP.
         """
         self.log.debug('IAC IP: Interrupt Process')
 
     def handle_abort(self):
-        """ Handle Abort (IAC, ABORT). Similar to Interrupt Process (IP),
-            but means only to abort or terminate the process to which the
-            NVT is connected.
+        """ XXX Handle Abort (IAC, ABORT).
+
+            Similar to Interrupt Process (IP), but means only to abort or
+            terminate the process to which the NVT is connected.
         """
         self.log.debug('IAC ABORT: Abort')
 
     def handle_susp(self):
-        """ Handle Suspend Process (IAC, SUSP). Suspend the execution of the
-            current process attached to the NVT in such a way that another
-            process will take over control of the NVT, and the suspended
-            process can be resumed at a later time.
+        """ XXX Handle Suspend Process (IAC, SUSP), rfc1184.
+
+            Suspends the execution of the current process attached to the NVT
+            in such a way that another process will take over control of the
+            NVT, and the suspended process can be resumed at a later time.
 
             If the receiving system does not support this functionality, it
             should be ignored.
         """
         self.log.debug('IAC SUSP: Suspend')
+
+    def handle_eof(self):
+        """ Handle End of Record (IAC, EOF), rfc1184.
+        """
+        self.log.debug('IAC EOF: End of File')
+
 
     def handle_ao(self):
         """ Handle Abort Output (IAC, AO). Discard any remaining output.
@@ -1678,11 +1693,6 @@ class TelnetStreamReader():
         """ Handle End of Record (IAC, EOR). rfc885
         """
         self.log.debug('IAC EOR: End of Record')
-
-    def handle_eof(self):
-        """ Handle End of Record (IAC, EOF). rfc885
-        """
-        self.log.debug('IAC EOF: End of File')
 
     def handle_nop(self):
         """ Callback does nothing when IAC + NOP is received.
@@ -1750,6 +1760,8 @@ class TelnetServer(tulip.protocols.Protocol):
         self.stream.set_slc_callback(SLC_AYT, self.display_status)
         # wire IAC + cmd + LOGOUT to callback ``logout(cmd)``
         self.stream.set_ext_callback(LOGOUT, self.logout)
+        # wire IAC EOR (end of record) to ``handle_line``
+        self.stream.set_iac_callback(EOR, self.handle_line)
         # wire various 'interrupts', such as AO, IP to ``abort_output``
         self.stream.set_iac_callback(AO, self.abort_output)
         self.stream.set_iac_callback(IP, self.abort_output)
@@ -1825,23 +1837,7 @@ class TelnetServer(tulip.protocols.Protocol):
         self.stream.iac(DO, XDISPLOC)
         self.stream.iac(DO, NAWS)
         self.stream.iac(DO, CHARSET)
-
-    def env_update(self, env):
-        self.client_env.update(env)
-        self.log.debug('env_update: %r', env)
-
-    def charset_received(self, charset):
-        self.client_env.update({'CHARSET': charset.lower()})
-
-    def naws_update(self, width, height):
-        self.client_env.update({'COLUMNS': str(width), 'LINES': str(height)})
-
-    def xdisploc_received(self, xdisploc):
-        if self.client_env.get('DISPLAY', None) != xdisploc:
-            self.env_update({'DISPLAY': xdisploc})
-
-    def tspeed_received(self, rx, tx):
-        self.env_update({'TSPEED': '%s,%s' % (rx, tx)})
+        self.stream.iac(DO, EOR)
 
     _advanced = False
     def ttype_received(self, ttype):
@@ -2013,11 +2009,9 @@ class TelnetServer(tulip.protocols.Protocol):
         The default implementation provides commands: 'help', 'quit',
         'echo', 'set', and 'status'.
         """
-        cmd = cmd.rstrip()
-        try:
+        cmd, args = cmd.rstrip(), []
+        if ' ' in cmd:
             cmd, *args = shlex.split(cmd)
-        except ValueError as err:
-            raise err
         if cmd == 'help':
             self.display_help(*args)
         elif cmd == 'set':
@@ -2142,9 +2136,11 @@ class TelnetServer(tulip.protocols.Protocol):
             self.echo('\r\n\t'.join(slc_table))
 
     def handle_line(self, slc=False):
-        """ Callback when carriage return is received on input, or, when
-        LINEMODE SLC is negotiated, the special linemode character byte
-        function as ``slc``, such as SLC_EC (erase character) for backspace.
+        """ Callback received when:
+            carriage return is received on input,
+            WILL EOR has been negotiated and IAC EOR is received,
+            LINEMODE SLC is negotiated and any SLC function character is
+                received, indicated by value argument ``slc``.
 
         input buffered up to this point is queued as ``self.inp_command``,
         and either processed as a bytestring to ``process_command`` and
@@ -2208,6 +2204,27 @@ class TelnetServer(tulip.protocols.Protocol):
             self._decoder = codecs.getincrementaldecoder(self.encoding)()
             self._decoder._encoding = self.encoding
         return self._decoder
+
+    def env_update(self, env):
+        " Callback receives no environment variables "
+        self.client_env.update(env)
+        self.log.debug('env_update: %r', env)
+
+    def charset_received(self, charset):
+        " Callback receives CHARSET value, rfc2066 "
+        self.env_update({'CHARSET': charset.lower()})
+
+    def naws_update(self, width, height):
+        " Callback receives NAWS values, rfc1073 "
+        self.env_update({'COLUMNS': str(width), 'LINES': str(height)})
+
+    def xdisploc_received(self, xdisploc):
+        " Callback receives XDISPLOC value, rfc1096 "
+        self.env_update({'DISPLAY': xdisploc})
+
+    def tspeed_received(self, rx, tx):
+        " Callback receives TSPEED values, rfc1079 "
+        self.env_update({'TSPEED': '%s,%s' % (rx, tx)})
 
 
 
