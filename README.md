@@ -1,25 +1,69 @@
-telnetlib3
-==========
+About
+=====
 
-telnetlib3.py is a telnet protocol implementation using the "tulip" module of PEP 3156, and is ISC licensed.
+telnetlib3.py is an ISC-licensed Telnet Server library.
 
-This project currently implements an advanced Telnet server protocol.
+Implemented using the "tulip" module of PEP 3156, the proposed Asynchronous I/O framework for Python 3.4.
 
-This implementation uses the 'tulip' project, the asynchronous networking model to become standard with python 3.4, and requires Python 3.3.
+Development is currently in progress, telnet server is near completion.
 
-Goals
+Status
+------
+
+TODO: Server 100% RFC-compliant
+TODO: TelnetClient
+TODO: nosetests
+TODO: example MUD server
+TODO: example wunderground.com client
+
+Synch
 -----
 
-  * Create telnet client and server fingerprinting services, for use
-    in honeypots or network scanning.
-  * Allow MUD client extensions to integrate cleanly into the API
-  * Provide character-at-a-time telnet service such as used in X/84
+RFC 1123 Requirements for Internet Hosts, states::
 
-Todo
-----
+      3.2.4  Telnet "Synch" Signal: RFC-854, pp. 8-10
 
-assert about carriage returns
-DM, or, some suitable non-OOB implementation
+         When it receives "urgent" TCP data, a User or Server Telnet
+         MUST discard all data except Telnet commands until the DM (and
+         end of urgent) is reached.
+
+     With protocols that support out-of-band data, the SO_OOBINLINE option
+     requests that out-of-band data be placed in the normal data input queue
+     as received; it will then be accessible with recv or read calls without
+     the MSG_OOB flag.  Some protocols always behave as if this option is set.
+
+
+This is refering to the TCP Urgent flag, which is received using socket
+option SO_OOBINLINE_
+
+
+The Telnet Synch mechanism, much must sent with the TCP Urgent flag, is not
+supported. This capability appears to be legacy and is not found in "the wild",
+it can be sent with the bsd telnet client command, "send synch".
+
+UTF-8
+-----
+
+CHARSET (rfc 2066) specifies a codepage, not an encoding. It is unimplemented
+in bsd client, and generally found implemented only in recent MUD client and
+servers, and possibly some vendor implementations. Where implemented, the
+a client replying "UTF-8" is presumed utf-8 encoded.
+
+The default preferred encoding for clients that negotiate BINARY but not
+CHARSET, such as the bsd client, is defined by the TelnetServer keyword
+argument *default_encoding*, which is 'utf-8' by default.
+
+Carriage Return
+---------------
+
+There are five signaling mechanisms for "end of line" supported.
+
+_CR LF_  The Telnet protocol defines the sequence CR LF to mean "end-of-line".
+the input argument to callback `line_received()` will contain the line input buffered up to, but not including, CR LF. the bsd telnet client sends CR LF by default.
+_CR NUL_ An interpretation of rfc854 may be that CR NUL should be sent when only a single CR is intended on a client and server host capable of distinguishing between CR and CR LF ('return' vs 'enter' key). The input argument to callback ``line_received()`` makes no distinction, which contains neither. The bsd telnet client may send CR NUL by toggling the ``crlf`` option.
+_CR_ If CR is not followed by LF or NUL, this byte is received as part of the next line. A client sending a bare CR is not RFC compliant.
+_LF_ If LF is not prefixes by CR, it is treated as though CR LF was received.
+_IAC EOR_ In addition to line-oriented or character-oriented terminals, IAC EOR is used to delimit logical recrds (e.g., "screens") on Data Entry Terminals (DETs).
 
 Notes
 -----
@@ -216,4 +260,42 @@ Option negotiation rule compliance:
     "DO LINEMODE" has been previously negotiated.  At no time should "SB
     LINEMODE WILL/WONT FORWARDMASK", be sent unless "WILL LINEMODE" has
     been previously negotiated.
+
+License
+-------
+telnetlib3 is (c) 2013 Jeffrey Quast <contact@jeffquast.com>.
+
+Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+SLC functions were transcribed from NetBSD.
+
+ Copyright (c) 1989, 1993
+      The Regents of the University of California.  All rights reserved.
+
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the following conditions
+ are met:
+ 1. Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+ 2. Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+ 3. Neither the name of the University nor the names of its contributors
+    may be used to endorse or promote products derived from this software
+    without specific prior written permission.
+
+ THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ SUCH DAMAGE.
+
 

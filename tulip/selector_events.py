@@ -336,7 +336,7 @@ class _SelectorTransport(transports.Transport):
         self._protocol = protocol
         self._buffer = []
         self._conn_lost = 0
-        self._xmit = True
+        self._writing = True
         self._closing = False  # Set when close() called.
 
     def abort(self):
@@ -411,7 +411,7 @@ class _SelectorSocketTransport(_SelectorTransport):
             self._conn_lost += 1
             return
 
-        if not self._buffer and self._xmit:
+        if not self._buffer and self._writing:
             # Attempt to send it right away first.
             try:
                 n = self._sock.send(data)
@@ -433,7 +433,7 @@ class _SelectorSocketTransport(_SelectorTransport):
         data = b''.join(self._buffer)
         assert data, 'Data should not be empty'
 
-        if not self._xmit:
+        if not self._writing:
             return  # transmission off
 
         self._buffer.clear()
@@ -455,12 +455,14 @@ class _SelectorSocketTransport(_SelectorTransport):
             self._buffer.append(data)  # Try again later.
 
     def pause_writing(self):
-        self._loop.remove_writer(self._sock.fileno())
-        self._xmit = False
+        if self._writing:
+            self._loop.remove_writer(self._sock.fileno())
+            self._writing = False
 
     def resume_writing(self):
-        self._loop.add_writer(self._sock.fileno(), self._write_ready)
-        self._xmit = True
+        if not self._writing:
+            self._loop.add_writer(self._sock.fileno(), self._write_ready)
+            self._writing = True
 
     def discard_output(self):
         self._buffer.clear()
