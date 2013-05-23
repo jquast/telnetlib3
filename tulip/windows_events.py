@@ -60,13 +60,21 @@ class IocpProactor:
     def recv(self, conn, nbytes, flags=0):
         self._register_with_iocp(conn)
         ov = _overlapped.Overlapped(NULL)
-        ov.WSARecv(conn.fileno(), nbytes, flags)
+        handle = getattr(conn, 'handle', None)
+        if handle is None:
+            ov.WSARecv(conn.fileno(), nbytes, flags)
+        else:
+            ov.ReadFile(handle, nbytes)
         return self._register(ov, conn, ov.getresult)
 
     def send(self, conn, buf, flags=0):
         self._register_with_iocp(conn)
         ov = _overlapped.Overlapped(NULL)
-        ov.WSASend(conn.fileno(), buf, flags)
+        handle = getattr(conn, 'handle', None)
+        if handle is None:
+            ov.WSASend(conn.fileno(), buf, flags)
+        else:
+            ov.WriteFile(handle, buf)
         return self._register(ov, conn, ov.getresult)
 
     def accept(self, listener):
@@ -139,15 +147,25 @@ class IocpProactor:
                 return
             address = status[3]
             f, ov, obj, callback = self._cache.pop(address)
-            try:
-                value = callback()
-            except OSError as e:
-                f.set_exception(e)
-                self._results.append(f)
-            else:
-                f.set_result(value)
-                self._results.append(f)
+            if not f.cancelled():
+                try:
+                    value = callback()
+                except OSError as e:
+                    f.set_exception(e)
+                    self._results.append(f)
+                else:
+                    f.set_result(value)
+                    self._results.append(f)
             ms = 0
+
+    def stop_serving(self, obj):
+        for (f, ov, ob, callback) in self._cache.values():
+            if ob is obj:
+                f.cancel()
+                try:
+                    ov.cancel()
+                except OSError:
+                    pass
 
     def close(self):
         for (f, ov, obj, callback) in self._cache.values():

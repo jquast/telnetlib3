@@ -82,16 +82,17 @@ class WriteTransport(BaseTransport):
     def pause_writing(self):
         """Pause transmission on the transport.
 
-        Later calls to write are deferred until resume_writing() is called.
+        Subsequent writes are deferred until resume_writing() is called.
         """
         raise NotImplementedError
 
     def resume_writing(self):
         """Resume transmission on the transport. """
+        raise NotImplementedError
 
     def discard_output(self):
-        """Discard any buffered data awaiting transmission on the transport.
-        """
+        """Discard any buffered data awaiting transmission on the transport."""
+        raise NotImplementedError
 
     def abort(self):
         """Closes the transport immediately.

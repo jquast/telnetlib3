@@ -6,13 +6,15 @@ proactor is only implemented on Windows with IOCP.
 
 from . import base_events
 from . import constants
+from . import futures
 from . import transports
 from .log import tulip_log
 
 
 class _ProactorSocketTransport(transports.Transport):
 
-    def __init__(self, loop, sock, protocol, waiter=None, extra=None):
+    def __init__(self, loop, sock, protocol, waiter=None, extra=None,
+                 write_only=False):
         super().__init__(extra)
         self._extra['socket'] = sock
         self._loop = loop
@@ -24,7 +26,8 @@ class _ProactorSocketTransport(transports.Transport):
         self._conn_lost = 0
         self._closing = False  # Set when close() called.
         self._loop.call_soon(self._protocol.connection_made, self)
-        self._loop.call_soon(self._loop_reading)
+        if not write_only:
+            self._loop.call_soon(self._loop_reading)
         if waiter is not None:
             self._loop.call_soon(waiter.set_result, None)
 
@@ -39,6 +42,12 @@ class _ProactorSocketTransport(transports.Transport):
                 if not data:
                     self._read_fut = None
                     return
+
+            # iocp, it is possible to close transport and
+            # receive data from socket
+            if self._closing:
+                data = None
+                return
 
             self._read_fut = self._loop._proactor.recv(self._sock, 4096)
         except (ConnectionAbortedError, ConnectionResetError) as exc:
@@ -135,8 +144,10 @@ class BaseProactorEventLoop(base_events.BaseEventLoop):
         self._selector = proactor   # convenient alias
         self._make_self_pipe()
 
-    def _make_socket_transport(self, sock, protocol, waiter=None, extra=None):
-        return _ProactorSocketTransport(self, sock, protocol, waiter, extra)
+    def _make_socket_transport(self, sock, protocol, waiter=None, extra=None,
+                               write_only=False):
+        return _ProactorSocketTransport(self, sock, protocol, waiter, extra,
+                                        write_only)
 
     def close(self):
         if self._proactor is not None:
@@ -203,9 +214,15 @@ class BaseProactorEventLoop(base_events.BaseEventLoop):
             except OSError:
                 sock.close()
                 tulip_log.exception('Accept failed')
+            except futures.CancelledError:
+                sock.close()
             else:
                 f.add_done_callback(loop)
         self.call_soon(loop)
 
     def _process_events(self, event_list):
         pass    # XXX hard work currently done in poll
+
+    def stop_serving(self, sock):
+        self._proactor.stop_serving(sock)
+        sock.close()
