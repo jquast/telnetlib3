@@ -385,8 +385,6 @@ class TelnetStreamReader():
      * ``lflow_any`` is a boolean to indicate wether flow control should be
        disabled after it has been enbaled using XON (^s) when: any key is
        pressed (True), or only when XOFF (^q) is pressed (False, default).
-     * ``xon`` and ``xoff`` are booleans indicate wether transmission is
-         enabled on the write channel.
      * ``iac_received`` True if the last byte sent to ``feed_data()`` is the
        beginning of an IAC command (\xff).
      * ``cmd_received`` value of IAC command byte if the last byte sent to
@@ -2066,28 +2064,30 @@ class TelnetServer(tulip.protocols.Protocol):
             cmd, *args = shlex.split(cmd)
         self.log.debug('process_cmd {}{}'.format(cmd, args))
         if cmd == 'help':
-            return self.display_help(*args)
-        elif cmd == 'set':
-            return self.cmdset_set(*args)
+            self.echo('\r\nAvailable commands, command -h for help:\r\n')
+            self.echo('quit, echo, set, status')
+            return 0 if not args or args[0] in ('-h', '--help',) else 1
         elif cmd == 'quit':
             if len(args):
                 self.echo('\r\nquit: close session.')
                 return 0 if args[0] in ('-h', '--help',) else 1
             return self.logout()
-        elif cmd == 'echo':
-            return self.cmdset_echo(*args)
         elif cmd == 'status':
             if args:
                 self.echo('\r\nstatus: displays session parameters')
                 return 0 if args[0] in ('-h', '--help',) else 1
             self.display_status()
             return 0
+        elif cmd == 'set':
+            return self.cmdset_set(*args)
+        elif cmd == 'echo':
+            return self.cmdset_echo(*args)
         else:
             self.echo('\r\nCommand {!r} not understood.'.format(cmd))
             return 1
 
     def cmdset_echo(self, args):
-        """ remote command: echo [on|off]: enable remote echo
+        """ remote command: echo [on|off]: view or set remote echo
         """
         if not args:
             echo_on = (self.stream.local_option.get(ECHO, None) != False)
@@ -2131,13 +2131,6 @@ class TelnetServer(tulip.protocols.Protocol):
             else:
                 return -1
         return 0
-
-
-    def display_help(self, *args):
-        """ remote command: help
-        """
-        self.echo('\r\nAvailable commands, command -h for help:\r\n')
-        self.echo('quit, echo, set, status')
 
     def display_status_then_prompt(self):
         self.display_status()
