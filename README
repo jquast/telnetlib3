@@ -1,0 +1,390 @@
+About
+=====
+
+telnetlib3.py is an ISC-licensed Telnet Server library.
+
+Implemented using the "tulip" module of PEP 3156, the proposed Asynchronous I/O framework for Python 3.4.
+
+Development is currently in progress, telnet server is near completion.
+
+Telnet
+======
+
+The Telnet protocol is over 40 years old and still in use today. Nearly all human-interaction with networked computers was done with the Telnet protocol prior to 1990.
+
+Telnet predates TCP, and was used over a wide array of transports, such as ARPANET or IBM SNA. The changes of Telnet over time describe the evolution of networking Transports, host operating systems, Terminal drivers, "is a command" (IAC) interpreter software, and today's virtual emulating full-duplex termials such as xterm driving a full-duplex bsd telnet client.
+
+Half-Duplex
+===========
+
+With no MMU and crude process control (Unix hadn't yet been invented!), it was necessary to differentiate the "command channel" from "inband data" from the start. This is done by enforcing that, unless negotiated otherwise:
+    * Each end transmit only 7-bit ASCII, (except as used in the interpreter)
+    * A line prompting input be followed by the 'Go-Ahead' (GA) command
+    * Client signals end of input (send) by CR LF (Carriage Return + Linefeed)
+
+These basic restrictions are modeled after a Teletype 33 which runs in "half-duplex" mode. While data is being printed, any keypress is buffered internaly in the teletype input buffer. The teletypist may press 'BREAK' at any time to signal a control line, the telnet Synch mechanism forwards this to the remote host.
+
+Telnet Synch
+------------
+
+Consider the description of a PDP-10 session in rfc139 (May 1971), presented here as a faux naif unix session:
+
+    1. Teletype sends command input,
+          find /usr -name 'telop.c'<send>
+
+    2. Server begins output -- perhaps many rows of 'Permission Denied',
+       meanwhile, user has already filled the input buffer, then decided
+       to abort the previous program:
+          ed /usr/local/s^t/tel^t^c
+
+At this point, the only way to signal the attention of the IAC interpreter of the client host serving the teletype, which is currently blocking the half-duplex transmission with output and has not yet sent GA (Go-Ahead), is by a special line signal using the 'BREAK' or 'ATTN' key.
+
+This notifies the Terminal driver, signalling the 'supervisor' (rfc139), which then sends 'INS'. Remaining control codes from the teletype (^t^t^c) continues to the remote end, but is discarded until the Data-Mark (DM) is received. This ensures the ^t and ^c characters are not received by the remote program.
+
+TCP Implementation
+------------------
+
+In the TCP implementation of telnet, where presumably a half-duplex terminal may still interconnect, the 'INS' marker referenced in pre-TCP documents is marked by sending the rarely-used TCP Urgent data (the value of the byte does not seem to matter), such as:
+    socket.send(IAC, socket.MSG_OOB).
+
+The value of the byte does not seem to matter, though it is suggested to have some meaning, the bsd client sends IAC. This allows a "supervisor" to be enterred, if a telnet hosting server provides one; which was been used with great grief and argument as a vendor-implemented control channel up to DM (rfc 529):
+
+      The TELNET SYNCH mechanism is being misused by attempting to give
+      it meaning at two different levels of protocol.
+
+All input is discarded by the remote telnet host until DM is received. The BSD client may be instructed to send this legacy mechanism by escaping and using the command "send synch":
+    telnet> send synch
+
+This sends IAC marked MSG_OOB. The BSD server at this point would continue testing "SYNCHing = stilloob()" which continues to test errorfds (third argument to select.select). As only IAC is marked oob, it correctly ends SYNCHing at the data-mark, DM.
+
+Our implementation
+------------------
+
+This seems to infer that a server that cannot support OOB data, or by using OOB_INLINE, may simply catch (IAC, DM) as an indication that any characters received up to CR are to be discarded. An actual half-duplex Teletype 33 might:
+    socket.send('^t^t^c' + IAC, so.MSG_OOB)
+    socket.send(DM)
+
+In which case we have already interrupted ^t, ^t, and ^c using callbacks ``character_received`` and ``slc_received``. We read (IAC + DM) to indicate that our current line can be tossed. We've already aborted. The input prompt is also re-displayed.
+
+=========
+
+This is a simple mechanism by which a teletype host can abort output and unwind the input buffer. The teletype 33 happens to remove only non-control characters, leaving '^C' in the input buffer; 
+
+
+signalling the driver to "give me the supervisor" and pause character output.
+
+At this time, the client may instruct the "supervisor" to send the IP (interrupt process) sequence. A reasonable implementation does exactly this. However, the input buffer of the teletype has a special feature: only non-control characters are not tossed from input the buffer.
+In our example, '^C' has continued to transmit.
+
+No matter; the 'BREAK' key causes the IAC interpreter to be interrupted by transmitting the 8th bit high in the supervisor, and transmits the "SYNCH" signal. The remaining
+
+
+Therefor, the "supervisor" marks the receipt of BREAK with a "Telnet SYNCH" mechanism.
+later implemented by MSG_OOB flag to socket send(), rfc318 does not make clear the value of 'INS'). Subsequent input characters are still received (^H^H^t), and ignored by the Telnet Server, until receipt of Data-mark (DM). This ensures that after 
+(this feature adopted by unix as ^c for "interrupt process")
+. An existing program's ASCII I/O could be directly piped, and an "IAC Interpreter", likely a subroutine existing somewhere in the address space, would be called if the most significant bit (MSB) is High (True).
+
+The teletypes most commonly used at the time (like model 33) were only 7-bit devices, and a seperate line was signalled for 'SEND' or 'BREAK':!
+
+When Telnet was first implemented, it would not be uncommon for it to share the same instruction stack as the program it is offering, say 1984 wargames.
+This is achieved by sending the telnet "is a command" byte as 255; which, for any device interpreting all 8 bits need only test that the MSB is 1 (any values greater than 127), and to interject or become activated, interpreting subsequent bytes as a "command". 
+
+By checking if the 8th
+
+In this sense, its study and implementation help gain insight into 
+
+The original 1971 implemetation was designed for half-duplex, teletype terminals, such as used in Bell Labs when designing Unix. 
+
+Originally designed for half-duplex connections, such as a 'teletype terminal', it allows only ASCII characters to be transferred in a single direction until the receipt of the 'Go Ahead' signal. The 'BREAK' or 'ATTN' key which would signal a seperate wire=
+
+It was not uncommon to be on a dumb terminal of an IBM 3270 SNA network, and telnet to a TOPS-10 system interconnected to arpanet to receive your netmail. 
+
+
+            A propert implementation of LOGOUT might have a server send,
+                WILL LOGOUT,
+            with which a client could reply,
+                DONT LOGOUT
+            or, if user choses to, DO. The server may then force close
+            the session, perhaps with a timeout message if no DONT is recv.
+
+            This can be used as a keep-alive mechanism, even on clients which
+            do not support LOGOUT, whose default reply is DONT (as is ours).
+
+
+
+Not Implemented
+===============
+
+RFC-1416 "Telnet Authentication Option", RFC-1411 "Telnet Authentication: Kerberos Version 4", and RFC-1412 "Telnet Authentication: SPX" are supported by the BSD telnetd.c, but there are no plans to implement any of them.
+
+RFC-861 "Telnet Extended Options List", May 1983. describes a method of negotiating options after all possible 255 option bytes are exausted by future implementations. This never happened (about 100 remain), it was perhaps, ambitious in thinking more protocols would incorperate with Telnet (such as FTP does).
+
+RFC-927, "TACACS User Identification Telnet Option", describes a method of identifying terminal clients by a 32-bit UUID, providing a form of 'rlogin'. This system, published in 1984, was designed for MILNET by BBN, and the actual TACACS implementation is undocumented, though partially re-imagined by Cisco in rfc1492. Essentially, the users' credentials are forwarded to a TACAS daemon to verify that the client does in fact have access. The UUID is a form of an early kerberos token.
+
+RFC 933, "Output Marking Telnet Option", Jan 1985
+
+RFCs not supported
+------------------
+
+RFC 946, "Telnet Terminal Location Number Option", May 1985
+RFC 1041, "Telnet 3270 Regime Option", Jan 1988
+RFC 1043, "TELNET Data Entry Terminal Option", Feb 1988
+RFC 1143, "The Q Method of Implementing .. Option Negotiation", Feb 1990
+RFC 1097, "Telnet Subliminal-Message Option", Apr 1989
+RFC 1205, "5250 Telnet Interface", Feb 1991
+RFC 1411, "Telnet Authentication: Kerberos Version 4", Jan 1993
+RFC 2217, "Telnet Com Port Control Option", Oct 1997
+
+
+Telnet SYNCH mechanism is not implemented.
+
+This appears to control the interpreter stack, so that if program A passes iac interpretation to program B, that a message with TCP Urgent is sent, followed by any message directed to program B (such as IAC+ABORT, interrupt process in FTP abort), followed by (IAC+DM), indicating to program B that any data received after the Urgent IAC+ABORT and up to IAC+DM should not be interpreted.
+
+BSD telnetd.c
+
+     RFC-854   TELNET PROTOCOL SPECIFICATION
+     RFC-855   TELNET OPTION SPECIFICATIONS
+     RFC-856   TELNET BINARY TRANSMISSION
+     RFC-857   TELNET ECHO OPTION
+     RFC-858   TELNET SUPPRESS GO AHEAD OPTION
+     RFC-859   TELNET STATUS OPTION
+     RFC-860   TELNET TIMING MARK OPTION
+     RFC-861   TELNET EXTENDED OPTIONS - LIST OPTION
+     RFC-885   TELNET END OF RECORD OPTION
+     RFC-1073  Telnet Window Size Option
+     RFC-1079  Telnet Terminal Speed Option
+     RFC-1091  Telnet Terminal-Type Option
+     RFC-1096  Telnet X Display Location Option
+     RFC-1123  Requirements for Internet Hosts -- Application and Support
+     RFC-1184  Telnet Linemode Option
+     RFC-1372  Telnet Remote Flow Control Option
+
+     RFC-1571  Telnet Environment Option Interoperability Issues
+     RFC-1572  Telnet Environment Option
+
+
+* RFC 779 "Telnet Send-Location Option", Apr 1981
++ RFC 854 "Telnet Protocol Specification", May 1983
++ RFC 855 "Telnet Option Specifications", May 1983
+  RFC 856 "Telnet Binary Transmission", May 1983
++ RFC 857 "Telnet Echo Option", May 1983
++ RFC 858 "Telnet Supress Go Ahead Option", May 1983
+o RFC 859 "Telnet Status Option", May 1983
++ RFC 860 "Telnet Timing mark Option", May 1983
+* RFC 885 "Telnet End of Record Option", Dec 1983
+  RFC 1073, "Telnet Window Size Option", Oct 1988
+  RFC 1079, "Telnet Terminal Speed Option", Dec 1988
++ RFC 1091, "Telnet Terminal-Type Option", Feb 1989
+o RFC 1096, "Telnet X Display Location Option", Mar 1989
+o RFC 1184, "Telnet Linemode Option (extended options)", Oct 1990
++ RFC 1123, "Requirements for Internet Hosts", Oct 1989
+* RFC 2066, "Telnet Charset Option", Jan 1997
+o RFC 1372, "Telnet Remote Flow Control Option", Oct 1992
+o RFC 1408, "Telnet Environment Option", Jan 1993
+o RFC 1571, "Telnet Environment Option Interoperability Issues", Jan 1994
+o RFC 1572, "Telnet Environment Option", Jan 1994
+
+* = Not implemented in bsd telnet (rare!)
++ = Required by specification (complies!)
+o = Implemented in bsd client, but not SyncTerm, netrunner, etc
+
+relevant RFCs
+-------------
+
+These RFCs predate RFC 854, but are often relevant (or not)
+
+RFC 137 TELNET Protocol.
+RFC 139 Discussion of TELNET Protocol.
+RFC 318 Telnet Protocol.
+RFC 328 Suggested Telnet Protocol Changes.
+RFC 340 PROPOSED TELNET CHANGES.
+RFC 393 Comments on TELNET Protocol Changes.
+RFC 435 TELNET Issues.
+RFC 495 TELNET Protocol Specification.
+RFC 513 COMMENTS ON THE NEW TELNET SPECIFICATIONS.
+RFC 529 A Note on Protocol Synch Sequences.
+RFC 559 Comments on the new TELNET Protocol and its Implementation.
+RFC 563 Comments on the RCTE TELNET Option.
+RFC 593 Telnet and FTP Implementation Schedule Change.
+RFC 595 Some Thoughts in Defense of the TELNET Go-Ahead.
+RFC 596 Second Thoughts on Telnet Go-Ahead.
+RFC 652 Telnet Output Carriage-Return Disposition Option.
+RFC 653 TELNET OUTPUT HORIZONTAL TABSTOPS OPTION.
+RFC 654 TELNET OUTPUT HORIZONTAL TAB DISPOSITION OPTION.
+RFC 655 TELNET OUTPUT FORMFEED DISPOSITION OPTION.
+RFC 656 TELNET OUTPUT VERTICAL TABSTOPS OPTION.
+RFC 657 TELNET OUTPUT VERTICAL TAB DISPOSITION OPTION.
+RFC 658 TELNET OUTPUT LINEFEED DISPOSITION.
+RFC 659 Announcing Addtional Telnet Options.
+RFC 698 TELNET EXTENDED ASCII OPTION.
+RFC 701 AUGUST, 1974, SURVEY OF NEW-PROTOCOL TELNET SERVERS.
+RFC 702 SEPTEMBER, 1974, SURVEY OF NEW-PROTOCOL TELNET SERVERS.
+RFC 703 July, 1975, Survey of New-Protocol TELNET Servers.
+RFC 718 Comments on RCTE from the TENEX Implementation Experience.
+RFC 719 Discussion on RCTE.
+RFC 726 Remote Controlled Transmssion and Echoing Telnet Option.
+RFC 727 TELNET Logout Option.
+RFC 728 A Minor Pitfall in the Telnet Protocol.
+RFC 732 Telnet Data Entry Terminal Option (Obsoletes: RFC 731)
+RFC 734 SUPDUP Protocol.
+RFC 735 Revised TELNET Byte Macro Option (Obsoletes: RFC 729, RFC 736)
+RFC 749 Telnet SUPDUP-OUTPUT Option.
+RFC 779 TELNET SEND-LOCATION Option.
+RFC 818 The Remote User Telnet Service.
+
+Status
+------
+
+TODO: Server 100% RFC-compliant
+TODO: TelnetClient
+TODO: nosetests
+TODO: example MUD server
+TODO: example wunderground.com client
+
+Synch
+-----
+
+This is refering to the TCP Urgent flag, which is received using socket
+option SO_OOBINLINE_
+
+
+The Telnet Synch mechanism, much must sent with the TCP Urgent flag, is not
+supported. This capability appears to be legacy and is not found in "the wild",
+it can be sent with the bsd telnet client command, "send synch".
+
+UTF-8
+-----
+
+CHARSET (rfc 2066) specifies a codepage, not an encoding. It is unimplemented
+in bsd client, and generally found implemented only in recent MUD client and
+servers, and possibly some vendor implementations. Where implemented, the
+a client replying "UTF-8" has been found, and is presumed utf-8 encoded.
+
+The default preferred encoding for clients that negotiate BINARY but not
+CHARSET, such as the bsd client, is defined by the TelnetServer keyword
+argument *default_encoding*, which is 'utf-8' by default.
+
+Carriage Return
+---------------
+
+There are five supported signalling mechanisms for "send" or "end of line" received by clients.  The default implementation supplies remote line editing and callback of ``line_received`` with all client-supported carriage returns, but may cause loss of data for implementors wishing to distinguish among them.
+
+Namely, the difference between 'return' and 'enter' or raw file transfers. Those implementors should directly override ``data_received``, or carefully deriving their own implementations of ``editing_received`` and ``character_received``.
+
+#An overview of the primary callbacks and their interaction with carriage returns are described below for those wishing to extend the basic remote line editing or 'character-at-a-time' capabilities.
+
+CR LF
+=====
+   The Telnet protocol defines the sequence CR LF to mean "end-of-line".  The default implementation strips CL LF, and fires line_received on CR.
+
+CR NUL
+======
+  An interpretation of rfc854 may be that CR NUL should be sent when only a single CR is intended on a client and server host capable of distinguishing between CR and CR LF ('return' vs 'enter' key).  The default implementation strips CL NUL, and fires line_received on CR.
+
+CR
+==
+  CR alone may be received, though a client is not RFC-complaint to do so.  The default implementation strips CL, and fires line_received.
+
+LF
+==
+  LF aline may be received, though a client is not RFC-complaint to do so.  The default implementation strips LF, and fires line_received.
+
+IAC EOR
+=======
+  In addition to line-oriented or character-oriented terminals, IAC EOR is used to delimit logical records (e.g., "screens") on Data Entry Terminals (DETs), or end of multi-line input on vendor-implemented and some MUD clients, or, together with BINARY, a mechanism to signal newline vendor-implemented newline outside of CR+LF during file transfers.
+
+MUD clients may read IAC+EOR as meaning 'Go Ahead', marking the current line to be displayed as a "prompt", optionally not included in the client "history buffer". Its meaning as received by server is not known ..
+
+
+
+TelnetServer.editing_received(byte, slc) may receive any special line editing character. If the remote end is not willing to negotiate their own characters through rfc1184, then a standard set modeled after termios' ttydefaults.h is used. Those wishing to ignore or bypass special line editing may simply overide this method to call character_received(self.decoder(byte)), ignoring the slc function value mapped to this byte.
+
+TelnetServer.character_received(input) receives all inband input, and may receive any of the aforementioned carriage return sequences, a single byte at a time. The default implementation strips LF or NUL when 'strip_crlf' is True, firing ``line_received`` on CR of a LF not preceeded by CR.
+
+``TelnetServer.character_received(char)`` is always fired on the receipt of all carriage return characters. The character received, ``char`` is the last byte of the carriage return sequence if ``carriage_returned`` returns True. Special care must be taken that this property is True for both '\r' and '\x00' or '\r' and '\n' when received for the first time, as is demonstrated in the default method.
+
+TelnetServer.line_received(input, eor=False) is always fired on completion of decoding any character in the bytestream that is not a special linemode character. The argument ``input`` receives the line buffered up to, but not including CR or LF. This line may be edited if special line characters are received. The argument ``eor`` indicates if IAC + EOR_CMD was received to fire this callback.
+
+
+Implementors of ``TelnetServer.character_received(char)`` may receive
+each carriage return byte, with the final byte signaled by the
+``carriage_returned`` property. This is achieved by auto-detecting the
+client-preferred CR signalling mechanism.
+
+Which mechanism is preffered by the client is auto-detected as the property
+``cr_kind`` in TelnetServer. Using this mechanism, implementors of
+
+``line_received()`` method is fired only after final carriage return sequence.
+
+As ``line_received`` is fired immediately upon receipt of CR or LF, the value of ``carriage_return`` may only be partially complete or temporarily incorrect on its first or when the client its signalling mechanism.
+
+
+strip_crlf
+----------
+
+If TelnetServer public property 'strip_crlf' is set True (default), then:
+  'x\r\ny\r\x00z\ny'
+would fire:
+  line_received('x')
+  line_received('y')
+  line_received('z')
+
+And not 'y' or subsequent characters until next CR or LF.
+
+When False, though unstripped, ``line_received`` is fired only at the CR byte:
+  line_received('x\r')
+  line_received('\ny\r')
+And not fire '\x00z\ny' or subsequent characters until next CR.
+
+Additional Resources
+--------------------
+
+"COMMENTS ON THE NEW TELNET SPECIFICATIONS" RFC 513
+"A Note on Protocol Synch Sequences", RFC 529
+"Comments on the new TELNET Protocol and its Implementation," RFC 559
+"A Minor Pitfall in the Telnet Protocol," RFC 728
+"Telnet Protocol," MIL-STD-1782, U.S. Department of Defense, May 1984.
+"Mud Terminal Type Standard," http://tintin.sourceforge.net/mtts/
+"Telnet Protocol in C-Kermit 8.0 and Kermit 95 2.0," http://www.columbia.edu/kermit/telnet80.html
+"Telnet Negotiation Concepts," http://lpc.psyc.eu/doc/concepts/negotiation
+"Telnet RFCs," http://www.omnifarious.org/~hopper/telnet-rfc.html"
+"Telnet Options", http://www.iana.org/assignments/telnet-options/telnet-options.xml
+
+License
+-------
+telnetlib3 is (c) 2013 Jeffrey Quast <contact@jeffquast.com>.
+
+Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted, provided that the above copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+SLC functions were transcribed from NetBSD.
+
+ Copyright (c) 1989, 1993
+      The Regents of the University of California.  All rights reserved.
+
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the following conditions
+ are met:
+ 1. Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+ 2. Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+ 3. Neither the name of the University nor the names of its contributors
+    may be used to endorse or promote products derived from this software
+    without specific prior written permission.
+
+ THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ SUCH DAMAGE.
+
+
