@@ -1838,7 +1838,9 @@ class TelnetServer(tulip.protocols.Protocol):
     @property
     def lastline(self):
         """ Returns client command line as unicode string. """
-        return u''.join(self._lastline)
+        return u''.join([chr if chr.isprintable()
+            else _name_char(chr)
+            for chr in self._lastline])
 
     @property
     def connected(self):
@@ -2262,8 +2264,8 @@ class TelnetServer(tulip.protocols.Protocol):
         # using ([uU]0000-ffff) and track of 'first digit' --- but there
         # is no need to escape unicode , it can used as a normal command
         # argument. This method is preferable for inserting control codes.
-        self.log.debug('literal_received: {} {} {}'.format(
-            _name_char(ucs), _name_slc_command(slc),))
+        self.log.debug('literal_received: {}'.format( _name_char(ucs)
+            if not ucs.isprintable() else ucs))
         literval = 0 if self._literal is '' else int(self._literal)
         new_lval = 0
         if self._literal is False:  # ^V or SLC_VLNEXT
@@ -2301,7 +2303,7 @@ class TelnetServer(tulip.protocols.Protocol):
             self._lit_recv, self._literal = 0, False
 
     def editing_received(self, char, slc):
-        self.log.debug('editing_received: {} {} {}'.format(
+        self.log.debug('editing_received: {}, {}.'.format(
             _name_char(char), _name_slc_command(slc),))
         if self.is_literal is not False:  # continue literal
             ucs = self.decode(char)
@@ -2321,8 +2323,8 @@ class TelnetServer(tulip.protocols.Protocol):
             self.display_prompt(redraw=True)
         elif slc == SLC_EW:  # erase word (^w)
             removed = 0
-            while (not removed or not self._lastline[-1].isspace()
-                    and len(self._lastline)):
+            while (len(self._lastline) and
+                    (not removed or not self._lastline[-1].isspace())):
                 self._lastline.pop()
                 removed += 1
             if not removed:
@@ -2638,7 +2640,7 @@ def _name_char(ucs):
         ucs = chr(ord(ucs) ^ ord('@'))
     else:
         try:
-            ucs = unicodedata.name(ucs)
+            ucs = unicodedata.name(chr(ord(ucs)))
         except ValueError:
             ucs = repr(ucs)
     return ret + ucs
