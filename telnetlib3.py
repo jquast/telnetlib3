@@ -9,14 +9,16 @@ See the ``README`` file for details and license.
 
 __all__ = ['TelnetServer']
 import collections
+import unicodedata
 import datetime
 import argparse
 import logging
 import codecs
-import socket
 import locale
 import shlex
-import time
+
+#import socket
+#import time
 
 import tulip
 
@@ -144,7 +146,7 @@ class SLC_definition(object):
             flags.append('flushout')
         return '({}, {})'.format(
                 '|'.join(flags) if flags else 'None',
-                _name_char(ord(self.val)))
+                _name_char(self.val.decode('iso8859-1')))
 
 class SLC_nosupport(SLC_definition):
     def __init__(self):
@@ -335,7 +337,7 @@ class Forwardmask(object):
             else:
                 start = mask * 8
                 last = start + 7
-                characters = ', '.join([ _name_char(char)
+                characters = ', '.join([ _name_char(chr(char))
                     for char in range(start, last + 1) if char in self])
                 result.append ('[%2d] %s %s' % (
                     mask, _bin8(byte), characters,))
@@ -1810,14 +1812,17 @@ class TelnetServer(tulip.protocols.Protocol):
         self._decoder = None
         self._last_received = None  # datetime timers,
         self._connected = None
-        self._advanced = False  # toggled on fire of client WILL TTYPE
-        self._literal = False  # toggled on ^v for raw input (SLC_LNEXT)
-        self._cr_buf = None
-        self._last_char = None  # for CR[+LF|+NUL] in ``character_received``
+        # toggled on fire of client WILL TTYPE
+        self._advanced = False
+        # toggled on ^v for raw input (SLC_LNEXT), '' until end of digit,
+        self._literal = False
+        self._lit_recv = False
+        # track and strip CR[+LF|+NUL] in ``character_received``
+        self._last_char = None
 
     def standout(self, ucs):
-        """ Returns ucs with terminal sequences for 'standout', using a
-            simple heuristic to consider the remote capability, if any.
+        """ Returns ucs wrapped with a terminal sequences for 'standout',
+            using a simple heuristic to consider the remote capability, if any.
             Otherwise ucs is returned unchanged.
         """
         if self._advanced:
@@ -1891,11 +1896,11 @@ class TelnetServer(tulip.protocols.Protocol):
             inserting raw sequences into a command line that may otherwise
             interpret them not printable, or a special line editing character.
         """
-        return bool(self._literal)
+        return not self._literal is False
 
     @is_literal.setter
     def is_literal(self, value):
-        assert value in (True, False), value
+        assert isinstance(value, (str, bool)), value
         self._literal = value
 
 
@@ -1992,7 +1997,7 @@ class TelnetServer(tulip.protocols.Protocol):
         if self.is_literal:
             self._lastline.append(ucs)
             if not ucs.isprintable():
-                self.echo(self.standout(_name_char(ord(ucs)).upper()))
+                self.echo(self.standout(_name_char(ucs)))
             else:
                 self.echo(ucs)
             return
@@ -2084,7 +2089,6 @@ class TelnetServer(tulip.protocols.Protocol):
             multibyte input sequence.
         """
         self._last_received = datetime.datetime.now()
-        print(repr(data))
         for byte in (bytes([value]) for value in data):
             self.stream.feed_byte(byte)
             if self.stream.is_oob:
@@ -2099,8 +2103,8 @@ class TelnetServer(tulip.protocols.Protocol):
             else:
                 # telnet bytes must be 7-bit ascii, or preferred self.encoding
                 ucs = self.decode(byte, final=False)
-                if ucs is not None:
-                    if self.is_literal:
+                if ucs is not None and ucs != '':
+                    if self.is_literal is not False:
                         # send literal after ^v until is_literal toggled off
                         self.literal_received(ucs)
                     else:
@@ -2151,7 +2155,7 @@ class TelnetServer(tulip.protocols.Protocol):
             provide commands and command help. Returns exit/success
             value as integer, 0 is success, non-zero is failure.
 
-            If ``show_tracebacks`` is enabled, exceptions that occur during
+            If ``show_errors`` is enabled, exceptions that occur during
             command line processing are displayed to the user.
         """
         cmd, args = input.rstrip(), []
@@ -2250,18 +2254,63 @@ class TelnetServer(tulip.protocols.Protocol):
     def literal_received(self, ucs):
         """ Receives literal character(s) after SLC_LNEXT (^v) until
             ``is_literal`` is explicitly set False by this callback.
+
+            Allowed values are control characters, printable characters,
+            or base 10 decimal optionally 0-leaded up to value 255.
         """
-        # for now, no smart decoding is done
-        self.character_received(ucs)
-        self.is_literal = False
+        # could be made vim-like to provide 255-65535+ range
+        # using ([uU]0000-ffff) and track of 'first digit' --- but there
+        # is no need to escape unicode , it can used as a normal command
+        # argument. This method is preferable for inserting control codes.
+        self.log.debug('literal_received: {} {} {}'.format(
+            _name_char(ucs), _name_slc_command(slc),))
+        literval = 0 if self._literal is '' else int(self._literal)
+        new_lval = 0
+        if self._literal is False:  # ^V or SLC_VLNEXT
+            self.echo('^\b')
+            self._literal = ''
+            return
+        elif ord(ucs) < 32:  # Control character
+            if self._lit_recv:
+                self.character_received(chr(literval))
+            self.character_received(ucs)
+            self._lit_recv, self._literal = 0, False
+            return
+        elif ord('0') <= ord(ucs) <= ord('9'):  # base10 digit
+            self._literal += ucs
+            self._lit_recv += 1
+            try:
+                new_lval = int(self._literal)
+            except Exception as err:
+                self.bell()
+                self.log.debug(err)
+                if self.show_errors:
+                    self.echo('\r\n{}'.format(err))
+                self.display_prompt(redraw=(not self.show_errors))
+                self._lit_recv, self._literal = 0, False
+                return
+            if new_lval >= 255 or self._lit_recv == len('255'):
+                self.character_received(chr(min(new_lval, 255)))
+                self._lit_recv, self._literal = 0, False
+            return
+        else:  # printable character
+            if self._lit_recv:
+                self.character_received(chr(literval))
+            if ucs not in ('\r', '\n'):
+                self.character_received(ucs)
+            self._lit_recv, self._literal = 0, False
 
     def editing_received(self, char, slc):
-        self.log.debug('editing_received: {} {}'.format(
-            _name_char(ord(char)), _name_slc_command(slc)))
-        if self.is_literal:  # continue literal
-            self.literal_received(self.decode(char))
+        self.log.debug('editing_received: {} {} {}'.format(
+            _name_char(char), _name_slc_command(slc),))
+        if self.is_literal is not False:  # continue literal
+            ucs = self.decode(char)
+            if ucs is not None:
+                self.literal_received(ucs)
         elif slc == SLC_LNEXT:  # literal input (^v)
-            self._literal = True
+            ucs = self.decode(char)
+            if ucs is not None:
+                self.literal_received(ucs)
         elif slc == SLC_RP:  # repaint (^r)
             self.display_prompt(redraw=True)
         elif slc == SLC_EC:  # erase character chr(127)
@@ -2413,13 +2462,13 @@ class TelnetServer(tulip.protocols.Protocol):
             self.echo('\r\n\t'.join([_name_commands(opt) for opt in pending]))
 
         if not self.stream.is_linemode:
-            self.echo('\r\nLinemode is `Kludge\'.')
+            self.echo('\r\nInput is full duplex (kludge) mode.')
         else:
             self.echo('\r\nLinemode is {0}.'.format(self.stream.linemode))
             self.stream.write(b'\r\nSpecial Line Characters:\r\n\t')
             slc_table = ['%-8s [%s]' % (
                 _name_slc_command(slc).split('_', 1)[-1].lower(),
-                    _name_char(ord(slc_def.val)),)
+                    _name_char(slc_def.val.decode('iso8859-1')),)
                     for slc, slc_def in self.stream._slctab.items()
                     if not slc_def.nosupport
                     and slc_def.val != theNULL]
@@ -2578,21 +2627,21 @@ def _bin8(number):
     prefix, value = bin(number).split('b')
     return '0b%0.8i' % (int(value),)
 
-def _name_char(number):
+def _name_char(ucs):
     """ Return string of an 8-bit input character value, ``number``. """
-    char = chr(number)
-    if char.isprintable():
-        return char
-    if number <= 0:
-        return 'None'
-    elif number <= 26:
-        return '^%s' % (chr(ord('a') + (number - 1)),)
-    elif number <= 31:
-        return '^%s' % (r'[\]^_'[number - 32])
-    elif number == 127:
-        return 'del'
+    ret=''
+    if 128 <= ord(ucs) <= 255:
+        ret = 'M-'
+        ucs = chr(ord(ucs) & 0x7f)
+    elif ord(ucs) < ord(' ') or (ucs) == 127:
+        ret += '^'
+        ucs = chr(ord(ucs) ^ ord('@'))
     else:
-        return repr(char)
+        try:
+            ucs = unicodedata.name(ucs)
+        except ValueError:
+            ucs = repr(ucs)
+    return ret + ucs
 
 # `````````````````````````````````````````````````````````````````````````````
 
