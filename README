@@ -200,7 +200,6 @@ RFC 328 Suggested Telnet Protocol Changes.
 RFC 340 PROPOSED TELNET CHANGES.
 RFC 393 Comments on TELNET Protocol Changes.
 RFC 435 TELNET Issues.
-RFC 495 TELNET Protocol Specification.
 RFC 513 COMMENTS ON THE NEW TELNET SPECIFICATIONS.
 RFC 529 A Note on Protocol Synch Sequences.
 RFC 559 Comments on the new TELNET Protocol and its Implementation.
@@ -349,6 +348,28 @@ Additional Resources
 "Telnet Negotiation Concepts," http://lpc.psyc.eu/doc/concepts/negotiation
 "Telnet RFCs," http://www.omnifarious.org/~hopper/telnet-rfc.html"
 "Telnet Options", http://www.iana.org/assignments/telnet-options/telnet-options.xml
+
+RFC 495
+-------
+
+RFC 495, NIC #15371 "TELNET Protocol Specification." 1 May 1973, A. McKenzie Lists the following attatched documents, which are missing.
+
+[...] specifications for TELNET options which allow negotiation of:
+
+            o binary transmission
+            o echoing
+            o reconnection
+            o suppression of "Go Ahead"
+            o approximate message size
+            o use of a "timing mark"
+            o discussion of status
+            o extension of option code set
+
+   These specifications have been prepared by Dave Walden (BBN-NET) with
+   the help of Bernie Cosell, Ray Tomlinson (BBN-TENEX) and Bob Thomas;
+   by Jerry Burchfiel (BBN-TENEX); and by David Crocker (ULCA-NMC).
+
+If anybody can locate these documents, please forward them along.
 
 License
 -------
