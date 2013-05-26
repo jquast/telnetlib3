@@ -41,12 +41,18 @@ class TelnetServer(tulip.protocols.Protocol):
     CONNECT_MAXWAIT = 4.00
     CONNECT_DEFERED = 0.15
     TTYPE_LOOPMAX = 8
+    default_env = {'COLUMNS': '80',
+                   'LINES': '24',
+                   'USER': 'unknown',
+                   'TERM': 'vt100', }
 
     def __init__(self, log=logging, default_encoding='utf8'):
         self.log = log
-        self.client_env = {}
+        self.client_env = collections.defaultdict(str, **self.default_env)
+        self.client_env['CHARSET'] = default_encoding
         self.show_traceback = True  # client sees full traceback
         self.strip_eol = '\r\n\00'
+        self.encoding_errors = 'strict'
 
         self._default_encoding = default_encoding
         self._lastline = collections.deque()
@@ -54,15 +60,14 @@ class TelnetServer(tulip.protocols.Protocol):
         self._decoder = None
         self._last_received = None  # datetime timers,
         self._connected = None
-        # toggled on fire of client WILL TTYPE
+        #: toggled on client WILL TTYPE, remote end is not a 'dumb' client
         self._advanced = False
-        # toggled on ^v for raw input (SLC_LNEXT), '' until end of digit,
+        #: toggled on SLC_LNEXT (^v) for keycode input
         self._literal = False
+        #: limit number of digits using counter _lit_recv
         self._lit_recv = False
-        # track and strip CR[+LF|+NUL] in ``character_received``
+        #: strip CR[+LF|+NUL] in character_received() by tracking last recv
         self._last_char = None
-        self._encoding_errors = 'strict'
-        self._on_encoding_err = 'replace'
         self._does_styling = False
         self._eof = False
 
@@ -74,7 +79,7 @@ class TelnetServer(tulip.protocols.Protocol):
         #
         #   Notably, a request to negotiate TTYPE is made. If sucessful,
         #   the callback ``request_advanced_opts()`` is fired.
-        self.echo ('Welcome to {}!\r\n'.format(__file__,))
+        self.echo ('Welcome to {}! '.format(__file__,))
         self.stream.iac(telopt.WILL, telopt.SGA)
         self.stream.iac(telopt.WILL, telopt.ECHO)
         self.stream.iac(telopt.DO, telopt.TTYPE)
@@ -87,14 +92,15 @@ class TelnetServer(tulip.protocols.Protocol):
     def __str__(self):
         """ Returns string suitable for status of server session.
         """
-        return '{}{}{}connected from {} after {:0.3f}s'.format(
-                '{}@'.format(self.client_env['USER'])
+        return '{}{}{}{}{}'.format(
+                '{} using '.format(self.client_env['USER'])
                 if 'USER' in self.client_env else '',
                 '{} '.format(self.client_env['TERM'])
-                if 'TERM' in self.client_env else 'dumb terminal ',
-                'dis' if self._eof or self._closing else '',
+                if 'TERM' in self.client_env else 'dumb terminal',
+                '{}connected from '.format(
+                    'dis' if self._eof or self._closing else ''),
                 self.transport.get_extra_info('addr', '??')[0],
-                self.duration)
+                ' after {:0.3f}s'.format(self.duration))
 
     def first_prompt(self, call_after=None):
         """ XXX First time prompt fire
@@ -173,24 +179,29 @@ class TelnetServer(tulip.protocols.Protocol):
 
     @property
     def prompt(self):
-        """ Returns string suitable for display_prompt(). This implementation
-            evaluates PS1 to a completed string, otherwise returns '$ '.
-        """
-        return u'% '
+        """ Returns string suitable for display_prompt().
 
-    def encoding(self, outgoing=False):
+            This implementation just returns the PROMPT client env
+            value, or '% ' if unset.
+        """
+        return self.client_env.get('PROMPT', u'% ')
+
+    def encoding(self, outgoing=False, incoming=False):
         """ Returns the session's preferred input or output encoding.
 
-            Always 'ascii' for the direction travelled unless ``inbinary``
+            Always 'ascii' for the direction(s) indicated unless ``inbinary``
             or ``outbinary`` has been negotiated. Then, the session value
-            CHARSET is used, or class constructor keyword argument
-            ``default_encoding``, if CHARSET is not negotiated.
+            CHARSET is used, or ``default_encoding``, if CHARSET is not
+            negotiated.
         """
         #   It possible to negotiate UTF-8 input with ascii output using
         #   command ``toggle outbinary`` on the bsd client.
+        assert outgoing or incoming
         return (self.client_env.get('CHARSET', self._default_encoding)
-                if (outgoing and self.outbinary or
-                    not outgoing and self.inbinary) else 'ascii')
+                if (outgoing and not incoming and self.outbinary or
+                    not outgoing and incoming and self.inbinary or
+                    outgoing and incoming and self.outbinary and self.inbinary)
+                else 'ascii')
 
     @property
     def inbinary(self):
@@ -452,36 +463,32 @@ class TelnetServer(tulip.protocols.Protocol):
             self.display_prompt()
 
     def process_cmd(self, input):
-        """ Simple shell-like command processing interface.
+        """ .. method:: process_cmd(input : string) -> int
+            XXX Callback from ``line_received()`` for input line processing..
 
-            This is used with the default ``line_received`` callback to
-            provide commands and command help. Returns exit/success
-            value as integer, 0 is success, non-zero is failure.
-
-            If ``show_traceback`` is enabled, exceptions that occur during
-            command line processing are displayed to the user.
+            The default handler returns shell-like exit/success value as
+            integer, 0 meaning success, non-zero failure, and provides a
+            minimal set of diagnostic commands.
         """
         cmd, args = input.rstrip(), []
         if ' ' in cmd:
             cmd, *args = shlex.split(cmd)
         self.log.debug('process_cmd {!r}{!r}'.format(cmd, args))
-        if cmd == 'help':
-            self.echo('\r\nAvailable commands, command -h for help:\r\n')
-            self.echo('quit, echo, set, toggle, status')
-            return 0 if not args or args[0] in ('-h', '--help',) else 1
-        elif cmd == 'quit':
-            if len(args):
-                self.echo('\r\nquit: close session.')
-                return 0 if args[0] in ('-h', '--help',) else 1
-            return self.logout()
+        if cmd in ('help', '?',):
+            self.echo('\r\nAvailable commands:\r\n')
+            self.echo('help, quit, status, whoami')
+            return 0
+        elif cmd in ('quit', 'exit', 'logout', 'bye'):
+            self.logout()
+            return 0
         elif cmd == 'status':
-            if args:
-                self.echo('\r\nstatus: displays session parameters')
-                return 0 if args[0] in ('-h', '--help',) else 1
             self.display_status()
             return 0
-        else:
-            self.echo('\r\nCommand {!r} not understood.'.format(cmd))
+        elif cmd == 'whoami':
+            self.echo('\r\n{}'.format(self))
+            return 0
+        elif cmd:
+            self.echo('\r\n{!s}: command not found.'.format(cmd))
             return 1
 
     def encode(self, buf, errors=None):
@@ -491,69 +498,36 @@ class TelnetServer(tulip.protocols.Protocol):
             7-bit ascii characters (valued less than 128), and any values
             outside of this range will be replaced with a python-like
             representation.
-
-            When ``outbinary`` is sucessfully negotiated, the session's
-            preferred encoding is used (negotiated by CHARSET). Or, if
-            unnegotiated, the server's default_encoding (utf-8). encoding
-            errors are 'strict' until UnicodeEncodeError, which is used
-            to notify the client that they should negotiate binary,
-            if possible; or at least an explanation for the \xa0 and etc.
         """
-        #if not self.outbinary:
-        #    swp = bytes(buf, self.encoding, 'replace')
-        errors = self._encoding_errors if errors is None else errors
-        try:
-            return bytes(buf, self.encoding(outgoing=True), errors)
-        except UnicodeEncodeError as err:
-            assert errors != 'replace', errors
-            # refactor to _warn_binary(), first fire only
-            if (self._encoding_errors != self._on_encoding_err
-                    and self._on_encoding_err != errors):
-                self._display_tb(*sys.exc_info(), level=logging.INFO)
-                self.log.info('{}. encoding_errors is {!r}, was {!r}.'
-                        .format(err, self._on_encoding_err,
-                            self._encoding_errors))
-                self.echo('\r\n{} encode error, mode now {!r}, was {!r}.'
-                        .format(self.encoding(outgoing=True), self._on_encoding_err,
-                            self._encoding_errors))
-                self._encoding_errors = self._on_encoding_err
-                # re-display prompt after completing 'replace' echo + warning
-                self.display_prompt()
-            return self.encode(buf, errors=self._on_encoding_err)
+        return bytes(buf, self.encoding(outgoing=True), self.encoding_errors)
 
     def decode(self, input, final=False):
-        """ Decode bytes sent by client using preferred encoding.
-
-            Wraps the ``decode()`` method of a ``codecs.IncrementalDecoder``
-            instance using the session's preferred ``encoding``.
-
-            If the preferred encoding is not valid, the class constructor
-            keyword ``default_encoding`` is used, the 'CHARSET' environment
-            value is reverted, and the client
+        """ Decode bytes received from client using preferred encoding.
         """
-        encoding = self.encoding(outgoing=False)
+        #   If the preferred encoding is not valid, the class constructor
+        #   keyword ``default_encoding`` is used, the 'CHARSET' environment
+        #   value is reverted, and the client
+        #   Wraps the ``decode()`` method of a ``codecs.IncrementalDecoder``
+        #   instance using the session's preferred ``encoding``.
+
+        encoding = self.encoding(incoming=True)
         if self._decoder is None or self._decoder._encoding != encoding:
             try:
                 self._decoder = codecs.getincrementaldecoder(encoding)(
-                        errors=self._encoding_errors)
+                        errors=self.encoding_errors)
             except LookupError as err:
                 assert encoding != self._default_encoding, (
                         self._default_encoding, err)
-                self.log.warn(err)
+                self.log.info(err)
                 self._env_update({'CHARSET': self._default_encoding})
                 self._decoder = codecs.getincrementaldecoder(encoding)(
-                        errors=self._encoding_errors)
+                        errors=self.encoding_errors)
                 # interupt client session to notify change of encoding,
                 self.echo('{}, CHARSET is {}.'.format(err, encoding))
                 self.display_prompt()
             self._decoder._encoding = encoding
-        try:
-            return self._decoder.decode(input, final)
-        except UnicodeDecodeError:
-            self._decoder = codecs.getincrementaldecoder(
-                    encoding)(errors=self._on_encoding_err)
-            self._decoder._encoding = encoding
-            return self._decoder.decode(input, final)
+
+        return self._decoder.decode(input, final)
 
     def connection_made(self, transport):
         """ Receive a new telnet client connection.
@@ -610,14 +584,17 @@ class TelnetServer(tulip.protocols.Protocol):
         self.echo('\r\nConnected {:0.3f}s ago from {}.'
             '\r\nLinemode is {}.'
             '\r\nFlow control is {}.'
-            '\r\nEncoding is {}{}.'.format(
+            '\r\nEncoding is {}{}.'
+            '\r\n{env[LINES]} rows; {env[COLUMNS]} cols.'.format(
                 self.duration,
                 self.transport.get_extra_info('addr', 'unknown'),
                 self.stream.linemode if self.stream.is_linemode else 'kludge',
                 'xon-any' if self.stream.xon_any else 'xon',
-                self.encoding(outgoing=False),
-                '' if self.encoding(outgoing=True) == self.encoding() else
-                    ' in, {} out'.format(self.encoding(outgoing=True))))
+                self.encoding(incoming=True),
+                '' if self.encoding(outgoing=True)
+                    == self.encoding(incoming=True)
+                else ' in, {} out'.format(self.encoding(outgoing=True)),
+                    env=self.client_env))
 
     def set_callbacks(self):
         """ XXX Register callbacks with TelnetStreamReader
@@ -712,7 +689,10 @@ class TelnetServer(tulip.protocols.Protocol):
             # track TTYPE seperately from the NEW_ENVIRON 'TERM' value to
             # avoid telnet loops in TTYPE cycling
             self._env_update({'TTYPE0': ttype})
-            self.request_advanced_opts()
+            # windows-98 era telnet ('ansi') or terminals replying as
+            # such won't have anything more interesting to say. windows
+            # socket transport locks up if a second TTYPE is requested.
+            self.request_advanced_opts(ttype=(ttype != 'ansi'))
             self._advanced = 1
             return
 
@@ -758,10 +738,10 @@ class TelnetServer(tulip.protocols.Protocol):
         self.log.info(self.__str__() + ' by client.')
 
     def close(self):
-        if not self._eof:
-            self.log.info(self.__str__() + ' by server.')
         self.transport.close ()
         self._closing = True
+        if not self._eof:
+            self.log.info(self.__str__() + ' by server.')
 
 ARGS = argparse.ArgumentParser(description="Run simple telnet server.")
 ARGS.add_argument(
