@@ -283,7 +283,7 @@ class TelnetServer(tulip.protocols.Protocol):
             if char == CR or self.strip_eol:
                 self.line_received(self.lastline)
             return
-        if not char.isprintable():
+        if not char.isprintable() and char not in (CR, LF, NUL,):
             self.bell()
         else:
             self._lastline.append(char)
