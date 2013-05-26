@@ -63,6 +63,7 @@ class TelnetServer(tulip.protocols.Protocol):
         self._last_char = None
         self._encoding_errors = 'strict'
         self._on_encoding_err = 'replace'
+
     def banner(self):
         """ XXX Display login banner and solicit initial telnet options.
         """
@@ -104,11 +105,29 @@ class TelnetServer(tulip.protocols.Protocol):
             assert errors != 'replace', errors
             self.echo(ucs, errors='replace')
 
-    def display_prompt(self, redraw=False):
-        """ Prompts client end for input.  When ``redraw`` is ``True``, the
-            prompt is re-displayed at the user's current screen row. GA
-            (go-ahead) is signalled if SGA (supress go-ahead) is declined.
+    def first_prompt(self, call_after=None):
+        """ XXX First time prompt fire
         """
+        call_after = self.display_prompt if call_after is None else call_after
+        assert callable(call_after), call_after
+        self.log.info('{}{}connected from {} after {:0.3f}s.'.format(
+            '{}@'.format(self.client_env['USER'])
+                if 'USER' in self.client_env else '',
+            '{} '.format(self.client_env['TERM'])
+                if 'TERM' in self.client_env else 'dumb terminal',
+            self.transport.get_extra_info('addr', '??')[0],
+            self.duration))
+        # conceivably, you could use various callback mechanisms to
+        # relate to authenticating or other multi-state login process.
+        loop = tulip.get_event_loop()
+        loop.call_soon(call_after)
+
+    def display_prompt(self, redraw=False):
+        """ XXX Prompts client end for input. """
+        #
+        # When ``redraw`` is ``True``, the
+        #    prompt is re-displayed at the user's current screen row. GA
+        #    (go-ahead) is signalled if SGA (supress go-ahead) is declined.
         # display CRLF before prompt, or, when redraw only carriage return
         # without linefeed, then 'clear_eol' vt102 before prompt.
         parts = (('\r\x1b[K') if redraw else ('\r\n'),
@@ -516,7 +535,7 @@ class TelnetServer(tulip.protocols.Protocol):
         self.stream.iac(telopt.DO, telopt.NAWS)
         self.stream.iac(telopt.DO, telopt.CHARSET)
         self.stream.iac(telopt.DO, telopt.TTYPE)
-        if ttype and self.stream.remote_option.get('TTYPE', None):
+        if ttype and self.stream.remote_option.get(telopt.TTYPE, None):
             # we've already accepted their ttype, but see what else they have!
             self.stream.request_ttype()
 
@@ -604,7 +623,7 @@ class TelnetServer(tulip.protocols.Protocol):
         callback.
         """
         if call_after is None:
-            call_after = self.display_prompt
+            call_after = self.first_prompt
         assert callable(call_after), call_after
 
         loop = tulip.get_event_loop()
@@ -630,8 +649,6 @@ class TelnetServer(tulip.protocols.Protocol):
         Otherwise the session variable TERM is set to the value of ``ttype``.
         """
         if not self._advanced:
-            self.log.info('TTYPE is {}, latency {:0.3f}s.'.format(
-                ttype, self.duration))
             if not 'TERM' in self.client_env:
                 self._env_update({'TERM': ttype})
             # track TTYPE seperately from the NEW_ENVIRON 'TERM' value to
@@ -653,13 +670,15 @@ class TelnetServer(tulip.protocols.Protocol):
         if ttype == self.client_env['TTYPE0']:
             ttype = ttype.lower()
             self._env_update({'TERM': ttype})
-            self.logger.debug('end on TTYPE{}: {}.'.format(
+            self.log.debug('end on TTYPE{}: {}.'.format(
                 self._advanced, ttype))
+            return
         elif self._advanced > self.TTYPE_LOOPMAX:
             ttype = self.client_env['TERM'].lower()
             self._env_update({'TERM': ttype})
             self.log.warn('TTYPE stop on {}, using {}.'.format(
                 self._advanced, ttype))
+            return
         ttype = ttype.lower()
         self.stream.request_ttype()
         self._does_styling = (

@@ -495,7 +495,6 @@ class TelnetStreamReader:
         call would return False; because it is either in state tracker
         ``pending_option`` or ``local_option`` is already True.
         """
-        log.debug(repr((self.remote_option.get(opt), opt)))
         assert cmd in (DO, DONT, WILL, WONT), (
             'Illegal IAC cmd, {!r}.' % (cmd,))
         if opt == LINEMODE:
@@ -503,22 +502,12 @@ class TelnetStreamReader:
                 raise ValueError('DO LINEMODE may only be sent by server.')
             if cmd == WILL and self.is_server:
                 raise ValueError('WILL LINEMODE may only be sent by client.')
-        if opt == TM:
-            # DO TM has special state tracking; bytes are thrown
-            # away by sender of DO TM until replied by WILL or WONT TM.
-            if cmd == DO:
-                if self.pending_option.get(DO + TM, None):
-                    self.log.debug('skip IAC DO TM; must first recv WILL TM.')
-                    return False
-                self.pending_option[DO + TM] = True
-        if cmd == DO and opt != TM: # XXX any other exclusions ?
+        if cmd == DO: # XXX any exclusions ?
             if self.remote_option.get(opt, None):
                 self.log.debug('skip {} {}; remote_option = True'.format(
                     _name_command(cmd), _name_command(opt)))
                 return False
-            else:
-                log.debug(repr((self.remote_option.get(opt), opt)))
-        if cmd in (DO, WILL) and opt != TM:
+        if cmd in (DO, WILL):
             if self.pending_option.get(cmd + opt, False):
                 self.log.debug('skip {} {}; pending_option = True'.format(
                     _name_command(cmd), _name_command(opt)))
@@ -529,7 +518,7 @@ class TelnetStreamReader:
                 self.log.debug('skip {} {}; local_option = True'.format(
                     _name_command(cmd), _name_command(opt)))
                 return False
-        if cmd == DONT:
+        if cmd == DONT and opt not in (LOGOUT,): # XXX any other exclusions?
             if self.remote_option.get(opt, None):
                 # warning: some implementations incorrectly reply (DONT, opt),
                 # for an option we already said we WONT. This would cause
@@ -637,7 +626,7 @@ class TelnetStreamReader:
         #
         # Does nothing if (WILL, NEW_ENVIRON) has not yet been received,
         # or an existing (SB NEW_ENVIRON SEND) request is already pending.
-        request_ENV = _default_env_request if env is None else env
+        request_ENV = self._default_env_request if env is None else env
         assert self.is_server
         kind = NEW_ENVIRON
         if not self.remote_option.get(kind, None):
@@ -652,9 +641,9 @@ class TelnetStreamReader:
         self.pending_option[SB + kind + SEND + IS] = True
         response = collections.deque()
         response.extend([IAC, SB, kind, SEND, IS])
-        for idx, env in enumerate(self.request_ENV):
+        for idx, env in enumerate(request_ENV):
             response.extend([bytes(char, 'ascii') for char in env])
-            if idx < len(self.request_ENV) - 1:
+            if idx < len(request_ENV) - 1:
                 response.append(theNULL)
         response.extend([b'\x03', IAC, SE])
         self.log.debug('send: {!r}'.format(b''.join(response)))
@@ -1449,7 +1438,7 @@ class TelnetStreamReader:
     def _handle_sb_linemode_mode(self, buf):
         assert len(buf) == 1
         self._linemode = Linemode(buf[0])
-        self.log.info('linemode is %s.' % (self.linemode,))
+        self.log.debug('Linemode MODE is %s.' % (self.linemode,))
 
     def _handle_sb_linemode_slc(self, buf):
         """ Process and reply to linemode slc command function triplets. """
