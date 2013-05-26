@@ -444,4 +444,40 @@ LC_MESSAGES="en_US.UTF-8"
 LC_MONETARY="en_US.UTF-8"
 LC_NUMERIC="en_US.UTF-8"
 LC_TIME="en_US.UTF-8"
+    def decode(self, input, final=False):
+        """ Decode bytes sent by client using preferred encoding.
+
+            Wraps the ``decode()`` method of a ``codecs.IncrementalDecoder``
+            instance using the session's preferred ``encoding``.
+
+            If the preferred encoding is not valid, the class constructor
+            keyword ``default_encoding`` is used, the 'CHARSET' environment
+            value is reverted, and the client
+        """
+        encoding = self.encoding(outgoing=False)
+        if self._decoder is None or self._decoder._encoding != encoding:
+            try:
+                self._decoder = codecs.getincrementaldecoder(encoding)(
+                        errors=self._encoding_errors)
+            except LookupError as err:
+                assert encoding != self._default_encoding, (
+                        self._default_encoding, err)
+                self.log.warn(err)
+                self._env_update({'CHARSET': self._default_encoding})
+                self._decoder = codecs.getincrementaldecoder(encoding)(
+                        errors=self._encoding_errors)
+                # interupt client session to notify change of encoding,
+                self.echo('{}, CHARSET is {}.'.format(err, encoding))
+                self.display_prompt()
+            self._decoder._encoding = encoding
+        try:
+            return self._decoder.decode(input, final)
+        except UnicodeDecodeError:
+            self._decoder = codecs.getincrementaldecoder(
+                    encoding)(errors=self._on_encoding_err)
+            self._decoder._encoding = encoding
+            return self._decoder.decode(input, final)
+        self._encoding_errors = 'strict'
+        self._on_encoding_err = 'replace'
+
 
