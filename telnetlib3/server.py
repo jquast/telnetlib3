@@ -95,28 +95,20 @@ class TelnetServer(tulip.protocols.Protocol):
             self.stream.write(bytes(ucs, self.encoding, errors))
         except UnicodeEncodeError as err:
             assert errors != 'replace', errors
-            if self.outbinary:
-                # This could occur for instance if a non-compatible client is
-                # transfering in binary when *DO BINARY* was not correctly
-                # understood on their side for the encoding used. Send
-                # original string with errors='replace', and only bell() and
-                # traceback if show_tracebacks is True, warning that the
-                # CHARSET had an encoding error.
-                val = sys.exc_info()
-                self._display_tb(*val, level=logging.INFO)
-                if self._encoding_errors != self._on_encoding_err:
-                    # warn each side once, brief to clientclient, terse to host.
-                    self.log.info('{}. encoding_errors is {!r}, was {!r}.'
-                            .format(err, self._on_encoding_err,
-                                self._encoding_errors))
-                    self.echo('\r\n{} encode error, mode now {!r}, was {!r}.'
-                            .format(self.encoding, self._on_encoding_err,
-                                self._encoding_errors))
-                    self._encoding_errors = self._on_encoding_err
-                    # re-display prompt after completing 'replace' echo + warning
-                    self.display_prompt()
-                else:
-                    self.echo(ucs, errors='replace')
+            self._display_tb(*sys.exc_info(), level=logging.INFO)
+            if self._encoding_errors != self._on_encoding_err:
+                # warn each side once, brief to clientclient, terse to host.
+                self.log.info('{}. encoding_errors is {!r}, was {!r}.'
+                        .format(err, self._on_encoding_err,
+                            self._encoding_errors))
+                self.echo('\r\n{} encode error, mode now {!r}, was {!r}.'
+                        .format(self.encoding, self._on_encoding_err,
+                            self._encoding_errors))
+                self._encoding_errors = self._on_encoding_err
+                # re-display prompt after completing 'replace' echo + warning
+                self.display_prompt()
+            else:
+                self.echo(ucs, errors='replace')
 
     def first_prompt(self, call_after=None):
         """ XXX First time prompt fire
@@ -332,12 +324,10 @@ class TelnetServer(tulip.protocols.Protocol):
             input = input.rstrip(self.strip_eol)
         try:
             self._retval = self.process_cmd(input)
-        except Exception as err:
-            self._retval = -1
+        except Exception:
+            self._display_tb(*sys.exc_info(), level=logging.INFO)
             self.bell()
-            val = sys.exc_info()
-            self._display_tb(*val, level=logging.INFO)
-            err #  pyflakes
+            self._retval = -1
         finally:
             self._lastline.clear()
             self.display_prompt()
@@ -346,12 +336,13 @@ class TelnetServer(tulip.protocols.Protocol):
         """ Dispaly exception to client when ``show_traceback`` is True,
             forward copy server log at debug and info levels.
         """
-        tbl_exception = traceback.format_tb(*exc_info)
+        tbl_exception = (
+                traceback.format_tb(exc_info[2]) +
+                traceback.format_exception_only(exc_info[0], exc_info[1]))
         for num, tb in enumerate(tbl_exception):
-            print(tb)
             tb_msg = tb.splitlines()
             if self.show_traceback:
-                self.echo('\r\n' + '\r\n\t'.join(
+                self.echo('\r\n' + '\r\n>> '.join(
                     self.standout(row.rstrip())
                     if num == len(tbl_exception) - 1
                     else row.rstrip() for row in tb_msg))
@@ -416,7 +407,7 @@ class TelnetServer(tulip.protocols.Protocol):
             self._lit_recv += 1
             new_lval = int(self._literal)
             if new_lval >= 255 or self._lit_recv == len('255'):
-                self.character_received(chr(min(new_lval, 255)))
+                self.character_received(chr(new_lval))
                 self._lit_recv, self._literal = 0, False
             return
         # printable character
