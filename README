@@ -67,9 +67,15 @@ In the TCP implementation of telnet, where presumably a half-duplex terminal may
 
     socket.send(IAC, socket.MSG_OOB).
 
-The value of the byte does not seem to matter, can be of any length, and can continue sending socket.MSG_OOB, though it is suggested that perhaps the last byte of OOB data must end with IAC, as implemented in bsd client. Where "Telnet Synch" mode is to end, DM should be inserted.
+The value of the byte does not seem to matter, can be of any length, and can continue sending socket.MSG_OOB, though, the bsd server sends only a single byte:
+            /*
+             * In 4.2 (and 4.3) systems, there is some question about
+             * what byte in a sendOOB operation is the "OOB" data.
+             * To make ourselves compatible, we only send ONE byte
+             * out of band, the one WE THINK should be OOB
+               (...)
 
-All input is discarded by the remote telnet host until DM is received. This was used to some abuse, as greived about in rfc 529, to implement sub-protocols:
+Where "Telnet Synch" mode is to end, DM should be inserted.  All input is discarded by the IAC interpreter until DM is received. This was used to some abuse, as greived about in rfc 529, for vendor-implemented sub-protocols:
 
       The TELNET SYNCH mechanism is being misused by attempting to give
       it meaning at two different levels of protocol.
@@ -77,8 +83,19 @@ All input is discarded by the remote telnet host until DM is received. This was 
 The BSD client may be instructed to send this legacy mechanism by escaping and using the command "send synch":
     telnet> send synch
 
-This sends IAC marked MSG_OOB. The BSD server at this point would continue testing "SYNCHing = stilloob()" which continues to test errorfds (third argument to select.select). As only IAC is marked oob, it correctly ends SYNCHing at the data-mark, DM.  A modern implementation may use sockatmark(),
+This sends IAC marked MSG_OOB, followed by DM, not marked MSG_OOB. The BSD server at this point would continue testing "SYNCHing = stilloob()" which continues to test errorfds (third argument to select.select). As only IAC is marked oob, it correctly ends SYNCHing at the data-mark, DM.  A modern implementation may use sockatmark(),
 
+BSD Telnet Server sets "Packet mode" with the pty driver:
+
+        (void) ioctl(p, TIOCPKT, (char *)&on);
+
+And when TIOCPKT_FLUSHWRITE is signaled by the pty driver:
+
+#define         TIOCPKT_FLUSHWRITE      0x02    /* flush packet */
+
+awaiting data buffered on the write transport is cleared; taking care to ensure all IAC commands were sent in the netclear() alogorithm, which also sets the neturgent pointer.
+
+Some work in progress on a correct discard_output() impl,
 
 Not Implemented
 ===============
