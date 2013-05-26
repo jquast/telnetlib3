@@ -10,7 +10,8 @@ Development is currently in progress, Telnet Server is complete, and under testi
 Status
 ======
 
-TODO: TelnetClient
+TODO: Charset Negotation
+TODO: TelnetClient using same TelnetServerStream
 TODO: fingerprinting Client & Server
 TODO: nosetests
 TODO: example MUD server
