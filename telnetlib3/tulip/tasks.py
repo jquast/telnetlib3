@@ -1,15 +1,16 @@
 """Support for tasks, coroutines and the scheduler."""
 
-__all__ = ['coroutine', 'task', 'async', 'Task',
+__all__ = ['coroutine', 'task', 'Task',
            'FIRST_COMPLETED', 'FIRST_EXCEPTION', 'ALL_COMPLETED',
-           'wait', 'as_completed', 'sleep',
+           'wait', 'as_completed', 'sleep', 'async',
            ]
 
+import collections
 import concurrent.futures
 import functools
 import inspect
-import time
 
+from . import events
 from . import futures
 
 
@@ -63,24 +64,6 @@ def task(func):
         return Task(coro(*args, **kwds))
 
     return task_wrapper
-
-
-def async(coro_or_future, *, loop=None, timeout=None):
-    """Wrap a coroutine in a future.
-    
-    If the argument is a Future, it is returned directly.
-    """
-    if isinstance(coro_or_future, futures.Future):
-        if ((loop != None and loop != coro_or_future._loop) or
-            (timeout != None and timeout != coro_or_future._timeout)):
-            raise ValueError(
-                'loop and timeout arguments must agree with Future')
-
-        return coro_or_future
-    elif iscoroutine(coro_or_future):
-        return Task(coro_or_future, loop=loop, timeout=timeout)
-    else:
-        raise TypeError('A Future or coroutine is required')
 
 
 _marker = object()
@@ -214,9 +197,9 @@ FIRST_EXCEPTION = concurrent.futures.FIRST_EXCEPTION
 ALL_COMPLETED = concurrent.futures.ALL_COMPLETED
 
 
-# Even though this *is* a @coroutine, we don't mark it as such!
-def wait(fs, timeout=None, return_when=ALL_COMPLETED):
-    """Wait for the Futures and and coroutines given by fs to complete.
+@coroutine
+def wait(fs, *, loop=None, timeout=None, return_when=ALL_COMPLETED):
+    """Wait for the Futures and coroutines given by fs to complete.
 
     Coroutines will be wrapped in Tasks.
 
@@ -229,63 +212,55 @@ def wait(fs, timeout=None, return_when=ALL_COMPLETED):
     Note: This does not raise TimeoutError!  Futures that aren't done
     when the timeout occurs are returned in the second set.
     """
-    fs = _wrap_coroutines(fs)
-    return _wait(fs, timeout, return_when)
+    if not fs:
+        raise ValueError('Set of coroutines/Futures is empty.')
+
+    loop = loop if loop is not None else events.get_event_loop()
+    fs = set(async(f, loop=loop) for f in fs)
+
+    if return_when not in (FIRST_COMPLETED, FIRST_EXCEPTION, ALL_COMPLETED):
+        raise ValueError('Invalid return_when value: {}'.format(return_when))
+    return (yield from _wait(fs, timeout, return_when, loop))
 
 
 @coroutine
-def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
-    """Internal helper: Like wait() but does not wrap coroutines."""
-    done, pending = set(), set()
+def _wait(fs, timeout, return_when, loop):
+    """Internal helper for wait(return_when=FIRST_COMPLETED).
 
-    errors = 0
-    for f in fs:
-        if f.done():
-            done.add(f)
-            if not f.cancelled() and f.exception() is not None:
-                errors += 1
-        else:
-            pending.add(f)
+    The fs argument must be a set of Futures.
+    The timeout argument is like for wait().
+    """
+    assert fs, 'Set of Futures is empty.'
+    waiter = futures.Future(loop=loop, timeout=timeout)
+    counter = len(fs)
 
-    if (not pending or
-        timeout is not None and timeout <= 0 or
-        return_when == FIRST_COMPLETED and done or
-        return_when == FIRST_EXCEPTION and errors):
-        return done, pending
-
-    # Will always be cancelled eventually.
-    bail = futures.Future(timeout=timeout)
-
-    def _on_completion(fut):
-        pending.remove(fut)
-        done.add(fut)
-        if (not pending or
+    def _on_completion(f):
+        nonlocal counter
+        counter -= 1
+        if (counter <= 0 or
             return_when == FIRST_COMPLETED or
-            (return_when == FIRST_EXCEPTION and
-             not fut.cancelled() and
-             fut.exception() is not None)):
-            bail.cancel()
+            return_when == FIRST_EXCEPTION and (not f.cancelled() and
+                                                f.exception() is not None)):
+            waiter.cancel()
 
-            for f in pending:
-                f.remove_done_callback(_on_completion)
-
-    for f in pending:
+    for f in fs:
         f.add_done_callback(_on_completion)
     try:
-        yield from bail
+        yield from waiter
     except futures.CancelledError:
         pass
-
-    really_done = set(f for f in pending if f.done())
-    if really_done:
-        done.update(really_done)
-        pending.difference_update(really_done)
-
+    done, pending = set(), set()
+    for f in fs:
+        f.remove_done_callback(_on_completion)
+        if f.done():
+            done.add(f)
+        else:
+            pending.add(f)
     return done, pending
 
 
 # This is *not* a @coroutine!  It is just an iterator (yielding Futures).
-def as_completed(fs, timeout=None):
+def as_completed(fs, *, loop=None, timeout=None):
     """Return an iterator whose values, when waited for, are Futures.
 
     This differs from PEP 3148; the proper way to use this is:
@@ -299,49 +274,58 @@ def as_completed(fs, timeout=None):
 
     Note: The futures 'f' are not necessarily members of fs.
     """
-    deadline = None
-    if timeout is not None:
-        deadline = time.monotonic() + timeout
+    loop = loop if loop is not None else events.get_event_loop()
+    deadline = None if timeout is None else loop.time() + timeout
+    todo = set(async(f, loop=loop) for f in fs)
+    completed = collections.deque()
 
-    done = None  # Make nonlocal happy.
-    fs = _wrap_coroutines(fs)
+    @coroutine
+    def _wait_for_one():
+        while not completed:
+            timeout = None
+            if deadline is not None:
+                timeout = deadline - loop.time()
+                if timeout < 0:
+                    raise futures.TimeoutError()
+            done, pending = yield from _wait(
+                todo, timeout, FIRST_COMPLETED, loop)
+            # Multiple callers might be waiting for the same events
+            # and getting the same outcome.  Dedupe by updating todo.
+            for f in done:
+                if f in todo:
+                    todo.remove(f)
+                    completed.append(f)
+        f = completed.popleft()
+        return f.result()  # May raise.
 
-    while fs:
-        if deadline is not None:
-            timeout = deadline - time.monotonic()
-
-        @coroutine
-        def _wait_for_some():
-            nonlocal done, fs
-            done, fs = yield from _wait(fs, timeout=timeout,
-                                        return_when=FIRST_COMPLETED)
-            if not done:
-                fs = set()
-                raise futures.TimeoutError()
-            return done.pop().result()  # May raise.
-
-        yield Task(_wait_for_some())
-        for f in done:
-            yield f
-
-
-def _wrap_coroutines(fs):
-    """Internal helper to process an iterator of Futures and coroutines.
-
-    Returns a set of Futures.
-    """
-    wrapped = set()
-    for f in fs:
-        wrapped.add(async(f))
-    return wrapped
+    for _ in range(len(todo)):
+        yield _wait_for_one()
 
 
 @coroutine
-def sleep(delay, result=None):
+def sleep(delay, result=None, *, loop=None):
     """Coroutine that completes after a given time (in seconds)."""
-    future = futures.Future()
+    future = futures.Future(loop=loop)
     h = future._loop.call_later(delay, future.set_result, result)
     try:
         return (yield from future)
     finally:
         h.cancel()
+
+
+def async(coro_or_future, *, loop=None, timeout=None):
+    """Wrap a coroutine in a future.
+
+    If the argument is a Future, it is returned directly.
+    """
+    if isinstance(coro_or_future, futures.Future):
+        if ((loop is not None and loop is not coro_or_future._loop) or
+            (timeout is not None and timeout != coro_or_future._timeout)):
+            raise ValueError(
+                'loop and timeout arguments must agree with Future')
+
+        return coro_or_future
+    elif iscoroutine(coro_or_future):
+        return Task(coro_or_future, loop=loop, timeout=timeout)
+    else:
+        raise TypeError('A Future or coroutine is required')
