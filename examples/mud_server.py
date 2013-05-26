@@ -481,3 +481,16 @@ LC_TIME="en_US.UTF-8"
         self._on_encoding_err = 'replace'
 
 
+    # popular term types:
+    330 'XTERM-256COLOR'
+     56 'XTERM'
+     31 'ANSI'
+     40 'rxvt-unicode-256color'
+     24 'linux'
+     15 'xterm'
+     13 'VT100'
+     12 'xterm-256color'
+      9 'TINTIN++'
+      3 'screen'
+      3 'vt100'
+      2 'XTERM-COLOR'
