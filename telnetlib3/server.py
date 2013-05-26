@@ -63,6 +63,7 @@ class TelnetServer(tulip.protocols.Protocol):
         self._last_char = None
         self._encoding_errors = 'strict'
         self._on_encoding_err = 'replace'
+        self._does_styling = False
 
     def banner(self):
         """ XXX Display login banner and solicit initial telnet options.
@@ -80,30 +81,42 @@ class TelnetServer(tulip.protocols.Protocol):
     def echo(self, ucs, errors=None):
         """ Write unicode string to transport using preferred encoding.
         """
-        #   If the stream is not in BINARY mode, the string must be made of
-        #   strictly 7-bit ascii characters (valued less than 128). Otherwise,
-        #   the session's preferred encoding is used (negotiated by CHARSET),
-        #   or if unnegotiated, the server's default_encoding (utf-8).
+        #   If ``outbinary`` is not negotiated, ucs must be made of strictly
+        #   7-bit ascii characters (valued less than 128), and any values
+        #   outside of this range will be replaced with a python-like
+        #   representation.
+        #
+        #   When ``outbinary`` is sucessfully negotiated, the session's
+        #   preferred encoding is used (negotiated by CHARSET). Or, if
+        #   unnegotiated, the server's default_encoding (utf-8).
         assert isinstance(ucs, str), ucs
         errors = self._encoding_errors if errors is None else errors
         try:
             self.stream.write(bytes(ucs, self.encoding, errors))
-        except UnicodeDecodeError as err:
-            # This could occur for instance if a non-compatible client is
-            # transfering in binary when *DO BINARY* was not correctly
-            # negotiated on their side. Send original string with
-            # errors='replace', and only bell + TB if show_tracebacks is True.
-            self._display_exception(*sys.exc_info(), level=logging.INFO)
-            if self._encoding_errors != self._on_encoding_err:
-                # warn each side once, brief to clientclient, terse to host.
-                self.log.info('{}. encoding_errors is {!r}, was {!r}.'.format(
-                    err, self._on_encoding_err, self._encoding_errors))
-                self.echo('\r\n{} bad charset, translation now {!r}, was {!r}.'
-                        .format(self.encoding, self._on_encoding_err,
-                            self._encoding_errors))
-                self._encoding_errors = self._on_encoding_err
+        except UnicodeEncodeError as err:
             assert errors != 'replace', errors
-            self.echo(ucs, errors='replace')
+            if self.outbinary:
+                # This could occur for instance if a non-compatible client is
+                # transfering in binary when *DO BINARY* was not correctly
+                # understood on their side for the encoding used. Send
+                # original string with errors='replace', and only bell() and
+                # traceback if show_tracebacks is True, warning that the
+                # CHARSET had an encoding error.
+                val = sys.exc_info()
+                self._display_tb(*val, level=logging.INFO)
+                if self._encoding_errors != self._on_encoding_err:
+                    # warn each side once, brief to clientclient, terse to host.
+                    self.log.info('{}. encoding_errors is {!r}, was {!r}.'
+                            .format(err, self._on_encoding_err,
+                                self._encoding_errors))
+                    self.echo('\r\n{} encode error, mode now {!r}, was {!r}.'
+                            .format(self.encoding, self._on_encoding_err,
+                                self._encoding_errors))
+                    self._encoding_errors = self._on_encoding_err
+                    # re-display prompt after completing 'replace' echo + warning
+                    self.display_prompt()
+                else:
+                    self.echo(ucs, errors='replace')
 
     def first_prompt(self, call_after=None):
         """ XXX First time prompt fire
@@ -114,7 +127,7 @@ class TelnetServer(tulip.protocols.Protocol):
             '{}@'.format(self.client_env['USER'])
                 if 'USER' in self.client_env else '',
             '{} '.format(self.client_env['TERM'])
-                if 'TERM' in self.client_env else 'dumb terminal',
+                if 'TERM' in self.client_env else 'dumb terminal ',
             self.transport.get_extra_info('addr', '??')[0],
             self.duration))
         # conceivably, you could use various callback mechanisms to
@@ -153,9 +166,12 @@ class TelnetServer(tulip.protocols.Protocol):
 
     @property
     def lastline(self):
-        """ Returns client command line as unicode string. """
-        return u''.join([chr if chr.isprintable()
-            else telopt._name_char(chr)
+        """ Returns client command line as unicode string.
+        """
+        # as it is used in the context for display, _name_char(chr)
+        # is used for non-ASCII
+        return u''.join([chr if chr.isprintable() 
+            else repr(chr).strip("'")
             for chr in self._lastline])
 
 
@@ -193,13 +209,20 @@ class TelnetServer(tulip.protocols.Protocol):
     def encoding(self):
         """ Returns the session's preferred encoding.
 
-            Always 'ascii' unless BINARY has been negotiated, then the
-            session value CHARSET is used, or constructor keyword
-            argument ``default_encoding`` if undefined.
+            Always 'ascii' unless outbinary has been negotiated. Then,
+            the session value CHARSET is used, or class constructor keyword
+            argument ``default_encoding``, if CHARSET is not negotiated.
         """
         return (self.client_env.get('CHARSET', self._default_encoding)
-                if self.stream.local_option.get(telopt.BINARY, None)
-                else 'ascii')
+                if self.outbinary else 'ascii')
+
+    @property
+    def outbinary(self):
+        """ Returns True if server status ``outbinary`` is True.
+        """
+        # character values above 127 should not be written to the transport
+        # unless outbinary is set True.
+        return self.stream.local_option.get(telopt.BINARY, None)
 
     @property
     def retval(self):
@@ -225,13 +248,14 @@ class TelnetServer(tulip.protocols.Protocol):
     def bell(self):
         """ Callback when inband data is not valid during remote line editing.
 
-            Default impl. writes ASCII BEL to transport if stream if it is
-            in kludge mode or remote editing is enabled with flag 'lit_echo'.
+            Default impl. writes ASCII BEL to transport if stream if is
+            in kludge mode or remote editing is enabled with flag 'lit_echo',
+            and only of remote echo is enabled.
         """
         if not self.stream.is_linemode or (
                 not self.stream.linemode.local
                 and self.stream.linemode.lit_echo):
-            self.echo('\x07')
+            self.local_echo('\a')
 
     def interrupt_received(self, cmd):
         """ This method aborts any output waiting on transport, then calls
@@ -245,6 +269,12 @@ class TelnetServer(tulip.protocols.Protocol):
         self.log.debug(telopt._name_command(cmd))
         self.echo('\r\n ** {}'.format(telopt._name_command(cmd)))
         self.display_prompt()
+
+    def local_echo(self, ucs, errors=None):
+        """ Calls ``echo(ucs, errors`` only of local option ECHO is True.
+        """
+        if self.stream.local_option.get(telopt.ECHO, None) is True:
+            self.echo(ucs, errors)
 
     def character_received(self, char):
         """ XXX Callback receives a single Unicode character as it is received.
@@ -265,12 +295,13 @@ class TelnetServer(tulip.protocols.Protocol):
         #   done by the callback ``line_received``, esp. as it is fired upon
         #   receipt of CR with remaining LF or NUL unreceived.
         CR, LF, NUL = '\r\n\x00'
+        char_disp = (
+                self.standout(repr(char).strip("'")) if (
+                    ord(char) > 127 and not self.outbinary
+                    or not char.isprintable()) else char)
         if self.is_literal:
             self._lastline.append(char)
-            if not char.isprintable():
-                self.echo(self.standout(telopt._name_char(char)))
-            else:
-                self.echo(char)
+            self.echo(char_disp)
             return
         if self._last_char == CR and char in (LF, NUL):
             if not self.strip_eol:
@@ -285,11 +316,9 @@ class TelnetServer(tulip.protocols.Protocol):
             return
         if not char.isprintable() and char not in (CR, LF, NUL,):
             self.bell()
-        else:
+        elif char.isprintable():
             self._lastline.append(char)
-            if self.stream.local_option.get(telopt.ECHO, None) == True:
-                self.echo(char)
-
+            self.local_echo(char_disp)
         self._last_char = char
 
     def line_received(self, input, eor=False):
@@ -306,18 +335,20 @@ class TelnetServer(tulip.protocols.Protocol):
         except Exception as err:
             self._retval = -1
             self.bell()
-            self._display_exception(*sys.exc_info(), level=logging.INFO)
+            val = sys.exc_info()
+            self._display_tb(*val, level=logging.INFO)
             err #  pyflakes
         finally:
             self._lastline.clear()
             self.display_prompt()
 
-    def _display_exception(self, *exc_info, level=logging.DEBUG):
+    def _display_tb(self, *exc_info, level=logging.DEBUG):
         """ Dispaly exception to client when ``show_traceback`` is True,
             forward copy server log at debug and info levels.
         """
-        tbl_exception = traceback.format_exception(*exc_info)
+        tbl_exception = traceback.format_tb(*exc_info)
         for num, tb in enumerate(tbl_exception):
+            print(tb)
             tb_msg = tb.splitlines()
             if self.show_traceback:
                 self.echo('\r\n' + '\r\n\t'.join(
@@ -398,7 +429,8 @@ class TelnetServer(tulip.protocols.Protocol):
 
     def editing_received(self, char, slc):
         self.log.debug('editing_received: {}, {}.'.format(
-            telopt._name_char(char), telopt._name_slc_command(slc),))
+            telopt._name_char(char.decode('iso8859-1')),
+            telopt._name_slc_command(slc),))
         if self.is_literal is not False:  # continue literal
             ucs = self.decode(char)
             if ucs is not None:
@@ -546,20 +578,15 @@ class TelnetServer(tulip.protocols.Protocol):
     def display_status(self):
         """ Output the status of telnet session.
         """
-        self.echo('\r\nConnected {}s ago from {} (latency is {:0.3f}s.),'
-            '\r\nLinemode is {} ({}).\r\nFlow control is {}.'
+        self.echo('\r\nConnected {:0.3f}s ago from {}.'
+            '\r\nLinemode is {}.'
+            '\r\nFlow control is {}.'
             '\r\nEncoding is {}.'.format(
                 self.duration,
                 self.transport.get_extra_info('addr', 'unknown'),
-                'ENABLED' if self.stream.is_linemode else 'DISABLED',
                 self.stream.linemode if self.stream.is_linemode else 'kludge',
                 'xon-any' if self.stream.xon_any else 'xon',
                 self.encoding))
-
-        if not self.stream.is_linemode:
-            self.echo('\r\nInput is full duplex (kludge) mode.')
-        else:
-            self.echo('\r\nLinemode is {0}.'.format(self.stream.linemode))
 
     def set_callbacks(self):
         """ XXX Register callbacks with TelnetStreamReader
