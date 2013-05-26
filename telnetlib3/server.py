@@ -44,7 +44,7 @@ class TelnetServer(tulip.protocols.Protocol):
     default_env = {'COLUMNS': '80',
                    'LINES': '24',
                    'USER': 'unknown',
-                   'TERM': 'vt100', }
+                   'TERM': 'unknown', }
 
     def __init__(self, log=logging, default_encoding='utf8'):
         self.log = log
@@ -52,7 +52,7 @@ class TelnetServer(tulip.protocols.Protocol):
         self.client_env['CHARSET'] = default_encoding
         self.show_traceback = True  # client sees full traceback
         self.strip_eol = '\r\n\00'
-        self.encoding_errors = 'strict'
+        self.encoding_errors = 'replace'
 
         self._default_encoding = default_encoding
         self._lastline = collections.deque()
@@ -92,11 +92,10 @@ class TelnetServer(tulip.protocols.Protocol):
     def __str__(self):
         """ Returns string suitable for status of server session.
         """
-        return '{}{}{}{}{}'.format(
+        return '{}{}{}{}'.format(
                 '{} using '.format(self.client_env['USER'])
                 if 'USER' in self.client_env else '',
-                '{} '.format(self.client_env['TERM'])
-                if 'TERM' in self.client_env else 'dumb terminal',
+                '{} '.format(self.client_env['TERM']),
                 '{}connected from '.format(
                     'dis' if self._eof or self._closing else ''),
                 self.transport.get_extra_info('addr', '??')[0],
@@ -147,11 +146,7 @@ class TelnetServer(tulip.protocols.Protocol):
     def lastline(self):
         """ Returns client command line as unicode string.
         """
-        # as it is used in the context for display, _name_char(chr)
-        # is used for non-ASCII
-        return u''.join([chr if chr.isprintable() 
-            else repr(chr).strip("'")
-            for chr in self._lastline])
+        return u''.join(self._lastline)
 
 
     @property
@@ -209,7 +204,7 @@ class TelnetServer(tulip.protocols.Protocol):
         """
         # character values above 127 should not be expected to be read
         # inband from the transport unless inbinary is set True.
-        return self.stream.remote_option.get(telopt.BINARY, None)
+        return self.stream.remote_option.enabled(telopt.BINARY)
 
     @property
     def outbinary(self):
@@ -217,7 +212,7 @@ class TelnetServer(tulip.protocols.Protocol):
         """
         # character values above 127 should not be written to the transport
         # unless outbinary is set True.
-        return self.stream.local_option.get(telopt.BINARY, None)
+        return self.stream.local_option.enabled(telopt.BINARY)
 
     @property
     def retval(self):
@@ -268,7 +263,7 @@ class TelnetServer(tulip.protocols.Protocol):
     def local_echo(self, ucs, errors=None):
         """ Calls ``echo(ucs, errors`` only of local option ECHO is True.
         """
-        if self.stream.local_option.get(telopt.ECHO, None) is True:
+        if self.stream.local_option.enabled(telopt.ECHO):
             self.echo(ucs, errors)
 
     def character_received(self, char):
@@ -290,10 +285,10 @@ class TelnetServer(tulip.protocols.Protocol):
         #   done by the callback ``line_received``, esp. as it is fired upon
         #   receipt of CR with remaining LF or NUL unreceived.
         CR, LF, NUL = '\r\n\x00'
-        char_disp = (
-                self.standout(repr(char).strip("'")) if (
-                    ord(char) > 127 and not self.outbinary
-                    or not char.isprintable()) else char)
+        char_disp = char
+        if (ord(char) > 127 and not self.outbinary) or (
+                not char.isprintable()):
+            char_disp = self.standout(char)
         if self.is_literal:
             self._lastline.append(char)
             self.echo(char_disp)
@@ -391,8 +386,7 @@ class TelnetServer(tulip.protocols.Protocol):
         """ Receives literal character(s) SLC_LNEXT (^v) and all subsequent
             characters until the boolean toggle ``_literal`` is set False.
         """
-        self.log.debug('literal_received: {}'.format(telopt._name_char(ucs)
-            if not ucs.isprintable() else ucs))
+        self.log.debug('literal_received: {!r}'.format(ucs))
         literval = 0 if self._literal is '' else int(self._literal)
         new_lval = 0
         if self._literal is False:  # ^V or SLC_VLNEXT
@@ -422,9 +416,8 @@ class TelnetServer(tulip.protocols.Protocol):
         self._lit_recv, self._literal = 0, False
 
     def editing_received(self, char, slc):
-        self.log.debug('editing_received: {}, {}.'.format(
-            telopt._name_char(char.decode('iso8859-1')),
-            telopt._name_slc_command(slc),))
+        self.log.debug('editing_received: {!r}, {}.'.format(
+            char, telopt._name_slc_command(slc),))
         if self.is_literal is not False:  # continue literal
             ucs = self.decode(char)
             if ucs is not None:
@@ -476,7 +469,7 @@ class TelnetServer(tulip.protocols.Protocol):
         self.log.debug('process_cmd {!r}{!r}'.format(cmd, args))
         if cmd in ('help', '?',):
             self.echo('\r\nAvailable commands:\r\n')
-            self.echo('help, quit, status, whoami')
+            self.echo('help, quit, status, whoami, echo.')
             return 0
         elif cmd in ('quit', 'exit', 'logout', 'bye'):
             self.logout()
@@ -485,8 +478,22 @@ class TelnetServer(tulip.protocols.Protocol):
             self.display_status()
             return 0
         elif cmd == 'whoami':
-            self.echo('\r\n{}'.format(self))
+            self.echo('\r\n{}.'.format(self))
             return 0
+        elif cmd == 'echo':
+            if 1 == len(args) and args[0].lower() in ('on', 'off',):
+                cmd = (telopt.WONT if args[0] == 'off'
+                        else telopt.WILL)
+                self.stream.iac(cmd, telopt.ECHO)
+                self.echo('\r\n{} echo.'.format(
+                    telopt._name_command(cmd).lower()))
+                return 0
+            elif 0 == len(args):
+                self.echo('\r\necho is {}.'.format('on'
+                    if self.stream.local_option.enabled(telopt.ECHO)
+                    else 'off'))
+                return 0
+            return 1
         elif cmd:
             self.echo('\r\n{!s}: command not found.'.format(cmd))
             return 1
@@ -570,7 +577,7 @@ class TelnetServer(tulip.protocols.Protocol):
         self.stream.iac(telopt.DO, telopt.NAWS)
         self.stream.iac(telopt.DO, telopt.CHARSET)
         self.stream.iac(telopt.DO, telopt.TTYPE)
-        if ttype and self.stream.remote_option.get(telopt.TTYPE, None):
+        if ttype and self.stream.remote_option.enabled(telopt.TTYPE):
             # we've already accepted their ttype, but see what else they have!
             self.stream.request_ttype()
 
@@ -595,6 +602,24 @@ class TelnetServer(tulip.protocols.Protocol):
                     == self.encoding(incoming=True)
                 else ' in, {} out'.format(self.encoding(outgoing=True)),
                     env=self.client_env))
+
+    def logout(self, opt=telopt.DO):
+        if opt != telopt.DO:
+            return self.stream.handle_logout(opt)
+        self.log.debug('Logout by client.')
+        self.echo('\r\nLogout by client.\r\n')
+        self.close()
+
+    def eof_received(self):
+        self._eof = True
+        self.log.info(self.__str__() + ' by client.')
+
+    def close(self):
+        self.transport.close ()
+        self._closing = True
+        if not self._eof:
+            self.log.info(self.__str__() + ' by server.')
+
 
     def set_callbacks(self):
         """ XXX Register callbacks with TelnetStreamReader
@@ -624,9 +649,14 @@ class TelnetServer(tulip.protocols.Protocol):
     def _env_update(self, env):
         " Callback receives no environment variables "
         if 'TERM' in env and env['TERM'] != env['TERM'].lower():
-            self.log.debug('{!r} -> {!r}'.format(env['TERM'],
-                env['TERM'].lower()))
-            env['TERM'] = env['TERM'].lower()
+            ttype = env['TERM'].lower()
+            self.log.debug('{!r} -> {!r}'.format(env['TERM'], ttype))
+            env['TERM'] = ttype
+            self._does_styling = (self._does_styling or
+                    ttype.startswith('vt') or ttype.startswith('xterm') or
+                    ttype.startswith('dtterm') or ttype.startswith('rxvt') or
+                    ttype.startswith('urxvt') or ttype.startswith('ansi') or
+                    ttype.startswith('linux') or ttype.startswith('screen'))
         self.client_env.update(env)
         self.log.debug('env_update: %r', env)
 
@@ -683,65 +713,47 @@ class TelnetServer(tulip.protocols.Protocol):
 
         Otherwise the session variable TERM is set to the value of ``ttype``.
         """
-        if not self._advanced:
+        if self._advanced is False:
             if not 'TERM' in self.client_env:
                 self._env_update({'TERM': ttype})
             # track TTYPE seperately from the NEW_ENVIRON 'TERM' value to
             # avoid telnet loops in TTYPE cycling
             self._env_update({'TTYPE0': ttype})
-            # windows-98 era telnet ('ansi') or terminals replying as
+            # windows-98 era telnet ('ansi'), or terminals replying as
             # such won't have anything more interesting to say. windows
             # socket transport locks up if a second TTYPE is requested.
             self.request_advanced_opts(ttype=(ttype != 'ansi'))
             self._advanced = 1
             return
 
-        # Soliciting additional TTYPE responses, so that a termcap-compatible
-        # TERM value can be determined from a greater variaty of telnet
-        # clients, rotating available TERM until it is repeated.
-        #
-        # This retrieves 'xterm256-color' from MUD or real xterms, regardless
-        # of wether they're fully implementing. But this is the closest we'll
-        # get to an appropriate definition of terminal capabilities we would
-        # be most interested in.
         self._env_update({'TTYPE{}'.format(self._advanced): ttype})
+        lastval = self.client_env['TTYPE{}'.format(self._advanced)]
         if ttype == self.client_env['TTYPE0']:
-            ttype = ttype.lower()
             self._env_update({'TERM': ttype})
-            self.log.debug('end on TTYPE{}: {}.'.format(
-                self._advanced, ttype))
+            self.log.debug('end on TTYPE{}: {}, using {env[TERM]}.'
+                    .format(self._advanced, ttype, env=self.client_env))
             return
-        elif (self._advanced > self.TTYPE_LOOPMAX
+        elif (self._advanced == self.TTYPE_LOOPMAX
                 or not ttype or ttype.lower() == 'unknown'):
             ttype = self.client_env['TERM'].lower()
             self._env_update({'TERM': ttype})
-            self.log.warn('TTYPE stop on {}, using {}.'.format(
-                self._advanced, ttype))
+            self.log.warn('TTYPE stop on {}, using {env[TERM]}.'.format(
+                self._advanced, env=self.client_env))
+            return
+        elif (self._advanced == 2 and ttype.upper().startswith('MTTS ')):
+            # Mud Terminal type started, previous value is most termcap-like
+            ttype = self.client_env['TTYPE{}'.format(self._advanced)]
+            self._env_update({'TERM': ttype})
+            self.log.warn('TTYPE is {}, using {env[TERM]}.'.format(
+                self._advanced, env=self.client_env))
+        elif (ttype.lower() == lastval):
+            # End of list (looping). Chose first value
+            self.log.warn('TTYPE repeated at {}, using {env[TERM]}.'.format(
+                self._advanced, env=self.client_env))
             return
         ttype = ttype.lower()
         self.stream.request_ttype()
-        self._does_styling = (
-                ttype.startswith('vt') or ttype.startswith('xterm')
-                or ttype.startswith('dtterm') or ttype.startswith('rxvt')
-                or ttype.startswith('shell') or ttype.startswith('ansi'))
         self._advanced += 1
-
-    def logout(self, opt=telopt.DO):
-        if opt != telopt.DO:
-            return self.stream.handle_logout(opt)
-        self.log.debug('Logout by client.')
-        self.echo('\r\nLogout by client.\r\n')
-        self.close()
-
-    def eof_received(self):
-        self._eof = True
-        self.log.info(self.__str__() + ' by client.')
-
-    def close(self):
-        self.transport.close ()
-        self._closing = True
-        if not self._eof:
-            self.log.info(self.__str__() + ' by server.')
 
 ARGS = argparse.ArgumentParser(description="Run simple telnet server.")
 ARGS.add_argument(
