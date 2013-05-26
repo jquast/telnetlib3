@@ -1827,13 +1827,13 @@ def _bin8(number):
     prefix, value = bin(number).split('b')
     return '0b%0.8i' % (int(value),)
 
-def _name_char(ucs, charset='iso8859-1'):
+def _name_char(ucs):
     """ Return string of an 8-bit input character value, ``number``. """
     import unicodedata
     ret=''
     if 127 <= ord(ucs) < 256:
         ret = 'M-'
-        ucs = chr(ord(ucs) & 127).decode(charset)
+        ucs = chr(ord(ucs) & 127)
     elif ord(ucs) < ord(' ') or (ucs) == 127:
         ret += '^'
         ucs = chr(ord(ucs) ^ ord('@'))
