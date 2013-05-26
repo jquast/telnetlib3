@@ -842,7 +842,7 @@ class TelnetStreamReader:
         #  of an *IAC DM* has been received. MSG_OOB not implemented, so
         #  this mechanism _should not be implmeneted_.
         self._dm_recv = True
-        self.iac(DM)
+        #self.iac(DM)
 
 # Public mixed-mode SLC and IAC callbacks
 #
@@ -1252,11 +1252,10 @@ class TelnetStreamReader:
         assert buf, ('SE: buffer empty')
         assert buf[0] != theNULL, ('SE: buffer is NUL')
         assert len(buf) > 1, ('SE: buffer too short: %r' % (buf,))
-        recv_only_server = (LINEMODE, LFLOW, NAWS, SNDLOC,
-                NEW_ENVIRON, TTYPE, TSPEED, XDISPLOC)
         cmd = buf[0]
-        assert not self.is_server or cmd in recv_only_server, (
-                _name_command(cmd))
+        if self.is_server:
+            assert cmd in (LINEMODE, LFLOW, NAWS, SNDLOC,
+                NEW_ENVIRON, TTYPE, TSPEED, XDISPLOC, STATUS), _name_command(cmd)
         if self.pending_option.enabled(SB + cmd):
             self.pending_option[SB + cmd] = False
         else:
@@ -1920,21 +1919,12 @@ def _bin8(number):
     return '0b%0.8i' % (int(value),)
 
 def _name_char(ucs):
-    """ Return string of an 8-bit input character value, ``number``. """
-    import unicodedata
-    ret=''
-    if 127 <= ord(ucs) < 256:
-        ret = 'M-'
-        ucs = chr(ord(ucs) & 127)
-    elif ord(ucs) < ord(' ') or (ucs) == 127:
-        ret += '^'
-        ucs = chr(ord(ucs) ^ ord('@'))
-    else:
-        try:
-            ucs = unicodedata.name(ucs)
-        except ValueError:
-            ucs = repr(ucs)
-    return ret + ucs
+    """ Return 7-bit ascii printable of any string. """
+    if ord(ucs) < ord(' ') or ord(ucs) == 127:
+        ucs = r'^{}'.format(chr(ord(ucs) ^ ord('@')))
+    elif ord(ucs) > 127 or not ucs.isprintable():
+        ucs = r'\x{:02x}'.format(ord(ucs))
+    return ucs
 
 def _name_slc_command(byte):
     """ Given an SLC byte, return global mnumonic constant as string. """
