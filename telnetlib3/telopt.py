@@ -1,3 +1,148 @@
+import collections
+import logging
+
+
+from telnetlib import LINEMODE, NAWS, NEW_ENVIRON, BINARY, SGA, ECHO, STATUS
+from telnetlib import TTYPE, TSPEED, LFLOW, XDISPLOC, IAC, DONT, DO, WONT
+from telnetlib import WILL, SE, NOP, TM, DM, BRK, IP, AO, AYT, EC, EL, EOR
+from telnetlib import GA, SB, LOGOUT, EXOPL, CHARSET, SNDLOC, theNULL
+
+(EOF, SUSP, ABORT, EOR_CMD) = (
+        bytes([const]) for const in range(236, 240))
+(IS, SEND, INFO) = (bytes([const]) for const in range(3))
+(LFLOW_OFF, LFLOW_ON, LFLOW_RESTART_ANY, LFLOW_RESTART_XON) = (
+        bytes([const]) for const in range(4))
+NSLC = 30
+(SLC_SYNCH, SLC_BRK, SLC_IP, SLC_AO, SLC_AYT, SLC_EOR, SLC_ABORT, SLC_EOF,
+    SLC_SUSP, SLC_EC, SLC_EL, SLC_EW, SLC_RP, SLC_LNEXT, SLC_XON, SLC_XOFF,
+    SLC_FORW1, SLC_FORW2, SLC_MCL, SLC_MCR, SLC_MCWL, SLC_MCWR, SLC_MCBOL,
+    SLC_MCEOL, SLC_INSRT, SLC_OVER, SLC_ECR, SLC_EWR, SLC_EBOL, SLC_EEOL) = (
+            bytes([const]) for const in range(1, NSLC + 1))
+(SLC_FLUSHOUT, SLC_FLUSHIN, SLC_ACK) = (
+        bytes([32]), bytes([64]), bytes([128]))
+(SLC_NOSUPPORT, SLC_CANTCHANGE, SLC_VARIABLE, SLC_DEFAULT) = (
+        bytes([const]) for const in range(4))
+(LMODE_MODE, LMODE_FORWARDMASK, LMODE_SLC) = (
+        bytes([const]) for const in range(1, 4))
+(LMODE_MODE_REMOTE, LMODE_MODE_LOCAL, LMODE_MODE_TRAPSIG) = (
+        bytes([const]) for const in range(3))
+(LMODE_MODE_ACK, LMODE_MODE_SOFT_TAB, LMODE_MODE_LIT_ECHO) = (
+    bytes([4]), bytes([8]), bytes([16]))
+SLC_LEVELBITS = 0x03
+
+# see: TelnetStreamReader._default_callbacks
+DEFAULT_IAC_CALLBACKS = (
+        (BRK, 'brk'), (IP, 'ip'), (AO, 'ao'), (AYT, 'ayt'), (EC, 'ec'),
+        (EL, 'el'), (EOF, 'eof'), (SUSP, 'susp'), (ABORT, 'abort'),
+        (NOP, 'nop'), (DM, 'dm'), (GA, 'ga'), (EOR_CMD, 'eor'), )
+DEFAULT_SLC_CALLBACKS = (
+        (SLC_SYNCH, 'dm'), (SLC_BRK, 'brk'), (SLC_IP, 'ip'),
+        (SLC_AO, 'ao'), (SLC_AYT, 'ayt'), (SLC_EOR, 'eor'),
+        (SLC_ABORT, 'abort'), (SLC_EOF, 'eof'), (SLC_SUSP, 'susp'),
+        (SLC_EC, 'ec'), (SLC_EL, 'el'), (SLC_EW, 'ew'), (SLC_RP, 'rp'),
+        (SLC_LNEXT, 'lnext'), (SLC_XON, 'xon'), (SLC_XOFF, 'xoff'), )
+DEFAULT_EXT_CALLBACKS = (
+        (TTYPE, 'ttype'), (TSPEED, 'tspeed'), (XDISPLOC, 'xdisploc'),
+        (NEW_ENVIRON, 'env'), (NAWS, 'naws'), (LOGOUT, 'logout'),
+        (SNDLOC, 'sndloc',) )
+
+class SLC_definition(object):
+    """ An SLC definition defines the willingness to support
+        a Special Linemode Character, and is defined by its byte,
+        ``mask`` and default keyboard ASCII byte ``value``.
+
+        The special byte ``mask`` ``SLC_NOSUPPORT`` and value
+        ``_POSIX_VDISABLE`` infer our unwillingness to support
+        the option.
+
+        The default byte ``mask`` ``SLC_DEFAULT`` and value
+        ``b'\x00'`` infer our willingness to support the option,
+        but with no default character. The value must first
+        negotiated by the client to activate the SLC callback.
+    """
+
+    def __init__(self, mask=SLC_DEFAULT, value=theNULL):
+        assert type(mask) is bytes and type(value) is bytes
+        assert len(mask) == 1 and len(value) == 1
+        self.mask = mask
+        self.val = value
+
+    @property
+    def level(self):
+        """ Returns SLC level of support.  """
+        return bytes([ord(self.mask) & SLC_LEVELBITS])
+
+    @property
+    def nosupport(self):
+        """ Returns True if SLC level is SLC_NOSUPPORT. """
+        return self.level == SLC_NOSUPPORT
+
+    @property
+    def ack(self):
+        """ Returns True if SLC_ACK bit is set. """
+        return ord(self.mask) & ord(SLC_ACK)
+
+    @property
+    def flushin(self):
+        """ Returns True if SLC_FLUSHIN bit is set. """
+        return ord(self.mask) & ord(SLC_FLUSHIN)
+
+    @property
+    def flushout(self):
+        """ Returns True if SLC_FLUSHIN bit is set. """
+        return ord(self.mask) & ord(SLC_FLUSHOUT)
+
+    def set_value(self, value):
+        """ Set SLC keyboard ascii value, ``byte``. """
+        assert type(value) is bytes and len(value) == 1
+        self.val = value
+
+    def set_mask(self, mask):
+        """ Set SLC mask, ``mask``. """
+        assert type(mask) is bytes and len(mask) == 1
+        self.mask = mask
+
+    def set_flag(self, flag):
+        """ Set SLC flag byte, ``flag``. """
+        assert type(flag) is bytes and len(flag) == 1
+        self.mask = bytes([ord(self.mask) | ord(flag)])
+
+    def unset_flag(self, flag):
+        """ Unset SLC flag byte, ``flag``. """
+        self.mask = bytes([ord(self.mask) ^ ord(flag)])
+
+    def __str__(self):
+        """ Returns SLC definition as string '(flag(|s), value)'. """
+        flags = []
+        if self.nosupport:
+            flags.append('nosupport')
+        if self.ack:
+            flags.append('ack')
+        if self.flushin:
+            flags.append('flushin')
+        if self.flushout:
+            flags.append('flushout')
+        return '({}, {})'.format(
+                '|'.join(flags) if flags else 'None',
+                _name_char(self.val.decode('iso8859-1')))
+
+class SLC_nosupport(SLC_definition):
+    def __init__(self):
+        SLC_definition.__init__(self, SLC_NOSUPPORT, _POSIX_VDISABLE)
+
+# The following are default values for the "Special Line Character" tabset,
+# set on initialization of a TelnetStreamReader, or when special SLC function
+# (0, SLC_DEFAULT, 0) is received.
+_SLC_VARIABLE_FIO = bytes(
+        [ord(SLC_VARIABLE) | ord(SLC_FLUSHIN) | ord(SLC_FLUSHOUT)])
+_SLC_VARIABLE_FI = bytes(
+        [ord(SLC_VARIABLE) | ord(SLC_FLUSHIN)])
+_SLC_VARIABLE_FO = bytes(
+        [ord(SLC_VARIABLE) | ord(SLC_FLUSHOUT)])
+
+# `````````````````````````````````````````````````````````````````````````````
+_POSIX_VDISABLE = b'\xff'
+
 #: A simple SLC tab that offers nearly all characters for negotiation,
 #  but has no default values of its own, soliciting them from client.
 DEFAULT_SLC_TAB = {
@@ -34,7 +179,6 @@ BSD_SLC_TAB = {
             SLC_VARIABLE, b'\x14'), SLC_BRK: SLC_definition(),
             SLC_SYNCH: SLC_definition(), SLC_EOR: SLC_definition(), }
 
-
 def escape_iac(buf):
     """ .. function:: escape_iac(buf : bytes) -> type(bytes)
         :noindex:
@@ -52,7 +196,7 @@ class Forwardmask(object):
         received by server with IAC SB LINEMODE DO FORWARDMASK. It
         must be a full 32-bit bytearray.
         """
-        assert isinstance(value, (bytes, bytesarray)), value
+        assert isinstance(value, (bytes, bytearray)), value
         assert len(value) is 32, len(value)
         self.value = value
         self.ack = ack
@@ -520,7 +664,7 @@ class TelnetStreamReader:
         """ Send XDISPLOC, SEND sub-negotiation, rfc1086.
         """
         # Does nothing if (WILL, XDISPLOC) has not yet been received.
-        # or an existing SB XDISPLOC SEND request is already pending. 
+        # or an existing SB XDISPLOC SEND request is already pending.
         if not self.remote_option.get(XDISPLOC, None):
             return
         if not self.pending_option.get(SB + XDISPLOC, None):
@@ -533,7 +677,7 @@ class TelnetStreamReader:
         """ Send TTYPE SEND sub-negotiation, rfc930.
         """
         # Does nothing if (WILL, TTYPE) has not yet been received.
-        # or an existing SB TTYPE SEND request is already pending. 
+        # or an existing SB TTYPE SEND request is already pending.
         if not self.remote_option.get(TTYPE, None):
             return
         if not self.pending_option.get(SB + TTYPE, None):
@@ -1124,24 +1268,27 @@ class TelnetStreamReader:
         """ Initilize dictionaries ``pending_option``, ``local_option``,
             ``remote_option``, and call ``set_default_linemode()``.
         """
-        # ivar pending_option: a dict of <opt> bytes that follow an
+        #: a dictionary of telnet option ``opt`` bytes that follow an
         # *IAC DO* or *DONT* command, and contains a value of ``True``
         # until an *IAC WILL* or *WONT* has been received by remote end.
-        # Requests that expect an *IAC SB* Sub-negotiation reply are keyed
-        # by bytes *SB* + ``opt``.
+        # Requests related to extended RFC sub-negotation are keyed by
+        # *SB* ``opt``.
         self.pending_option = Option('pending_option', self.log)
-     * ``local_option`` is a dict of <opt> bytes that follow an IAC WILL or
-       WONT command sent by local end to indicate local capability.  For
-       example, if local_option[ECHO] is True, then this server should echo
-       input received from client.
-     * ``remote_option`` is a dict of <opt> bytes that follow an IAC WILL or
-       WONT command received by remote end to indicate remote capability. For
-       example, if remote_option[NAWS] (Negotiate about window size) is True,
-       then the window dimensions of the remote client may be determined.
 
-
+        #: a dictionary of telnet option ``byte`` bytes that follow an
+        # *IAC WILL* or *WONT* command sent by local end to indicate local
+        # capability. For example, if ``local_option[ECHO]`` is ``True``,
+        # then this end should echo input received from remote end (note
+        # this is clearly not a valid mode for client mode)
         self.local_option = Option('local_option', self.log)
+
+        #: a dictionary of telnet option ``byte`` bytes that follow an
+        # *IAC WILL* or *WONT* command received by remote end to indicate
+        # remote capability. For example, if remote_option[NAWS] (Negotiate
+        # about window size) is True, then the window dimensions of the
+        # remote client may be determined by ``request_naws()``
         self.remote_option = Option('remote_option', self.log)
+
         self.set_default_linemode()
 
     def _default_callbacks(self):
@@ -1633,5 +1780,85 @@ class Linemode(object):
         if self.ack:
             flags.append('ack')
         return '|'.join(flags)
+
+#: List of globals that may match an iac command option bytes
+_DEBUG_OPTS = dict([(value, key)
+                    for key, value in globals().items() if key in
+                  ('LINEMODE', 'LMODE_FORWARDMASK', 'NAWS', 'NEW_ENVIRON',
+                      'ENCRYPT', 'AUTHENTICATION', 'BINARY', 'SGA', 'ECHO',
+                      'STATUS', 'TTYPE', 'TSPEED', 'LFLOW', 'XDISPLOC', 'IAC',
+                      'DONT', 'DO', 'WONT', 'WILL', 'SE', 'NOP', 'DM', 'TM',
+                      'BRK', 'IP', 'ABORT', 'AO', 'AYT', 'EC', 'EL', 'EOR',
+                      'GA', 'SB', 'EOF', 'SUSP', 'ABORT', 'LOGOUT',
+                      'CHARSET', 'SNDLOC')])
+#: List of globals that may match an slc function byte
+_DEBUG_SLC_OPTS = dict([(value, key)
+                        for key, value in locals().items() if key in
+                        ('SLC_SYNCH', 'SLC_BRK', 'SLC_IP', 'SLC_AO', 'SLC_AYT',
+                            'SLC_EOR', 'SLC_ABORT', 'SLC_EOF', 'SLC_SUSP',
+                            'SLC_EC', 'SLC_EL', 'SLC_EW', 'SLC_RP',
+                            'SLC_LNEXT', 'SLC_XON', 'SLC_XOFF', 'SLC_FORW1',
+                            'SLC_FORW2', 'SLC_MCL', 'SLC_MCR', 'SLC_MCWL',
+                            'SLC_MCWR', 'SLC_MCBOL', 'SLC_MCEOL', 'SLC_INSRT',
+                            'SLC_OVER', 'SLC_ECR', 'SLC_EWR', 'SLC_EBOL',
+                            'SLC_EEOL',)])
+
+#: List of globals that may match an slc linemode mode bitmask
+_DEBUG_SLC_BITMASK = dict([(value, key)
+                           for key, value in locals().items() if key in
+                         ('SLC_FLUSHIN', 'SLC_FLUSHOUT', 'SLC_ACK',)])
+
+#: List of globals that may match an slc function flag
+_DEBUG_SLC_MODIFIERS = dict([(value, key)
+                             for key, value in locals().items() if key in
+                           ('SLC_NOSUPPORT', 'SLC_CANTCHANGE',
+                               'SLC_VARIABLE', 'SLC_DEFAULT',)])
+
+def _name_command(byte):
+    """ Given an IAC byte, return its mnumonic global constant. """
+    return (repr(byte) if byte not in _DEBUG_OPTS
+            else _DEBUG_OPTS[byte])
+
+def _name_commands(cmds, sep=' '):
+    return ' '.join([
+        _name_command(bytes([byte])) for byte in cmds])
+
+def _name_cr(cr_kind):
+    """ Display a simple name for NVT carriage return sequence, usually one
+        of 'CR', 'CR + LF', 'CR + NUL', but even 'EOR_CMD' for IBM Clients!
+    """
+    return 'EOR' if cr_kind == EOR_CMD else ' + '.join([
+        'CR' if char == '\r' else
+        'LF' if char == '\n' else
+        'NUL' if char == '\x00' else None
+        for char in cr_kind])
+
+def _bin8(number):
+    """ return binary representation of ``number``, padded to 8 bytes. """
+    prefix, value = bin(number).split('b')
+    return '0b%0.8i' % (int(value),)
+
+def _name_char(ucs):
+    """ Return string of an 8-bit input character value, ``number``. """
+    import unicodedata
+    ret=''
+    if 128 <= ord(ucs) <= 255:
+        ret = 'M-'
+        ucs = chr(ord(ucs) & 0x7f)
+    elif ord(ucs) < ord(' ') or (ucs) == 127:
+        ret += '^'
+        ucs = chr(ord(ucs) ^ ord('@'))
+    else:
+        try:
+            ucs = unicodedata.name(chr(ord(ucs)))
+        except ValueError:
+            ucs = repr(ucs)
+    return ret + ucs
+
+def _name_slc_command(byte):
+    """ Given an SLC byte, return global mnumonic constant as string. """
+    return (repr(byte) if byte not in _DEBUG_SLC_OPTS
+            else _DEBUG_SLC_OPTS[byte])
+
 
 
