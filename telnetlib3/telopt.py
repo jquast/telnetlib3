@@ -867,9 +867,6 @@ class TelnetStreamReader:
         """
         self.log.debug('IAC ABORT: Abort')
 
-        assert byte in (IP, AO, AYT, EC, EL, EOR_CMD, ABORT, NOP, DM, GA
-                ), (byte)
-
     def handle_eof(self, byte):
         """ XXX Handle End of Record (IAC, EOF), rfc1184 or SLC_EOF.
         """
@@ -920,7 +917,8 @@ class TelnetStreamReader:
         #   prompt character and the preceding <CR><LF>*."
         # XXX TODO: Must netsend()
         self.log.debug('IAC AO: Abort Output')
-        self.stream.discard_output()
+        pass
+        #self.stream.discard_output()
 
     def handle_xon(self, byte):
         """ XXX handle Transmit-On (IAC, XON) or SLC_XON.
