@@ -291,8 +291,9 @@ class TelnetStreamReader:
             # IAC WILL TM or IAC WONT TM is received by remote end.
             self.log.debug('discarded by timing-mark: {!r}'.format(byte))
 
-        elif (self.is_linemode and self.slc_simulated  # kludge mode,
-                ) or self.remote_option.enabled(LINEMODE):  # remote editing
+        elif (not self.is_linemode and self.slc_simulated  # kludge mode,
+                ) or (self.remote_option.enabled(LINEMODE)
+                        and self.linemode.remote):  #  remote lm + editing,
             # 'byte' is tested for SLC characters
             (callback, slc_name, slc_def) = self._slc_snoop(byte)
             if slc_name is not None:
