@@ -10,6 +10,8 @@ import sys
 
 import tulip
 import telopt
+import teldisp
+from slc import name_slc_command
 
 __all__ = ['TelnetServer']
 
@@ -135,7 +137,7 @@ class TelnetServer(tulip.protocols.Protocol):
         char_disp = char
         if (127 > ord(char) < 31 and not self.outbinary
                 ) or (not char.isprintable()):
-            char_disp = self.standout(telopt._name_char(char))
+            char_disp = self.standout(teldisp.name_unicode(char))
         if self.is_literal:
             self._lastline.append(char)
             self.echo(char_disp)
@@ -224,7 +226,8 @@ class TelnetServer(tulip.protocols.Protocol):
 
     def editing_received(self, char, slc):
         self.log.debug('editing_received: {!r}, {}.'.format(
-            char, telopt._name_slc_command(slc),))
+            char, name_slc_command(slc),))
+        char_disp = teldisp.name_unicode(char.decode('iso8859-1'))
         if self.is_literal is not False:  # continue literal
             ucs = self.decode(char)
             if ucs is not None:
@@ -241,37 +244,38 @@ class TelnetServer(tulip.protocols.Protocol):
             else:
                 self._lastline.pop()
             self.display_prompt(redraw=True)
-        elif slc == telopt.SLC_EW:  # erase word (^w)
-            # erase over .(\w+)
-            removed = 0
-            while (self.lastline) and not (removed
-                    or not self._lastline[-1].isspace()):
-                self._lastline.pop()
-                removed += 1
-            if not removed:
+        elif slc == telopt.SLC_EW:  # erase word (^w), rubout .(\w+)
+            if not self._lastline:
                 self.bell()
             else:
+                while self._lastline and self._lastline[-1].isspace():
+                    self._lastline.pop()
+                while self._lastline and not self._lastline[-1].isspace():
+                    self._lastline.pop()
                 self.display_prompt(redraw=True)
-        elif slc == telopt.SLC_EL:
-            # erase line (^L)
+        elif slc == telopt.SLC_EL:  # erase line (^L)
             self._lastline.clear()
             self.display_prompt(redraw=True)
-        elif slc == telopt.SLC_EOF:
-            # end of file (^D)
+        elif slc == telopt.SLC_EOF:  # end of file (^D)
             if not self._lastline:
-                self.echo(telopt._name_char(char.decode('ascii')))
+                self.echo(char_disp)
                 self.logout(telopt.DO)
             else:
                 self.bell()
-        elif slc == telopt.SLC_IP:
+        elif slc in (telopt.SLC_IP, telopt.SLC_ABORT):
+            # interrupt process (^C), abort process (^\)
             self._lastline.clear()
-            self.echo(telopt._name_char(char.decode('ascii')))
+            self.echo(char_disp)
             self.display_prompt()
-        elif slc in (telopt.SLC_AYT, telopt.SLC_SUSP, telopt.SLC_AO,
-                telopt.SLC_XON, telopt.SLC_XOFF, telopt.SLC_ABORT,
-                telopt.SLC_EOF, telopt.SLC_SYNCH, telopt.SLC_EOR):
-            self.log.debug('recv {}'.format(telopt._name_slc_command(slc)))
-            self.echo(telopt._name_char(char.decode('ascii')))
+        elif slc in (telopt.SLC_XON, telopt.SLC_XOFF,
+                telopt.SLC_AYT, telopt.SLC_SUSP):
+            # handled by callbacks or not really an editing cmd
+            pass
+        elif slc in (telopt.SLC_AO, telopt.SLC_SYNCH, telopt.SLC_EOR):
+            # all others (unhandled)
+            self.log.debug('recv {}'.format(name_slc_command(slc)))
+            self.echo(char_disp)
+            self.bell()
             self.display_prompt()
         else:
             raise NotImplementedError
@@ -595,7 +599,7 @@ class TelnetServer(tulip.protocols.Protocol):
 
         # wire extended rfc callbacks for terminal type, dimensions
         self.stream.set_ext_callback(telopt.NEW_ENVIRON, self._env_update)
-        self.stream.set_ext_callback(telopt.TTYPE, self._ttype_received)
+        self.stream.set_ext_callback(telopt.TTYPE, self.ttype_received)
         self.stream.set_ext_callback(telopt.NAWS, self._naws_update)
 
     def cmdset_toggle(self, *args):
@@ -607,7 +611,7 @@ class TelnetServer(tulip.protocols.Protocol):
             ('goahead', not lopt.enabled(telopt.SGA) and not self._send_ga),
             ('color', self._does_styling),
             ('xon-any', self.stream.xon_any),
-            ('bell', self._does_styling)])
+            ('bell', self._send_bell)])
         if len(args) is 0:
             self.echo(', '.join(
                 '{}{} [{}]'.format('\r\n' if num % 4 == 0 else '',
@@ -657,6 +661,56 @@ class TelnetServer(tulip.protocols.Protocol):
         else:
             return 1
         return 0
+
+    def ttype_received(self, ttype):
+        """ Callback for TTYPE response.
+
+        The first firing of this callback signals an advanced client and
+        is awarded with additional opts by ``request_advanced_opts()``.
+
+        Otherwise the session variable TERM is set to the value of ``ttype``.
+        """
+        if self._advanced is False:
+            if not len(self.client_env['TERM']):
+                self._env_update({'TERM': ttype})
+            # track TTYPE seperately from the NEW_ENVIRON 'TERM' value to
+            # avoid telnet loops in TTYPE cycling
+            self._env_update({'TTYPE0': ttype})
+            # windows-98 era telnet ('ansi'), or terminals replying as
+            # such won't have anything more interesting to say. windows
+            # socket transport locks up if a second TTYPE is requested.
+            self.request_advanced_opts(ttype=(ttype != 'ansi'))
+            self._advanced = 1
+            return
+
+        self._env_update({'TTYPE{}'.format(self._advanced): ttype})
+        lastval = self.client_env['TTYPE{}'.format(self._advanced)]
+        if ttype == self.client_env['TTYPE0']:
+            self._env_update({'TERM': ttype})
+            self.log.debug('end on TTYPE{}: {}, using {env[TERM]}.'
+                    .format(self._advanced, ttype, env=self.client_env))
+            return
+        elif (self._advanced == self.TTYPE_LOOPMAX
+                or not ttype or ttype.lower() == 'unknown'):
+            ttype = self.client_env['TERM'].lower()
+            self._env_update({'TERM': ttype})
+            self.log.warn('TTYPE stop on {}, using {env[TERM]}.'.format(
+                self._advanced, env=self.client_env))
+            return
+        elif (self._advanced == 2 and ttype.upper().startswith('MTTS ')):
+            # Mud Terminal type started, previous value is most termcap-like
+            ttype = self.client_env['TTYPE{}'.format(self._advanced)]
+            self._env_update({'TERM': ttype})
+            self.log.warn('TTYPE is {}, using {env[TERM]}.'.format(
+                self._advanced, env=self.client_env))
+        elif (ttype.lower() == lastval):
+            # End of list (looping). Chose first value
+            self.log.warn('TTYPE repeated at {}, using {env[TERM]}.'.format(
+                self._advanced, env=self.client_env))
+            return
+        ttype = ttype.lower()
+        self.stream.request_ttype()
+        self._advanced += 1
 
     def _display_tb(self, *exc_info, level=logging.DEBUG):
         """ Dispaly exception to client when ``show_traceback`` is True,
@@ -735,56 +789,6 @@ class TelnetServer(tulip.protocols.Protocol):
             self.log.warn('negotiate failed for {}.'.format(pending))
             self.echo('\r\nnegotiate failed for {}.'.format(pending))
         loop.call_soon(call_after)
-
-    def _ttype_received(self, ttype):
-        """ Callback for TTYPE response.
-
-        The first firing of this callback signals an advanced client and
-        is awarded with additional opts by ``request_advanced_opts()``.
-
-        Otherwise the session variable TERM is set to the value of ``ttype``.
-        """
-        if self._advanced is False:
-            if not len(self.client_env['TERM']):
-                self._env_update({'TERM': ttype})
-            # track TTYPE seperately from the NEW_ENVIRON 'TERM' value to
-            # avoid telnet loops in TTYPE cycling
-            self._env_update({'TTYPE0': ttype})
-            # windows-98 era telnet ('ansi'), or terminals replying as
-            # such won't have anything more interesting to say. windows
-            # socket transport locks up if a second TTYPE is requested.
-            self.request_advanced_opts(ttype=(ttype != 'ansi'))
-            self._advanced = 1
-            return
-
-        self._env_update({'TTYPE{}'.format(self._advanced): ttype})
-        lastval = self.client_env['TTYPE{}'.format(self._advanced)]
-        if ttype == self.client_env['TTYPE0']:
-            self._env_update({'TERM': ttype})
-            self.log.debug('end on TTYPE{}: {}, using {env[TERM]}.'
-                    .format(self._advanced, ttype, env=self.client_env))
-            return
-        elif (self._advanced == self.TTYPE_LOOPMAX
-                or not ttype or ttype.lower() == 'unknown'):
-            ttype = self.client_env['TERM'].lower()
-            self._env_update({'TERM': ttype})
-            self.log.warn('TTYPE stop on {}, using {env[TERM]}.'.format(
-                self._advanced, env=self.client_env))
-            return
-        elif (self._advanced == 2 and ttype.upper().startswith('MTTS ')):
-            # Mud Terminal type started, previous value is most termcap-like
-            ttype = self.client_env['TTYPE{}'.format(self._advanced)]
-            self._env_update({'TERM': ttype})
-            self.log.warn('TTYPE is {}, using {env[TERM]}.'.format(
-                self._advanced, env=self.client_env))
-        elif (ttype.lower() == lastval):
-            # End of list (looping). Chose first value
-            self.log.warn('TTYPE repeated at {}, using {env[TERM]}.'.format(
-                self._advanced, env=self.client_env))
-            return
-        ttype = ttype.lower()
-        self.stream.request_ttype()
-        self._advanced += 1
 
 ARGS = argparse.ArgumentParser(description="Run simple telnet server.")
 ARGS.add_argument(

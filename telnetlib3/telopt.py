@@ -6,20 +6,22 @@ from telnetlib import TTYPE, TSPEED, LFLOW, XDISPLOC, IAC, DONT, DO, WONT
 from telnetlib import WILL, SE, NOP, TM, DM, BRK, IP, AO, AYT, EC, EL, EOR
 from telnetlib import GA, SB, LOGOUT, EXOPL, CHARSET, SNDLOC, theNULL
 
+from slc import SLC_NOSUPPORT, SLC_CANTCHANGE, SLC_VARIABLE, NSLC
+from slc import SLC_DEFAULT, SLC_FLUSHOUT, SLC_FLUSHIN, SLC_ACK
+from slc import SLC_SYNCH, SLC_BRK, SLC_IP, SLC_AO, SLC_AYT, SLC_EOR
+from slc import SLC_ABORT, SLC_EOF, SLC_SUSP, SLC_EC, SLC_EL, SLC_EW
+from slc import SLC_RP, SLC_LNEXT, SLC_XON, SLC_XOFF, SLC_FORW1
+from slc import SLC_FORW2, SLC_MCL, SLC_MCR, SLC_MCWL, SLC_MCWR, SLC_MCBOL
+from slc import SLC_MCEOL, SLC_INSRT, SLC_OVER, SLC_ECR, SLC_EWR, SLC_EBOL
+from slc import SLC_EEOL, DEFAULT_SLC_TAB, SLC_nosupport, SLC_definition
+from slc import _POSIX_VDISABLE, name_slc_command, Forwardmask
+
+from teldisp import name_unicode
+
 (EOF, SUSP, ABORT, EOR_CMD) = (
         bytes([const]) for const in range(236, 240))
 (IS, SEND, INFO) = (bytes([const]) for const in range(3))
 (LFLOW_OFF, LFLOW_ON, LFLOW_RESTART_ANY, LFLOW_RESTART_XON) = (
-        bytes([const]) for const in range(4))
-NSLC = 30
-(SLC_SYNCH, SLC_BRK, SLC_IP, SLC_AO, SLC_AYT, SLC_EOR, SLC_ABORT, SLC_EOF,
-    SLC_SUSP, SLC_EC, SLC_EL, SLC_EW, SLC_RP, SLC_LNEXT, SLC_XON, SLC_XOFF,
-    SLC_FORW1, SLC_FORW2, SLC_MCL, SLC_MCR, SLC_MCWL, SLC_MCWR, SLC_MCBOL,
-    SLC_MCEOL, SLC_INSRT, SLC_OVER, SLC_ECR, SLC_EWR, SLC_EBOL, SLC_EEOL) = (
-            bytes([const]) for const in range(1, NSLC + 1))
-(SLC_FLUSHOUT, SLC_FLUSHIN, SLC_ACK) = (
-        bytes([32]), bytes([64]), bytes([128]))
-(SLC_NOSUPPORT, SLC_CANTCHANGE, SLC_VARIABLE, SLC_DEFAULT) = (
         bytes([const]) for const in range(4))
 (LMODE_MODE, LMODE_FORWARDMASK, LMODE_SLC) = (
         bytes([const]) for const in range(1, 4))
@@ -27,7 +29,6 @@ NSLC = 30
         bytes([const]) for const in range(3))
 (LMODE_MODE_ACK, LMODE_MODE_SOFT_TAB, LMODE_MODE_LIT_ECHO) = (
     bytes([4]), bytes([8]), bytes([16]))
-SLC_LEVELBITS = 0x03
 
 # see: TelnetStreamReader._default_callbacks
 DEFAULT_IAC_CALLBACKS = (
@@ -45,139 +46,6 @@ DEFAULT_EXT_CALLBACKS = (
         (NEW_ENVIRON, 'env'), (NAWS, 'naws'), (LOGOUT, 'logout'),
         (SNDLOC, 'sndloc',) )
 
-class SLC_definition(object):
-    """ An SLC definition defines the willingness to support
-        a Special Linemode Character, and is defined by its byte,
-        ``mask`` and default keyboard ASCII byte ``value``.
-
-        The special byte ``mask`` ``SLC_NOSUPPORT`` and value
-        ``_POSIX_VDISABLE`` infer our unwillingness to support
-        the option.
-
-        The default byte ``mask`` ``SLC_DEFAULT`` and value
-        ``b'\x00'`` infer our willingness to support the option,
-        but with no default character. The value must first
-        negotiated by the client to activate the SLC callback.
-    """
-
-    def __init__(self, mask=SLC_DEFAULT, value=theNULL):
-        assert type(mask) is bytes and type(value) is bytes
-        assert len(mask) == 1 and len(value) == 1
-        self.mask = mask
-        self.val = value
-
-    @property
-    def level(self):
-        """ Returns SLC level of support.  """
-        return bytes([ord(self.mask) & SLC_LEVELBITS])
-
-    @property
-    def nosupport(self):
-        """ Returns True if SLC level is SLC_NOSUPPORT. """
-        return self.level == SLC_NOSUPPORT
-
-    @property
-    def ack(self):
-        """ Returns True if SLC_ACK bit is set. """
-        return ord(self.mask) & ord(SLC_ACK)
-
-    @property
-    def flushin(self):
-        """ Returns True if SLC_FLUSHIN bit is set. """
-        return ord(self.mask) & ord(SLC_FLUSHIN)
-
-    @property
-    def flushout(self):
-        """ Returns True if SLC_FLUSHIN bit is set. """
-        return ord(self.mask) & ord(SLC_FLUSHOUT)
-
-    def set_value(self, value):
-        """ Set SLC keyboard ascii value, ``byte``. """
-        assert type(value) is bytes and len(value) == 1
-        self.val = value
-
-    def set_mask(self, mask):
-        """ Set SLC mask, ``mask``. """
-        assert type(mask) is bytes and len(mask) == 1
-        self.mask = mask
-
-    def set_flag(self, flag):
-        """ Set SLC flag byte, ``flag``. """
-        assert type(flag) is bytes and len(flag) == 1
-        self.mask = bytes([ord(self.mask) | ord(flag)])
-
-    def unset_flag(self, flag):
-        """ Unset SLC flag byte, ``flag``. """
-        self.mask = bytes([ord(self.mask) ^ ord(flag)])
-
-    def __str__(self):
-        """ Returns SLC definition as string '(flag(|s), value)'. """
-        flags = []
-        if self.nosupport:
-            flags.append('nosupport')
-        if self.ack:
-            flags.append('ack')
-        if self.flushin:
-            flags.append('flushin')
-        if self.flushout:
-            flags.append('flushout')
-        return '({}, {})'.format(
-                '|'.join(flags) if flags else 'None',
-                _name_char(self.val.decode('iso8859-1')))
-
-class SLC_nosupport(SLC_definition):
-    def __init__(self):
-        SLC_definition.__init__(self, SLC_NOSUPPORT, _POSIX_VDISABLE)
-
-#: SLC value may be changed, flushes input and output
-_SLC_VARIABLE_FIO = bytes(
-        [ord(SLC_VARIABLE) | ord(SLC_FLUSHIN) | ord(SLC_FLUSHOUT)])
-#: SLC value may be changed, flushes input
-_SLC_VARIABLE_FI = bytes(
-        [ord(SLC_VARIABLE) | ord(SLC_FLUSHIN)])
-#: SLC value may be changed, flushes output
-_SLC_VARIABLE_FO = bytes(
-        [ord(SLC_VARIABLE) | ord(SLC_FLUSHOUT)])
-#: SLC function for this value is not supported
-_POSIX_VDISABLE = b'\xff'
-
-#: A simple SLC tab that offers nearly all characters for negotiation,
-#  but has no default values of its own, soliciting them from client.
-DEFAULT_SLC_TAB = {
-        SLC_FORW1: SLC_definition(SLC_NOSUPPORT, _POSIX_VDISABLE),
-        SLC_FORW2: SLC_definition(SLC_NOSUPPORT, _POSIX_VDISABLE),
-        SLC_EOF: SLC_definition(), SLC_EC: SLC_definition(),
-        SLC_EL: SLC_definition(), SLC_IP: SLC_definition(),
-        SLC_ABORT: SLC_definition(), SLC_XON: SLC_definition(),
-        SLC_XOFF: SLC_definition(), SLC_EW: SLC_definition(),
-        SLC_RP: SLC_definition(), SLC_LNEXT: SLC_definition(),
-        SLC_AO: SLC_definition(), SLC_SUSP: SLC_definition(),
-        SLC_AYT: SLC_definition(), SLC_BRK: SLC_definition(),
-        SLC_SYNCH: SLC_definition(), SLC_EOR: SLC_definition(), }
-
-
-#: This SLC tab when sent to a BSD client warrants no reply; their
-#  tabs match exactly. These values are found in ttydefaults.h of
-#  termios family of functions.
-BSD_SLC_TAB = {
-        SLC_FORW1: SLC_definition(SLC_NOSUPPORT, _POSIX_VDISABLE),
-        SLC_FORW2: SLC_definition(SLC_NOSUPPORT, _POSIX_VDISABLE),
-        SLC_EOF: SLC_definition(  # ^D VEOF
-            SLC_VARIABLE, b'\x04'), SLC_EC: SLC_definition(  # BS VERASE
-            SLC_VARIABLE, b'\x7f'), SLC_EL: SLC_definition(  # ^U VKILL
-            SLC_VARIABLE, b'\x15'), SLC_IP: SLC_definition(  # ^C VINTR
-            _SLC_VARIABLE_FIO, b'\x03'), SLC_ABORT: SLC_definition(  # ^\ VQUIT
-            _SLC_VARIABLE_FIO, b'\x1c'), SLC_XON: SLC_definition(  # ^Q VSTART
-            SLC_VARIABLE, b'\x11'), SLC_XOFF: SLC_definition(  # ^S VSTOP
-            SLC_VARIABLE, b'\x13'), SLC_EW: SLC_definition(  # ^W VWERASE
-            SLC_VARIABLE, b'\x17'), SLC_RP: SLC_definition(  # ^R VREPRINT
-            SLC_VARIABLE, b'\x12'), SLC_LNEXT: SLC_definition(  # ^V VLNEXT
-            SLC_VARIABLE, b'\x16'), SLC_AO: SLC_definition(  # ^O VDISCARD
-            _SLC_VARIABLE_FO, b'\x0f'), SLC_SUSP: SLC_definition(  # ^Z VSUSP
-            _SLC_VARIABLE_FI, b'\x1a'), SLC_AYT: SLC_definition(  # ^T VSTATUS
-            SLC_VARIABLE, b'\x14'), SLC_BRK: SLC_definition(),
-            SLC_SYNCH: SLC_definition(), SLC_EOR: SLC_definition(), }
-
 def escape_iac(buf):
     """ .. function:: escape_iac(buf : bytes) -> type(bytes)
         :noindex:
@@ -186,67 +54,6 @@ def escape_iac(buf):
     """
     assert isinstance(buf, (bytes, bytearray)), buf
     return buf.replace(IAC, IAC + IAC)
-
-class Forwardmask(object):
-    def __init__(self, value, ack=False):
-        """ .. class:: ForwardMask(value : bytes, ack: bool)
-
-        Initialize a ForwardMask object using the bytemask value
-        received by server with IAC SB LINEMODE DO FORWARDMASK. It
-        must be a full 32-bit bytearray.
-        """
-        assert isinstance(value, (bytes, bytearray)), value
-        assert len(value) in (16, 32), len(value)
-        self.value = value
-        self.ack = ack
-
-    def __repr__(self):
-        """ .. method:: __repr__() -> type(list)
-
-            Returns list of strings describing obj as a tabular ASCII map.
-        """
-        result = []
-        nil8 = _bin8(0)
-        MRK_CONT = '(...)'
-        def same_as_last(row):
-            return len(result) and result[-1].endswith(row.split()[-1])
-        def continuing():
-            return len(result) and result[-1] == MRK_CONT
-        def is_last(mask):
-            return mask == len(self.value) - 1
-        for mask, byte in enumerate(self.value):
-            if byte is 0:
-                if continuing() and not is_last(mask):
-                    continue
-                row = '[%2d] %s' % (mask, nil8,)
-                if not same_as_last(row) or is_last(mask):
-                    result.append(row)
-                else:
-                    result.append(MRK_CONT)
-            else:
-                start = mask * 8
-                last = start + 7
-                characters = ', '.join([ _name_char(chr(char))
-                    for char in range(start, last + 1) if char in self])
-                result.append ('[%2d] %s %s' % (
-                    mask, _bin8(byte), characters,))
-        return result
-
-    def __str__(self):
-        """ .. method:: __str__ -> type(str)
-
-            Returns single string of binary 0 and 1 describing obj.
-        """
-        return '0b%s' % (''.join([value for (prefix, value) in [
-            _bin8(byte).split('b') for byte in self.value]]),)
-
-    def __contains__(self, number):
-        """ .. method:: __contains__(number : int) -> type(bool)
-
-            ``True`` if forwardmask has keycode ``number``, else ``False``.
-        """
-        mask, flag = number // 8, 2 ** (7 - (number % 8))
-        return bool(self.value[mask] & flag)
 
 class Option(dict):
     def __init__(self, name, log=logging):
@@ -287,7 +94,7 @@ class TelnetStreamReader:
     # a client agrees to negotiate NEW_ENVIRON.
     _default_env_request = (
             "USER HOSTNAME UID TERM COLUMNS LINES DISPLAY LANG SYSTEMTYPE "
-            "ACCT JOB PRINTER SFUTLNTVER SFUTLNTMODE").split()
+            "ACCT JOB PRINTER SFUTLNTVER SFUTLNTMODE LC_ALL").split()
     #: Maximum size of sub-negotiation buffer
     SB_MAXSIZE = 2048
     #: Maximum size of Special Linemode Character receive buffer
@@ -490,7 +297,7 @@ class TelnetStreamReader:
             (callback, slc_name, slc_def) = self._slc_snoop(byte)
             if slc_name is not None:
                 self.log.debug('_slc_snoop({!r}): {}, callback is {}.'.format(
-                        byte, _name_slc_command(slc_name),
+                        byte, name_slc_command(slc_name),
                         callback.__name__ if callback is not None else None))
                 if slc_def.flushin:
                     # SLC_FLUSHIN not supported, requires SYNCH (urgent TCP).
@@ -803,7 +610,7 @@ class TelnetStreamReader:
         self.send_iac(IAC + SB + sb_cmd + IAC + SE)
         self.pending_option[SB + LINEMODE] = True
 
-# Public is-a-command (IAC) callbacks, public methods
+# Public is-a-command (IAC) callbacks
 #
     def set_iac_callback(self, cmd, func):
         """ Register callable ``func`` as callback for IAC ``cmd``.
@@ -1553,7 +1360,7 @@ class TelnetStreamReader:
         if slc_def is None:
             slc_def = self._slctab[func]
         self.log.debug('_slc_add (%s, %s)',
-            _name_slc_command(func), slc_def)
+            name_slc_command(func), slc_def)
         self._slc_buffer.extend([func, slc_def.mask, slc_def.val])
 
     def _slc_process(self, func, slc_def):
@@ -1567,7 +1374,7 @@ class TelnetStreamReader:
             side-effect of replying with a full slc tabset, resetting to
             the default tabset, if indicated.  """
         self.log.debug('_slc_process %s mine=%s, his=%s',
-                _name_slc_command(func), self._slctab[func], slc_def)
+                name_slc_command(func), self._slctab[func], slc_def)
 
         # out of bounds checking
         if ord(func) > NSLC:
@@ -1754,7 +1561,6 @@ class TelnetStreamReader:
         for ext_cmd, key in DEFAULT_EXT_CALLBACKS:
             self.set_ext_callback(ext_cmd, getattr(self, 'handle_%s' % (key,)))
 
-
 class Linemode(object):
     def __init__(self, mask=LMODE_MODE_LOCAL):
         """ A mask of ``LMODE_MODE_LOCAL`` means that all line editing is
@@ -1869,28 +1675,6 @@ _DEBUG_OPTS = dict([(value, key)
                       'BRK', 'IP', 'ABORT', 'AO', 'AYT', 'EC', 'EL', 'EOR',
                       'GA', 'SB', 'EOF', 'SUSP', 'ABORT', 'LOGOUT',
                       'CHARSET', 'SNDLOC')])
-#: List of globals that may match an slc function byte
-_DEBUG_SLC_OPTS = dict([(value, key)
-                        for key, value in locals().items() if key in
-                        ('SLC_SYNCH', 'SLC_BRK', 'SLC_IP', 'SLC_AO', 'SLC_AYT',
-                            'SLC_EOR', 'SLC_ABORT', 'SLC_EOF', 'SLC_SUSP',
-                            'SLC_EC', 'SLC_EL', 'SLC_EW', 'SLC_RP',
-                            'SLC_LNEXT', 'SLC_XON', 'SLC_XOFF', 'SLC_FORW1',
-                            'SLC_FORW2', 'SLC_MCL', 'SLC_MCR', 'SLC_MCWL',
-                            'SLC_MCWR', 'SLC_MCBOL', 'SLC_MCEOL', 'SLC_INSRT',
-                            'SLC_OVER', 'SLC_ECR', 'SLC_EWR', 'SLC_EBOL',
-                            'SLC_EEOL',)])
-
-#: List of globals that may match an slc linemode mode bitmask
-_DEBUG_SLC_BITMASK = dict([(value, key)
-                           for key, value in locals().items() if key in
-                         ('SLC_FLUSHIN', 'SLC_FLUSHOUT', 'SLC_ACK',)])
-
-#: List of globals that may match an slc function flag
-_DEBUG_SLC_MODIFIERS = dict([(value, key)
-                             for key, value in locals().items() if key in
-                           ('SLC_NOSUPPORT', 'SLC_CANTCHANGE',
-                               'SLC_VARIABLE', 'SLC_DEFAULT',)])
 
 def _name_command(byte):
     """ Given an IAC byte, return its mnumonic global constant. """
@@ -1901,30 +1685,3 @@ def _name_commands(cmds, sep=' '):
     return ' '.join([
         _name_command(bytes([byte])) for byte in cmds])
 
-def _name_cr(cr_kind):
-    """ Display a simple name for NVT carriage return sequence, usually one
-        of 'CR', 'CR + LF', 'CR + NUL', but even 'EOR_CMD' for IBM Clients!
-    """
-    return 'EOR' if cr_kind == EOR_CMD else ' + '.join([
-        'CR' if char == '\r' else
-        'LF' if char == '\n' else
-        'NUL' if char == '\x00' else None
-        for char in cr_kind])
-
-def _bin8(number):
-    """ return binary representation of ``number``, padded to 8 bytes. """
-    prefix, value = bin(number).split('b')
-    return '0b%0.8i' % (int(value),)
-
-def _name_char(ucs):
-    """ Return 7-bit ascii printable of any string. """
-    if ord(ucs) < ord(' ') or ord(ucs) == 127:
-        ucs = r'^{}'.format(chr(ord(ucs) ^ ord('@')))
-    elif ord(ucs) > 127 or not ucs.isprintable():
-        ucs = r'\x{:02x}'.format(ord(ucs))
-    return ucs
-
-def _name_slc_command(byte):
-    """ Given an SLC byte, return global mnumonic constant as string. """
-    return (repr(byte) if byte not in _DEBUG_SLC_OPTS
-            else _DEBUG_SLC_OPTS[byte])
