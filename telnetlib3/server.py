@@ -11,6 +11,7 @@ import sys
 import tulip
 import telopt
 import teldisp
+#import editing
 from slc import name_slc_command
 
 __all__ = ['TelnetServer']
@@ -47,6 +48,31 @@ class TelnetServer(tulip.protocols.Protocol):
                    'LINES': '24',
                    'USER': 'unknown',
                    'TERM': 'unknown', }
+    #: A cyclical collections.OrderedDict of command names and nestable
+    #  arguments, or None for end-of-command, used by ``tab_received()``
+    #  to provide autocomplete and argument cycling.
+    cmdset_autocomplete = collections.OrderedDict([
+        ('help', collections.OrderedDict([
+            ('status', None),
+            ('whoami', None),
+            ('whereami', None),
+            ('toggle', None),
+            ('logoff', None),
+            ]), ),
+        ('status', None),
+        ('whoami', None),
+        ('whereami', None),
+        ('toggle', collections.OrderedDict([
+            ('echo', None),
+            ('outbinary', None),
+            ('inbinary', None),
+            ('goahead', None),
+            ('color', None),
+            ('xon-any', None),
+            ('bell', None),
+            ]), ),
+        ('logoff', None),
+        ])
 
     def __init__(self, log=logging, default_encoding='utf8'):
         self.log = log
@@ -59,6 +85,9 @@ class TelnetServer(tulip.protocols.Protocol):
         self.strip_eol = '\r\n\00'
         #: default encoding 'errors' argument
         self.encoding_errors = 'replace'
+        #: Whether ``tab_received()`` performs tab completion
+        self.tab_completion = True
+
         #: server-preferred encoding
         self._default_encoding = default_encoding
         #: buffer for line input
@@ -120,13 +149,39 @@ class TelnetServer(tulip.protocols.Protocol):
         if self._send_ga:
             self.stream.send_ga()
 
-    def standout(self, string):
-        """ XXX Return ``string`` decorated using 'standout' terminal sequence
+    # TODO: pipe blessings curses in Multiprocessing for initialization
+    # and parameterizing
+    def dim(self, string):
+        """ XXX Return ``string`` as dim color for smart terms
         """
         if self._does_styling:
-            return '\x1b[0;1m' + string + '\x1b[0m'
+            term = self.client_env['TERM']
+            if (term.startswith('xterm') or term.startswith('rxvt')
+                    or term.startswith('urxvt') or term.startswith('ansi')
+                    or term == 'screen'):
+                # smart terminals know that a bold black wouldn't be very
+                # visible, and instead use it to great effect as 'dim'
+                return u'\x1b[1m\x1b[30m' + string + '\x1b[0m'
+            # use cyan instead
+            return '\x1b[36m' + string + '\x1b[0m'
         return string
 
+    def bold(self, string):
+        """ XXX Return ``string`` decorated using 'bold' for smart terms
+        """
+        if self._does_styling:
+            return '\x1b[0;1m' + string + '\x1b[0m' # green is pythonic?
+        return string
+
+
+    def standout(self, string):
+        """ XXX Return ``string`` decorated using 'standout' for smart terms
+        """
+        if self._does_styling:
+            return '\x1b[32;1m' + string + '\x1b[0m' # green is pythonic?
+        return string
+
+    # TODO: EditingStreamReader.character_received()
     def character_received(self, char):
         """ XXX Callback receives a single Unicode character as it is received.
 
@@ -135,24 +190,37 @@ class TelnetServer(tulip.protocols.Protocol):
         """
         CR, LF, NUL = '\r\n\x00'
         char_disp = char
-        if (127 > ord(char) < 31 and not self.outbinary
-                ) or (not char.isprintable()):
+        self.log.debug('character_received: {!r}'.format(char))
+        if not self.can_write(char) or not char.isprintable():
+            # ASCII representation of unprtintables for display editing
             char_disp = self.standout(teldisp.name_unicode(char))
         if self.is_literal:
+            # Within a ^v loop of ``literal_received()``, insert raw
             self._lastline.append(char)
-            self.echo(char_disp)
-            return
-        if self._last_char == CR and char in (LF, NUL):
-            if self.strip_eol:
-                return
+            self.local_echo(char_disp)
+        elif (self._last_char == CR and char in (LF, NUL) and self.strip_eol):
+            # ``strip_eol`` is True, pass on '\n' or '\x00' following CR,
+            pass
+        elif self._last_char == CR and char in (LF, NUL):
+            # ``strip_eol`` is False, preserve '\n' or '\x00'
             self._lastline.append(char)
-        if char in (CR, LF,):
+        elif char == CR:
+            # callback ``line_received()`` always on CR
             if not self.strip_eol:
-                self._lastline.append(char)
-            if char == CR or self.strip_eol:
-                self.line_received(self.lastline)
-            return
-        if not char.isprintable() and char not in (CR, LF, NUL,):
+                self.lastline._append(CR)
+            self.line_received(self.lastline)
+        elif self.tab_completion and char == '\t':  # ^I tab auto-completion
+            try:
+                if not self.tab_received(self.lastline):
+                    self.bell()
+            except ValueError as err:
+                self.log.debug(err)
+                self.bell()
+            except Exception:
+                self._display_tb(*sys.exc_info(), level=logging.INFO)
+            finally:
+                self.display_prompt(redraw=True)
+        elif not char.isprintable() and char not in (CR, LF, NUL,):
             self.bell()
         elif char.isprintable() and char not in ('\r', '\n'):
             self._lastline.append(char)
@@ -224,9 +292,91 @@ class TelnetServer(tulip.protocols.Protocol):
         self._lit_recv, self._literal = 0, False
         self._last_char = ucs
 
-    def editing_received(self, char, slc):
-        self.log.debug('editing_received: {!r}, {}.'.format(
-            char, name_slc_command(slc),))
+    def tab_received(self, input, table=None):
+        """ .. method:: tab_received(input : string)
+
+            XXX Callback for receipt of TAB key ('\t'), provides tab
+            auto-compeltion, using default ``table`` of format OrderedDict
+            ``self.cmdset_autocomplete``.
+        """
+        self.log.debug('tab_received: {!r}'.format(input))
+        if not self.tab_completion:
+            return
+
+        def autocomplete(table, buf, cmd, *args):
+            """
+            .. function::autocomplete(table, buf, cmd, *args) -> (buf, bool)
+
+            Returns autocompletion from command point after prefixing
+            line, "buf", based on nested OrderedDict table, with current
+            command as "cmd", and remaining shell quoting args *args,
+            recursively completing as command-args match, returning tuple
+            (buffer, bool), where bool indicates that a command or
+            argument was successfully auto-completed, and buffer is the
+            new input line.
+            """
+            auto_cmds = tuple(table.keys())
+            self.log.debug('autocomplete: {!r}, {!r}, {!r}; {}'.format(
+                buf, cmd, args, auto_cmds))
+            # empty commands cycle at first argument,
+            if not cmd:
+                has_args = table[auto_cmds[0]] is not None
+                buf = ''.join((
+                    teldisp.postfix(buf),
+                    teldisp.postfix(auto_cmds[0], using=' '
+                        if has_args else ''),))
+                return (buf, True)
+            # scan for partial/complete matches, recurse if applicable
+            for ptr, auto_cmd in enumerate(auto_cmds):
+                has_args = table[auto_cmd] is not None
+                if cmd.lower() == auto_cmd:
+                    if table[cmd] is None:
+                        # match, but arguments not valid for command,
+                        if len(args):
+                            buf = '{}{}'.format(
+                                    teldisp.postfix(buf),
+                                    teldisp.postfix(auto_cmd),
+                                    teldisp.escape_quote(args))
+                            return (buf, False)
+                        # first-time exact match,
+                        if self._last_char != '\t':
+                            return (buf, True)
+                        # cycle next match
+                        ptr = 0 if ptr + 1 == len(auto_cmds) - 1 else ptr + 1
+                        buf = ''.join((teldisp.postfix(buf), auto_cmds[ptr],))
+                        return (buf, True)
+                    else:
+                        # match at this step, have/will args, recruse;
+                        buf = ''.join((teldisp.postfix(buf), auto_cmd,))
+                        _cmd = args[0] if args else ''
+                        return autocomplete(  # recurse
+                                table[auto_cmd], buf, _cmd, *args[1:])
+                elif auto_cmd.lower().startswith(cmd.lower()):
+                    # partial match, error if arguments not valid,
+                    args_ok = bool(not args or args and has_args)
+                    buf = ''.join((teldisp.postfix(buf), auto_cmd))
+                    if args:
+                        buf = ''.join((teldisp.postfix(buf),
+                            teldisp.escape_quote(args)))
+                    return (buf, args_ok)
+            # no matches
+            buf = '{}{}{}'.format(teldisp.postfix(buf),
+                    cmd, teldisp.escape_quote(args))
+            return (buf, False)
+
+        cmd, args = input.rstrip(), []
+        table = self.cmdset_autocomplete if table is None else table
+        if ' ' in cmd:
+            cmd, *args = shlex.split(cmd)
+        buf, match = autocomplete(table, '', cmd, *args)
+        self._last_char = '\t'
+        self._lastline = collections.deque(buf)
+        return match
+
+    def editing_received(self, char, slc=None):
+        self.log.debug('editing_received: {!r}{}.'.format(
+            char, ', {}'.format(name_slc_command(slc),) if slc is not None
+                else ''))
         char_disp = teldisp.name_unicode(char.decode('iso8859-1'))
         if self.is_literal is not False:  # continue literal
             ucs = self.decode(char)
@@ -278,7 +428,7 @@ class TelnetServer(tulip.protocols.Protocol):
             self.bell()
             self.display_prompt()
         else:
-            raise NotImplementedError
+            raise NotImplementedError(char, slc)
 
 
     def data_received(self, data):
@@ -311,6 +461,7 @@ class TelnetServer(tulip.protocols.Protocol):
     def about_connection(self):
         """ Returns string suitable for status of server session.
         """
+            # tulip asynchronous dns lookup!
         return '{}{}{}{}'.format(
                 '{}{} '.format(self.client_env['USER'],
                     ' using' if self.client_env['TERM'] != 'unknown' else ''),
@@ -440,9 +591,7 @@ class TelnetServer(tulip.protocols.Protocol):
             cmd, *args = shlex.split(cmd)
         self.log.debug('process_cmd {!r}{!r}'.format(cmd, args))
         if cmd in ('help', '?',):
-            self.echo('\r\nAvailable commands:\r\n')
-            self.echo('help, quit, status, whoami, toggle.')
-            return 0
+            self.cmdset_help(*args)
         elif cmd in ('quit', 'exit', 'logout', 'bye'):
             self.logout()
             return 0
@@ -452,11 +601,24 @@ class TelnetServer(tulip.protocols.Protocol):
         elif cmd == 'whoami':
             self.echo('\r\n{}.'.format(self.about_connection()))
             return 0
+        elif cmd == 'whereami':
+            # tulip asynchronous dns lookup!
+            self.echo('\r\n{}.'.format(self))
+            return 0
         elif cmd == 'toggle':
             return self.cmdset_toggle(*args)
         elif cmd:
             self.echo('\r\n{!s}: command not found.'.format(cmd))
             return 1
+
+    def can_write(self, ucs):
+        """ .. method::can_display(string) -> bool
+
+            True if client end can receive character as a simple cell
+            glyph: if character is 7-bit ascii and not a control character,
+            or has 8th bit set but outbinary is true.
+        """
+        return ord(ucs) > 32 and (ord(ucs) < 127 or self.outbinary)
 
     def encode(self, buf, errors=None):
         """ Encode byte buffer using client-preferred encoding.
@@ -546,23 +708,38 @@ class TelnetServer(tulip.protocols.Protocol):
     def display_status(self):
         """ Output the status of telnet session.
         """
+        encoding = '{}{}'.format(
+                self.encoding(incoming=True), '' if
+                self.encoding(outgoing=True)
+                == self.encoding(incoming=True) else ' in, {} out'
+                .format(self.encoding(outgoing=True)))
+        origin = '{0}:{1}'.format(
+                *self.transport.get_extra_info('addr', ('unknown', -1,)))
         self.echo('\r\nConnected {}s ago from {}.'
             '\r\nLinemode is {}.'
             '\r\nFlow control is {}.'
-            '\r\nEncoding is {}{}.'
+            '\r\nEncoding is {}.'
             '\r\n{} rows; {} cols.'.format(
-                self.standout('{:0.3f}'.format(self.duration)),
-                self.standout(str(
-                    self.transport.get_extra_info('addr', 'unknown'))),
-                self.standout(self.stream.linemode.__str__()
-                    if self.stream.is_linemode else 'kludge'),
-                self.standout('xon-any' if self.stream.xon_any else 'xon'),
-                self.standout(self.encoding(incoming=True)),
-                self.standout('' if self.encoding(outgoing=True)
-                    == self.encoding(incoming=True)
-                else ' in, {} out'.format(self.encoding(outgoing=True))),
-                self.standout(self.client_env['COLUMNS']),
-                self.standout(self.client_env['LINES'])))
+                self.bold('{:0.3f}'.format(self.duration)),
+                (origin
+                    if not origin.startswith('127.0.0.1:')
+                    else self.bold(origin)),
+                (self.standout(self.stream.linemode.__str__().rstrip('|ack'))
+                    if self.stream.is_linemode
+                    else self.bold('kludge')),
+                (self.bold('xon-any') if self.stream.xon_any
+                    else 'xon'),
+                (encoding if encoding == 'ascii'
+                    else self.standout(encoding)),
+                (self.bold(self.client_env['COLUMNS'])
+                    if self.client_env['COLUMNS']
+                        != self.default_env['COLUMNS']
+                    else self.client_env['COLUMNS']),
+                (self.bold(self.client_env['LINES'])
+                    if self.client_env['LINES']
+                        != self.default_env['LINES']
+                    else self.client_env['LINES']),
+                ))
 
     def logout(self, opt=telopt.DO):
         if opt != telopt.DO:
@@ -602,6 +779,33 @@ class TelnetServer(tulip.protocols.Protocol):
         self.stream.set_ext_callback(telopt.TTYPE, self.ttype_received)
         self.stream.set_ext_callback(telopt.NAWS, self._naws_update)
 
+    def cmdset_help(self, *args):
+        if not len(args):
+            self.echo('\r\nAvailable commands:\r\n')
+            self.echo(', '.join(self.cmdset_autocomplete.keys()))
+            return 0
+        cmd = args[0].lower()
+        if cmd == 'help':
+            self.echo('\r\nDON\'T PANIC.')
+            return -42
+        elif cmd == 'logoff':
+            self.echo('\r\nTerminate connection.')
+        elif cmd == 'status':
+            self.echo('\r\nDisplay operating parameters.')
+        elif cmd == 'whoami':
+            self.echo('\r\nDisplay session parameters.')
+        elif cmd == 'whereami':
+            self.echo('\r\nDisplay server name')
+        elif cmd == 'toggle':
+            self.echo('\r\nToggle opearting parameters:')
+        else:
+            return 1
+        if (cmd and cmd in self.cmdset_autocomplete
+                and self.cmdset_autocomplete[cmd] is not None):
+            self.echo('\r\n{}'.format(', '.join(
+                self.cmdset_autocomplete[cmd].keys())))
+        return 0
+
     def cmdset_toggle(self, *args):
         lopt = self.stream.local_option
         tbl_opt = dict([
@@ -615,7 +819,8 @@ class TelnetServer(tulip.protocols.Protocol):
         if len(args) is 0:
             self.echo(', '.join(
                 '{}{} [{}]'.format('\r\n' if num % 4 == 0 else '',
-                    opt, self.standout('on' if enabled else 'off'))
+                    opt, self.standout('ON') if enabled
+                    else self.dim('off'))
                 for num, (opt, enabled) in enumerate(sorted(tbl_opt.items()))))
             return 0
         if len(args) > 1:
@@ -766,7 +971,7 @@ class TelnetServer(tulip.protocols.Protocol):
         every CONNECT_DEFERED up to the greater of the value CONNECT_MAXWAIT.
 
         Negotiation completes when all ``pending_options`` of the
-        TelnetStreamReade have completed. Any options not negotiated
+        TelnetStreamReader have completed. Any options not negotiated
         are displayed to the client as a warning, and ``display_prompt()``
         is called for the first time, unless ``call_after`` specifies another
         callback.
