@@ -6,6 +6,7 @@ import argparse
 import logging
 import codecs
 import shlex
+import time
 import sys
 
 import tulip
@@ -47,7 +48,12 @@ class TelnetServer(tulip.protocols.Protocol):
     default_env = {'COLUMNS': '80',
                    'LINES': '24',
                    'USER': 'unknown',
-                   'TERM': 'unknown', }
+                   'TERM': 'unknown',
+                   'CHARSET': 'ascii',
+                   }
+
+        #    self.echo('\r\nset[ option[=value]]: read or set session values.')
+    readonly_env = ['USER', 'HOSTNAME', 'UID']  # just example, really
     #: A cyclical collections.OrderedDict of command names and nestable
     #  arguments, or None for end-of-command, used by ``tab_received()``
     #  to provide autocomplete and argument cycling.
@@ -60,6 +66,7 @@ class TelnetServer(tulip.protocols.Protocol):
             ('logoff', None),
             ]), ),
         ('status', None),
+        ('set', None),  # args injected during tab_received()
         ('whoami', None),
         ('whereami', None),
         ('toggle', collections.OrderedDict([
@@ -77,8 +84,8 @@ class TelnetServer(tulip.protocols.Protocol):
     def __init__(self, log=logging, default_encoding='utf8'):
         self.log = log
         #: cient_env holds client session variables
-        self.client_env = collections.defaultdict(str, **self.default_env)
-        self.client_env['CHARSET'] = default_encoding
+        self._client_env = collections.defaultdict(str, **self.default_env)
+        self._client_env['CHARSET'] = default_encoding
         #: Show client full traceback on error
         self.show_traceback = True
         #: if set, characters are stripped around ``line_received``
@@ -114,6 +121,8 @@ class TelnetServer(tulip.protocols.Protocol):
         self._send_ga = True
         #: send ASCII BELL on line editing error
         self._send_bell = True
+        #: currently in multiline (shell quote not escaped, or \\)
+        self._multiline = False
 
     def banner(self):
         """ XXX Display login banner and solicit initial telnet options.
@@ -140,11 +149,10 @@ class TelnetServer(tulip.protocols.Protocol):
         loop = tulip.get_event_loop()
         loop.call_soon(call_after)
 
-    def display_prompt(self, redraw=False):
+    def display_prompt(self, redraw=False, input=None):
         """ XXX Prompts client end for input. """
-        parts = (('\r\x1b[K') if redraw else ('\r\n'),
-                         self.prompt,
-                         self.lastline,)
+        input = self.lastline if input is None else input
+        parts = (('\r\x1b[K') if redraw else ('\r\n'), self.prompt, input,)
         self.echo(''.join(parts))
         if self._send_ga:
             self.stream.send_ga()
@@ -155,7 +163,7 @@ class TelnetServer(tulip.protocols.Protocol):
         """ XXX Return ``string`` as dim color for smart terms
         """
         if self._does_styling:
-            term = self.client_env['TERM']
+            term = self.env['TERM']
             if (term.startswith('xterm') or term.startswith('rxvt')
                     or term.startswith('urxvt') or term.startswith('ansi')
                     or term == 'screen'):
@@ -233,6 +241,7 @@ class TelnetServer(tulip.protocols.Protocol):
         self.log.debug('line_received: {!r}'.format(input))
         if self.strip_eol:
             input = input.rstrip(self.strip_eol)
+        self._multiline = False
         try:
             self._retval = self.process_cmd(input)
         except Exception:
@@ -240,8 +249,15 @@ class TelnetServer(tulip.protocols.Protocol):
             self.bell()
             self._retval = -1
         finally:
-            self._lastline.clear()
-            self.display_prompt()
+            # when _retval is None, we are multi-line
+            if self._retval is not None:
+                # command was processed, clear line buffer and prompt
+                self._lastline.clear()
+                self.display_prompt()
+            else:
+                # we are in a line continuate
+                self._multiline = True
+                self.display_prompt(input='')
 
     def interrupt_received(self, cmd):
         """ This method aborts any output waiting on transport, then calls
@@ -329,7 +345,7 @@ class TelnetServer(tulip.protocols.Protocol):
             # scan for partial/complete matches, recurse if applicable
             for ptr, auto_cmd in enumerate(auto_cmds):
                 has_args = table[auto_cmd] is not None
-                if cmd.lower() == auto_cmd:
+                if cmd.lower() == auto_cmd.lower():
                     if table[cmd] is None:
                         # match, but arguments not valid for command,
                         if len(args):
@@ -363,9 +379,15 @@ class TelnetServer(tulip.protocols.Protocol):
             buf = '{}{}{}'.format(teldisp.postfix(buf),
                     cmd, teldisp.escape_quote(args))
             return (buf, False)
-
+        # dynamic injection of variables for set command,
         cmd, args = input.rstrip(), []
         table = self.cmdset_autocomplete if table is None else table
+        # inject session variables for set command,
+        if 'set' in table:
+            table['set'] = collections.OrderedDict([
+                ('{}='.format(key), None)
+                for key in sorted(self.env.keys())
+                if key not in self.readonly_env])
         if ' ' in cmd:
             cmd, *args = shlex.split(cmd)
         buf, match = autocomplete(table, '', cmd, *args)
@@ -456,21 +478,35 @@ class TelnetServer(tulip.protocols.Protocol):
     def echo(self, ucs, errors=None):
         """ Write unicode string to transport using preferred encoding.
         """
-        self.stream.write(self.encode(ucs, errors))
+        errors = errors if errors is not None else self.encoding_errors
+        try:
+            self.stream.write(self.encode(ucs, errors))
+        except LookupError as err:
+            assert self.encoding(outgoing=True) != self._default_encoding
+            self._env_update({'CHARSET': self._default_encoding})
+            self.log.debug(err)
+            self._display_charset_err(err)
+            return self.echo(ucs, errors)
 
     def about_connection(self):
         """ Returns string suitable for status of server session.
         """
             # tulip asynchronous dns lookup!
         return '{}{}{}{}'.format(
-                '{}{} '.format(self.client_env['USER'],
-                    ' using' if self.client_env['TERM'] != 'unknown' else ''),
-                '{} '.format(self.client_env['TERM'])
-                if self.client_env['TERM'] != 'unknown' else '',
+                '{}{} '.format(self.env['USER'],
+                    ' using' if self.env['TERM'] != 'unknown' else ''),
+                '{} '.format(self.env['TERM'])
+                if self.env['TERM'] != 'unknown' else '',
                 '{}connected from '.format(
                     'dis' if self._closing else ''),
                 self.transport.get_extra_info('addr', '??')[0],
                 ' after {:0.3f}s'.format(self.duration))
+
+    @property
+    def env(self):
+        """ Returns hash of session environment values
+        """
+        return self._client_env
 
     @property
     def lastline(self):
@@ -500,6 +536,12 @@ class TelnetServer(tulip.protocols.Protocol):
         """
         return (datetime.datetime.now() - self._last_received).total_seconds()
 
+    def eval_prompt(self, input):
+        """ Evaluates special characters of prompt and returns
+            new string with any escaping or variable evaluation
+            performed
+        """
+        return input
 
     @property
     def prompt(self):
@@ -508,7 +550,8 @@ class TelnetServer(tulip.protocols.Protocol):
             This implementation just returns the PROMPT client env
             value, or '% ' if unset.
         """
-        return self.client_env.get('PROMPT', u'% ')
+        return self.eval_prompt(self.env.get('PS2', u'> ')
+                if self.is_multiline else self.env.get('PS1', u'% '))
 
     def encoding(self, outgoing=False, incoming=False):
         """ Returns the session's preferred input or output encoding.
@@ -521,7 +564,7 @@ class TelnetServer(tulip.protocols.Protocol):
         #   It possible to negotiate UTF-8 input with ascii output using
         #   command ``toggle outbinary`` on the bsd client.
         assert outgoing or incoming
-        return (self.client_env.get('CHARSET', self._default_encoding)
+        return (self.env.get('CHARSET', self._default_encoding)
                 if (outgoing and not incoming and self.outbinary or
                     not outgoing and incoming and self.inbinary or
                     outgoing and incoming and self.outbinary and self.inbinary)
@@ -559,6 +602,14 @@ class TelnetServer(tulip.protocols.Protocol):
         """
         return not self._literal is False
 
+    @property
+    def is_multiline(self):
+        """ Returns True if currently within a multi-line prompt, that is,
+            a shell quote was used (" or ') and carriage return was pressed,
+            a PS2-prompt like should be implemented in display_prompt(True)
+        """
+        return self._multiline
+
     @is_literal.setter
     def is_literal(self, value):
         assert isinstance(value, (str, bool)), value
@@ -588,28 +639,40 @@ class TelnetServer(tulip.protocols.Protocol):
         """
         cmd, args = input.rstrip(), []
         if ' ' in cmd:
-            cmd, *args = shlex.split(cmd)
+            try:
+                cmd, *args = shlex.split(cmd)
+            except ValueError as err:
+                self.log.debug(err)
+                if err.args == ('No closing quotation',):
+                    self._lastline.append('\r') # use '\r' ..
+                    return None
+                elif (err.args == ('No escaped character',)
+                        and cmd.endswith('\\')):
+                    # multiline without escaping
+                    return None
+                raise err
         self.log.debug('process_cmd {!r}{!r}'.format(cmd, args))
         if cmd in ('help', '?',):
-            self.cmdset_help(*args)
-        elif cmd in ('quit', 'exit', 'logout', 'bye'):
+            return self.cmdset_help(*args)
+        elif cmd in ('quit', 'exit', 'logoff', 'logout', 'bye'):
             self.logout()
-            return 0
         elif cmd == 'status':
             self.display_status()
-            return 0
         elif cmd == 'whoami':
             self.echo('\r\n{}.'.format(self.about_connection()))
-            return 0
         elif cmd == 'whereami':
-            # tulip asynchronous dns lookup!
+# XXX tulip asynchronous dns lookup!
             self.echo('\r\n{}.'.format(self))
-            return 0
+        elif cmd == 'set':
+            return self.cmdset_set(*args)
         elif cmd == 'toggle':
             return self.cmdset_toggle(*args)
+        elif '=' in cmd:
+            return self.cmdset_assign(*([cmd] + args))
         elif cmd:
             self.echo('\r\n{!s}: command not found.'.format(cmd))
             return 1
+        return 0
 
     def can_write(self, ucs):
         """ .. method::can_display(string) -> bool
@@ -628,29 +691,43 @@ class TelnetServer(tulip.protocols.Protocol):
             outside of this range will be replaced with a python-like
             representation.
         """
-        return bytes(buf, self.encoding(outgoing=True), self.encoding_errors)
+        errors = errors if errors is not None else self.encoding_errors
+        return bytes(buf, self.encoding(outgoing=True), errors)
 
     def decode(self, input, final=False):
         """ Decode bytes received from client using preferred encoding.
         """
-        encoding = self.encoding(incoming=True)
-        if self._decoder is None or self._decoder._encoding != encoding:
+        if (self._decoder is None or
+                self._decoder._encoding
+                != self.encoding(incoming=True)):
             try:
-                self._decoder = codecs.getincrementaldecoder(encoding)(
+                self._decoder = codecs.getincrementaldecoder(
+                        self.encoding(incoming=True))(
                         errors=self.encoding_errors)
+                self._decoder._encoding = self.encoding(incoming=True)
             except LookupError as err:
-                assert encoding != self._default_encoding, (
-                        self._default_encoding, err)
+                assert (self.encoding(incoming=True)
+                        != self._default_encoding), err
                 self.log.info(err)
                 self._env_update({'CHARSET': self._default_encoding})
-                self._decoder = codecs.getincrementaldecoder(encoding)(
+                self._decoder = codecs.getincrementaldecoder(
+                        self.encoding(incoming=True))(
                         errors=self.encoding_errors)
+                self._decoder._encoding = self.encoding(incoming=True)
                 # interupt client session to notify change of encoding,
-                self.echo('{}, CHARSET is {}.'.format(err, encoding))
+                self._display_charset_err(err)
                 self.display_prompt()
-            self._decoder._encoding = encoding
-
         return self._decoder.decode(input, final)
+
+    def _display_charset_err(self, err):
+        self.stream.write(b'\r\n')
+        self.stream.write(bytes(
+            err.args[0].encode(
+                self.encoding(outgoing=True), )))
+        self.stream.write(b', CHARSET is ')
+        self.stream.write(bytes(self.env['CHARSET'].encode(
+            self.encoding(outgoing=True))))
+        self.stream.write(b'.\r\n')
 
     def connection_made(self, transport):
         """ Receive a new telnet client connection.
@@ -731,21 +808,26 @@ class TelnetServer(tulip.protocols.Protocol):
                     else 'xon'),
                 (encoding if encoding == 'ascii'
                     else self.standout(encoding)),
-                (self.bold(self.client_env['COLUMNS'])
-                    if self.client_env['COLUMNS']
+                (self.bold(self.env['COLUMNS'])
+                    if self.env['COLUMNS']
                         != self.default_env['COLUMNS']
-                    else self.client_env['COLUMNS']),
-                (self.bold(self.client_env['LINES'])
-                    if self.client_env['LINES']
+                    else self.env['COLUMNS']),
+                (self.bold(self.env['LINES'])
+                    if self.env['LINES']
                         != self.default_env['LINES']
-                    else self.client_env['LINES']),
+                    else self.env['LINES']),
                 ))
 
     def logout(self, opt=telopt.DO):
         if opt != telopt.DO:
             return self.stream.handle_logout(opt)
         self.log.debug('Logout by client.')
-        self.echo('\r\nLogout by client.\r\n')
+        msgs = ('The black thing inside rejoices at your departure',
+                'The very earth groans at your depature',
+                'The very trees seem to moan as you leave',
+                'Echoing screams fill the wastelands as you close your eyes',
+                'Your very soul aches as you wake up from your favorite dream')
+        self.echo('\r\n{}.\r\n'.format(msgs[int(time.time()/84) % len(msgs)]))
         self.transport.close()
 
     def eof_received(self):
@@ -793,11 +875,13 @@ class TelnetServer(tulip.protocols.Protocol):
         elif cmd == 'status':
             self.echo('\r\nDisplay operating parameters.')
         elif cmd == 'whoami':
-            self.echo('\r\nDisplay session parameters.')
+            self.echo('\r\nDisplay session values.')
+        elif cmd == 'set':
+            self.echo('\r\nSet session values.')
         elif cmd == 'whereami':
             self.echo('\r\nDisplay server name')
         elif cmd == 'toggle':
-            self.echo('\r\nToggle opearting parameters:')
+            self.echo('\r\nToggle operating parameters:')
         else:
             return 1
         if (cmd and cmd in self.cmdset_autocomplete
@@ -867,6 +951,50 @@ class TelnetServer(tulip.protocols.Protocol):
             return 1
         return 0
 
+    def cmdset_set(self, *args):
+        def disp_kv(key, val):
+            return (shlex.quote(val)
+                    if key not in self.readonly_env
+                    else self.standout(shlex.quote(val)))
+        retval = 0
+        if args:
+            if '=' in args[0]:
+                retval = self.cmdset_assign(*args)
+                return 0 if not retval else retval # cycle down errors
+            # no '=' must mean form of 'set a', displays 'a=value'
+            key = args[0].strip()
+            if key in self.env:
+                self.echo('\r\n{}{}{}'.format(
+                    key, self.dim('='),
+                    disp_kv(key, self.env[key])))
+                return 0
+            return -1  # variable not found, -1
+        # display all values
+        self.echo('\r\n')
+        self.echo('\r\n'.join(['{}{}{}'.format(
+            _key, self.dim('='), disp_kv(_key, _val))
+            for (_key, _val) in sorted(self.env.items())]))
+        return 0
+
+    def cmdset_assign(self, *args):
+        """ remote command: set [ option[=value]]: read or set session values.
+        """
+        if len(args) > 1:
+            # x=1 y=2; evaluates right-left recursively
+            self.cmdset_set(*args[1:])
+        key, val = args[0].split('=', 1)
+        if key in self.readonly_env:
+            # value is read-only
+            return -2
+        if not val:
+            if not key in self.env:
+                # key not found
+                return -3
+            self._env_update({key: ''})
+            return 0
+        self._env_update({key: val})
+        return 0
+
     def ttype_received(self, ttype):
         """ Callback for TTYPE response.
 
@@ -876,7 +1004,7 @@ class TelnetServer(tulip.protocols.Protocol):
         Otherwise the session variable TERM is set to the value of ``ttype``.
         """
         if self._advanced is False:
-            if not len(self.client_env['TERM']):
+            if not len(self.env['TERM']):
                 self._env_update({'TERM': ttype})
             # track TTYPE seperately from the NEW_ENVIRON 'TERM' value to
             # avoid telnet loops in TTYPE cycling
@@ -889,29 +1017,29 @@ class TelnetServer(tulip.protocols.Protocol):
             return
 
         self._env_update({'TTYPE{}'.format(self._advanced): ttype})
-        lastval = self.client_env['TTYPE{}'.format(self._advanced)]
-        if ttype == self.client_env['TTYPE0']:
+        lastval = self.env['TTYPE{}'.format(self._advanced)]
+        if ttype == self.env['TTYPE0']:
             self._env_update({'TERM': ttype})
             self.log.debug('end on TTYPE{}: {}, using {env[TERM]}.'
-                    .format(self._advanced, ttype, env=self.client_env))
+                    .format(self._advanced, ttype, env=self.env))
             return
         elif (self._advanced == self.TTYPE_LOOPMAX
                 or not ttype or ttype.lower() == 'unknown'):
-            ttype = self.client_env['TERM'].lower()
+            ttype = self.env['TERM'].lower()
             self._env_update({'TERM': ttype})
             self.log.warn('TTYPE stop on {}, using {env[TERM]}.'.format(
-                self._advanced, env=self.client_env))
+                self._advanced, env=self.env))
             return
         elif (self._advanced == 2 and ttype.upper().startswith('MTTS ')):
             # Mud Terminal type started, previous value is most termcap-like
-            ttype = self.client_env['TTYPE{}'.format(self._advanced)]
+            ttype = self.env['TTYPE{}'.format(self._advanced)]
             self._env_update({'TERM': ttype})
             self.log.warn('TTYPE is {}, using {env[TERM]}.'.format(
-                self._advanced, env=self.client_env))
+                self._advanced, env=self.env))
         elif (ttype.lower() == lastval):
             # End of list (looping). Chose first value
             self.log.warn('TTYPE repeated at {}, using {env[TERM]}.'.format(
-                self._advanced, env=self.client_env))
+                self._advanced, env=self.env))
             return
         ttype = ttype.lower()
         self.stream.request_ttype()
@@ -937,17 +1065,20 @@ class TelnetServer(tulip.protocols.Protocol):
 
     def _env_update(self, env):
         " Callback receives no environment variables "
-        if 'TERM' in env and env['TERM'] != env['TERM'].lower():
+        if 'TERM' in env and env['TERM'] != self.env['TERM'].lower():
             ttype = env['TERM'].lower()
-            self.log.debug('{!r} -> {!r}'.format(env['TERM'], ttype))
-            env['TERM'] = ttype
-            self._does_styling = (self._does_styling or
+            if not ttype:
+                ttype = 'unknown'
+            self.log.debug('{!r} -> {!r}'.format(self.env['TERM'], ttype))
+            self._client_env['TERM'] = ttype
+            self._does_styling = (
                     ttype.startswith('vt') or ttype.startswith('xterm') or
                     ttype.startswith('dtterm') or ttype.startswith('rxvt') or
                     ttype.startswith('urxvt') or ttype.startswith('ansi') or
                     ttype.startswith('linux') or ttype.startswith('screen'))
-        self.client_env.update(env)
-        self.log.debug('env_update: %r', env)
+        else:
+            self._client_env.update(env)
+            self.log.debug('env_update: %r', env)
 
     def _charset_received(self, charset):
         " Callback receives CHARSET value, rfc2066 "
@@ -985,7 +1116,6 @@ class TelnetServer(tulip.protocols.Protocol):
         pending = [telopt._name_commands(opt)
                 for (opt, val) in self.stream.pending_option.items()
                 if val]
-
         if self.duration < self.CONNECT_MINWAIT or (
                 pending and self.duration < self.CONNECT_MAXWAIT):
             loop.call_later(self.CONNECT_DEFERED, self._negotiate, call_after)

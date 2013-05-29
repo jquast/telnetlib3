@@ -94,7 +94,9 @@ class TelnetStreamReader:
     # a client agrees to negotiate NEW_ENVIRON.
     _default_env_request = (
             "USER HOSTNAME UID TERM COLUMNS LINES DISPLAY LANG SYSTEMTYPE "
-            "ACCT JOB PRINTER SFUTLNTVER SFUTLNTMODE LC_ALL").split()
+            "ACCT JOB PRINTER SFUTLNTVER SFUTLNTMODE LC_ALL VISUAL EDITOR "
+            "LC_COLLATE LC_CTYPE LC_MESSAGES LC_MONETARY LC_NUMERIC LC_TIME"
+            ).split()
     #: Maximum size of sub-negotiation buffer
     SB_MAXSIZE = 2048
     #: Maximum size of Special Linemode Character receive buffer
