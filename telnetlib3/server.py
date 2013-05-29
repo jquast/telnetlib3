@@ -144,9 +144,11 @@ class TelnetServer(tulip.protocols.Protocol):
         self._send_bell = True
         #: currently in multiline (shell quote not escaped, or \\)
         self._multiline = False
-        #: prompt evaulation re for ``eval_prompt()``
+        #: prompt evaulation re for ``prompt_eval()``
         self._re_prompt = re.compile('{}{}'.format(
             self.prompt_esc_char, self.prompt_escapes), flags=re.DOTALL)
+        #: variable evaluation re for ``echo_eval()``
+        self._re_variable = re.compile('\$([a-zA-Z_]+|\{[a-zA-Z_]+\})')
         #: prompt escape %h is socket.gethostname()
         self._server_name = tulip.get_event_loop().run_in_executor(None,
                 socket.gethostname)
@@ -526,15 +528,17 @@ class TelnetServer(tulip.protocols.Protocol):
     def about_connection(self):
         """ Returns string suitable for status of server session.
         """
-            # tulip asynchronous dns lookup!
         return '{}{}{}{}'.format(
+                # user [' using <terminal> ']
                 '{}{} '.format(self.env['USER'],
                     ' using' if self.env['TERM'] != 'unknown' else ''),
                 '{} '.format(self.env['TERM'])
                 if self.env['TERM'] != 'unknown' else '',
+                # state,
                 '{}connected from '.format(
                     'dis' if self._closing else ''),
-                '{}{}.'.format(
+                # ip, dns
+                '{}{}'.format(
                     self.client_ip, ' ({}{})'.format(
                         self.client_hostname.result(),
                         (', dns-ok' if self.client_ip
@@ -644,6 +648,7 @@ class TelnetServer(tulip.protocols.Protocol):
         return (datetime.datetime.now() - self._last_received).total_seconds()
 
     prompt_escapes = r'(\d{3}|x[0-9a-fA-F]{2}|[\$e#\?huH])'
+
     def prompt_esc(self, input, esc_char=None):
         """ Escape prompt characters and return value, using escape value
             ``prompt_esc_char`` of matching regular expression values for
@@ -697,6 +702,32 @@ class TelnetServer(tulip.protocols.Protocol):
             return self._shell_ver
         return input
 
+    def echo_eval(self, input, literal_escape=True):
+        """ Evalutes ``input`` for variable substituion
+        """
+        output = []
+        start_next = 0
+        for n in range(len(input)):
+            if n >= start_next:
+                match = self._re_variable.match(input[n:])
+                if match:
+                    key = match.group(1).strip('}{')
+                    val = self.env[key]
+                    output.append(val)
+                    start_next = n + match.end()
+                elif (input[n] == '\\' and n < len(input) - 1
+                        and literal_escape):
+                    val = teldisp.resolve_literal(input[n:n+2])
+                    if val is None:
+                        output.append('\\')
+                        start_next = 0
+                        continue
+                    output.append(val)
+                    start_next = n + 2
+                else:
+                    output.append(input[n])
+        return ''.join(output)
+
 
     def prompt_eval(self, input, escape_literals=True):
         """ Evaluates ``input`` as a prompt containing escape characters
@@ -710,8 +741,9 @@ class TelnetServer(tulip.protocols.Protocol):
                     val = self.prompt_esc(match.group(1))
                     output.append(val)
                     start_next = n + match.end()
-                elif input[n] == '\\' and n < len(input) - 1:
-                    val = teldisp.escape_literal(input[n:n+2])
+                elif (input[n] == '\\' and n < len(input) - 1
+                        and escape_literals):
+                    val = teldisp.resolve_literal(input[n:n+2])
                     if val is None:
                         output.append('\\')
                         start_next = 0
@@ -834,7 +866,7 @@ class TelnetServer(tulip.protocols.Protocol):
         if cmd in ('help', '?',):
             return self.cmdset_help(*args)
         elif cmd == 'echo':
-            self.echo('\r\n{}'.format(' '.join(args)))
+            self.cmdset_echo(*args)
         elif cmd in ('quit', 'exit', 'logoff', 'logout', 'bye'):
             self.logout()
         elif cmd == 'status':
@@ -842,8 +874,12 @@ class TelnetServer(tulip.protocols.Protocol):
         elif cmd == 'whoami':
             self.echo('\r\n{}.'.format(self.about_connection()))
         elif cmd == 'whereami':
-# XXX tulip asynchronous dns lookup!
-            self.echo('\r\n{}.'.format(self))
+            self.echo('\r\n{}'.format(
+                (self.server_fqdn.result()
+                    if self.server_fqdn.done()
+                    else self.server_name.result()
+                    if self.server_name.done()
+                    else self.server_name.__repr__())))
         elif cmd == 'set':
             return self.cmdset_set(*args)
         elif cmd == 'toggle':
@@ -1081,18 +1117,23 @@ class TelnetServer(tulip.protocols.Protocol):
         elif cmd == 'set':
             self.echo('\r\nSet or display session values.'
                       '\r\nset[ option[=value]]')
-
-        #    self.echo('\r\n: read or set session values.')
         elif cmd == 'whereami':
             self.echo('\r\nDisplay server name')
         elif cmd == 'toggle':
             self.echo('\r\nToggle operating parameters:')
+        elif cmd == 'echo':
+            self.echo('\r\nDisplay arguments.')
         else:
             return 1
         if (cmd and cmd in self.cmdset_autocomplete
                 and self.cmdset_autocomplete[cmd] is not None):
             self.echo('\r\n{}'.format(', '.join(
                 self.cmdset_autocomplete[cmd].keys())))
+        return 0
+
+    def cmdset_echo(self, *args):
+        self.echo('\r\n{}'.format(' '.join(
+            self.echo_eval(arg) if '$' in arg else arg for arg in args)))
         return 0
 
     def cmdset_toggle(self, *args):

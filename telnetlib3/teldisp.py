@@ -41,4 +41,21 @@ def prefix(buf, using=' '):
     """
     return '{}{}'.format(buf, using) if buf else ''
 
-
+def resolve_literal(char):
+    """ .. function::resolve_literal(input : string) -> string
+    """
+    if char == 'e':
+        return '\x1b'
+    elif char == 'f':
+        return '\f'
+    elif char == 'n':
+        return '\n'
+    elif char == 'r':
+        return '\r'
+    elif char == 't':
+        return '\t'
+    elif char == 'v':
+        return '\v'
+    else:
+        return '\\'
+    return char
