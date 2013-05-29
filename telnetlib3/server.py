@@ -6,14 +6,24 @@ import argparse
 import logging
 import codecs
 import shlex
+import socket
 import time
 import sys
+import re
 
 import tulip
 import telopt
 import teldisp
 #import editing
 from slc import name_slc_command
+    # XXX
+    # TODO: EditingStreamReader.character_received()
+     # _will_timeout use future instead
+
+def wrap_future_result(future, result):
+    future = tulip.Future()
+    future.set_result(result)
+    return future
 
 __all__ = ['TelnetServer']
 
@@ -50,10 +60,12 @@ class TelnetServer(tulip.protocols.Protocol):
                    'USER': 'unknown',
                    'TERM': 'unknown',
                    'CHARSET': 'ascii',
+                   'PS1': '[%u@%h] %# ',
+                   'PS2': '> ',
+                   'TIMEOUT': '120',
                    }
 
-        #    self.echo('\r\nset[ option[=value]]: read or set session values.')
-    readonly_env = ['USER', 'HOSTNAME', 'UID']  # just example, really
+    readonly_env = ['USER', 'HOSTNAME', 'UID']
     #: A cyclical collections.OrderedDict of command names and nestable
     #  arguments, or None for end-of-command, used by ``tab_received()``
     #  to provide autocomplete and argument cycling.
@@ -81,12 +93,21 @@ class TelnetServer(tulip.protocols.Protocol):
             ]), ),
         ('logoff', None),
         ])
+    #: regular expression pattern that matches 1 or more characters following
+    #  the prompt escape character (``prompt_esc_char``), which should be
+    #  handled by prompt_esc().
+    #: character used to prefix special prompt escapes, ``prompt_escapes``
+    prompt_esc_char = '%'
+    #: character used for %# substituion in PS1 or PS2 evaluation
+    prompt_char = '%'
 
     def __init__(self, log=logging, default_encoding='utf8'):
         self.log = log
         #: cient_env holds client session variables
         self._client_env = collections.defaultdict(str, **self.default_env)
         self._client_env['CHARSET'] = default_encoding
+        self._will_timeout = (
+                self._client_env['TIMEOUT'] and int(self._client_env['TIMEOUT']))
         #: Show client full traceback on error
         self.show_traceback = True
         #: if set, characters are stripped around ``line_received``
@@ -95,7 +116,6 @@ class TelnetServer(tulip.protocols.Protocol):
         self.encoding_errors = 'replace'
         #: Whether ``tab_received()`` performs tab completion
         self.tab_completion = True
-
         #: server-preferred encoding
         self._default_encoding = default_encoding
         #: buffer for line input
@@ -124,6 +144,18 @@ class TelnetServer(tulip.protocols.Protocol):
         self._send_bell = True
         #: currently in multiline (shell quote not escaped, or \\)
         self._multiline = False
+        #: prompt evaulation re for ``eval_prompt()``
+        self._re_prompt = re.compile('{}{}'.format(
+            self.prompt_esc_char, self.prompt_escapes), flags=re.DOTALL)
+        #: prompt escape %h is socket.gethostname()
+        self._server_name = tulip.get_event_loop().run_in_executor(None,
+                socket.gethostname)
+        #: prompt escape %H is socket.get_fqdn(self._server_name) Future
+        self._server_fqdn = tulip.Future()
+        #: name of shell %s in prompt escape
+        self._shell_name = 'telsh'
+        #: version of shell %v in prompt escape
+        self._shell_ver = '0.1'
 
     def banner(self):
         """ XXX Display login banner and solicit initial telnet options.
@@ -171,15 +203,15 @@ class TelnetServer(tulip.protocols.Protocol):
                 # smart terminals know that a bold black wouldn't be very
                 # visible, and instead use it to great effect as 'dim'
                 return u'\x1b[1m\x1b[30m' + string + '\x1b[0m'
-            # use cyan instead
-            return '\x1b[36m' + string + '\x1b[0m'
+            # use red instead
+            return '\x1b[31m' + string + '\x1b[0m'
         return string
 
     def bold(self, string):
         """ XXX Return ``string`` decorated using 'bold' for smart terms
         """
         if self._does_styling:
-            return '\x1b[0;1m' + string + '\x1b[0m' # green is pythonic?
+            return '\x1b[0;1m' + string + '\x1b[0m'
         return string
 
 
@@ -187,10 +219,9 @@ class TelnetServer(tulip.protocols.Protocol):
         """ XXX Return ``string`` decorated using 'standout' for smart terms
         """
         if self._does_styling:
-            return '\x1b[32;1m' + string + '\x1b[0m' # green is pythonic?
+            return '\x1b[31;1m' + string + '\x1b[0m'
         return string
 
-    # TODO: EditingStreamReader.character_received()
     def character_received(self, char):
         """ XXX Callback receives a single Unicode character as it is received.
 
@@ -199,7 +230,7 @@ class TelnetServer(tulip.protocols.Protocol):
         """
         CR, LF, NUL = '\r\n\x00'
         char_disp = char
-        self.log.debug('character_received: {!r}'.format(char))
+        #self.log.debug('character_received: {!r}'.format(char))
         if not self.can_write(char) or not char.isprintable():
             # ASCII representation of unprtintables for display editing
             char_disp = self.standout(teldisp.name_unicode(char))
@@ -460,8 +491,11 @@ class TelnetServer(tulip.protocols.Protocol):
             Derived impl. should instead extend or override the
             ``line_received()`` and ``char_received()`` methods.
         """
-        self.log.debug('data_received: {!r}'.format(data))
+        #self.log.debug('data_received: {!r}'.format(data))
         self._last_received = datetime.datetime.now()
+        if self._will_timeout:
+            self._timeout.cancel()
+            self._start_timeout()
         for byte in (bytes([value]) for value in data):
             self.stream.feed_byte(byte)
             if self.stream.is_oob:
@@ -500,8 +534,80 @@ class TelnetServer(tulip.protocols.Protocol):
                 if self.env['TERM'] != 'unknown' else '',
                 '{}connected from '.format(
                     'dis' if self._closing else ''),
-                self.transport.get_extra_info('addr', '??')[0],
+                '{}{}.'.format(
+                    self.client_ip, ' ({}{})'.format(
+                        self.client_hostname.result(),
+                        (', dns-ok' if self.client_ip
+                            == self.client_reverse_ip.result()
+                            else self.standout('!= {}, revdns-fail'.format(
+                                self.client_reverse_ip.result()))
+                            ) if self.client_reverse_ip.done() else '')
+                        if self.client_hostname.done() else ''),
                 ' after {:0.3f}s'.format(self.duration))
+
+    @property
+    def client_ip(self):
+        """ .. client_ip() -> string
+
+            Returns Client IP address as string.
+        """
+        return self._client_ip
+
+    @property
+    def client_hostname(self):
+        """ .. client_hostname() -> Future()
+
+            Returns DNS name of client as String as Future.
+        """
+        if self._client_hostname.done():
+            val = self._client_hostname.result()[0]
+            return wrap_future_result(self._client_hostname, val)
+        return self._client_hostname
+
+    @property
+    def client_fqdn(self):
+        """ .. client_fqdn() -> Future()
+
+            Returns FQDN dns name of client as Future.
+        """
+        if self._client_hostname.done():
+            val = self._client_hostname.result()[1][0]
+            return wrap_future_result(self._client_hostname, val)
+        return self._client_hostname
+
+    @property
+    def client_reverse_ip(self):
+        """ .. client_fqdn() -> Future()
+
+            Returns reverse DNS lookup IP address of client as Future.
+        """
+        if self._client_hostname.done():
+            val = self._client_hostname.result()[2][0]
+            return wrap_future_result(self._client_hostname, val)
+        return self._client_hostname
+
+    @property
+    def server_name(self):
+        """ .. server_name() -> Future()
+
+            Returns name of server as string as Future.
+        """
+        return self._server_name
+
+    @property
+    def server_fqdn(self):
+        """ .. server_fqdn() -> Future()
+
+            Returns fqdn string of server as Future.
+        """
+        if self._server_fqdn.done():
+            # future is complete,
+            return self._server_fqdn
+        if not self._server_fqdn.running() and self._server_name.done():
+            # first DNS lookup,
+            self._server_fqdn = tulip.get_event_loop().run_in_executor(
+                        None, socket.getfqdn, self._server_name.result())
+        return self._server_fqdn
 
     @property
     def env(self):
@@ -537,12 +643,84 @@ class TelnetServer(tulip.protocols.Protocol):
         """
         return (datetime.datetime.now() - self._last_received).total_seconds()
 
-    def eval_prompt(self, input):
-        """ Evaluates special characters of prompt and returns
-            new string with any escaping or variable evaluation
-            performed
-        """
+    prompt_escapes = r'(\d{3}|x[0-9a-fA-F]{2}|[\$e#\?huH])'
+    def prompt_esc(self, input, esc_char=None):
+        """ Escape prompt characters and return value, using escape value
+            ``prompt_esc_char`` of matching regular expression values for
+            ``prompt_escapes``, and the following value lookup table:
+
+          '%%'     a single '%'
+          '%#'     prompt character
+          '%u'     username
+          '%h'     hostname
+          '%H'     full hostname
+          '%$'     value of session parameter following $
+          '%?'     Return code last command processed
+          '%000'   8-bit character for octal '077'
+          '%x00'   8-bit character for 16-bit hexidecimal pair
+          '%s'     name of shell
+          '%v'     version of shell
+          """
+        # TODO:
+        # '%t'     time of day in 12-hour AM/PM format
+        # '%T'     time of day in 24-hour format
+        # '%p'     time of day in 12-hour format with seconds
+        # '%P'     time of day in 24-hour format with seconds
+        # '%d      The weekday in `Day' format.
+        # '%D'     The day in `dd' format.
+        # '%w'     The month in `Mon' format.
+        # '%W'     The month in `mm' format.
+        # '%y'     The year in `yy' format.
+        # '%Y'     The year in `yyyy' format.
+        esc_char = self.prompt_esc_char if esc_char is None else esc_char
+        if input == esc_char:
+            return esc_char
+        if input == '#':
+            return self.prompt_char
+        if input == 'u':
+            return self.env['USER']
+        if input == 'h':
+            return '{}'.format(self.server_name.result())
+        if input == 'H':
+            return '{}'.format(self.server_fqdn.result())
+        if input.startswith('$'):
+            return self.env[input[1:]]
+        if input == '?':
+            return '{}'.format(self.retval)
+        if input.isdigit():
+            return chr(int(input, 8))
+        if input.startswith('x'):
+            return chr(int('0x{}'.format(input[1:]), 16))
+        if input == 's':
+            return self._shell_name
+        if input == 'v':
+            return self._shell_ver
         return input
+
+
+    def prompt_eval(self, input, escape_literals=True):
+        """ Evaluates ``input`` as a prompt containing escape characters
+        """
+        output = []
+        start_next = 0
+        for n in range(len(input)):
+            if n >= start_next:
+                match = self._re_prompt.match(input[n:])
+                if match:
+                    val = self.prompt_esc(match.group(1))
+                    output.append(val)
+                    start_next = n + match.end()
+                elif input[n] == '\\' and n < len(input) - 1:
+                    val = teldisp.escape_literal(input[n:n+2])
+                    if val is None:
+                        output.append('\\')
+                        start_next = 0
+                        continue
+                    output.append(val)
+                    start_next = n + 2
+                else:
+                    output.append(input[n])
+        return ''.join(output)
 
     @property
     def prompt(self):
@@ -551,8 +729,8 @@ class TelnetServer(tulip.protocols.Protocol):
             This implementation just returns the PROMPT client env
             value, or '% ' if unset.
         """
-        return self.eval_prompt(self.env.get('PS2', u'> ')
-                if self.is_multiline else self.env.get('PS1', u'% '))
+        return self.prompt_eval(
+                self.env['PS2'] if self.is_multiline else self.env['PS1'])
 
     def encoding(self, outgoing=False, incoming=False):
         """ Returns the session's preferred input or output encoding.
@@ -591,7 +769,7 @@ class TelnetServer(tulip.protocols.Protocol):
     def retval(self):
         """ Returns exit status of last command processed by ``line_received``
         """
-        return self._retval
+        return self._retval if self._retval is not None else ''
 
 
     @property
@@ -684,7 +862,7 @@ class TelnetServer(tulip.protocols.Protocol):
             glyph: if character is 7-bit ascii and not a control character,
             or has 8th bit set but outbinary is true.
         """
-        return ord(ucs) > 32 and (ord(ucs) < 127 or self.outbinary)
+        return ord(ucs) > 31 and (ord(ucs) < 127 or self.outbinary)
 
     def encode(self, buf, errors=None):
         """ Encode byte buffer using client-preferred encoding.
@@ -747,10 +925,18 @@ class TelnetServer(tulip.protocols.Protocol):
         self.stream = telopt.TelnetStreamReader(transport, server=True)
         self._last_received = datetime.datetime.now()
         self._connected = datetime.datetime.now()
-        self._retval = 0
+        self._retval = None
         self.set_callbacks()
+        self.server_fqdn  # spawn Future for server_fqdn
         self.banner()
         self._negotiate()
+        self._start_timeout()
+        #: start DNS lookup of client
+        self._client_ip = transport.get_extra_info('addr')[0]
+        self._client_hostname = tulip.get_event_loop().run_in_executor(None,
+                socket.gethostbyaddr, self._client_ip)
+        self._client_hostname.add_done_callback(
+                self._completed_client_lookup)
 
     def request_advanced_opts(self, ttype=True):
         """ XXX Request advanced telnet options.
@@ -821,6 +1007,11 @@ class TelnetServer(tulip.protocols.Protocol):
                     else self.env['LINES']),
                 ))
 
+    def timeout(self):
+        self.echo('\r\nTimeout after {}s.\r\n'.format(int(self.idle)))
+        self.log.debug('Timeout after {}s.'.format(self.idle))
+        self.transport.close()
+
     def logout(self, opt=telopt.DO):
         if opt != telopt.DO:
             return self.stream.handle_logout(opt)
@@ -840,6 +1031,14 @@ class TelnetServer(tulip.protocols.Protocol):
         self._closing = True
         self.log.info('{}{}'.format(self.about_connection(),
             ': {}'.format(exc) if exc is not None else ''))
+        if self._will_timeout:
+            self._timeout.cancel()
+            self.log.debug('cancelled {!r}'.format(self._timeout))
+        for task in (self._server_name, self._server_fqdn,
+                self._client_hostname):
+            if task.running():
+                task.cancel()
+                self.log.debug('cancelled {!r}'.format(task))
 
     def set_callbacks(self):
         """ XXX Register callbacks with TelnetStreamReader
@@ -878,9 +1077,12 @@ class TelnetServer(tulip.protocols.Protocol):
         elif cmd == 'status':
             self.echo('\r\nDisplay operating parameters.')
         elif cmd == 'whoami':
-            self.echo('\r\nDisplay session values.')
+            self.echo('\r\nDisplay session identifier.')
         elif cmd == 'set':
-            self.echo('\r\nSet session values.')
+            self.echo('\r\nSet or display session values.'
+                      '\r\nset[ option[=value]]')
+
+        #    self.echo('\r\n: read or set session values.')
         elif cmd == 'whereami':
             self.echo('\r\nDisplay server name')
         elif cmd == 'toggle':
@@ -968,14 +1170,13 @@ class TelnetServer(tulip.protocols.Protocol):
             key = args[0].strip()
             if key in self.env:
                 self.echo('\r\n{}{}{}'.format(
-                    key, self.dim('='),
-                    disp_kv(key, self.env[key])))
+                    key, '=', disp_kv(key, self.env[key])))
                 return 0
             return -1  # variable not found, -1
         # display all values
         self.echo('\r\n')
         self.echo('\r\n'.join(['{}{}{}'.format(
-            _key, self.dim('='), disp_kv(_key, _val))
+            _key, '=', disp_kv(_key, _val))
             for (_key, _val) in sorted(self.env.items())]))
         return 0
 
@@ -1068,20 +1269,47 @@ class TelnetServer(tulip.protocols.Protocol):
 
     def _env_update(self, env):
         " Callback receives no environment variables "
-        if 'TERM' in env and env['TERM'] != self.env['TERM'].lower():
-            ttype = env['TERM'].lower()
-            if not ttype:
-                ttype = 'unknown'
-            self.log.debug('{!r} -> {!r}'.format(self.env['TERM'], ttype))
-            self._client_env['TERM'] = ttype
-            self._does_styling = (
-                    ttype.startswith('vt') or ttype.startswith('xterm') or
-                    ttype.startswith('dtterm') or ttype.startswith('rxvt') or
-                    ttype.startswith('urxvt') or ttype.startswith('ansi') or
-                    ttype.startswith('linux') or ttype.startswith('screen'))
+        if 'HOSTNAME' in env:
+            env['REMOTEHOST'] = env.pop('HOSTNAME')
+        if 'TERM' in env:
+            if env['TERM'].lower() != self.env['TERM'].lower():
+                ttype = env['TERM'].lower()
+                if not ttype:
+                    ttype = 'unknown'
+                self.log.debug('{!r} -> {!r}'.format(self.env['TERM'], ttype))
+                self._client_env['TERM'] = ttype
+                self._does_styling = ( ttype.startswith('vt') or
+                        ttype.startswith('xterm') or
+                        ttype.startswith('dtterm') or
+                        ttype.startswith('rxvt') or
+                        ttype.startswith('urxvt') or
+                        ttype.startswith('ansi') or
+                        ttype == 'linux' or ttype == 'screen')
+            del env['TERM']
+        if 'TIMEOUT' in env and env['TIMEOUT'] != self.env['TIMEOUT']:
+            timeout = env['TIMEOUT']
+            if not timeout:
+                will_timeout = False
+            else:
+                try:
+                    will_timeout = (timeout and int(timeout))
+                except ValueError as err:
+                    self.log.info('cannot set timeout {!r}: {}'
+                            .format(env['TIMEOUT'], err))
+                    return
+            if self._will_timeout:
+                self._timeout.cancel()
+            self._client_env['TIMEOUT'] = timeout
+            self._will_timeout = will_timeout
+            self._start_timeout()
         else:
             self._client_env.update(env)
             self.log.debug('env_update: %r', env)
+
+    def _start_timeout(self):
+        if self._will_timeout:
+            self._timeout = tulip.get_event_loop().call_later(
+                int(self.env['TIMEOUT']) * 60, self.timeout)
 
     def _charset_received(self, charset):
         " Callback receives CHARSET value, rfc2066 "
@@ -1098,6 +1326,15 @@ class TelnetServer(tulip.protocols.Protocol):
     def _tspeed_received(self, rx, tx):
         " Callback receives TSPEED values, rfc1079 "
         self._env_update({'TSPEED': '%s,%s' % (rx, tx)})
+
+    def _completed_client_lookup(self, arg):
+        """
+        Called when dns resolution of client IP address completed.
+        """
+        if self.client_ip != self.client_reverse_ip.result():
+            # OpenSSH will log 'POSSIBLE BREAK-IN ATTEMPT!' but we dont care ..
+            self.log.warn('reverse mapping failed: {}'.format(
+                self.arg.result()))
 
     def _negotiate(self, call_after=None):
         """
@@ -1160,8 +1397,8 @@ def main():
     func = loop.start_serving(lambda: TelnetServer(default_encoding=enc),
             args.host, args.port)
 
-    for sock in loop.run_until_complete(func):
-        logging.info('Listening on %s', sock.getsockname())
+    socks = loop.run_until_complete(func)
+    logging.info('Listening on %s', socks[0].getsockname())
     loop.run_forever()
 
 if __name__ == '__main__':
