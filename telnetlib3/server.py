@@ -65,6 +65,7 @@ class TelnetServer(tulip.protocols.Protocol):
             ('toggle', None),
             ('logoff', None),
             ]), ),
+        ('echo', None),
         ('status', None),
         ('set', None),  # args injected during tab_received()
         ('whoami', None),
@@ -654,6 +655,8 @@ class TelnetServer(tulip.protocols.Protocol):
         self.log.debug('process_cmd {!r}{!r}'.format(cmd, args))
         if cmd in ('help', '?',):
             return self.cmdset_help(*args)
+        elif cmd == 'echo':
+            self.echo('\r\n{}'.format(' '.join(args)))
         elif cmd in ('quit', 'exit', 'logoff', 'logout', 'bye'):
             self.logout()
         elif cmd == 'status':
