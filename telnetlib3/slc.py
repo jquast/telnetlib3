@@ -14,6 +14,8 @@ NSLC = 30
     SLC_MCEOL, SLC_INSRT, SLC_OVER, SLC_ECR, SLC_EWR, SLC_EBOL, SLC_EEOL) = (
             bytes([const]) for const in range(1, NSLC + 1))
 
+
+# TODO: was modelled after slc.c; pythonize it
 class SLC_definition(object):
     def __init__(self, mask=SLC_DEFAULT, value=theNULL):
         """ .. class:SLC_definition(mask : byte, value: byte)

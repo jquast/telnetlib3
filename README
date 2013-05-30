@@ -11,11 +11,19 @@ Status
 ======
 
 TODO: Charset Negotation
-TODO: TelnetClient using same TelnetServerStream
+TODO: Proper abort_output()/IAC rewind.
+TODO: TelnetClient (also using TelnetStreamReader)
 TODO: fingerprinting Client & Server
 TODO: nosetests
 TODO: example MUD server
 TODO: example wunderground.com client
+
+telsh
+=====
+
+In adition to remote line editing as described below, a pure-python shell, 'telsh' is provided to allow toggling of telnet server option negotiation and setting and displaying of session parameters, such as encodings, tab auto-completion, variables, PS1 and PS2 multi-line prompt substitions, etc.
+
+It is only in the interest of this project to provide enough shell-like capabilities to demonstrate remote line editing and an extensible environment for session introspection. An example of this is assigning a new value to CHARSET, toggling in and outbinary, etc.
 
 Telnet
 ======
@@ -24,27 +32,61 @@ The Telnet protocol is over 40 years old and still in use today. Telnet predates
 
 Naturally, Telnet as a code project inevitably must handle a wide variety of connecting clients and hosts, due to limitations of their networking Transports, Terminals, their drivers, and host operating systems. 
 
-This implementation aims to implement only those capabilities "found in the wold", and include, or chose not to include, mechanisms that are suitable only for legacy or vendor-implemented deviations. It even makes one of its own, wiring the 'encoding' to the value of replied by the CHARSET (rfc 2066), see UTF-8 below.
+This implementation aims to implement only those capabilities "found in the wold", and include, or chose not to include, mechanisms that are suitable only for legacy or vendor-implemented deviations. It even makes one of its own, wiring the 'encoding' to the value of replied by the CHARSET (rfc 2066).
 
-Kludge mode
------------
+UTF-8
+=====
+
+CHARSET (rfc 2066) specifies a codepage, not an encoding. It is unimplemented in bsd client, and generally found implemented only in recent MUD client and servers, and possibly some vendor implementations. Most common values are:
+    ASCII
+    UTF-8
+    LATIN1
+
+The default preferred encoding for clients that negotiate BINARY but not CHARSET, such as the bsd client, is defined by the TelnetServer keyword argument ``default_encoding``, which is 'utf-8' by default.
+
+Setting binary for only a single direction (outbinary or inbinary) is supported, and client support of one does not immediately toggle the other, it must be negotiated both ways for full UTF-8 input and output.
+
+Remote Linemode
+===============
+
+This project is the only known Server-side implementation of *Special Linemode Character* (SLC) negotiation and *Remote line editing*, other than BSD telnetd.
+
+Remote line editing is a comprehensive approach to providing responsive, low-latency output of characters received over slow network links, allowing incomplete lines to be buffered, while still providing editing facilities remotely.
+
+The Server and Client agree on a series of Special Line Mode (SLC) function values, to agree on the keyboard characters used for Backspace, Interrupt Process (^C), Repaint (^R), Erase Word (^W), etc.
+
+Kludge Mode
+===========
+
+In kludge mode, SLC characters are simulated for remote editing, provide an almost readline-like experience for all telnet clients, except those that perform only local editing, which are unaffected.
+
+The "magic" sequence *WILL-SGA, WILL-ECHO* enables Kludge mode for all Telnet
+clients that meet minimal RFC compliance. This is the most frequent client
+implementation (Windows 98 Telnet, SyncTerm, netrunner, TinTin++) used to
+provide remote line editing (characters are transmitted before CR), and most
+compatible with conanical (line-seperated) processing, while still providing
+remote line editing for dumb clients.
+
+Consider that Kludge mode provies no way to determine which bytes, received at any indeterminate time, of any indeterminate length, or none at all, are received as the result of which input characters sent.
+
+Accordingly, with Supress Go-Ahead (SGA) enabled, there can be any indeterminable state of whether the remote program is hung, receiving, has replied but not yet received, or has received only partially and not completely the program's output.
+
+Local Linemode
+==============
 
 With no MMU and crude process control, it was necessary to differentiate the "command channel" from "inband data" from the start. This is done by enforcing that, unless negotiated otherwise, the following core Rules:
   * Each end transmits only 7-bit ASCII, (except as used in the interpreter).
   * A line prompting input be followed by the 'Go-Ahead' (GA) command
   * Client signals end of input (send) by CR LF (Carriage Return + Linefeed)
 
-Half-Duplex
------------
-
-These basic restrictions are modeled after a Teletype 33 which runs in "half-duplex" mode. While data is being printed, any keypress is buffered internaly in the teletype input buffer. The teletypist may press 'BREAK' at any time to signal a control line, the telnet Synch mechanism forwards this to the remote host.
-
-This terminal is also strictly 7-bit ASCII. A supervisor connecting a teletype to a telnet stream would release ownership of all I/O except when the 8th bit is high, could then release further I/O by calling to an IAC interpreter.
+These basic restrictions are modeled after a Teletype 33 which runs in "half-duplex" mode. While data is being printed, it cannot yet transit any input: any keypress is buffered internaly in the teletype's buffer.
 
 "Synch" Mechanism
------------------
+=================
 
 NOT SUPPORTED.
+
+A supervisor connecting a (7-bit) teletype to a telnet (8-bit) data line would simply pipe the streams together by the 7 bits; The teletypist may press 'BREAK' at any time to signal a control line: the supervisor then enters "Telnet Synch" mode by sending an "Urgent" mechanism, ceases printing. A user could then instruct "Abort Output", "Abourt Process", or other mechanisms and presumably return to normal processing.
 
 Consider the description of a PDP-10 session in rfc139 (May 1971), presented here as a faux naif unix session:
 
@@ -68,12 +110,12 @@ In the TCP implementation of telnet, where presumably a half-duplex terminal may
     socket.send(IAC, socket.MSG_OOB).
 
 The value of the byte does not seem to matter, can be of any length, and can continue sending socket.MSG_OOB, though, the bsd server sends only a single byte:
-            /*
-             * In 4.2 (and 4.3) systems, there is some question about
-             * what byte in a sendOOB operation is the "OOB" data.
-             * To make ourselves compatible, we only send ONE byte
-             * out of band, the one WE THINK should be OOB
-               (...)
+    /*
+     * In 4.2 (and 4.3) systems, there is some question about
+     * what byte in a sendOOB operation is the "OOB" data.
+     * To make ourselves compatible, we only send ONE byte
+     * out of band, the one WE THINK should be OOB
+     (...)
 
 Where "Telnet Synch" mode is to end, DM should be inserted.  All input is discarded by the IAC interpreter until DM is received. This was used to some abuse, as greived about in rfc 529, for vendor-implemented sub-protocols:
 
@@ -95,12 +137,28 @@ And when TIOCPKT_FLUSHWRITE is signaled by the pty driver:
 
 awaiting data buffered on the write transport is cleared; taking care to ensure all IAC commands were sent in the netclear() alogorithm, which also sets the neturgent pointer.
 
-Some work in progress on a correct discard_output() impl,
+
+Carriage Return
+===============
+
+There are five supported signalling mechanisms for "send" or "end of line" received by clients.  The default implementation supplies remote line editing and callback of ``line_received`` with all client-supported carriage returns, but may cause loss of data for implementors wishing to distinguish among them.
+
+Namely, the difference between 'return' and 'enter' or raw file transfers. Those implementors should directly override ``data_received``, or carefully deriving their own implementations of ``editing_received`` and ``character_received``.
+
+An overview of the primary callbacks and their interaction with carriage returns are described below for those wishing to extend the basic remote line editing or 'character-at-a-time' capabilities.
+
+CR LF: The Telnet protocol defines the sequence CR LF to mean "end-of-line".  The default implementation strips CL LF, and fires line_received on CR.
+
+CR NUL: An interpretation of rfc854 may be that CR NUL should be sent when only a single CR is intended on a client and server host capable of distinguishing between CR and CR LF ('return' vs 'enter' key).  The default implementation strips CL NUL, and fires line_received on CR.
+
+CR: CR alone may be received, though a client is not RFC-complaint to do so.  The default implementation strips CL, and fires line_received.
+
+LF: LF aline may be received, though a client is not RFC-complaint to do so.  The default implementation strips LF, and fires line_received.
+
+IAC EOR: In addition to line-oriented or character-oriented terminals, IAC EOR is used to delimit logical records (e.g., "screens") on Data Entry Terminals (DETs), or end of multi-line input on vendor-implemented and some MUD clients, or, together with BINARY, a mechanism to signal newline vendor-implemented newline outside of CR+LF during file transfers. MUD clients may read IAC+EOR as meaning 'Go Ahead', marking the current line to be displayed as a "prompt", optionally not included in the client "history buffer". Its meaning as received by server is not known ..
 
 Not Implemented
 ===============
-
-Telnet SYNCH mechanism is not implemented.
 
 RFC-1416 "Telnet Authentication Option", RFC-1411 "Telnet Authentication: Kerberos Version 4", and RFC-1412 "Telnet Authentication: SPX" are supported by the BSD telnetd.c, but there are no plans to implement any of them.
 
@@ -145,40 +203,8 @@ Implemented
   RFC 1572, "Telnet Environment Option", Jan 1994
 
 * = Not implemented in bsd telnet (rare!)
+
 + = Required by specification (complies!)
-
-Linemode
---------
-
-This project is the only known Server-side implementation of Special Linemode Character negotiation with BSD Clients. This allows the server and client to agree on Backspace, Interrupt Process (^C), Repaint (^R), Erase Word (^W), etc.
-
-In kludge mode, SLC characters are simulated for remote editing, provide an almost readline-like experience for all telnet clients, except those that perform only local editing, which are unaffected.
-
-UTF-8
------
-
-CHARSET (rfc 2066) specifies a codepage, not an encoding. It is unimplemented in bsd client, and generally found implemented only in recent MUD client and servers, and possibly some vendor implementations. Where implemented, the a client replying "UTF-8" has been found, and is presumed utf-8 encoded.
-
-The default preferred encoding for clients that negotiate BINARY but not CHARSET, such as the bsd client, is defined by the TelnetServer keyword argument *default_encoding*, which is 'utf-8' by default. Setting binary for only a single direction (outbinary or inbinary) is supported, and client support of one does not immediately toggle the other, it must be negotiated both ways for both UTF-8 input and output.
-
-Carriage Return
----------------
-
-There are five supported signalling mechanisms for "send" or "end of line" received by clients.  The default implementation supplies remote line editing and callback of ``line_received`` with all client-supported carriage returns, but may cause loss of data for implementors wishing to distinguish among them.
-
-Namely, the difference between 'return' and 'enter' or raw file transfers. Those implementors should directly override ``data_received``, or carefully deriving their own implementations of ``editing_received`` and ``character_received``.
-
-#An overview of the primary callbacks and their interaction with carriage returns are described below for those wishing to extend the basic remote line editing or 'character-at-a-time' capabilities.
-
-CR LF: The Telnet protocol defines the sequence CR LF to mean "end-of-line".  The default implementation strips CL LF, and fires line_received on CR.
-
-CR NUL: An interpretation of rfc854 may be that CR NUL should be sent when only a single CR is intended on a client and server host capable of distinguishing between CR and CR LF ('return' vs 'enter' key).  The default implementation strips CL NUL, and fires line_received on CR.
-
-CR: CR alone may be received, though a client is not RFC-complaint to do so.  The default implementation strips CL, and fires line_received.
-
-LF: LF aline may be received, though a client is not RFC-complaint to do so.  The default implementation strips LF, and fires line_received.
-
-IAC EOR: In addition to line-oriented or character-oriented terminals, IAC EOR is used to delimit logical records (e.g., "screens") on Data Entry Terminals (DETs), or end of multi-line input on vendor-implemented and some MUD clients, or, together with BINARY, a mechanism to signal newline vendor-implemented newline outside of CR+LF during file transfers. MUD clients may read IAC+EOR as meaning 'Go Ahead', marking the current line to be displayed as a "prompt", optionally not included in the client "history buffer". Its meaning as received by server is not known ..
 
 Resources
 =========

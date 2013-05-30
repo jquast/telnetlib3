@@ -7,7 +7,7 @@ from telnetlib import WILL, SE, NOP, TM, DM, BRK, IP, AO, AYT, EC, EL, EOR
 from telnetlib import GA, SB, LOGOUT, EXOPL, CHARSET, SNDLOC, theNULL
 
 from slc import SLC_NOSUPPORT, SLC_CANTCHANGE, SLC_VARIABLE, NSLC
-from slc import SLC_DEFAULT, SLC_FLUSHOUT, SLC_FLUSHIN, SLC_ACK
+from slc import SLC_DEFAULT, SLC_ACK
 from slc import SLC_SYNCH, SLC_BRK, SLC_IP, SLC_AO, SLC_AYT, SLC_EOR
 from slc import SLC_ABORT, SLC_EOF, SLC_SUSP, SLC_EC, SLC_EL, SLC_EW
 from slc import SLC_RP, SLC_LNEXT, SLC_XON, SLC_XOFF, SLC_FORW1
@@ -16,7 +16,6 @@ from slc import SLC_MCEOL, SLC_INSRT, SLC_OVER, SLC_ECR, SLC_EWR, SLC_EBOL
 from slc import SLC_EEOL, DEFAULT_SLC_TAB, SLC_nosupport, SLC_definition
 from slc import _POSIX_VDISABLE, name_slc_command, Forwardmask
 
-from teldisp import name_unicode
 
 (EOF, SUSP, ABORT, EOR_CMD) = (
         bytes([const]) for const in range(236, 240))
@@ -1565,6 +1564,8 @@ class TelnetStreamReader:
             self.set_ext_callback(ext_cmd, getattr(self, 'handle_%s' % (key,)))
 
 class Linemode(object):
+    """ """
+
     def __init__(self, mask=LMODE_MODE_LOCAL):
         """ A mask of ``LMODE_MODE_LOCAL`` means that all line editing is
             performed on the client side (default). A mask of theNULL (\x00)
