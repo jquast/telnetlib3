@@ -178,9 +178,7 @@ class Telsh():
             flags=re.DOTALL)
 
         #: variable evaluation re for ``echo_eval()``
-        self._re_var = re.compile(r'\$({(?P<eval>[^}]+)}'
-                                  r'|(?P<val>[a-zA-Z_]+)'
-                                  r'|(?P<ret>\?))')
+        self._re_var = re.compile(r'\${?(\?|[a-zA-Z_]+)}?')
 
         #: Current state is multiline (PS2 is displayed)
         self._multiline = False
@@ -677,13 +675,10 @@ class Telsh():
     def cmdset_echo(self, *args):
         def echo_eval(input, literal_escape=True):
             def _getter(match):
-                key = (match.group('eval') or
-                        match.group('val') or
-                        match.group('ret'))
-                if key == '?':
+                if match.group(1) == '?':
                     return ('{}'.format(self._retval)
                             if self._retval is not None else '')
-                return self.server.env[key]
+                return self.server.env[match.group(1)]
             return self._eval(input, self._re_var, _getter, literal_escape)
         output = ' '.join(echo_eval(arg) for arg in args)
         self.stream.write('\r\n{}'.format(output))

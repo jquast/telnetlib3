@@ -1169,7 +1169,7 @@ class TelnetStreamReader:
     def _handle_sb_env(self, buf):
         """ Callback handles IAC-SB-NEWENVIRON-<buf>-SE (rfc1073).
         """
-        assert len(buf) > 2, ('SE: buffer too short: %r' % (buf,))
+        assert len(buf) > 1, ('SE: buffer too short: %r' % (buf,))
         kind = buf.popleft()
         opt = buf.popleft()
         assert opt in (IS, INFO, SEND), opt
@@ -1200,7 +1200,8 @@ class TelnetStreamReader:
                     key, value = pair
                     env[key] = value
             self.log.debug('sb_env %s: %r', name_command(opt), env)
-            self._ext_callback[kind](env)
+            if env:
+                self._ext_callback[kind](env)
             return
 
     def _handle_sb_sndloc(self, buf):
