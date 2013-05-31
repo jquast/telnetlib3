@@ -174,11 +174,13 @@ class Telsh():
 
         #: prompt evaluation re for ``resolve_prompt()``
         self._re_prompt = re.compile('{}{}'.format( self.prompt_esc_char,
-            r'(?P<val>\d{3}|x[0-9a-fA-F]{2}|\$([a-zA-Z_]+)|[Ee#\?huH])'),
+            r'(?P<val>\d{3}|x[0-9a-fA-F]{2}|\$([a-zA-Z_]+)|[Ee#\?hHusv])'),
             flags=re.DOTALL)
 
         #: variable evaluation re for ``echo_eval()``
-        self._re_var = re.compile(r'\$({(?P<eval>[^}]+)}|(?P<val>[a-zA-Z_]+))')
+        self._re_var = re.compile(r'\$({(?P<eval>[^}]+)}'
+                                  r'|(?P<val>[a-zA-Z_]+)'
+                                  r'|(?P<ret>\?))')
 
         #: Current state is multiline (PS2 is displayed)
         self._multiline = False
@@ -675,11 +677,16 @@ class Telsh():
     def cmdset_echo(self, *args):
         def echo_eval(input, literal_escape=True):
             def _getter(match):
-                key = match.group('eval') or match.group('val')
+                key = (match.group('eval') or
+                        match.group('val') or
+                        match.group('ret'))
+                if key == '?':
+                    return ('{}'.format(self._retval)
+                            if self._retval is not None else '')
                 return self.server.env[key]
             return self._eval(input, self._re_var, _getter, literal_escape)
-        self.stream.write('\r\n{}'.format(' '.join(
-            echo_eval(arg) if '$' in arg else arg for arg in args)))
+        output = ' '.join(echo_eval(arg) for arg in args)
+        self.stream.write('\r\n{}'.format(output))
         return 0
 
     def cmdset_help(self, *args):
@@ -730,7 +737,7 @@ class Telsh():
             ('outbinary', self.server.outbinary),
             ('inbinary', self.server.inbinary),
             ('binary', self.server.outbinary + self.server.inbinary),
-            ('goahead', not lopt.enabled(telopt.SGA) and not self._send_ga),
+            ('goahead', (not lopt.enabled(telopt.SGA)) and self._send_ga),
             ('color', self._does_styling),
             ('xon-any', self.server.stream.xon_any),
             ('bell', self.send_bell)])
@@ -768,8 +775,8 @@ class Telsh():
                 telopt.name_command(cmd).lower()))
         if opt in ('goahead', '_all'):
             _opt = 'goahead' if opt == '_all' else opt
-            cmd = (telopt.WONT if tbl_opt[_opt] else telopt.WILL)
-            self._send_ga = cmd is telopt.WILL
+            cmd = (telopt.WILL if tbl_opt[_opt] else telopt.WONT)
+            self._send_ga = cmd is telopt.WONT
             self.server.stream.iac(cmd, telopt.SGA)
             self.stream.write('\r\n{} supress go-ahead.'.format(
                 telopt.name_command(cmd).lower()))
@@ -845,8 +852,7 @@ class Telsh():
             elif char == 't': return '\t'
             elif char == 'v': return '\v'
             else:
-                return '\\'
-            return char
+                return '\\{}'.format(char)
 
         assert callable(getter), getter
         output = []
@@ -857,10 +863,9 @@ class Telsh():
                 if match:
                     output.append(getter(match))
                     start_next = n + match.end()
-                elif literal_escape and (
-                        input[n] == '\\' and n < len(input) - 1
-                        and literal_escape):
-                    val = _resolve_literal(input[n:n+2])
+                elif (literal_escape and input[n] == '\\'
+                        and n < len(input) - 1):
+                    val = _resolve_literal(input[n+1])
                     if val is None:
                         output.append('\\')
                         start_next = 0

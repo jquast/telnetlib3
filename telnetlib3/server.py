@@ -37,7 +37,7 @@ class TelnetServer(tulip.protocols.Protocol):
             'USER': 'unknown',
             'TERM': 'unknown',
             'CHARSET': 'ascii',
-            'PS1': '[%?] [%E] [%u@%h] %# ',
+            'PS1': '%s-%v %# ',
             'PS2': '> ',
             'TIMEOUT': '5',
             }

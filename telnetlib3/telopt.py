@@ -398,6 +398,7 @@ class TelnetStreamReader:
             if self.remote_option.enabled(opt):
                 self.log.debug('skip {} {}; remote_option = True'.format(
                     name_command(cmd), name_command(opt)))
+                self.pending_option[cmd + opt] = False
                 return False
         if cmd in (DO, WILL):
             if self.pending_option.enabled(cmd + opt):
@@ -409,6 +410,7 @@ class TelnetStreamReader:
             if self.local_option.enabled(opt):
                 self.log.debug('skip {} {}; local_option = True'.format(
                     name_command(cmd), name_command(opt)))
+                self.pending_option[cmd + opt] = False
                 return False
         if cmd == DONT and opt not in (LOGOUT,): # XXX any other exclusions?
             if self.remote_option.enabled(opt):
