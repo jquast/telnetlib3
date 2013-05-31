@@ -14,6 +14,8 @@ __all__ = ['TelnetStreamReader', 'escape_iac', 'name_command', 'name_commands']
 (IS, SEND, INFO) = (bytes([const]) for const in range(3))
 (LFLOW_OFF, LFLOW_ON, LFLOW_RESTART_ANY, LFLOW_RESTART_XON) = (
         bytes([const]) for const in range(4))
+(REQUEST, ACCEPTED, REJECTED, TTABLE_IS, TTABLE_REJECTED,
+    TTABLE_ACK, TTABLE_NAK) = (bytes([const]) for const in range(1, 8))
 
 _MAXSIZE_SB = 2048
 _MAXSIZE_SLC = slc.NSLC * 6
@@ -49,6 +51,15 @@ class TelnetStreamReader:
             "LC_COLLATE LC_CTYPE LC_MESSAGES LC_MONETARY LC_NUMERIC LC_TIME"
             ).split()
     default_slc_tab = slc.BSD_SLC_TAB
+    default_codepages = ('UTF-8', 'UTF-16', 'US-ASCII', 'LATIN1', 'BIG5',
+            'GBK', 'SHIFTJIS', 'GB18030', 'KOI8-R', 'KOI8-U',) + tuple(
+                    'ISO8859-{}'.format(iso) for iso in range(16)) + tuple(
+                          'CP{}'.format(cp) for cp in (
+                              154, 437, 500, 737, 775, 850, 852, 855, 856, 857,
+                             860, 861, 862, 863, 864, 865, 866, 869, 874,
+                             875, 932, 949, 950, 1006, 1026, 1140, 1250,
+                             1251, 1252, 1253, 1254, 1255, 1257, 1257, 1258,
+                             1361, ))
 
     @property
     def mode(self):
@@ -217,7 +228,7 @@ class TelnetStreamReader:
         for ext_cmd, key in (
                 (TTYPE, 'ttype'), (TSPEED, 'tspeed'), (XDISPLOC, 'xdisploc'),
                 (NEW_ENVIRON, 'env'), (NAWS, 'naws'), (LOGOUT, 'logout'),
-                (SNDLOC, 'sndloc',) ):
+                (SNDLOC, 'sndloc'), (CHARSET, 'charset'), ):
             self.set_ext_callback(ext_cmd,
                     getattr(self, 'handle_{}'.format(key)))
 
@@ -410,11 +421,12 @@ class TelnetStreamReader:
         elif cmd == WONT:
             self.local_option[opt] = False
         if cmd in short_iacs:
+            self.log.debug('send IAC {}'.format(name_command(cmd)))
             self.send_iac(IAC + cmd)
         else:
             self.send_iac(IAC + cmd + opt)
-        self.log.debug('send IAC {}'.format(name_command(cmd),
-            ' {}'.format(name_command(opt)) if cmd in short_iacs else ''))
+            self.log.debug('send IAC {} {}'.format(
+                name_command(cmd), name_command(opt)))
 
 # Public methods for notifying about, or soliciting state options.
 #
@@ -462,19 +474,21 @@ class TelnetStreamReader:
     def request_charset(self, codepages=None, sep=' '):
         """ .. method:: request_charset(codepages : list, sep : string) -> bool
 
-            Request sub-negotiation CHARSET, rfc 2066.
-            Returns True if request is valid for telnet state, and was sent.
-        """ # TODO: find client that works!
-        #  At least some modern MUD clients and popular asian telnet BBS
-        #  systems use CHARSET, and reply 'UTF-8' (or 'GBK',).  """
-        if not self.remote_option.enabled(CHARSET):
-            pass
-        (REQUEST, ACCEPTED, REJECTED, TTABLE_IS, TTABLE_REJECTED,
-            TTABLE_ACK, TTABLE_NAK) = (bytes([const]) for const in range(1, 8))
-        if not self.pending_option.enabled(SB + CHARSET):
+            Request sub-negotiation CHARSET, rfc 2066. Returns True if request
+            is valid for telnet state, and was sent.
+
+            The sender requests that all text sent to and by it be encoded in
+            one of character sets specifed by string list ``codepages``.
+        """
+        codepages = self.default_codepages if codepages is None else codepages
+        if (self.remote_option.enabled(CHARSET) and
+                not self.pending_option.enabled(SB + CHARSET)):
             self.pending_option[SB + CHARSET] = True
-            response = [IAC, SB, CHARSET, REQUEST]
-            response.extend(bytes(sep.join(codepages), 'ascii'))
+
+            response = collections.deque()
+            response.extend([IAC, SB, CHARSET, REQUEST])
+            response.extend([bytes(sep, 'ascii')])
+            response.extend([bytes(sep.join(codepages), 'ascii')])
             response.extend([IAC, SE])
             self.log.debug('send: IAC SB CHARSET REQUEST {} IAC SE'.format(
                 sep.join(codepages)))
@@ -799,14 +813,15 @@ class TelnetStreamReader:
     def set_ext_callback(self, cmd, func):
         """ Register ``func`` as callback for subnegotiation result of ``cmd``.
 
-        cmd must be one of: TTYPE, TSPEED, XDISPLOC, NEW_ENVIRON, or NAWS.
+        cmd is one of: TTYPE, TSPEED, XDISPLOC, NEW_ENVIRON, NAWS, or CHARSET.
 
         These callbacks may receive a number of arguments.
 
-        Callbacks for ``TTYPE`` and ``XDISPLOC`` receive a single argument
-        as a bytestring. ``NEW_ENVIRON`` receives a single argument as
-        dictionary. ``NAWS`` receives two integer arguments (width, height),
-        and ``TSPEED`` receives two integer arguments (rx, tx).
+        Callbacks for ``TTYPE``, ``XDISPLOC``, and ``CHARSET`` receive a
+        single argument as a string. ``NEW_ENVIRON`` receives a single
+        argument as dictionary. ``NAWS`` receives two integer arguments
+        (width, height), and ``TSPEED`` receives two integer arguments
+        (rx, tx).
         """
         assert cmd in (TTYPE, TSPEED, XDISPLOC,
                 NEW_ENVIRON, NAWS, LOGOUT, CHARSET, SNDLOC), cmd
@@ -815,9 +830,8 @@ class TelnetStreamReader:
 
     def handle_xdisploc(self, xdisploc):
         """ XXX Receive XDISPLAY value ``xdisploc``, rfc1096.
-
-            xdisploc string format is '<host>:<dispnum>[.<screennum>]'.
         """
+        #   xdisploc string format is '<host>:<dispnum>[.<screennum>]'.
         self.log.debug('X Display is {}'.format(xdisploc))
 
     def handle_sndloc(self, location):
@@ -827,16 +841,15 @@ class TelnetStreamReader:
 
     def handle_ttype(self, ttype):
         """ XXX Receive TTYPE value ``ttype``, rfc1091.
-
-            Often value of TERM, or analogous to client's emulation capability,
-            common values for non-posix client replies are 'VT100', 'VT102',
-            'ANSI', 'ANSI-BBS', or even a mud client identifier. RFC allows
-            subsequent requests, the client may solicit multiple times, and
-            the client indicates 'end of list' by cycling the return value.
-
-            Some example values: VT220, VT100, IBM-3278-(2 through 5),
-                ANSITERM, ANSI, TTY, and 5250.
         """
+        #   Often value of TERM, or analogous to client's emulation capability,
+        #   common values for non-posix client replies are 'VT100', 'VT102',
+        #   'ANSI', 'ANSI-BBS', or even a mud client identifier. RFC allows
+        #   subsequent requests, the server may solicit multiple times, and
+        #   the client indicates 'end of list' by cycling the return value.
+        #
+        #   Some example values: VT220, VT100, IBM-3278-(2 through 5),
+        #       ANSITERM, ANSI, TTY, and 5250.
         self.log.debug('Terminal type is %r', ttype)
 
     def handle_naws(self, width, height):
@@ -845,21 +858,24 @@ class TelnetStreamReader:
         self.log.debug('Terminal cols=%d, rows=%d', width, height)
 
     def handle_env(self, env):
-        """ XXX Receive environment variables as dict, rfc1572
-            negotiation, as dictionary.
+        """ XXX Receive environment variables as dict, rfc1572.
         """
         self.log.debug('env=%r', env)
 
     def handle_tspeed(self, rx, tx):
         """ XXX Receive terminal speed from TSPEED as int, rfc1079
         """
-        self.log.debug('Terminal Speed rx:%d, tx:%d', rx, tx)
-
+        self.log.debug('Terminal Speed rx:{}, tx:{}'.format(rx, tx))
 
     def handle_location(self, location):
-        """ XXX Handle (IAC, SB, SNDLOC, <location>, IAC, SE), RFC 779.
+        """ XXX Receive terminal location from SNDLOC as string, rfc779.
         """
-        self.log.debug('Terminal Location:%s', location)
+        self.log.debug('Terminal Location: {}'.format(location))
+
+    def handle_charset(self, charset):
+        """ XXX Receive character set from CHARSET as string, rfc2066
+        """
+        self.log.debug('Character set: {}'.format(charset))
 
     def handle_logout(self, cmd):
         """ XXX Handle (IAC, (DO | DONT | WILL | WONT), LOGOUT), RFC 727.
@@ -1063,8 +1079,8 @@ class TelnetStreamReader:
         cmd = buf[0]
         if self.is_server:
             assert cmd in (LINEMODE, LFLOW, NAWS, SNDLOC,
-                NEW_ENVIRON, TTYPE, TSPEED, XDISPLOC, STATUS
-                ), name_command(cmd)
+                NEW_ENVIRON, TTYPE, TSPEED, XDISPLOC, STATUS, CHARSET
+                ), ('SB {}: not supported'.format(name_command(cmd)))
         if self.pending_option.enabled(SB + cmd):
             self.pending_option[SB + cmd] = False
         else:
@@ -1078,6 +1094,8 @@ class TelnetStreamReader:
             self._handle_sb_sndloc(buf)
         elif cmd == NEW_ENVIRON:
             self._handle_sb_env(buf)
+        elif cmd == CHARSET:
+            self._handle_sb_charset(buf)
         elif (cmd, buf[1]) == (TTYPE, IS):
             self._handle_sb_ttype(buf)
         elif (cmd, buf[1]) == (TSPEED, IS):
@@ -1092,6 +1110,23 @@ class TelnetStreamReader:
 
 # Private sub-negotiation (SB) routines
 #
+    def _handle_sb_charset(self, buf):
+        assert buf.popleft() == CHARSET
+        cmd = buf.popleft()
+        if cmd == REQUEST:
+            #sep = buf.popleft()
+            # client decodes 'buf', split by 'sep', and choses a charset
+            raise NotImplementedError
+        elif cmd == ACCEPTED:
+            charset = b''.join(buf).decode('ascii')
+            self._ext_callback[CHARSET](charset)
+        elif cmd == REJECTED:
+            self.log.info('Client rejects codepages')
+        elif cmd in (TTABLE_IS, TTABLE_ACK, TTABLE_NAK, TTABLE_REJECTED):
+            raise NotImplementedError
+        else:
+            raise ValueError("SB: unknown CHARSET command: {!r}".format(cmd))
+
     def _handle_sb_tspeed(self, buf):
         """ Callback handles IAC-SB-TSPEED-<buf>-SE.
         """
@@ -1315,8 +1350,8 @@ class TelnetStreamReader:
             The special definition (0, SLC_DEFAULT|SLC_VARIABLE, 0) has the
             side-effect of replying with a full slc tabset, resetting to
             the default tabset, if indicated.  """
-        self.log.debug('_slc_process %s mine=%s, his=%s',
-                slc.name_slc_command(func), self.slctab[func], slc_def)
+        self.log.debug('_slc_process {:<9} mine={}, his={}'.format(
+                slc.name_slc_command(func), self.slctab[func], slc_def))
 
         # out of bounds checking
         if ord(func) > slc.NSLC:

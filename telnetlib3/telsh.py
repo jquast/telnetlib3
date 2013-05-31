@@ -468,6 +468,10 @@ class Telsh():
             if not self.strip_eol:
                 self.lastline._append(LF)
             self.line_received(self.lastline)
+        elif char == '\b':
+            # callback ``editing_received`` with simulated SLC_EC (backspace).
+            import slc  # todo: abstract away slc
+            self.editing_received(char, slc.SLC_EC)
         elif (char == self.autocomplete_char
                 and self.autocomplete_char
                 and self.server.stream.mode != 'local'):
@@ -560,7 +564,10 @@ class Telsh():
             if input == 'u':
                 return self.server.env['USER']
             if input == 'h':
-                return '{}'.format(self.server.server_name.result())
+                return '{}'.format(
+                        self.server.server_name.result().split('.')[0]
+                        if self.server.server_name.done()
+                        else '')
             if input == 'H':
                 return '{}'.format(self.server.server_fqdn.result()
                         if self.server.server_fqdn.done() else
@@ -631,12 +638,12 @@ class Telsh():
                         return ''
                     elif (err.args == ('No escaped character',)
                             and cmd.endswith('\\')):
-                        # multiline without escaping
-                        return None
+                        return ''
                     raise err
             commands.append((cmd, args))
         for cmd, args in commands:
-            self.cmdset_command(cmd, *args)
+            retval = self.cmdset_command(cmd, *args)
+        return retval
 
     def cmdset_command(self, cmd, *args):
         self.log.debug('command {!r}{!r}'.format(cmd, args))
@@ -647,11 +654,11 @@ class Telsh():
         elif cmd == 'echo':
             self.cmdset_echo(*args)
         elif cmd in ('quit', 'exit', 'logoff', 'logout', 'bye'):
-            self.logout()
+            self.server.logout()
         elif cmd == 'status':
             self.display_status()
         elif cmd == 'whoami':
-            self.stream.write('\r\n{}.'.format(self.about_connection()))
+            self.stream.write('\r\n{}.'.format(self.server.__str__()))
         elif cmd == 'whereami':
             return self.cmdset_whereami(*args)
         elif cmd == 'set':

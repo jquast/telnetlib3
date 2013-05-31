@@ -305,6 +305,8 @@ class TelnetServer(tulip.protocols.Protocol):
         self.stream.iac(telopt.DO, telopt.NAWS)
         self.stream.iac(telopt.DO, telopt.CHARSET)
         self.stream.iac(telopt.DO, telopt.TTYPE)
+        self.stream.iac(telopt.DO, telopt.BINARY)
+        self.stream.iac(telopt.WILL, telopt.BINARY)
         if ttype and self.stream.remote_option.enabled(telopt.TTYPE):
             # we've already accepted their ttype, but see what else they have!
             self.stream.request_ttype()
@@ -314,13 +316,14 @@ class TelnetServer(tulip.protocols.Protocol):
 
             Outputs status of connection and re-displays prompt.
         """
-        self.stream.write('\r\n{}.'.format(self.__str__()))
+        self.shell.stream.write('\r\n{}.'.format(self.__str__()))
         self.shell.display_prompt()
 
     def timeout(self):
         """ XXX Callback received on session timeout.
         """
-        self.stream.write('\r\nTimeout after {:1.0f}s.\r\n'.format(self.idle))
+        self.shell.stream.write(
+                '\r\nTimeout after {:1.0f}s.\r\n'.format(self.idle))
         self.log.debug('Timeout after {:1.3f}s.'.format(self.idle))
         self.transport.close()
 
@@ -335,7 +338,8 @@ class TelnetServer(tulip.protocols.Protocol):
                 'The very trees seem to moan as you leave',
                 'Echoing screams fill the wastelands as you close your eyes',
                 'Your very soul aches as you wake up from your favorite dream')
-        self.stream.write('\r\n{}.\r\n'.format(
+        self.shell.stream.write(
+                '\r\n{}.\r\n'.format(
             msgs[int(time.time()/84) % len(msgs)]))
         self.transport.close()
 
@@ -383,19 +387,20 @@ class TelnetServer(tulip.protocols.Protocol):
                 or not ttype or ttype.lower() == 'unknown'):
             ttype = self.env['TERM'].lower()
             self.env_update({'TERM': ttype})
-            self.log.warn('TTYPE stop on {}, using {env[TERM]}.'.format(
+            self.log.debug('TTYPE stop on {}, using {env[TERM]}.'.format(
                 self._advanced, env=self.env))
             return
         elif (self._advanced == 2 and ttype.upper().startswith('MTTS ')):
             # Mud Terminal type started, previous value is most termcap-like
             ttype = self.env['TTYPE{}'.format(self._advanced)]
             self.env_update({'TERM': ttype})
-            self.log.warn('TTYPE is {}, using {env[TERM]}.'.format(
+            self.log.debug('TTYPE is {}, using {env[TERM]}.'.format(
                 self._advanced, env=self.env))
         elif (ttype.lower() == lastval):
-            # End of list (looping). Chose first value
-            self.log.warn('TTYPE repeated at {}, using {env[TERM]}.'.format(
-                self._advanced, env=self.env))
+            # End of list (looping). Chose this value
+            self.log.debug('TTYPE repeated at {}, using {}.'.format(
+                self._advanced, ttype))
+            self.env_update({'TERM': ttype})
             return
         ttype = ttype.lower()
         self.stream.request_ttype()
@@ -482,7 +487,7 @@ class TelnetServer(tulip.protocols.Protocol):
             return
         elif pending:
             self.log.warn('negotiate failed for {}.'.format(pending))
-            self.echo('\r\nnegotiate failed for {}.'.format(pending))
+            self.shell.write('\r\nnegotiate failed for {}.'.format(pending))
         loop.call_soon(call_after)
 
 def _set_default_callbacks(server, stream):
@@ -503,6 +508,7 @@ def _set_default_callbacks(server, stream):
     stream.set_ext_callback(telopt.NEW_ENVIRON, server.env_update)
     stream.set_ext_callback(telopt.TTYPE, server.ttype_received)
     stream.set_ext_callback(telopt.NAWS, server._naws_update)
+    stream.set_ext_callback(telopt.CHARSET, server._charset_received)
 
 def _describe_connection(server):
     return '{}{}{}{}'.format(
