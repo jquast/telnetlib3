@@ -3,18 +3,13 @@ import collections
 import datetime
 import argparse
 import logging
-import shlex
 import socket
 import time
 
 import tulip
 import telsh
 import telopt
-
-def wrap_future_result(future, result):
-    future = tulip.Future()
-    future.set_result(result)
-    return future
+import slc
 
 __all__ = ['TelnetServer']
 
@@ -30,12 +25,6 @@ class TelnetServer(tulip.protocols.Protocol):
         negotiate to test the remote iac interpreter, (if any!). If the remote
         end replies in the affirmitive, then ``request_advanced_opts()`` is
         called.
-
-        The reason all capabilities are not immediately announced is that
-        the remote end may be too dumb to advance any further, and these
-        additional negotiations can only serve to confuse the remote end
-        or erroneously display garbage output if remote end is not equipped
-        with an iac interpreter.
     """
     # TODO: Future, callback_after_complete(first_prompt)
     CONNECT_MINWAIT = 0.50
@@ -48,7 +37,7 @@ class TelnetServer(tulip.protocols.Protocol):
             'USER': 'unknown',
             'TERM': 'unknown',
             'CHARSET': 'ascii',
-            'PS1': '[%u@%h] %# ',
+            'PS1': '[%?] [%E] [%u@%h] %# ',
             'PS2': '> ',
             'TIMEOUT': '5',
             }
@@ -108,6 +97,13 @@ class TelnetServer(tulip.protocols.Protocol):
         #
         #   Notably, a request to negotiate TTYPE is made. If sucessful,
         #   the callback ``request_advanced_opts()`` is fired.
+        #
+        #   The reason all capabilities are not immediately announced is that
+        #   the remote end may be too dumb to advance any further, and these
+        #   additional negotiations can only serve to confuse the remote end
+        #   or erroneously display garbage output if remote end is not equipped
+        #   with an iac interpreter.
+
         self.stream.iac(telopt.WILL, telopt.SGA)
         self.stream.iac(telopt.WILL, telopt.ECHO)
         self.stream.iac(telopt.DO, telopt.TTYPE)
@@ -120,6 +116,7 @@ class TelnetServer(tulip.protocols.Protocol):
         assert callable(call_after), call_after
 
         self.log.info(self.__str__())
+
         # conceivably, you could use various callback mechanisms to
         # relate to authenticating or other multi-state login process.
         loop = tulip.get_event_loop()
@@ -131,7 +128,7 @@ class TelnetServer(tulip.protocols.Protocol):
             Derived impl. should instead extend or override the
             ``line_received()`` and ``char_received()`` methods.
         """
-        #self.log.debug('data_received: {!r}'.format(data))
+        self.log.debug('data_received: {!r}'.format(data))
         self._last_received = datetime.datetime.now()
         self._restart_timeout()
         for byte in (bytes([value]) for value in data):
@@ -168,7 +165,7 @@ class TelnetServer(tulip.protocols.Protocol):
         """
         if self._client_hostname.done():
             val = self._client_hostname.result()[0]
-            return wrap_future_result(self._client_hostname, val)
+            return _wrap_future_result(self._client_hostname, val)
         return self._client_hostname
 
     @property
@@ -178,8 +175,8 @@ class TelnetServer(tulip.protocols.Protocol):
             Returns FQDN dns name of client as Future.
         """
         if self._client_hostname.done():
-            val = self._client_hostname.result()[1][0]
-            return wrap_future_result(self._client_hostname, val)
+            val = self._client_hostname.result()[0]
+            return _wrap_future_result(self._client_hostname, val)
         return self._client_hostname
 
     @property
@@ -190,7 +187,7 @@ class TelnetServer(tulip.protocols.Protocol):
         """
         if self._client_hostname.done():
             val = self._client_hostname.result()[2][0]
-            return wrap_future_result(self._client_hostname, val)
+            return _wrap_future_result(self._client_hostname, val)
         return self._client_hostname
 
     @property
@@ -317,50 +314,14 @@ class TelnetServer(tulip.protocols.Protocol):
 
             Outputs status of connection and re-displays prompt.
         """
-        self.echo('\r\n{}.'.format(self.__str__()))
+        self.stream.write('\r\n{}.'.format(self.__str__()))
         self.shell.display_prompt()
-
-    def display_status(self):
-        """ Output the status of telnet session.
-        """
-        encoding = '{}{}'.format(
-                self.encoding(incoming=True), '' if
-                self.encoding(outgoing=True)
-                == self.encoding(incoming=True) else ' in, {} out'
-                .format(self.encoding(outgoing=True)))
-        origin = '{0}:{1}'.format(
-                *self.transport.get_extra_info('addr', ('unknown', -1,)))
-        self.echo('\r\nConnected {}s ago from {}.'
-            '\r\nLinemode is {}.'
-            '\r\nFlow control is {}.'
-            '\r\nEncoding is {}.'
-            '\r\n{} rows; {} cols.'.format(
-                self.bold('{:0.3f}'.format(self.duration)),
-                (origin
-                    if not origin.startswith('127.0.0.1:')
-                    else self.bold(origin)),
-                (self.standout(self.stream.linemode.__str__().rstrip('|ack'))
-                    if self.stream.is_linemode
-                    else self.bold('kludge')),
-                (self.bold('xon-any') if self.stream.xon_any
-                    else 'xon'),
-                (encoding if encoding == 'ascii'
-                    else self.standout(encoding)),
-                (self.bold(self.env['COLUMNS'])
-                    if self.env['COLUMNS']
-                        != self.default_env['COLUMNS']
-                    else self.env['COLUMNS']),
-                (self.bold(self.env['LINES'])
-                    if self.env['LINES']
-                        != self.default_env['LINES']
-                    else self.env['LINES']),
-                ))
 
     def timeout(self):
         """ XXX Callback received on session timeout.
         """
-        self.echo('\r\nTimeout after {}s.\r\n'.format(int(self.idle)))
-        self.log.debug('Timeout after {}s.'.format(self.idle))
+        self.stream.write('\r\nTimeout after {:1.0f}s.\r\n'.format(self.idle))
+        self.log.debug('Timeout after {:1.3f}s.'.format(self.idle))
         self.transport.close()
 
     def logout(self, opt=telopt.DO):
@@ -374,7 +335,8 @@ class TelnetServer(tulip.protocols.Protocol):
                 'The very trees seem to moan as you leave',
                 'Echoing screams fill the wastelands as you close your eyes',
                 'Your very soul aches as you wake up from your favorite dream')
-        self.echo('\r\n{}.\r\n'.format(msgs[int(time.time()/84) % len(msgs)]))
+        self.stream.write('\r\n{}.\r\n'.format(
+            msgs[int(time.time()/84) % len(msgs)]))
         self.transport.close()
 
     def eof_received(self):
@@ -464,7 +426,7 @@ class TelnetServer(tulip.protocols.Protocol):
             such as iac(AO) and SLC_AO.
         """
         self.log.debug('interrupt_received: {}'.format(
-            telopt._name_command(cmd)))
+            telopt.name_command(cmd)))
         self.shell.display_prompt()
 
     def _restart_timeout(self, val=None):
@@ -511,7 +473,7 @@ class TelnetServer(tulip.protocols.Protocol):
                     self.server_fqdn.result()))
             self._banner_displayed = True
         loop = tulip.get_event_loop()
-        pending = [telopt._name_commands(opt)
+        pending = [telopt.name_commands(opt)
                 for (opt, val) in self.stream.pending_option.items()
                 if val]
         if self.duration < self.CONNECT_MINWAIT or (
@@ -528,7 +490,7 @@ def _set_default_callbacks(server, stream):
     """
     # wire AYT and SLC_AYT (^T) to callback ``status()``
     stream.set_iac_callback(telopt.AYT, server.handle_ayt)
-    stream.set_slc_callback(telopt.SLC_AYT, server.handle_ayt)
+    stream.set_slc_callback(slc.SLC_AYT, server.handle_ayt)
 
     # wire various 'interrupts', such as AO, IP to ``interrupt_received``
     stream.set_iac_callback(telopt.AO, server.interrupt_received)
@@ -564,7 +526,10 @@ def _describe_connection(server):
                     if server.client_hostname.done() else ''),
             ' after {:0.3f}s'.format(server.duration))
 
-
+def _wrap_future_result(future, result):
+    future = tulip.Future()
+    future.set_result(result)
+    return future
 
 ARGS = argparse.ArgumentParser(description="Run simple telnet server.")
 ARGS.add_argument(

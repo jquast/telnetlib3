@@ -1,49 +1,22 @@
 import collections
 import logging
-
 from telnetlib import LINEMODE, NAWS, NEW_ENVIRON, BINARY, SGA, ECHO, STATUS
 from telnetlib import TTYPE, TSPEED, LFLOW, XDISPLOC, IAC, DONT, DO, WONT
 from telnetlib import WILL, SE, NOP, TM, DM, BRK, IP, AO, AYT, EC, EL, EOR
 from telnetlib import GA, SB, LOGOUT, EXOPL, CHARSET, SNDLOC, theNULL
 
-from slc import SLC_NOSUPPORT, SLC_CANTCHANGE, SLC_VARIABLE, NSLC
-from slc import SLC_DEFAULT, SLC_ACK
-from slc import SLC_SYNCH, SLC_BRK, SLC_IP, SLC_AO, SLC_AYT, SLC_EOR
-from slc import SLC_ABORT, SLC_EOF, SLC_SUSP, SLC_EC, SLC_EL, SLC_EW
-from slc import SLC_RP, SLC_LNEXT, SLC_XON, SLC_XOFF, SLC_FORW1
-from slc import SLC_FORW2, SLC_MCL, SLC_MCR, SLC_MCWL, SLC_MCWR, SLC_MCBOL
-from slc import SLC_MCEOL, SLC_INSRT, SLC_OVER, SLC_ECR, SLC_EWR, SLC_EBOL
-from slc import SLC_EEOL, DEFAULT_SLC_TAB, SLC_nosupport, SLC_definition
-from slc import _POSIX_VDISABLE, name_slc_command, Forwardmask
+import slc
 
+__all__ = ['TelnetStreamReader', 'escape_iac', 'name_command', 'name_commands']
 
 (EOF, SUSP, ABORT, EOR_CMD) = (
         bytes([const]) for const in range(236, 240))
 (IS, SEND, INFO) = (bytes([const]) for const in range(3))
 (LFLOW_OFF, LFLOW_ON, LFLOW_RESTART_ANY, LFLOW_RESTART_XON) = (
         bytes([const]) for const in range(4))
-(LMODE_MODE, LMODE_FORWARDMASK, LMODE_SLC) = (
-        bytes([const]) for const in range(1, 4))
-(LMODE_MODE_REMOTE, LMODE_MODE_LOCAL, LMODE_MODE_TRAPSIG) = (
-        bytes([const]) for const in range(3))
-(LMODE_MODE_ACK, LMODE_MODE_SOFT_TAB, LMODE_MODE_LIT_ECHO) = (
-    bytes([4]), bytes([8]), bytes([16]))
 
-# see: TelnetStreamReader._default_callbacks
-DEFAULT_IAC_CALLBACKS = (
-        (BRK, 'brk'), (IP, 'ip'), (AO, 'ao'), (AYT, 'ayt'), (EC, 'ec'),
-        (EL, 'el'), (EOF, 'eof'), (SUSP, 'susp'), (ABORT, 'abort'),
-        (NOP, 'nop'), (DM, 'dm'), (GA, 'ga'), (EOR_CMD, 'eor'), )
-DEFAULT_SLC_CALLBACKS = (
-        (SLC_SYNCH, 'dm'), (SLC_BRK, 'brk'), (SLC_IP, 'ip'),
-        (SLC_AO, 'ao'), (SLC_AYT, 'ayt'), (SLC_EOR, 'eor'),
-        (SLC_ABORT, 'abort'), (SLC_EOF, 'eof'), (SLC_SUSP, 'susp'),
-        (SLC_EC, 'ec'), (SLC_EL, 'el'), (SLC_EW, 'ew'), (SLC_RP, 'rp'),
-        (SLC_LNEXT, 'lnext'), (SLC_XON, 'xon'), (SLC_XOFF, 'xoff'), )
-DEFAULT_EXT_CALLBACKS = (
-        (TTYPE, 'ttype'), (TSPEED, 'tspeed'), (XDISPLOC, 'xdisploc'),
-        (NEW_ENVIRON, 'env'), (NAWS, 'naws'), (LOGOUT, 'logout'),
-        (SNDLOC, 'sndloc',) )
+_MAXSIZE_SB = 2048
+_MAXSIZE_SLC = slc.NSLC * 6
 
 def escape_iac(buf):
     """ .. function:: escape_iac(buf : bytes) -> type(bytes)
@@ -54,40 +27,19 @@ def escape_iac(buf):
     assert isinstance(buf, (bytes, bytearray)), buf
     return buf.replace(IAC, IAC + IAC)
 
-class Option(dict):
-    def __init__(self, name, log=logging):
-        """ .. class:: Option(name : str, log: logging.logger)
-
-            Initialize a Telnet Option database for capturing option
-            negotation changes to ``log`` if enabled for debug logging.
-        """
-        self.name, self.log = name, log
-        dict.__init__(self)
-
-    def enabled(self, key):
-        """ Returns True of option is enabled."""
-        return bool(self.get(key, None) is True)
-
-    def __setitem__(self, key, value):
-        if value != dict.get(self, key, None):
-            descr = ' + '.join([_name_command(bytes([byte]))
-                for byte in key[:2]] + [repr(byte)
-                    for byte in key[2:]])
-            self.log.debug('{}[{}] = {}'.format(self.name, descr, value))
-        dict.__setitem__(self, key, value)
-    __setitem__.__doc__ = dict.__setitem__.__doc__
-
-
 class TelnetStreamReader:
     """
        This class implements a ``feed_byte()`` method that acts as a
-       Telnet Is-A-Command (IAC) interpreter. The significance of the
-       last byte passed to this method is tested by class instance public
-       attributes following the call. A minimal Telnet Service Protocol
-       ``data_received`` method should forward each byte, or begin forwarding
-       at IAC until  ``is_oob`` tests ``True``, and optionally act on
-       functions of ``slc_received``.
-   """
+       Telnet Is-A-Command (IAC) interpreter.
+
+       The significance of the last byte passed to this method is tested
+       by instance attributes following the call. A minimal Telnet Service
+       Protocol ``data_received`` method should forward each byte, or begin
+       forwarding at receipt of IAC until ``is_oob`` tests ``False``.
+    """
+    MODE_LOCAL = 'local'
+    MODE_REMOTE = 'remote'
+    MODE_KLUDGE = 'kludge'
 
     #: a list of system environment variables requested by the server after
     # a client agrees to negotiate NEW_ENVIRON.
@@ -96,45 +48,45 @@ class TelnetStreamReader:
             "ACCT JOB PRINTER SFUTLNTVER SFUTLNTMODE LC_ALL VISUAL EDITOR "
             "LC_COLLATE LC_CTYPE LC_MESSAGES LC_MONETARY LC_NUMERIC LC_TIME"
             ).split()
-    #: Maximum size of sub-negotiation buffer
-    SB_MAXSIZE = 2048
-    #: Maximum size of Special Linemode Character receive buffer
-    SLC_MAXSIZE = 6 * NSLC
+    default_slc_tab = slc.BSD_SLC_TAB
 
     @property
-    def is_linemode(self):
-        """ If telnet stream appears to be in any linemode, remote or local.
+    def mode(self):
+        """ String describing NVT mode, one of:
+
+            ``kludge``: Client acknowledges WILL-ECHO, WILL-SGA. character-at-
+                a-time and remote line editing may be provided.
+
+            ``local``: Default NVT half-duplex mode, client performs line
+                editing and transmits only after pressing send (usually CR)
+
+            ``remote``: Client supports advanced remote line editing, using
+                mixed-mode local line buffering (optionally, echoing) until
+                send, but also transmits buffer up to and including special
+                line characters (SLCs).
         """
-        #   The default Network Terminal is always in linemode, unless
-        #   explicitly set False (client sends: WONT, LINEMODE),
-        #   or implied by server (server sends: WILL ECHO, WILL SGA).
+        if self.remote_option.enabled(LINEMODE):
+            return (self.MODE_LOCAL
+                    if self._linemode.local
+                    else self.MODE_REMOTE)
         if self.is_server:
-            return self.remote_option.enabled(LINEMODE) or not (
-                    self.local_option.enabled(ECHO) and
-                    self.local_option.enabled(SGA))
-        # same heuristic is reversed for client point of view (unveried XXX)
-        return self.local_option.enabled(LINEMODE) or (
-                self.remote_option.enabled(ECHO) and
-                self.remote_option.enabled(SGA))
-
-    @property
-    def linemode(self):
-        """ Linemode instance for stream, or None if stream is in Kludge mode.
-        """
-        #   A description of the linemode entered may be tested using boolean
-        #   instance attributes ``edit``, ``trapsig``, ``soft_tab``, and
-        #   ``lit_echo``, or simply its __str__() method.
-        return (self._linemode if self.is_linemode else None)
+            return (self.MODE_KLUDGE
+                    if self.local_option.enabled(ECHO)
+                    and self.local_option.enabled(SGA)
+                    else self.MODE_LOCAL)
+        return (self.MODE_KLUDGE
+                if self.remote_option.enabled(ECHO)
+                and self.remote_option.enabled(SGA)
+                else self.MODE_LOCAL)
 
     @property
     def is_server(self):
-        """ Telnet stream is used for server end. """
+        """ Returns True if stream is used for server-end. """
         return bool(self._server)
 
     @property
     def is_client(self):
-        """ Telnet stream is used for client end.
-        """
+        """ Returns True if stream is used for client-end.  """
         return bool(not self._server)
 
     @property
@@ -143,15 +95,21 @@ class TelnetStreamReader:
             in-band: not duplicated to the client if remote ECHO is enabled,
             and not inserted into an input buffer.
         """
-        # Values matching special linemode characters (SLC) are inband.
-        # Always True if handled by IAC interpreter and any matching callbacks.
         return (self.iac_received or self.cmd_received)
 
-    def __init__(self, transport, client=False, server=False, log=logging,
-            default_slc_tab=DEFAULT_SLC_TAB):
+    @property
+    def linemode(self):
+        """ Linemode instance for stream, or None if stream is in Kludge mode.
+        """
+        #   A description of the linemode entered may be tested using boolean
+        #   instance attributes ``edit``, ``trapsig``, ``soft_tab``,
+        #   ``lit_echo``, ``remote``, ``local``.
+        return (self._linemode if self.mode != 'kludge' else None)
+
+    def __init__(self, transport, client=False, server=False, log=logging):
         """
         .. class::TelnetServer(transport, client=False, server=False,
-                                log=logging, default_slc_tag=DEFAULT_SLC_TAB)
+                               log=logging)
 
         Server and Client streams negotiate about capabilities from different
         perspectives, so the mutually exclusive booleans ``client`` and
@@ -166,42 +124,102 @@ class TelnetStreamReader:
             "Arguments 'client' and 'server' are mutually exclusive")
         self.log = log
         self.transport = transport
-        #: total bytes sent to ``feed_byte()``
+        self._server = (client in (None, False) or server in (None, True))
+
+        #: Total bytes sent to ``feed_byte()``
         self.byte_count = 0
-        #: wether flow control enabled by Transmit-Off (XOFF) (defaults
+
+        #: Wether flow control enabled by Transmit-Off (XOFF) (defaults
         #  to Ctrl-s), should re-enable Transmit-On (XON) only on receipt
         #  of the XON key (Ctrl-q). Or, when unset, any keypress from client
         #  re-enables transmission (XON).
         self.xon_any = False
-        #: set ``True`` if the last byte sent to ``feed_byte()`` is the
+
+        #: boolean is set ``True`` if last byte sent to ``feed_byte()`` is the
         #  beginning of an IAC command (\xff).
         self.iac_received = False
-        #: SLC function value if the last byte sent to ``feed_byte()`` is a
-        #  matching special line chracter value.
-        self.slc_received = False
-        #: SLC function values and callbacks are fired for clients in
-        #  Kludge mode not otherwise capable of negotiating them, providing
-        #  remote editing facilities for dumb clients, such as with ``nc -T``.
-        self.slc_simulated = True
+
         #: IAC command byte value if the last byte sent to ``feed_byte()`` is
         #  part of an IAC command sequence, such as *WILL* or *SB*.
         self.cmd_received = False
-        #: True when Flow Control (XON) has been recv until receipt of XOFF.
-        self._xmit = True
+
+        #: SLC function value if last byte sent to ``feed_byte()`` is a
+        #  matching special line chracter value, False otherwise.
+        self.slc_received = False
+
+        #: SLC function values and callbacks are fired for clients in
+        #  Kludge mode not otherwise capable of negotiating them, providing
+        #  remote editing facilities for dumb clients.
+        self.slc_simulated = True
+
+        #: Dictionary of telnet option byte(s) that follow an
+        # IAC-DO or IAC-DONT command, and contains a value of ``True``
+        # until IAC-WILL or IAC-WONT has been received by remote end.
+        self.pending_option = Option('pending_option', self.log)
+
+        #: Dictionary of telnet option byte(s) that follow an
+        # IAC-WILL or IAC-WONT command, sent by our end,
+        # indicating state of local capabilities.
+        self.local_option = Option('local_option', self.log)
+
+        #: Dictionary of telnet option byte(s) that follow an
+        # IAC-WILL or IAC-WONT command received by remote end,
+        # indicating state of remote capabilities.
+        self.remote_option = Option('remote_option', self.log)
+
+        #: True when Flow Control (XON) has been recv, until receipt of XOFF.
+        self.writing = True
+
         #: Sub-negotiation buffer
         self._sb_buffer = collections.deque()
+
         #: SLC buffer
         self._slc_buffer = collections.deque()
-        #: Represents negotiated linemode byte mask if ``is_linemode`` is True.
-        self._linemode = Linemode()
-        #: True if client acknowledged forwardmask
-        self._forwardmask_enabled = False
-        #: True if stream is operating in server mode
-        self._server = (client in (None, False) or server in (None, True))
 
-        self._init_options()
-        self._default_callbacks()
-        self._default_slc(default_slc_tab)
+        #: SLC Tab (SLC Functions and their support level, and ascii value)
+        self.slctab = slc.generate_slctab(self.default_slc_tab)
+
+        #: Represents LINEMODE MODE neogtiated or requested by client.
+        #  attribute ``ack`` returns True if it is in use.
+        self._linemode = slc.Linemode()
+
+        #: Initial line mode requested by server if client supports LINEMODE
+        #  negotiation (remote line editing and literal echo of control chars)
+        self.default_linemode = slc.Linemode(bytes([
+            ord(slc.LMODE_MODE_REMOTE) | ord(slc.LMODE_MODE_LIT_ECHO)]))
+
+        #: True if client sends IAC-SB-LINEMODE-DO-FORWARDMASK
+        self._forwardmask_enabled = False
+
+        # Set default callback handlers to local methods.
+        self._iac_callback = {}
+        for iac_cmd, key in (
+                (BRK, 'brk'), (IP, 'ip'), (AO, 'ao'), (AYT, 'ayt'), (EC, 'ec'),
+                (EL, 'el'), (EOF, 'eof'), (SUSP, 'susp'), (ABORT, 'abort'),
+                (NOP, 'nop'), (DM, 'dm'), (GA, 'ga'), (EOR_CMD, 'eor'), ):
+            self.set_iac_callback(iac_cmd,
+                    getattr(self, 'handle_{}'.format(key)))
+
+        self._slc_callback = {}
+        for slc_cmd, key in (
+                (slc.SLC_SYNCH, 'dm'), (slc.SLC_BRK, 'brk'),
+                (slc.SLC_IP, 'ip'), (slc.SLC_AO, 'ao'),
+                (slc.SLC_AYT, 'ayt'), (slc.SLC_EOR, 'eor'),
+                (slc.SLC_ABORT, 'abort'), (slc.SLC_EOF, 'eof'),
+                (slc.SLC_SUSP, 'susp'), (slc.SLC_EC, 'ec'),
+                (slc.SLC_EL, 'el'), (slc.SLC_EW, 'ew'),
+                (slc.SLC_RP, 'rp'), (slc.SLC_LNEXT, 'lnext'),
+                (slc.SLC_XON, 'xon'), (slc.SLC_XOFF, 'xoff'),):
+            self.set_slc_callback(slc_cmd,
+                    getattr(self, 'handle_{}'.format(key)))
+
+        self._ext_callback = {}
+        for ext_cmd, key in (
+                (TTYPE, 'ttype'), (TSPEED, 'tspeed'), (XDISPLOC, 'xdisploc'),
+                (NEW_ENVIRON, 'env'), (NAWS, 'naws'), (LOGOUT, 'logout'),
+                (SNDLOC, 'sndloc',) ):
+            self.set_ext_callback(ext_cmd,
+                    getattr(self, 'handle_{}'.format(key)))
 
     def feed_byte(self, byte):
         """ .. method:: feed_byte(byte : bytes)
@@ -231,7 +249,7 @@ class TelnetStreamReader:
                 # DO, DONT, WILL, WONT are 3-byte commands and
                 # SB can be of any length. Otherwise, this 2nd byte
                 # is the final iac sequence command byte.
-                assert cmd in self._iac_callback, _name_command(cmd)
+                assert cmd in self._iac_callback, name_command(cmd)
                 self._iac_callback[cmd](cmd)
             self.iac_received = False
 
@@ -241,7 +259,7 @@ class TelnetStreamReader:
             self.cmd_received = cmd = byte
             if cmd != SE:
                 self.log.warn('SB buffer interrupted by IAC {}'.format(
-                    _name_command(cmd)))
+                    name_command(cmd)))
                 self._sb_buffer.clear()
             else:
                 self.log.debug('recv IAC SE')
@@ -255,13 +273,13 @@ class TelnetStreamReader:
         elif self.cmd_received == SB:
             # continue buffering of sub-negotiation command.
             self._sb_buffer.append(byte)
-            assert len(self._sb_buffer) < self.SB_MAXSIZE
+            assert len(self._sb_buffer) < _MAXSIZE_SB
 
         elif self.cmd_received:
             # parse 3rd and final byte of IAC DO, DONT, WILL, WONT.
             cmd, opt = self.cmd_received, byte
             self.log.debug('recv IAC {} {}'.format(
-                _name_command(cmd), _name_command(opt)))
+                name_command(cmd), name_command(opt)))
             if cmd == DO:
                 if self.handle_do(opt):
                     self.local_option[opt] = True
@@ -275,7 +293,7 @@ class TelnetStreamReader:
             elif cmd == WILL:
                 if not self.pending_option.enabled(DO + opt) and opt != TM:
                     self.log.debug('WILL {} unsolicited'.format(
-                        _name_command(opt)))
+                        name_command(opt)))
                 self.handle_will(opt)
                 if self.pending_option.enabled(DO + opt):
                     self.pending_option[DO + opt] = False
@@ -292,17 +310,18 @@ class TelnetStreamReader:
             # IAC WILL TM or IAC WONT TM is received by remote end.
             self.log.debug('discarded by timing-mark: {!r}'.format(byte))
 
-        elif (not self.is_linemode and self.slc_simulated  # kludge mode,
-                ) or (self.remote_option.enabled(LINEMODE)
-                        and self.linemode.remote):  #  remote lm + editing,
+        elif (self.mode == 'remote' or
+                self.mode == 'kludge' and self.slc_simulated):
             # 'byte' is tested for SLC characters
-            (callback, slc_name, slc_def) = self._slc_snoop(byte)
+            (callback, slc_name, slc_def) = slc.snoop(
+                    byte, self.slctab, self._slc_callback)
             if slc_name is not None:
                 self.log.debug('_slc_snoop({!r}): {}, callback is {}.'.format(
-                        byte, name_slc_command(slc_name),
+                        byte, slc.name_slc_command(slc_name),
                         callback.__name__ if callback is not None else None))
                 if slc_def.flushin:
-                    # SLC_FLUSHIN not supported, requires SYNCH (urgent TCP).
+                    # SLC_FLUSHIN not supported, requires SYNCH? (urgent TCP).
+                    # XXX or TM?
                     pass
                 if slc_def.flushout:
                     # XXX
@@ -318,9 +337,9 @@ class TelnetStreamReader:
         else:
             # standard inband data
             return
-        if not self._xmit and self.xon_any and not self.is_oob:
+        if not self.writing and self.xon_any and not self.is_oob:
             # any key after XOFF enables XON
-            self._slc_callback[SLC_XON]()
+            self._slc_callback[slc.SLC_XON]()
 
     def write(self, data, oob=False):
         """ .. method:: feed_byte(byte : bytes)
@@ -328,15 +347,6 @@ class TelnetStreamReader:
             Write data bytes to transport end connected to stream reader.
             Bytes matching IAC (\xff) is escabed by IAC IAC, unless oob=True.
         """
-        #   All standard telnet bytes, and bytes within an (IAC SB), (IAC SE)
-        #   sub-negotiation buffer must always be escaped.
-        #
-        #   8-bit ASCII data values greater than 128 cannot be sent inband
-        #   unless WILL BINARY ('outbinary') has been agreed, or ``oob``
-        #   is ``True``.
-        #
-        #   If ``oob`` is set ``True``, data is considered
-        #   out-of-band and may set high bit.
         assert isinstance(data, (bytes, bytearray)), repr(data)
         if not oob and not self.local_option.enabled(BINARY):
             for pos, byte in enumerate(data):
@@ -364,10 +374,10 @@ class TelnetStreamReader:
             are legal in the context of client, server, or negotiation state,
             emitting a relevant debug warning to the log handler.
         """
-        short_iacs = (DM, )
+        short_iacs = (DM, SE)
         assert (cmd in (DO, DONT, WILL, WONT)
                 or cmd in short_iacs and opt is None), (
-                        'Uknown IAC {}.'.format(_name_command(cmd)))
+                        'Uknown IAC {}.'.format(name_command(cmd)))
         if opt == LINEMODE:
             if cmd == DO and not self.is_server:
                 raise ValueError('DO LINEMODE may only be sent by server.')
@@ -376,18 +386,18 @@ class TelnetStreamReader:
         if cmd == DO: # XXX any exclusions ?
             if self.remote_option.enabled(opt):
                 self.log.debug('skip {} {}; remote_option = True'.format(
-                    _name_command(cmd), _name_command(opt)))
+                    name_command(cmd), name_command(opt)))
                 return False
         if cmd in (DO, WILL):
             if self.pending_option.enabled(cmd + opt):
                 self.log.debug('skip {} {}; pending_option = True'.format(
-                    _name_command(cmd), _name_command(opt)))
+                    name_command(cmd), name_command(opt)))
                 return False
             self.pending_option[cmd + opt] = True
         if cmd == WILL and opt != TM:
             if self.local_option.enabled(opt):
                 self.log.debug('skip {} {}; local_option = True'.format(
-                    _name_command(cmd), _name_command(opt)))
+                    name_command(cmd), name_command(opt)))
                 return False
         if cmd == DONT and opt not in (LOGOUT,): # XXX any other exclusions?
             if self.remote_option.enabled(opt):
@@ -395,7 +405,7 @@ class TelnetStreamReader:
                 # for an option we already said we WONT. This would cause
                 # telnet loops for implementations not doing state tracking!
                 self.log.debug('skip {} {}; remote_option = True'.format(
-                    _name_command(cmd), _name_command(opt)))
+                    name_command(cmd), name_command(opt)))
             self.remote_option[opt] = False
         elif cmd == WONT:
             self.local_option[opt] = False
@@ -403,54 +413,40 @@ class TelnetStreamReader:
             self.send_iac(IAC + cmd)
         else:
             self.send_iac(IAC + cmd + opt)
-        self.log.debug('send IAC {}'.format(_name_command(cmd),
-            ' {}'.format(_name_command(opt)) if cmd in short_iacs else ''))
+        self.log.debug('send IAC {}'.format(name_command(cmd),
+            ' {}'.format(name_command(opt)) if cmd in short_iacs else ''))
 
-# Public methods for notifying about, soliciting, or advertising state options.
+# Public methods for notifying about, or soliciting state options.
 #
     def send_ga(self):
         """ .. method:: send_ga() -> bool
 
-            Send IAC GA (Go-Ahead) only if IAC DONT SGA was received.
-            Clients wishing to receive GA should send (DONT SGA). Returns
-            True if GA was sent.
+            Send IAC-GA (go ahead) only if IAC-DONT-SGA was received.
+            Returns True if GA was sent.
         """
-        #   Only a few 1970-era hosts require GA (AMES-67, UCLA-CON). The GA
-        #   signal is very useful for scripting, such as an 'expect'-like
-        #   program flow, or for MUDs, indicating that the last-most received
-        #   line is a prompt. Another example of GA is a nethack server
-        #   (alt.nethack.org), that indicates to ai bots that it has received
-        #   all screen updates.
-        #
         if not self.local_option.enabled(SGA):
             self.send_iac(IAC + GA)
             return True
 
-
-
     def request_status(self):
         """ .. method:: request_status() -> bool
 
-            Send STATUS, SEND sub-negotiation, rfc859.
-            Returns True if request is valid for telnet state, and was sent.
+            Send IAC-SB-STATUS-SEND sub-negotiation (rfc859) only if
+            IAC-WILL-STATUS has been received. Returns True if status
+            request was sent.
         """
-        #   Does nothing if (WILL, STATUS) has not yet been received,
-        #   or an existing SB STATUS SEND request is already pending.
-        if not self.remote_option.enabled(STATUS):
-            pass
-        if not self.pending_option.enabled(SB + STATUS):
-            self.pending_option[SB + STATUS] = True
-            self.send_iac(
-                b''.join([IAC, SB, STATUS, SEND, IAC, SE]))
-            # set pending for SB STATUS
+        if (self.remote_option.enabled(STATUS) and
+                not self.pending_option.enabled(SB + STATUS)):
+            self.send_iac(b''.join([IAC, SB, STATUS, SEND, IAC, SE]))
             self.pending_option[SB + STATUS] = True
             return True
 
     def request_tspeed(self):
         """ .. method:: request_tspeed() -> bool
 
-            Send TSPEED, SEND sub-negotiation, rfc1079.
-            Returns True if request is valid for telnet state, and was sent.
+            Send IAC-SB-TSPEED-SEND sub-negotiation (rfc1079) only if
+            IAC-WILL-TSPEED has been received. Returns True if tspeed
+            request was sent.
         """
         #   Does nothing if (WILL, TSPEED) has not yet been received.
         #   or an existing SB TSPEED SEND request is already pending. """
@@ -485,7 +481,6 @@ class TelnetStreamReader:
             self.send_iac(b''.join(response))
             return True
 
-
     def request_env(self, env=None):
         """ .. method:: request_env(env : list) -> bool
 
@@ -506,11 +501,11 @@ class TelnetStreamReader:
         if not self.remote_option.enabled(kind):
             self.log.debug('cannot send SB {} SEND IS '
                 'without receipt of WILL {}'.format(
-                    _name_command(kind), _name_command(kind)))
+                    name_command(kind), name_command(kind)))
             return False
         if self.pending_option.enabled(SB + kind + SEND + IS):
             self.log.debug('cannot send SB {} SEND IS, '
-                'request pending.'.format(_name_command(kind)))
+                'request pending.'.format(name_command(kind)))
             return False
         self.pending_option[SB + kind + SEND + IS] = True
         response = collections.deque()
@@ -554,6 +549,31 @@ class TelnetStreamReader:
             self.send_iac(b''.join(response))
             return True
 
+    def request_forwardmask(self, fmask=None):
+        """ Request the client forward the control characters indicated
+            in the Forwardmask class instance ``fmask``. When fmask is
+            None, a forwardmask is generated for the SLC characters
+            registered by ``slctab``.
+        """
+        assert self.is_server, (
+                'DO FORWARDMASK may only be sent by server end')
+        assert self.remote_option.enabled(LINEMODE), (
+                'cannot send DO FORWARDMASK without receipt of WILL LINEMODE.')
+        if fmask is None:
+            fmask = slc.generate_forwardmask(
+                    binary_mode=self.local_option.enabled(BINARY),
+                    tabset=self.slctab, ack=self._forwardmask_enabled)
+
+        assert isinstance(fmask, slc.Forwardmask), fmask
+        self.pending_option[SB + LINEMODE] = True
+        self.send_iac(IAC + SB + LINEMODE + DO + slc.LMODE_FORWARDMASK)
+        self.write(fmask.value)  # escape IAC+IAC
+        self.iac(SE)
+
+        self.log.debug('send IAC SB LINEMODE DO LMODE_FORWARDMASK::')
+        for maskbit_descr in fmask.__repr__():
+            self.log.debug('  %s', maskbit_descr)
+
     def send_eor(self):
         """ .. method:: request_eor() -> bool
 
@@ -587,30 +607,10 @@ class TelnetStreamReader:
         if linemode is not None:
             self.log.debug('Linemode is %s', linemode)
             self._linemode = linemode
-        self.send_iac(IAC + SB + LINEMODE
-                    + LMODE_MODE + self._linemode.mask
-                    + IAC + SE)
+        self.send_iac(IAC + SB + LINEMODE + slc.LMODE_MODE)
+        self.write(self._linemode.mask)
+        self.iac(SE)
         self.log.debug('sent IAC SB LINEMODE MODE %s IAC SE', self._linemode)
-
-    def request_forwardmask(self, fmask=None):
-        """ Request the client forward the control characters indicated
-            in the Forwardmask class instance ``fmask``. When fmask is
-            None, a forwardmask is generated for the SLC characters registered
-            in the SLC tab, ``_slctab``.
-        """
-        assert self.is_server, (
-                'DO FORWARDMASK may only be sent by server end')
-        assert self.remote_option.enabled(LINEMODE), (
-                'cannot send DO FORWARDMASK without receipt of WILL LINEMODE.')
-        if fmask is None:
-            fmask = self._generate_forwardmask()
-        assert isinstance(fmask, Forwardmask), fmask
-        sb_cmd = LINEMODE + DO + LMODE_FORWARDMASK + escape_iac(fmask.value)
-        self.log.debug('send IAC SB LINEMODE DO LMODE_FORWARDMASK::')
-        for maskbit_descr in fmask.__repr__():
-            self.log.debug('  %s', maskbit_descr)
-        self.send_iac(IAC + SB + sb_cmd + IAC + SE)
-        self.pending_option[SB + LINEMODE] = True
 
 # Public is-a-command (IAC) callbacks
 #
@@ -735,7 +735,7 @@ class TelnetStreamReader:
             Pauses writing to the transport.
         """
         self.log.debug('IAC XON: Transmit On')
-        self._xmit = True
+        self.writing = True
         self.transport.resume_writing()
 
     def handle_ec(self, byte):
@@ -748,7 +748,7 @@ class TelnetStreamReader:
 
 # public Special Line Mode (SLC) callbacks
 #
-    def set_slc_callback(self, slc, func):
+    def set_slc_callback(self, slc_byte, func):
         """ Register ``func`` as callbable for receipt of SLC character
             negotiated for the SLC command ``slc`` in  ``_slc_callback``,
             keyed by ``slc`` and valued by its handling function.
@@ -763,9 +763,10 @@ class TelnetStreamReader:
             evaulating this argument.
             """
         assert callable(func), ('Argument func must be callable')
-        assert (type(slc) == bytes and
-                0 < ord(slc) < NSLC + 1), ('Uknown SLC byte: %r' % (slc,))
-        self._slc_callback[slc] = func
+        assert (type(slc_byte) == bytes and
+                0 < ord(slc_byte) < slc.NSLC + 1), (
+                        'Uknown SLC byte: {!r}'.format(slc_byte))
+        self._slc_callback[slc_byte] = func
 
     def handle_ew(self, slc):
         """ XXX Handle SLC_EW (Erase Word).
@@ -790,7 +791,7 @@ class TelnetStreamReader:
         """ Called when SLC_XOFF is received.
         """
         self.log.debug('IAC XOFF: Transmit Off')
-        self._xmit = False
+        self.writing = False
         self.transport.pause_writing()
 
 # public Telnet extension callbacks
@@ -897,7 +898,7 @@ class TelnetStreamReader:
         # remote end to accept a telnet capability, such as NAWS. It returns
         # False for unsupported option, or an option invalid in that context,
         # such as LOGOUT.
-        self.log.debug('handle_do(%s)' % (_name_command(opt)))
+        self.log.debug('handle_do(%s)' % (name_command(opt)))
         if opt == ECHO and not self.is_server:
             self.log.warn('cannot recv DO ECHO on client end.')
         elif opt == LINEMODE and self.is_server:
@@ -920,7 +921,7 @@ class TelnetStreamReader:
         else:
             if self.local_option.get(opt, None) is None:
                 self.iac(WONT, opt)
-            self.log.warn('Unhandled: DO %s.' % (_name_command(opt),))
+            self.log.warn('Unhandled: DO %s.' % (name_command(opt),))
         return False
 
     def handle_dont(self, opt):
@@ -930,7 +931,7 @@ class TelnetStreamReader:
         the exception of (IAC, DONT, LOGOUT), which only signals a callback
         to ``handle_logout(DONT)``.
         """
-        self.log.debug('handle_dont(%s)' % (_name_command(opt)))
+        self.log.debug('handle_dont(%s)' % (name_command(opt)))
         if opt == LOGOUT:
             assert self.is_server, ('cannot recv DONT LOGOUT on server end')
             self._ext_callback[LOGOUT](DONT)
@@ -960,13 +961,13 @@ class TelnetStreamReader:
         and the setting of ``self.remote_option[opt]`` of ``True``. For
         unsupported capabilities, RFC specifies a response of (IAC, DONT, opt).
         Similarly, set ``self.remote_option[opt]`` to ``False``.  """
-        self.log.debug('handle_will(%s)' % (_name_command(opt)))
+        self.log.debug('handle_will(%s)' % (name_command(opt)))
         if opt in (BINARY, SGA, ECHO, NAWS, LINEMODE, EOR, SNDLOC):
             if opt == ECHO and self.is_server:
                 raise ValueError('cannot recv WILL ECHO on server end')
             if opt in (NAWS, LINEMODE, SNDLOC) and not self.is_server:
                 raise ValueError('cannot recv WILL %s on client end' % (
-                    _name_command(opt),))
+                    name_command(opt),))
             if not self.remote_option.enabled(opt):
                 self.remote_option[opt] = True
                 self.iac(DO, opt)
@@ -974,7 +975,7 @@ class TelnetStreamReader:
                 self.pending_option[SB + opt] = True
                 if opt == LINEMODE:
                     # server sets the initial mode and sends forwardmask,
-                    self.send_linemode(self._default_linemode)
+                    self.send_linemode(self.default_linemode)
         elif opt == TM:
             if opt == TM and not self.pending_option.enabled(DO + TM):
                 raise ValueError('cannot recv WILL TM, must first send DO TM.')
@@ -1014,7 +1015,7 @@ class TelnetStreamReader:
         else:
             self.remote_option[opt] = False
             self.iac(DONT, opt)
-            raise ValueError('Unhandled: WILL %s.' % (_name_command(opt),))
+            raise ValueError('Unhandled: WILL %s.' % (name_command(opt),))
 
     def handle_wont(self, opt):
         """ Process byte 3 of series (IAC, WONT, opt) received by remote end.
@@ -1026,7 +1027,7 @@ class TelnetStreamReader:
         It is not possible to decline a WONT. ``T.remote_option[opt]`` is set
         False to indicate the remote end's refusal to perform ``opt``.
         """
-        self.log.debug('handle_wont(%s)' % (_name_command(opt)))
+        self.log.debug('handle_wont(%s)' % (name_command(opt)))
         if opt == TM and not self.pending_option.enabled(DO + TM):
             raise ValueError('WONT TM received but DO TM was not sent')
         elif opt == TM:
@@ -1062,11 +1063,12 @@ class TelnetStreamReader:
         cmd = buf[0]
         if self.is_server:
             assert cmd in (LINEMODE, LFLOW, NAWS, SNDLOC,
-                NEW_ENVIRON, TTYPE, TSPEED, XDISPLOC, STATUS), _name_command(cmd)
+                NEW_ENVIRON, TTYPE, TSPEED, XDISPLOC, STATUS
+                ), name_command(cmd)
         if self.pending_option.enabled(SB + cmd):
             self.pending_option[SB + cmd] = False
         else:
-            self.log.debug('[SB + %s] unsolicited', _name_command(cmd))
+            self.log.debug('[SB + %s] unsolicited', name_command(cmd))
         if cmd == LINEMODE: self._handle_sb_linemode(buf)
         elif cmd == LFLOW:
             self._handle_sb_lflow(buf)
@@ -1087,27 +1089,12 @@ class TelnetStreamReader:
         else:
             raise ValueError('SE: unhandled: %r' % (buf,))
 
-# LINEMODE and SLC-related public methods
-#
-    def set_default_linemode(self, lmode=None):
-        """ Set the initial line mode requested by the server if client
-            supports LINEMODE negotiation. The default is::
-                Linemode(bytes(
-                    ord(LMODE_MODE_REMOTE) | ord(LMODE_MODE_LIT_ECHO)))
-            which indicates remote editing, and control characters (\b)
-            are displayed to the client terminal without transposing,
-            such that \b is written to the client screen, and not '^G'.
-        """
-        assert lmode is None or isinstance(lmode, Linemode), lmode
-        if lmode is None:
-            self._default_linemode = Linemode(bytes([
-                    ord(LMODE_MODE_REMOTE) | ord(LMODE_MODE_LIT_ECHO)]))
-        else:
-            self._default_linemode = lmode
 
 # Private sub-negotiation (SB) routines
 #
     def _handle_sb_tspeed(self, buf):
+        """ Callback handles IAC-SB-TSPEED-<buf>-SE.
+        """
         assert buf.popleft() == TSPEED
         assert buf.popleft() == IS
         rx, tx = str(), str()
@@ -1125,6 +1112,8 @@ class TelnetStreamReader:
         self._ext_callback[TSPEED](int(rx), int(tx))
 
     def _handle_sb_xdisploc(self, buf):
+        """ Callback handles IAC-SB-XIDISPLOC-<buf>-SE.
+        """
         assert buf.popleft() == XDISPLOC
         assert buf.popleft() == IS
         xdisploc_str = b''.join(buf).decode('ascii')
@@ -1132,6 +1121,8 @@ class TelnetStreamReader:
         self._ext_callback[XDISPLOC](xdisploc_str)
 
     def _handle_sb_ttype(self, buf):
+        """ Callback handles IAC-SB-TTYPE-<buf>-SE.
+        """
         assert buf.popleft() == TTYPE
         assert buf.popleft() == IS
         ttype_str = b''.join(buf).decode('ascii')
@@ -1139,26 +1130,28 @@ class TelnetStreamReader:
         self._ext_callback[TTYPE](ttype_str)
 
     def _handle_sb_env(self, buf):
+        """ Callback handles IAC-SB-NEWENVIRON-<buf>-SE (rfc1073).
+        """
         assert len(buf) > 2, ('SE: buffer too short: %r' % (buf,))
         kind = buf.popleft()
         opt = buf.popleft()
         assert opt in (IS, INFO, SEND), opt
         assert kind == NEW_ENVIRON
         if opt == SEND:
-            self._handle_sb_env_send(buf)
+            raise NotImplementedError # client
         if opt in (IS, INFO):
             assert self.is_server, ('SE: cannot recv from server: %s %s' % (
-                _name_command(kind), 'IS' if opt == IS else 'INFO',))
+                name_command(kind), 'IS' if opt == IS else 'INFO',))
             if opt == IS:
                 if not self.pending_option.enabled(SB + kind + SEND + IS):
-                    self.log.debug('%s IS unsolicited', _name_command(opt))
+                    self.log.debug('%s IS unsolicited', name_command(opt))
                 self.pending_option[SB + kind + SEND + IS] = False
             if self.pending_option.get(SB + kind + SEND + IS, None) is False:
                 # a pending option of value of 'False' means it previously
                 # completed, subsequent environment values should have been
                 # send as INFO ..
                 self.log.debug('%s IS already recv; expected INFO.',
-                        _name_command(kind))
+                        name_command(kind))
             breaks = list([idx for (idx, byte) in enumerate(buf)
                            if byte in (theNULL, b'\x03')])
             env = {}
@@ -1169,18 +1162,19 @@ class TelnetStreamReader:
                 if 2 == len(pair):
                     key, value = pair
                     env[key] = value
-            self.log.debug('sb_env %s: %r', _name_command(opt), env)
+            self.log.debug('sb_env %s: %r', name_command(opt), env)
             self._ext_callback[kind](env)
             return
 
-    def _handle_sb_env_send(self, buf):
-        raise NotImplementedError  # recv by client
-
     def _handle_sb_sndloc(self, buf):
+        """ Callback handles IAC-SB-SNDLOC-<buf>-SE (rfc779).
+        """
         location_str = b''.join(buf).decode('ascii')
         self._ext_callback[SNDLOC](location_str)
 
     def _handle_sb_naws(self, buf):
+        """ Callback handles IAC-SB-NAWS-<buf>-SE (rfc1073).
+        """
         assert buf.popleft() == NAWS
         columns = str((256 * ord(buf[0])) + ord(buf[1]))
         rows = str((256 * ord(buf[2])) + ord(buf[3]))
@@ -1188,85 +1182,16 @@ class TelnetStreamReader:
         self._ext_callback[NAWS](int(columns), int(rows))
 
     def _handle_sb_lflow(self, buf):
-        """ Handle receipt of (IAC, SB, LFLOW).
+        """ Callback handles IAC-SB-LFOW-<buf>
         """ # XXX
         assert buf.popleft() == LFLOW
         assert self.local_option.enabled(LFLOW), (
             'received IAC SB LFLOW wihout IAC DO LFLOW')
-        self.log.debug('sb_lflow: %r', buf)
-
-
-    def _handle_sb_linemode(self, buf):
-        assert buf.popleft() == LINEMODE
-        cmd = buf.popleft()
-        if cmd == LMODE_MODE:
-            self._handle_sb_linemode_mode(buf)
-        elif cmd == LMODE_SLC:
-            self._handle_sb_linemode_slc(buf)
-        elif cmd in (DO, DONT, WILL, WONT):
-            opt = buf.popleft()
-            self.log.debug('recv SB LINEMODE %s FORWARDMASK%s.',
-                    _name_command(cmd), '(...)' if len(buf) else '')
-            assert opt == LMODE_FORWARDMASK, (
-                    'Illegal byte follows IAC SB LINEMODE %s: %r, '
-                    ' expected LMODE_FORWARDMASK.' (_name_command(cmd), opt))
-            self._handle_sb_forwardmask(cmd, buf)
-        else:
-            raise ValueError('Illegal IAC SB LINEMODE command, %r' % (
-                _name_command(cmd),))
-
-    def _handle_sb_linemode_mode(self, buf):
-        assert len(buf) == 1
-        self._linemode = Linemode(buf[0])
-        self.log.debug('Linemode MODE is %s.' % (self.linemode,))
-
-    def _handle_sb_linemode_slc(self, buf):
-        """ Process and reply to linemode slc command function triplets. """
-        assert 0 == len(buf) % 3, ('SLC buffer must be byte triplets')
-        self._slc_start()
-        while len(buf):
-            func = buf.popleft()
-            flag = buf.popleft()
-            value = buf.popleft()
-            self._slc_process(func, SLC_definition(flag, value))
-        self._slc_end()
-        self.request_forwardmask()
-
-    def _handle_sb_forwardmask(self, cmd, buf):
-        # set and report about pending options by 2-byte opt,
-        if self.is_server:
-            assert self.remote_option.enabled(LINEMODE), (
-                    'cannot recv LMODE_FORWARDMASK %s (%r) '
-                    'without first sending DO LINEMODE.' % (cmd, buf,))
-            assert cmd not in (DO, DONT), (
-                    'cannot recv %s LMODE_FORWARDMASK on server end',
-                    _name_command(cmd,))
-        if self.is_client:
-            assert self.local_option.enabled(LINEMODE), (
-                    'cannot recv %s LMODE_FORWARDMASK without first '
-                    ' sending WILL LINEMODE.')
-            assert cmd not in (WILL, WONT), (
-                    'cannot recv %s LMODE_FORWARDMASK on client end',
-                    _name_command(cmd,))
-            assert cmd not in (DONT) or len(buf) == 0, (
-                    'Illegal bytes follow DONT LMODE_FORWARDMASK: %r' % (
-                        buf,))
-            assert cmd not in (DO) and len(buf), (
-                    'bytes must follow DO LMODE_FORWARDMASK')
-        if cmd in (WILL, WONT):
-            self._forwardmask_enabled = cmd is WILL
-        elif cmd in (DO, DONT):
-            self._forwardmask_enabled = cmd is DO
-            if cmd == DO:
-                self._handle_do_forwardmask(buf)
-
-    def _handle_do_forwardmask(self, buf):
-        """ Handles buffer received in SB LINEMODE DO FORWARDMASK <buf>
-        """ # XXX UNIMPLEMENTED: ( received on client )
-        pass
+        raise NotImplementedError
 
     def _send_status(self):
-        """ Respond after DO STATUS received by client (rfc859). """
+        """ Callback handles IAC-SB-STATUS-SEND (rfc859).
+        """
         assert (self.pending_option.enabled(WILL + STATUS)
                 or self.local_option.enabled(STATUS)), (u'Only the sender '
                 'of IAC WILL STATUS may send IAC SB STATUS IS.')
@@ -1287,41 +1212,56 @@ class TelnetStreamReader:
                 response.extend([DONT, opt])
         response.extend([IAC, SE])
         self.log.debug('send: %s', ', '.join([
-            _name_command(byte) for byte in response]))
+            name_command(byte) for byte in response]))
         self.send_iac(bytes([ord(byte) for byte in response]))
         if self.pending_option.enabled(WILL + STATUS):
             self.pending_option[WILL + STATUS] = False
 
-# private Special Linemode Character (SLC) routines
+# Special Line Character and other LINEMODE functions
 #
-
-    def _default_slc(self, tabset):
-        """ Set property ``_slctab`` to default SLC tabset, unless it
-            is unlisted (as is the case for SLC_MCL+), then set as
-            SLC_NOSUPPORT _POSIX_VDISABLE (0xff).
-
-            ``_slctab`` is a dictionary of SLC functions, such as SLC_IP,
-            to a tuple of the handling character and support level.
+    def _handle_sb_linemode(self, buf):
+        """ Callback handles IAC-SB-LINEMODE-<buf>.
         """
-        self._slctab = {}
-        self._default_tabset = tabset
-        for slc in range(NSLC + 1):
-            self._slctab[bytes([slc])] = tabset.get(bytes([slc]),
-                    SLC_definition(SLC_NOSUPPORT, _POSIX_VDISABLE))
+        assert buf.popleft() == LINEMODE
+        cmd = buf.popleft()
+        if cmd == slc.LMODE_MODE:
+            self._handle_sb_linemode_mode(buf)
+        elif cmd == slc.LMODE_SLC:
+            self._handle_sb_linemode_slc(buf)
+        elif cmd in (DO, DONT, WILL, WONT):
+            opt = buf.popleft()
+            self.log.debug('recv SB LINEMODE %s FORWARDMASK%s.',
+                    name_command(cmd), '(...)' if len(buf) else '')
+            assert opt == slc.LMODE_FORWARDMASK, (
+                    'Illegal byte follows IAC SB LINEMODE %s: %r, '
+                    ' expected LMODE_FORWARDMASK.' (name_command(cmd), opt))
+            self._handle_sb_forwardmask(cmd, buf)
+        else:
+            raise ValueError('Illegal IAC SB LINEMODE command, %r' % (
+                name_command(cmd),))
 
-    def _slc_snoop(self, byte):
-        """ Scan ``self._slctab`` for matching byte values.
-
-            If any are discovered, the (callback, func_byte, slc_definition)
-            is returned. Otherwise (None, None, None) is returned.
+    def _handle_sb_linemode_mode(self, mode):
+        """ Callback handles IAC-SB-LINEMODE-MODE-<mode>.
         """
-        # scan byte for SLC function mappings, if any, return function
-        for slc_func, slc_def in self._slctab.items():
-            if byte == slc_def.val and slc_def.val != theNULL:
-                callback = self._slc_callback.get(slc_func, None)
-                return (callback, slc_func, slc_def)
-        return (None, None, None)
+        assert len(mode) == 1
+        self._linemode = slc.Linemode(mode[0])
+        self.log.debug('Linemode MODE is %s.' % (self.mode,))
 
+    def _handle_sb_linemode_slc(self, buf):
+        """ Callback handles IAC-SB-LINEMODE-SLC-<buf>.
+
+            Processes slc command function triplets and replies accordingly.
+        """
+        assert 0 == len(buf) % 3, ('SLC buffer must be byte triplets')
+        self._slc_start()
+        while len(buf):
+            func = buf.popleft()
+            flag = buf.popleft()
+            value = buf.popleft()
+            slc_def = slc.SLC(flag, value)
+            self._slc_process(func, slc_def)
+        self._slc_end()
+        self.request_forwardmask()
 
     def _slc_end(self):
         """ Send any SLC pending SLC changes sotred in _slc_buffer """
@@ -1335,14 +1275,14 @@ class TelnetStreamReader:
 
     def _slc_start(self):
         """ Send IAC SB LINEMODE SLC header """
-        self.send_iac(IAC + SB + LINEMODE + LMODE_SLC)
+        self.send_iac(IAC + SB + LINEMODE + slc.LMODE_SLC)
         self.log.debug('slc_start: IAC + SB + LINEMODE + SLC')
 
     def _slc_send(self):
         """ Send all special characters that are supported """
         send_count = 0
-        for func in range(NSLC + 1):
-            if self._slctab[bytes([func])].nosupport:
+        for func in range(slc.NSLC + 1):
+            if self.slctab[bytes([func])].nosupport:
                 continue
             if func is 0 and not self.is_server:
                 # only the server may send an octet with the first
@@ -1356,42 +1296,42 @@ class TelnetStreamReader:
         """ buffer slc triplet response as (function, flag, value),
             for the given SLC_func byte and slc_def instance providing
             byte attributes ``flag`` and ``val``. If no slc_def is provided,
-            the slc definition of ``_slctab`` is used by key ``func``.
+            the slc definition of ``slctab`` is used by key ``func``.
         """
-        assert len(self._slc_buffer) < self.SLC_MAXSIZE, ('SLC: buffer full')
+        assert len(self._slc_buffer) < _MAXSIZE_SLC, ('SLC: buffer full')
         if slc_def is None:
-            slc_def = self._slctab[func]
+            slc_def = self.slctab[func]
         self.log.debug('_slc_add (%s, %s)',
-            name_slc_command(func), slc_def)
+            slc.name_slc_command(func), slc_def)
         self._slc_buffer.extend([func, slc_def.mask, slc_def.val])
 
     def _slc_process(self, func, slc_def):
         """ Process an SLC definition provided by remote end.
 
             Ensure the function definition is in-bounds and an SLC option
-            we support. Store SLC_VARIABLE changes to self._slctab, keyed
+            we support. Store SLC_VARIABLE changes to self.slctab, keyed
             by SLC byte function ``func``.
 
             The special definition (0, SLC_DEFAULT|SLC_VARIABLE, 0) has the
             side-effect of replying with a full slc tabset, resetting to
             the default tabset, if indicated.  """
         self.log.debug('_slc_process %s mine=%s, his=%s',
-                name_slc_command(func), self._slctab[func], slc_def)
+                slc.name_slc_command(func), self.slctab[func], slc_def)
 
         # out of bounds checking
-        if ord(func) > NSLC:
+        if ord(func) > slc.NSLC:
             self.log.warn('SLC not supported (out of range): (%r)', func)
-            self._slc_add(func, SLC_nosupport())
+            self._slc_add(func, slc.SLC_nosupport())
             return
 
         # process special request
         if func == theNULL:
-            if slc_def.level == SLC_DEFAULT:
+            if slc_def.level == slc.SLC_DEFAULT:
                 # client requests we send our default tab,
                 self.log.info('SLC_DEFAULT')
                 self._default_slc(self._default_tabset)
                 self._slc_send()
-            elif slc_def.level == SLC_VARIABLE:
+            elif slc_def.level == slc.SLC_VARIABLE:
                 # client requests we send our current tab,
                 self.log.info('SLC_VARIABLE')
                 self._slc_send()
@@ -1400,7 +1340,7 @@ class TelnetStreamReader:
             return
 
         # evaluate slc
-        mylevel, myvalue = (self._slctab[func].level, self._slctab[func].val)
+        mylevel, myvalue = (self.slctab[func].level, self.slctab[func].val)
         if slc_def.level == mylevel and myvalue == slc_def.val:
             return
         elif slc_def.level == mylevel and slc_def.ack:
@@ -1415,259 +1355,127 @@ class TelnetStreamReader:
     def _slc_change(self, func, slc_def):
         """ Update SLC tabset with SLC definition provided by remote end.
 
-            Modify prviate attribute ``_slctab`` appropriately for the level
+            Modify prviate attribute ``slctab`` appropriately for the level
             and value indicated, except for slc tab functions of SLC_NOSUPPORT.
 
             Reply as appropriate ..
         """
         hislevel, hisvalue = slc_def.level, slc_def.val
-        mylevel, myvalue = self._slctab[func].level, self._slctab[func].val
-        if hislevel == SLC_NOSUPPORT:
+        mylevel, myvalue = self.slctab[func].level, self.slctab[func].val
+        if hislevel == slc.SLC_NOSUPPORT:
             # client end reports SLC_NOSUPPORT; use a
             # nosupport definition with ack bit set
-            self._slctab[func] = SLC_nosupport()
-            self._slctab[func].set_flag(SLC_ACK)
+            self.slctab[func] = slc.SLC_nosupport()
+            self.slctab[func].set_flag(slc.SLC_ACK)
             self._slc_add(func)
             return
 
-        if hislevel == SLC_DEFAULT:
+        if hislevel == slc.SLC_DEFAULT:
             # client end requests we use our default level
-            if mylevel == SLC_DEFAULT:
+            if mylevel == slc.SLC_DEFAULT:
                 # client end telling us to use SLC_DEFAULT on an SLC we do not
                 # support (such as SYNCH). Set flag to SLC_NOSUPPORT instead
                 # of the SLC_DEFAULT value that it begins with
-                self._slctab[func].set_mask(SLC_NOSUPPORT)
+                self.slctab[func].set_mask(slc.SLC_NOSUPPORT)
             else:
                 # set current flag to the flag indicated in default tab
-                self._slctab[func].set_mask(DEFAULT_SLC_TAB.get(func).mask)
+                self.slctab[func].set_mask(
+                        self.default_slc_tab.get(func).mask)
             # set current value to value indicated in default tab
-            self._slctab[func].set_value(DEFAULT_SLC_TAB.get(func,
-                SLC_nosupport()).val)
+            self.default_slc_tab.get(func, slc.SLC_nosupport())
+            self.slctab[func].set_value(slc_def.val)
             self._slc_add(func)
             return
 
         # client wants to change to a new value, or,
         # refuses to change to our value, accept their value.
-        if self._slctab[func].val != theNULL:
-            self._slctab[func].set_value(slc_def.val)
-            self._slctab[func].set_mask(slc_def.mask)
-            slc_def.set_flag(SLC_ACK)
+        if self.slctab[func].val != theNULL:
+            self.slctab[func].set_value(slc_def.val)
+            self.slctab[func].set_mask(slc_def.mask)
+            slc_def.set_flag(slc.SLC_ACK)
             self._slc_add(func, slc_def)
             return
 
         # if our byte value is b'\x00', it is not possible for us to support
         # this request. If our level is default, just ack whatever was sent.
         # it is a value we cannot change.
-        if mylevel == SLC_DEFAULT:
+        if mylevel == slc.SLC_DEFAULT:
             # If our level is default, store & ack whatever was sent
-            self._slctab[func].set_mask(slc_def.mask)
-            self._slctab[func].set_value(slc_def.val)
-            slc_def.set_flag(SLC_ACK)
+            self.slctab[func].set_mask(slc_def.mask)
+            self.slctab[func].set_value(slc_def.val)
+            slc_def.set_flag(slc.SLC_ACK)
             self._slc_add(func, slc_def)
-        elif slc_def.level == SLC_CANTCHANGE and mylevel == SLC_CANTCHANGE:
+        elif (slc_def.level == slc.SLC_CANTCHANGE
+                and mylevel == slc.SLC_CANTCHANGE):
             # "degenerate to SLC_NOSUPPORT"
-            self._slctab[func].set_mask(SLC_NOSUPPORT)
+            self.slctab[func].set_mask(slc.SLC_NOSUPPORT)
             self._slc_add(func)
         else:
             # mask current level to levelbits (clears ack),
-            self._slctab[func].set_mask(self._slctab[func].level)
-            if mylevel == SLC_CANTCHANGE:
-                self._slctab[func].val = DEFAULT_SLC_TAB.get(
-                        func, SLC_nosupport()).val
+            self.slctab[func].set_mask(self.slctab[func].level)
+            if mylevel == slc.SLC_CANTCHANGE:
+                slc_def = self.default_slc_tab.get(
+                        func, slc.SLC_nosupport())
+                self.slctab[func].val = slc_def.val
             self._slc_add(func)
 
-    def _generate_forwardmask(self):
-        """ Generate a 32-byte or 16-byte Forwardmask() instance
-
-            Forwardmask is formed by a bitmask of all 256 possible 8-bit
-            keyboard ascii input, or, when not 'outbinary', a 16-byte
-            7-bit representation of each value, and whether or not they
-            should be "forwarded" by the client on the transport stream
+    def _handle_sb_forwardmask(self, cmd, buf):
+        """ Callback handles IAC-SB-LINEMODE-<cmd>-FORWARDMASK-<buf>.
         """
-        #   (as opposed to caught locally, such as ^C).
-        #
-        #   Characters requested to be forwarded are any bytes matching a
-        #   supported SLC function byte in self._slctab.
-        #
-        #   The return value is an instance of ``Forwardmask``, which can
-        #   be tested by using the __contains__ method::
-        #
-        #       if b'\x03' in stream.linemode_forwardmask:
-        #           stream.write(b'Press ^C to exit.\r\n')
-        if not self.local_option.enabled(BINARY):
-            num_bytes, msb = 16, 127
-        else:
-            num_bytes, msb = 32, 256
-        mask32 = [theNULL] * num_bytes
-        for mask in range(msb // 8):
-            start = mask * 8
-            last = start + 7
-            byte = theNULL
-            for char in range(start, last + 1):
-                (func, slc_name, slc_def) = self._slc_snoop(bytes([char]))
-                if func is not None and not slc_def.nosupport:
-                    # set bit for this character, it is a supported slc char
-                    byte = bytes([ord(byte) | 1])
-                if char != last:
-                    # shift byte left for next character,
-                    # except for the final byte.
-                    byte = bytes([ord(byte) << 1])
-            mask32[mask] = byte
-        return Forwardmask(b''.join(mask32), ack=self._forwardmask_enabled)
+        # set and report about pending options by 2-byte opt,
+        if self.is_server:
+            assert self.remote_option.enabled(LINEMODE), (
+                    'cannot recv LMODE_FORWARDMASK %s (%r) '
+                    'without first sending DO LINEMODE.' % (cmd, buf,))
+            assert cmd not in (DO, DONT), (
+                    'cannot recv %s LMODE_FORWARDMASK on server end',
+                    name_command(cmd,))
+        if self.is_client:
+            assert self.local_option.enabled(LINEMODE), (
+                    'cannot recv %s LMODE_FORWARDMASK without first '
+                    ' sending WILL LINEMODE.')
+            assert cmd not in (WILL, WONT), (
+                    'cannot recv %s LMODE_FORWARDMASK on client end',
+                    name_command(cmd,))
+            assert cmd not in (DONT) or len(buf) == 0, (
+                    'Illegal bytes follow DONT LMODE_FORWARDMASK: %r' % (
+                        buf,))
+            assert cmd not in (DO) and len(buf), (
+                    'bytes must follow DO LMODE_FORWARDMASK')
+        if cmd in (WILL, WONT):
+            self._forwardmask_enabled = cmd is WILL
+        elif cmd in (DO, DONT):
+            self._forwardmask_enabled = cmd is DO
+            if cmd == DO:
+                self._handle_do_forwardmask(buf)
 
-# Class constructor / set-default routines
-#
-    def _init_options(self):
-        """ Initilize dictionaries ``pending_option``, ``local_option``,
-            ``remote_option``, and call ``set_default_linemode()``.
+    def _handle_do_forwardmask(self, buf):
+        """ Callback handles IAC-SB-LINEMODE-DO-FORWARDMASK-<buf>.
+        """ # XXX
+        raise NotImplementedError
+
+class Option(dict):
+    def __init__(self, name, log=logging):
+        """ .. class:: Option(name : str, log: logging.logger)
+
+            Initialize a Telnet Option database for capturing option
+            negotation changes to ``log`` if enabled for debug logging.
         """
-        #: a dictionary of telnet option ``opt`` bytes that follow an
-        # *IAC DO* or *DONT* command, and contains a value of ``True``
-        # until an *IAC WILL* or *WONT* has been received by remote end.
-        # Requests related to extended RFC sub-negotation are keyed by
-        # *SB* ``opt``.
-        self.pending_option = Option('pending_option', self.log)
+        self.name, self.log = name, log
+        dict.__init__(self)
 
-        #: a dictionary of telnet option ``byte`` bytes that follow an
-        # *IAC WILL* or *WONT* command sent by local end to indicate local
-        # capability. For example, if ``local_option[ECHO]`` is ``True``,
-        # then this end should echo input received from remote end (note
-        # this is clearly not a valid mode for client mode)
-        self.local_option = Option('local_option', self.log)
+    def enabled(self, key):
+        """ Returns True of option is enabled."""
+        return bool(self.get(key, None) is True)
 
-        #: a dictionary of telnet option ``byte`` bytes that follow an
-        # *IAC WILL* or *WONT* command received by remote end to indicate
-        # remote capability. For example, if remote_option[NAWS] (Negotiate
-        # about window size) is True, then the window dimensions of the
-        # remote client may be determined by ``request_naws()``
-        self.remote_option = Option('remote_option', self.log)
-
-        self.set_default_linemode()
-
-    def _default_callbacks(self):
-        """ Set default callback dictionaries ``_iac_callback``,
-            ``_slc_callback``, and ``_ext_callback`` to default methods of
-            matching names, such that IAC + IP, or, the SLC value negotiated
-            for SLC_IP, signals a callback to method ``self.handle_ip``.
-        """
-        self._iac_callback = {}
-        for iac_cmd, key in DEFAULT_IAC_CALLBACKS:
-            self.set_iac_callback(iac_cmd, getattr(self, 'handle_%s' % (key,)))
-
-        self._slc_callback = {}
-        for slc_cmd, key in DEFAULT_SLC_CALLBACKS:
-            self.set_slc_callback(slc_cmd, getattr(self, 'handle_%s' % (key,)))
-
-        # extended callbacks may receive various arguments
-        self._ext_callback = {}
-        for ext_cmd, key in DEFAULT_EXT_CALLBACKS:
-            self.set_ext_callback(ext_cmd, getattr(self, 'handle_%s' % (key,)))
-
-class Linemode(object):
-    """ """
-
-    def __init__(self, mask=LMODE_MODE_LOCAL):
-        """ A mask of ``LMODE_MODE_LOCAL`` means that all line editing is
-            performed on the client side (default). A mask of theNULL (\x00)
-            indicates that editing is performed on the remote side. Valid
-            flags are ``LMODE_MODE_TRAPSIG``, ``LMODE_MODE_ACK``,
-            ``LMODE_MODE_SOFT_TAB``, ``LMODE_MODE_LIT_ECHO``.
-        """
-        assert type(mask) is bytes and len(mask) == 1
-        self.mask = mask
-
-    def set_flag(self, flag):
-        """ Set linemode bitmask ``flag``.  """
-        self.mask = bytes([ord(self.mask) | ord(flag)])
-
-    def unset_flag(self, flag):
-        """ Unset linemode bitmask ``flag``.  """
-        self.mask = bytes([ord(self.mask) ^ ord(flag)])
-
-    @property
-    def remote(self):
-        """ True if linemode processing is done on server end
-            (remote processing).
-
-            """
-        return not self.local
-
-    @property
-    def local(self):
-        """ True if telnet stream is in EDIT mode (local processing).
-
-            When set, the client side of the connection should process all
-            input lines, performing any editing functions, and only send
-            completed lines to the remote side.
-
-            When unset, client side should *not* process any input from the
-            user, and the server side should take care of all character
-            processing that needs to be done.
-        """
-        return bool(ord(self.mask) & ord(LMODE_MODE_LOCAL))
-
-    @property
-    def trapsig(self):
-        """ True if signals are trapped by client.
-
-        When set, the client side should translate appropriate
-        interrupts/signals to their Telnet equivalent.  (These would be
-        IP, BRK, AYT, ABORT, EOF, and SUSP)
-
-        When unset, the client should pass interrupts/signals as their
-        normal ASCII values, if desired, or, trapped locally.
-        """
-        return bool(ord(self.mask) & ord(LMODE_MODE_TRAPSIG))
-
-    @property
-    def ack(self):
-        """ Returns True if ack bit is set.
-        """
-        return bool(ord(self.mask) & ord(LMODE_MODE_ACK))
-
-    @property
-    def soft_tab(self):
-        """ When set, the client will expand horizontal tab (\\x09)
-            into the appropriate number of spaces.
-
-            When unset, the client should allow horitzontal tab to
-            pass through un-modified. This status is only relevant
-            for the client end.
-        """
-        return bool(ord(self.mask) & ord(LMODE_MODE_SOFT_TAB))
-
-    @property
-    def lit_echo(self):
-        """ When set, non-printable characters are displayed as a literal
-            character, allowing control characters to write directly to
-            the user's screen.
-
-            When unset, the LIT_ECHO, the client side may echo the character
-            in any manner that it desires (fe: '^C' for chr(3)).
-        """
-        return bool(ord(self.mask) & ord(LMODE_MODE_LIT_ECHO))
-
-    def __str__(self):
-        """ Returns string representation of line mode, for debugging """
-        if self.mask == bytes([0]):
-            return 'remote'
-        flags = []
-        # we say 'local' to indicate that 'edit' mode means that all
-        # input processing is done locally, instead of the obtusely named
-        # flag 'edit'
-        if self.local:
-            flags.append('local')
-        else:
-            flags.append('remote')
-        if self.trapsig:
-            flags.append('trapsig')
-        if self.soft_tab:
-            flags.append('soft_tab')
-        if self.lit_echo:
-            flags.append('lit_echo')
-        if self.ack:
-            flags.append('ack')
-        return '|'.join(flags)
+    def __setitem__(self, key, value):
+        if value != dict.get(self, key, None):
+            descr = ' + '.join([name_command(bytes([byte]))
+                for byte in key[:2]] + [repr(byte)
+                    for byte in key[2:]])
+            self.log.debug('{}[{}] = {}'.format(self.name, descr, value))
+        dict.__setitem__(self, key, value)
+    __setitem__.__doc__ = dict.__setitem__.__doc__
 
 #: List of globals that may match an iac command option bytes
 _DEBUG_OPTS = dict([(value, key)
@@ -1680,12 +1488,12 @@ _DEBUG_OPTS = dict([(value, key)
                       'GA', 'SB', 'EOF', 'SUSP', 'ABORT', 'LOGOUT',
                       'CHARSET', 'SNDLOC')])
 
-def _name_command(byte):
+def name_command(byte):
     """ Given an IAC byte, return its mnumonic global constant. """
     return (repr(byte) if byte not in _DEBUG_OPTS
             else _DEBUG_OPTS[byte])
 
-def _name_commands(cmds, sep=' '):
+def name_commands(cmds, sep=' '):
     return ' '.join([
-        _name_command(bytes([byte])) for byte in cmds])
+        name_command(bytes([byte])) for byte in cmds])
 

@@ -71,45 +71,68 @@ Consider that Kludge mode provies no way to determine which bytes, received at a
 
 Accordingly, with Supress Go-Ahead (SGA) enabled, there can be any indeterminable state of whether the remote program is hung, receiving, has replied but not yet received, or has received only partially and not completely the program's output.
 
+Go-Ahead
+========
+
+The IAC-GA signal would seemingly be of little use over today's bi-directional TCP protocol and virtual terminal emulators -- its original purpose was to coordinate transmission on half-duplex protocols and terminals. Only a few 1970-era hosts (AMES-67, UCLA-CON) require the GA signal. For this reason, this server takes the modern recommendation of supressing the GA signal *by default*. Those clients wishing to make use of the GA signal must send IAC-DONT-GA.
+
+There are now many modern examples of using GA. The competition nethack server alt.nethack.org indicates to ai bots that it has received all screen updates and can now send input, for instance.
+
 Local Linemode
 ==============
 
-With no MMU and crude process control, it was necessary to differentiate the "command channel" from "inband data" from the start. This is done by enforcing that, unless negotiated otherwise, the following core Rules:
+Unless otherwise negotiatied, Telnet's default mode is half-duplex, local line editing. This most basic "dummy" mode are modeled after a Teletype 33, which runs in "half-duplex" mode.
+
+Telnet implmentations attached to 7-bit ASCII teletypes may implement the Telnet protocol by hardware or minimal changes to their terminal line drivers. Often without MMU and crude process control, an IAC interpreter or hardware device could be "interrupted" when the 8th bit is set high. "Out of band" in regards to 7-bit terminals, the receipt of \xff indicates that the following byte Is-a-command (IAC).
+
+A client that does not reply to any IAC commands is still a valid client: it just likely "dumb", and therefor in half-duplex, local linemode processing by default. This allowed a teletype to act as a Telnet client without any implementation or regard to telnet commands.
+
+Default
+-------
+
   * Each end transmits only 7-bit ASCII, (except as used in the interpreter).
+
   * A line prompting input be followed by the 'Go-Ahead' (GA) command
+
   * Client signals end of input (send) by CR LF (Carriage Return + Linefeed)
 
-These basic restrictions are modeled after a Teletype 33 which runs in "half-duplex" mode. While data is being printed, it cannot yet transit any input: any keypress is buffered internaly in the teletype's buffer.
 
 "Synch" Mechanism
 =================
 
 NOT SUPPORTED.
 
-A supervisor connecting a (7-bit) teletype to a telnet (8-bit) data line would simply pipe the streams together by the 7 bits; The teletypist may press 'BREAK' at any time to signal a control line: the supervisor then enters "Telnet Synch" mode by sending an "Urgent" mechanism, ceases printing. A user could then instruct "Abort Output", "Abourt Process", or other mechanisms and presumably return to normal processing.
+A supervisor connecting a (7-bit) teletype to a telnet (8-bit) data line would simply pipe the streams together by the 7 bits; The teletypist may press 'BREAK' at any time to signal a control line: the supervisor then enters "Telnet Synch" mode by sending an "Urgent" mechanism, ceases printing data received on the transport.
+
+A user could then instruct "Abort Output", "Abourt Process", or other mechanisms and presumably return to normal processing.
 
 Consider the description of a PDP-10 session in rfc139 (May 1971), presented here as a faux naif unix session:
 
     1. Teletype sends command input,
           find /usr -name 'telop.c'<send>
 
-    2. Server begins output -- perhaps many rows of 'Permission Denied',
-       meanwhile, user has already filled the input buffer, then decided
-       to abort the previous program:
+    2. Server begins output -- perhaps, after some minutes of pause,
+       many rows of 'Permission Denied'. Meanwhile, the user has already
+       filled his teletype's input buffer, later deciding to abort the
+       previous program:
           ed /usr/local/s^t/tel^t^c
 
-At this point, the only way to signal the attention of the IAC interpreter of the client host serving the teletype, which is currently blocking the half-duplex transmission with output and has not yet sent GA (Go-Ahead), is by a special line signal using the 'BREAK' or 'ATTN' key.
+At this point, however, the half-dupex Teletype cannot transmit any input.
 
-This notifies the Terminal driver, signalling the 'supervisor' (rfc139), which then sends 'INS'. Remaining control codes from the teletype (^t^t^c) continues to the remote end, but is discarded until the Data-Mark (DM) is received. This ensures the ^t and ^c characters are not received by the remote program.
+The only way to signal the attention of the supervisor, which is currently blocking the half-duplex transmission with output (having not yet received GA), is by a special line signal wired seperately from the teletype keyboard. This is the 'BREAK' or 'ATTN' key.
+
+The terminal driver may then signal the 'supervisor', which then sends 'INS' (rfc139). Although the teletype is capable of "flushing" its input buffer, it does not flush control codes. Remaining control codes from the teletype (^t^t^c) continues to the remote end, but is discarded by that end, until the Data-Mark (DM) is sent by the supervisor.
+
+This ensures the ^t and ^c characters are not received by the remote program.
 
 TCP Implementation
 ------------------
 
-In the TCP implementation of telnet, where presumably a half-duplex terminal may still interconnect, the 'INS' marker referenced in pre-TCP documents is marked by sending the rarely-used TCP Urgent option, marked by socket option MSG_OOB to send:
+In the TCP implementation of telnet, where presumably a half-duplex terminal may still interconnect, the 'INS' marker referenced in pre-TCP documents is, instead, marked by sending the TCP Urgent option:
 
     socket.send(IAC, socket.MSG_OOB).
 
-The value of the byte does not seem to matter, can be of any length, and can continue sending socket.MSG_OOB, though, the bsd server sends only a single byte:
+The value of the byte does not seem to matter, can be of any length, and can continue sending socket.MSG_OOB (presumably, along with the remaining ^t^t^c described previously). Though, the BSD server sends only a single byte:
     /*
      * In 4.2 (and 4.3) systems, there is some question about
      * what byte in a sendOOB operation is the "OOB" data.
@@ -117,15 +140,19 @@ The value of the byte does not seem to matter, can be of any length, and can con
      * out of band, the one WE THINK should be OOB
      (...)
 
-Where "Telnet Synch" mode is to end, DM should be inserted.  All input is discarded by the IAC interpreter until DM is received. This was used to some abuse, as greived about in rfc 529, for vendor-implemented sub-protocols:
+All input is discarded by the IAC interpreter until DM is received; including IAC or 8-bit commands. This was used to some abuse to "piggyback" telnet by breaking out of IAC and into another "protocol" all together, and isgreived about in rfc 529:
 
       The TELNET SYNCH mechanism is being misused by attempting to give
       it meaning at two different levels of protocol.
 
 The BSD client may be instructed to send this legacy mechanism by escaping and using the command "send synch":
+
     telnet> send synch
 
-This sends IAC marked MSG_OOB, followed by DM, not marked MSG_OOB. The BSD server at this point would continue testing "SYNCHing = stilloob()" which continues to test errorfds (third argument to select.select). As only IAC is marked oob, it correctly ends SYNCHing at the data-mark, DM.  A modern implementation may use sockatmark(),
+This sends IAC marked MSG_OOB, followed by DM, not marked MSG_OOB. The BSD server at this point would continue testing wether the last received byte is still marked urgent, by continuing to test errorfds (third argument to select.select, a modern implementation might rather use sockatmark(3)).
+
+Abort Output
+============
 
 BSD Telnet Server sets "Packet mode" with the pty driver:
 
@@ -136,7 +163,6 @@ And when TIOCPKT_FLUSHWRITE is signaled by the pty driver:
 #define         TIOCPKT_FLUSHWRITE      0x02    /* flush packet */
 
 awaiting data buffered on the write transport is cleared; taking care to ensure all IAC commands were sent in the netclear() alogorithm, which also sets the neturgent pointer.
-
 
 Carriage Return
 ===============
@@ -268,9 +294,9 @@ Twisted is the only other known asynchronous callback implementation of note, th
 RFC 495
 -------
 
-RFC 495, NIC #15371 "TELNET Protocol Specification." 1 May 1973, A. McKenzie Lists the following attatched documents, which are missing.
+RFC 495, NIC #15371 "TELNET Protocol Specification." 1 May 1973, A. McKenzie, lists the following "attatched documents", which are not available to the public or in digitized form.
 
-[...] specifications for TELNET options which allow negotiation of:
+""" [...] specifications for TELNET options which allow negotiation of:
 
             o binary transmission
             o echoing
@@ -284,6 +310,7 @@ RFC 495, NIC #15371 "TELNET Protocol Specification." 1 May 1973, A. McKenzie Lis
    These specifications have been prepared by Dave Walden (BBN-NET) with
    the help of Bernie Cosell, Ray Tomlinson (BBN-TENEX) and Bob Thomas;
    by Jerry Burchfiel (BBN-TENEX); and by David Crocker (ULCA-NMC).
+"""
 
 If anybody can locate these documents, please forward them along.
 
