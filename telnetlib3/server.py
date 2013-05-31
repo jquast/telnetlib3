@@ -56,6 +56,7 @@ class TelnetServer(tulip.protocols.Protocol):
         #: prompt sequence '%h' is result of socket.gethostname()
         self._server_name = tulip.get_event_loop().run_in_executor(None,
                 socket.gethostname)
+        self._server_name.add_done_callback(self.completed_server_lookup)
 
     def connection_made(self, transport):
         """ Receive a new telnet client connection.
@@ -283,7 +284,7 @@ class TelnetServer(tulip.protocols.Protocol):
         #: prompt sequence '%H' is result of socket.get_fqdn(self._server_name)
         self._server_fqdn = tulip.get_event_loop().run_in_executor(
                     None, socket.getfqdn, arg.result())
-
+        self.env.update({'HOSTNAME': self.server_name.result()})
 
     def request_advanced_opts(self, ttype=True):
         """ XXX Request advanced telnet options when remote end replies TTYPE.
