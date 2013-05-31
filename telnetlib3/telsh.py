@@ -717,7 +717,7 @@ class Telsh():
 
     def cmdset_whereami(self, *args):
         self.stream.write('\r\n{}'.format(
-            (self.server_fqdn.result()
+            (self.server.server_fqdn.result()
                 if self.server.server_fqdn.done()
                 else self.server.server_name.result()
                 if self.server.server_name.done()
