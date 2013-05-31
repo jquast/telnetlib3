@@ -796,7 +796,7 @@ class Telsh():
         def disp_kv(key, val):
             return (shlex.quote(val)
                     if key not in self.server.readonly_env
-                    else self.standout(shlex.quote(val)))
+                    else self.dim(shlex.quote(val)))
         retval = 0
         if args:
             if '=' in args[0]:
