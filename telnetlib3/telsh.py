@@ -10,6 +10,9 @@ import telopt
 
 __all__ = ['TelnetShellStream', 'Telsh']
 
+CR, LF, NUL = '\r\n\x00'
+#_MAX_LITVAL = 255
+
 class TelnetShellStream():
     def __init__(self, server):
         self.server = server
@@ -154,7 +157,9 @@ class Telsh():
     def __init__(self, server, log=logging):
         #: TelnetServer instance associated with shell
         self.server = server
+        #: TelnetShellStream provides encoding for Telnet NVT
         self.stream = TelnetShellStream(server)
+
         self.log = log
 
         #: display full traceback to output stream ``display_exception()``
@@ -168,6 +173,9 @@ class Telsh():
 
         #: if set, characters are stripped around ``line_received``
         self.strip_eol = '\r\n\00'
+
+        #: maximum base10 digit that may be entered
+        self._max_litval = 65535
 
         #: buffer of line input until command process.
         self._lastline = collections.deque()
@@ -193,7 +201,7 @@ class Telsh():
         self._literal = False
 
         #: limit number of digits using counter _lit_recv
-        self._lit_recv = False
+        #self._lit_recv = False
 
         #: strip CR[+LF|+NUL] in character_received() by tracking last recv
         self._last_char = None
@@ -223,6 +231,9 @@ class Telsh():
         """ Display or redraw prompt and current command line input.
         """
         input = self.lastline
+        input = ''.join((self.standout(name_unicode(char)) if
+                not self.stream.can_write(char) or not char.isprintable() else
+                char for char in input))
         if self.is_multiline:
             input = input.split('\r')[-1]
         self.stream.write(''.join((
@@ -331,7 +342,7 @@ class Telsh():
                 if slc_byte is not None else '')))
         char_disp = name_unicode(char)
         if self.is_literal is not False:
-            # continue literal input
+            # continue literal input for matching editing characters
             self.literal_received(char)
         elif slc_byte == slc.SLC_LNEXT:
             # begin literal input (^v)
@@ -389,43 +400,7 @@ class Telsh():
             inserting raw sequences into a command line that may otherwise
             interpret them not printable, or a special line editing character.
         """
-        return not self._literal is False
-
-    def literal_received(self, ucs):
-        """ Receives literal character(s) SLC_LNEXT (^v) and all subsequent
-            characters until the boolean toggle ``_literal`` is set False.
-        """
-        self.log.debug('literal_received: {!r}'.format(ucs))
-        literval = 0 if self._literal is '' else int(self._literal)
-        new_lval = 0
-        if self._literal is False:  # ^V or SLC_VLNEXT
-            self.stream.write(self.standout('^\b'))
-            self._literal = ''
-            return
-        elif ord(ucs) < 32 and (
-                not self._lit_recv
-                and ucs not in ('\r', '\n')):
-            # Control character
-            if self._lit_recv:
-                self.character_received(chr(literval))
-            self.character_received(ucs)
-            self._lit_recv, self._literal = 0, False
-            return
-        elif ord('0') <= ord(ucs) <= ord('9'):  # base10 digit
-            self._literal += ucs
-            self._lit_recv += 1
-            new_lval = int(self._literal)
-            if new_lval >= 255 or self._lit_recv == len('255'):
-                self.character_received(chr(min(new_lval, 255)))
-                self._lit_recv, self._literal = 0, False
-            return
-        # printable character
-        elif self._lit_recv and ucs in ('\r', '\n'):
-            self.character_received(chr(literval))
-        else:
-            self.character_received(ucs)
-        self._lit_recv, self._literal = 0, False
-        self._last_char = ucs
+        return self._literal is not False
 
     def feed_byte(self, byte):
         ucs = self.stream.decode(byte, final=False)
@@ -436,22 +411,64 @@ class Telsh():
         ucs = self.stream.decode(byte, final=False)
         self.editing_received(ucs, slc)
 
-    def character_received(self, char):
+    def literal_received(self, ucs):
+        """ Receives literal character(s) SLC_LNEXT (^v) and all subsequent
+            characters until the boolean toggle ``_literal`` is set False.
+        """
+        self.log.debug('literal_received: {!r}'.format(ucs))
+        if self.is_literal is False:
+            self.log.debug('begin marker (expect ^V) {!r}'.format(ucs))
+            self.stream.write(self.standout('^\b'))
+            self._literal = -1
+            return
+        val = 0 if self._literal == -1 else int(self._literal)
+        self.log.debug('continuation, {!r}, {!r}'.format(val, ucs))
+        if ord(ucs) < 32:
+            if ucs in (CR, LF) and self._literal != -1:
+                # when CR or LF is received, send as-is & cancel,
+                self.character_received(chr(val), literal=True)
+                self._literal = False
+                return
+            if self._literal != -1:
+                # before sending control character, send current value,
+                self.character_received(chr(val), literal=True)
+            # send raw control character to ``character_received``
+            self.character_received(ucs, literal=True)
+            self._literal = False
+            return
+        if ord('0') <= ord(ucs) <= ord('9'):
+            # base10 digit
+            self._literal = (val*10) + int(ucs)
+            if (self._literal >= self._max_litval or
+                    len('{}'.format(self._literal))
+                    == len('{}'.format(self._max_litval))):
+                # send & trim value to _MAX_LITVAL; this could be much higher
+                # for uniocode points beyond iso8859-1 ..
+                ucs = chr(min(self._literal, self._max_litval))
+                self.character_received(ucs, literal=True)
+                self._literal = False
+            return
+        self.character_received(ucs, literal=True)
+        self._literal = False
+
+
+    def character_received(self, char, literal=False):
         """ XXX Callback receives a single Unicode character as it is received.
 
             The default takes a 'most-compatible' implementation, providing
             'kludge' mode with simulated remote editing for inadvanced clients.
         """
-        CR, LF, NUL = '\r\n\x00'
         char_disp = char
         self.log.debug('character_received: {!r}'.format(char))
         if not self.stream.can_write(char) or not char.isprintable():
             # ASCII representation of unprtintables for display editing
             char_disp = self.standout(name_unicode(char))
-        if self.is_literal:
+        if literal:
             # Within a ^v loop of ``literal_received()``, insert raw
             self._lastline.append(char)
             self.stream.echo(char_disp)
+        elif self.is_literal:
+            self.literal_received(char)
         elif (self._last_char == CR and char in (LF, NUL) and self.strip_eol):
             # ``strip_eol`` is True, pass on '\n' or '\x00' following CR,
             pass
@@ -936,7 +953,7 @@ def name_unicode(ucs):
     """ Return 7-bit ascii printable of any string. """
     if ord(ucs) < ord(' ') or ord(ucs) == 127:
         ucs = r'^{}'.format(chr(ord(ucs) ^ ord('@')))
-    elif ord(ucs) > 127 or not ucs.isprintable():
+    elif not ucs.isprintable():
         ucs = r'\x{:02x}'.format(ord(ucs))
     return ucs
 

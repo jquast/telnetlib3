@@ -799,9 +799,9 @@ class TelnetStreamReader:
         self.log.debug('SLC RP: Repaint')
 
     def handle_lnext(self, slc):
-        """ Handle SLC LINE NEXT?
+        """ Handle SLC Literal Next (Next character(s) received raw)
         """ # XXX
-        self.log.debug('IAC LNEXT: Line Next')
+        self.log.debug('IAC LNEXT: Literal Next')
 
     def handle_xoff(self, slc):
         """ Called when SLC_XOFF is received.

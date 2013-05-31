@@ -45,6 +45,9 @@ class TelnetServer(tulip.protocols.Protocol):
     readonly_env = ['USER', 'HOSTNAME', 'UID']
     def __init__(self, log=logging, default_encoding='utf8'):
         self.log = log
+        #: default option is ECHO off for only those clients capable of
+        #  remote line editing.
+        self.remote_noecho = True
         #: cient_env holds client session variables
         self._client_env = collections.defaultdict(str, **self.default_env)
         self._default_encoding = self._client_env['CHARSET'] = default_encoding
@@ -57,6 +60,9 @@ class TelnetServer(tulip.protocols.Protocol):
         self._server_name = tulip.get_event_loop().run_in_executor(None,
                 socket.gethostname)
         self._server_name.add_done_callback(self.completed_server_lookup)
+        self._server_fqdn = tulip.Future()
+        self._timeout = tulip.Future()
+        self._banner_displayed = False
 
     def connection_made(self, transport):
         """ Receive a new telnet client connection.
@@ -78,14 +84,11 @@ class TelnetServer(tulip.protocols.Protocol):
         self.shell = telsh.Telsh(server=self)
         self._last_received = datetime.datetime.now()
         self._connected = datetime.datetime.now()
-        self._server_fqdn = tulip.Future()
-        self._timeout = tulip.Future()
         self._client_ip = transport.get_extra_info('addr')[0]
         self._client_hostname = tulip.get_event_loop().run_in_executor(None,
                 socket.gethostbyaddr, self._client_ip)  # client fqdn,
         self._client_hostname.add_done_callback(  # check reverse-dns
                 self.completed_client_lookup)
-        self._banner_displayed = False
         loop = tulip.get_event_loop()
         loop.call_soon(self.banner)
         loop.call_soon(self._negotiate, self.first_prompt)
@@ -475,13 +478,20 @@ class TelnetServer(tulip.protocols.Protocol):
         if self._closing:
             return
         if not self._banner_displayed and self.server_fqdn.done():
-            self.shell.stream.write('Welcome to {}! '.format(
+            self.shell.stream.write('Welcome to {} !'.format(
                     self.server_fqdn.result()))
             self._banner_displayed = True
         loop = tulip.get_event_loop()
         pending = [telopt.name_commands(opt)
                 for (opt, val) in self.stream.pending_option.items()
                 if val]
+        if self.remote_noecho:
+            if self.stream.mode == 'remote' and (
+                    self.stream.local_option.enabled(telopt.ECHO) and not
+                    self.stream.pending_option.enabled(
+                        telopt.WONT + telopt.ECHO)):
+                self.log.debug('lediting is remote; request WONT ECHO')
+                self.stream.iac(telopt.WONT, telopt.ECHO)
         if self.duration < self.CONNECT_MINWAIT or (
                 pending and self.duration < self.CONNECT_MAXWAIT):
             loop.call_later(self.CONNECT_DEFERED, self._negotiate, call_after)
