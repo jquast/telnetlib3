@@ -279,6 +279,7 @@ class TelnetStreamReader:
                     self.handle_subnegotiation(self._sb_buffer)
                 finally:
                     self._sb_buffer.clear()
+                    self.iac_received = False
             self.iac_received = False
 
         elif self.cmd_received == SB:
