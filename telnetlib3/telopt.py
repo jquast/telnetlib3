@@ -291,30 +291,33 @@ class TelnetStreamReader:
             cmd, opt = self.cmd_received, byte
             self.log.debug('recv IAC {} {}'.format(
                 name_command(cmd), name_command(opt)))
-            if cmd == DO:
-                if self.handle_do(opt):
-                    self.local_option[opt] = True
+            try:
+                if cmd == DO:
+                    if self.handle_do(opt):
+                        self.local_option[opt] = True
+                        if self.pending_option.enabled(WILL + opt):
+                            self.pending_option[WILL + opt] = False
+                elif cmd == DONT:
+                    self.handle_dont(opt)
                     if self.pending_option.enabled(WILL + opt):
                         self.pending_option[WILL + opt] = False
-            elif cmd == DONT:
-                self.handle_dont(opt)
-                if self.pending_option.enabled(WILL + opt):
-                    self.pending_option[WILL + opt] = False
-                self.local_option[opt] = False
-            elif cmd == WILL:
-                if not self.pending_option.enabled(DO + opt) and opt != TM:
-                    self.log.debug('WILL {} unsolicited'.format(
-                        name_command(opt)))
-                self.handle_will(opt)
-                if self.pending_option.enabled(DO + opt):
+                    self.local_option[opt] = False
+                elif cmd == WILL:
+                    if not self.pending_option.enabled(DO + opt) and opt != TM:
+                        self.log.debug('WILL {} unsolicited'.format(
+                            name_command(opt)))
+                    self.handle_will(opt)
+                    if self.pending_option.enabled(DO + opt):
+                        self.pending_option[DO + opt] = False
+                    if self.pending_option.enabled(DONT + opt):
+                        self.pending_option[DONT + opt] = False
+                elif cmd == WONT:
+                    self.handle_wont(opt)
                     self.pending_option[DO + opt] = False
-                if self.pending_option.enabled(DONT + opt):
-                    self.pending_option[DONT + opt] = False
-            elif cmd == WONT:
-                self.handle_wont(opt)
-                self.pending_option[DO + opt] = False
-            self.iac_received = False
-            self.cmd_received = (opt, byte)
+            finally:
+                # toggle iac_received on ValueErrors/AssertionErrors raised
+                self.iac_received = False
+                self.cmd_received = (opt, byte)
 
         elif self.pending_option.enabled(DO + TM):
             # IAC DO TM was previously sent; discard all input until
