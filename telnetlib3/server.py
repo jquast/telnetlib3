@@ -99,8 +99,9 @@ class TelnetServer(tulip.protocols.Protocol):
         #   The default initially sets 'kludge' mode, which does not warrant
         #   any reply and is always compatible with any client NVT.
         #
-        #   Notably, a request to negotiate TTYPE is made. If sucessful,
-        #   the callback ``request_advanced_opts()`` is fired.
+        #   Notably, a request to send binary and to negotiate TTYPE is made.
+        #   If ttype is sucessful, the callback ``request_advanced_opts()``
+        #   is fired.
         #
         #   The reason all capabilities are not immediately announced is that
         #   the remote end may be too dumb to advance any further, and these
@@ -110,6 +111,7 @@ class TelnetServer(tulip.protocols.Protocol):
 
         self.stream.iac(telopt.WILL, telopt.SGA)
         self.stream.iac(telopt.WILL, telopt.ECHO)
+        self.stream.iac(telopt.WILL, telopt.BINARY)
         self.stream.iac(telopt.DO, telopt.TTYPE)
 
     def first_prompt(self, call_after=None):
@@ -137,7 +139,11 @@ class TelnetServer(tulip.protocols.Protocol):
         self._restart_timeout()
         for byte in (bytes([value]) for value in data):
 
-            self.stream.feed_byte(byte)
+            try:
+                self.stream.feed_byte(byte)
+            except (ValueError, AssertionError) as err:
+                self.log.warn(err)
+                continue
 
             if self.stream.is_oob:
                 continue
@@ -309,8 +315,13 @@ class TelnetServer(tulip.protocols.Protocol):
         self.stream.iac(telopt.DO, telopt.NAWS)
         self.stream.iac(telopt.DO, telopt.CHARSET)
         self.stream.iac(telopt.DO, telopt.TTYPE)
-        self.stream.iac(telopt.DO, telopt.BINARY)
-        self.stream.iac(telopt.WILL, telopt.BINARY)
+        # FIFO guarentees WILL, BINARY has been answered at this point; only
+        # request (DO, BINARY) if it was answered affirmative --
+        #   tintin++, for instance, cannot answer "DONT BINARY" after already
+        #   sending "WONT BINARY". It wrongly evaluates all telnet options as
+        #   a single-direction, client-host viewpoint (answers: WILL ECHO! lol)
+        if self.stream.local_option.enabled(telopt.BINARY):
+            self.stream.iac(telopt.DO, telopt.BINARY)
         if ttype and self.stream.remote_option.enabled(telopt.TTYPE):
             # we've already accepted their ttype, but see what else they have!
             self.stream.request_ttype()
