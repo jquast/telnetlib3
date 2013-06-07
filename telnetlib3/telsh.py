@@ -6,27 +6,52 @@ import shlex
 import re
 import sys
 
-import telopt
+from telnetlib3 import slc
+from telnetlib3 import telopt
+from telnetlib3 import wcwidth
 
-__all__ = ['TelnetShellStream', 'Telsh']
+__all__ = ('TelnetShellStream', 'Telsh')
 
-CR, LF, NUL = '\r\n\x00'
-#_MAX_LITVAL = 255
+class EDIT():
+    """ Enums for value of ``cmd`` in ``Telsh.editing_received()``.
+    """
+    (RP, EC, EW, EL, IP, AO, AYT, BRK, EOF, EOR, XON, XOFF, ABORT, SUSP, LNEXT
+            ) = range(15)
+
+SLC_EDIT_TRANSTABLE = dict((
+        (slc.SLC_RP, EDIT.RP),
+        (slc.SLC_EC, EDIT.EC),
+        (slc.SLC_EW, EDIT.EW),
+        (slc.SLC_EL, EDIT.EL),
+        (slc.SLC_IP, EDIT.IP),
+        (slc.SLC_AO, EDIT.AO),
+        (slc.SLC_AYT, EDIT.AYT),
+        (slc.SLC_BRK, EDIT.BRK),
+        (slc.SLC_EOF, EDIT.EOF),
+        (slc.SLC_EOR, EDIT.EOR),
+        (slc.SLC_XON, EDIT.XON),
+        (slc.SLC_XOFF, EDIT.XOFF),
+        (slc.SLC_SUSP, EDIT.SUSP),
+        (slc.SLC_ABORT, EDIT.ABORT),
+        (slc.SLC_LNEXT, EDIT.LNEXT),
+        ))  # not mapped: SLC_SYNCH
 
 class TelnetShellStream():
-    def __init__(self, server):
+    def __init__(self, server, log=logging):
         self.server = server
+        self.log = log
         #: codecs.IncrementalDecoder for current CHARSET
         self._decoder = None
         #: default encoding 'errors' argument
         self.encoding_errors = 'replace'
 
     def _display_charset_err(self, err):
-        errmsg = bytes(err.args[0].encode(self.server.encoding(outgoing=True)))
-        charset = bytes(self.server.env['CHARSET'].encode(
-            self.server.encoding(outgoing=True)))
-        self.server.stream.write(
-                b''.join((b'\r\n', errmsg, ', CHARSET is ', charset, '.\r\n')))
+        """ Carefully notify client of encoding error. """
+        encoding = self.server.encoding(outgoing=True)
+        err_bytes = bytes(err.args[0].encode(encoding))
+        charset = bytes(self.server.env['CHARSET'].encode(encoding))
+        msg = b''.join((b'\r\n', err_bytes, b', CHARSET is ', charset, b'.'))
+        self.server.stream.write(msg)
 
     def send_ga(self):
         self.server.stream.send_ga()
@@ -41,17 +66,26 @@ class TelnetShellStream():
         except LookupError as err:
             assert (self.server.encoding(outgoing=True)
                     != self.server._default_encoding)
-            self.server.env_update({'CHARSET': self.server._default_encoding})
+            self.server.env_update(
+                    {'CHARSET': self.server._default_encoding})
             self.log.debug(err)
             self._display_charset_err(err)
             return self.write(string, errors)
+
+    @property
+    def will_echo(self):
+        """ Returns wether the shell should display keyboard input to the
+            client: True if (DO, ECHO) received by client or (WILL, ECHO)
+            sent by server.
+        """
+        return self.server.stream.local_option.enabled(telopt.ECHO)
 
     def echo(self, string, errors=None):
         """ Write string to output only if "remote echo" enabled, for
             Telnet Servers that have sent (WILL, ECHO) or have
             received (DO, ECHO). Otherwise, nothing is done.
         """
-        if self.server.stream.local_option.enabled(telopt.ECHO):
+        if self.will_echo:
             self.write(string, errors)
 
     def decode(self, input, final=False):
@@ -64,7 +98,7 @@ class TelnetShellStream():
                         errors=self.encoding_errors)
                 self._decoder._encoding = enc
             except LookupError as err:
-                assert (enc != self._default_encoding), err
+                assert (enc != self.server._default_encoding), err
                 self.log.info(err)
                 # notify server of change to _default_encoding, try again,
                 self.server.env_update(
@@ -72,9 +106,7 @@ class TelnetShellStream():
                 self._decoder = codecs.getincrementaldecoder(enc)(
                         errors=self.encoding_errors)
                 self._decoder._encoding = enc
-                # notify client of change to CHARSET,
                 self._display_charset_err(err)
-                # re-display shell prompt on input decode error
                 self.shell.display_prompt()
         return self._decoder.decode(input, final)
 
@@ -197,7 +229,7 @@ class Telsh():
         #: write video attributes to output stream
         self._does_styling = False
 
-        #: toggled on SLC_LNEXT (^v) for keycode input
+        #: toggled on EDIT.LNEXT (^v) for keycode input
         self._literal = False
 
         #: limit number of digits using counter _lit_recv
@@ -209,14 +241,16 @@ class Telsh():
         #: Return value of last command, or None if none yet processed.
         self._retval = None
 
-        #: Whether to call ``send_ga`` on server stream on WONT SGA (legacy)
+        #: Whether to call ``send_ga`` on server stream on WONT SGA
         self._send_ga = True
+
+        self._dim = '\x1b[31m'
+        self._normal = '\x1b[0m'
+        self._standout = '\x1b[31;1m'
 
     def set_term(self, term):
         """ Set termcap TERM value
-        """ #  currently only _does_styling is flipped True,
-            #  sometime in the future a multiprocessing.Process() should
-            #  drive the 'blessings' module
+        """
         self.term = term
         self._does_styling = (
                 term.startswith('vt') or
@@ -228,7 +262,8 @@ class Telsh():
                 term == 'linux' or term == 'screen')
 
     def display_prompt(self, redraw=False, input=None):
-        """ Display or redraw prompt and current command line input.
+        """ Display new, or when ``redraw`` set True, refresh current prompt,
+            and current command line, if any.
         """
         input = self.lastline
         input = ''.join((self.standout(name_unicode(char)) if
@@ -246,36 +281,39 @@ class Telsh():
     def display_status(self):
         """ Output the status of telnet session.
         """
-        self.stream.write('\r\nConnected {:0.3f}s ago from {}.'
-            '\r\nLinemode is {}.'
-            '\r\nFlow control is {}.'
-            '\r\nEncoding is {}.'
-            '\r\n{} rows; {} cols.'.format(
-                self.server.duration,
-                (self.server.client_fqdn.result()
-                    if self.server.client_fqdn.done()
-                    else self.server.client_ip),
-                self.server.stream.mode,
-                'xon-any' if self.server.stream.xon_any else 'xon',
-                self.stream,
-                self.server.env['COLUMNS'],
-                self.server.env['LINES'],))
+        self.stream.write(
+                '\r\nConnected {:0.3f}s ago from {}.'
+                '\r\nLinemode is {}.'
+                '\r\nFlow control is {}.'
+                '\r\nEncoding is {}.'
+                '\r\n{} rows; {} cols.'.format(
+                    self.server.duration,
+                    (self.server.client_fqdn.result()
+                        if self.server.client_fqdn.done()
+                        else self.server.client_ip),
+                    self.server.stream.mode,
+                    'xon-any' if self.server.stream.xon_any else 'xon',
+                    self.stream,
+                    self.server.env['COLUMNS'],
+                    self.server.env['LINES'],
+                    ))
 
     def bell(self):
-        """ writes ASCII BEL unless ``send_bell`` is toggled False.
+        """ write ASCII bell (\a) unless ``send_bell`` is set False.
         """
         if self.send_bell:
             self.stream.write('\a')
 
     @property
     def retval(self):
-        """ Returns exit status of last command processed by ``line_received``
+        """ Returns exit status of last command processed by ``line_received()``
         """
         return self._retval if self._retval is not None else ''
 
     @property
     def is_multiline(self):
-        """ Returns True if at continuation of multi-line prompt.
+        """ Returns True if current prompt is a continuation
+            of a multi-line prompt.
         """
         return self._multiline
 
@@ -285,28 +323,37 @@ class Telsh():
         """
         return u''.join(self._lastline)
 
-    def write(self, ucs):
-        """ Write unicode string using TelnetServer transport
+    def erase(self, string, char=chr(127)):
+        """ Returns sequence for erasing ``string`` preceeding cursor given
+            the erase character ``char`` used (chr(127) or chr(8)).
         """
-        self.stream.write(ucs)
+        assert char in (chr(127), chr(8)), chr
+        string_disp = ''.join((char
+                if self.stream.can_write(char) and char.isprintable()
+                else name_unicode(char) for char in string))
+        vtlen = wcwidth.wcswidth_cjk(string_disp)
+        assert vtlen >= 0, string
+        if self.stream.will_echo:
+            return ('\b' * vtlen) + '\x1b[K'
+        # BSD has strange behavior for line editing with local echo;
+        if char == chr(127):
+            # '^?' actually advances the cursor right one cell !
+            return '\b' + ('\b' * vtlen) + '\x1b[K'
+        else:
+            # whereas '^h' moves the cursor left one (displayable) cell !
+            return '\b' * (vtlen - 1) + '\x1b[K'
 
     def dim(self, string):
-        """ XXX Return ``string`` decurated using 'dim'
+        """ Returns ``string`` decorated using preferred terminal sequence.
         """
         return (string if not self._does_styling
-                else '\x1b[31m' + string + '\x1b[0m')
-
-    def bold(self, string):
-        """ XXX Return ``string`` decorated using 'bold'
-        """
-        return (string if not self._does_styling
-                else '\x1b[0;1m' + string + '\x1b[0m')
+                else self._dim + string + self._normal)
 
     def standout(self, string):
-        """ XXX Return ``string`` decorated using 'standout'
+        """ Returns ``string`` decorated using preferred terminal sequence.
         """
         return (string if not self._does_styling
-                else '\x1b[31;1m' + string + '\x1b[0m')
+                else self._standout + string + self._normal)
 
     def autocomplete(self, input, table=None):
         """ .. method:: autocomplete(input : string, table=None) -> bool
@@ -334,68 +381,78 @@ class Telsh():
         self._lastline = collections.deque(buf)
         return match
 
-    def editing_received(self, char, slc_byte=None):
-        import slc  # todo: abstract away slc
-        self.log.debug('editing_received: {!r}{}.'.format(
-            char, ', {}'.format(
-                (slc.name_slc_command(slc_byte),)
-                if slc_byte is not None else '')))
+    def editing_received(self, char, cmd):
+        """ Receive unicode character that triggers an edit command of the constants
+            available in class EDIT.
+        """
+        def _name(cmd):
+            for key in dir(EDIT):
+                if key.isupper() and getattr(EDIT, key) == cmd:
+                    return key
+        self.log.debug('editing_received: {!r}({}).'.format(
+            name_unicode(char), _name(cmd)))
+        # a printable ASCII representation of unprintables,
         char_disp = name_unicode(char)
         if self.is_literal is not False:
             # continue literal input for matching editing characters
             self.literal_received(char)
-        elif slc_byte == slc.SLC_LNEXT:
+        elif cmd == EDIT.LNEXT:
             # begin literal input (^v)
             self.literal_received(char)
-        elif slc_byte == slc.SLC_RP:
+        elif cmd == EDIT.RP:
             # repaint (^r)
             self.display_prompt(redraw=True)
-        elif slc_byte == slc.SLC_EC:
+        elif cmd == EDIT.EC:
+            pass
             # erase character chr(127)
             if 0 == len(self._lastline):
                 self.bell()
+                self.display_prompt(redraw=True)
             else:
-                self._lastline.pop()
-            self.display_prompt(redraw=True)
-        elif slc_byte == slc.SLC_EW:  # erase word (^w), rubout .(\w+)
+                x = self.erase(self._lastline.pop(), char)
+                print(repr((x, char)))
+                self.stream.write(x)
+        elif cmd == EDIT.EW:
+            # erase word (^w), rubout .(\w+)
             if not self._lastline:
                 self.bell()
             else:
+                ucs = ''
                 while self._lastline and self._lastline[-1].isspace():
-                    self._lastline.pop()
+                    ucs += self._lastline.pop()
                 while self._lastline and not self._lastline[-1].isspace():
-                    self._lastline.pop()
+                    ucs += self._lastline.pop()
                 self.display_prompt(redraw=True)
-        elif slc_byte == slc.SLC_EL:  # erase line (^L)
+        elif cmd == EDIT.EL:
+            # erase line (^L)
             self._lastline.clear()
             self.display_prompt(redraw=True)
-        elif slc_byte == slc.SLC_EOF:  # end of file (^D)
+        elif cmd == EDIT.EOF:
+            # end of file (^D)
             if not self._lastline:
                 self.stream.write(char_disp)
-                self.server.logout(telopt.DO)
+                self.server.logout()
             else:
                 self.bell()
-        elif slc_byte in (slc.SLC_IP, slc.SLC_ABORT):
+        elif cmd in (EDIT.IP, EDIT.ABORT):
             # interrupt process (^C), abort process (^\)
             self._lastline.clear()
             self.stream.write(char_disp)
             self.display_prompt()
-        elif slc_byte in (slc.SLC_XON, slc.SLC_XOFF,
-                slc.SLC_AYT, slc.SLC_SUSP):
-            # handled by callbacks or not really an editing cmd
-            pass
-        elif slc_byte in (slc.SLC_AO, slc.SLC_SYNCH, slc.SLC_EOR):
-            # all others (unhandled)
-            self.log.debug('recv {}'.format(slc.name_slc_command(slc)))
+        elif cmd in (EDIT.XON, EDIT.XOFF, EDIT.AYT, EDIT.SUSP,
+                EDIT.AO, EDIT.SYNCH, EDIT.EOR):
+            # not handled or implemented
+            self.log.debug('{} unhandled.'.format(EDIT.name(cmd)))
             self.stream.write(char_disp)
             self.bell()
             self.display_prompt()
+            pass
         else:
-            raise NotImplementedError(char, slc)
+            raise NotImplementedError(char, cmd)
 
     @property
     def is_literal(self):
-        """ Returns True if the SLC_LNEXT character (^v) was recieved, and
+        """ Returns True if the EDIT.LNEXT character (^v) was recieved, and
             any subsequent character should be received as-is; this is for
             inserting raw sequences into a command line that may otherwise
             interpret them not printable, or a special line editing character.
@@ -407,17 +464,18 @@ class Telsh():
         if ucs:
             self.character_received(ucs)
 
-    def feed_slc(self, byte, slc):
-        ucs = self.stream.decode(byte, final=False)
-        self.editing_received(ucs, slc)
+    def feed_slc(self, byte, func):
+        ucs = self.stream.decode(byte, final=True)
+        self.editing_received(ucs, SLC_EDIT_TRANSTABLE[func])
 
     def literal_received(self, ucs):
-        """ Receives literal character(s) SLC_LNEXT (^v) and all subsequent
+        """ Receives literal character(s) EDIT.LNEXT (^v) and all subsequent
             characters until the boolean toggle ``_literal`` is set False.
         """
+        CR, LF, NUL = '\r\n\x00'
         self.log.debug('literal_received: {!r}'.format(ucs))
         if self.is_literal is False:
-            self.log.debug('begin marker (expect ^V) {!r}'.format(ucs))
+            self.log.debug('begin marker {!r}'.format(name_unicode(ucs)))
             self.stream.write(self.standout('^\b'))
             self._literal = -1
             return
@@ -442,75 +500,93 @@ class Telsh():
             if (self._literal >= self._max_litval or
                     len('{}'.format(self._literal))
                     == len('{}'.format(self._max_litval))):
-                # send & trim value to _MAX_LITVAL; this could be much higher
-                # for uniocode points beyond iso8859-1 ..
                 ucs = chr(min(self._literal, self._max_litval))
                 self.character_received(ucs, literal=True)
                 self._literal = False
             return
-        self.character_received(ucs, literal=True)
+        self._lastline.append(ucs)
+        if self.stream.will_echo:
+            self.stream.echo(self.standout(name_unicode(ucs)))
+        else:
+            self.display_prompt(redraw=True)
         self._literal = False
 
-
     def character_received(self, char, literal=False):
-        """ XXX Callback receives a single Unicode character as it is received.
-
-            The default takes a 'most-compatible' implementation, providing
-            'kludge' mode with simulated remote editing for inadvanced clients.
+        """ Receive a single (non-editing) Unicode character.
         """
-        char_disp = char
-        self.log.debug('character_received: {!r}'.format(char))
-        if not self.stream.can_write(char) or not char.isprintable():
-            # ASCII representation of unprtintables for display editing
-            char_disp = self.standout(name_unicode(char))
+        CR, LF, NUL = '\r\n\x00'
+        self.log.debug('character_received: {!r} literal={}'.format(
+                    char, literal))
+
+        # a printable ASCII representation of unprintables,
+        char_disp = (char
+                if self.stream.can_write(char) and char.isprintable()
+                else self.standout(name_unicode(char)))
+
         if literal:
-            # Within a ^v loop of ``literal_received()``, insert raw
             self._lastline.append(char)
-            self.stream.echo(char_disp)
-        elif self.is_literal:
+            self.display_prompt(redraw=True)
+
+        elif self.is_literal and not literal:
             self.literal_received(char)
-        elif (self._last_char == CR and char in (LF, NUL) and self.strip_eol):
-            # ``strip_eol`` is True, pass on '\n' or '\x00' following CR,
-            pass
+
         elif self._last_char == CR and char in (LF, NUL):
+            # ``strip_eol`` is True, pass on '\n' or '\x00' following CR,
+            if self.strip_eol:
+                pass
             # ``strip_eol`` is False, preserve '\n' or '\x00'
-            self._lastline.append(char)
+            else:
+                self._lastline.append(char)
+
+        # callback ``line_received()`` always on CR
         elif char == CR:
-            # callback ``line_received()`` always on CR
             if not self.strip_eol:
                 self.lastline._append(CR)
             self.line_received(self.lastline)
+
+        # callback ``line_received()`` on single LF without CR
         elif char == LF:
-            # callback ``line_received()`` on single LF without CR
             if not self.strip_eol:
                 self.lastline._append(LF)
             self.line_received(self.lastline)
-        elif char == '\b':
-            # callback ``editing_received`` with simulated SLC_EC (backspace).
-            import slc  # todo: abstract away slc
-            self.editing_received(char, slc.SLC_EC)
+
+        # callback ``editing_received(char, EDIT.EC)`` for backspace/delete
+        elif char in ('\b', chr(127)) and not literal:
+            self.editing_received(char, EDIT.EC)
+
+        elif char == '\x0c': # ^L, refresh
+            self.display_prompt(redraw=True)
+
+        # perform tab completion for kludge or remote line editing.
         elif (char == self.autocomplete_char
                 and self.autocomplete_char
                 and self.server.stream.mode != 'local'):
             try:
                 if not self.autocomplete(self.lastline):
                     self.bell()
+            # shlex parsing error
             except ValueError as err:
-                self.log.debug(err)  # shlex parsing error
+                self.log.debug(err)
                 self.bell()
             except Exception:
                 self.display_exception(*sys.exc_info(), level=logging.INFO)
             finally:
                 self.display_prompt(redraw=True)
-        elif not char.isprintable() and char not in (CR, LF, NUL,):
+
+        elif (not char.isprintable() and char not in (CR, LF, NUL,)
+                and self.server.stream.mode != 'local'):
             self.bell()
-        elif char.isprintable() and char not in ('\r', '\n'):
+            self.display_prompt(redraw=True)
+
+        elif char.isprintable(): # and char not in ('\r', '\n'):
             self._lastline.append(char)
             self.stream.echo(char_disp)
+        else:
+            self.bell()
         self._last_char = char
 
     def line_received(self, input, eor=False):
-        """ XXX Callback for each telnet input line received.
+        """ Callback for each line received, processing command(s) at EOL.
         """
         self.log.debug('line_received: {!r}'.format(input))
         if self.strip_eol:
@@ -742,7 +818,6 @@ class Telsh():
         return 0
 
     def cmdset_toggle(self, *args):
-        import telopt
         lopt = self.server.stream.local_option
         tbl_opt = dict([
             ('echo', lopt.enabled(telopt.ECHO)),
@@ -908,8 +983,7 @@ def _autocomplete(table, cycle, buf, cmd, *args):
         has_args = table[auto_cmds[0]] is not None
         buf = ''.join((
             postfix(buf),
-            postfix(auto_cmds[0], using=' '
-                if has_args else ''),))
+            postfix(auto_cmds[0], using=(' ' if has_args else '')),))
         return (buf, True)
     # scan for partial/complete matches, recurse if applicable
     for ptr, auto_cmd in enumerate(auto_cmds):
@@ -928,7 +1002,7 @@ def _autocomplete(table, cycle, buf, cmd, *args):
                     return (buf, True)
                 # cycle next match
                 ptr = 0 if ptr + 1 == len(auto_cmds) - 1 else ptr + 1
-                buf = ''.join((postfix(buf), auto_cmds[ptr],))
+                buf = ''.join((postfix(buf), auto_cmds[ptr]))
                 return (buf, True)
             else:
                 # match at this step, have/will args, recruse;
@@ -940,22 +1014,14 @@ def _autocomplete(table, cycle, buf, cmd, *args):
             # partial match, error if arguments not valid,
             args_ok = bool(not args or args and has_args)
             buf = ''.join((postfix(buf), auto_cmd))
-            if args:
-                buf = ''.join((postfix(buf),
-                    escape_quote(args)))
+            if args or has_args:
+                buf = ''.join((postfix(buf), escape_quote(args)))
+            print(repr((buf, has_args,)))
             return (buf, args_ok)
     # no matches
     buf = '{}{}{}'.format(postfix(buf),
             cmd, escape_quote(args))
     return (buf, False)
-
-def name_unicode(ucs):
-    """ Return 7-bit ascii printable of any string. """
-    if ord(ucs) < ord(' ') or ord(ucs) == 127:
-        ucs = r'^{}'.format(chr(ord(ucs) ^ ord('@')))
-    elif not ucs.isprintable():
-        ucs = r'\x{:02x}'.format(ord(ucs))
-    return ucs
 
 def escape_quote(args, quote_char="'", join_char=' '):
     """ .. function::quote(args : list, quote_char="'") -> string
@@ -972,4 +1038,10 @@ def escape_quote(args, quote_char="'", join_char=' '):
                 if join_char in arg else arg)
     return join_char.join([quoted(arg) for arg in args] if args else [])
 
-
+def name_unicode(ucs):
+    """ Return 7-bit ascii printable of any string. """
+    if ord(ucs) < ord(' ') or ord(ucs) == 127:
+        ucs = r'^{}'.format(chr(ord(ucs) ^ ord('@')))
+    elif not ucs.isprintable():
+        ucs = r'\x{:02x}'.format(ord(ucs))
+    return ucs

@@ -1,13 +1,14 @@
 import collections
 import logging
+
 from telnetlib import LINEMODE, NAWS, NEW_ENVIRON, BINARY, SGA, ECHO, STATUS
 from telnetlib import TTYPE, TSPEED, LFLOW, XDISPLOC, IAC, DONT, DO, WONT
 from telnetlib import WILL, SE, NOP, TM, DM, BRK, IP, AO, AYT, EC, EL, EOR
 from telnetlib import GA, SB, LOGOUT, EXOPL, CHARSET, SNDLOC, theNULL
 
-import slc
+from telnetlib3 import slc
 
-__all__ = ['TelnetStreamReader', 'escape_iac', 'name_command', 'name_commands']
+__all__ = ('TelnetStreamReader', 'escape_iac', 'name_command', 'name_commands')
 
 (EOF, SUSP, ABORT, EOR_CMD) = (
         bytes([const]) for const in range(236, 240))

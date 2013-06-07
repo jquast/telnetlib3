@@ -6,12 +6,11 @@ import logging
 import socket
 import time
 
-import tulip
-import telsh
-import telopt
-import slc
+from telnetlib3 import tulip
+from telnetlib3 import telsh, telopt, slc
 
-__all__ = ['TelnetServer']
+
+__all__ = ('TelnetServer',)
 
 class TelnetServer(tulip.protocols.Protocol):
     """
@@ -42,7 +41,7 @@ class TelnetServer(tulip.protocols.Protocol):
             'TIMEOUT': '5',
             }
 
-    readonly_env = ['USER', 'HOSTNAME', 'UID']
+    readonly_env = ['USER', 'HOSTNAME', 'UID', 'REMOTEIP', 'REMOTEHOST']
     def __init__(self, log=logging, default_encoding='utf8'):
         self.log = log
         #: default option is ECHO off for only those clients capable of
@@ -149,7 +148,7 @@ class TelnetServer(tulip.protocols.Protocol):
                 continue
 
             if self.stream.slc_received:
-                self.shell.feed_slc(byte, slc=self.stream.slc_received)
+                self.shell.feed_slc(byte, func=self.stream.slc_received)
                 continue
 
             self.shell.feed_byte(byte)

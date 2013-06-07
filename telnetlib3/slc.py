@@ -1,3 +1,13 @@
+"""Special Line Character, LINEMODE (rfc eventloop for Unix with signal handling."""
+__all__ = ('SLC', 'SLC_AYT', 'NSLC', 'BSD_SLC_TAB', 'generate_slctab',
+    'Linemode', 'LMODE_MODE_REMOTE', 'SLC_SYNCH', 'SLC_IP', 'SLC_AYT',
+    'SLC_ABORT', 'SLC_SUSP', 'SLC_EL', 'SLC_RP', 'SLC_XON', 'snoop',
+    'name_slc_command', 'generate_forwardmask', 'Forwardmask',
+    'LMODE_FORWARDMASK', 'LMODE_MODE', 'NSLC', 'LMODE_MODE', 'LMODE_SLC',
+    'SLC', 'SLC_nosupport', 'SLC_DEFAULT', 'SLC_VARIABLE', 'SLC_NOSUPPORT',
+    'SLC_ACK', 'SLC_CANTCHANGE', 'SLC_LNEXT', 'SLC_EC', 'SLC_EW', 'SLC_EOF',
+    'SLC_AO',)
+
 theNULL = bytes([0])
 (SLC_NOSUPPORT, SLC_CANTCHANGE, SLC_VARIABLE, SLC_DEFAULT) = (
         bytes([const]) for const in range(4))
@@ -313,3 +323,4 @@ def name_unicode(ucs):
     elif ord(ucs) > 127 or not ucs.isprintable():
         ucs = r'\x{:02x}'.format(ord(ucs))
     return ucs
+
