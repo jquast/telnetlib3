@@ -31,7 +31,7 @@ The Telnet protocol is over 40 years old and still in use today. Telnet predates
 
 Naturally, Telnet as a code project inevitably must handle a wide variety of connecting clients and hosts, due to limitations of their networking Transports, Terminals, their drivers, and host operating systems. 
 
-This implementation aims to implement only those capabilities "found in the wold", and include, or chose not to include, mechanisms that are suitable only for legacy or vendor-implemented deviations. It even makes one of its own, wiring the 'encoding' to the value of replied by the CHARSET (rfc 2066).
+This implementation aims to implement only those capabilities "found in the wild", and include, or chose not to include, mechanisms that are suitable only for legacy or vendor-implemented deviations. It even makes one of its own, wiring the 'encoding' to the value of replied by the CHARSET (rfc 2066).
 
 UTF-8
 =====
@@ -68,12 +68,13 @@ remote line editing for dumb clients.
 
 Consider that Kludge mode provies no way to determine which bytes, received at any indeterminate time, of any indeterminate length, or none at all, are received as the result of which input characters sent.
 
-Accordingly, with Supress Go-Ahead (SGA) enabled, there can be any indeterminable state of whether the remote program is hung, receiving, has replied but not yet received, or has received only partially and not completely the program's output.
+Accordingly, with Supress Go-Ahead (SGA) enabled, there can be any indeterminable state of whether the remote program is hung, receiving, has replied but not yet received, or has received only partially and not completely the program's output. This has the effect of a poor user experience, as a user cannot know wether the input was legal, ignored, or not yet replied to, causing some frustration over high latency links. However, it is the most capable -- it is the *only* mode supported by many clients, such as SyncTerm or Windows 98 telnet.exe.
+
 
 Go-Ahead
 ========
 
-The IAC-GA signal would seemingly be of little use over today's bi-directional TCP protocol and virtual terminal emulators -- its original purpose was to coordinate transmission on half-duplex protocols and terminals. Only a few 1970-era hosts (AMES-67, UCLA-CON) require the GA signal. For this reason, this server takes the modern recommendation of supressing the GA signal *by default*. Those clients wishing to make use of the GA signal must send IAC-DONT-GA.
+The IAC-GA signal would seemingly be of little use over today's bi-directional TCP protocol and virtual terminal emulators -- its original purpose was to coordinate transmission on half-duplex protocols and terminals. Only a few 1970-era hosts (AMES-67, UCLA-CON) require the GA signal. For this reason, this server takes the modern recommendation of supressing the GA signal *by default*. Those clients wishing to make use of the GA signal must send IAC-DONT-SGA.
 
 There are now many modern examples of using GA. The competition nethack server alt.nethack.org indicates to ai bots that it has received all screen updates and can now send input, for instance.
 
