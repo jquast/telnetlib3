@@ -162,7 +162,6 @@ class TelnetServer(tulip.protocols.Protocol):
             until negotiation is considered final, firing ``after_negotiation``
             callback.
         """
-        print('x')
         def _build_status(stream):
             """ Build simple dict of negotiation status """
             local = stream.local_option
