@@ -15,7 +15,16 @@
 import argparse
 
 import telnetlib3
-from telnetlib3 import tulip, TelnetServer, Telsh
+from telnetlib3 import tulip, TelnetServer, TelnetStream, Telsh
+
+class HoneyStream(TelnetStream):
+    default_env_request = (
+            "USER HOSTNAME UID EUID TERM COLUMNS LINES DISPLAY SYSTEMTYPE "
+            "LOGNAME VISUAL EDITOR BASH_VERSION KSH_VERSION PWD OLDPWD "
+            "SSH_CONNECTION SSH_CLIENT SSH_TTY SSH_AUTH_SOCK SHELL "
+            "PS1 PS2 _ LANG SHELLOPTS BASHOPTS SFUTLNTVER SFUTLNTMODE "
+            "MACHTYPE HOSTTYPE LC_ALL HISTFILE TMPDIR SECONDS "
+            ).split()
 
 class HoneypotShell(Telsh):
     @property
@@ -59,11 +68,22 @@ class TelnetHoneypotServer(TelnetServer):
 
     def request_advanced_opts(self, ttype):
         from telnetlib3 import telopt
-        for opt in range(255):
-            if bytes([opt]) not in (telopt.LOGOUT, telopt.SB):
+        for opt in range(240):
+            if bytes([opt]) not in (telopt.TM, telopt.LINEMODE):
+                self.stream.iac(telopt.DONT, bytes([opt]))
+
+        for opt in range(240):
+            if bytes([opt]) not in (telopt.LOGOUT):
                 self.stream.iac(telopt.DO, bytes([opt]))
-            if bytes([opt]) not in (telopt.TM, telopt.SB, telopt.LINEMODE):
+
+        for opt in range(240):
+            if bytes([opt]) not in (telopt.TM, telopt.LINEMODE):
+                self.stream.iac(telopt.WONT, bytes([opt]))
+
+        for opt in range(240):
+            if bytes([opt]) not in (telopt.LOGOUT, telopt.TM, telopt.LINEMODE):
                 self.stream.iac(telopt.WILL, bytes([opt]))
+
         telnetlib3.server.TelnetServer.request_advanced_opts(self, ttype)
 
     def line_received(self, input, *args):
@@ -105,7 +125,8 @@ def main():
     log.setLevel(getattr(logging, log_const))
 
     loop = tulip.get_event_loop()
-    func = loop.start_serving(TelnetHoneypotServer, args.host, args.port)
+    func = loop.start_serving(lambda: TelnetHoneypotServer(
+        stream=HoneyStream, encoding='ascii'), args.host, args.port)
 
     socks = loop.run_until_complete(func)
     logging.info('Listening on %s', socks[0].getsockname())
