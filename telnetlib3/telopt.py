@@ -16,7 +16,7 @@ from telnetlib import NAOVTS, NAOVTD, NAOLFD
 
 from telnetlib3 import slc
 
-__all__ = ('TelnetStreamReader', 'escape_iac', 'name_command', 'name_commands')
+__all__ = ('TelnetStream', 'escape_iac', 'name_command', 'name_commands')
 
 (EOF, SUSP, ABORT, EOR_CMD) = (
         bytes([const]) for const in range(236, 240))
@@ -40,7 +40,7 @@ def escape_iac(buf):
     assert isinstance(buf, (bytes, bytearray)), buf
     return buf.replace(IAC, IAC + IAC)
 
-class TelnetStreamReader:
+class TelnetStream:
     """
        This class implements a ``feed_byte()`` method that acts as a
        Telnet Is-A-Command (IAC) interpreter.
@@ -56,7 +56,7 @@ class TelnetStreamReader:
 
     #: a list of system environment variables requested by the server after
     # a client agrees to negotiate NEW_ENVIRON.
-    _default_env_request = (
+    default_env_request = (
             "USER HOSTNAME UID TERM COLUMNS LINES DISPLAY LANG SYSTEMTYPE "
             "ACCT JOB PRINTER SFUTLNTVER SFUTLNTMODE LC_ALL VISUAL EDITOR "
             "LC_COLLATE LC_CTYPE LC_MESSAGES LC_MONETARY LC_NUMERIC LC_TIME"
@@ -242,6 +242,15 @@ class TelnetStreamReader:
             self.set_ext_callback(ext_cmd,
                     getattr(self, 'handle_{}'.format(key)))
 
+    def __str__(self):
+        """ XXX Returns string suitable for status of telnet stream.
+        """
+        return '{{{}}}'.format(
+                ', '.join(
+                    ['{!r}: {!r}'.format(key, ','.join([_opt for _opt in options]))
+                        for key, options in describe_stream(self).items()
+                        if len(options)]))
+
     def feed_byte(self, byte):
         """ .. method:: feed_byte(byte : bytes)
 
@@ -312,8 +321,7 @@ class TelnetStreamReader:
                     try:
                         self.handle_dont(opt)
                     finally:
-                        if self.pending_option.enabled(WILL + opt):
-                            self.pending_option[WILL + opt] = False
+                        self.pending_option[WILL + opt] = False
                         self.local_option[opt] = False
                 elif cmd == WILL:
                     if not self.pending_option.enabled(DO + opt) and opt != TM:
@@ -522,14 +530,14 @@ class TelnetStreamReader:
             Returns True if request is valid for telnet state, and was sent.
 
             ``env`` is list ascii uppercase keys of values requested. Default
-            value is when unset is instance attribute ``_default_env_request``.
+            value is when unset is instance attribute ``default_env_request``.
             Returns True if request is valid for telnet state, and was sent.
         """
         # May only be requested by the server end. Sends IAC SB ``kind``
         # SEND IS sub-negotiation, rfc1086, using list of ascii string
-        # values ``self._default_env_request``, which is mostly variables
+        # values ``self.default_env_request``, which is mostly variables
         # for impl.-specific extensions, such as TERM type, or USER for auth.
-        request_ENV = self._default_env_request if env is None else env
+        request_ENV = self.default_env_request if env is None else env
         assert self.is_server
         kind = NEW_ENVIRON
         if not self.remote_option.enabled(kind):
@@ -910,16 +918,20 @@ class TelnetStreamReader:
         # Close the transport on receipt of DO, Reply DONT on receipt
         # of WILL.  Nothing is done on receipt of DONT or WONT LOGOFF.
         if cmd == DO:
-            self.log.info('client requests DO LOGOUT')
+            assert self.is_server, (cmd, LOGOUT)
+            self.log.debug('client requests DO LOGOUT')
             self.transport.close()
         elif cmd == DONT:
-            self.log.info('client requests DONT LOGOUT')
+            assert self.is_server, (cmd, LOGOUT)
+            self.log.debug('client requests DONT LOGOUT')
         elif cmd == WILL:
+            assert self.is_client, (cmd, LOGOUT)
             self.log.debug('recv WILL TIMEOUT (timeout warning)')
             self.log.debug('send IAC DONT LOGOUT')
             self.iac(DONT, LOGOUT)
         elif cmd == WONT:
-            self.log.info('recv IAC WONT LOGOUT (server refuses logout')
+            assert self.is_client, (cmd, LOGOUT)
+            self.log.debug('recv IAC WONT LOGOUT (server refuses logout')
 
 # public derivable methods DO, DONT, WILL, and WONT negotiation
 #
@@ -962,6 +974,9 @@ class TelnetStreamReader:
             if self.local_option.get(opt, None) is None:
                 self.iac(WONT, opt)
             self.log.warn('Unhandled: DO %s.' % (name_command(opt),))
+            self.local_option[opt] = -1 # toggles opt.unsupported()
+            if self.pending_option.enabled(WILL + opt):
+                self.pending_option[WILL + opt] = False
         return False
 
     def handle_dont(self, opt):
@@ -975,12 +990,10 @@ class TelnetStreamReader:
         if opt == LOGOUT:
             assert self.is_server, ('cannot recv DONT LOGOUT on server end')
             self._ext_callback[LOGOUT](DONT)
-            return
         # many implementations (wrongly!) sent a WONT in reply to DONT. It
         # sounds reasonable, but it can and will cause telnet loops. (ruby?)
         # Correctly, a DONT can not be declined, so there is no need to
         # affirm in the negative.
-        self.local_option[opt] = False
 
     def handle_will(self, opt):
         """ Process byte 3 of series (IAC, DONT, opt) received by remote end.
@@ -995,7 +1008,7 @@ class TelnetStreamReader:
         BINARY and SGA are answered with DO.  STATUS, NEW_ENVIRON, XDISPLOC,
         and TTYPE is answered with sub-negotiation SEND. The env variables
         requested in response to WILL NEW_ENVIRON is specified by list
-        ``self._default_env_request``. All others are replied with DONT.
+        ``self.default_env_request``. All others are replied with DONT.
 
         The result of a supported capability is a response of (IAC, DO, opt)
         and the setting of ``self.remote_option[opt]`` of ``True``. For
@@ -1019,8 +1032,8 @@ class TelnetStreamReader:
         elif opt == TM:
             if opt == TM and not self.pending_option.enabled(DO + TM):
                 raise ValueError('cannot recv WILL TM, must first send DO TM.')
-            self.log.debug('WILL TIMING-MARK')
-            self.pending_option[DO + TM] = False
+            self.log.debug('recv WILL TIMING-MARK')
+            self.remote_option[opt] = True
         elif opt == LOGOUT:
             if opt == LOGOUT and not self.is_server:
                 raise ValueError('cannot recv WILL LOGOUT on server end')
@@ -1053,9 +1066,12 @@ class TelnetStreamReader:
             self.remote_option[opt] = True
             self.request_tspeed()
         else:
-            self.remote_option[opt] = False
             self.iac(DONT, opt)
-            raise ValueError('Unhandled: WILL %s.' % (name_command(opt),))
+            self.remote_option[opt] = -1
+            self.log.warn('Unhandled: WILL %s.' % (name_command(opt),))
+            self.local_option[opt] = -1 # toggles opt.unsupported()
+            if self.pending_option.enabled(DO + opt):
+                self.pending_option[DO + opt] = False
 
     def handle_wont(self, opt):
         """ Process byte 3 of series (IAC, WONT, opt) received by remote end.
@@ -1072,7 +1088,7 @@ class TelnetStreamReader:
             raise ValueError('WONT TM received but DO TM was not sent')
         elif opt == TM:
             self.log.debug('WONT TIMING-MARK')
-            self.pending_option[DO + TM] = False
+            self.remote_option[opt] = False
         elif opt == LOGOUT:
             assert not (self.is_server), (
                 'cannot recv WONT LOGOUT on server end')
@@ -1227,13 +1243,15 @@ class TelnetStreamReader:
             return
 
     def _handle_sb_sndloc(self, buf):
-        """ Callback handles IAC-SB-SNDLOC-<buf>-SE (rfc779).
+        """ Fire callback for IAC-SB-SNDLOC-<buf>-SE (rfc779).
         """
+        assert buf.popleft() == SNDLOC
         location_str = b''.join(buf).decode('ascii')
         self._ext_callback[SNDLOC](location_str)
 
+
     def _handle_sb_naws(self, buf):
-        """ Callback handles IAC-SB-NAWS-<buf>-SE (rfc1073).
+        """ Fire callback for IAC-SB-NAWS-<buf>-SE (rfc1073).
         """
         assert buf.popleft() == NAWS
         columns = str((256 * ord(buf[0])) + ord(buf[1]))
@@ -1242,7 +1260,7 @@ class TelnetStreamReader:
         self._ext_callback[NAWS](int(columns), int(rows))
 
     def _handle_sb_lflow(self, buf):
-        """ Callback handles IAC-SB-LFOW-<buf>
+        """ Fire callback for IAC-SB-LFOW-<buf>
         """ # XXX
         assert buf.popleft() == LFLOW
         assert self.local_option.enabled(LFLOW), (
@@ -1250,7 +1268,7 @@ class TelnetStreamReader:
         raise NotImplementedError
 
     def _send_status(self):
-        """ Callback handles IAC-SB-STATUS-SEND (rfc859).
+        """ Fire callback for IAC-SB-STATUS-SEND (rfc859).
         """
         assert (self.pending_option.enabled(WILL + STATUS)
                 or self.local_option.enabled(STATUS)), (u'Only the sender '
@@ -1260,12 +1278,16 @@ class TelnetStreamReader:
         for opt, status in self.local_option.items():
             # status is 'WILL' for local option states that are True,
             # and 'WONT' for options that are False.
+            if opt == STATUS:
+                continue
             response.extend([WILL if status else WONT, opt])
         for opt, status in self.remote_option.items():
             # status is 'DO' for remote option states that are True,
             # or for any DO option requests pending reply. status is
             # 'DONT' for any remote option states that are False,
             # or for any DONT option requests pending reply.
+            if opt == STATUS:
+                continue
             if status or DO + opt in self.pending_option:
                 response.extend([DO, opt])
             elif not status or DONT + opt in self.pending_option:
@@ -1273,7 +1295,7 @@ class TelnetStreamReader:
         response.extend([IAC, SE])
         self.log.debug('send: %s', ', '.join([
             name_command(byte) for byte in response]))
-        self.send_iac(bytes([ord(byte) for byte in response]))
+        self.send_iac(b''.join(response))
         if self.pending_option.enabled(WILL + STATUS):
             self.pending_option[WILL + STATUS] = False
 
@@ -1527,8 +1549,12 @@ class Option(dict):
         dict.__init__(self)
 
     def enabled(self, key):
-        """ Returns True of option is enabled."""
+        """ Returns True of option is enabled. """
         return bool(self.get(key, None) is True)
+
+    def unhandled(self, key):
+        """ Returns True of option is requested but unhandled by stream. """
+        return bool(self.get(key, None) == -1)
 
     def __setitem__(self, key, value):
         if value != dict.get(self, key, None):
@@ -1548,7 +1574,7 @@ _DEBUG_OPTS = dict([(value, key)
                       'DONT', 'DO', 'WONT', 'WILL', 'SE', 'NOP', 'DM', 'TM',
                       'BRK', 'IP', 'ABORT', 'AO', 'AYT', 'EC', 'EL', 'EOR',
                       'GA', 'SB', 'EOF', 'SUSP', 'ABORT', 'LOGOUT',
-                      'CHARSET', 'SNDLOC', 'MCCP_COMPRESS', 'MCCP2_COMPRESS'
+                      'CHARSET', 'SNDLOC', 'MCCP_COMPRESS', 'MCCP2_COMPRESS',
                       'ENCRYPT', 'AUTHENTICATION', 'TN3270E', 'XAUTH', 'RSP',
                       'COM_PORT_OPTION', 'SUPPRESS_LOCAL_ECHO', 'TLS',
                       'KERMIT', 'SEND_URL', 'FORWARD_X', 'PRAGMA_LOGON',
@@ -1566,4 +1592,26 @@ def name_command(byte):
 def name_commands(cmds, sep=' '):
     return ' '.join([
         name_command(bytes([byte])) for byte in cmds])
+
+def describe_stream(stream):
+    local = stream.local_option
+    remote = stream.remote_option
+    pending = stream.pending_option
+    status = collections.defaultdict(list)
+    local_is = 'server' if stream.is_server else 'client'
+    remote_is = 'server' if stream.is_client else 'client'
+    if any(pending.values()):
+        status.update({'failed-reply': [name_commands(opt)
+            for (opt, val) in pending.items()
+            if val]})
+    if len(local):
+        status.update({'local-{}'.format(local_is): [
+            name_commands(opt) for (opt, val) in local.items()
+            if val]})
+    if len(remote):
+        status.update({'remote-{}'.format(remote_is): [
+            name_commands(opt) for (opt, val) in remote.items()
+            if val]})
+    return dict(status)
+
 
