@@ -209,26 +209,7 @@ class TelnetServer(tulip.protocols.Protocol):
 
         # log about connection
         self.log.info(self.__str__())
-        self.log.info('{}'.format(status.__repr__()))
-
-            # 
-#        pending = [for opt in self.stream.pending_option.items() if val]
-#        pending = [telopt.name_commands(opt)
-#                for (opt, val) in self.stream.pending_option.items() if val]
-#        debug_pending = ', '.join(pending)
-        # disable echo for advanced clients w/remote editing (bsd)
-
-#        self._negotiation = tulip.Future()
-#
-#
-#        if self.duration < self.CONNECT_MINWAIT or (
-#                pending and self.duration < self.CONNECT_MAXWAIT):
-#            loop.call_later(self.CONNECT_DEFERED, self.check_negotiation)
-#        elif pending:
-#            self.log.warn('failed to negotiate {<0.60s}{}.'.format(
-#                debug_pending, '..' if len(debug_pending) > 60 else ''))
-#            loop.call_soon(self.after_negotiation)
-
+        self.log.info('{}'.format(status.result().__repr__()))
 
     def data_received(self, data):
         """ Process each byte as received by transport.
