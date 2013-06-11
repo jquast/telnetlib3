@@ -14,21 +14,26 @@ __all__ = ('TelnetServer',)
 
 class TelnetServer(tulip.protocols.Protocol):
     """
-        The banner() method is called on-connect, displaying the login banner,
-        and indicates the desired telnet options.
+        The begin_negotiation() method is called on-connect,
+        displaying the login banner, and indicates desired options.
 
-            The default implementations sends only: iac(WILL, SGA),
-            iac(WILL, ECHO), and iac(DO, TTYPE).
+            The default implementations sends only: iac(DO, TTYPE).
 
         The negotiation DO-TTYPE is twofold: provide at least one option to
-        negotiate to test the remote iac interpreter, (if any!). If the remote
-        end replies in the affirmitive, then ``request_advanced_opts()`` is
-        called.
+        negotiate to test the remote iac interpreter. If the remote end
+        replies in the affirmitive, then ``request_advanced_opts()`` is
+        called. The default implementation prefers remote line editing,
+        kludge mode, and finally default NVT half-duplex local-line mode.
     """
-    # TODO: Future, callback_after_complete(first_prompt)
-    CONNECT_MINWAIT = 0.50
-    CONNECT_MAXWAIT = 4.00
-    CONNECT_DEFERED = 0.15
+    #: mininum on-connect time to wait for client-initiated negotiation options
+    CONNECT_MINWAIT = 1.50
+    #: maximum on-connect time to wait for client-initiated negotiation options
+    #  before negotiation is considered 'final'. some telnet clients will fail
+    #  to acknowledge bi-directionally, appearing as a timeout, while others
+    #  are simply on very high-latency links.
+    CONNECT_MAXWAIT = 6.00
+    #: timer length for check_negotiation re-scheduling
+    CONNECT_DEFERED = 0.10
     TTYPE_LOOPMAX = 8
     default_env = {
             'COLUMNS': '80',
@@ -42,90 +47,189 @@ class TelnetServer(tulip.protocols.Protocol):
             }
 
     readonly_env = ['USER', 'HOSTNAME', 'UID', 'REMOTEIP', 'REMOTEHOST']
-    def __init__(self, log=logging, default_encoding='utf8'):
+    def __init__(self, shell=telsh.Telsh, encoding='utf8', log=logging):
         self.log = log
-        #: default option is ECHO off for only those clients capable of
-        #  remote line editing.
-        self.remote_noecho = True
-        #: cient_env holds client session variables
+        self._shell_factory = shell
+        self._default_encoding = encoding
+        #: session environment as S.env['key'], defaults empty string value
         self._client_env = collections.defaultdict(str, **self.default_env)
-        self._default_encoding = self._client_env['CHARSET'] = default_encoding
+        self._client_host = tulip.Future()
+
+        #: default environment is server-preferred encoding if un-negotiated.
+        self.env_update({'CHARSET': encoding})
+
+        #: 'ECHO off' set for clients capable of remote line editing (fastest).
+        self.fast_edit = True
+
+        #: toggled when transport is shutting down
         self._closing = False
+
+        #: datetime
         self._last_received = None
+
+        #: datetime
         self._connected = None
+
+        #: client performed ttype; probably human
         self._advanced = False
 
-        #: prompt sequence '%h' is result of socket.gethostname()
-        self._server_name = tulip.get_event_loop().run_in_executor(None,
-                socket.gethostname)
-        self._server_name.add_done_callback(self.completed_server_lookup)
+        loop = tulip.get_event_loop()
+
+        #: prompt sequence '%h' is result of socket.gethostname().
+        self._server_name = loop.run_in_executor(None, socket.gethostname)
+        self._server_name.add_done_callback(self.after_server_gethostname)
+
         self._server_fqdn = tulip.Future()
         self._timeout = tulip.Future()
-        self._banner_displayed = False
+        self._negotiation = tulip.Future()
+        self._negotiation.add_done_callback(self.after_negotiation)
+        self._banner = tulip.Future()
 
     def connection_made(self, transport):
         """ Receive a new telnet client connection.
 
             A ``TelnetStreamReader`` instance is created for reading on
-            the transport as ``i_stream``, and various IAC, SLC, and
-            extended callbacks are registered.
+            the transport as ``stream``, and various IAC, SLC, and
+            extended callbacks are registered to local handlers.
 
             A ``TelnetShell`` instance is created for writing on
             the transport as ``shell``. It receives in-band data
             from the telnet transport, providing line editing and
             command line processing.
 
-            Then, ``banner()`` is fired.
+            ``begin_negotiation()`` is fired after connection is registered.
         """
         self.transport = transport
+        self._client_ip = transport.get_extra_info('addr')[0]
         self.stream = telopt.TelnetStreamReader(transport, server=True)
-        _set_default_callbacks(server=self, stream=self.stream)
-        self.shell = telsh.Telsh(server=self)
+        self.shell = self._shell_factory(server=self)
+        self.set_stream_callbacks()
         self._last_received = datetime.datetime.now()
         self._connected = datetime.datetime.now()
-        self._client_ip = transport.get_extra_info('addr')[0]
-        self._client_hostname = tulip.get_event_loop().run_in_executor(None,
-                socket.gethostbyaddr, self._client_ip)  # client fqdn,
-        self._client_hostname.add_done_callback(  # check reverse-dns
-                self.completed_client_lookup)
+        # resolve client fqdn (and later, reverse-dns)
         loop = tulip.get_event_loop()
-        loop.call_soon(self.banner)
-        loop.call_soon(self._negotiate, self.first_prompt)
+        self._client_host = loop.run_in_executor(None,
+                socket.gethostbyaddr, self._client_ip)
+        self._client_host.add_done_callback(self.after_client_lookup)
+        # begin connect-time negotiation
+        loop.call_soon(self.begin_negotiation)
 
-    def banner(self):
-        """ XXX Display login banner and solicit initial telnet options.
+    def set_stream_callbacks(self):
+        """ XXX Set default iac, slc, and ext callbacks for telnet stream
         """
-        #   The default initially sets 'kludge' mode, which does not warrant
-        #   any reply and is always compatible with any client NVT.
-        #
-        #   Notably, a request to send binary and to negotiate TTYPE is made.
-        #   If ttype is sucessful, the callback ``request_advanced_opts()``
-        #   is fired.
-        #
-        #   The reason all capabilities are not immediately announced is that
-        #   the remote end may be too dumb to advance any further, and these
-        #   additional negotiations can only serve to confuse the remote end
-        #   or erroneously display garbage output if remote end is not equipped
-        #   with an iac interpreter.
+        stream, server = self.stream, self
 
-        self.stream.iac(telopt.WILL, telopt.SGA)
-        self.stream.iac(telopt.WILL, telopt.ECHO)
-        self.stream.iac(telopt.WILL, telopt.BINARY)
+        # wire AYT and SLC_AYT (^T) to callback ``status()``
+        stream.set_iac_callback(telopt.AYT, self.handle_ayt)
+        stream.set_slc_callback(slc.SLC_AYT, self.handle_ayt)
+
+        # wire various 'interrupts', such as AO, IP to
+        # ``interrupt_received``
+        for sir in (telopt.AO, telopt.IP, telopt.BRK,
+                telopt.SUSP,telopt.ABORT,):
+            stream.set_iac_callback(sir, self.interrupt_received)
+
+        # wire extended rfc callbacks for terminal atributes, etc.
+        for (opt, ext) in (
+                (telopt.NEW_ENVIRON, self.env_update),
+                (telopt.TTYPE, self.ttype_received),
+                (telopt.NAWS, self._naws_update),
+                (telopt.CHARSET, self._charset_received),):
+            stream.set_ext_callback(opt, ext)
+
+
+    def begin_negotiation(self):
+        """ XXX begin on-connect negotiation. A Telnet Server is expected to
+            assert the preferred session options immediately after connection.
+
+            The default implementation sends only (DO, TTYPE), the default
+            ``ttype_received()`` fires ``request_advanced_opts()``, further
+            requesting more advanced negotiations that may otherwise confuse
+            or corrupt output of the remote end if it is not equipped with an
+            IAC interpreter (such as a net scanner).
+        """
+
+        if self._closing:
+            self._negotiation.cancel()
+            return
+
         self.stream.iac(telopt.DO, telopt.TTYPE)
+        tulip.get_event_loop().call_soon(self.check_negotiation)
+        self.shell.display_prompt()
 
-    def first_prompt(self, call_after=None):
-        """ XXX First time prompt fire
+    def check_negotiation(self):
+        """ XXX negotiation check-loop, schedules itself for continual callback
+            until negotiation is considered final, firing ``after_negotiation``
+            callback.
         """
-        call_after = (self.shell.display_prompt
-                if call_after is None else call_after)
-        assert callable(call_after), call_after
+        print('x')
+        def _build_status(stream):
+            """ Build simple dict of negotiation status """
+            local = stream.local_option
+            remote = stream.remote_option
+            pending = stream.pending_option
+            status = dict()
+            if any(pending.values()):
+                status.update({'failed_pending':
+                    [telopt.name_commands(opt)
+                        for (opt, val) in pending.items() if val]})
+            if len(local):
+                status.update({'local_options':
+                    [telopt.name_commands(opt)
+                        for (opt, val) in local.items() if val]})
+            if len(remote):
+                status.update({'remote_options':
+                    [telopt.name_commands(opt)
+                        for (opt, val) in remote.items() if val]})
+            return status
 
-        self.log.info(self.__str__())
+        if self._closing:
+            self._negotiation.cancel()
+            return
 
-        # conceivably, you could use various callback mechanisms to
-        # relate to authenticating or other multi-state login process.
+        # negotiation completed when pending options have been acknowledged
+        if not any(self.stream.pending_option.values()):
+            if self.duration > self.CONNECT_MINWAIT:
+                self._negotiation.set_result(_build_status(self.stream))
+                return
+        elif self.duration > self.CONNECT_MAXWAIT:
+            self._negotiation.set_result(_build_status())
+            return
         loop = tulip.get_event_loop()
-        loop.call_soon(call_after)
+        loop.call_later(self.CONNECT_DEFERED, self.check_negotiation)
+
+    def after_negotiation(self, status):
+        """ XXX negotiation completed
+        """
+        self.log.debug('after_negotiation: {}'.format(status))
+
+        # enable 'fast edit' for remote line editing by sending 'wont echo'
+        if self.fast_edit and self.stream.mode == 'remote':
+            self.log.debug('fast_edit enabled (remote editing, wont echo)')
+            self.stream.iac(telopt.WONT, telopt.ECHO)
+
+        # log about connection
+        self.log.info(self.__str__())
+        self.log.info('{}'.format(status.__repr__()))
+
+            # 
+#        pending = [for opt in self.stream.pending_option.items() if val]
+#        pending = [telopt.name_commands(opt)
+#                for (opt, val) in self.stream.pending_option.items() if val]
+#        debug_pending = ', '.join(pending)
+        # disable echo for advanced clients w/remote editing (bsd)
+
+#        self._negotiation = tulip.Future()
+#
+#
+#        if self.duration < self.CONNECT_MINWAIT or (
+#                pending and self.duration < self.CONNECT_MAXWAIT):
+#            loop.call_later(self.CONNECT_DEFERED, self.check_negotiation)
+#        elif pending:
+#            self.log.warn('failed to negotiate {<0.60s}{}.'.format(
+#                debug_pending, '..' if len(debug_pending) > 60 else ''))
+#            loop.call_soon(self.after_negotiation)
+
 
     def data_received(self, data):
         """ Process each byte as received by transport.
@@ -153,10 +257,31 @@ class TelnetServer(tulip.protocols.Protocol):
 
             self.shell.feed_byte(byte)
 
+    def interrupt_received(self, cmd):
+        """ XXX Callback receives telnet IAC or SLC interrupt byte.
+
+            This is suitable for the receipt of interrupt signals,
+            such as iac(AO) and SLC_AO.
+        """
+        self.log.debug('interrupt_received: {}'.format(
+            telopt.name_command(cmd)))
+        self.shell.display_prompt()
+
+
     def __str__(self):
         """ XXX Returns string suitable for status of server session.
         """
         return _describe_connection(self)
+
+    @property
+    def default_banner(self):
+        """ .. default_banner() -> string
+
+            Returns first banner string written to stream during negotiation.
+        """
+        if self.server_fqdn.done():
+            return 'Welcome to {} !'.format(self.server_fqdn.result())
+        return ''
 
     @property
     def client_ip(self):
@@ -172,10 +297,10 @@ class TelnetServer(tulip.protocols.Protocol):
 
             Returns DNS name of client as String as Future.
         """
-        if self._client_hostname.done():
-            val = self._client_hostname.result()[0]
-            return _wrap_future_result(self._client_hostname, val)
-        return self._client_hostname
+        if self._client_host.done():
+            val = self._client_host.result()[0]
+            return _wrap_future_result(self._client_host, val)
+        return self._client_host
 
     @property
     def client_fqdn(self):
@@ -183,10 +308,10 @@ class TelnetServer(tulip.protocols.Protocol):
 
             Returns FQDN dns name of client as Future.
         """
-        if self._client_hostname.done():
-            val = self._client_hostname.result()[0]
-            return _wrap_future_result(self._client_hostname, val)
-        return self._client_hostname
+        if self._client_host.done():
+            val = self._client_host.result()[0]
+            return _wrap_future_result(self._client_host, val)
+        return self._client_host
 
     @property
     def client_reverse_ip(self):
@@ -194,10 +319,10 @@ class TelnetServer(tulip.protocols.Protocol):
 
             Returns reverse DNS lookup IP address of client as Future.
         """
-        if self._client_hostname.done():
-            val = self._client_hostname.result()[2][0]
-            return _wrap_future_result(self._client_hostname, val)
-        return self._client_hostname
+        if self._client_host.done():
+            val = self._client_host.result()[2][0]
+            return _wrap_future_result(self._client_host, val)
+        return self._client_host
 
     @property
     def server_name(self):
@@ -205,7 +330,8 @@ class TelnetServer(tulip.protocols.Protocol):
 
             Returns name of server as string as Future.
         """
-        return self._server_name
+        if self._server_name.done():
+            return self._server_name
 
     @property
     def server_fqdn(self):
@@ -260,8 +386,8 @@ class TelnetServer(tulip.protocols.Protocol):
 
             Always 'ascii' for the direction(s) indicated unless ``inbinary``
             or ``outbinary`` has been negotiated. Then, the session value
-            CHARSET is used, or ``default_encoding``, if CHARSET is not
-            negotiated.
+            CHARSET is used, or the constructor kwarg ``encoding`` if CHARSET
+            is not negotiated.
         """
         # of note: UTF-8 input with ascii output or vice-versa is possible.
         assert outgoing or incoming
@@ -271,28 +397,6 @@ class TelnetServer(tulip.protocols.Protocol):
                     outgoing and incoming and self.outbinary
                                           and self.inbinary)
                 else 'ascii')
-
-    def completed_client_lookup(self, arg):
-        """ Callback receives result of client name resolution,
-            Logs warning if reverse dns verification failed,
-        """
-        if self.client_ip != self.client_reverse_ip.result():
-            # OpenSSH will log 'POSSIBLE BREAK-IN ATTEMPT!' but we dont care ..
-            self.log.warn('reverse mapping failed: {}'.format(
-                self.arg.result()))
-        self.env_update({
-            'REMOTEIP': self.client_ip,
-            'REMOTEHOST': self.client_hostname.result(),
-            })
-
-    def completed_server_lookup(self, arg):
-        """ Callback receives result of server name resolution,
-            Begins fqdn resolution, available as '%H' prompt character.
-        """
-        #: prompt sequence '%H' is result of socket.get_fqdn(self._server_name)
-        self._server_fqdn = tulip.get_event_loop().run_in_executor(
-                    None, socket.getfqdn, arg.result())
-        self.env.update({'HOSTNAME': self.server_name.result()})
 
     def request_advanced_opts(self, ttype=True):
         """ XXX Request advanced telnet options when remote end replies TTYPE.
@@ -307,6 +411,9 @@ class TelnetServer(tulip.protocols.Protocol):
         # Request *additional* TTYPE response from clients who have replied
         # already, beginning a 'looping' mechanism of ``ttype_received()``
         # replies, by by which MUD clients may be identified.
+        self.stream.iac(telopt.WILL, telopt.SGA)
+        self.stream.iac(telopt.WILL, telopt.ECHO)
+        self.stream.iac(telopt.WILL, telopt.BINARY)
         self.stream.iac(telopt.DO, telopt.LINEMODE)
         self.stream.iac(telopt.WILL, telopt.STATUS)
         self.stream.iac(telopt.WILL, telopt.LFLOW)
@@ -365,7 +472,7 @@ class TelnetServer(tulip.protocols.Protocol):
         self.log.info('{}{}'.format(self.__str__(),
             ': {}'.format(exc) if exc is not None else ''))
         for task in (self._server_name, self._server_fqdn,
-                self._client_hostname, self._timeout):
+                self._client_host, self._timeout):
             task.cancel()
 
     def ttype_received(self, ttype):
@@ -378,11 +485,13 @@ class TelnetServer(tulip.protocols.Protocol):
         """
         # there is no sort of acknowledgement protocol ..
         if self._advanced is False:
+            self.log.debug('first ttype: {}'.format(ttype))
             if not len(self.env['TERM']):
                 self.env_update({'TERM': ttype})
             # track TTYPE seperately from the NEW_ENVIRON 'TERM' value to
             # avoid telnet loops in TTYPE cycling
             self.env_update({'TTYPE0': ttype})
+            self.env_update({'TERM': ttype})
             # windows-98 era telnet ('ansi'), or terminals replying as
             # such won't have anything more interesting to say. windows
             # socket transport locks up if a second TTYPE is requested.
@@ -391,14 +500,13 @@ class TelnetServer(tulip.protocols.Protocol):
             return
 
         self.env_update({'TTYPE{}'.format(self._advanced): ttype})
-        lastval = self.env['TTYPE{}'.format(self._advanced)]
+        lastval = self.env['TTYPE{}'.format(self._advanced -1)].lower()
         if ttype == self.env['TTYPE0']:
             self.env_update({'TERM': ttype})
             self.log.debug('end on TTYPE{}: {}, using {env[TERM]}.'
                     .format(self._advanced, ttype, env=self.env))
             return
-        elif (self._advanced == self.TTYPE_LOOPMAX
-                or not ttype or ttype.lower() == 'unknown'):
+        elif (not ttype or self._advanced == self.TTYPE_LOOPMAX or ttype.lower() == 'unknown'):
             ttype = self.env['TERM'].lower()
             self.env_update({'TERM': ttype})
             self.log.debug('TTYPE stop on {}, using {env[TERM]}.'.format(
@@ -406,10 +514,11 @@ class TelnetServer(tulip.protocols.Protocol):
             return
         elif (self._advanced == 2 and ttype.upper().startswith('MTTS ')):
             # Mud Terminal type started, previous value is most termcap-like
-            ttype = self.env['TTYPE{}'.format(self._advanced)]
-            self.env_update({'TERM': ttype})
-            self.log.debug('TTYPE is {}, using {env[TERM]}.'.format(
-                self._advanced, env=self.env))
+            revert_ttype = self.env['TTYPE1']
+            self.env_update({'TERM': revert_ttype})
+            self.log.debug('TTYPE{} is mud client; {}, using {env[TERM]}.'.format(
+                self._advanced, ttype, env=self.env))
+            return
         elif (ttype.lower() == lastval):
             # End of list (looping). Chose this value
             self.log.debug('TTYPE repeated at {}, using {}.'.format(
@@ -417,6 +526,7 @@ class TelnetServer(tulip.protocols.Protocol):
             self.env_update({'TERM': ttype})
             return
         ttype = ttype.lower()
+        self.env_update({'TERM': ttype})
         self.stream.request_ttype()
         self._advanced += 1
 
@@ -428,7 +538,7 @@ class TelnetServer(tulip.protocols.Protocol):
             ttype = env['TERM'].lower()
             if ttype != self.env['TERM']:
                self.log.debug('{!r} -> {!r}'.format(self.env['TERM'], ttype))
-            self.shell.set_term(ttype)
+            self.shell.term_received(ttype)
             self._client_env['TERM'] = ttype
             del env['TERM']
         if 'TIMEOUT' in env and env['TIMEOUT'] != self.env['TIMEOUT']:
@@ -438,15 +548,38 @@ class TelnetServer(tulip.protocols.Protocol):
             self._client_env.update(env)
             self.log.debug('env_update: %r', env)
 
-    def interrupt_received(self, cmd):
-        """ XXX Callback receives telnet IAC or SLC interrupt byte.
-
-            This is suitable for the receipt of interrupt signals,
-            such as iac(AO) and SLC_AO.
+    def after_client_lookup(self, arg):
+        """ Callback receives result of client name resolution,
+            Logs warning if reverse dns verification failed,
         """
-        self.log.debug('interrupt_received: {}'.format(
-            telopt.name_command(cmd)))
-        self.shell.display_prompt()
+        if self.client_ip != self.client_reverse_ip.result():
+            # OpenSSH will log 'POSSIBLE BREAK-IN ATTEMPT!' but we dont care ..
+            self.log.warn('reverse mapping failed: {}'.format(
+                self.arg.result()))
+        self.env_update({
+            'REMOTEIP': self.client_ip,
+            'REMOTEHOST': self.client_hostname.result(),
+            })
+
+    def after_server_gethostname(self, arg):
+        """ Callback receives result of server name resolution,
+            Begins fqdn resolution, available as '%H' prompt character.
+        """
+        #: prompt sequence '%H' is result of socket.get_fqdn(self._server_name)
+        self._server_fqdn = tulip.get_event_loop().run_in_executor(
+                    None, socket.getfqdn, arg.result())
+        self._server_fqdn.add_done_callback(self.after_server_getfqdn)
+        #self.env_update({'HOSTNAME': self.server_name.result()})
+
+    def after_server_getfqdn(self, arg):
+        """ Callback receives result of server fqdn resolution,
+        """
+        if self.env['HOSTNAME'] != arg.result():
+            #self.env_update({'HOSTNAME': arg.result()})
+            self.log.debug('HOSTNAME fully resolved to {}'.format(arg.result()))
+        else:
+            self.log.debug('HOSTNAME is {}'.format(arg.result()))
+
 
     def _restart_timeout(self, val=None):
         self._timeout.cancel()
@@ -470,66 +603,6 @@ class TelnetServer(tulip.protocols.Protocol):
     def _tspeed_received(self, rx, tx):
         " Callback receives TSPEED values, rfc1079 "
         self.env_update({'TSPEED': '%s,%s' % (rx, tx)})
-
-    def _negotiate(self, call_after=None):
-        """
-        Negotiate options before prompting for input, this method calls itself
-        every CONNECT_DEFERED up to the greater of the value CONNECT_MAXWAIT.
-
-        Negotiation completes when all ``pending_options`` of the
-        TelnetStreamReader have completed. Any options not negotiated
-        are displayed to the client as a warning, and
-        ``shell.display_prompt()`` is called for the first time,
-        unless ``call_after`` specifies another callback.
-        """
-        if call_after is None:
-            call_after = self.first_prompt
-        assert callable(call_after), call_after
-        if self._closing:
-            return
-        if not self._banner_displayed and self.server_fqdn.done():
-            self.shell.stream.write('Welcome to {} !'.format(
-                    self.server_fqdn.result()))
-            self._banner_displayed = True
-        loop = tulip.get_event_loop()
-        pending = [telopt.name_commands(opt)
-                for (opt, val) in self.stream.pending_option.items()
-                if val]
-        if self.remote_noecho:
-            if self.stream.mode == 'remote' and (
-                    self.stream.local_option.enabled(telopt.ECHO) and not
-                    self.stream.pending_option.enabled(
-                        telopt.WONT + telopt.ECHO)):
-                self.log.debug('lediting is remote; request WONT ECHO')
-                self.stream.iac(telopt.WONT, telopt.ECHO)
-        if self.duration < self.CONNECT_MINWAIT or (
-                pending and self.duration < self.CONNECT_MAXWAIT):
-            loop.call_later(self.CONNECT_DEFERED, self._negotiate, call_after)
-            return
-        elif pending:
-            self.log.warn('negotiate failed for {}.'.format(pending))
-            self.shell.write('\r\nnegotiate failed for {}.'.format(pending))
-        loop.call_soon(call_after)
-
-def _set_default_callbacks(server, stream):
-    """ Register callbacks of TelnetStreamReader for default TelnetServer
-    """
-    # wire AYT and SLC_AYT (^T) to callback ``status()``
-    stream.set_iac_callback(telopt.AYT, server.handle_ayt)
-    stream.set_slc_callback(slc.SLC_AYT, server.handle_ayt)
-
-    # wire various 'interrupts', such as AO, IP to ``interrupt_received``
-    stream.set_iac_callback(telopt.AO, server.interrupt_received)
-    stream.set_iac_callback(telopt.IP, server.interrupt_received)
-    stream.set_iac_callback(telopt.BRK, server.interrupt_received)
-    stream.set_iac_callback(telopt.SUSP, server.interrupt_received)
-    stream.set_iac_callback(telopt.ABORT, server.interrupt_received)
-
-    # wire extended rfc callbacks for terminal type, dimensions
-    stream.set_ext_callback(telopt.NEW_ENVIRON, server.env_update)
-    stream.set_ext_callback(telopt.TTYPE, server.ttype_received)
-    stream.set_ext_callback(telopt.NAWS, server._naws_update)
-    stream.set_ext_callback(telopt.CHARSET, server._charset_received)
 
 def _describe_connection(server):
     return '{}{}{}{}'.format(
@@ -587,7 +660,7 @@ def main():
     log.debug('default_encoding is {}'.format(enc))
 
     loop = tulip.get_event_loop()
-    func = loop.start_serving(lambda: TelnetServer(default_encoding=enc),
+    func = loop.start_serving(lambda: TelnetServer(encoding=enc, log=log),
             args.host, args.port)
 
     socks = loop.run_until_complete(func)
@@ -597,3 +670,13 @@ def main():
 if __name__ == '__main__':
     main()
 
+#self.shell.display_prompt
+#self.shell.feed_slc
+#self.shell.feed_byte
+#self.shell.stream.write
+#self.shell.display_prompt
+#self.shell.stream.write
+#self.shell.stream.write
+#self.shell.term_received
+#self.shell.display_prompt
+#self.shell.stream.write

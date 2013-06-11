@@ -12,11 +12,12 @@ from telnetlib3 import wcwidth
 
 __all__ = ('TelnetShellStream', 'Telsh')
 
-class EDIT():
+class _EDIT():
     """ Enums for value of ``cmd`` in ``Telsh.editing_received()``.
     """
     (RP, EC, EW, EL, IP, AO, AYT, BRK, EOF, EOR, XON, XOFF, ABORT, SUSP, LNEXT
             ) = range(15)
+EDIT = _EDIT()
 
 SLC_EDIT_TRANSTABLE = dict((
         (slc.SLC_RP, EDIT.RP),
@@ -40,13 +41,19 @@ class TelnetShellStream():
     def __init__(self, server, log=logging):
         self.server = server
         self.log = log
+
         #: codecs.IncrementalDecoder for current CHARSET
-        self._decoder = None
+        self.decoder = None
+
         #: default encoding 'errors' argument
         self.encoding_errors = 'replace'
 
-    def _display_charset_err(self, err):
-        """ Carefully notify client of encoding error. """
+        #: boolean toggle: call ``TelnetServer.stream.send_ga()`` if client
+        #  refuses supress goahead (WONT SGA) ?
+        self.send_go_ahead = True
+
+    def display_charset_err(self, err):
+        """ XXX Carefully notify client of encoding error. """
         encoding = self.server.encoding(outgoing=True)
         err_bytes = bytes(err.args[0].encode(encoding))
         charset = bytes(self.server.env['CHARSET'].encode(encoding))
@@ -54,7 +61,8 @@ class TelnetShellStream():
         self.server.stream.write(msg)
 
     def send_ga(self):
-        self.server.stream.send_ga()
+        if self.send_go_ahead:
+            self.server.stream.send_ga()
 
     def write(self, string, errors=None):
         """ Write string to output using preferred encoding.
@@ -69,7 +77,7 @@ class TelnetShellStream():
             self.server.env_update(
                     {'CHARSET': self.server._default_encoding})
             self.log.debug(err)
-            self._display_charset_err(err)
+            self.display_charset_err(err)
             return self.write(string, errors)
 
     @property
@@ -92,23 +100,23 @@ class TelnetShellStream():
         """ Decode input string using preferred encoding.
         """
         enc = self.server.encoding(incoming=True)
-        if (self._decoder is None or enc != self._decoder._encoding):
+        if (self.decoder is None or enc != self.decoder._encoding):
             try:
-                self._decoder = codecs.getincrementaldecoder(enc)(
+                self.decoder = codecs.getincrementaldecoder(enc)(
                         errors=self.encoding_errors)
-                self._decoder._encoding = enc
+                self.decoder._encoding = enc
             except LookupError as err:
                 assert (enc != self.server._default_encoding), err
                 self.log.info(err)
                 # notify server of change to _default_encoding, try again,
                 self.server.env_update(
                         {'CHARSET': self.server._default_encoding})
-                self._decoder = codecs.getincrementaldecoder(enc)(
+                self.decoder = codecs.getincrementaldecoder(enc)(
                         errors=self.encoding_errors)
-                self._decoder._encoding = enc
-                self._display_charset_err(err)
+                self.decoder._encoding = enc
+                self.display_charset_err(err)
                 self.shell.display_prompt()
-        return self._decoder.decode(input, final)
+        return self.decoder.decode(input, final)
 
     def can_write(self, ucs):
         """ Returns True if transport can receive ``ucs`` as a single-cell,
@@ -152,6 +160,12 @@ class Telsh():
     #: character used for %# substituion in PS1 or PS2 evaluation
     prompt_char = '%'
 
+    #: regular expression pattern string for prompt escape sequences
+    re_prompt = r'(?P<val>\d{3}|x[0-9a-fA-F]{2}|\$([a-zA-Z_]+)|[Ee#\?hHusv])'
+
+    #: regular expression pattern for echo variable matches, $var or ${var}
+    re_echo = r'\${?(\?|[a-zA-Z_]+)}?'
+
     #: name of shell %s in prompt escape
     shell_name = 'telsh'
 
@@ -186,73 +200,88 @@ class Telsh():
         ('logoff', None),
         ])
 
-    def __init__(self, server, log=logging):
+    def __init__(self, server, stream=TelnetShellStream, log=logging):
         #: TelnetServer instance associated with shell
         self.server = server
+
         #: TelnetShellStream provides encoding for Telnet NVT
-        self.stream = TelnetShellStream(server)
+        self.stream = stream(server=server, log=log)
 
         self.log = log
 
         #: display full traceback to output stream ``display_exception()``
-        self.show_traceback = True
+        self.show_traceback = False
 
-        #: Whether to send video attributes
+        #: Whether to send video attributes; toggled by ``set_term()``
         self.does_styling = False
 
-        #: input character fires ``autocomplete()``, None disables
+        #: if set, input character fires ``autocomplete()``
         self.autocomplete_char = '\t'
 
-        #: if set, characters are stripped around ``line_received``
+        #: if set, CR, LF, and NUL are stripped from ``line_received()``
         self.strip_eol = '\r\n\00'
 
-        #: maximum base10 digit that may be entered
+        #: if set, maximum base10 digit that may be entered using ^V[0-9]+
         self._max_litval = 65535
 
+        #: maximum length of in-memory input buffer, (default, 8K)
+        self._max_lastline = 8192
+
         #: buffer of line input until command process.
-        self._lastline = collections.deque()
+        self._lastline = collections.deque(maxlen=self._max_lastline)
 
-        #: prompt evaluation re for ``resolve_prompt()``
-        self._re_prompt = re.compile('{}{}'.format( self.prompt_esc_char,
-            r'(?P<val>\d{3}|x[0-9a-fA-F]{2}|\$([a-zA-Z_]+)|[Ee#\?hHusv])'),
-            flags=re.DOTALL)
+        #: compiled expression for prompt evaluation in ``resolve_prompt()``
+        self._re_prompt = re.compile('{esc}{pattern}'.format(
+            esc=self.prompt_esc_char, pattern=self.re_prompt), re.DOTALL)
 
-        #: variable evaluation re for ``echo_eval()``
-        self._re_var = re.compile(r'\${?(\?|[a-zA-Z_]+)}?')
+        #: compiled expression for variable expanson in ``echo_eval()``
+        self._re_echo = re.compile(self.re_echo, re.DOTALL)
 
-        #: Current state is multiline (PS2 is displayed)
-        self._multiline = False
+        #: boolean toggle: Current state is multiline? PS2 is displayed.
+        self.multiline = False
 
-        #: write ASCII BELL on error
+        #: boolean toggle: write ASCII BELL on error?
         self.send_bell = True
 
-        #: write video attributes to output stream
-        self._does_styling = False
+        #: if set, last character received by ``character_received()``.
+        self.last_char = None
 
-        #: toggled on EDIT.LNEXT (^v) for keycode input
-        self._literal = False
-
-        #: limit number of digits using counter _lit_recv
-        #self._lit_recv = False
-
-        #: strip CR[+LF|+NUL] in character_received() by tracking last recv
-        self._last_char = None
-
-        #: Return value of last command, or None if none yet processed.
+        #: if set, exit status of last command; accessed by property ``retval``
         self._retval = None
 
-        #: Whether to call ``send_ga`` on server stream on WONT SGA
-        self._send_ga = True
+        #: boolean toggle: set on editing_received of EDIT.LNEXT (^v)
+        self._literal = False
 
-        self._dim = '\x1b[31m'
-        self._normal = '\x1b[0m'
-        self._standout = '\x1b[31;1m'
+# properties
 
-    def set_term(self, term):
-        """ Set termcap TERM value
+    @property
+    def retval(self):
+        """ Returns exit status of last command executed. ``
+        """
+        return self._retval if self._retval is not None else ''
+
+    @property
+    def is_multiline(self):
+        """ Returns True if current prompt is a continuation
+            of a multi-line prompt.
+        """
+        return self.multiline
+
+    @property
+    def lastline(self):
+        """ Returns current input line.
+        """
+        return u''.join(self._lastline)
+
+# internal methods
+
+    def term_received(self, term):
+        """ .. method:: term_received(string)
+
+            callback fired by telnet iac to set or update TERM
         """
         self.term = term
-        self._does_styling = (
+        self.does_styling = (
                 term.startswith('vt') or
                 term.startswith('xterm') or
                 term.startswith('dtterm') or
@@ -261,25 +290,63 @@ class Telsh():
                 term.startswith('ansi') or
                 term == 'linux' or term == 'screen')
 
-    def display_prompt(self, redraw=False, input=None):
-        """ Display new, or when ``redraw`` set True, refresh current prompt,
-            and current command line, if any.
+    def bell(self):
+        """ ..method:: bell()
+
+            writes ASCII bell (\a) unless ``send_bell`` is set False.
         """
-        input = self.lastline
+        if self.send_bell:
+            self.stream.write('\a')
+
+    def erase(self, string, keypress=chr(127)):
+        """ .. method:: erase(string, keypress=chr(127)) -> string
+
+            Returns sequence for erasing ``string`` preceeding cursor given
+            the erase character ``keypressed`` (one of chr(127) or 8) has
+            been used to perform deletion, assisting predicted cursor
+            movement of sessions using remote line editing with echo off.
+        """
+        assert keypress in (chr(127), chr(8)), chr
+        string_disp = ''.join((_char
+                if self.stream.can_write(_char) and _char.isprintable()
+                else name_unicode(_char) for _char in string))
+        vtlen = wcwidth.wcswidth_cjk(string_disp)
+        assert vtlen >= 0, string
+
+        # non-BSD clients will echo
+        if self.stream.will_echo:
+            return ('\b' * vtlen) + '\x1b[K'
+
+        # BSD has strange behavior for line editing with local echo:
+        if keypress == chr(127):
+            # (1) '^?' actually advances the cursor right one cell,
+            return '\b' + ('\b' * vtlen) + '\x1b[K'
+        else:
+            # (2) whereas '^h' moves the cursor left one (displayable) cell !
+            return '\b' * (vtlen - 1) + '\x1b[K'
+
+# public callbacks
+
+    def display_prompt(self, redraw=False):
+        """ .. method::display_prompt(redraw=False)
+
+            XXX Display or redraw prompt.
+        """
         input = ''.join((self.standout(name_unicode(char)) if
                 not self.stream.can_write(char) or not char.isprintable() else
-                char for char in input))
+                char for char in self.lastline))
         if self.is_multiline:
             input = input.split('\r')[-1]
-        self.stream.write(''.join((
-            '\r\x1b[K' if redraw else '\r\n',
-            self.prompt,
-            input,)))
-        if self._send_ga:
-            self.stream.send_ga()
+        prefix = '\r\x1b[K' if redraw else '\r\n'
+        output = ''.join((prefix, self.prompt, input,))
+        self.stream.write(output)
+        self.stream.send_ga()
 
     def display_status(self):
-        """ Output the status of telnet session.
+        """ .. method::display_status()
+
+            XXX Output status of telnet session, respoding to 'are you there?'
+            (AYT) requests, or command 'status'.
         """
         self.stream.write(
                 '\r\nConnected {:0.3f}s ago from {}.'
@@ -298,62 +365,23 @@ class Telsh():
                     self.server.env['LINES'],
                     ))
 
-    def bell(self):
-        """ write ASCII bell (\a) unless ``send_bell`` is set False.
-        """
-        if self.send_bell:
-            self.stream.write('\a')
-
-    @property
-    def retval(self):
-        """ Returns exit status of last command processed by ``line_received()``
-        """
-        return self._retval if self._retval is not None else ''
-
-    @property
-    def is_multiline(self):
-        """ Returns True if current prompt is a continuation
-            of a multi-line prompt.
-        """
-        return self._multiline
-
-    @property
-    def lastline(self):
-        """ Returns current input line.
-        """
-        return u''.join(self._lastline)
-
-    def erase(self, string, char=chr(127)):
-        """ Returns sequence for erasing ``string`` preceeding cursor given
-            the erase character ``char`` used (chr(127) or chr(8)).
-        """
-        assert char in (chr(127), chr(8)), chr
-        string_disp = ''.join((char
-                if self.stream.can_write(char) and char.isprintable()
-                else name_unicode(char) for char in string))
-        vtlen = wcwidth.wcswidth_cjk(string_disp)
-        assert vtlen >= 0, string
-        if self.stream.will_echo:
-            return ('\b' * vtlen) + '\x1b[K'
-        # BSD has strange behavior for line editing with local echo;
-        if char == chr(127):
-            # '^?' actually advances the cursor right one cell !
-            return '\b' + ('\b' * vtlen) + '\x1b[K'
-        else:
-            # whereas '^h' moves the cursor left one (displayable) cell !
-            return '\b' * (vtlen - 1) + '\x1b[K'
-
     def dim(self, string):
-        """ Returns ``string`` decorated using preferred terminal sequence.
+        """ .. method:: dim(string) -> string
+
+            XXX Returns ``string`` decorated using preferred terminal sequence.
         """
-        return (string if not self._does_styling
-                else self._dim + string + self._normal)
+        _dim, _normal = '\x1b[31m', '\x1b[0m'
+        return (string if not self.does_styling
+                else (_dim + string + _normal))
 
     def standout(self, string):
-        """ Returns ``string`` decorated using preferred terminal sequence.
+        """ .. method:: standout(string) -> string
+
+            XXX Returns ``string`` decorated using preferred terminal sequence.
         """
-        return (string if not self._does_styling
-                else self._standout + string + self._normal)
+        _standout, _normal = '\x1b[31;1m', '\x1b[0m'
+        return (string if not self.does_styling
+                else (_standout + string + _normal))
 
     def autocomplete(self, input, table=None):
         """ .. method:: autocomplete(input : string, table=None) -> bool
@@ -375,16 +403,23 @@ class Telsh():
                 if key not in self.server.readonly_env])
         if ' ' in cmd:
             cmd, *args = shlex.split(cmd)
-        do_cycle = bool(self._last_char == '\t')
+        do_cycle = bool(self.last_char == '\t')
         buf, match = _autocomplete(table, do_cycle, '', cmd, *args)
-        self._last_char = '\t'
+        self.last_char = '\t'
         self._lastline = collections.deque(buf)
         return match
 
     def editing_received(self, char, cmd):
-        """ Receive unicode character that triggers an edit command of the constants
-            available in class EDIT.
+        """ ..method::editing_received(char, cmd)
+
+            XXX Callback receives unicode character and editing ``cmd``,
+            matching class attributes of global instance ``EDIT``. The
+            default implementation provides a readline-like interface,
+            though, without any insertion.
         """
+        # it could be said the default SLC function values are emacs-like.
+        # it is not suprising, given rms' involvement with late 70's telnet
+        # line editing and video attribute negotiation protocols ..
         def _name(cmd):
             for key in dir(EDIT):
                 if key.isupper() and getattr(EDIT, key) == cmd:
@@ -403,15 +438,12 @@ class Telsh():
             # repaint (^r)
             self.display_prompt(redraw=True)
         elif cmd == EDIT.EC:
-            pass
             # erase character chr(127)
             if 0 == len(self._lastline):
                 self.bell()
                 self.display_prompt(redraw=True)
             else:
-                x = self.erase(self._lastline.pop(), char)
-                print(repr((x, char)))
-                self.stream.write(x)
+                self.stream.write(self.erase(self._lastline.pop(), char))
         elif cmd == EDIT.EW:
             # erase word (^w), rubout .(\w+)
             if not self._lastline:
@@ -434,21 +466,24 @@ class Telsh():
                 self.server.logout()
             else:
                 self.bell()
+        elif cmd == EDIT.AYT:
+            # are-you-there? (^T)
+            self._lastline.clear()
+            self.stream.write(char_disp)
+            self.display_status()
+            self.display_prompt()
         elif cmd in (EDIT.IP, EDIT.ABORT):
             # interrupt process (^C), abort process (^\)
             self._lastline.clear()
             self.stream.write(char_disp)
             self.display_prompt()
-        elif cmd in (EDIT.XON, EDIT.XOFF, EDIT.AYT, EDIT.SUSP,
-                EDIT.AO, EDIT.SYNCH, EDIT.EOR):
+        else:
             # not handled or implemented
             self.log.debug('{} unhandled.'.format(EDIT.name(cmd)))
             self.stream.write(char_disp)
             self.bell()
             self.display_prompt()
             pass
-        else:
-            raise NotImplementedError(char, cmd)
 
     @property
     def is_literal(self):
@@ -494,7 +529,7 @@ class Telsh():
             self.character_received(ucs, literal=True)
             self._literal = False
             return
-        if ord('0') <= ord(ucs) <= ord('9'):
+        if self._max_litval and ord('0') <= ord(ucs) <= ord('9'):
             # base10 digit
             self._literal = (val*10) + int(ucs)
             if (self._literal >= self._max_litval or
@@ -530,7 +565,7 @@ class Telsh():
         elif self.is_literal and not literal:
             self.literal_received(char)
 
-        elif self._last_char == CR and char in (LF, NUL):
+        elif self.last_char == CR and char in (LF, NUL):
             # ``strip_eol`` is True, pass on '\n' or '\x00' following CR,
             if self.strip_eol:
                 pass
@@ -583,7 +618,7 @@ class Telsh():
             self.stream.echo(char_disp)
         else:
             self.bell()
-        self._last_char = char
+        self.last_char = char
 
     def line_received(self, input, eor=False):
         """ Callback for each line received, processing command(s) at EOL.
@@ -591,9 +626,9 @@ class Telsh():
         self.log.debug('line_received: {!r}'.format(input))
         if self.strip_eol:
             input = input.rstrip(self.strip_eol)
-        if self._multiline:
+        if self.multiline:
             input = ' '.join(input.split('\r'))
-        self._multiline = False
+        self.multiline = False
         retval = None
         try:
             retval = self.process_cmd(input)
@@ -605,7 +640,7 @@ class Telsh():
             # when _retval is None, we are multi-line
             if retval == '':
                 # we are in a line continuate
-                self._multiline = True
+                self.multiline = True
                 self.display_prompt(input='')
             else:
                 if retval is not None:
@@ -744,6 +779,8 @@ class Telsh():
             return None
         if cmd in ('help', '?',):
             return self.cmdset_help(*args)
+        elif cmd in ('_debug',):
+            return self.cmdset_debug(*args)
         elif cmd == 'echo':
             self.cmdset_echo(*args)
         elif cmd in ('quit', 'exit', 'logoff', 'logout', 'bye'):
@@ -772,7 +809,7 @@ class Telsh():
                     return ('{}'.format(self._retval)
                             if self._retval is not None else '')
                 return self.server.env[match.group(1)]
-            return self._eval(input, self._re_var, _getter, literal_escape)
+            return self._eval(input, self._re_echo, _getter, literal_escape)
         output = ' '.join(echo_eval(arg) for arg in args)
         self.stream.write('\r\n{}'.format(output))
         return 0
@@ -817,6 +854,22 @@ class Telsh():
                 else self.server.server_name.__repr__())))
         return 0
 
+    def cmdset_debug(self, *args):
+        self.stream.write('\r\nserver: DO')
+        for cmd, enabled in self.server.stream.remote_option.items():
+            if enabled:
+                self.stream.write(' {}'.format(telopt.name_command(cmd)))
+        self.stream.write('.\r\nclient: WILL')
+        for cmd, enabled in self.server.stream.local_option.items():
+            if enabled:
+                self.stream.write(' {}'.format(telopt.name_command(cmd)))
+        self.stream.write('.\r\nunreplied:')
+        for cmd, pending in self.server.stream.pending_option.items():
+            if pending:
+                self.stream.write(', {}'.format(telopt.name_commands(cmd)))
+        self.stream.write('.')
+        return 0
+
     def cmdset_toggle(self, *args):
         lopt = self.server.stream.local_option
         tbl_opt = dict([
@@ -825,7 +878,7 @@ class Telsh():
             ('inbinary', self.server.inbinary),
             ('binary', self.server.outbinary + self.server.inbinary),
             ('goahead', (not lopt.enabled(telopt.SGA)) and self._send_ga),
-            ('color', self._does_styling),
+            ('color', self.does_styling),
             ('xon-any', self.server.stream.xon_any),
             ('bell', self.send_bell)])
         if len(args) is 0:
@@ -879,9 +932,9 @@ class Telsh():
                 'en' if self.server.stream.xon_any else 'dis'))
         if opt in ('color', '_all'):
             _opt = 'color' if opt == '_all' else opt
-            self._does_styling = not self._does_styling
+            self.does_styling = not self.does_styling
             self.stream.write('\r\ncolor {}.'.format('on'
-                if self._does_styling else 'off'))
+                if self.does_styling else 'off'))
         return 0
 
     def cmdset_set(self, *args):
@@ -1016,7 +1069,6 @@ def _autocomplete(table, cycle, buf, cmd, *args):
             buf = ''.join((postfix(buf), auto_cmd))
             if args or has_args:
                 buf = ''.join((postfix(buf), escape_quote(args)))
-            print(repr((buf, has_args,)))
             return (buf, args_ok)
     # no matches
     buf = '{}{}{}'.format(postfix(buf),

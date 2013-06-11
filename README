@@ -11,6 +11,7 @@ Status
 ======
 
 TODO: Proper abort_output()/IAC rewind.
+TODO: handling duplication of echo and flow control by LINEMODE opts
 TODO: TelnetClient (also using TelnetStreamReader)
 TODO: fingerprinting Client & Server
 TODO: nosetests

@@ -4,7 +4,15 @@ import logging
 from telnetlib import LINEMODE, NAWS, NEW_ENVIRON, BINARY, SGA, ECHO, STATUS
 from telnetlib import TTYPE, TSPEED, LFLOW, XDISPLOC, IAC, DONT, DO, WONT
 from telnetlib import WILL, SE, NOP, TM, DM, BRK, IP, AO, AYT, EC, EL, EOR
-from telnetlib import GA, SB, LOGOUT, EXOPL, CHARSET, SNDLOC, theNULL
+from telnetlib import GA, SB, LOGOUT, CHARSET, SNDLOC, theNULL
+# not supported,
+from telnetlib import ENCRYPT, AUTHENTICATION, TN3270E, XAUTH, RSP
+from telnetlib import COM_PORT_OPTION, SUPPRESS_LOCAL_ECHO, TLS, KERMIT
+from telnetlib import SEND_URL, FORWARD_X, PRAGMA_LOGON, SSPI_LOGON
+from telnetlib import PRAGMA_HEARTBEAT, EXOPL, X3PAD, VT3270REGIME, TTYLOC
+from telnetlib import SUPDUPOUTPUT, SUPDUP, DET, BM, XASCII, RCP, NAMS
+from telnetlib import RCTE, NAOL, NAOP, NAOCRD, NAOHTS, NAOHTD, NAOFFD
+from telnetlib import NAOVTS, NAOVTD, NAOLFD
 
 from telnetlib3 import slc
 
@@ -17,6 +25,8 @@ __all__ = ('TelnetStreamReader', 'escape_iac', 'name_command', 'name_commands')
         bytes([const]) for const in range(4))
 (REQUEST, ACCEPTED, REJECTED, TTABLE_IS, TTABLE_REJECTED,
     TTABLE_ACK, TTABLE_NAK) = (bytes([const]) for const in range(1, 8))
+
+(MCCP_COMPRESS, MCCP2_COMPRESS) = (bytes([85]), bytes([86]))
 
 _MAXSIZE_SB = 2048
 _MAXSIZE_SLC = slc.NSLC * 6
@@ -94,12 +104,12 @@ class TelnetStreamReader:
     @property
     def is_server(self):
         """ Returns True if stream is used for server-end. """
-        return bool(self._server)
+        return bool(self._is_server)
 
     @property
     def is_client(self):
         """ Returns True if stream is used for client-end.  """
-        return bool(not self._server)
+        return bool(not self._is_server)
 
     @property
     def is_oob(self):
@@ -136,7 +146,9 @@ class TelnetStreamReader:
             "Arguments 'client' and 'server' are mutually exclusive")
         self.log = log
         self.transport = transport
-        self._server = (client in (None, False) or server in (None, True))
+        self._is_server = (
+                client in (None, False) or
+                server not in (None, False))
 
         #: Total bytes sent to ``feed_byte()``
         self.byte_count = 0
@@ -199,9 +211,6 @@ class TelnetStreamReader:
         #  negotiation (remote line editing and literal echo of control chars)
         self.default_linemode = slc.Linemode(bytes([
             ord(slc.LMODE_MODE_REMOTE) | ord(slc.LMODE_MODE_LIT_ECHO)]))
-
-        #: True if client sends IAC-SB-LINEMODE-DO-FORWARDMASK
-        self._forwardmask_enabled = False
 
         # Set default callback handlers to local methods.
         self._iac_callback = {}
@@ -300,19 +309,23 @@ class TelnetStreamReader:
                         if self.pending_option.enabled(WILL + opt):
                             self.pending_option[WILL + opt] = False
                 elif cmd == DONT:
-                    self.handle_dont(opt)
-                    if self.pending_option.enabled(WILL + opt):
-                        self.pending_option[WILL + opt] = False
-                    self.local_option[opt] = False
+                    try:
+                        self.handle_dont(opt)
+                    finally:
+                        if self.pending_option.enabled(WILL + opt):
+                            self.pending_option[WILL + opt] = False
+                        self.local_option[opt] = False
                 elif cmd == WILL:
                     if not self.pending_option.enabled(DO + opt) and opt != TM:
                         self.log.debug('WILL {} unsolicited'.format(
                             name_command(opt)))
-                    self.handle_will(opt)
-                    if self.pending_option.enabled(DO + opt):
-                        self.pending_option[DO + opt] = False
-                    if self.pending_option.enabled(DONT + opt):
-                        self.pending_option[DONT + opt] = False
+                    try:
+                        self.handle_will(opt)
+                    finally:
+                        if self.pending_option.enabled(DO + opt):
+                            self.pending_option[DO + opt] = False
+                        if self.pending_option.enabled(DONT + opt):
+                            self.pending_option[DONT + opt] = False
                 elif cmd == WONT:
                     self.handle_wont(opt)
                     self.pending_option[DO + opt] = False
@@ -581,9 +594,13 @@ class TelnetStreamReader:
         assert self.remote_option.enabled(LINEMODE), (
                 'cannot send DO FORWARDMASK without receipt of WILL LINEMODE.')
         if fmask is None:
+            opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
+            forwardmask_enabled = (
+                    self.is_server and self.local_option.get(opt, False)
+                    ) or self.remote_option.get(opt, False)
             fmask = slc.generate_forwardmask(
                     binary_mode=self.local_option.enabled(BINARY),
-                    tabset=self.slctab, ack=self._forwardmask_enabled)
+                    tabset=self.slctab, ack=forwardmask_enabled)
 
         assert isinstance(fmask, slc.Forwardmask), fmask
         self.pending_option[SB + LINEMODE] = True
@@ -932,7 +949,7 @@ class TelnetStreamReader:
             self.iac(WILL, TM)
         elif opt == LOGOUT:
             self._ext_callback[LOGOUT](DO)
-        elif opt in (ECHO, LINEMODE, BINARY, SGA, LFLOW, EXOPL, EOR):
+        elif opt in (ECHO, LINEMODE, BINARY, SGA, LFLOW, EOR):
             if not self.local_option.enabled(opt):
                 self.iac(WILL, opt)
             return True
@@ -1485,10 +1502,12 @@ class TelnetStreamReader:
                         buf,))
             assert cmd not in (DO) and len(buf), (
                     'bytes must follow DO LMODE_FORWARDMASK')
+
+        opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
         if cmd in (WILL, WONT):
-            self._forwardmask_enabled = cmd is WILL
+            self.remote_option[opt] = bool(cmd is WILL)
         elif cmd in (DO, DONT):
-            self._forwardmask_enabled = cmd is DO
+            self.local_option[opt] = bool(cmd is DO)
             if cmd == DO:
                 self._handle_do_forwardmask(buf)
 
@@ -1529,7 +1548,15 @@ _DEBUG_OPTS = dict([(value, key)
                       'DONT', 'DO', 'WONT', 'WILL', 'SE', 'NOP', 'DM', 'TM',
                       'BRK', 'IP', 'ABORT', 'AO', 'AYT', 'EC', 'EL', 'EOR',
                       'GA', 'SB', 'EOF', 'SUSP', 'ABORT', 'LOGOUT',
-                      'CHARSET', 'SNDLOC')])
+                      'CHARSET', 'SNDLOC', 'MCCP_COMPRESS', 'MCCP2_COMPRESS'
+                      'ENCRYPT', 'AUTHENTICATION', 'TN3270E', 'XAUTH', 'RSP',
+                      'COM_PORT_OPTION', 'SUPPRESS_LOCAL_ECHO', 'TLS',
+                      'KERMIT', 'SEND_URL', 'FORWARD_X', 'PRAGMA_LOGON',
+                      'SSPI_LOGON', 'PRAGMA_HEARTBEAT', 'EXOPL', 'X3PAD',
+                      'VT3270REGIME', 'TTYLOC', 'SUPDUPOUTPUT', 'SUPDUP',
+                      'DET', 'BM', 'XASCII', 'RCP', 'NAMS', 'RCTE', 'NAOL',
+                      'NAOP', 'NAOCRD', 'NAOHTS', 'NAOHTD', 'NAOFFD', 'NAOVTS',
+                      'NAOVTD', 'NAOLFD', )])
 
 def name_command(byte):
     """ Given an IAC byte, return its mnumonic global constant. """
