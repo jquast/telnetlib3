@@ -104,22 +104,6 @@ class BaseEventLoop(events.AbstractEventLoop):
         finally:
             self._running = False
 
-    def run_once(self, timeout=0):
-        """Run through all callbacks and all I/O polls once.
-
-        Calling stop() will break out of this too.
-        """
-        if self._running:
-            raise RuntimeError('Event loop is running.')
-
-        self._running = True
-        try:
-            self._run_once(timeout)
-        except _StopError:
-            pass
-        finally:
-            self._running = False
-
     def run_until_complete(self, future, timeout=None):
         """Run until the Future is done, or until a timeout.
 
@@ -133,24 +117,29 @@ class BaseEventLoop(events.AbstractEventLoop):
         timeout is reached or stop() is called, raise TimeoutError.
         """
         future = tasks.async(future)
-        handle_called = False
-
-        def stop_loop():
-            nonlocal handle_called
-            handle_called = True
-            raise _StopError
-
         future.add_done_callback(_raise_stop_error)
+        handle_called = False
 
         if timeout is None:
             self.run_forever()
         else:
+
+            def stop_loop():
+                nonlocal handle_called
+                handle_called = True
+                raise _StopError
+
             handle = self.call_later(timeout, stop_loop)
             self.run_forever()
             handle.cancel()
 
+        future.remove_done_callback(_raise_stop_error)
+
         if handle_called:
             raise futures.TimeoutError
+
+        if not future.done():
+            raise RuntimeError('Event loop stopped before Future completed.')
 
         return future.result()
 
