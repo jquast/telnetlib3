@@ -480,10 +480,8 @@ class Telsh():
         else:
             # not handled or implemented
             self.log.debug('{} unhandled.'.format(EDIT.name(cmd)))
+            self._lastline.append(char)
             self.stream.write(char_disp)
-            self.bell()
-            self.display_prompt()
-            pass
 
     @property
     def is_literal(self):
@@ -608,16 +606,12 @@ class Telsh():
             finally:
                 self.display_prompt(redraw=True)
 
-        elif (not char.isprintable() and char not in (CR, LF, NUL,)
-                and self.server.stream.mode != 'local'):
-            self.bell()
-            self.display_prompt(redraw=True)
-
-        elif char.isprintable(): # and char not in ('\r', '\n'):
+        else:
             self._lastline.append(char)
             self.stream.echo(char_disp)
-        else:
-            self.bell()
+            if not char.isprintable():
+                self.log.debug('unprintable recv, {!r}'.format(char))
+
         self.last_char = char
 
     def line_received(self, input, eor=False):
@@ -796,9 +790,10 @@ class Telsh():
         elif cmd == 'toggle':
             return self.cmdset_toggle(*args)
         elif '=' in cmd:
-            return self.cmdset_assign(*([cmd] + args))
+            return self.cmdset_assign(*((cmd,) + args))
         elif cmd:
-            self.stream.write('\r\n{!s}: command not found.'.format(cmd))
+            disp_cmd = u''.join([name_unicode(char) for char in cmd])
+            self.stream.write('\r\n{!s}: command not found.'.format(disp_cmd))
             return 1
         return 0
 
