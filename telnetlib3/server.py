@@ -27,14 +27,14 @@ class TelnetServer(tulip.protocols.Protocol):
         kludge mode, and finally default NVT half-duplex local-line mode.
     """
     #: mininum on-connect time to wait for client-initiated negotiation options
-    CONNECT_MINWAIT = 1.50
+    CONNECT_MINWAIT = 2.00
     #: maximum on-connect time to wait for client-initiated negotiation options
     #  before negotiation is considered 'final'. some telnet clients will fail
     #  to acknowledge bi-directionally, appearing as a timeout, while others
     #  are simply on very high-latency links.
     CONNECT_MAXWAIT = 6.00
     #: timer length for check_negotiation re-scheduling
-    CONNECT_DEFERED = 0.10
+    CONNECT_DEFERED = 0.2
     TTYPE_LOOPMAX = 8
     default_env = {
             'COLUMNS': '80',
@@ -106,7 +106,7 @@ class TelnetServer(tulip.protocols.Protocol):
         self._client_ip = transport.get_extra_info('addr')[0]
         self.stream = self._stream_factory(
                 transport=transport, server=True, log=self.log)
-        self.shell = self._shell_factory(server=self)
+        self.shell = self._shell_factory(server=self, log=self.log)
         self.set_stream_callbacks()
         self._last_received = datetime.datetime.now()
         self._connected = datetime.datetime.now()
@@ -294,7 +294,7 @@ class TelnetServer(tulip.protocols.Protocol):
 
         # enable 'fast edit' for remote line editing by sending 'wont echo'
         if self.fast_edit and self.stream.mode == 'remote':
-            self.log.debug('fast_edit enabled (remote editing, wont echo)')
+            self.log.info('fast_edit enabled (remote editing, wont echo)')
             self.stream.iac(WONT, ECHO)
 
         # log about connection
