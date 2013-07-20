@@ -21,9 +21,9 @@ TODO: example wunderground.com client
 telsh
 =====
 
-In adition to remote line editing as described below, a pure-python shell, 'telsh' is provided to allow toggling of telnet server option negotiation and setting and displaying of session parameters, such as encodings, tab auto-completion, variables, PS1 and PS2 multi-line prompt substitions, etc.
+In adition to remote line editing as described below, a pure-python shell, 'telsh' is provided to allow toggling of server options and session parameters. In this way, it provides a suitable interface for testing telnet client capabilities.
 
-It is only in the interest of this project to provide enough shell-like capabilities to demonstrate remote line editing and an extensible environment for session introspection. An example of this is assigning a new value to CHARSET, toggling in and outbinary, etc.
+It is only in the interest of this project to provide enough shell-like capabilities to demonstrate remote line editing and an extensible environment for session introspection. An example of this is assigning a new value to CHARSET, toggling in and outbinary, thereby enabling utf-8 input/output, etc.
 
 Telnet
 ======
@@ -32,26 +32,30 @@ The Telnet protocol is over 40 years old and still in use today. Telnet predates
 
 Naturally, Telnet as a code project inevitably must handle a wide variety of connecting clients and hosts, due to limitations of their networking Transports, Terminals, their drivers, and host operating systems. 
 
-This implementation aims to implement only those capabilities "found in the wild", and include, or chose not to include, mechanisms that are suitable only for legacy or vendor-implemented deviations. It even makes one of its own, wiring the 'encoding' to the value of replied by the CHARSET (rfc 2066).
+This implementation aims to implement only those capabilities "found in the wild", and includes, or does not include, mechanisms that are suitable only for legacy or vendor-implemented options. It even makes one of its own: the 'encoding' used in binary mode is the value replied by the CHARSET negotation (rfc 2066).
 
 UTF-8
 =====
 
-CHARSET (rfc 2066) specifies a codepage, not an encoding. It is unimplemented in bsd client, and generally found implemented only in recent MUD client and servers, and possibly some vendor implementations. Most common values are:
+CHARSET (rfc 2066) specifies a codepage, not an encoding. At the time, this more or less limited to the 127-255 range of an 8-bit codepage.
+
+It is unimplemented in bsd client, and generally found implemented only in recent MUD client and servers, and possibly some vendor implementations. Most common values are:
     ASCII
     UTF-8
     LATIN1
 
 The default preferred encoding for clients that negotiate BINARY but not CHARSET, such as the bsd client, is defined by the TelnetServer keyword argument ``default_encoding``, which is 'utf-8' by default.
 
+The 'telsh' shell allows changing encoding on the fly, by setting the 'CHARSET' session environment value at the command prompt.
+
 Setting binary for only a single direction (outbinary or inbinary) is supported, and client support of one does not immediately toggle the other, it must be negotiated both ways for full UTF-8 input and output.
 
 Remote Linemode
 ===============
 
-This project is the only known Server-side implementation of *Special Linemode Character* (SLC) negotiation and *Remote line editing* (rfc1184), other than berkeley telnet.
+This project is the only known Server-side implementation of *Special Linemode Character* (SLC) negotiation and *Remote line editing* (rfc1184), other than bsd telnet, which was used as a guide for the bulk of this python implementation.
 
-Remote line editing is a comprehensive approach to providing responsive, low-latency output of characters received over slow network links, allowing incomplete lines to be buffered, while still providing editing facilities remotely.
+Remote line editing is a comprehensive approach to providing responsive, low-latency output of characters received over slow network links, allowing incomplete lines to be buffered, while still providing editing facilities (such as backspace, kill line, etc.), remotely.
 
 The Server and Client agree on a series of Special Line Mode (SLC) function values, to agree on the keyboard characters used for Backspace, Interrupt Process (^C), Repaint (^R), Erase Word (^W), etc.
 
@@ -60,36 +64,34 @@ Kludge Mode
 
 In kludge mode, SLC characters are simulated for remote editing, provide an almost readline-like experience for all telnet clients, except those that perform only local editing, which are unaffected.
 
-The "magic" sequence *WILL-SGA, WILL-ECHO* enables Kludge mode for all Telnet
-clients that meet minimal RFC compliance. This is the most frequent client
-implementation (Windows 98 Telnet, SyncTerm, netrunner, TinTin++) used to
-provide remote line editing (characters are transmitted before CR), and most
-compatible with conanical (line-seperated) processing, while still providing
-remote line editing for dumb clients.
+The "magic" sequence sent by server, *WILL-SGA, WILL-ECHO* enables "kludge mode", a form of line mode editing that is compatible with all minimally implemented telnet clients. This is the most frequent implementation used by Windows 98 telnet, SyncTerm, netrunner, or TinTin++ to provide character-at-a-time editing.
 
-Consider that Kludge mode provies no way to determine which bytes, received at any indeterminate time, of any indeterminate length, or none at all, are received as the result of which input characters sent.
+Consider that kludge mode provies no way to determine which bytes, received at any indeterminate time, of any indeterminate length, or none at all, are received as the result of which input characters sent.
 
-Accordingly, with Supress Go-Ahead (SGA) enabled, there can be any indeterminable state of whether the remote program is hung, receiving, has replied but not yet received, or has received only partially and not completely the program's output. This has the effect of a poor user experience, as a user cannot know wether the input was legal, ignored, or not yet replied to, causing some frustration over high latency links. However, it is the most capable -- it is the *only* mode supported by many clients, such as SyncTerm or Windows 98 telnet.exe.
+Accordingly, with Supress Go-Ahead (SGA) enabled, there can be any indeterminable state: (1) the remote program is hung, (2) receiving and/or processing, (3) has responded with output but not yet received by transport, and (4) has received some, but not yet all output by transport.
 
+This is detrimental to a user experience with character-at-a-time processing, as a user cannot know wether the input was legal, ignored, or not yet replied to, causing some frustration over high latency links.
 
 Go-Ahead
 ========
 
-The IAC-GA signal would seemingly be of little use over today's bi-directional TCP protocol and virtual terminal emulators -- its original purpose was to coordinate transmission on half-duplex protocols and terminals. Only a few 1970-era hosts (AMES-67, UCLA-CON) require the GA signal. For this reason, this server takes the modern recommendation of supressing the GA signal *by default*. Those clients wishing to make use of the GA signal must send IAC-DONT-SGA.
+The IAC-GA signal would seemingly be of little use over today's bi-directional TCP protocol and virtual terminal emulators -- its original purpose was to coordinate transmission on half-duplex protocols and terminals.
 
-There are now many modern examples of using GA. The competition nethack server alt.nethack.org indicates to ai bots that it has received all screen updates and can now send input, for instance.
+Only a few 1970-era hosts (AMES-67, UCLA-CON) require the GA signal. For this reason, this server takes the modern recommendation of supressing the GA signal  (WILL-SGA) *by default*; those clients wishing to make use of the GA signal must explicitly request IAC-DONT-SGA to enable the GA signal.
+
+The GA signal has been re-implemented even for character-at-a-time servers, such as the competition nethack server alt.nethack.org, targeted at client scripts that play using AI decision-making routines.
 
 Local Linemode
 ==============
 
-Unless otherwise negotiatied, Telnet's default mode is half-duplex, local line editing. This most basic "dummy" mode are modeled after a Teletype 33, which runs in "half-duplex" mode.
+Unless otherwise negotiatied, the specification describes Telnet's default mode as half-duplex, local line editing. This most basic "dummy" mode is modeled after a Teletype 33, which runs in "half-duplex" mode.
 
-Telnet implmentations attached to 7-bit ASCII teletypes may implement the Telnet protocol by hardware or minimal changes to their terminal line drivers. Often without MMU and crude process control, an IAC interpreter or hardware device could be "interrupted" when the 8th bit is set high. "Out of band" in regards to 7-bit terminals, the receipt of \xff indicates that the following byte Is-a-command (IAC).
+A Telnet implmentation attached to 7-bit ASCII teletype may implement the Telnet protocol by hardware circuit, or by minimal changes to their terminal line drivers.
 
-A client that does not reply to any IAC commands is still a valid client: it just likely "dumb", and therefor in half-duplex, local linemode processing by default. This allowed a teletype to act as a Telnet client without any implementation or regard to telnet commands.
+Often, the connecting CPU is without MMU or process control. An IAC interpreter or hardware device could be "interrupted" when the 8th bit is set high. "Out of band" in regards to 7-bit terminals, the receipt of value 255 indicates that the byte following it *Is-a-command* (IAC).
 
-Default
--------
+Telnet Specification Default
+----------------------------
 
   * Each end transmits only 7-bit ASCII, (except as used in the interpreter).
 
@@ -101,20 +103,21 @@ Default
 "Synch" Mechanism
 =================
 
-NOT SUPPORTED.
+*NOT SUPPORTED*.
 
-A supervisor connecting a (7-bit) teletype to a telnet (8-bit) data line would simply pipe the streams together by the 7 bits; The teletypist may press 'BREAK' at any time to signal a control line: the supervisor then enters "Telnet Synch" mode by sending an "Urgent" mechanism, ceases printing data received on the transport.
+A supervisor connecting a (7-bit) teletype to a telnet (8-bit) data line would simply pipe the streams together by the 7 bits; The teletypist may press 'BREAK' at any time to signal a control line: the supervisor then enters "Telnet Synch" mode by sending an "Urgent" mechanism, and ceases printing data received on the transport.
 
-A user could then instruct "Abort Output", "Abourt Process", or other mechanisms and presumably return to normal processing.
+A user could then instruct "Abort Output" (AO), "Interrupt Process" (IP), or others, and then presumably return to normal processing.
 
 Consider the description of a PDP-10 session in rfc139 (May 1971), presented here as a faux naif unix session:
 
     1. Teletype sends command input,
-          find /usr -name 'telop.c'<send>
+
+          find /usr -name 'telop.c'<CR>
 
     2. Server begins output -- perhaps, after some minutes of pause,
        many rows of 'Permission Denied'. Meanwhile, the user has already
-       filled his teletype's input buffer, later deciding to abort the
+       filled his teletype's input buffer, and later deciding to abort the
        previous program:
           ed /usr/local/s^t/tel^t^c
 
@@ -287,10 +290,9 @@ Others
 
 It should be said, that as far as historical source code of note, BSD 2.11's telnet source of UCLA, or NSCA Telnet client of Univ. of IL for MacOS is most notable.
 
-There are a notable few modern Telnet Servers, many implementations are minimal, linemode only, or kludge mode only. Many modern Telnet Clients do not care to recognize latency in a modern network, and are kludge mode only. 
+There are a notable few modern Telnet servers, many implementations are minimal: local editing (simple linemode), or kludge mode only. Some modern Telnet clients support only kludge mode, with the exception of MUD clients, which are often linemode only. TinTin++ supports both modes.
 
-Twisted is the only other known asynchronous callback implementation of note, though it makes little distinction between protocol and stream, providing very few default handlers for intelligent negotiation, but instead would require overriding many bare IAC interpretation methods for many of the functions implemented in telnetlib3.
-
+Twisted is the only other known asynchronous callback implementation of note, though, provides few handlers for rich negotiation, instead requiring overriding and replacing the backend IAC interpretation methods entirely to support them.
 
 RFC 495
 -------
