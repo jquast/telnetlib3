@@ -376,7 +376,7 @@ class TelnetStream:
             return
         if not self.writing and self.xon_any and not self.is_oob:
             # any key after XOFF enables XON
-            self._slc_callback[slc.SLC_XON]()
+            self._slc_callback[slc.SLC_XON](byte)
 
     def write(self, data, oob=False):
         """ .. method:: feed_byte(byte : bytes)
