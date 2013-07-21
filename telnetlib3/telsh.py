@@ -17,6 +17,14 @@ class _EDIT():
     """
     (RP, EC, EW, EL, IP, AO, AYT, BRK, EOF, EOR, XON, XOFF, ABORT, SUSP, LNEXT
             ) = range(15)
+
+    def __init__(self):
+        self.constants = dict([(getattr(self, key), key)
+            for key in dir(self) if key.isupper()])
+
+    def name(self, const):
+        return self.constants.get(const, str(const))
+
 EDIT = _EDIT()
 
 SLC_EDIT_TRANSTABLE = dict((
@@ -241,7 +249,7 @@ class Telsh():
         self.multiline = False
 
         #: boolean toggle: write ASCII BELL on error?
-        self.send_bell = True
+        self.send_bell = False
 
         #: if set, last character received by ``character_received()``.
         self.last_char = None
