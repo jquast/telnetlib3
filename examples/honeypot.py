@@ -111,7 +111,7 @@ class TelnetHoneypotServer(TelnetServer):
         self.fast_edit = False
         TelnetServer.begin_negotiation(self)
 
-    def request_advanced_opts(self, ttype):
+    def request_advanced_opts(self):
         from telnetlib3 import telopt
         for opt in range(240):
             if bytes([opt]) not in (telopt.TM, telopt.LINEMODE):
@@ -129,7 +129,7 @@ class TelnetHoneypotServer(TelnetServer):
             if bytes([opt]) not in (telopt.LOGOUT, telopt.TM, telopt.LINEMODE):
                 self.stream.iac(telopt.WILL, bytes([opt]))
 
-        telnetlib3.server.TelnetServer.request_advanced_opts(self, ttype)
+        telnetlib3.server.TelnetServer.request_advanced_opts(self)
 
     def line_received(self, input, *args):
         self.log.debug('line_received: {!r}'.format(input))
