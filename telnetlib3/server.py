@@ -10,7 +10,6 @@ from telnetlib3 import tulip
 from telnetlib3.telsh import Telsh
 from telnetlib3.telopt import TelnetStream
 
-
 __all__ = ('TelnetServer',)
 
 class TelnetServer(tulip.protocols.Protocol):
@@ -54,6 +53,7 @@ class TelnetServer(tulip.protocols.Protocol):
         self._shell_factory = shell
         self._stream_factory = stream
         self._default_encoding = encoding
+
         #: session environment as S.env['key'], defaults empty string value
         self._client_env = collections.defaultdict(str, **self.default_env)
         self._client_host = tulip.Future()
@@ -378,7 +378,7 @@ class TelnetServer(tulip.protocols.Protocol):
         """ Process each byte as received by transport.
 
             Derived impl. should instead extend or override the
-            ``line_received()`` and ``char_received()`` methods.
+            shell stream methods ``feed_byte()`` and ``feed_slc()``.
         """
         self.log.debug('data_received: {!r}'.format(data))
         self._last_received = datetime.datetime.now()
