@@ -67,10 +67,10 @@ class TelnetServer(tulip.protocols.Protocol):
         #: toggled when transport is shutting down
         self._closing = False
 
-        #: datetime
+        #: datetime of last byte received
         self._last_received = None
 
-        #: datetime
+        #: datetime of connection made
         self._connected = None
 
         #: client performed ttype; probably human
@@ -529,9 +529,12 @@ class TelnetServer(tulip.protocols.Protocol):
     def after_server_getfqdn(self, arg):
         """ Callback receives result of server fqdn resolution,
         """
-        if self.env['HOSTNAME'] != arg.result():
-            self.env_update({'HOSTNAME': arg.result()})
-            self.log.debug('HOSTNAME is {}'.format(arg.result()))
+        if arg.cancelled():
+            self.log.debug('getfqdn cancelled')
+        else:
+            if self.env['HOSTNAME'] != arg.result():
+                self.env_update({'HOSTNAME': arg.result()})
+                self.log.debug('HOSTNAME is {}'.format(arg.result()))
 
     def __str__(self):
         """ XXX Returns string suitable for status of server session.
@@ -731,7 +734,6 @@ ARGS.add_argument(
     default='info', type=str, help='Loglevel (debug,info)')
 
 def main():
-    import logging
     import locale
     args = ARGS.parse_args()
     if ':' in args.host:
