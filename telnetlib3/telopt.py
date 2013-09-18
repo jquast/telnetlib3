@@ -236,11 +236,20 @@ class TelnetStream:
 
         self._ext_callback = {}
         for ext_cmd, key in (
-                (TTYPE, 'ttype'), (TSPEED, 'tspeed'), (XDISPLOC, 'xdisploc'),
-                (NEW_ENVIRON, 'env'), (NAWS, 'naws'), (LOGOUT, 'logout'),
-                (SNDLOC, 'sndloc'), (CHARSET, 'charset'), ):
+                (LOGOUT, 'logout'), (SNDLOC, 'sndloc'), (NAWS, 'naws'),
+                (TSPEED, 'tspeed'), (TTYPE, 'ttype'), (XDISPLOC, 'xdisploc'),
+                (NEW_ENVIRON, 'env'), (CHARSET, 'charset'),
+                ):
             self.set_ext_callback(ext_cmd,
                     getattr(self, 'handle_{}'.format(key)))
+
+        self._ext_send_callback = {}
+        for ext_cmd, key in (
+                (TTYPE, 'ttype'), (TSPEED, 'tspeed'), (XDISPLOC, 'xdisploc'),
+                (NEW_ENVIRON, 'env'), (NAWS, 'naws'), (SNDLOC, 'sndloc'),
+                (CHARSET, 'charset'), ):
+            self.set_ext_send_callback(ext_cmd,
+                    getattr(self, 'handle_send_{}'.format(key)))
 
     def __str__(self):
         """ XXX Returns string suitable for status of telnet stream.
@@ -416,7 +425,7 @@ class TelnetStream:
                 or cmd in short_iacs and opt is None), (
                         'Uknown IAC {}.'.format(name_command(cmd)))
         if opt == LINEMODE:
-            if cmd == DO and not self.is_server:
+            if cmd == DO and self.is_client:
                 raise ValueError('DO LINEMODE may only be sent by server.')
             if cmd == WILL and self.is_server:
                 raise ValueError('WILL LINEMODE may only be sent by client.')
@@ -842,21 +851,71 @@ class TelnetStream:
 
 # public Telnet extension callbacks
 #
-    def set_ext_callback(self, cmd, func):
-        """ Register ``func`` as callback for subnegotiation result of ``cmd``.
+    def set_ext_send_callback(self, cmd, func):
+        """ Register ``func`` as a callback for inquries of subnegotiation
+        response values of ``cmd``. These callbacks must return any number
+        of arguments:
 
-        cmd is one of: TTYPE, TSPEED, XDISPLOC, NEW_ENVIRON, NAWS, or CHARSET.
+          * SNDLOC: for clients, returing one argument: the string
+            describing client location, such as b'ROOM 641-A' (rfc 779).
 
-        These callbacks may receive a number of arguments.
+          * NAWS: for clients, returning two integer arguments (width,
+            height), such as (80, 24) (rfc 1073).
 
-        Callbacks for ``TTYPE``, ``XDISPLOC``, and ``CHARSET`` receive a
-        single argument as a string. ``NEW_ENVIRON`` receives a single
-        argument as dictionary. ``NAWS`` receives two integer arguments
-        (width, height), and ``TSPEED`` receives two integer arguments
-        (rx, tx).
+          * TSPEED: for clients, returning two integer arguments (rx, tx)
+            such as (57600, 57600) (rfc 1079).
+
+          * TTYPE: for clients, returning one string, usually the terminfo(5)
+            database capability name, such as 'xterm' (rfc 1091).
+
+          * XDISPLOC: for clients, returning one string, the DISPLAY host
+            value, in form of <host>:<dispnum>[.<screennum>] (rfc 1096).
+
+          * NEW_ENVIRON: for clients, returning a dictionary of (key, val)
+            pairs of environment item values (rfc 1408).
+
+          * CHARSET: for servers, receiving one string, the character set
+            negotiated by client (rfc 2066).
         """
-        assert cmd in (TTYPE, TSPEED, XDISPLOC,
-                NEW_ENVIRON, NAWS, LOGOUT, CHARSET, SNDLOC), cmd
+        assert cmd in (SNDLOC, NAWS, TSPEED,
+                TTYPE, XDISPLOC, NEW_ENVIRON, CHARSET), cmd
+        assert callable(func), ('Argument func must be callable')
+        self._ext_send_callback[cmd] = func
+
+    def set_ext_callback(self, cmd, func):
+        """ Register ``func`` as callback for receipt of ``cmd`` negotiation:
+
+          * LOGOUT: for servers and clients, receiving one argument. Server
+            end may receive DO or DONT as argument ``cmd``, indicating
+            client's wish to disconnect, or a response to WILL, LOGOUT,
+            indicating it's wish not to be automatically disconnected.
+            Client end may receive WILL or WONT, indicating server's wish
+            to disconnect, or acknowledgement that the client will not be
+            disconnected.
+
+          * SNDLOC: for servers, receiving one argument: the string
+            describing the client location, such as b'ROOM 641-A' (rfc 779).
+
+          * NAWS: for servers, receiving two integer arguments (width,
+            height), such as (80, 24) (rfc 1073).
+
+          * TSPEED: for servers, receiving two integer arguments (rx, tx)
+            such as (57600, 57600) (rfc 1079).
+
+          * TTYPE: for servers, receiving one string, usually the terminfo(5)
+            database capability name, such as 'xterm' (rfc 1091).
+
+          * XDISPLOC: for servers, receiving one string, the DISPLAY host
+            value, in form of <host>:<dispnum>[.<screennum>] (rfc 1096).
+
+          * NEW_ENVIRON: for servers, receiving a dictionary of (key, val)
+            pairs of remote client environment item values (rfc 1408).
+
+          * CHARSET: for servers, receiving one string, the character set
+            negotiated by client (rfc 2066).
+        """
+        assert cmd in (LOGOUT, SNDLOC, NAWS, TSPEED,
+                TTYPE, XDISPLOC, NEW_ENVIRON, CHARSET), cmd
         assert callable(func), ('Argument func must be callable')
         self._ext_callback[cmd] = func
 
@@ -866,10 +925,23 @@ class TelnetStream:
         #   xdisploc string format is '<host>:<dispnum>[.<screennum>]'.
         self.log.debug('X Display is {}'.format(xdisploc))
 
+    def handle_send_xdisploc(self):
+        """ XXX Send XDISPLAY value ``xdisploc``, rfc1096.
+        """
+        #   xdisploc string format is '<host>:<dispnum>[.<screennum>]'.
+        self.log.warn('X Display requested, returning empty response.')
+        return b''
+
     def handle_sndloc(self, location):
         """ XXX Receive LOCATION value ``location``, rfc779.
         """
         self.log.debug('Location is {}'.format(location))
+
+    def handle_send_sndloc(self):
+        """ XXX Send LOCATION value ``location``, rfc779.
+        """
+        self.log.warn('Location requested, returning empty response.')
+        return b''
 
     def handle_ttype(self, ttype):
         """ XXX Receive TTYPE value ``ttype``, rfc1091.
@@ -884,30 +956,58 @@ class TelnetStream:
         #       ANSITERM, ANSI, TTY, and 5250.
         self.log.debug('Terminal type is %r', ttype)
 
+    def handle_send_ttype(self):
+        """ XXX Send TTYPE value ``ttype``, rfc1091.
+        """
+        self.log.warn('Terminal type requested, returning empty response.')
+        return b''
+
     def handle_naws(self, width, height):
-        """ XXX Receive window size ``width`` and ``height``, rfc1073
+        """ XXX Receive window size ``width`` and ``height``, rfc1073.
         """
         self.log.debug('Terminal cols=%d, rows=%d', width, height)
+
+    def handle_send_naws(self):
+        """ XXX Send window size ``width`` and ``height``, rfc1073.
+        """
+        self.log.warn('Terminal type requested, returning 80x24.')
+        return 80, 24
 
     def handle_env(self, env):
         """ XXX Receive environment variables as dict, rfc1572.
         """
-        self.log.debug('env=%r', env)
+        self.log.debug('Environment values are %r', env)
+
+    def handle_send_env(self, keys=None):
+        """ XXX Send environment variables as dict, rfc1572.
+        If argument ``keys`` is None, then all available values should be
+        sent. Otherwise, ``keys`` is a set of environment keys explicitly
+        requested.
+        """
+        self.log.warn('Environment values requested, returning none.')
+        return dict()
 
     def handle_tspeed(self, rx, tx):
-        """ XXX Receive terminal speed from TSPEED as int, rfc1079
+        """ XXX Receive terminal speed from TSPEED as int, rfc1079.
         """
         self.log.debug('Terminal Speed rx:{}, tx:{}'.format(rx, tx))
 
-    def handle_location(self, location):
-        """ XXX Receive terminal location from SNDLOC as string, rfc779.
+    def handle_send_tspeed(self):
+        """ XXX Send terminal speed from TSPEED as int, rfc1079.
         """
-        self.log.debug('Terminal Location: {}'.format(location))
+        self.log.warn('Terminal Speed requested, returning 9600,9600.')
+        return 9600, 9600
 
     def handle_charset(self, charset):
-        """ XXX Receive character set from CHARSET as string, rfc2066
+        """ XXX Receive character set as string, rfc2066.
         """
         self.log.debug('Character set: {}'.format(charset))
+
+    def handle_send_charset(self, charsets):
+        """ XXX Send character set as string, rfc2066.
+        """
+        self.log.warn('Character Set requested, returning "ascii".')
+        return b'ascii'
 
     def handle_logout(self, cmd):
         """ XXX Handle (IAC, (DO | DONT | WILL | WONT), LOGOUT), RFC 727.
@@ -951,17 +1051,32 @@ class TelnetStream:
         # False for unsupported option, or an option invalid in that context,
         # such as LOGOUT.
         self.log.debug('handle_do(%s)' % (name_command(opt)))
-        if opt == ECHO and not self.is_server:
+        if opt == ECHO and self.is_client:
             self.log.warn('cannot recv DO ECHO on client end.')
         elif opt == LINEMODE and self.is_server:
             self.log.warn('cannot recv DO LINEMODE on server end.')
-        elif opt == LOGOUT and self.is_server:
-            self.log.warn('cannot recv DO LOGOUT on client end')
+        elif opt == LOGOUT and self.is_client:
+            self.log.warn('cannot recv DO LOGOUT on client end.')
+        elif opt == TTYPE and self.is_server:
+            self.log.warn('cannot recv DO TTYPE on server end.')
+        elif opt == NAWS and self.is_server:
+            self.log.warn('cannot recv DO NAWS on server end.')
+        elif opt == NEW_ENVIRON and self.is_server:
+            self.log.warn('cannot recv DO NEW_ENVIRON on server end.')
+        elif opt == XDISPLOC and self.is_server:
+            self.log.warn('cannot recv DO XDISPLOC on server end.')
         elif opt == TM:
+            # timing mark is special: simply by replying, the effect
+            # is accomplished ('will' or 'wont' is non-consequential):
+            # the distant end is able to "time" our response. More
+            # importantly, ensure that the IAC interpreter is, in fact,
+            # interpreting, and, that all iac commands up to this point
+            # have been processed.
             self.iac(WILL, TM)
         elif opt == LOGOUT:
             self._ext_callback[LOGOUT](DO)
-        elif opt in (ECHO, LINEMODE, BINARY, SGA, LFLOW, EOR):
+        elif opt in (ECHO, LINEMODE, BINARY, SGA, LFLOW, EOR,
+                TTYPE, NAWS, NEW_ENVIRON, XDISPLOC):
             if not self.local_option.enabled(opt):
                 self.iac(WILL, opt)
             return True
@@ -1018,7 +1133,7 @@ class TelnetStream:
         if opt in (BINARY, SGA, ECHO, NAWS, LINEMODE, EOR, SNDLOC):
             if opt == ECHO and self.is_server:
                 raise ValueError('cannot recv WILL ECHO on server end')
-            if opt in (NAWS, LINEMODE, SNDLOC) and not self.is_server:
+            if opt in (NAWS, LINEMODE, SNDLOC) and self.is_client:
                 raise ValueError('cannot recv WILL %s on client end' % (
                     name_command(opt),))
             if not self.remote_option.enabled(opt):
@@ -1035,14 +1150,14 @@ class TelnetStream:
             self.log.debug('recv WILL TIMING-MARK')
             self.remote_option[opt] = True
         elif opt == LOGOUT:
-            if opt == LOGOUT and not self.is_server:
+            if opt == LOGOUT and self.is_client:
                 raise ValueError('cannot recv WILL LOGOUT on server end')
             self._ext_callback[LOGOUT](WILL)
         elif opt == STATUS:
             self.remote_option[opt] = True
             self.request_status()
         elif opt == LFLOW:
-            if opt == LFLOW and not self.is_server:
+            if opt == LFLOW and self.is_client:
                 raise ValueError('WILL LFLOW not supported on client end')
             self.remote_option[opt] = True
             self.send_lineflow_mode()
@@ -1053,12 +1168,12 @@ class TelnetStream:
             self.remote_option[opt] = True
             self.request_charset()
         elif opt == XDISPLOC:
-            if opt == XDISPLOC and not self.is_server:
+            if opt == XDISPLOC and self.is_client:
                 raise ValueError('cannot recv WILL XDISPLOC on client end')
             self.remote_option[opt] = True
             self.request_xdisploc()
         elif opt == TTYPE:
-            if opt == TTYPE and not self.is_server:
+            if opt == TTYPE and self.is_client:
                 raise ValueError('cannot recv WILL TTYPE on client end')
             self.remote_option[opt] = True
             self.request_ttype()
@@ -1108,24 +1223,19 @@ class TelnetStream:
             equivalent methods. Implementors of additional SB options
             should extend this method.
         """
-        #   Changes to the default responses should replace the
-        #   default callbacks ``handle_ttype``, ``handle_xdisploc``,
-        #   ``handle_env``, and ``handle_naws``, by using
-        #   ``set_ext_callback(opt_byte, func)``.
-        #
         assert buf, ('SE: buffer empty')
         assert buf[0] != theNULL, ('SE: buffer is NUL')
         assert len(buf) > 1, ('SE: buffer too short: %r' % (buf,))
         cmd = buf[0]
-        if self.is_server:
-            assert cmd in (LINEMODE, LFLOW, NAWS, SNDLOC,
-                NEW_ENVIRON, TTYPE, TSPEED, XDISPLOC, STATUS, CHARSET
-                ), ('SB {}: not supported'.format(name_command(cmd)))
+        assert cmd in (LINEMODE, LFLOW, NAWS, SNDLOC,
+            NEW_ENVIRON, TTYPE, TSPEED, XDISPLOC, STATUS, CHARSET
+            ), ('SB {}: not supported'.format(name_command(cmd)))
         if self.pending_option.enabled(SB + cmd):
             self.pending_option[SB + cmd] = False
         else:
             self.log.debug('[SB + %s] unsolicited', name_command(cmd))
-        if cmd == LINEMODE: self._handle_sb_linemode(buf)
+        if cmd == LINEMODE:
+            self._handle_sb_linemode(buf)
         elif cmd == LFLOW:
             self._handle_sb_lflow(buf)
         elif cmd == NAWS:
@@ -1136,17 +1246,16 @@ class TelnetStream:
             self._handle_sb_env(buf)
         elif cmd == CHARSET:
             self._handle_sb_charset(buf)
-        elif (cmd, buf[1]) == (TTYPE, IS):
+        elif cmd == TTYPE: # XXX Mark IS
             self._handle_sb_ttype(buf)
-        elif (cmd, buf[1]) == (TSPEED, IS):
+        elif cmd == TSPEED:
             self._handle_sb_tspeed(buf)
-        elif (cmd, buf[1]) == (XDISPLOC, IS):
+        elif cmd == XDISPLOC:
             self._handle_sb_xdisploc(buf)
-        elif (cmd, buf[1]) == (STATUS, SEND):
-            self._send_status()
+        elif cmd == (STATUS, SEND):
+            self._handle_sb_status(buf)
         else:
             raise ValueError('SE: unhandled: %r' % (buf,))
-
 
 # Private sub-negotiation (SB) routines
 #
@@ -1171,49 +1280,103 @@ class TelnetStream:
         """ Callback handles IAC-SB-TSPEED-<buf>-SE.
         """
         assert buf.popleft() == TSPEED
-        assert buf.popleft() == IS
-        rx, tx = str(), str()
-        while len(buf):
-            value = buf.popleft()
-            if value == b',':
-                break
-            rx += value.decode('ascii')
-        while len(buf):
-            value = buf.popleft()
-            if value == b',':
-                break
-            tx += value.decode('ascii')
-        self.log.debug('sb_tspeed: %s, %s', rx, tx)
-        self._ext_callback[TSPEED](int(rx), int(tx))
+        cmd = buf.popleft()
+        assert cmd in (IS, SEND), cmd
+        if cmd == IS:
+            rx, tx = str(), str()
+            while len(buf):
+                value = buf.popleft()
+                if value == b',':
+                    break
+                rx += value.decode('ascii')
+            while len(buf):
+                value = buf.popleft()
+                if value == b',':
+                    break
+                tx += value.decode('ascii')
+            self.log.debug('sb_tspeed: %s, %s', rx, tx)
+            try:
+                rx, tx = int(rx), int(tx)
+            except ValueError as err:
+                self.log.error('illegal TSPEED values received '
+                    '(rx=%r, tx=%r: %s', rx, tx, err)
+                return
+            self._ext_callback[TSPEED](rx, tx)
+        elif cmd == SEND:
+            response = collections.deque()
+            response.extend([IAC, SB, TSPEED, IS])
+            rx, tx = self._ext_send_callback[TSPEED]()
+            response.extend('{}'.format(rx).encode('ascii'))
+            response.extend(b',')
+            response.extend('{}'.format(tx).encode('ascii'))
+            response.extend([IAC, SE])
+            self.log.debug('send: %r', response)
+            self.send_iac(b''.join(response))
+            if self.pending_option.enabled(WILL + TSPEED):
+                self.pending_option[WILL + TSPEED] = False
 
     def _handle_sb_xdisploc(self, buf):
         """ Callback handles IAC-SB-XIDISPLOC-<buf>-SE.
         """
         assert buf.popleft() == XDISPLOC
-        assert buf.popleft() == IS
-        xdisploc_str = b''.join(buf).decode('ascii')
-        self.log.debug('sb_xdisploc: %s', xdisploc_str)
-        self._ext_callback[XDISPLOC](xdisploc_str)
+        cmd = buf.popleft()
+        assert cmd in (IS, SEND), cmd
+        if cmd == IS:
+            xdisploc_str = b''.join(buf).decode('ascii')
+            self.log.debug('sb_xdisploc: %s', xdisploc_str)
+            self._ext_callback[XDISPLOC](xdisploc_str)
+        elif cmd == SEND:
+            response = collections.deque()
+            response.extend([IAC, SB, XDISPLOC, IS])
+            response.extend(self._ext_send_callback[XDISPLOC]())
+            response.extend([IAC, SE])
+            self.log.debug('send: %r', response)
+            self.send_iac(b''.join(response))
+            if self.pending_option.enabled(WILL + XDISPLOC):
+                self.pending_option[WILL + XDISPLOC] = False
 
     def _handle_sb_ttype(self, buf):
         """ Callback handles IAC-SB-TTYPE-<buf>-SE.
         """
         assert buf.popleft() == TTYPE
-        assert buf.popleft() == IS
-        ttype_str = b''.join(buf).decode('ascii')
-        self.log.debug('sb_ttype: %s', ttype_str)
-        self._ext_callback[TTYPE](ttype_str)
+        cmd = buf.popleft()
+        assert cmd in (IS, SEND), cmd
+        if cmd == IS:
+            ttype_str = b''.join(buf).decode('ascii')
+            self.log.debug('sb_ttype: %s', ttype_str)
+            self._ext_callback[TTYPE](ttype_str)
+        elif cmd == SEND:
+            response = collections.deque()
+            response.extend([IAC, SB, TTYPE, IS])
+            response.extend(self._ext_send_callback[TTYPE]())
+            response.extend([IAC, SE])
+            self.log.debug('send: %r', response)
+            self.send_iac(b''.join(response))
+            if self.pending_option.enabled(WILL + TTYPE):
+                self.pending_option[WILL + TTYPE] = False
 
     def _handle_sb_env(self, buf):
-        """ Callback handles IAC-SB-NEWENVIRON-<buf>-SE (rfc1073).
+        """ Callback handles IAC-SB-NEW_ENVIRON-<buf>-SE (rfc1073).
         """
-        assert len(buf) > 1, ('SE: buffer too short: %r' % (buf,))
         kind = buf.popleft()
         opt = buf.popleft()
         assert opt in (IS, INFO, SEND), opt
         assert kind == NEW_ENVIRON
         if opt == SEND:
             raise NotImplementedError # client
+            assert self.is_client, (
+                    'SE: cannot recv SB NEW_ENVIRON SEND from client')
+            response = collections.deque()
+            response.extend([IAC, SB, NEW_ENVIRON, IS])
+            for key, value in self._ext_send_callback[NEW_ENVIRON]():
+                pass # TODO
+#                response.extend([IAC, SE])
+            response.extend([IAC, SE])
+            self.log.debug('send: %r', response)
+            self.send_iac(b''.join(response))
+            if self.pending_option.enabled(WILL + TTYPE):
+                self.pending_option[WILL + TTYPE] = False
+
         if opt in (IS, INFO):
             assert self.is_server, ('SE: cannot recv from server: %s %s' % (
                 name_command(kind), 'IS' if opt == IS else 'INFO',))
@@ -1249,7 +1412,6 @@ class TelnetStream:
         location_str = b''.join(buf).decode('ascii')
         self._ext_callback[SNDLOC](location_str)
 
-
     def _handle_sb_naws(self, buf):
         """ Fire callback for IAC-SB-NAWS-<buf>-SE (rfc1073).
         """
@@ -1266,6 +1428,16 @@ class TelnetStream:
         assert self.local_option.enabled(LFLOW), (
             'received IAC SB LFLOW wihout IAC DO LFLOW')
         raise NotImplementedError
+
+    def _handle_sb_status(self, buf):
+        """ Fire callback for IAC-SB-STATUS-<buf>
+        """
+        assert buf.popleft() == STATUS
+        cmd = buf.popleft()
+        if cmd == SEND:
+            self._send_status()
+        elif cmd == IS:
+            raise NotImplemented
 
     def _send_status(self):
         """ Fire callback for IAC-SB-STATUS-SEND (rfc859).
@@ -1366,7 +1538,7 @@ class TelnetStream:
         for func in range(slc.NSLC + 1):
             if self.slctab[bytes([func])].nosupport:
                 continue
-            if func is 0 and not self.is_server:
+            if func is 0 and self.is_client:
                 # only the server may send an octet with the first
                 # byte (func) set as 0 (SLC_NOSUPPORT).
                 continue
