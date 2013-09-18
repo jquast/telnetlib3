@@ -1,7 +1,7 @@
 """A Future class similar to the one in PEP 3148."""
 
 __all__ = ['CancelledError', 'TimeoutError',
-           'InvalidStateError', 'InvalidTimeoutError',
+           'InvalidStateError',
            'Future', 'wrap_future',
            ]
 
@@ -28,11 +28,6 @@ STACK_DEBUG = logging.DEBUG - 1  # heavy-duty debugging
 class InvalidStateError(Error):
     """The operation is not allowed in this state."""
     # TODO: Show the future, its state, the method, and the required state.
-
-
-class InvalidTimeoutError(Error):
-    """Called result() or exception() with timeout != 0."""
-    # TODO: Print a nice error message.
 
 
 class _TracebackLogger:
@@ -129,15 +124,13 @@ class Future:
     _state = _PENDING
     _result = None
     _exception = None
-    _timeout = None
-    _timeout_handle = None
     _loop = None
 
     _blocking = False  # proper use of future (yield vs yield from)
 
     _tb_logger = None
 
-    def __init__(self, *, loop=None, timeout=None):
+    def __init__(self, *, loop=None):
         """Initialize the future.
 
         The optional event_loop argument allows to explicitly set the event
@@ -149,10 +142,6 @@ class Future:
         else:
             self._loop = loop
         self._callbacks = []
-
-        if timeout is not None:
-            self._timeout = timeout
-            self._timeout_handle = self._loop.call_later(timeout, self.cancel)
 
     def __repr__(self):
         res = self.__class__.__name__
@@ -192,11 +181,6 @@ class Future:
         The callbacks are scheduled to be called as soon as possible. Also
         clears the callback list.
         """
-        # Cancel timeout handle
-        if self._timeout_handle is not None:
-            self._timeout_handle.cancel()
-            self._timeout_handle = None
-
         callbacks = self._callbacks[:]
         if not callbacks:
             return
@@ -209,13 +193,7 @@ class Future:
         """Return True if the future was cancelled."""
         return self._state == _CANCELLED
 
-    def running(self):
-        """Always return False.
-
-        This method is for compatibility with concurrent.futures; we don't
-        have a running state.
-        """
-        return False  # We don't have a running state.
+    # Don't implement running(); see http://bugs.python.org/issue18699
 
     def done(self):
         """Return True if the future is done.
@@ -225,20 +203,17 @@ class Future:
         """
         return self._state != _PENDING
 
-    def result(self, timeout=0):
+    def result(self):
         """Return the result this future represents.
 
         If the future has been cancelled, raises CancelledError.  If the
         future's result isn't yet available, raises InvalidStateError.  If
         the future is done and has an exception set, this exception is raised.
-        Timeout values other than 0 are not supported.
         """
-        if timeout != 0:
-            raise InvalidTimeoutError
         if self._state == _CANCELLED:
             raise CancelledError
         if self._state != _FINISHED:
-            raise InvalidStateError
+            raise InvalidStateError('Result is not ready.')
         if self._tb_logger is not None:
             self._tb_logger.clear()
             self._tb_logger = None
@@ -246,20 +221,18 @@ class Future:
             raise self._exception
         return self._result
 
-    def exception(self, timeout=0):
+    def exception(self):
         """Return the exception that was set on this future.
 
         The exception (or None if no exception was set) is returned only if
         the future is done.  If the future has been cancelled, raises
         CancelledError.  If the future isn't done yet, raises
-        InvalidStateError.  Timeout values other than 0 are not supported.
+        InvalidStateError.
         """
-        if timeout != 0:
-            raise InvalidTimeoutError
         if self._state == _CANCELLED:
             raise CancelledError
         if self._state != _FINISHED:
-            raise InvalidStateError
+            raise InvalidStateError('Exception is not set.')
         if self._tb_logger is not None:
             self._tb_logger.clear()
             self._tb_logger = None
@@ -299,19 +272,19 @@ class Future:
         InvalidStateError.
         """
         if self._state != _PENDING:
-            raise InvalidStateError
+            raise InvalidStateError('{}: {!r}'.format(self._state, self))
         self._result = result
         self._state = _FINISHED
         self._schedule_callbacks()
 
     def set_exception(self, exception):
-        """ Mark the future done and set an exception.
+        """Mark the future done and set an exception.
 
         If the future is already done when this method is called, raises
         InvalidStateError.
         """
         if self._state != _PENDING:
-            raise InvalidStateError
+            raise InvalidStateError('{}: {!r}'.format(self._state, self))
         self._exception = exception
         self._tb_logger = _TracebackLogger(exception)
         self._state = _FINISHED

@@ -1,17 +1,79 @@
 """Stream-related things."""
 
-__all__ = ['StreamReader']
+__all__ = ['StreamReader', 'StreamReaderProtocol', 'open_connection']
 
 import collections
 
+from . import events
 from . import futures
+from . import protocols
 from . import tasks
+
+
+_DEFAULT_LIMIT = 2**16
+
+
+@tasks.coroutine
+def open_connection(host=None, port=None, *,
+                    loop=None, limit=_DEFAULT_LIMIT, **kwds):
+    """A wrapper for create_connection() returning a (reader, writer) pair.
+
+    The reader returned is a StreamReader instance; the writer is a
+    Transport.
+
+    The arguments are all the usual arguments to create_connection()
+    except protocol_factory; most common are positional host and port,
+    with various optional keyword arguments following.
+
+    Additional optional keyword arguments are loop (to set the event loop
+    instance to use) and limit (to set the buffer limit passed to the
+    StreamReader).
+
+    (If you want to customize the StreamReader and/or
+    StreamReaderProtocol classes, just copy the code -- there's
+    really nothing special here except some convenience.)
+    """
+    if loop is None:
+        loop = events.get_event_loop()
+    reader = StreamReader(limit=limit, loop=loop)
+    protocol = StreamReaderProtocol(reader)
+    transport, _ = yield from loop.create_connection(
+        lambda: protocol, host, port, **kwds)
+    return reader, transport  # (reader, writer)
+
+
+class StreamReaderProtocol(protocols.Protocol):
+    """Trivial helper class to adapt between Protocol and StreamReader.
+
+    (This is a helper class instead of making StreamReader itself a
+    Protocol subclass, because the StreamReader has other potential
+    uses, and to prevent the user of the StreamReader to accidentally
+    call inappropriate methods of the protocol.)
+    """
+
+    def __init__(self, stream_reader):
+        self.stream_reader = stream_reader
+
+    def connection_lost(self, exc):
+        if exc is None:
+            self.stream_reader.feed_eof()
+        else:
+            self.stream_reader.set_exception(exc)
+
+    def data_received(self, data):
+        self.stream_reader.feed_data(data)
+
+    def eof_received(self):
+        self.stream_reader.feed_eof()
 
 
 class StreamReader:
 
-    def __init__(self, limit=2**16):
+    def __init__(self, limit=_DEFAULT_LIMIT, loop=None):
         self.limit = limit  # Max line length.  (Security feature.)
+        if loop is None:
+            loop = events.get_event_loop()
+        self.loop = loop
         self.buffer = collections.deque()  # Deque of bytes objects.
         self.byte_count = 0  # Bytes in buffer.
         self.eof = False  # Whether we're done.
@@ -34,7 +96,8 @@ class StreamReader:
         waiter = self.waiter
         if waiter is not None:
             self.waiter = None
-            waiter.set_result(True)
+            if not waiter.done():
+                waiter.set_result(True)
 
     def feed_data(self, data):
         if not data:
@@ -46,7 +109,8 @@ class StreamReader:
         waiter = self.waiter
         if waiter is not None:
             self.waiter = None
-            waiter.set_result(False)
+            if not waiter.done():
+                waiter.set_result(False)
 
     @tasks.coroutine
     def readline(self):
@@ -82,7 +146,7 @@ class StreamReader:
 
             if not_enough:
                 assert self.waiter is None
-                self.waiter = futures.Future()
+                self.waiter = futures.Future(loop=self.loop)
                 yield from self.waiter
 
         line = b''.join(parts)
@@ -101,12 +165,12 @@ class StreamReader:
         if n < 0:
             while not self.eof:
                 assert not self.waiter
-                self.waiter = futures.Future()
+                self.waiter = futures.Future(loop=self.loop)
                 yield from self.waiter
         else:
             if not self.byte_count and not self.eof:
                 assert not self.waiter
-                self.waiter = futures.Future()
+                self.waiter = futures.Future(loop=self.loop)
                 yield from self.waiter
 
         if n < 0 or self.byte_count <= n:
@@ -141,7 +205,7 @@ class StreamReader:
 
         while self.byte_count < n and not self.eof:
             assert not self.waiter
-            self.waiter = futures.Future()
+            self.waiter = futures.Future(loop=self.loop)
             yield from self.waiter
 
         return (yield from self.read(n))

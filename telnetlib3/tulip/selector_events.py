@@ -20,19 +20,6 @@ from . import transports
 from .log import tulip_log
 
 
-# Errno values indicating the connection was disconnected.
-# Comment out _DISCONNECTED as never used
-# TODO: make sure that errors has processed properly
-# for now we have no exception clsses for ENOTCONN and EBADF
-# _DISCONNECTED = frozenset((errno.ECONNRESET,
-#                            errno.ENOTCONN,
-#                            errno.ESHUTDOWN,
-#                            errno.ECONNABORTED,
-#                            errno.EPIPE,
-#                            errno.EBADF,
-#                            ))
-
-
 class BaseSelectorEventLoop(base_events.BaseEventLoop):
     """Selector event loop.
 
@@ -129,11 +116,12 @@ class BaseSelectorEventLoop(base_events.BaseEventLoop):
         """Add a reader callback."""
         handle = events.make_handle(callback, args)
         try:
-            mask, (reader, writer) = self._selector.get_info(fd)
+            key = self._selector.get_key(fd)
         except KeyError:
             self._selector.register(fd, selectors.EVENT_READ,
                                     (handle, None))
         else:
+            mask, (reader, writer) = key.events, key.data
             self._selector.modify(fd, mask | selectors.EVENT_READ,
                                   (handle, writer))
             if reader is not None:
@@ -142,10 +130,11 @@ class BaseSelectorEventLoop(base_events.BaseEventLoop):
     def remove_reader(self, fd):
         """Remove a reader callback."""
         try:
-            mask, (reader, writer) = self._selector.get_info(fd)
+            key = self._selector.get_key(fd)
         except KeyError:
             return False
         else:
+            mask, (reader, writer) = key.events, key.data
             mask &= ~selectors.EVENT_READ
             if not mask:
                 self._selector.unregister(fd)
@@ -162,11 +151,12 @@ class BaseSelectorEventLoop(base_events.BaseEventLoop):
         """Add a writer callback.."""
         handle = events.make_handle(callback, args)
         try:
-            mask, (reader, writer) = self._selector.get_info(fd)
+            key = self._selector.get_key(fd)
         except KeyError:
             self._selector.register(fd, selectors.EVENT_WRITE,
                                     (None, handle))
         else:
+            mask, (reader, writer) = key.events, key.data
             self._selector.modify(fd, mask | selectors.EVENT_WRITE,
                                   (reader, handle))
             if writer is not None:
@@ -175,10 +165,11 @@ class BaseSelectorEventLoop(base_events.BaseEventLoop):
     def remove_writer(self, fd):
         """Remove a writer callback."""
         try:
-            mask, (reader, writer) = self._selector.get_info(fd)
+            key = self._selector.get_key(fd)
         except KeyError:
             return False
         else:
+            mask, (reader, writer) = key.events, key.data
             # Remove both writer and connector.
             mask &= ~selectors.EVENT_WRITE
             if not mask:
@@ -194,7 +185,7 @@ class BaseSelectorEventLoop(base_events.BaseEventLoop):
 
     def sock_recv(self, sock, n):
         """XXX"""
-        fut = futures.Future()
+        fut = futures.Future(loop=self)
         self._sock_recv(fut, False, sock, n)
         return fut
 
@@ -210,15 +201,16 @@ class BaseSelectorEventLoop(base_events.BaseEventLoop):
             return
         try:
             data = sock.recv(n)
-            fut.set_result(data)
         except (BlockingIOError, InterruptedError):
             self.add_reader(fd, self._sock_recv, fut, True, sock, n)
         except Exception as exc:
             fut.set_exception(exc)
+        else:
+            fut.set_result(data)
 
     def sock_sendall(self, sock, data):
         """XXX"""
-        fut = futures.Future()
+        fut = futures.Future(loop=self)
         if data:
             self._sock_sendall(fut, False, sock, data)
         else:
@@ -254,7 +246,7 @@ class BaseSelectorEventLoop(base_events.BaseEventLoop):
         # self.getaddrinfo() for you here.  But verifying this is
         # complicated; the socket module doesn't have a pattern for
         # IPv6 addresses (there are too many forms, apparently).
-        fut = futures.Future()
+        fut = futures.Future(loop=self)
         self._sock_connect(fut, False, sock, address)
         return fut
 
@@ -279,16 +271,17 @@ class BaseSelectorEventLoop(base_events.BaseEventLoop):
                 err = sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
                 if err != 0:
                     # Jump to the except clause below.
-                    raise socket.error(err, 'Connect call failed')
-            fut.set_result(None)
+                    raise OSError(err, 'Connect call failed')
         except (BlockingIOError, InterruptedError):
             self.add_writer(fd, self._sock_connect, fut, True, sock, address)
         except Exception as exc:
             fut.set_exception(exc)
+        else:
+            fut.set_result(None)
 
     def sock_accept(self, sock):
         """XXX"""
-        fut = futures.Future()
+        fut = futures.Future(loop=self)
         self._sock_accept(fut, False, sock)
         return fut
 
@@ -301,14 +294,16 @@ class BaseSelectorEventLoop(base_events.BaseEventLoop):
         try:
             conn, address = sock.accept()
             conn.setblocking(False)
-            fut.set_result((conn, address))
         except (BlockingIOError, InterruptedError):
             self.add_reader(fd, self._sock_accept, fut, True, sock)
         except Exception as exc:
             fut.set_exception(exc)
+        else:
+            fut.set_result((conn, address))
 
     def _process_events(self, event_list):
-        for fileobj, mask, (reader, writer) in event_list:
+        for key, mask in event_list:
+            fileobj, (reader, writer) = key.fileobj, key.data
             if mask & selectors.EVENT_READ and reader is not None:
                 if reader._cancelled:
                     self.remove_reader(fileobj)
@@ -372,6 +367,8 @@ class _SelectorTransport(transports.Transport):
         finally:
             self._sock.close()
             self._sock = None
+            self._protocol = None
+            self._loop = None
 
 
 class _SelectorSocketTransport(_SelectorTransport):
@@ -419,7 +416,7 @@ class _SelectorSocketTransport(_SelectorTransport):
                 n = self._sock.send(data)
             except (BlockingIOError, InterruptedError):
                 n = 0
-            except socket.error as exc:
+            except OSError as exc:
                 self._fatal_error(exc)
                 return
 

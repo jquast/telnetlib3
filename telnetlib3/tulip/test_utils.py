@@ -1,6 +1,7 @@
 """Utilities shared by tests."""
 
 import cgi
+import collections
 import contextlib
 import gc
 import email.parser
@@ -8,12 +9,15 @@ import http.server
 import json
 import logging
 import io
+import unittest.mock
 import os
 import re
 import socket
 import sys
 import threading
 import traceback
+import unittest
+import unittest.mock
 import urllib.parse
 try:
     import ssl
@@ -23,6 +27,11 @@ except ImportError:  # pragma: no cover
 import tulip
 import tulip.http
 from tulip.http import client
+from tulip import base_events
+from tulip import events
+
+from tulip import base_events
+from tulip import selectors
 
 
 if sys.platform == 'win32':  # pragma: no cover
@@ -32,10 +41,11 @@ else:
 
 
 def run_briefly(loop):
-    @tulip.task
+    @tulip.coroutine
     def once():
         pass
-    loop.run_until_complete(once())
+    t = tulip.Task(once(), loop=loop)
+    loop.run_until_complete(t)
 
 
 def run_once(loop):
@@ -88,10 +98,11 @@ def run_test_server(loop, *, host='127.0.0.1', port=0,
 
             if router is not None:
                 body = bytearray()
-                chunk = yield from payload.read()
-                while chunk:
-                    body.extend(chunk)
-                    chunk = yield from payload.read()
+                try:
+                    while True:
+                        body.extend((yield from payload.read()))
+                except tulip.EofStream:
+                    pass
 
                 rob = router(
                     self, properties,
@@ -127,26 +138,30 @@ def run_test_server(loop, *, host='127.0.0.1', port=0,
                 lambda: TestHttpServer(keep_alive=0.5),
                 host, port, ssl=sslcontext))
 
-        waiter = tulip.Future()
+        waiter = tulip.Future(loop=thread_loop)
         loop.call_soon_threadsafe(
             fut.set_result, (thread_loop, waiter, socks[0].getsockname()))
 
-        thread_loop.run_until_complete(waiter)
+        try:
+            thread_loop.run_until_complete(waiter)
+        finally:
+            # call pending connection_made if present
+            run_briefly(thread_loop)
 
-        # close opened trnsports
-        for tr in transports:
-            tr.close()
+            # close opened trnsports
+            for tr in transports:
+                tr.close()
 
-        run_briefly(thread_loop)  # call close callbacks
+            run_briefly(thread_loop)  # call close callbacks
 
-        for s in socks:
-            thread_loop.stop_serving(s)
+            for s in socks:
+                thread_loop.stop_serving(s)
 
-        thread_loop.stop()
-        thread_loop.close()
-        gc.collect()
+            thread_loop.stop()
+            thread_loop.close()
+            gc.collect()
 
-    fut = tulip.Future()
+    fut = tulip.Future(loop=loop)
     server_thread = threading.Thread(target=run, args=(loop, fut))
     server_thread.start()
 
@@ -295,3 +310,135 @@ class Router:
         # keep-alive
         if response.keep_alive():
             self._srv.keep_alive(True)
+
+
+def make_test_protocol(base):
+    dct = {}
+    for name in dir(base):
+        if name.startswith('__') and name.endswith('__'):
+            # skip magic names
+            continue
+        dct[name] = unittest.mock.Mock(return_value=None)
+    return type('TestProtocol', (base,) + base.__bases__, dct)()
+
+
+class TestSelector(selectors.BaseSelector):
+
+    def select(self, timeout):
+        return []
+
+
+class TestLoop(base_events.BaseEventLoop):
+    """Loop for unittests.
+
+    It manages self time directly.
+    If something scheduled to be executed later then
+    on next loop iteration after all ready handlers done
+    generator passed to __init__ is calling.
+
+    Generator should be like this:
+
+        def gen():
+            ...
+            when = yield ...
+            ... = yield time_advance
+
+    Value retuned by yield is absolute time of next scheduled handler.
+    Value passed to yield is time advance to move loop's time forward.
+    """
+
+    def __init__(self, gen=None):
+        super().__init__()
+
+        if gen is None:
+            self._check_on_close = False
+            def gen():
+                yield
+        else:
+            self._check_on_close = True
+
+        self._gen = gen()
+        next(self._gen)
+        self._time = 0
+        self._timers = []
+        self._selector = TestSelector()
+
+        self.readers = {}
+        self.writers = {}
+        self.reset_counters()
+
+    def time(self):
+        return self._time
+
+    def advance_time(self, advance):
+        """Move test time forward."""
+        if advance:
+            self._time += advance
+
+    def close(self):
+        if self._check_on_close:
+            try:
+                self._gen.send(0)
+            except StopIteration:
+                pass
+            else:  # pragma: no cover
+                raise AssertionError("Time generator is not finished")
+
+    def add_reader(self, fd, callback, *args):
+        self.readers[fd] = events.make_handle(callback, args)
+
+    def remove_reader(self, fd):
+        self.remove_reader_count[fd] += 1
+        if fd in self.readers:
+            del self.readers[fd]
+            return True
+        else:
+            return False
+
+    def assert_reader(self, fd, callback, *args):
+        assert fd in self.readers, 'fd {} is not registered'.format(fd)
+        handle = self.readers[fd]
+        assert handle._callback == callback, '{!r} != {!r}'.format(
+            handle._callback, callback)
+        assert handle._args == args, '{!r} != {!r}'.format(
+            handle._args, args)
+
+    def add_writer(self, fd, callback, *args):
+        self.writers[fd] = events.make_handle(callback, args)
+
+    def remove_writer(self, fd):
+        self.remove_writer_count[fd] += 1
+        if fd in self.writers:
+            del self.writers[fd]
+            return True
+        else:
+            return False
+
+    def assert_writer(self, fd, callback, *args):
+        assert fd in self.writers, 'fd {} is not registered'.format(fd)
+        handle = self.writers[fd]
+        assert handle._callback == callback, '{!r} != {!r}'.format(
+            handle._callback, callback)
+        assert handle._args == args, '{!r} != {!r}'.format(
+            handle._args, args)
+
+    def reset_counters(self):
+        self.remove_reader_count = collections.defaultdict(int)
+        self.remove_writer_count = collections.defaultdict(int)
+
+    def _run_once(self):
+        super()._run_once()
+        for when in self._timers:
+            advance = self._gen.send(when)
+            self.advance_time(advance)
+        self._timers = []
+
+    def call_at(self, when, callback, *args):
+        self._timers.append(when)
+        return super().call_at(when, callback, *args)
+
+    def _process_events(self, event_list):
+        return
+
+    def _write_to_self(self):
+        pass

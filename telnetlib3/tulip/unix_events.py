@@ -1,19 +1,22 @@
 """Selector eventloop for Unix with signal handling."""
 
+import collections
 import errno
 import fcntl
+import functools
 import os
+import signal
 import socket
+import stat
+import subprocess
 import sys
 
-try:
-    import signal
-except ImportError:  # pragma: no cover
-    signal = None
 
 from . import constants
 from . import events
+from . import protocols
 from . import selector_events
+from . import tasks
 from . import transports
 from .log import tulip_log
 
@@ -34,9 +37,16 @@ class SelectorEventLoop(selector_events.BaseSelectorEventLoop):
     def __init__(self, selector=None):
         super().__init__(selector)
         self._signal_handlers = {}
+        self._subprocesses = {}
 
     def _socketpair(self):
         return socket.socketpair()
+
+    def close(self):
+        handler = self._signal_handlers.get(signal.SIGCHLD)
+        if handler is not None:
+            self.remove_signal_handler(signal.SIGCHLD)
+        super().close()
 
     def add_signal_handler(self, sig, callback, *args):
         """Add a handler for a signal.  UNIX only.
@@ -123,9 +133,6 @@ class SelectorEventLoop(selector_events.BaseSelectorEventLoop):
         if not isinstance(sig, int):
             raise TypeError('sig must be an int, not {!r}'.format(sig))
 
-        if signal is None:
-            raise RuntimeError('Signals are not supported')
-
         if not (1 <= sig < signal.NSIG):
             raise ValueError(
                 'sig {} out of range(1, {})'.format(sig, signal.NSIG))
@@ -138,6 +145,51 @@ class SelectorEventLoop(selector_events.BaseSelectorEventLoop):
                                    extra=None):
         return _UnixWritePipeTransport(self, pipe, protocol, waiter, extra)
 
+    @tasks.coroutine
+    def _make_subprocess_transport(self, protocol, args, shell,
+                                   stdin, stdout, stderr, bufsize,
+                                   extra=None, **kwargs):
+        self._reg_sigchld()
+        transp = _UnixSubprocessTransport(self, protocol, args, shell,
+                                          stdin, stdout, stderr, bufsize,
+                                          extra=None, **kwargs)
+        self._subprocesses[transp.get_pid()] = transp
+        yield from transp._post_init()
+        return transp
+
+    def _reg_sigchld(self):
+        if signal.SIGCHLD not in self._signal_handlers:
+            self.add_signal_handler(signal.SIGCHLD, self._sig_chld)
+
+    def _sig_chld(self):
+        try:
+            while True:
+                try:
+                    pid, status = os.waitpid(0, os.WNOHANG)
+                except ChildProcessError:
+                    break
+                if pid == 0:
+                    continue
+                elif os.WIFSIGNALED(status):
+                    returncode = -os.WTERMSIG(status)
+                elif os.WIFEXITED(status):
+                    returncode = os.WEXITSTATUS(status)
+                else:
+                    # covered by
+                    # SelectorEventLoopTests.test__sig_chld_unknown_status
+                    # from tests/unix_events_test.py
+                    # bug in coverage.py version 3.6 ???
+                    continue  # pragma: no cover
+                transp = self._subprocesses.get(pid)
+                if transp is not None:
+                    transp._process_exited(returncode)
+        except Exception:
+            tulip_log.exception('Unknown exception in SIGCHLD handler')
+
+    def _subprocess_closed(self, transport):
+        pid = transport.get_pid()
+        self._subprocesses.pop(pid, None)
+
 
 def _set_nonblocking(fd):
     flags = fcntl.fcntl(fd, fcntl.F_GETFL)
@@ -149,19 +201,19 @@ class _UnixReadPipeTransport(transports.ReadTransport):
 
     max_size = 256 * 1024  # max bytes we read in one eventloop iteration
 
-    def __init__(self, event_loop, pipe, protocol, waiter=None, extra=None):
+    def __init__(self, loop, pipe, protocol, waiter=None, extra=None):
         super().__init__(extra)
         self._extra['pipe'] = pipe
-        self._event_loop = event_loop
+        self._loop = loop
         self._pipe = pipe
         self._fileno = pipe.fileno()
         _set_nonblocking(self._fileno)
         self._protocol = protocol
         self._closing = False
-        self._event_loop.add_reader(self._fileno, self._read_ready)
-        self._event_loop.call_soon(self._protocol.connection_made, self)
+        self._loop.add_reader(self._fileno, self._read_ready)
+        self._loop.call_soon(self._protocol.connection_made, self)
         if waiter is not None:
-            self._event_loop.call_soon(waiter.set_result, None)
+            self._loop.call_soon(waiter.set_result, None)
 
     def _read_ready(self):
         try:
@@ -174,14 +226,16 @@ class _UnixReadPipeTransport(transports.ReadTransport):
             if data:
                 self._protocol.data_received(data)
             else:
-                self._event_loop.remove_reader(self._fileno)
-                self._protocol.eof_received()
+                self._closing = True
+                self._loop.remove_reader(self._fileno)
+                self._loop.call_soon(self._protocol.eof_received)
+                self._loop.call_soon(self._call_connection_lost, None)
 
     def pause(self):
-        self._event_loop.remove_reader(self._fileno)
+        self._loop.remove_reader(self._fileno)
 
     def resume(self):
-        self._event_loop.add_reader(self._fileno, self._read_ready)
+        self._loop.add_reader(self._fileno, self._read_ready)
 
     def close(self):
         if not self._closing:
@@ -194,32 +248,45 @@ class _UnixReadPipeTransport(transports.ReadTransport):
 
     def _close(self, exc):
         self._closing = True
-        self._event_loop.remove_reader(self._fileno)
-        self._event_loop.call_soon(self._call_connection_lost, exc)
+        self._loop.remove_reader(self._fileno)
+        self._loop.call_soon(self._call_connection_lost, exc)
 
     def _call_connection_lost(self, exc):
         try:
             self._protocol.connection_lost(exc)
         finally:
             self._pipe.close()
+            self._pipe = None
+            self._protocol = None
+            self._loop = None
 
 
 class _UnixWritePipeTransport(transports.WriteTransport):
 
-    def __init__(self, event_loop, pipe, protocol, waiter=None, extra=None):
+    def __init__(self, loop, pipe, protocol, waiter=None, extra=None):
         super().__init__(extra)
         self._extra['pipe'] = pipe
-        self._event_loop = event_loop
+        self._loop = loop
         self._pipe = pipe
         self._fileno = pipe.fileno()
+        if not stat.S_ISFIFO(os.fstat(self._fileno).st_mode):
+            raise ValueError("Pipe transport is for pipes only.")
         _set_nonblocking(self._fileno)
         self._protocol = protocol
         self._buffer = []
         self._conn_lost = 0
         self._closing = False  # Set when close() or write_eof() called.
-        self._event_loop.call_soon(self._protocol.connection_made, self)
+        self._writing = True
+        self._loop.add_reader(self._fileno, self._read_ready)
+
+        self._loop.call_soon(self._protocol.connection_made, self)
         if waiter is not None:
-            self._event_loop.call_soon(waiter.set_result, None)
+            self._loop.call_soon(waiter.set_result, None)
+
+    def _read_ready(self):
+        # pipe was closed by peer
+
+        self._close()
 
     def write(self, data):
         assert isinstance(data, bytes), repr(data)
@@ -233,7 +300,7 @@ class _UnixWritePipeTransport(transports.WriteTransport):
             self._conn_lost += 1
             return
 
-        if not self._buffer:
+        if not self._buffer and self._writing:
             # Attempt to send it right away first.
             try:
                 n = os.write(self._fileno, data)
@@ -247,11 +314,14 @@ class _UnixWritePipeTransport(transports.WriteTransport):
                 return
             elif n > 0:
                 data = data[n:]
-            self._event_loop.add_writer(self._fileno, self._write_ready)
+            self._loop.add_writer(self._fileno, self._write_ready)
 
         self._buffer.append(data)
 
     def _write_ready(self):
+        if not self._writing:
+            return
+
         data = b''.join(self._buffer)
         assert data, 'Data should not be empty'
 
@@ -262,11 +332,15 @@ class _UnixWritePipeTransport(transports.WriteTransport):
             self._buffer.append(data)
         except Exception as exc:
             self._conn_lost += 1
+            # Remove writer here, _fatal_error() doesn't it
+            # because _buffer is empty.
+            self._loop.remove_writer(self._fileno)
             self._fatal_error(exc)
         else:
             if n == len(data):
-                self._event_loop.remove_writer(self._fileno)
+                self._loop.remove_writer(self._fileno)
                 if self._closing:
+                    self._loop.remove_reader(self._fileno)
                     self._call_connection_lost(None)
                 return
             elif n > 0:
@@ -282,7 +356,8 @@ class _UnixWritePipeTransport(transports.WriteTransport):
         assert self._pipe
         self._closing = True
         if not self._buffer:
-            self._event_loop.call_soon(self._call_connection_lost, None)
+            self._loop.remove_reader(self._fileno)
+            self._loop.call_soon(self._call_connection_lost, None)
 
     def close(self):
         if not self._closing:
@@ -299,12 +374,182 @@ class _UnixWritePipeTransport(transports.WriteTransport):
 
     def _close(self, exc=None):
         self._closing = True
+        if self._buffer:
+            self._loop.remove_writer(self._fileno)
         self._buffer.clear()
-        self._event_loop.remove_writer(self._fileno)
-        self._event_loop.call_soon(self._call_connection_lost, exc)
+        self._loop.remove_reader(self._fileno)
+        self._loop.call_soon(self._call_connection_lost, exc)
 
     def _call_connection_lost(self, exc):
         try:
             self._protocol.connection_lost(exc)
         finally:
             self._pipe.close()
+            self._pipe = None
+            self._protocol = None
+            self._loop = None
+
+    def pause_writing(self):
+        if self._writing:
+            if self._buffer:
+                self._loop.remove_writer(self._fileno)
+            self._writing = False
+
+    def resume_writing(self):
+        if not self._writing:
+            if self._buffer:
+                self._loop.add_writer(self._fileno, self._write_ready)
+            self._writing = True
+
+    def discard_output(self):
+        if self._buffer:
+            self._loop.remove_writer(self._fileno)
+            self._buffer.clear()
+
+
+class _UnixWriteSubprocessPipeProto(protocols.BaseProtocol):
+    pipe = None
+
+    def __init__(self, proc, fd):
+        self.proc = proc
+        self.fd = fd
+        self.connected = False
+        self.disconnected = False
+        proc._pipes[fd] = self
+
+    def connection_made(self, transport):
+        self.connected = True
+        self.pipe = transport
+        self.proc._try_connected()
+
+    def connection_lost(self, exc):
+        self.disconnected = True
+        self.proc._pipe_connection_lost(self.fd, exc)
+
+
+class _UnixReadSubprocessPipeProto(_UnixWriteSubprocessPipeProto,
+                                   protocols.Protocol):
+
+    def data_received(self, data):
+        self.proc._pipe_data_received(self.fd, data)
+
+    def eof_received(self):
+        pass
+
+
+class _UnixSubprocessTransport(transports.SubprocessTransport):
+
+    def __init__(self, loop, protocol, args, shell,
+                 stdin, stdout, stderr, bufsize,
+                 extra=None, **kwargs):
+        super().__init__(extra)
+        self._protocol = protocol
+        self._loop = loop
+
+        self._pipes = {}
+        if stdin == subprocess.PIPE:
+            self._pipes[0] = None
+        if stdout == subprocess.PIPE:
+            self._pipes[1] = None
+        if stderr == subprocess.PIPE:
+            self._pipes[2] = None
+        self._pending_calls = collections.deque()
+        self._finished = False
+        self._returncode = None
+
+        self._proc = subprocess.Popen(
+            args, shell=shell, stdin=stdin, stdout=stdout, stderr=stderr,
+            universal_newlines=False, bufsize=bufsize, **kwargs)
+        self._extra['subprocess'] = self._proc
+
+    def close(self):
+        for proto in self._pipes.values():
+            proto.pipe.close()
+        if self._returncode is None:
+            self.terminate()
+
+    def get_pid(self):
+        return self._proc.pid
+
+    def get_returncode(self):
+        return self._returncode
+
+    def get_pipe_transport(self, fd):
+        if fd in self._pipes:
+            return self._pipes[fd].pipe
+        else:
+            return None
+
+    def send_signal(self, signal):
+        self._proc.send_signal(signal)
+
+    def terminate(self):
+        self._proc.terminate()
+
+    def kill(self):
+        self._proc.kill()
+
+    @tasks.coroutine
+    def _post_init(self):
+        proc = self._proc
+        loop = self._loop
+        if proc.stdin is not None:
+            transp, proto = yield from loop.connect_write_pipe(
+                functools.partial(_UnixWriteSubprocessPipeProto, self, 0),
+                proc.stdin)
+        if proc.stdout is not None:
+            transp, proto = yield from loop.connect_read_pipe(
+                functools.partial(_UnixReadSubprocessPipeProto, self, 1),
+                proc.stdout)
+        if proc.stderr is not None:
+            transp, proto = yield from loop.connect_read_pipe(
+                functools.partial(_UnixReadSubprocessPipeProto, self, 2),
+                proc.stderr)
+        if not self._pipes:
+            self._try_connected()
+
+    def _call(self, cb, *data):
+        if self._pending_calls is not None:
+            self._pending_calls.append((cb, data))
+        else:
+            self._loop.call_soon(cb, *data)
+
+    def _try_connected(self):
+        assert self._pending_calls is not None
+        if all(p is not None and p.connected for p in self._pipes.values()):
+            self._loop.call_soon(self._protocol.connection_made, self)
+            for callback, data in self._pending_calls:
+                self._loop.call_soon(callback, *data)
+            self._pending_calls = None
+
+    def _pipe_connection_lost(self, fd, exc):
+        self._call(self._protocol.pipe_connection_lost, fd, exc)
+        self._try_finish()
+
+    def _pipe_data_received(self, fd, data):
+        self._call(self._protocol.pipe_data_received, fd, data)
+
+    def _process_exited(self, returncode):
+        assert returncode is not None, returncode
+        assert self._returncode is None, self._returncode
+        self._returncode = returncode
+        self._loop._subprocess_closed(self)
+        self._call(self._protocol.process_exited)
+        self._try_finish()
+
+    def _try_finish(self):
+        assert not self._finished
+        if self._returncode is None:
+            return
+        if all(p is not None and p.disconnected
+               for p in self._pipes.values()):
+            self._finished = True
+            self._loop.call_soon(self._call_connection_lost, None)
+
+    def _call_connection_lost(self, exc):
+        try:
+            self._protocol.connection_lost(exc)
+        finally:
+            self._proc = None
+            self._protocol = None
+            self._loop = None

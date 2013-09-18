@@ -1,9 +1,9 @@
 """Queues"""
 
-__all__ = ['Queue', 'PriorityQueue', 'LifoQueue', 'JoinableQueue']
+__all__ = ['Queue', 'PriorityQueue', 'LifoQueue', 'JoinableQueue',
+           'Full', 'Empty']
 
 import collections
-import concurrent.futures
 import heapq
 import queue
 
@@ -11,6 +11,11 @@ from . import events
 from . import futures
 from . import locks
 from .tasks import coroutine
+
+
+# Re-export queue.Full and .Empty exceptions.
+Full = queue.Full
+Empty = queue.Empty
 
 
 class Queue:
@@ -64,10 +69,10 @@ class Queue:
             result += ' _putters[{}]'.format(len(self._putters))
         return result
 
-    def _consume_done_getters(self, waiters):
+    def _consume_done_getters(self):
         # Delete waiters at the head of the get() queue who've timed out.
-        while waiters and waiters[0].done():
-            waiters.popleft()
+        while self._getters and self._getters[0].done():
+            self._getters.popleft()
 
     def _consume_done_putters(self):
         # Delete waiters at the head of the put() queue who've timed out.
@@ -99,16 +104,13 @@ class Queue:
             return self.qsize() == self._maxsize
 
     @coroutine
-    def put(self, item, timeout=None):
+    def put(self, item):
         """Put an item into the queue.
 
-        If you yield from put() and timeout is None (the default), wait until a
-        free slot is available before adding item.
-
-        If a timeout is provided, raise queue.Full if no free slot becomes
-        available before the timeout.
+        If you yield from put(), wait until a free slot is available
+        before adding item.
         """
-        self._consume_done_getters(self._getters)
+        self._consume_done_getters()
         if self._getters:
             assert not self._queue, (
                 'queue non-empty, why are getters waiting?')
@@ -121,13 +123,10 @@ class Queue:
             getter.set_result(self._get())
 
         elif self._maxsize > 0 and self._maxsize == self.qsize():
-            waiter = futures.Future(loop=self._loop, timeout=timeout)
+            waiter = futures.Future(loop=self._loop)
 
             self._putters.append((item, waiter))
-            try:
-                yield from waiter
-            except concurrent.futures.CancelledError:
-                raise queue.Full
+            yield from waiter
 
         else:
             self._put(item)
@@ -135,9 +134,9 @@ class Queue:
     def put_nowait(self, item):
         """Put an item into the queue without blocking.
 
-        If no free slot is immediately available, raise queue.Full.
+        If no free slot is immediately available, raise Full.
         """
-        self._consume_done_getters(self._getters)
+        self._consume_done_getters()
         if self._getters:
             assert not self._queue, (
                 'queue non-empty, why are getters waiting?')
@@ -150,19 +149,15 @@ class Queue:
             getter.set_result(self._get())
 
         elif self._maxsize > 0 and self._maxsize == self.qsize():
-            raise queue.Full
+            raise Full
         else:
             self._put(item)
 
     @coroutine
-    def get(self, timeout=None):
+    def get(self):
         """Remove and return an item from the queue.
 
-        If you yield from get() and timeout is None (the default), wait until a
-        item is available.
-
-        If a timeout is provided, raise queue.Empty if no item is available
-        before the timeout.
+        If you yield from get(), wait until a item is available.
         """
         self._consume_done_putters()
         if self._putters:
@@ -181,18 +176,15 @@ class Queue:
         elif self.qsize():
             return self._get()
         else:
-            waiter = futures.Future(loop=self._loop, timeout=timeout)
+            waiter = futures.Future(loop=self._loop)
 
             self._getters.append(waiter)
-            try:
-                return (yield from waiter)
-            except concurrent.futures.CancelledError:
-                raise queue.Empty
+            return (yield from waiter)
 
     def get_nowait(self):
         """Remove and return an item from the queue.
 
-        Return an item if one is immediately available, else raise queue.Full.
+        Return an item if one is immediately available, else raise Full.
         """
         self._consume_done_putters()
         if self._putters:
@@ -207,7 +199,7 @@ class Queue:
         elif self.qsize():
             return self._get()
         else:
-            raise queue.Empty
+            raise Empty
 
 
 class PriorityQueue(Queue):
@@ -245,7 +237,7 @@ class JoinableQueue(Queue):
     def __init__(self, maxsize=0, *, loop=None):
         super().__init__(maxsize=maxsize, loop=loop)
         self._unfinished_tasks = 0
-        self._finished = locks.EventWaiter(loop=self._loop)
+        self._finished = locks.Event(loop=self._loop)
         self._finished.set()
 
     def _format(self):
@@ -280,7 +272,7 @@ class JoinableQueue(Queue):
             self._finished.set()
 
     @coroutine
-    def join(self, timeout=None):
+    def join(self):
         """Block until all items in the queue have been gotten and processed.
 
         The count of unfinished tasks goes up whenever an item is added to the
@@ -289,4 +281,4 @@ class JoinableQueue(Queue):
         When the count of unfinished tasks drops to zero, join() unblocks.
         """
         if self._unfinished_tasks > 0:
-            yield from self._finished.wait(timeout=timeout)
+            yield from self._finished.wait()

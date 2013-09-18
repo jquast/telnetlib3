@@ -72,8 +72,10 @@ def http_request_parser(max_line_size=8190,
         # read headers
         headers, close, compression = parse_headers(
             lines, max_line_size, max_headers, max_field_size)
-        if close is None:
-            close = version <= (1, 0)
+        if version <= (1, 0):
+            close = True
+        elif close is None:
+            close = False
 
         out.feed_data(
             RawRequestMessage(
@@ -468,6 +470,8 @@ class HttpMessage:
 
     status = None
     status_line = b''
+    upgrade = False  # Connection: UPGRADE
+    websocket = False  # Upgrade: WEBSOCKET
 
     # subclass can enable auto sending headers with write() call,
     # this is useful for wsgi's start_response implementation.
@@ -477,11 +481,15 @@ class HttpMessage:
         self.transport = transport
         self.version = version
         self.closing = close
-        self.keepalive = None
+
+        # disable keep-alive for http/1.0
+        if version <= (1, 0):
+            self.keepalive = False
+        else:
+            self.keepalive = None
 
         self.chunked = False
         self.length = None
-        self.upgrade = False
         self.headers = collections.deque()
         self.headers_sent = False
 
@@ -520,11 +528,12 @@ class HttpMessage:
             # connection keep-alive
             elif 'close' in val:
                 self.keepalive = False
-            elif 'keep-alive' in val:
+            elif 'keep-alive' in val and self.version >= (1, 1):
                 self.keepalive = True
 
         elif name == 'UPGRADE':
             if 'websocket' in value.lower():
+                self.websocket = True
                 self.headers.append((name, value))
 
         elif name == 'TRANSFER-ENCODING' and not self.chunked:

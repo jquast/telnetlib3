@@ -29,8 +29,8 @@ class _OverlappedFuture(futures.Future):
     Cancelling it will immediately cancel the overlapped operation.
     """
 
-    def __init__(self, ov):
-        super().__init__()
+    def __init__(self, ov, *, loop=None):
+        super().__init__(loop=loop)
         self.ov = ov
 
     def cancel(self):
@@ -59,6 +59,7 @@ class ProactorEventLoop(proactor_events.BaseProactorEventLoop):
 class IocpProactor:
 
     def __init__(self, concurrency=0xffffffff):
+        self._loop = None
         self._results = []
         self._iocp = _overlapped.CreateIoCompletionPort(
             _overlapped.INVALID_HANDLE_VALUE, NULL, 0, concurrency)
@@ -66,8 +67,8 @@ class IocpProactor:
         self._registered = weakref.WeakSet()
         self._stopped_serving = weakref.WeakSet()
 
-    def registered_count(self):
-        return len(self._cache)
+    def set_loop(self, loop):
+        self._loop = loop
 
     def select(self, timeout=None):
         if not self._results:
@@ -142,7 +143,7 @@ class IocpProactor:
             _overlapped.CreateIoCompletionPort(obj.fileno(), self._iocp, 0, 0)
 
     def _register(self, ov, obj, callback):
-        f = _OverlappedFuture(ov)
+        f = _OverlappedFuture(ov, loop=self._loop)
         self._cache[ov.address] = (f, ov, obj, callback)
         return f
 

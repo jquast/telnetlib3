@@ -13,6 +13,7 @@ __all__ = ['request']
 
 import base64
 import email.message
+import functools
 import http.client
 import http.cookies
 import json
@@ -42,7 +43,8 @@ def request(method, url, *,
             timeout=None,
             compress=None,
             chunked=None,
-            session=None):
+            session=None,
+            loop=None):
     """Constructs and sends a request. Returns response object.
 
     method: http method
@@ -65,6 +67,7 @@ def request(method, url, *,
        transfer encoding.
     session: tulip.http.Session instance to support connection pooling and
        session cookies.
+    loop: Optional event loop.
 
     Usage:
 
@@ -73,11 +76,12 @@ def request(method, url, *,
       >> resp
       <HttpResponse(python.org/) [200]>
 
-      >> data = yield from resp.content.read()
+      >> data = yield from resp.read()
 
     """
     redirects = 0
-    loop = tulip.get_event_loop()
+    if loop is None:
+        loop = tulip.get_event_loop()
 
     while True:
         req = HttpRequest(
@@ -91,10 +95,17 @@ def request(method, url, *,
             conn = session.start(req, loop)
 
         # connection timeout
+        t = tulip.Task(conn, loop=loop)
+        th = None
+        if timeout is not None:
+            th = loop.call_later(timeout, t.cancel)
         try:
-            resp = yield from tulip.Task(conn, timeout=timeout)
+            resp = yield from t
         except tulip.CancelledError:
             raise tulip.TimeoutError from None
+        finally:
+            if th is not None:
+                th.cancel()
 
         # redirects
         if resp.status in (301, 302) and allow_redirects:
@@ -124,7 +135,8 @@ def request(method, url, *,
 @tulip.coroutine
 def start(req, loop):
     transport, p = yield from loop.create_connection(
-        tulip.StreamProtocol, req.host, req.port, ssl=req.ssl)
+        functools.partial(tulip.StreamProtocol, loop=loop),
+        req.host, req.port, ssl=req.ssl)
 
     try:
         resp = req.send(transport)
@@ -287,13 +299,20 @@ class HttpRequest:
             data = list(data.items())
 
         if data and not files:
-            if not isinstance(data, str):
-                data = urllib.parse.urlencode(data, doseq=True)
+            if isinstance(data, (bytes, bytearray)):
+                self.body = data
+                if 'content-type' not in self.headers:
+                    self.headers['content-type'] = (
+                        'application/octet-stream')
+            else:
+                if not isinstance(data, str):
+                    data = urllib.parse.urlencode(data, doseq=True)
 
-            self.body = data.encode(encoding)
-            if 'content-type' not in self.headers:
-                self.headers['content-type'] = (
-                    'application/x-www-form-urlencoded')
+                self.body = data.encode(encoding)
+                if 'content-type' not in self.headers:
+                    self.headers['content-type'] = (
+                        'application/x-www-form-urlencoded')
+
             if 'content-length' not in self.headers and not chunked:
                 self.headers['content-length'] = str(len(self.body))
 
@@ -474,12 +493,14 @@ class HttpResponse(http.client.HTTPMessage):
         if self._content is None:
             buf = []
             total = 0
-            chunk = yield from self.content.read()
-            while chunk:
-                size = len(chunk)
-                buf.append((chunk, size))
-                total += size
-                chunk = yield from self.content.read()
+            try:
+                while True:
+                    chunk = yield from self.content.read()
+                    size = len(chunk)
+                    buf.append((chunk, size))
+                    total += size
+            except tulip.EofStream:
+                pass
 
             self._content = bytearray(total)
 

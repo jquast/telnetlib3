@@ -10,6 +10,7 @@ __all__ = ['AbstractEventLoopPolicy', 'DefaultEventLoopPolicy',
            'get_event_loop', 'set_event_loop', 'new_event_loop',
            ]
 
+import subprocess
 import sys
 import threading
 import socket
@@ -108,14 +109,10 @@ class AbstractEventLoop:
         """Run the event loop until stop() is called."""
         raise NotImplementedError
 
-    def run_until_complete(self, future, timeout=None):
+    def run_until_complete(self, future):
         """Run the event loop until a Future is done.
 
         Return the Future's result, or raise its exception.
-
-        If timeout is not None, run it for at most that long;
-        if the Future is still not done, raise TimeoutError
-        (but don't cancel the Future).
         """
         raise NotImplementedError
 
@@ -172,9 +169,9 @@ class AbstractEventLoop:
     def start_serving(self, protocol_factory, host=None, port=None, *,
                       family=socket.AF_UNSPEC, flags=socket.AI_PASSIVE,
                       sock=None, backlog=100, ssl=None, reuse_address=None):
-        """Creates a TCP server bound to host and port and return
-        a list of socket objects which will later be handled by
-        protocol_factory.
+        """A coroutine which creates a TCP server bound to host and
+        port and whose result will be a list of socket objects which
+        will later be handled by protocol_factory.
 
         If host is an empty string or None all interfaces are assumed
         and a list of multiple sockets will be returned (most likely
@@ -237,8 +234,15 @@ class AbstractEventLoop:
         # close fd in pipe transport then close f and vise versa.
         raise NotImplementedError
 
-    #def spawn_subprocess(self, protocol_factory, pipe):
-    #    raise NotImplementedError
+    def subprocess_shell(self, protocol_factory, cmd, *, stdin=subprocess.PIPE,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         **kwargs):
+        raise NotImplementedError
+
+    def subprocess_exec(self, protocol_factory, *args, stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        **kwargs):
+        raise NotImplementedError
 
     # Ready-based callback registration methods.
     # The add_*() methods return None.
@@ -310,6 +314,7 @@ class DefaultEventLoopPolicy(threading.local, AbstractEventLoopPolicy):
     """
 
     _loop = None
+    _set_called = False
 
     def get_event_loop(self):
         """Get the event loop.
@@ -317,13 +322,18 @@ class DefaultEventLoopPolicy(threading.local, AbstractEventLoopPolicy):
         This may be None or an instance of EventLoop.
         """
         if (self._loop is None and
-            threading.current_thread().name == 'MainThread'):
+            not self._set_called and
+            isinstance(threading.current_thread(), threading._MainThread)):
             self._loop = self.new_event_loop()
+        assert self._loop is not None, \
+               ('There is no current event loop in thread %r.' %
+                threading.current_thread().name)
         return self._loop
 
     def set_event_loop(self, loop):
         """Set the event loop."""
         # TODO: The isinstance() test violates the PEP.
+        self._set_called = True
         assert loop is None or isinstance(loop, AbstractEventLoop)
         self._loop = loop
 

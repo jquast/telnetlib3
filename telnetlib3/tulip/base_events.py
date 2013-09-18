@@ -19,6 +19,7 @@ import concurrent.futures
 import heapq
 import logging
 import socket
+import subprocess
 import time
 import os
 import sys
@@ -78,6 +79,13 @@ class BaseEventLoop(events.AbstractEventLoop):
         """Create write pipe transport."""
         raise NotImplementedError
 
+    @tasks.coroutine
+    def _make_subprocess_transport(self, protocol, args, shell,
+                                   stdin, stdout, stderr, bufsize,
+                                   extra=None, **kwargs):
+        """Create subprocess transport."""
+        raise NotImplementedError
+
     def _read_from_self(self):
         """XXX"""
         raise NotImplementedError
@@ -104,8 +112,8 @@ class BaseEventLoop(events.AbstractEventLoop):
         finally:
             self._running = False
 
-    def run_until_complete(self, future, timeout=None):
-        """Run until the Future is done, or until a timeout.
+    def run_until_complete(self, future):
+        """Run until the Future is done.
 
         If the argument is a coroutine, it is wrapped in a Task.
 
@@ -113,31 +121,12 @@ class BaseEventLoop(events.AbstractEventLoop):
         with the same coroutine twice -- it would wrap it in two
         different Tasks and that can't be good.
 
-        Return the Future's result, or raise its exception.  If the
-        timeout is reached or stop() is called, raise TimeoutError.
+        Return the Future's result, or raise its exception.
         """
-        future = tasks.async(future)
+        future = tasks.async(future, loop=self)
         future.add_done_callback(_raise_stop_error)
-        handle_called = False
-
-        if timeout is None:
-            self.run_forever()
-        else:
-
-            def stop_loop():
-                nonlocal handle_called
-                handle_called = True
-                raise _StopError
-
-            handle = self.call_later(timeout, stop_loop)
-            self.run_forever()
-            handle.cancel()
-
+        self.run_forever()
         future.remove_done_callback(_raise_stop_error)
-
-        if handle_called:
-            raise futures.TimeoutError
-
         if not future.done():
             raise RuntimeError('Event loop stopped before Future completed.')
 
@@ -209,7 +198,7 @@ class BaseEventLoop(events.AbstractEventLoop):
             assert not args
             assert not isinstance(callback, events.TimerHandle)
             if callback._cancelled:
-                f = futures.Future()
+                f = futures.Future(loop=self)
                 f.set_result(None)
                 return f
             callback, args = callback._callback, callback._args
@@ -253,15 +242,15 @@ class BaseEventLoop(events.AbstractEventLoop):
             else:
                 f2 = None
 
-            yield from tasks.wait(fs)
+            yield from tasks.wait(fs, loop=self)
 
             infos = f1.result()
             if not infos:
-                raise socket.error('getaddrinfo() returned empty list')
+                raise OSError('getaddrinfo() returned empty list')
             if f2 is not None:
                 laddr_infos = f2.result()
                 if not laddr_infos:
-                    raise socket.error('getaddrinfo() returned empty list')
+                    raise OSError('getaddrinfo() returned empty list')
 
             exceptions = []
             for family, type, proto, cname, address in infos:
@@ -273,8 +262,8 @@ class BaseEventLoop(events.AbstractEventLoop):
                             try:
                                 sock.bind(laddr)
                                 break
-                            except socket.error as exc:
-                                exc = socket.error(
+                            except OSError as exc:
+                                exc = OSError(
                                     exc.errno, 'error while '
                                     'attempting to bind on address '
                                     '{!r}: {}'.format(
@@ -285,7 +274,7 @@ class BaseEventLoop(events.AbstractEventLoop):
                             sock = None
                             continue
                     yield from self.sock_connect(sock, address)
-                except socket.error as exc:
+                except OSError as exc:
                     if sock is not None:
                         sock.close()
                     exceptions.append(exc)
@@ -301,7 +290,7 @@ class BaseEventLoop(events.AbstractEventLoop):
                         raise exceptions[0]
                     # Raise a combined exception so the user can see all
                     # the various error messages.
-                    raise socket.error('Multiple exceptions: {}'.format(
+                    raise OSError('Multiple exceptions: {}'.format(
                         ', '.join(str(exc) for exc in exceptions)))
 
         elif sock is None:
@@ -311,7 +300,7 @@ class BaseEventLoop(events.AbstractEventLoop):
         sock.setblocking(False)
 
         protocol = protocol_factory()
-        waiter = futures.Future()
+        waiter = futures.Future(loop=self)
         if ssl:
             sslcontext = None if isinstance(ssl, bool) else ssl
             transport = self._make_ssl_transport(
@@ -343,7 +332,7 @@ class BaseEventLoop(events.AbstractEventLoop):
                         *addr, family=family, type=socket.SOCK_DGRAM,
                         proto=proto, flags=flags)
                     if not infos:
-                        raise socket.error('getaddrinfo() returned empty list')
+                        raise OSError('getaddrinfo() returned empty list')
 
                     for fam, _, pro, _, address in infos:
                         key = (fam, pro)
@@ -379,7 +368,7 @@ class BaseEventLoop(events.AbstractEventLoop):
                 if remote_addr:
                     yield from self.sock_connect(sock, remote_address)
                     r_addr = remote_address
-            except socket.error as exc:
+            except OSError as exc:
                 if sock is not None:
                     sock.close()
                 exceptions.append(exc)
@@ -393,10 +382,15 @@ class BaseEventLoop(events.AbstractEventLoop):
             sock, protocol, r_addr, extra={'addr': l_addr})
         return transport, protocol
 
-    @tasks.task
-    def start_serving(self, protocol_factory, host=None, port=None, *,
-                      family=socket.AF_UNSPEC, flags=socket.AI_PASSIVE,
-                      sock=None, backlog=100, ssl=None, reuse_address=None):
+    @tasks.coroutine
+    def start_serving(self, protocol_factory, host=None, port=None,
+                      *,
+                      family=socket.AF_UNSPEC,
+                      flags=socket.AI_PASSIVE,
+                      sock=None,
+                      backlog=100,
+                      ssl=None,
+                      reuse_address=None):
         """XXX"""
         if host is not None or port is not None:
             if sock is not None:
@@ -414,7 +408,7 @@ class BaseEventLoop(events.AbstractEventLoop):
                 host, port, family=family,
                 type=socket.SOCK_STREAM, proto=0, flags=flags)
             if not infos:
-                raise socket.error('getaddrinfo() returned empty list')
+                raise OSError('getaddrinfo() returned empty list')
 
             completed = False
             try:
@@ -434,8 +428,8 @@ class BaseEventLoop(events.AbstractEventLoop):
                                         True)
                     try:
                         sock.bind(sa)
-                    except socket.error as err:
-                        raise socket.error(err.errno, 'error while attempting '
+                    except OSError as err:
+                        raise OSError(err.errno, 'error while attempting '
                                            'to bind on address %r: %s'
                                            % (sa, err.strerror.lower()))
                 completed = True
@@ -458,7 +452,7 @@ class BaseEventLoop(events.AbstractEventLoop):
     @tasks.coroutine
     def connect_read_pipe(self, protocol_factory, pipe):
         protocol = protocol_factory()
-        waiter = futures.Future()
+        waiter = futures.Future(loop=self)
         transport = self._make_read_pipe_transport(pipe, protocol, waiter,
                                                    extra={})
         yield from waiter
@@ -467,10 +461,37 @@ class BaseEventLoop(events.AbstractEventLoop):
     @tasks.coroutine
     def connect_write_pipe(self, protocol_factory, pipe):
         protocol = protocol_factory()
-        waiter = futures.Future()
+        waiter = futures.Future(loop=self)
         transport = self._make_write_pipe_transport(pipe, protocol, waiter,
                                                     extra={})
         yield from waiter
+        return transport, protocol
+
+    @tasks.coroutine
+    def subprocess_shell(self, protocol_factory, cmd, *, stdin=subprocess.PIPE,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         universal_newlines=False, shell=True, bufsize=0,
+                         **kwargs):
+        assert not universal_newlines, "universal_newlines must be False"
+        assert shell, "shell must be True"
+        assert isinstance(cmd, str), cmd
+        protocol = protocol_factory()
+        transport = yield from self._make_subprocess_transport(
+            protocol, cmd, True, stdin, stdout, stderr, bufsize,
+            extra={}, **kwargs)
+        return transport, protocol
+
+    @tasks.coroutine
+    def subprocess_exec(self, protocol_factory, *args, stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        universal_newlines=False, shell=False, bufsize=0,
+                        **kwargs):
+        assert not universal_newlines, "universal_newlines must be False"
+        assert not shell, "shell must be False"
+        protocol = protocol_factory()
+        transport = yield from self._make_subprocess_transport(
+            protocol, args, False, stdin, stdout, stderr, bufsize,
+            extra={}, **kwargs)
         return transport, protocol
 
     def _add_callback(self, handle):
@@ -488,7 +509,7 @@ class BaseEventLoop(events.AbstractEventLoop):
         self._add_callback(handle)
         self._write_to_self()
 
-    def _run_once(self, timeout=None):
+    def _run_once(self):
         """Run one full iteration of the event loop.
 
         This calls all currently ready callbacks, polls for I/O,
@@ -499,6 +520,7 @@ class BaseEventLoop(events.AbstractEventLoop):
         while self._scheduled and self._scheduled[0]._cancelled:
             heapq.heappop(self._scheduled)
 
+        timeout = None
         if self._ready:
             timeout = 0
         elif self._scheduled:
