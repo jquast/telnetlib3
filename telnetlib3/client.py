@@ -11,6 +11,37 @@ from telnetlib3.telopt import TelnetStream
 
 __all__ = ('TelnetClient',)
 
+def _query_term_winsize(fd):
+    """ Returns the value of the ``winsize`` struct, four integers:
+    rows, cols, xheight, yheight. """
+    import ioctl
+    import struct
+    import os
+    from termios import TIOCGWINSZ
+    assert os.isatty(fd), u'{}: not a tty.'.format(fd)
+    return struct.unpack('hhhh', ioctl.fcntl(fd, TIOCGWINSZ, '\000' * 8))
+
+def start_client(loop, host, port):
+
+    import locale
+    locale.setlocale(locale.LC_ALL, '')
+    enc = locale.getpreferredencoding()
+    log = logging.getLogger()
+    transport, protocol = yield from loop.create_connection(
+            lambda: TelnetClient(encoding=enc, log=log), host, port)
+
+    # keyboard input reader; catch stdin bytes and pass through transport
+    # line-oriented for now,
+    def stdin_callback():
+        inp = sys.stdin.buffer.readline()
+        log.debug('stdin_callback: {!r}'.format(inp))
+        if not inp:
+            loop.stop()
+        else:
+            transport.write(inp)
+    loop.add_reader(sys.stdin.fileno(), stdin_callback)
+
+
 class ConsoleStream():
     def __init__(self, client, log=logging, stream_out=None, stream_in=None):
         #: TelnetClient instance associated with console
@@ -41,6 +72,49 @@ class ConsoleStream():
         """
         from telopt import ECHO
         return self.client.stream.remote_option.enabled(ECHO)
+
+    @property
+    def terminal_type(self):
+        """ The terminfo(5) terminal type name: the value found in the
+        ``TERM`` environment variable, if exists; otherwise 'unknown'.
+        """
+        import os
+        return os.environ.get('TERM', 'unknown')
+
+    @property
+    def terminal_width(self):
+        """ The terminal width in printable character columns as integer:
+        if the stream_out file descriptor is a terminal, the terminal is
+        queried for its size; otherwise the value found in the ``COLUMNS``
+        environment variable is returned.
+        """
+        import os
+        if (hasattr(self.stream_out, 'fileno')
+                and os.isatty(self.stream_out.fileno())):
+            cols, rows, xpixels, ypixels = _query_term_winsize(self.stream_out)
+            return cols
+        try:
+            cols = int(os.environ.get('COLUMNS', '80'))
+        except ValueError:
+            cols = 80
+        return cols
+
+    @property
+    def terminal_height(self):
+        """ The terminal height printable character columns as integer:
+        if the stream_out file descriptor is a terminal, the terminal is
+        queried for its size; otherwise the value found in the ``LINES``
+        environment variable is returned.  """
+        import os
+        if (hasattr(self.stream_out, 'fileno')
+                and os.isatty(self.stream_out.fileno())):
+            cols, rows, xpixels, ypixels = _query_term_winsize(self.stream_out)
+            return rows
+        try:
+            rows = int(os.environ.get('LINES', '24'))
+        except ValueError:
+            rows = 24
+        return rows
 
     def decode(self, input, final=False):
         """ Decode input string using preferred encoding.
@@ -152,7 +226,7 @@ class TelnetClient(tulip.protocols.Protocol):
         self.stream = self._stream_factory(
                 transport=transport, client=True, log=self.log)
         self.shell = self._shell_factory(client=self, log=self.log)
-        self.set_environment()
+        self.init_environment()
         self._last_received = datetime.datetime.now()
         self._connected = datetime.datetime.now()
 
@@ -160,6 +234,19 @@ class TelnetClient(tulip.protocols.Protocol):
 
         # begin connect-time negotiation
         loop.call_soon(self.begin_negotiation)
+
+
+    def init_environment(self):
+        """ XXX This method must initialize the class attribute, ``env`` with
+        any values wished to be exported by telnet negotiation.  namely: TERM,
+        COLUMNS, LINES, CHARSET, or any other values wished to be explicitly
+        exported from the client's environment by negotiation. Otherwise, the
+        values of ``default_env`` are used.
+        """
+        self.env['TERM'] = self.shell.terminal_type
+        self.env['COLUMNS'] = self.shell.terminal_width
+        self.env['LINES'] = self.shell.terminal_height
+        self.env['CHARSET'] = self._default_encoding
 
     @property
     def env(self):
@@ -208,26 +295,6 @@ class TelnetClient(tulip.protocols.Protocol):
                     outgoing and incoming and self.outbinary and self.inbinary
                     ) else 'ascii')
 
-
-    def set_environment(self):
-        """ XXX This method must initialize the class attribute, ``env``
-            with at least the value of 'TERM' for proper terminal handling,
-            and may optionally set COLUMNS, LINES, or any other values
-            wish to be explicitly exported from the client's environment
-            values. Otherwise, the values of ``default_env`` are used.
-        """
-        import os
-        term = os.environ.get('TERM', '')
-        if term:
-            self.env['TERM'] = term
-
-        cols = os.environ.get('COLUMNS', '')
-        if cols:
-            self.env['COLUMNS'] = cols
-
-        lines = os.environ.get('LINES', '')
-        if lines:
-            self.env['LINES'] = lines
 
     def begin_negotiation(self):
         """ XXX begin on-connect negotiation.
@@ -326,8 +393,9 @@ def describe_connection(client):
             '{} '.format(client.env['TERM'])
             if client.env['TERM'] != 'unknown' else '',
             # state,
-            '{}connected from '.format(
-                'dis' if client._closing else ''),
+            '{}connected {} '.format(
+                'dis' if client._closing else '',
+                'from' if client._closing else 'to'),
             # ip, dns
 #            '{}{}'.format(
 #                client.client_ip, ' ({}{})'.format(
@@ -353,27 +421,19 @@ ARGS.add_argument(
     default='info', type=str, help='Loglevel (debug,info)')
 
 def main():
-    import locale
     args = ARGS.parse_args()
     if ':' in args.host:
         args.host, port = args.host.split(':', 1)
         args.port = int(port)
-    locale.setlocale(locale.LC_ALL, '')
-    enc = locale.getpreferredencoding()
-    log = logging.getLogger()
+
     log_const = args.loglevel.upper()
     assert (log_const in dir(logging)
             and isinstance(getattr(logging, log_const), int)
             ), args.loglevel
+    log = logging.getLogger()
     log.setLevel(getattr(logging, log_const))
-    log.debug('default_encoding is {}'.format(enc))
-
     loop = tulip.get_event_loop()
-    task = loop.create_connection(
-            lambda: TelnetClient(encoding=enc, log=log), args.host, args.port)
-
-    socks = loop.run_until_complete(task)
-    logging.info('Connecting to %s', socks[0])
+    tulip.Task(start_client(loop, args.host, args.port))
     loop.run_forever()
 
 if __name__ == '__main__':
