@@ -211,6 +211,7 @@ RFC 2217, "Telnet Com Port Control Option", Oct 1997
 Implemented
 ===========
 
+* RFC 727 TELNET Logout Option.
 * RFC 779 "Telnet Send-Location Option", Apr 1981
 + RFC 854 "Telnet Protocol Specification", May 1983
 + RFC 855 "Telnet Option Specifications", May 1983
@@ -270,7 +271,6 @@ RFC 703 July, 1975, Survey of New-Protocol TELNET Servers.
 RFC 718 Comments on RCTE from the TENEX Implementation Experience.
 RFC 719 Discussion on RCTE.
 RFC 726 Remote Controlled Transmssion and Echoing Telnet Option.
-RFC 727 TELNET Logout Option.
 RFC 728 A Minor Pitfall in the Telnet Protocol.
 RFC 732 Telnet Data Entry Terminal Option (Obsoletes: RFC 731)
 RFC 734 SUPDUP Protocol.
