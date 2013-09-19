@@ -11,34 +11,45 @@ from telnetlib3.telopt import TelnetStream
 
 __all__ = ('TelnetClient',)
 
-def _query_term_winsize(fd):
-    """ Returns the value of the ``winsize`` struct, four integers:
-    rows, cols, xheight, yheight. """
-    import ioctl
+def _query_term_speed(tty_fd):
+    """ Returns the input and output speed of the terminal specified
+    by argument ``tty_fd`` as two integers: (rx, tx).
+    """
+    import fcntl
+    import termios
+    iflag, oflag, cflag, lflag, ispeed, ospeed, cc = termios.tcgetattr(tty_fd)
+    return ispeed, ospeed
+
+def _query_term_winsize(tty_fd):
+    """ Returns the value of the ``winsize`` struct for the terminal
+    specified by argument ``tty_fd`` as four integers: (rows, cols,
+    xheight, yheight).
+    """
+    import fcntl
     import struct
-    import os
-    from termios import TIOCGWINSZ
-    assert os.isatty(fd), u'{}: not a tty.'.format(fd)
-    return struct.unpack('hhhh', ioctl.fcntl(fd, TIOCGWINSZ, '\000' * 8))
+    import termios
+    val = fcntl.ioctl(tty_fd, termios.TIOCGWINSZ, b'\x00' * 8)
+    return struct.unpack('hhhh', val)
 
-def start_client(loop, host, port):
-
+def start_client(loop, log, host, port):
     import locale
+    import os
     locale.setlocale(locale.LC_ALL, '')
     enc = locale.getpreferredencoding()
-    log = logging.getLogger()
     transport, protocol = yield from loop.create_connection(
             lambda: TelnetClient(encoding=enc, log=log), host, port)
 
     # keyboard input reader; catch stdin bytes and pass through transport
     # line-oriented for now,
     def stdin_callback():
-        inp = sys.stdin.buffer.readline()
+#        inp = sys.stdin.buffer.readline()
+        inp = os.read(sys.stdin.fileno(), 1)
+        transport.write(inp)
         log.debug('stdin_callback: {!r}'.format(inp))
-        if not inp:
-            loop.stop()
-        else:
-            transport.write(inp)
+#        if not inp:
+#            loop.stop()
+#        else:
+
     loop.add_reader(sys.stdin.fileno(), stdin_callback)
 
 
@@ -80,6 +91,28 @@ class ConsoleStream():
         """
         import os
         return os.environ.get('TERM', 'unknown')
+
+    @property
+    def xdisploc(self):
+        """ The XDISPLAY value: the value found as os environ key ``DISPLAY``.
+        """
+        import os
+        return os.environ.get('DISPLAY', '')
+
+    def terminal_speed(self):
+        """ The terminal speed is a legacy application of determining
+        the bandwidth (bits per second) of the connecting terminal, esp.
+        when that terminal is serial attached. This method retuns a tuple
+        of receive and send speed (rx, tx).
+
+        If the connecting output stream's terminal speed cannot be
+        determined, a default value of (38400, 38400) is returned.
+        """
+        import os
+        if (hasattr(self.stream_out, 'fileno')
+                and os.isatty(self.stream_out.fileno())):
+            return _query_term_speed(self.stream_out)
+        return 38400, 38400
 
     @property
     def terminal_width(self):
@@ -222,11 +255,13 @@ class TelnetClient(tulip.protocols.Protocol):
             ``begin_negotiation()`` is fired after connection
             is registered.
         """
+        self.log.debug('connection made')
         self.transport = transport
         self.stream = self._stream_factory(
                 transport=transport, client=True, log=self.log)
         self.shell = self._shell_factory(client=self, log=self.log)
         self.init_environment()
+        self.set_stream_callbacks()
         self._last_received = datetime.datetime.now()
         self._connected = datetime.datetime.now()
 
@@ -295,6 +330,62 @@ class TelnetClient(tulip.protocols.Protocol):
                     outgoing and incoming and self.outbinary and self.inbinary
                     ) else 'ascii')
 
+    def set_stream_callbacks(self):
+        """ XXX Set callbacks for returning negotiation responses
+        """
+#        stream, server = self.stream, self
+#        # wire AYT and SLC_AYT (^T) to callback ``status()``
+#        #from telnetlib3 import slc, telopt
+#        from telnetlib3.slc import SLC_AYT
+#        from telnetlib3.telopt import AYT, AO, IP, BRK, SUSP, ABORT
+        from telnetlib3.telopt import TTYPE, TSPEED, XDISPLOC, NEW_ENVIRON
+        from telnetlib3.telopt import CHARSET, NAWS
+#        from telnetlib3.telopt import LOGOUT, SNDLOC, CHARSET, NAWS
+#        stream.set_iac_callback(AYT, self.handle_ayt)
+#        stream.set_slc_callback(SLC_AYT, self.handle_ayt)
+
+        # wire extended rfc callbacks for terminal atributes, etc.
+        for (opt, func) in (
+                (TTYPE, self.send_ttype),
+                (TSPEED, self.send_tspeed),
+                (XDISPLOC, self.send_xdisploc),
+                (NEW_ENVIRON, self.send_env),
+                (NAWS, self.send_naws),
+                (CHARSET, self.send_charset),
+                ):
+            self.stream.set_ext_send_callback(opt, func)
+
+    def send_ttype(self):
+        """ Callback for responding to TTYPE requests.
+        """
+        return (self.shell.terminal_type).encode('ascii')
+
+    def send_tspeed(self):
+        """ Callback for responding to TSPEED requests.
+        """
+        return self.shell.terminal_speed
+
+    def send_xdisploc(self):
+        """ Callback for responding to XDISPLOC requests.
+        """
+        return (self.shell.xdisploc).encode('ascii')
+
+    def send_env(self, keys):
+        """ Callback for responding to NEW_ENVIRON requests.
+        """
+        if keys is None:
+            return self.env
+        return dict([(key, self.env.get(key, '')) for key in keys])
+
+    def send_charset(self):
+        """ Callback for responding to CHARSET requests.
+        """
+        return self._default_encoding
+
+    def send_naws(self):
+        """ Callback for responding to NAWS requests.
+        """
+        return self.shell.terminal_width, self.shell.terminal_height
 
     def begin_negotiation(self):
         """ XXX begin on-connect negotiation.
@@ -433,8 +524,17 @@ def main():
     log = logging.getLogger()
     log.setLevel(getattr(logging, log_const))
     loop = tulip.get_event_loop()
-    tulip.Task(start_client(loop, args.host, args.port))
+    tulip.Task(start_client(loop, log, args.host, args.port))
     loop.run_forever()
 
 if __name__ == '__main__':
-    main()
+    import tty
+    import termios
+    mode = termios.tcgetattr(sys.stdin.fileno())
+    tty.setcbreak(sys.stdin.fileno(), termios.TCSANOW)
+    try:
+        main()
+    finally:
+        termios.tcsetattr(sys.stdin.fileno(), termios.TCSAFLUSH, mode)
+
+
