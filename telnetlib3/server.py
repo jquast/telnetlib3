@@ -140,7 +140,7 @@ class TelnetServer(tulip.protocols.Protocol):
             stream.set_iac_callback(sir, self.interrupt_received)
 
         # wire extended rfc callbacks for terminal atributes, etc.
-        for (opt, ext) in (
+        for (opt, func) in (
                 (TTYPE, self.ttype_received),
                 (TSPEED, self.tspeed_received),
                 (XDISPLOC, self.xdisploc_received),
@@ -149,7 +149,7 @@ class TelnetServer(tulip.protocols.Protocol):
                 (LOGOUT, self.logout),
                 (SNDLOC, self.sndloc_received),
                 (CHARSET, self.charset_received),):
-            stream.set_ext_callback(opt, ext)
+            stream.set_ext_callback(opt, func)
 
     def begin_negotiation(self):
         """ XXX begin on-connect negotiation.
