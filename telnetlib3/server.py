@@ -473,7 +473,7 @@ class TelnetServer(asyncio.protocols.Protocol):
         self.transport.close()
 
     def eof_received(self):
-        self._closing = True
+        self.connection_lost('EOF')
 
     def connection_lost(self, exc):
         self._closing = True
