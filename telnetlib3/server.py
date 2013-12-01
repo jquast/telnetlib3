@@ -481,7 +481,8 @@ class TelnetServer(asyncio.protocols.Protocol):
                                     ': {}'.format(exc) if exc is not None
                                     else ''))
         for task in (self._server_name, self._server_fqdn,
-                self._client_host, self._timeout):
+                     self._client_host, self._timeout,
+                     self._negotiation):
             task.cancel()
 
     def env_update(self, env):
