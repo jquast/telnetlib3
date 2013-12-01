@@ -36,19 +36,22 @@ class TelnetServer(asyncio.protocols.Protocol):
     CONNECT_DEFERED = 0.2
     TTYPE_LOOPMAX = 8
     default_env = {
-            'COLUMNS': '80',
-            'LINES': '24',
-            'USER': 'unknown',
-            'TERM': 'unknown',
-            'CHARSET': 'ascii',
-            'PS1': '%s-%v %# ',
-            'PS2': '> ',
-            'TIMEOUT': '5',
-            }
+        'COLUMNS': '80',
+        'LINES': '24',
+        'USER': 'unknown',
+        'TERM': 'unknown',
+        'CHARSET': 'ascii',
+        'PS1': '%s-%v %# ',
+        'PS2': '> ',
+        'TIMEOUT': '5',
+    }
 
-    readonly_env = ['USER', 'HOSTNAME', 'UID', 'REMOTEIP', 'REMOTEHOST']
-    def __init__(self, shell=Telsh, stream=TelnetStream,
-                       encoding='utf8', log=logging):
+    readonly_env = ['USER', 'HOSTNAME', 'UID', 'REMOTE_IP',
+                    'REMOTE_HOST', 'REMOTE_PORT', ]
+
+    def __init__(self, shell=telsh.Telsh,
+                 stream=telopt.TelnetStream,
+                 encoding='utf8', log=logging):
         self.log = log
         self._shell_factory = shell
         self._stream_factory = stream
@@ -80,7 +83,7 @@ class TelnetServer(asyncio.protocols.Protocol):
         #: prompt sequence '%h' is result of socket.gethostname().
         self._server_name = loop.run_in_executor(None, socket.gethostname)
         self._server_name.add_done_callback(self.after_server_gethostname)
-        #: prompt sequence '%H' is result of socket.getfqdn() of '%h'
+        #: prompt sequence '%H' is result of socket.getfqdn() of '%h'.
         self._server_fqdn = asyncio.Future()
         self._timeout = asyncio.Future()
         self._negotiation = asyncio.Future()
@@ -439,7 +442,7 @@ class TelnetServer(asyncio.protocols.Protocol):
         """ XXX Callback received on session timeout.
         """
         self.shell.stream.write(
-                '\r\nTimeout after {:1.0f}s.\r\n'.format(self.idle))
+            '\r\nTimeout after {:1.0f}s.\r\n'.format(self.idle))
         self.log.debug('Timeout after {:1.3f}s.'.format(self.idle))
         self.transport.close()
 
@@ -456,8 +459,8 @@ class TelnetServer(asyncio.protocols.Protocol):
                 'Echoing screams fill the wastelands as you close your eyes',
                 'Your very soul aches as you wake up from your favorite dream')
         self.shell.stream.write(
-                '\r\n{}.\r\n'.format(
-            msgs[int(time.time()/84) % len(msgs)]))
+            '\r\n{}.\r\n'.format(
+                msgs[int(time.time()/84) % len(msgs)]))
         self.transport.close()
 
     def eof_received(self):
@@ -466,7 +469,8 @@ class TelnetServer(asyncio.protocols.Protocol):
     def connection_lost(self, exc):
         self._closing = True
         self.log.info('{}{}'.format(self.__str__(),
-            ': {}'.format(exc) if exc is not None else ''))
+                                    ': {}'.format(exc) if exc is not None
+                                    else ''))
         for task in (self._server_name, self._server_fqdn,
                 self._client_host, self._timeout):
             task.cancel()
@@ -522,8 +526,8 @@ class TelnetServer(asyncio.protocols.Protocol):
             Begins fqdn resolution, available as '%H' prompt character.
         """
         #: prompt sequence '%H' is result of socket.get_fqdn(self._server_name)
-        self._server_fqdn = tulip.get_event_loop().run_in_executor(
-                    None, socket.getfqdn, arg.result())
+        self._server_fqdn = asyncio.get_event_loop().run_in_executor(
+            None, socket.getfqdn, arg.result())
         self._server_fqdn.add_done_callback(self.after_server_getfqdn)
         self.env_update({'HOSTNAME': self.server_name.result()})
 
@@ -684,6 +688,7 @@ class TelnetServer(asyncio.protocols.Protocol):
         " Callback receives SNDLOC values, rfc779. "
         self.env_update({'SNDLOC': location})
 
+
 def describe_env(server):
     env_fingerprint = dict()
     for key, value in server.env.items():
@@ -693,8 +698,10 @@ def describe_env(server):
         if key in ('HOSTNAME',):
             continue
         env_fingerprint[key] = value
+    sfp_items = sorted(env_fingerprint.items())
     return '{{{}}}'.format(', '.join(['{!r}: {!r}'.format(key, value)
-        for key, value in sorted(env_fingerprint.items())]))
+                                      for key, value in sfp_items]))
+
 
 def describe_connection(server):
     return '{}{}{}{}'.format(
