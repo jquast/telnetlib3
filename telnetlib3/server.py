@@ -256,6 +256,9 @@ class TelnetServer(asyncio.protocols.Protocol):
         """ XXX telnet stream option negotiation completed
         """
         from telnetlib3.telopt import WONT, ECHO
+        if status.cancelled:
+            self.log.debug('negotiation cancelled')
+            return
 
         # enable 'fast edit' for remote line editing by sending 'wont echo'
         if self.fast_edit and self.stream.mode == 'remote':
