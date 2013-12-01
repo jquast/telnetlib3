@@ -340,13 +340,18 @@ class Telsh():
 
             XXX Display or redraw prompt.
         """
-        input = ''.join((self.standout(name_unicode(char)) if
-                not self.stream.can_write(char) or not char.isprintable() else
-                char for char in self.lastline))
+        disp_char = lambda char: (
+            self.standout(name_unicode(char))
+            if not self.stream.can_write(char)
+            or not char.isprintable()
+            else char)
+        text = ''.join([disp_char(char) for char in self.lastline])
         if self.is_multiline:
-            input = input.split('\r')[-1]
+            text = text.split('\r')[-1]
+        # when 'redraw' is true, perform a 'carriage return'
+        # followed by 'clear_eol' sequence, otherwise CR+LF is fine.
         prefix = '\r\x1b[K' if redraw else '\r\n'
-        output = ''.join((prefix, self.prompt, input,))
+        output = ''.join((prefix, self.prompt, text,))
         self.stream.write(output)
         self.stream.send_ga()
 
