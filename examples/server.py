@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+import argparse
+import logging
+import asyncio
+
+import telnetlib3
+
+ARGS = argparse.ArgumentParser(description="Run simple telnet server.")
+ARGS.add_argument(
+    '--host', action="store", dest='host',
+    default='127.0.0.1', help='Host name')
+ARGS.add_argument(
+    '--port', action="store", dest='port',
+    default=6023, type=int, help='Port number')
+ARGS.add_argument(
+    '--loglevel', action="store", dest="loglevel",
+    default='info', type=str, help='Loglevel (debug,info)')
+
+
+def start_server(loop, log, host, port):
+    # create_server recieves a callable that returns a Protocol
+    # instance; wrap using `lambda' so that the specified logger
+    # instance (whose log-level is specified by cmd-line argument)
+    # may be used.
+    func = loop.create_server(lambda: telnetlib3.TelnetServer(log=log),
+                              host, port)
+    server = loop.run_until_complete(func)
+    log.info('Listening on %s', server.sockets[0].getsockname())
+
+
+def main():
+    args = ARGS.parse_args()
+    if ':' in args.host:
+        args.host, port = args.host.split(':', 1)
+        args.port = int(port)
+
+    # use generic 'logging' instance, and set the log-level as specified by
+    # command-line argument --loglevel
+    fmt = '%(asctime)s %(filename)s:%(lineno)d %(message)s'
+    logging.basicConfig(format=fmt)
+    log = logging.getLogger('telnet_server')
+    log.setLevel(getattr(logging, args.loglevel.upper()))
+
+    loop = asyncio.get_event_loop()
+    start_server(loop, log, args.host, args.port)
+    loop.run_forever()
+
+if __name__ == '__main__':
+    main()

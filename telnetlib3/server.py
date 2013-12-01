@@ -1,7 +1,5 @@
-#!/usr/bin/env python3
 import collections
 import datetime
-import argparse
 import logging
 import socket
 import time
@@ -723,52 +721,3 @@ def _wrap_future_result(future, result):
     future = asyncio.Future()
     future.set_result(result)
     return future
-
-ARGS = argparse.ArgumentParser(description="Run simple telnet server.")
-ARGS.add_argument(
-    '--host', action="store", dest='host',
-    default='127.0.0.1', help='Host name')
-ARGS.add_argument(
-    '--port', action="store", dest='port',
-    default=6023, type=int, help='Port number')
-ARGS.add_argument(
-    '--loglevel', action="store", dest="loglevel",
-    default='info', type=str, help='Loglevel (debug,info)')
-
-def main():
-    import locale
-    args = ARGS.parse_args()
-    if ':' in args.host:
-        args.host, port = args.host.split(':', 1)
-        args.port = int(port)
-    locale.setlocale(locale.LC_ALL, '')
-    enc = locale.getpreferredencoding()
-    log = logging.getLogger()
-    log_const = args.loglevel.upper()
-    assert (log_const in dir(logging)
-            and isinstance(getattr(logging, log_const), int)
-            ), args.loglevel
-    log.setLevel(getattr(logging, log_const))
-    log.debug('default_encoding is {}'.format(enc))
-
-    loop = tulip.get_event_loop()
-    func = loop.start_serving(lambda: TelnetServer(encoding=enc, log=log),
-            args.host, args.port)
-
-    socks = loop.run_until_complete(func)
-    logging.info('Listening on %s', socks[0].getsockname())
-    loop.run_forever()
-
-if __name__ == '__main__':
-    main()
-
-#self.shell.display_prompt
-#self.shell.feed_slc
-#self.shell.feed_byte
-#self.shell.stream.write
-#self.shell.display_prompt
-#self.shell.stream.write
-#self.shell.stream.write
-#self.shell.term_received
-#self.shell.display_prompt
-#self.shell.stream.write
