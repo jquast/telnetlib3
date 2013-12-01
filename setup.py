@@ -15,7 +15,7 @@ setup(name='telnetlib3',
       url='http://telnetlib3.rtfd.org/',
       keywords='telnet, server, bbs, mud, utf8, honeypot',
       license='ISC',
-      packages=['telnetlib3', 'telnetlib3.tulip'],
+      packages=['telnetlib3',],
       classifiers=[
           'Intended Audience :: Developers',
           'License :: OSI Approved :: ISC License (ISCL)',

@@ -6,7 +6,8 @@ import logging
 import codecs
 import sys
 
-from telnetlib3 import tulip
+import asyncio
+
 from telnetlib3.telopt import TelnetStream
 
 __all__ = ('TelnetClient',)
@@ -201,7 +202,7 @@ class ConsoleStream():
 
 
 
-class TelnetClient(tulip.protocols.Protocol):
+class TelnetClient(asyncio.protocols.Protocol):
     #: mininum on-connect time to wait for server-initiated negotiation options
     CONNECT_MINWAIT = 2.00
     #: maximum on-connect time to wait for server-initiated negotiation options
@@ -238,7 +239,7 @@ class TelnetClient(tulip.protocols.Protocol):
         #: datetime of connection made
         self._connected = None
 
-        self._negotiation = tulip.Future()
+        self._negotiation = asyncio.Future()
         self._negotiation.add_done_callback(self.after_negotiation)
 
     def __str__(self):
@@ -265,7 +266,7 @@ class TelnetClient(tulip.protocols.Protocol):
         self._last_received = datetime.datetime.now()
         self._connected = datetime.datetime.now()
 
-        loop = tulip.get_event_loop()
+        loop = asyncio.get_event_loop()
 
         # begin connect-time negotiation
         loop.call_soon(self.begin_negotiation)
@@ -397,7 +398,7 @@ class TelnetClient(tulip.protocols.Protocol):
             self._negotiation.cancel()
             return
 
-        tulip.get_event_loop().call_soon(self.check_negotiation)
+        asyncio.get_event_loop().call_soon(self.check_negotiation)
 
     def check_negotiation(self):
         """ XXX negotiation check-loop, schedules itself for continual callback
@@ -415,7 +416,7 @@ class TelnetClient(tulip.protocols.Protocol):
         elif self.duration > self.CONNECT_MAXWAIT:
             self._negotiation.set_result(self.stream.__repr__())
             return
-        loop = tulip.get_event_loop()
+        loop = asyncio.get_event_loop()
         loop.call_later(self.CONNECT_DEFERED, self.check_negotiation)
 
     def after_negotiation(self, status):
@@ -523,8 +524,8 @@ def main():
             ), args.loglevel
     log = logging.getLogger()
     log.setLevel(getattr(logging, log_const))
-    loop = tulip.get_event_loop()
-    tulip.Task(start_client(loop, log, args.host, args.port))
+    loop = asyncio.get_event_loop()
+    asyncio.Task(start_client(loop, log, args.host, args.port))
     loop.run_forever()
 
 if __name__ == '__main__':

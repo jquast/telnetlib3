@@ -6,13 +6,14 @@ import logging
 import socket
 import time
 
-from telnetlib3 import tulip
 from telnetlib3.telsh import Telsh
 from telnetlib3.telopt import TelnetStream
+import asyncio
 
 __all__ = ('TelnetServer',)
 
-class TelnetServer(tulip.protocols.Protocol):
+
+class TelnetServer(asyncio.protocols.Protocol):
     """
         The begin_negotiation() method is called on-connect,
         displaying the login banner, and indicates desired options.
@@ -56,7 +57,6 @@ class TelnetServer(tulip.protocols.Protocol):
 
         #: session environment as S.env['key'], defaults empty string value
         self._client_env = collections.defaultdict(str, **self.default_env)
-        self._client_host = tulip.Future()
 
         #: default environment is server-preferred encoding if un-negotiated.
         self.env_update({'CHARSET': encoding})
@@ -76,15 +76,16 @@ class TelnetServer(tulip.protocols.Protocol):
         #: client performed ttype; probably human
         self._advanced = False
 
-        loop = tulip.get_event_loop()
+        loop = asyncio.get_event_loop()
 
         #: prompt sequence '%h' is result of socket.gethostname().
         self._server_name = loop.run_in_executor(None, socket.gethostname)
         self._server_name.add_done_callback(self.after_server_gethostname)
-
-        self._server_fqdn = tulip.Future()
-        self._timeout = tulip.Future()
-        self._negotiation = tulip.Future()
+        #: prompt sequence '%H' is result of socket.getfqdn() of '%h'
+        self._server_fqdn = asyncio.Future()
+        self._timeout = asyncio.Future()
+        self._negotiation = asyncio.Future()
+        self._client_host = asyncio.Future()
         self._negotiation.add_done_callback(self.after_negotiation)
         self._banner = tulip.Future()
 
@@ -104,7 +105,8 @@ class TelnetServer(tulip.protocols.Protocol):
             registered.
         """
         self.transport = transport
-        self._client_ip = transport.get_extra_info('addr')[0]
+        self._client_ip, self._client_port = (
+            transport.get_extra_info('peername'))
         self.stream = self._stream_factory(
                 transport=transport, server=True, log=self.log)
         self.shell = self._shell_factory(server=self, log=self.log)
@@ -113,9 +115,9 @@ class TelnetServer(tulip.protocols.Protocol):
         self._connected = datetime.datetime.now()
 
         # resolve client fqdn (and later, reverse-dns)
-        loop = tulip.get_event_loop()
-        self._client_host = loop.run_in_executor(None,
-                socket.gethostbyaddr, self._client_ip)
+        loop = asyncio.get_event_loop()
+        self._client_host = loop.run_in_executor(
+            None, socket.gethostbyaddr, self._client_ip)
         self._client_host.add_done_callback(self.after_client_lookup)
 
         # begin connect-time negotiation
@@ -169,7 +171,7 @@ class TelnetServer(tulip.protocols.Protocol):
         from telnetlib3.telopt import DO, TTYPE
         self.stream.iac(DO, TTYPE)
 
-        tulip.get_event_loop().call_soon(self.check_negotiation)
+        asyncio.get_event_loop().call_soon(self.check_negotiation)
 
         self.shell.display_prompt()
 
@@ -181,7 +183,7 @@ class TelnetServer(tulip.protocols.Protocol):
         self.stream.iac(WILL, BINARY)
         self.stream.iac(DO, CHARSET)
 
-        loop = tulip.get_event_loop()
+        loop = asyncio.get_event_loop()
         loop.call_soon(self.check_encoding)
 
     def check_negotiation(self):
@@ -200,7 +202,7 @@ class TelnetServer(tulip.protocols.Protocol):
         elif self.duration > self.CONNECT_MAXWAIT:
             self._negotiation.set_result(self.stream.__repr__())
             return
-        loop = tulip.get_event_loop()
+        loop = asyncio.get_event_loop()
         loop.call_later(self.CONNECT_DEFERED, self.check_negotiation)
 
     def check_encoding(self):
@@ -214,7 +216,7 @@ class TelnetServer(tulip.protocols.Protocol):
             self._encoding_negotiation.cancel()
             return
 
-        loop = tulip.get_event_loop()
+        loop = asyncio.get_event_loop()
 
         # encoding negotiation is complete
         if self.outbinary and self.inbinary:
@@ -254,9 +256,9 @@ class TelnetServer(tulip.protocols.Protocol):
             self.log.debug('fast_edit enabled (wont echo)')
             self.stream.iac(WONT, ECHO)
 
-        loop = tulip.get_event_loop()
-        self._client_host = loop.run_in_executor(None,
-                socket.gethostbyaddr, self._client_ip)
+        loop = asyncio.get_event_loop()
+        self._client_host = loop.run_in_executor(
+            None, socket.gethostbyaddr, self._client_ip)
         self._client_host.add_done_callback(self.after_client_lookup)
 
         # log about connection
@@ -324,7 +326,7 @@ class TelnetServer(tulip.protocols.Protocol):
 
         Otherwise the session variable TERM is set to the value of ``ttype``.
         """
-        loop = tulip.get_event_loop()
+        loop = asyncio.get_event_loop()
 
         if self._advanced is False:
             self._advanced = 1
@@ -653,7 +655,7 @@ class TelnetServer(tulip.protocols.Protocol):
 
     def _restart_timeout(self, val=None):
         self._timeout.cancel()
-        loop = tulip.get_event_loop()
+        loop = asyncio.get_event_loop()
         val = val if val is not None else self.env['TIMEOUT']
         if val:
             try:
@@ -718,7 +720,7 @@ def describe_connection(server):
             ' after {:0.3f}s'.format(server.duration))
 
 def _wrap_future_result(future, result):
-    future = tulip.Future()
+    future = asyncio.Future()
     future.set_result(result)
     return future
 
