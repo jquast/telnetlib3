@@ -700,26 +700,19 @@ def describe_env(server):
 
 
 def describe_connection(server):
-    return '{}{}{}{}'.format(
-            # user [' using <terminal> ']
-            '{}{} '.format(server.env['USER'],
-                ' using' if server.env['TERM'] != 'unknown' else ''),
-            '{} '.format(server.env['TERM'])
-            if server.env['TERM'] != 'unknown' else '',
-            # state,
-            '{}connected from '.format(
-                'dis' if server._closing else ''),
-            # ip, dns
-            '{}{}'.format(
-                server.client_ip, ' ({}{})'.format(
-                    server.client_hostname.result(),
-                    ('' if server.client_ip
-                        == server.client_reverse_ip.result()
-                        else server.standout('!= {}, revdns-fail'.format(
-                            server.client_reverse_ip.result()))
-                        ) if server.client_reverse_ip.done() else '')
-                    if server.client_hostname.done() else ''),
-            ' after {:0.3f}s'.format(server.duration))
+    return ('{user} using {terminal} {state} '
+            'from {ip}:{port}{host} after {duration}'.format(
+                user=server.env['USER'],
+                terminal=server.env['TERM'],
+                state=(server._closing and 'dis' or '') + 'connected',
+                ip=server.client_ip,
+                port=server.client_port,
+                host=(server.client_hostname.done() and
+                      ' ({})'.format(server.client_hostname.result())
+                      or ''),
+                duration='{:0.3f}s'.format(server.duration))
+            )
+
 
 def _wrap_future_result(future, result):
     future = asyncio.Future()
