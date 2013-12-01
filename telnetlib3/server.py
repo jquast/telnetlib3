@@ -333,62 +333,71 @@ class TelnetServer(asyncio.protocols.Protocol):
             self.begin_encoding_negotiation()
 
     def ttype_received(self, ttype):
-        """ Callback for TTYPE response.
+        """ XXX Callback for TTYPE response.
 
-        The first firing of this callback signals an advanced client and
-        is awarded with additional opts by ``request_advanced_opts()``.
+        In the default implementation, an affirmitive reply to TTYPE acts
+        as a canary for detecting more advanced options by firing the callback
+        ``request_advanced_opts()``.
 
-        Otherwise the session variable TERM is set to the value of ``ttype``.
+        The value of 'TERM' in class instance lookup table ``client_env`` is
+        set to the lowercased value of ``ttype`` recieved.
+
+        TTYPE may be requested multiple times, MUD implementations will
+        reply a curses-capable terminal type (usually xterm-256color) on the
+        2nd reply, and 'MTTS <client identifier>' on the third. Other clients
+        will, in time, loop back to their first response.
         """
         loop = asyncio.get_event_loop()
 
-        if self._advanced is False:
-            self._advanced = 1
-            self.log.debug('ttype received: {}'.format(ttype))
-            if not self.env['TERM']:
-                self.env_update({'TERM': ttype})
+        if self.client_dumb:
+            self.log.debug('client terminal is {}.'.format(ttype))
             # track TTYPE seperately from the NEW_ENVIRON 'TERM' value to
             # avoid telnet loops in TTYPE cycling
-            self.env_update({'TERM': ttype})
-            self.env_update({'TTYPE0': ttype})
+            self.env_update({'TERM': ttype, 'TTYPE0': ttype})
+            self._advanced = 1
             loop.call_soon(self.request_advanced_opts)
             return
 
         self.env_update({'TTYPE{}'.format(self._advanced): ttype})
-        lastval = self.env['TTYPE{}'.format(self._advanced -1)].lower()
+
+        lastval = self.env['TTYPE{}'.format(self._advanced - 1)].lower()
+
+        # ttype value has looped
         if ttype == self.env['TTYPE0']:
-            self.env_update({'TERM': ttype})
+            self.env_update({'TERM': ttype.lower()})
             self.log.debug('end on TTYPE{}: {}, using {env[TERM]}.'
                     .format(self._advanced, ttype, env=self.env))
             return
-        # if ttype is empty or maximum loops reached, stop.
+
+        # ttype empty or maximum loops reached, stop.
         elif (not ttype or
                 self._advanced == self.TTYPE_LOOPMAX or
                 ttype.lower() == 'unknown'):
-            ttype = self.env['TERM'].lower()
-            self.env_update({'TERM': ttype})
+            self.env_update({'TERM': ttype.lower()})
             self.log.debug('TTYPE stop on {}, using {env[TERM]}.'.format(
                 self._advanced, env=self.env))
             return
+
         # Mud Terminal type (MTTS), use previous ttype, end negotiation
         elif (self._advanced == 2 and
                 ttype.upper().startswith('MTTS ')):
-            revert_ttype = self.env['TTYPE1']
-            self.env_update({'TERM': revert_ttype})
+            self.env_update({'TERM': self.env['TTYPE1']})
             self.log.debug('TTYPE{} is {}, using {env[TERM]}.'.format(
                 self._advanced, ttype, env=self.env))
             return
-        # ttype value has looped, use ttype, end negotiation
+
+        # ttype value repeated
         elif (ttype.lower() == lastval):
             self.log.debug('TTYPE repeated at {}, using {}.'.format(
                 self._advanced, ttype))
-            self.env_update({'TERM': ttype})
+            self.env_update({'TERM': ttype.lower()})
             return
-        ttype = ttype.lower()
-        self.env_update({'TERM': ttype})
-        self.stream.request_ttype()
-        self._advanced += 1
 
+        else:
+            self.log.debug('TTYPE{} is {}, requesting another.'.format())
+            self.env_update({'TERM': ttype})
+            self.stream.request_ttype()
+            self._advanced += 1
 
     def data_received(self, data):
         """ Process each byte as received by transport.
