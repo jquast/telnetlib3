@@ -6,9 +6,9 @@ import shlex
 import re
 import sys
 
-from telnetlib3 import slc
-from telnetlib3 import telopt
-from telnetlib3 import wcwidth
+from . import slc
+from . import telopt
+from . import wcwidth
 
 __all__ = ('TelnetShellStream', 'Telsh')
 

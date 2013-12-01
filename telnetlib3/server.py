@@ -4,9 +4,10 @@ import logging
 import socket
 import time
 
-from telnetlib3.telsh import Telsh
-from telnetlib3.telopt import TelnetStream
 import asyncio
+
+from . import telsh
+from . import telopt
 
 __all__ = ('TelnetServer',)
 

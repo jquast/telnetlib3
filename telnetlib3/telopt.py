@@ -14,7 +14,7 @@ from telnetlib import SUPDUPOUTPUT, SUPDUP, DET, BM, XASCII, RCP, NAMS
 from telnetlib import RCTE, NAOL, NAOP, NAOCRD, NAOHTS, NAOHTD, NAOFFD
 from telnetlib import NAOVTS, NAOVTD, NAOLFD
 
-from telnetlib3 import slc
+from . import slc
 
 __all__ = ('TelnetStream', 'escape_iac', 'name_command', 'name_commands')
 
