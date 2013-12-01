@@ -124,6 +124,9 @@ class TelnetServer(asyncio.protocols.Protocol):
         # begin connect-time negotiation
         loop.call_soon(self.begin_negotiation)
 
+        self.log.info('connection_made from {}:{}'.format(
+            self.client_ip, self.client_port))
+
     def set_stream_callbacks(self):
         """ XXX Set default iac, slc, and ext callbacks for telnet stream
         """
