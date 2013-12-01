@@ -946,28 +946,36 @@ class Telsh():
         return 0
 
     def cmdset_set(self, *args):
+        """ The 'set' command recieved by client displays all environmentl
+            alues, or the value and key for a specified argument. When the
+            assignment operator, '=' is used, that value is assigned.
+        """
         def disp_kv(key, val):
-            return (shlex.quote(val)
-                    if key not in self.server.readonly_env
-                    else self.dim(shlex.quote(val)))
+            """ display a shell-escaped version of value ``val`` of ``key``,
+                using terminal 'dim' attribute for read-only variables.
+            """
+            return (self.dim(shlex.quote(val))
+                    if key in self.server.readonly_env
+                    else shlex.quote(val))
         retval = 0
-        if args:
-            if '=' in args[0]:
-                retval = self.cmdset_assign(*args)
-                return 0 if not retval else retval # cycle down errors
-            # no '=' must mean form of 'set a', displays 'a=value'
-            key = args[0].strip()
-            if key in self.server.env:
-                self.stream.write('\r\n{}{}{}'.format(
-                    key, '=', disp_kv(key, self.server.env[key])))
-                return 0
-            return -1  # variable not found, -1
-        # display all values
-        self.stream.write('\r\n')
-        self.stream.write('\r\n'.join(['{}{}{}'.format(
-            _key, '=', disp_kv(_key, _val))
-            for (_key, _val) in sorted(self.server.env.items())]))
-        return 0
+        for arg in args:
+            if '=' in args:
+                retval = self.cmdset_assign(arg)  # assigned
+            elif key in self.server.env:
+                val = self.server.env[key]
+                self.stream.write('\r\n{key}={val}'.format(
+                    key=key, val=disp_kv(key, val)))
+                retval = 0  # displayed query
+            else:
+                retval = -1  # query unmatched
+        else:
+            # display all values
+            self.stream.write('\r\n')
+            kv = [(_key, _val) for (_key, _val)
+                  in sorted(self.server.env.items())]
+            self.stream.write('\r\n'.join(['{key}={val}'.format(
+                key=_key, val=disp_kv(_key, _val)) for _key, _val in kv]))
+        return retval
 
     def cmdset_assign(self, *args):
         """ remote command: x=[val] set or unset session values.
