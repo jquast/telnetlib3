@@ -490,36 +490,21 @@ class TelnetServer(asyncio.protocols.Protocol):
 
     def env_update(self, env):
         " Callback receives no environment variables "
-        # if client sends 'HOSTNAME' variable, store as '_HOSTNAME'
-#    readonly_env = ['USER', 'HOSTNAME', 'UID', 'REMOTEIP', 'REMOTEHOST']
-# 
-#        if 'HOSTNAME' in env:
-#            env['_HOSTNAME'] = env.pop('HOSTNAME')
-#        for key, value in self.env.items():
-#            if key in self.default_env and value == self.default_env[key]:
-#                continue
-#            if key in ('HOSTNAME',):
-#                continue
-#            env_fingerprint[key] = value
-
-        if 'TERM' in env and env['TERM']:
-            ttype = env['TERM'].lower()
-            if ttype != self.env['TERM']:
-               self.log.debug('{!r} -> {!r}'.format(self.env['TERM'], ttype))
-            self.shell.term_received(ttype)
-            self._client_env['TERM'] = ttype
-            del env['TERM']
-        if 'TIMEOUT' in env and env['TIMEOUT'] != self.env['TIMEOUT']:
+        # if client sends a readonly_env variable as part of host neogitation,
+        # such as volunteering their 'HOSTNAME', replace it with the same name,
+        # prefixed by '_'.
+        if 'TIMEOUT' in env:
             try:
                 val = int(env['TIMEOUT'])
-                self._client_env['TIMEOUT'] = env['TIMEOUT']
                 self._restart_timeout(val)
             except ValueError as err:
                 self.log.debug('bad TIMEOUT {!r}, {}.'.format(
                     env['TIMEOUT'], err))
-        else:
-            self._client_env.update(env)
-            self.log.debug('env_update: %r', env)
+                del env['TIMEOUT']
+        if 'TERM' in env:
+            self.shell.term_received(env['TERM'])
+        self.log.debug('env_update: %r', env)
+        self._client_env.update(env)
 
     def after_client_lookup(self, arg):
         """ Callback receives result of client name resolution,
