@@ -599,8 +599,7 @@ class TelnetServer(asyncio.protocols.Protocol):
 
             Returns name of server as string as Future.
         """
-        if self._server_name.done():
-            return self._server_name
+        return self._server_name
 
     @property
     def server_fqdn(self):
