@@ -561,6 +561,14 @@ class TelnetServer(asyncio.protocols.Protocol):
         return self._client_ip
 
     @property
+    def client_port(self):
+        """ .. client_port() -> string
+
+            Returns Client Port address as integer.
+        """
+        return self._client_port
+
+    @property
     def client_hostname(self):
         """ .. client_hostname() -> Future()
 
@@ -592,6 +600,15 @@ class TelnetServer(asyncio.protocols.Protocol):
             val = self._client_host.result()[2][0]
             return _wrap_future_result(self._client_host, val)
         return self._client_host
+
+    @property
+    def client_dumb(self):
+        """ .. client_dumb() -> bool
+
+            Indicates the client is a dumb terminal (fe., a network scanner).
+        """
+        # _advanced is incremented by response to TTYPE negotiation.
+        return not self._advanced
 
     @property
     def server_name(self):
