@@ -61,7 +61,7 @@ class TelnetServer(asyncio.protocols.Protocol):
         self._client_env = collections.defaultdict(str, **self.default_env)
 
         #: default environment is server-preferred encoding if un-negotiated.
-        self.env_update({'CHARSET': encoding})
+        self._client_env['CHARSET'] = encoding
 
         #: 'ECHO off' set for clients capable of remote line editing (fastest).
         self.fast_edit = True
@@ -89,14 +89,13 @@ class TelnetServer(asyncio.protocols.Protocol):
         self._negotiation = asyncio.Future()
         self._client_host = asyncio.Future()
         self._negotiation.add_done_callback(self.after_negotiation)
-        self._banner = tulip.Future()
 
     def connection_made(self, transport):
         """ Receive a new telnet client connection.
 
-            A ``TelnetStream`` instance is created for reading on
-            the transport as ``stream``, and various IAC, SLC, and
-            extended callbacks are registered to local handlers.
+            A ``telopt.TelnetStream`` instance is created for reading on
+            the transport as class attribute ``stream``, and various IAC,
+            SLC, and extended callbacks are registered to local handlers.
 
             A ``TelnetShell`` instance is created for writing on
             the transport as ``shell``. It receives in-band data
@@ -110,7 +109,7 @@ class TelnetServer(asyncio.protocols.Protocol):
         self._client_ip, self._client_port = (
             transport.get_extra_info('peername'))
         self.stream = self._stream_factory(
-                transport=transport, server=True, log=self.log)
+            transport=transport, server=True, log=self.log)
         self.shell = self._shell_factory(server=self, log=self.log)
         self.set_stream_callbacks()
         self._last_received = datetime.datetime.now()
@@ -161,11 +160,12 @@ class TelnetServer(asyncio.protocols.Protocol):
             A Telnet Server is expected to assert the preferred session
             options immediately after connection.
 
-            The default implementation sends only (DO, TTYPE): the default
-            ``ttype_received()`` handler fires ``request_advanced_opts()``,
-            further requesting more advanced negotiations that may otherwise
-            confuse or corrupt output of the remote end if it is not equipped
-            with an IAC interpreter, such as a network scanner.
+            The default implementation sends only (DO, TTYPE) and the
+            shell prompt. The default ``ttype_received()`` handler fires
+            ``request_advanced_opts()``, further requesting more advanced
+            negotiations that may otherwise confuse or corrupt output of the
+            remote end if it is not equipped with an IAC interpreter (such as
+            a network scanner).
         """
         if self._closing:
             self._negotiation.cancel()
@@ -236,13 +236,17 @@ class TelnetServer(asyncio.protocols.Protocol):
 
         elif self.duration > self.CONNECT_MAXWAIT:
             # Many IAC interpreters do not differentiate 'local' from 'remote'
+            # options -- they are treated equivalently.
+            #
             # tintin++ for example, cannot answer "DONT BINARY" after already
             # having sent "WONT BINARY"; it wrongly evaluates all telnet
             # options as single direction, client-host viewpoint, thereby
-            # "failing" to negotiate a pending option (the code ignores it, as
-            # it has "already been sent"). Note, that these kinds of IAC
-            # interpreters may be discovered by requesting (DO, ECHO): the
-            # client answers (WILL, ECHO), which is proposterous.
+            # "failing" to negotiate a pending option: it ignores our request,
+            # it believes it has already been sent!
+            #
+            # Note: these kinds of IAC interpreters may be discovered by
+            # requesting (DO, ECHO): the client replies (WILL, ECHO),
+            # which is proposterous!
             loop.call_soon(self.after_encoding)
 
         else:
@@ -269,9 +273,11 @@ class TelnetServer(asyncio.protocols.Protocol):
         self.log.info('client environment is {}.'.format(describe_env(self)))
 
     def after_encoding(self):
-        """ XXX encoding negotiation has completed
+        """ XXX this callback fires after encoding negotiation has completed,
+            the value of client and remote encoding are final.  Some
+            implementors may wish to display a non-english login banner.
         """
-        self.log.info('client encoding is {}.'.format(
+        self.log.debug('client encoding is {}.'.format(
             self.encoding(outgoing=True, incoming=True)))
 
     def request_advanced_opts(self):
@@ -547,16 +553,6 @@ class TelnetServer(asyncio.protocols.Protocol):
         return describe_connection(self)
 
     @property
-    def default_banner(self):
-        """ .. default_banner() -> string
-
-            Returns first banner string written to stream during negotiation.
-        """
-        if self.server_fqdn.done():
-            return 'Welcome to {} !'.format(self.server_fqdn.result())
-        return ''
-
-    @property
     def client_ip(self):
         """ .. client_ip() -> string
 
@@ -568,7 +564,7 @@ class TelnetServer(asyncio.protocols.Protocol):
     def client_hostname(self):
         """ .. client_hostname() -> Future()
 
-            Returns DNS name of client as String as Future.
+            Returns DNS name of client as Future.
         """
         if self._client_host.done():
             val = self._client_host.result()[0]
@@ -588,7 +584,7 @@ class TelnetServer(asyncio.protocols.Protocol):
 
     @property
     def client_reverse_ip(self):
-        """ .. client_fqdn() -> Future()
+        """ .. client_reverse_ip() -> Future()
 
             Returns reverse DNS lookup IP address of client as Future.
         """
@@ -610,7 +606,7 @@ class TelnetServer(asyncio.protocols.Protocol):
     def server_fqdn(self):
         """ .. server_fqdn() -> Future()
 
-            Returns fqdn string of server as Future.
+            Returns fqdn string of server as Future String.
         """
         return self._server_fqdn
 
