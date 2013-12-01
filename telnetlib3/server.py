@@ -531,6 +531,9 @@ class TelnetServer(asyncio.protocols.Protocol):
         """ Callback receives result of server name resolution,
             Begins fqdn resolution, available as '%H' prompt character.
         """
+        if arg.cancelled():
+            self.log.debug('server gethostname cancelled')
+            return
         #: prompt sequence '%H' is result of socket.get_fqdn(self._server_name)
         self._server_fqdn = asyncio.get_event_loop().run_in_executor(
             None, socket.getfqdn, arg.result())
@@ -541,7 +544,7 @@ class TelnetServer(asyncio.protocols.Protocol):
         """ Callback receives result of server fqdn resolution,
         """
         if arg.cancelled():
-            self.log.debug('getfqdn cancelled')
+            self.log.debug('server getfqdn cancelled')
         else:
             if self.env['HOSTNAME'] != arg.result():
                 self.env_update({'HOSTNAME': arg.result()})
