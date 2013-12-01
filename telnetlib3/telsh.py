@@ -734,7 +734,7 @@ class Telsh():
             self.server.env['PS2'] if self.is_multiline
             else self.server.env['PS1'])))
 
-    def display_exception(self, *exc_info, level=logging.DEBUG):
+    def display_exception(self, *exc_info, level=logging.ERROR):
         """ Dispaly exception to client when ``show_traceback`` is True,
             forward copy server log at debug and info levels.
         """
@@ -750,7 +750,7 @@ class Telsh():
                     else row.rstrip() for row in tb_msg))
             tbl_srv = [row.rstrip() for row in tb_msg]
             for line in tbl_srv:
-                logging.log(level, line)
+                self.log(level, line)
 
     def process_cmd(self, input):
         """ .. method:: process_cmd(input : string) -> int
