@@ -518,14 +518,21 @@ class TelnetServer(asyncio.protocols.Protocol):
         """ Callback receives result of client name resolution,
             Logs warning if reverse dns verification failed,
         """
+        if arg.cancelled():
+            self.log.debug('client ip lookup cancelled')
+            return
         if self.client_ip != self.client_reverse_ip.result():
-            # OpenSSH will log 'POSSIBLE BREAK-IN ATTEMPT!' but we dont care ..
-            self.log.warn('reverse mapping failed: {}'.format(
-                self.arg.result()))
+            # OpenSSH will log 'POSSIBLE BREAK-IN ATTEMPT!'
+            # but we dont care .. just demonstrating these values,
+            self.log.warn('reverse lookup: {cip} != {rcip} ({arg})'.format(
+                cip=self.client_ip, rcip=self.client_reverse_ip,
+                arg=arg.result()))
         self.env_update({
-            'REMOTEIP': self.client_ip,
-            'REMOTEHOST': self.client_hostname.result(),
+            'REMOTE_IP': self.client_ip,
+            'REMOTE_PORT': str(self.client_port),
+            'REMOTE_HOST': self.client_hostname.result(),
             })
+        self.log.error(self.env)
 
     def after_server_gethostname(self, arg):
         """ Callback receives result of server name resolution,
