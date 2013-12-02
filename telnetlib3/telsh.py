@@ -187,9 +187,11 @@ class Telsh():
         ('help', collections.OrderedDict([
             ('status', None),
             ('whoami', None),
-            ('whereami', None),
             ('toggle', None),
             ('logoff', None),
+            ('whereami', None),
+            ('set', None),
+            ('echo', None),
             ]), ),
         ('echo', None),
         ('status', None),
