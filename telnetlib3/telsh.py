@@ -970,16 +970,16 @@ class Telsh():
                     else shlex.quote(val))
         retval = 0
         for arg in args:
-            if '=' in args:
+            if '=' in arg:
                 retval = self.cmdset_assign(arg)  # assigned
-            elif key in self.server.env:
-                val = self.server.env[key]
+            elif arg in self.server.env:
+                val = self.server.env[arg]
                 self.stream.write('\r\n{key}={val}'.format(
-                    key=key, val=disp_kv(key, val)))
+                    key=arg, val=disp_kv(arg, val)))
                 retval = 0  # displayed query
             else:
                 retval = -1  # query unmatched
-        else:
+        if not args:
             # display all values
             self.stream.write('\r\n')
             kv = [(_key, _val) for (_key, _val)
