@@ -191,8 +191,10 @@ class TelnetStream:
         # indicating state of remote capabilities.
         self.remote_option = Option('remote_option', self.log)
 
-        #: True when Flow Control (XON) has been recv, until receipt of XOFF.
+        #: bool implementing Flow Control, False when XOFF recieved,
+        #  pending data buffered into self._write_buffer
         self.writing = True
+        self._write_buffer = collections.deque()
 
         #: Sub-negotiation buffer
         self._sb_buffer = collections.deque()
@@ -206,6 +208,10 @@ class TelnetStream:
         #: Represents LINEMODE MODE neogtiated or requested by client.
         #  attribute ``ack`` returns True if it is in use.
         self._linemode = slc.Linemode()
+
+        #: Wether to write along the transport, allowing for flow control
+        #  (XOFF/^S, activated by SLC_XOFF, and XON/^Q, activated by SLC_XON)
+        self._writing = True
 
         #: Initial line mode requested by server if client supports LINEMODE
         #  negotiation (remote line editing and literal echo of control chars)
@@ -268,7 +274,6 @@ class TelnetStream:
         assert isinstance(byte, (bytes, bytearray)), byte
         assert len(byte) == 1, byte
         self.byte_count += 1
-        self._dm_recv = False
         self.slc_received = False
         # list of IAC commands needing 3+ bytes
         iac_mbs = (DO, DONT, WILL, WONT, SB)
@@ -391,15 +396,24 @@ class TelnetStream:
         """ .. method:: feed_byte(byte : bytes)
 
             Write data bytes to transport end connected to stream reader.
-            Bytes matching IAC (\xff) is escabed by IAC IAC, unless oob=True.
+
+            Bytes matching IAC (\xff, Is-A-Command) are escaped by (IAC, IAC),
+            unless ``oob`` is ``True``. When oob is True, data is always
+            written regardless of XON/XOFF. Otherwise, this data may be
+            held in-memory until XON (the default state).
         """
         assert isinstance(data, (bytes, bytearray)), repr(data)
         if not oob and not self.local_option.enabled(BINARY):
             for pos, byte in enumerate(data):
                 assert byte < 128, (
-                        'character value {} at pos {} not valid, send '
-                        'IAC WILL BINARY first: {}'.format(byte, pos, data))
-        self.transport.write(escape_iac(data))
+                    'character value {} at pos {} not valid, send '
+                    'IAC WILL BINARY first: {}'.format(byte, pos, data))
+        data = data if oob else escape_iac(data)
+        if self.writing or oob:
+            self.transport.write(data)
+        else:
+            # XOFF (Transmit Off) enabled, buffer in-band data until XON.
+            self._write_buffer.extend([data])
 
     def send_iac(self, data):
         """ .. method: send_iac(self, data : bytes)
@@ -685,27 +699,26 @@ class TelnetStream:
     def handle_nop(self, cmd):
         """ XXX Handle IAC No-Operation (NOP)
         """
-        self.log.debug('IAC NOP: Null Operation')
+        self.log.debug('IAC NOP: Null Operation (unhandled).')
 
     def handle_ga(self, cmd):
         """ XXX Handle IAC Go-Ahead (GA)
         """
-        self.log.debug('IAC GA: Go-Ahead')
+        self.log.debug('IAC GA: Go-Ahead (unhandled).')
 
     def handle_dm(self, cmd):
         """ XXX Handle IAC Data-Mark (DM)
 
-            Callback sets ``self._dm_recv``.  when IAC + DM is received.
             The TCP transport is not tested for OOB/TCP Urgent, so an old
             teletype half-duplex terminal may inadvertantly send unintended
             control sequences up until now,
 
             Oh well.  """
-        self.log.debug('IAC DM: received')
+        self.log.debug('IAC DM: received (unhandled).')
         #: ``True`` if the last byte sent to ``feed_byte()`` was the end
         #  of an *IAC DM* has been received. MSG_OOB not implemented, so
         #  this mechanism _should not be implmeneted_.
-        self._dm_recv = True
+        #self._dm_recv = True
         #self.iac(DM)
 
 # Public mixed-mode SLC and IAC callbacks
@@ -716,12 +729,12 @@ class TelnetStream:
             Provides a function which discards all the data ready on current
             line of input. The prompt should be re-displayed.
         """
-        self.log.debug('IAC EL: Erase Line')
+        self.log.debug('IAC EL: Erase Line (unhandled).')
 
     def handle_eor(self, byte):
         """ XXX Handle IAC End of Record (EOR_CMD) or SLC_EOR.
         """
-        self.log.debug('IAC EOR_CMD: End of Record')
+        self.log.debug('IAC EOR_CMD: End of Record (unhandled).')
 
     def handle_abort(self, byte):
         """ XXX Handle IAC Abort (ABORT) rfc1184, or SLC_ABORT.
@@ -729,12 +742,12 @@ class TelnetStream:
             Similar to Interrupt Process (IP), but means only to abort or
             terminate the process to which the NVT is connected.
         """
-        self.log.debug('IAC ABORT: Abort')
+        self.log.debug('IAC ABORT: Abort (unhandled).')
 
     def handle_eof(self, byte):
         """ XXX Handle End of Record (IAC, EOF), rfc1184 or SLC_EOF.
         """
-        self.log.debug('IAC EOF: End of File')
+        self.log.debug('IAC EOF: End of File (unhandled).')
 
     def handle_susp(self, byte):
         """ XXX Handle Suspend Process (SUSP), rfc1184 or SLC_SUSP.
@@ -745,7 +758,7 @@ class TelnetStream:
         """
         # If the receiving system does not support this functionality, it
         # should be ignored.
-        self.log.debug('IAC SUSP: Suspend')
+        self.log.debug('IAC SUSP: Suspend (unhandled).')
 
     def handle_brk(self, byte):
         """ XXX Handle IAC Break (BRK) or SLC_BRK (Break).
@@ -754,7 +767,7 @@ class TelnetStream:
             as IP (^c), but a means to map sysystem-dependent break key such
             as found on an IBM Systems.
         """
-        self.log.debug('IAC BRK: Break')
+        self.log.debug('IAC BRK: Break (unhandled).')
 
     def handle_ayt(self, byte):
         """ XXX Handle IAC Are You There (AYT) or SLC_AYT.
@@ -769,29 +782,19 @@ class TelnetStream:
     def handle_ip(self, byte):
         """ XXX Handle IAC Interrupt Process (IP) or SLC_IP
         """
-        self.log.debug('IAC IP: Interrupt Process')
+        self.log.debug('IAC IP: Interrupt Process (unhandled).')
 
     def handle_ao(self, byte):
         """ XXX Handle IAC Abort Output (AO) or SLC_AO.
 
             Discards any remaining output on the transport buffer.
+            " [...] a reasonable implementation would be to suppress the
+              remainder of the text string, but transmit the prompt character
+              and the preceding <CR><LF>. "
         """
-        #   "If the AO were received [...] a reasonable implementation would
-        #   be to suppress the remainder of the text string, *but transmit the
-        #   prompt character and the preceding <CR><LF>*."
-        # XXX TODO: Must netsend()
-        self.log.debug('IAC AO: Abort Output')
-        pass
-        #self.stream.discard_output()
-
-    def handle_xon(self, byte):
-        """ XXX handle Transmit-On (IAC, XON) or SLC_XON.
-
-            Pauses writing to the transport.
-        """
-        self.log.debug('IAC XON: Transmit On')
-        self.writing = True
-        self.transport.resume_writing()
+        self.log.debug('IAC AO: Abort Output, '
+                       '{} bytes discarded.'.format(len(self._write_buffer)))
+        self._write_buffer.clear()
 
     def handle_ec(self, byte):
         """ XXX Handle IAC + SLC or SLC_EC (Erase Character).
@@ -799,7 +802,7 @@ class TelnetStream:
             Provides a function which deletes the last preceding undeleted
             character from data ready on current line of input.
         """
-        self.log.debug('IAC EC: Erase Character')
+        self.log.debug('IAC EC: Erase Character (unhandled).')
 
 # public Special Line Mode (SLC) callbacks
 #
@@ -830,24 +833,37 @@ class TelnetStream:
             character, and any subsequent bytes until next whitespace character
             from data ready on current line of input.
         """
-        self.log.debug('IAC EC: Erase Word')
+        self.log.debug('SLC EC: Erase Word (unhandled).')
 
     def handle_rp(self, slc):
-        """ Handle SLC Repaint.
-        """ # XXX
-        self.log.debug('SLC RP: Repaint')
+        """ XXX Handle SLC Repaint.
+        """
+        self.log.debug('SLC RP: Repaint (unhandled).')
 
     def handle_lnext(self, slc):
-        """ Handle SLC Literal Next (Next character(s) received raw)
-        """ # XXX
-        self.log.debug('IAC LNEXT: Literal Next')
-
-    def handle_xoff(self, slc):
-        """ Called when SLC_XOFF is received.
+        """ XXX Handle SLC Literal Next (Next character(s) received raw)
         """
-        self.log.debug('IAC XOFF: Transmit Off')
+        self.log.debug('SLC LNEXT: Literal Next (unhandled)')
+
+    def handle_xon(self, byte):
+        """ XXX Handle SLC XON (Transmit-On).
+
+            The default implementation enables transmission and
+            writes any data buffered during XOFF.
+        """
+        self.log.debug('SLC XON: Transmit On.')
+        self.writing = True
+        self.write(b''.join(self._write_buffer), oob=True)
+        self._write_buffer.clear()
+
+    def handle_xoff(self, byte):
+        """ XXX Handle SLC XOFF (Transmit-Off)
+
+            The default implementation disables transmission of
+            in-band data until XON is recieved.
+        """
+        self.log.debug('SLC XOFF: Transmit Off.')
         self.writing = False
-        self.transport.pause_writing()
 
 # public Telnet extension callbacks
 #
@@ -1246,7 +1262,7 @@ class TelnetStream:
             self._handle_sb_env(buf)
         elif cmd == CHARSET:
             self._handle_sb_charset(buf)
-        elif cmd == TTYPE: # XXX Mark IS
+        elif cmd == TTYPE:
             self._handle_sb_ttype(buf)
         elif cmd == TSPEED:
             self._handle_sb_tspeed(buf)
