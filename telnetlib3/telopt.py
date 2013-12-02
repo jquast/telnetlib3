@@ -1534,11 +1534,11 @@ class TelnetStream:
         self.request_forwardmask()
 
     def _slc_end(self):
-        """ Send any SLC pending SLC changes sotred in _slc_buffer """
+        """ Send any pending SLC changes stored in _slc_buffer """
         if 0 == len(self._slc_buffer):
             self.log.debug('slc_end: IAC SE')
         else:
-            self.write(b''.join(self._slc_buffer), oob=True)
+            self.write(b''.join(self._slc_buffer))
             self.log.debug('slc_end: (%r) IAC SE', b''.join(self._slc_buffer))
         self.send_iac(IAC + SE)
         self._slc_buffer.clear()
@@ -1574,8 +1574,8 @@ class TelnetStream:
         assert len(self._slc_buffer) < _MAXSIZE_SLC, ('SLC: buffer full')
         if slc_def is None:
             slc_def = self.slctab[func]
-        self.log.debug('_slc_add (%s, %s)',
-            slc.name_slc_command(func), slc_def)
+        self.log.debug('_slc_add ({:<10} {})'.format(
+                   slc.name_slc_command(func) + ',', slc_def))
         self._slc_buffer.extend([func, slc_def.mask, slc_def.val])
 
     def _slc_process(self, func, slc_def):
