@@ -898,7 +898,8 @@ class Telsh():
             ('outbinary', self.server.outbinary),
             ('inbinary', self.server.inbinary),
             ('binary', self.server.outbinary + self.server.inbinary),
-            ('goahead', (not lopt.enabled(telopt.SGA)) and self._send_ga),
+            ('goahead', (
+                not lopt.enabled(telopt.SGA)) and self.stream.send_go_ahead),
             ('color', self.does_styling),
             ('xon-any', self.server.stream.xon_any),
             ('bell', self.send_bell)])
@@ -937,7 +938,7 @@ class Telsh():
         if opt in ('goahead', '_all'):
             _opt = 'goahead' if opt == '_all' else opt
             cmd = (telopt.WILL if tbl_opt[_opt] else telopt.WONT)
-            self._send_ga = cmd is telopt.WONT
+            self.stream.send_go_ahead = cmd is telopt.WONT
             self.server.stream.iac(cmd, telopt.SGA)
             self.stream.write('\r\n{} supress go-ahead.'.format(
                 telopt.name_command(cmd).lower()))
