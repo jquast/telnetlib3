@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+"""
+A Demonstrating TelnetServer implementation.
+
+This script simply runs the TelnetServer API in its default configuration.
+"""
 import argparse
 import logging
 import asyncio
@@ -22,8 +27,8 @@ def start_server(loop, log, host, port):
     # instance; wrap using `lambda' so that the specified logger
     # instance (whose log-level is specified by cmd-line argument)
     # may be used.
-    func = loop.create_server(lambda: telnetlib3.TelnetServer(log=log),
-                              host, port)
+    func = loop.create_server(
+        lambda: telnetlib3.TelnetServer(log=log), host, port)
     server = loop.run_until_complete(func)
     log.info('Listening on %s', server.sockets[0].getsockname())
 
