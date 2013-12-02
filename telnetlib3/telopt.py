@@ -1548,9 +1548,12 @@ class TelnetStream:
         self.send_iac(IAC + SB + LINEMODE + slc.LMODE_SLC)
         self.log.debug('slc_start: IAC + SB + LINEMODE + SLC')
 
-    def _slc_send(self):
-        """ Send all special characters that are supported """
+    def _slc_send(self, slctab=None):
+        """ Send supported SLC characters of current tabset,
+            or tabspet specified by argument slctab.
+        """
         send_count = 0
+        slctab = slctab or self.slctab
         for func in range(slc.NSLC + 1):
             if self.slctab[bytes([func])].nosupport:
                 continue
@@ -1595,12 +1598,11 @@ class TelnetStream:
         if func == theNULL:
             if slc_def.level == slc.SLC_DEFAULT:
                 # client requests we send our default tab,
-                self.log.info('SLC_DEFAULT')
-                self._default_slc(self._default_tabset)
-                self._slc_send()
+                self.log.debug('_slc_process: client request SLC_DEFAULT')
+                self._slc_send(self.default_slc_tab)
             elif slc_def.level == slc.SLC_VARIABLE:
                 # client requests we send our current tab,
-                self.log.info('SLC_VARIABLE')
+                self.log.debug('_slc_process: client request SLC_VARIABLE')
                 self._slc_send()
             else:
                 self.log.warn('func(0) flag expected, got %s.', slc_def)
