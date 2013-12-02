@@ -494,6 +494,8 @@ class TelnetServer(asyncio.protocols.Protocol):
         self.connection_lost('EOF')
 
     def connection_lost(self, exc):
+        if self._closing:
+            return
         self._closing = True
         self.log.info('{}{}'.format(self.__str__(),
                                     ': {}'.format(exc) if exc is not None
