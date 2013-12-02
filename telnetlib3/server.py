@@ -517,6 +517,7 @@ class TelnetServer(asyncio.protocols.Protocol):
                     env['TIMEOUT'], err))
                 del env['TIMEOUT']
         if 'TERM' in env:
+            env['TERM'] = env['TERM'].lower()
             self.shell.term_received(env['TERM'])
         self.log.debug('env_update: %r', env)
         self._client_env.update(env)
