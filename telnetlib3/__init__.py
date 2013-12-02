@@ -1,7 +1,9 @@
 """
-telnetlib3 0.1, Telnet Protocol using the 'tulip' project of PEP 3156.
+telnetlib3: a Telnet Protocol implemented in python.
 
-Requires Python 3.3. 'tulip' module is included, see ``README`` file details.
+Requires Python 3.3 or 3.4. and the 'asyncio' module
+(to be distributed with python3.4). See the README file
+for details.
 """
 __author__ = "Jeffrey Quast"
 __url__ = u'https://github.com/jquast/telnetlib3/'
