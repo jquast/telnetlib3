@@ -10,10 +10,21 @@ Development is currently in progress, Telnet Server is complete, and under testi
 Status
 ======
 
-TODO: Proper abort_output()/IAC rewind.
+TODO: backspacing not working correctly on 'fast edit', why
+      the hecker does bsd client print forward-space when
+      backspace is pressed?
+TODO: Proper XON/XOFF/AO, this was previously implemented with
+      the proposed pause/resume_writing() methods for tulip, but
+      these have been complicated a great deal upstream in asyncio/py 3.4,
+      looks like a custom StreamWriter will need to be implemented ?
+TODO: Proper abort_output()/IAC rewind, have yet 
 TODO: handling duplication of echo and flow control by LINEMODE opts
+      need to cross-wire these all correctly
 TODO: TelnetClient (also using TelnetStreamReader)
+      this is rudimentarily implemented, but we need to implement
+      a tty-driven interface of some sort to rapidly test it
 TODO: fingerprinting Client & Server
+      somewhere there with examples/honeypot.py
 TODO: nosetests
 TODO: example MUD server
 TODO: example wunderground.com client
