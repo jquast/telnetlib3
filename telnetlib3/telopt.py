@@ -1585,9 +1585,6 @@ class TelnetStream:
             The special definition (0, SLC_DEFAULT|SLC_VARIABLE, 0) has the
             side-effect of replying with a full slc tabset, resetting to
             the default tabset, if indicated.  """
-        self.log.debug('_slc_process {:<9} mine={}, his={}'.format(
-                slc.name_slc_command(func), self.slctab[func], slc_def))
-
         # out of bounds checking
         if ord(func) > slc.NSLC:
             self.log.warn('SLC not supported (out of range): (%r)', func)
@@ -1608,6 +1605,9 @@ class TelnetStream:
             else:
                 self.log.warn('func(0) flag expected, got %s.', slc_def)
             return
+
+        self.log.debug('_slc_process {:<9} mine={}, his={}'.format(
+            slc.name_slc_command(func), self.slctab[func], slc_def))
 
         # evaluate slc
         mylevel, myvalue = (self.slctab[func].level, self.slctab[func].val)
