@@ -1,8 +1,10 @@
 import collections
+import traceback
 import datetime
 import logging
 import socket
 import time
+import sys
 
 import asyncio
 
@@ -409,7 +411,15 @@ class TelnetServer(asyncio.protocols.Protocol):
             try:
                 self.stream.feed_byte(byte)
             except (ValueError, AssertionError) as err:
-                self.log.warn(err)
+                exc_info = sys.exc_info()
+                tbl_exception = (
+                    traceback.format_tb(exc_info[2]) +
+                    traceback.format_exception_only(exc_info[0], exc_info[1]))
+                for tb in tbl_exception:
+                    tb_msg = tb.splitlines()
+                    tbl_srv = [row.rstrip() for row in tb_msg]
+                    for line in tbl_srv:
+                        self.log.error(line)
                 continue
 
             if self.stream.is_oob:
