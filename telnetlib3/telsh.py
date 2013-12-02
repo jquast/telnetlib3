@@ -950,6 +950,7 @@ class Telsh():
         if opt in ('xon-any', '_all'):
             _opt = 'xon-any' if opt == '_all' else opt
             self.server.stream.xon_any = not tbl_opt[_opt]
+            self.server.stream.send_lineflow_mode()
             self.stream.write('\r\nxon-any {}abled.'.format(
                 'en' if self.server.stream.xon_any else 'dis'))
         if opt in ('color', '_all'):
