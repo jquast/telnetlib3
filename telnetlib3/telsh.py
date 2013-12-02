@@ -639,7 +639,7 @@ class Telsh():
 
         self.last_char = char
 
-    def line_received(self, input, eor=False):
+    def line_received(self, input):
         """ Callback for each line received, processing command(s) at EOL.
         """
         self.log.debug('line_received: {!r}'.format(input))
