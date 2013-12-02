@@ -855,7 +855,7 @@ class Telsh():
         elif cmd == 'whereami':
             self.stream.write('\r\nDisplay server name')
         elif cmd == 'toggle':
-            self.stream.write('\r\nToggle operating parameters:')
+            self.stream.write('\r\nView or toggle operating parameters.')
         elif cmd == 'echo':
             self.stream.write('\r\nDisplay arguments.')
         else:
