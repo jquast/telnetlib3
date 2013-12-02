@@ -208,6 +208,28 @@ class Telsh():
         ('logoff', None),
         ])
 
+    #: display full traceback to output stream ``display_exception()``
+    show_traceback = False
+
+    #: Whether to send video attributes; toggled by ``set_term()``, updated
+    #  to 'True' in certain conditions in callback ``term_received()``.
+    does_styling = False
+
+    #: if set, input character fires ``autocomplete()``
+    autocomplete_char = '\t'
+
+    #: if set, these chars stripped from end of line in ``line_received()``
+    strip_eol = '\r\n\00'
+
+    #: boolean toggle: write ASCII BELL on error?
+    send_bell = False
+
+    #: if set, maximum base10 digit that may be entered using ^V[0-9]+
+    _max_litval = 65535
+
+    #: maximum length of in-memory input buffer, (default, 8K)
+    _max_lastline = 8192
+
     def __init__(self, server, stream=TelnetShellStream, log=logging):
         #: TelnetServer instance associated with shell
         self.server = server
@@ -217,23 +239,17 @@ class Telsh():
 
         self.log = log
 
-        #: display full traceback to output stream ``display_exception()``
-        self.show_traceback = False
+        #: boolean toggle: Current state is multiline? PS2 is displayed.
+        self.multiline = False
 
-        #: Whether to send video attributes; toggled by ``set_term()``
-        self.does_styling = False
+        #: if set, last character received by ``character_received()``.
+        self.last_char = None
 
-        #: if set, input character fires ``autocomplete()``
-        self.autocomplete_char = '\t'
+        #: if set, exit status of last command; accessed by property ``retval``
+        self._retval = None
 
-        #: if set, CR, LF, and NUL are stripped from ``line_received()``
-        self.strip_eol = '\r\n\00'
-
-        #: if set, maximum base10 digit that may be entered using ^V[0-9]+
-        self._max_litval = 65535
-
-        #: maximum length of in-memory input buffer, (default, 8K)
-        self._max_lastline = 8192
+        #: boolean toggle: set on editing_received of EDIT.LNEXT (^v)
+        self._literal = False
 
         #: buffer of line input until command process.
         self._lastline = collections.deque(maxlen=self._max_lastline)
@@ -245,23 +261,9 @@ class Telsh():
         #: compiled expression for variable expanson in ``echo_eval()``
         self._re_echo = re.compile(self.re_echo, re.DOTALL)
 
-        #: boolean toggle: Current state is multiline? PS2 is displayed.
-        self.multiline = False
-
-        #: boolean toggle: write ASCII BELL on error?
-        self.send_bell = False
-
-        #: if set, last character received by ``character_received()``.
-        self.last_char = None
-
-        #: if set, exit status of last command; accessed by property ``retval``
-        self._retval = None
-
-        #: boolean toggle: set on editing_received of EDIT.LNEXT (^v)
-        self._literal = False
-
+#
 # properties
-
+#
     @property
     def retval(self):
         """ Returns exit status of last command executed. ``
@@ -281,14 +283,16 @@ class Telsh():
         """
         return u''.join(self._lastline)
 
+#
 # internal methods
-
+#
     def term_received(self, term):
         """ .. method:: term_received(string)
 
             callback fired by telnet iac to set or update TERM
         """
         self.term = term
+        self.log.debug('term_received: {}'.format(term))
         self.does_styling = (
                 term.startswith('vt') or
                 term.startswith('xterm') or
@@ -333,8 +337,9 @@ class Telsh():
             # (2) whereas '^h' moves the cursor left one (displayable) cell !
             return '\b' * (vtlen - 1) + '\x1b[K'
 
+#
 # public callbacks
-
+#
     def display_prompt(self, redraw=False):
         """ .. method::display_prompt(redraw=False)
 
@@ -759,11 +764,12 @@ class Telsh():
 
     def process_cmd(self, input):
         """ .. method:: process_cmd(input : string) -> int
-            XXX Callback from ``line_received()`` for input line processing..
+            XXX Callback from ``line_received()`` for input line processing.
 
             The default handler returns shell-like exit/success value as
-            integer, 0 meaning success, non-zero failure, and provides a
-            minimal set of diagnostic commands.
+            integer, 0 meaning success, non-zero failure. None indicates
+            no command was processed, and '' indicates a continuation of
+            multi-line.
         """
         commands = []
         for cmd_args in input.split(';'):
