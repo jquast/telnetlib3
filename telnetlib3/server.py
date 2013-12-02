@@ -89,6 +89,14 @@ class TelnetServer(asyncio.protocols.Protocol):
         self._client_host = asyncio.Future()
         self._negotiation.add_done_callback(self.after_negotiation)
 
+    def pause_writing(self):
+        self.log.debug('high watermark reached')
+        self.stream.handle_xoff(None)
+
+    def resume_writing(self):
+        self.log.debug('low watermark reached')
+        self.stream.handle_xon(None)
+
     def connection_made(self, transport):
         """ Receive a new telnet client connection.
 

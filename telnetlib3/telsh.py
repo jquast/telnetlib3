@@ -490,6 +490,11 @@ class Telsh():
             self._lastline.clear()
             self.stream.write(char_disp)
             self.display_prompt()
+        elif cmd in (EDIT.XOFF, EDIT.XON):
+            # transmit-off (^S), transmit-on (^Q)
+            pass
+        elif cmd in (EDIT.AO):
+            self.display_prompt()
         else:
             # not handled or implemented
             self.log.debug('{} unhandled.'.format(EDIT.name(cmd)))
