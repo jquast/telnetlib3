@@ -760,7 +760,7 @@ class Telsh():
                     else row.rstrip() for row in tb_msg))
             tbl_srv = [row.rstrip() for row in tb_msg]
             for line in tbl_srv:
-                self.log(level, line)
+                self.log.log(level, line)
 
     def process_cmd(self, input):
         """ .. method:: process_cmd(input : string) -> int
