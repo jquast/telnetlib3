@@ -794,12 +794,12 @@ class Telsh():
         return retval
 
     def cmdset_command(self, cmd, *args):
-        self.log.debug('command {!r}{!r}'.format(cmd, args))
+        self.log.debug('command {!r} {!r}'.format(cmd, args))
         if not len(cmd) and not len(args):
             return None
-        if cmd in ('help', '?',):
+        elif cmd in ('help', '?',):
             return self.cmdset_help(*args)
-        elif cmd in ('_debug',):
+        elif cmd == '_debug':
             return self.cmdset_debug(*args)
         elif cmd == 'echo':
             self.cmdset_echo(*args)
