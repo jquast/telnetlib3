@@ -103,6 +103,7 @@ class TalkerShell(telnetlib3.Telsh):
         ('/status', None),
         ('/whoami', None),
         ('/whereami', None),
+        ('/listclients', None),
         ('/logoff', None),
         ('/nick', None),
         ('/join', None),
@@ -162,6 +163,8 @@ class TalkerShell(telnetlib3.Telsh):
             return self.cmdset_assign('CHANNEL=')
         elif cmd == '/nick':
             return self.cmdset_nick(*args)
+        elif cmd == '/listclients':
+            return self.cmdset_listclients()
         elif cmd == '/whoami':
             self.stream.write('\r\n{}.'.format(self.server.__str__()))
         elif cmd == '/whereami':
@@ -174,6 +177,16 @@ class TalkerShell(telnetlib3.Telsh):
             disp_cmd = u''.join([name_unicode(char) for char in cmd])
             self.stream.write('\r\n{!s}: command not found.'.format(disp_cmd))
             return 1
+        return 0
+
+    def cmdset_listclients(self):
+        """
+        List clients currently connected. 
+        """
+        clients_info = ("{} - {}".format(server.env['USER'], key_)
+                        for (key_, server) in clients.items())
+        output = "\r\n".join(clients_info)
+        self.stream.write("\r\n{}".format(output))
         return 0
 
     def cmdset_help(self, *args):
