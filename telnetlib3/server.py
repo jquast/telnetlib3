@@ -83,13 +83,21 @@ class TelnetServer(asyncio.protocols.Protocol):
 
         #: prompt sequence '%h' is result of socket.gethostname().
         self._server_name = self._loop.run_in_executor(None, socket.gethostname)
-        self._server_name.add_done_callback(self.after_server_gethostname)
+        self._server_name.add_done_callback(
+            self.after_server_gethostname)
+
         #: prompt sequence '%H' is result of socket.getfqdn() of '%h'.
         self._server_fqdn = asyncio.Future()
         self._timeout = asyncio.Future()
-        self._negotiation = asyncio.Future()
         self._client_host = asyncio.Future()
-        self._negotiation.add_done_callback(self.after_negotiation)
+
+        self._telopt_negotiation = asyncio.Future()
+        self._telopt_negotiation.add_done_callback(
+            self.after_telopt_negotiation)
+
+        self._encoding_negotiation = asyncio.Future()
+        self._encoding_negotiation.add_done_callback(
+            self.after_encoding)
 
     def pause_writing(self):
         self.log.debug('high watermark reached')
@@ -178,45 +186,52 @@ class TelnetServer(asyncio.protocols.Protocol):
             a network scanner).
         """
         if self._closing:
-            self._negotiation.cancel()
+            self._telopt_negotiation.cancel()
             return
         from .telopt import DO, TTYPE
         self.stream.iac(DO, TTYPE)
-        self._loop.call_soon(self.check_negotiation)
+        self._loop.call_soon(self.check_telopt_negotiation)
         self.shell.display_prompt()
 
     def begin_encoding_negotiation(self):
-        """ XXX Request bi-directional binary encoding and CHARSET; called only
-            if remote end replies affirmitively to (DO, TTYPE).
+        """ XXX Request bi-directional binary encoding and CHARSET;
+            called only if remote end replies affirmitively to (DO, TTYPE).
         """
         from .telopt import WILL, BINARY, DO, CHARSET
         self.stream.iac(WILL, BINARY)
         self.stream.iac(DO, CHARSET)
 
-        self._loop.call_soon(self.check_encoding)
+        self._loop.call_soon(self.check_encoding_negotiation)
 
-    def check_negotiation(self):
+    def check_telopt_negotiation(self):
         """ XXX negotiation check-loop, schedules itself for continual callback
-            until negotiation is considered final, firing ``after_negotiation``
-            callback when complete.
+            until negotiation is considered final, firing
+            ``after_telopt_negotiation`` callback when complete.
         """
         if self._closing:
-            self._negotiation.cancel()
+            self._telopt_negotiation.cancel()
             return
+
         pots = self.stream.pending_option
+        # negotiation completed: all pending values have been replied
         if not any(pots.values()):
             if self.duration > self.CONNECT_MINWAIT:
-                self._negotiation.set_result(self.stream.__repr__())
+                self._telopt_negotiation.set_result(self.stream.__repr__())
                 return
+        # negotiation has gone on long enough, give up and set result,
+        # either a very, very slow-to-respond client or a dumb network
+        # network scanner.
         elif self.duration > self.CONNECT_MAXWAIT:
-            self._negotiation.set_result(self.stream.__repr__())
+            self._telopt_negotiation.set_result(self.stream.__repr__())
             return
-        self._loop.call_later(self.CONNECT_DEFERED, self.check_negotiation)
+        # negotiation not yet complete, check again in CONNECT_DEFERED seconds,
+        self._loop.call_later(self.CONNECT_DEFERED,
+                              self.check_telopt_negotiation)
 
-    def check_encoding(self):
+    def check_encoding_negotiation(self):
         """ XXX encoding negotiation check-loop, schedules itself for continual
             callback until both outbinary and inbinary has been answered in
-            the affirmitive, firing ``after_encoding_negotiation`` callback
+            the affirmitive, firing ``after_encoding`` callback
             when complete.
         """
         from .telopt import DO, BINARY
@@ -227,7 +242,7 @@ class TelnetServer(asyncio.protocols.Protocol):
         # encoding negotiation is complete
         if self.outbinary and self.inbinary:
             self.log.debug('outbinary and inbinary negotiated.')
-            self._loop.call_soon(self.after_encoding)
+            self._encoding_negotiation.set_result(True)
 
         # if (WILL, BINARY) requested by begin_negotiation() is answered in
         # the affirmitive, then request (DO, BINARY) to ensure bi-directional
@@ -236,7 +251,8 @@ class TelnetServer(asyncio.protocols.Protocol):
                 not (DO, BINARY,) in self.stream.pending_option):
             self.log.debug('outbinary=True, requesting inbinary.')
             self.stream.iac(DO, BINARY)
-            self._loop.call_later(self.CONNECT_DEFERED, self.check_encoding)
+            self._loop.call_later(self.CONNECT_DEFERED,
+                                  self.check_encoding_negotiation)
 
         elif self.duration > self.CONNECT_MAXWAIT:
             # Many IAC interpreters do not differentiate 'local' from 'remote'
@@ -251,17 +267,19 @@ class TelnetServer(asyncio.protocols.Protocol):
             # Note: these kinds of IAC interpreters may be discovered by
             # requesting (DO, ECHO): the client replies (WILL, ECHO),
             # which is proposterous!
-            self._loop.call_soon(self.after_encoding)
+            self._encoding_negotiation.set_result(False)
 
         else:
-            self._loop.call_later(self.CONNECT_DEFERED, self.check_encoding)
+            self._loop.call_later(self.CONNECT_DEFERED,
+                                  self.check_encoding_negotiation)
 
-    def after_negotiation(self, status):
+    def after_telopt_negotiation(self, status):
         """ XXX telnet stream option negotiation completed
         """
         from .telopt import WONT, ECHO
+        from .slc import SLC_nosupport, SLC_EC, SLC_CANTCHANGE
         if status.cancelled():
-            self.log.debug('negotiation cancelled')
+            self.log.debug('telopt negotiation cancelled')
             return
 
         # enable 'fast edit' for remote line editing by sending 'wont echo'
@@ -287,11 +305,14 @@ class TelnetServer(asyncio.protocols.Protocol):
         self.log.info('stream status is {}.'.format(self.stream))
         self.log.info('client environment is {}.'.format(describe_env(self)))
 
-    def after_encoding(self):
+    def after_encoding(self, status):
         """ XXX this callback fires after encoding negotiation has completed,
             the value of client and remote encoding are final.  Some
             implementors may wish to display a non-english login banner.
         """
+        if status.cancelled():
+            self.log.debug('encoding negotiation cancelled')
+            return
         self.log.debug('client encoding is {}.'.format(
             self.encoding(outgoing=True, incoming=True)))
 
@@ -511,7 +532,7 @@ class TelnetServer(asyncio.protocols.Protocol):
                                     else ''))
         for task in (self._server_name, self._server_fqdn,
                      self._client_host, self._timeout,
-                     self._negotiation):
+                     self._telopt_negotiation):
             task.cancel()
 
     def env_update(self, env):
