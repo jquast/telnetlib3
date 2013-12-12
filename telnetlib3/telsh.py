@@ -932,6 +932,7 @@ class Telsh():
                            self.server.stream.slctab.items())
                        if slc_def.nosupport])))
         self.stream.write('\r\n')
+        return 0
 
     def cmdset_toggle(self, *args):
         lopt = self.server.stream.local_option
