@@ -10,9 +10,6 @@ Development is currently in progress, Telnet Server is complete, and under testi
 Status
 ======
 
-TODO: backspacing not working correctly on 'fast edit', why
-      the hecker does bsd client print forward-space when
-      backspace is pressed?
 TODO: Proper XON/XOFF/AO, this was previously implemented with
       the proposed pause/resume_writing() methods for tulip, but
       these have been complicated a great deal upstream in asyncio/py 3.4,

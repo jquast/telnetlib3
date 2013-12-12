@@ -266,8 +266,17 @@ class TelnetServer(asyncio.protocols.Protocol):
 
         # enable 'fast edit' for remote line editing by sending 'wont echo'
         if self.fast_edit and self.stream.mode == 'remote':
-            self.log.debug('fast_edit enabled (wont echo)')
-            self.stream.iac(WONT, ECHO)
+            erase_is = self.stream.slctab.get(SLC_EC, SLC_nosupport())
+            if erase_is.variable and erase_is.val == bytes([127]):
+                # delete (int 127) actually forwards the carriage when echoed
+                # locally (LIT_ECHO enabled); we work around this by echoing
+                # '\b\b \b', but for fast typist over slow links, this will
+                # only serve to fudge up the inputline, so do not set
+                # 'fast_edit' (local echo)
+                self.log.debug('Cannot enable fast_edit (EC is ^?)')
+            else:
+                self.log.debug("`fast_edit' enabled (wont echo)")
+                self.stream.iac(WONT, ECHO)
 
         self._client_host = self._loop.run_in_executor(
             None, socket.gethostbyaddr, self._client_ip)
