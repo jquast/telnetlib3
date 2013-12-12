@@ -338,8 +338,8 @@ class TelnetServer(asyncio.protocols.Protocol):
             # fail to reply.
             self.stream.request_ttype()
 
-            # Also begin request of CHARSET, and bi-directional BINARY.
-            self.begin_encoding_negotiation()
+        # Also begin request of CHARSET, and bi-directional BINARY.
+        self.begin_encoding_negotiation()
 
     def ttype_received(self, ttype):
         """ XXX Callback for TTYPE response.
