@@ -143,6 +143,13 @@ class TelnetServer(asyncio.protocols.Protocol):
         self.log.info('connection_made from {}:{}'.format(
             self.client_ip, self.client_port))
 
+        self.env_update({
+            'REMOTE_IP': self.client_ip,
+            'REMOTE_PORT': str(self.client_port),
+            'REMOTE_HOST': self.client_ip  # override by dns, later
+            })
+
+
     def set_stream_callbacks(self):
         """ XXX Set default iac, slc, and ext callbacks for telnet stream
         """
