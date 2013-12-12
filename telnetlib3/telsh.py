@@ -409,6 +409,15 @@ class Telsh():
         return (string if not self.does_styling
                 else (_standout + string + _normal))
 
+    def underline(self, string):
+        """ .. method:: standout(string) -> string
+
+            XXX Returns ``string`` decorated using preferred terminal sequence.
+        """
+        _underline, _normal = '\x1b[4m', '\x1b[0m'
+        return (string if not self.does_styling
+                else (_underline + string + _normal))
+
     def autocomplete(self, input, table=None):
         """ .. method:: autocomplete(input : string, table=None) -> bool
 
