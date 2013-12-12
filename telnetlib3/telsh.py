@@ -633,7 +633,7 @@ class Telsh():
                 self.log.debug(err)
                 self.bell()
             except Exception:
-                self.display_exception(*sys.exc_info(), level=logging.INFO)
+                self.display_exception(*sys.exc_info())
             finally:
                 self.display_prompt(redraw=True)
 
@@ -658,7 +658,7 @@ class Telsh():
         try:
             retval = self.process_cmd(input)
         except Exception:
-            self.display_exception(*sys.exc_info(), level=logging.INFO)
+            self.display_exception(*sys.exc_info())
             self.bell()
             retval = -1
         finally:
