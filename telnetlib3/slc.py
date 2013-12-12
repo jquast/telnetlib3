@@ -57,6 +57,21 @@ class SLC(object):
         return self.level == SLC_NOSUPPORT
 
     @property
+    def cantchange(self):
+        """ Returns True if SLC level is SLC_CANTCHANGE. """
+        return self.level == SLC_CANTCHANGE
+
+    @property
+    def variable(self):
+        """ Returns True if SLC level is SLC_VARIABLE. """
+        return self.level == SLC_VARIABLE
+
+    @property
+    def default(self):
+        """ Returns True if SLC level is SLC_DEFAULT. """
+        return self.level == SLC_DEFAULT
+
+    @property
     def ack(self):
         """ Returns True if SLC_ACK bit is set. """
         return ord(self.mask) & ord(SLC_ACK)
@@ -87,8 +102,18 @@ class SLC(object):
         self.mask = bytes([ord(self.mask) | ord(flag)])
 
     def __str__(self):
-        """ SLC definition as string '(flag(|s), value)'. """
-        return '{}'.format(name_unicode(self.val.decode('iso8859-1')))
+        """ SLC definition as string '(value, flag(|s))'. """
+        flags = list()
+        for flag in ('nosupport', 'variable', 'default', 'ack',
+                     'flushin', 'flushout', 'cantchange', ):
+            if getattr(self, flag):
+                flags.append(flag)
+        return '({value}, {flags})'.format(
+            value=(name_unicode(self.val)
+                   if self.val != _POSIX_VDISABLE
+                   else '(DISABLED:\\xff)'),
+            flags='|'.join(flags))
+
 
 class SLC_nosupport(SLC):
     def __init__(self):
