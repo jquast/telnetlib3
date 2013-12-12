@@ -604,7 +604,13 @@ class TelnetServer(asyncio.protocols.Protocol):
             Returns DNS name of client as Future.
         """
         if self._client_host.done():
-            val = self._client_host.result()[0]
+            try:
+                val = self._client_host.result()[0]
+            except socket.herror as err:
+                if err.errno == 1:  # Errno 1: Unknown host
+                    val = self._client_ip
+                else:
+                    raise
             return _wrap_future_result(self._client_host, val)
         return self._client_host
 
@@ -615,7 +621,13 @@ class TelnetServer(asyncio.protocols.Protocol):
             Returns FQDN dns name of client as Future.
         """
         if self._client_host.done():
-            val = self._client_host.result()[0]
+            try:
+                val = self._client_host.result()[0]
+            except socket.herror as err:
+                if err.errno == 1:  # Errno 1: Unknown host
+                    val = self._client_ip
+                else:
+                    raise
             return _wrap_future_result(self._client_host, val)
         return self._client_host
 
@@ -626,7 +638,13 @@ class TelnetServer(asyncio.protocols.Protocol):
             Returns reverse DNS lookup IP address of client as Future.
         """
         if self._client_host.done():
-            val = self._client_host.result()[2][0]
+            try:
+                val = self._client_host.result()[2][0]
+            except socket.herror as err:
+                if err.errno == 1:  # Errno 1: Unknown host
+                    val = self._client_ip
+                else:
+                    raise
             return _wrap_future_result(self._client_host, val)
         return self._client_host
 
