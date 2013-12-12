@@ -278,12 +278,11 @@ class Forwardmask(object):
         """
         result = []
         MRK_CONT = '(...)'
-        def same_as_last(row):
-            return len(result) and result[-1].endswith(row.split()[-1])
-        def continuing():
-            return len(result) and result[-1] == MRK_CONT
-        def is_last(mask):
-            return mask == len(self.value) - 1
+        continuing = lambda: len(result) and result[-1] == MRK_CONT
+        is_last = lambda mask: mask == len(self.value) - 1
+        same_as_last = lambda row: (
+            len(result) and result[-1].endswith(row.split()[-1]))
+
         for mask, byte in enumerate(self.value):
             if byte is 0:
                 if continuing() and not is_last(mask):
