@@ -1538,7 +1538,7 @@ class TelnetStream:
         if 0 == len(self._slc_buffer):
             self.log.debug('slc_end: IAC SE')
         else:
-            self.write(b''.join(self._slc_buffer))
+            self.write(escape_iac(b''.join(self._slc_buffer)), oob=True)
             self.log.debug('slc_end: (%r) IAC SE', b''.join(self._slc_buffer))
         self.send_iac(IAC + SE)
         self._slc_buffer.clear()
