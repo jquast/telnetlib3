@@ -166,7 +166,7 @@ def generate_slctab(tabset=BSD_SLC_TAB):
     #   ``slctab`` is a dictionary of SLC functions, such as SLC_IP,
     #   to a tuple of the handling character and support level.
     _slctab = {}
-    for slc in [bytes([const]) for const in range(NSLC + 1)]:
+    for slc in [bytes([const]) for const in range(1, NSLC + 1)]:
         _slctab[slc] = tabset.get(slc, SLC_nosupport())
     return _slctab
 
