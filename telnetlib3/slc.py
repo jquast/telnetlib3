@@ -1,34 +1,37 @@
-"""Special Line Character, LINEMODE (rfc eventloop for Unix with signal handling."""
+"""
+Special Line Character support for Telnet Linemode Option (rfc1184)
+"""
+
 __all__ = ('SLC', 'SLC_AYT', 'NSLC', 'BSD_SLC_TAB', 'generate_slctab',
-    'Linemode', 'LMODE_MODE_REMOTE', 'SLC_SYNCH', 'SLC_IP', 'SLC_AYT',
-    'SLC_ABORT', 'SLC_SUSP', 'SLC_EL', 'SLC_RP', 'SLC_XON', 'snoop',
-    'name_slc_command', 'generate_forwardmask', 'Forwardmask',
-    'LMODE_FORWARDMASK', 'LMODE_MODE', 'NSLC', 'LMODE_MODE', 'LMODE_SLC',
-    'SLC', 'SLC_nosupport', 'SLC_DEFAULT', 'SLC_VARIABLE', 'SLC_NOSUPPORT',
-    'SLC_ACK', 'SLC_CANTCHANGE', 'SLC_LNEXT', 'SLC_EC', 'SLC_EW', 'SLC_EOF',
-    'SLC_AO',)
+           'Linemode', 'LMODE_MODE_REMOTE', 'SLC_SYNCH', 'SLC_IP', 'SLC_AYT',
+           'SLC_ABORT', 'SLC_SUSP', 'SLC_EL', 'SLC_RP', 'SLC_XON', 'snoop',
+           'name_slc_command', 'generate_forwardmask', 'Forwardmask',
+           'LMODE_FORWARDMASK', 'LMODE_MODE', 'NSLC', 'LMODE_MODE',
+           'LMODE_SLC', 'SLC', 'SLC_nosupport', 'SLC_DEFAULT', 'SLC_VARIABLE',
+           'SLC_NOSUPPORT', 'SLC_ACK', 'SLC_CANTCHANGE', 'SLC_LNEXT', 'SLC_EC',
+           'SLC_EW', 'SLC_EOF', 'SLC_AO',)
 
 theNULL = bytes([0])
 (SLC_NOSUPPORT, SLC_CANTCHANGE, SLC_VARIABLE, SLC_DEFAULT) = (
-        bytes([const]) for const in range(4))
+    bytes([const]) for const in range(4)) # 0, 1, 2, 3
 (SLC_FLUSHOUT, SLC_FLUSHIN, SLC_ACK) = (
-        bytes([32]), bytes([64]), bytes([128]))
+    bytes([2**const]) for const in range(5, 8))  # 32, 64, 128
+
 SLC_LEVELBITS = 0x03
-
 NSLC = 30
-
 (SLC_SYNCH, SLC_BRK, SLC_IP, SLC_AO, SLC_AYT, SLC_EOR, SLC_ABORT, SLC_EOF,
     SLC_SUSP, SLC_EC, SLC_EL, SLC_EW, SLC_RP, SLC_LNEXT, SLC_XON, SLC_XOFF,
     SLC_FORW1, SLC_FORW2, SLC_MCL, SLC_MCR, SLC_MCWL, SLC_MCWR, SLC_MCBOL,
-    SLC_MCEOL, SLC_INSRT, SLC_OVER, SLC_ECR, SLC_EWR, SLC_EBOL, SLC_EEOL) = (
-            bytes([const]) for const in range(1, NSLC + 1))
+    SLC_MCEOL, SLC_INSRT, SLC_OVER, SLC_ECR, SLC_EWR, SLC_EBOL, SLC_EEOL
+ ) = (bytes([const]) for const in range(1, NSLC + 1))
 
 (LMODE_MODE, LMODE_FORWARDMASK, LMODE_SLC) = (
-        bytes([const]) for const in range(1, 4))
+    bytes([const]) for const in range(1, 4))
 (LMODE_MODE_REMOTE, LMODE_MODE_LOCAL, LMODE_MODE_TRAPSIG) = (
-        bytes([const]) for const in range(3))
+    bytes([const]) for const in range(3))
 (LMODE_MODE_ACK, LMODE_MODE_SOFT_TAB, LMODE_MODE_LIT_ECHO) = (
-    bytes([4]), bytes([8]), bytes([16]))
+    bytes([2**const]) for const in range(2, 5))  # 4, 8, 16
+
 
 class SLC(object):
     def __init__(self, mask=SLC_DEFAULT, value=theNULL):
@@ -127,13 +130,13 @@ class SLC_nosupport(SLC):
 
 #: SLC value may be changed, flushes input and output
 _SLC_VARIABLE_FIO = bytes(
-        [ord(SLC_VARIABLE) | ord(SLC_FLUSHIN) | ord(SLC_FLUSHOUT)])
+    [ord(SLC_VARIABLE) | ord(SLC_FLUSHIN) | ord(SLC_FLUSHOUT)])
 #: SLC value may be changed, flushes input
 _SLC_VARIABLE_FI = bytes(
-        [ord(SLC_VARIABLE) | ord(SLC_FLUSHIN)])
+    [ord(SLC_VARIABLE) | ord(SLC_FLUSHIN)])
 #: SLC value may be changed, flushes output
 _SLC_VARIABLE_FO = bytes(
-        [ord(SLC_VARIABLE) | ord(SLC_FLUSHOUT)])
+    [ord(SLC_VARIABLE) | ord(SLC_FLUSHOUT)])
 #: SLC function for this value is not supported
 _POSIX_VDISABLE = b'\xff'
 
@@ -141,22 +144,24 @@ _POSIX_VDISABLE = b'\xff'
 #  tabs match exactly. These values are found in ttydefaults.h of
 #  termios family of functions.
 BSD_SLC_TAB = {
-        SLC_FORW1: SLC_nosupport(), SLC_FORW2: SLC_nosupport(),
-        SLC_EOF: SLC(  # ^D VEOF
-            SLC_VARIABLE, b'\x04'), SLC_EC: SLC(  # BS VERASE
-            SLC_VARIABLE, b'\x7f'), SLC_EL: SLC(  # ^U VKILL
-            SLC_VARIABLE, b'\x15'), SLC_IP: SLC(  # ^C VINTR
-            _SLC_VARIABLE_FIO, b'\x03'), SLC_ABORT: SLC(  # ^\ VQUIT
-            _SLC_VARIABLE_FIO, b'\x1c'), SLC_XON: SLC(  # ^Q VSTART
-            SLC_VARIABLE, b'\x11'), SLC_XOFF: SLC(  # ^S VSTOP
-            SLC_VARIABLE, b'\x13'), SLC_EW: SLC(  # ^W VWERASE
-            SLC_VARIABLE, b'\x17'), SLC_RP: SLC(  # ^R VREPRINT
-            SLC_VARIABLE, b'\x12'), SLC_LNEXT: SLC(  # ^V VLNEXT
-            SLC_VARIABLE, b'\x16'), SLC_AO: SLC(  # ^O VDISCARD
-            _SLC_VARIABLE_FO, b'\x0f'), SLC_SUSP: SLC(  # ^Z VSUSP
-            _SLC_VARIABLE_FI, b'\x1a'), SLC_AYT: SLC(  # ^T VSTATUS
-            SLC_VARIABLE, b'\x14'), SLC_BRK: SLC(),
-            SLC_SYNCH: SLC(), SLC_EOR: SLC(), }
+    SLC_FORW1: SLC_nosupport(),  # unsupported; causes all buffered
+    SLC_FORW2: SLC_nosupport(),  # characters to be sent immediately,
+    SLC_EOF: SLC(SLC_VARIABLE,        b'\x04'),  # ^D VEOF
+    SLC_EC: SLC(SLC_VARIABLE,         b'\x7f'),  # BS VERASE
+    SLC_EL: SLC(SLC_VARIABLE,         b'\x15'),  # ^U VKILL
+    SLC_IP: SLC(_SLC_VARIABLE_FIO,    b'\x03'),  # ^C VINTR
+    SLC_ABORT: SLC(_SLC_VARIABLE_FIO, b'\x1c'),  # ^\ VQUIT
+    SLC_XON: SLC(SLC_VARIABLE,        b'\x11'),  # ^Q VSTART
+    SLC_XOFF: SLC(SLC_VARIABLE,       b'\x13'),  # ^S VSTOP
+    SLC_EW: SLC(SLC_VARIABLE,         b'\x17'),  # ^W VWERASE
+    SLC_RP: SLC(SLC_VARIABLE,         b'\x12'),  # ^R VREPRINT
+    SLC_LNEXT: SLC(SLC_VARIABLE,      b'\x16'),  # ^V VLNEXT
+    SLC_AO: SLC(_SLC_VARIABLE_FO,     b'\x0f'),  # ^O VDISCARD
+    SLC_SUSP: SLC(_SLC_VARIABLE_FI,   b'\x1a'),  # ^Z VSUSP
+    SLC_AYT: SLC(SLC_VARIABLE,        b'\x14'),  # ^T VSTATUS
+    # no default value for break, sync, end-of-record,
+    SLC_BRK: SLC(), SLC_SYNCH: SLC(), SLC_EOR: SLC(),
+}
 
 
 def generate_slctab(tabset=BSD_SLC_TAB):
@@ -169,6 +174,7 @@ def generate_slctab(tabset=BSD_SLC_TAB):
     for slc in [bytes([const]) for const in range(1, NSLC + 1)]:
         _slctab[slc] = tabset.get(slc, SLC_nosupport())
     return _slctab
+
 
 def generate_forwardmask(binary_mode, tabset, ack=False):
     """ Generate a 32-byte (``binary_mode`` is True) or 16-byte (False)
@@ -198,6 +204,7 @@ def generate_forwardmask(binary_mode, tabset, ack=False):
         mask32[mask] = byte
     return Forwardmask(b''.join(mask32), ack)
 
+
 def snoop(byte, slctab, slc_callbacks):
     """ Scan ``slctab`` for matching ``byte`` values.
 
@@ -209,6 +216,7 @@ def snoop(byte, slctab, slc_callbacks):
         if byte == slc_def.val and slc_def.val != theNULL:
             return (slc_callbacks.get(slc_func, None), slc_func, slc_def)
     return (None, None, None)
+
 
 class Linemode(object):
     """ """
@@ -258,6 +266,7 @@ class Linemode(object):
         """ Returns string representation of line mode, for debugging """
         return 'remote' if self.remote else 'local'
 
+
 class Forwardmask(object):
     def __init__(self, value, ack=False):
         """ .. class:: ForwardMask(value : bytes, ack: bool)
@@ -296,8 +305,9 @@ class Forwardmask(object):
                 start = mask * 8
                 last = start + 7
                 characters = ', '.join([name_unicode(chr(char))
-                    for char in range(start, last + 1) if char in self])
-                result.append ('[%2d] %s %s' % (
+                                        for char in range(start, last + 1)
+                                        if char in self])
+                result.append('[%2d] %s %s' % (
                     mask, eightbits(byte), characters,))
         return result
 
@@ -330,15 +340,18 @@ _DEBUG_SLC_OPTS = dict([(value, key)
                             'SLC_OVER', 'SLC_ECR', 'SLC_EWR', 'SLC_EBOL',
                             'SLC_EEOL',)])
 
+
 def name_slc_command(byte):
     """ Given an SLC ``byte``, return global mnumonic as string. """
     return (repr(byte) if byte not in _DEBUG_SLC_OPTS
             else _DEBUG_SLC_OPTS[byte])
 
+
 def eightbits(number):
     """ return binary representation of ``number`` padded to 8 bits. """
     prefix, value = bin(number).split('b')
     return '0b%0.8i' % (int(value),)
+
 
 def name_unicode(ucs):
     """ Return 7-bit ascii printable of any string. """
@@ -355,4 +368,3 @@ def name_unicode(ucs):
         ucs = r'\x{:02x}'.format(ord(ucs))
     # remaining (33<=>126) (isprint)
     return ucs
-
