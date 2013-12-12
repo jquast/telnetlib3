@@ -34,8 +34,8 @@ class TelnetServer(asyncio.protocols.Protocol):
     #  to acknowledge bi-directionally, appearing as a timeout, while others
     #  are simply on very high-latency links.
     CONNECT_MAXWAIT = 6.00
-    #: timer length for check_negotiation re-scheduling
-    CONNECT_DEFERED = 0.2
+    #: timer length for ``check_telopt_negotiation`` re-scheduling
+    CONNECT_DEFERED = 0.1
     TTYPE_LOOPMAX = 8
     default_env = {
         'COLUMNS': '80',
