@@ -12,15 +12,16 @@ from . import wcwidth
 
 __all__ = ('TelnetShellStream', 'Telsh')
 
+
 class _EDIT():
     """ Enums for value of ``cmd`` in ``Telsh.editing_received()``.
     """
     (RP, EC, EW, EL, IP, AO, AYT, BRK, EOF, EOR, XON, XOFF, ABORT, SUSP, LNEXT
-            ) = range(15)
+     ) = range(15)
 
     def __init__(self):
         self.constants = dict([(getattr(self, key), key)
-            for key in dir(self) if key.isupper()])
+                               for key in dir(self) if key.isupper()])
 
     def name(self, const):
         return self.constants.get(const, str(const))
@@ -28,22 +29,23 @@ class _EDIT():
 EDIT = _EDIT()
 
 SLC_EDIT_TRANSTABLE = dict((
-        (slc.SLC_RP, EDIT.RP),
-        (slc.SLC_EC, EDIT.EC),
-        (slc.SLC_EW, EDIT.EW),
-        (slc.SLC_EL, EDIT.EL),
-        (slc.SLC_IP, EDIT.IP),
-        (slc.SLC_AO, EDIT.AO),
-        (slc.SLC_AYT, EDIT.AYT),
-        (slc.SLC_BRK, EDIT.BRK),
-        (slc.SLC_EOF, EDIT.EOF),
-        (slc.SLC_EOR, EDIT.EOR),
-        (slc.SLC_XON, EDIT.XON),
-        (slc.SLC_XOFF, EDIT.XOFF),
-        (slc.SLC_SUSP, EDIT.SUSP),
-        (slc.SLC_ABORT, EDIT.ABORT),
-        (slc.SLC_LNEXT, EDIT.LNEXT),
-        ))  # not mapped: SLC_SYNCH
+    (slc.SLC_RP, EDIT.RP),
+    (slc.SLC_EC, EDIT.EC),
+    (slc.SLC_EW, EDIT.EW),
+    (slc.SLC_EL, EDIT.EL),
+    (slc.SLC_IP, EDIT.IP),
+    (slc.SLC_AO, EDIT.AO),
+    (slc.SLC_AYT, EDIT.AYT),
+    (slc.SLC_BRK, EDIT.BRK),
+    (slc.SLC_EOF, EDIT.EOF),
+    (slc.SLC_EOR, EDIT.EOR),
+    (slc.SLC_XON, EDIT.XON),
+    (slc.SLC_XOFF, EDIT.XOFF),
+    (slc.SLC_SUSP, EDIT.SUSP),
+    (slc.SLC_ABORT, EDIT.ABORT),
+    (slc.SLC_LNEXT, EDIT.LNEXT),
+))  # not mapped: SLC_SYNCH
+
 
 class TelnetShellStream():
     def __init__(self, server, log=logging):
@@ -83,7 +85,7 @@ class TelnetShellStream():
             assert (self.server.encoding(outgoing=True)
                     != self.server._default_encoding)
             self.server.env_update(
-                    {'CHARSET': self.server._default_encoding})
+                {'CHARSET': self.server._default_encoding})
             self.log.debug(err)
             self.display_charset_err(err)
             return self.write(string, errors)
@@ -111,16 +113,16 @@ class TelnetShellStream():
         if (self.decoder is None or enc != self.decoder._encoding):
             try:
                 self.decoder = codecs.getincrementaldecoder(enc)(
-                        errors=self.encoding_errors)
+                    errors=self.encoding_errors)
                 self.decoder._encoding = enc
             except LookupError as err:
                 assert (enc != self.server._default_encoding), err
                 self.log.info(err)
                 # notify server of change to _default_encoding, try again,
                 self.server.env_update(
-                        {'CHARSET': self.server._default_encoding})
+                    {'CHARSET': self.server._default_encoding})
                 self.decoder = codecs.getincrementaldecoder(enc)(
-                        errors=self.encoding_errors)
+                    errors=self.encoding_errors)
                 self.decoder._encoding = enc
                 self.display_charset_err(err)
                 self.shell.display_prompt()
@@ -153,11 +155,12 @@ class TelnetShellStream():
         """ Returns string describing state of stream encoding.
         """
         encoding = '{}{}'.format(
-                self.server.encoding(incoming=True), '' if
-                self.server.encoding(outgoing=True)
-                == self.server.encoding(incoming=True) else ' in, {} out'
-                .format(self.server.encoding(outgoing=True)))
+            self.server.encoding(incoming=True),
+            '' if self.server.encoding(outgoing=True)
+            == self.server.encoding(incoming=True)
+            else ' in, {} out'.format(self.server.encoding(outgoing=True)))
         return encoding
+
 
 class Telsh():
     """ A remote line editing shell for host command processing.
@@ -296,13 +299,13 @@ class Telsh():
         self.term = term
         self.log.debug('term_received: {}'.format(term))
         self.does_styling = (
-                term.startswith('vt') or
-                term.startswith('xterm') or
-                term.startswith('dtterm') or
-                term.startswith('rxvt') or
-                term.startswith('urxvt') or
-                term.startswith('ansi') or
-                term == 'linux' or term == 'screen')
+            term.startswith('vt') or
+            term.startswith('xterm') or
+            term.startswith('dtterm') or
+            term.startswith('rxvt') or
+            term.startswith('urxvt') or
+            term.startswith('ansi') or
+            term == 'linux' or term == 'screen')
 
     def bell(self):
         """ ..method:: bell()
@@ -321,9 +324,11 @@ class Telsh():
             movement of sessions using remote line editing with echo off.
         """
         assert keypress in (chr(127), chr(8)), chr
-        string_disp = ''.join((_char
-                if self.stream.can_write(_char) and _char.isprintable()
-                else name_unicode(_char) for _char in string))
+        string_disp = ''.join(((_char
+                                if self.stream.can_write(_char)
+                                and _char.isprintable()
+                                else name_unicode(_char))
+                               for _char in string))
         vtlen = wcwidth.wcswidth_cjk(string_disp)
         assert vtlen >= 0, string
 
@@ -369,21 +374,21 @@ class Telsh():
             (AYT) requests, or command 'status'.
         """
         self.stream.write(
-                '\r\nConnected {:0.3f}s ago from {}.'
-                '\r\nLinemode is {}.'
-                '\r\nFlow control is {}.'
-                '\r\nEncoding is {}.'
-                '\r\n{} rows; {} cols.'.format(
-                    self.server.duration,
-                    (self.server.client_fqdn.result()
-                        if self.server.client_fqdn.done()
-                        else self.server.client_ip),
-                    self.server.stream.mode,
-                    'xon-any' if self.server.stream.xon_any else 'xon',
-                    self.stream,
-                    self.server.env['COLUMNS'],
-                    self.server.env['LINES'],
-                    ))
+            '\r\nConnected {:0.3f}s ago from {}.'
+            '\r\nLinemode is {}.'
+            '\r\nFlow control is {}.'
+            '\r\nEncoding is {}.'
+            '\r\n{} rows; {} cols.'.format(
+                self.server.duration,
+                (self.server.client_fqdn.result()
+                 if self.server.client_fqdn.done()
+                 else self.server.client_ip),
+                self.server.stream.mode,
+                'xon-any' if self.server.stream.xon_any else 'xon',
+                self.stream,
+                self.server.env['COLUMNS'],
+                self.server.env['LINES'],
+            ))
 
     def dim(self, string):
         """ .. method:: dim(string) -> string
@@ -574,12 +579,12 @@ class Telsh():
         """
         CR, LF, NUL = '\r\n\x00'
         self.log.debug('character_received: {!r} literal={}'.format(
-                    char, literal))
+            char, literal))
 
         # a printable ASCII representation of unprintables,
         char_disp = (char
-                if self.stream.can_write(char) and char.isprintable()
-                else self.standout(name_unicode(char)))
+                     if self.stream.can_write(char) and char.isprintable()
+                     else self.standout(name_unicode(char)))
 
         if literal:
             self._lastline.append(char)
@@ -712,15 +717,15 @@ class Telsh():
                 return self.server.env['USER']
             if input == 'h':
                 return '{}'.format(
-                        self.server.server_name.result().split('.')[0]
-                        if self.server.server_name.done()
-                        else '')
+                    self.server.server_name.result().split('.')[0]
+                    if self.server.server_name.done()
+                    else '')
             if input == 'H':
                 return '{}'.format(self.server.server_fqdn.result()
-                        if self.server.server_fqdn.done() else
-                        self.server.server_name.result()
-                        if self.server.server_name.done()
-                        else '')
+                                   if self.server.server_fqdn.done() else
+                                   self.server.server_name.result()
+                                   if self.server.server_name.done()
+                                   else '')
             if input[0] == '$':
                 return self.server.env[input[1:]]
             if input == '?':
@@ -738,21 +743,24 @@ class Telsh():
             if input == 'E':
                 return '{}'.format(self.stream)
             return input
+
         def prompt_eval(input, literal_escape=True):
             def _getter(match):
                 return _resolve_prompt(match.group('val'))
             return self._eval(input, self._re_prompt, _getter, literal_escape)
+
         return ('{}'.format(prompt_eval(
             self.server.env['PS2'] if self.is_multiline
             else self.server.env['PS1'])))
 
-    def display_exception(self, *exc_info, level=logging.ERROR):
+    def display_exception(self, *exc_info):
         """ Dispaly exception to client when ``show_traceback`` is True,
             forward copy server log at debug and info levels.
         """
         tbl_exception = (
-                traceback.format_tb(exc_info[2]) +
-                traceback.format_exception_only(exc_info[0], exc_info[1]))
+            traceback.format_tb(exc_info[2]) +
+            traceback.format_exception_only(exc_info[0], exc_info[1]))
+        level = logging.ERROR
         for num, tb in enumerate(tbl_exception):
             tb_msg = tb.splitlines()
             if self.show_traceback:
@@ -782,7 +790,7 @@ class Telsh():
                 except ValueError as err:
                     self.log.debug(err)
                     if err.args == ('No closing quotation',):
-                        self._lastline.append('\r') # use '\r' ..
+                        self._lastline.append('\r')  # use '\r' ..
                         return ''
                     elif (err.args == ('No escaped character',)
                             and cmd.endswith('\\')):
@@ -906,8 +914,8 @@ class Telsh():
         if len(args) is 0:
             self.stream.write(', '.join(
                 '{}{} [{}]'.format('\r\n' if num % 4 == 0 else '',
-                    opt, self.standout('ON') if enabled
-                    else self.dim('off'))
+                                   opt, self.standout('ON') if enabled
+                                   else self.dim('off'))
                 for num, (opt, enabled) in enumerate(sorted(tbl_opt.items()))))
             return 0
         opt = args[0].lower()
@@ -956,8 +964,8 @@ class Telsh():
         if opt in ('color', '_all'):
             _opt = 'color' if opt == '_all' else opt
             self.does_styling = not self.does_styling
-            self.stream.write('\r\ncolor {}.'.format('on'
-                if self.does_styling else 'off'))
+            self.stream.write('\r\ncolor {}.'.format(
+                'on' if self.does_styling else 'off'))
         return 0
 
     def cmdset_set(self, *args):
@@ -1016,12 +1024,18 @@ class Telsh():
             replacing matches with return value of ``getter(match)``.
         """
         def _resolve_literal(char):
-            if char == 'e': return '\x1b'  # transtable changed 2.x -> 3.x,
-            elif char == 'f': return '\f'  # still worth it? Xxx
-            elif char == 'n': return '\n'
-            elif char == 'r': return '\r'
-            elif char == 't': return '\t'
-            elif char == 'v': return '\v'
+            if char == 'e':
+                return '\x1b'  # transtable changed 2.x -> 3.x,
+            elif char == 'f':
+                return '\f'  # still worth it? XXX
+            elif char == 'n':
+                return '\n'
+            elif char == 'r':
+                return '\r'
+            elif char == 't':
+                return '\t'
+            elif char == 'v':
+                return '\v'
             else:
                 return '\\{}'.format(char)
 
@@ -1077,9 +1091,9 @@ def _autocomplete(table, cycle, buf, cmd, *args):
                 # match, but arguments not valid for command,
                 if len(args):
                     buf = '{}{}'.format(
-                            postfix(buf),
-                            postfix(auto_cmd),
-                            escape_quote(args))
+                        postfix(buf),
+                        postfix(auto_cmd),
+                        escape_quote(args))
                     return (buf, False)
                 # first-time exact match,
                 if not cycle:
@@ -1093,7 +1107,7 @@ def _autocomplete(table, cycle, buf, cmd, *args):
                 buf = ''.join((postfix(buf), auto_cmd,))
                 _cmd = args[0] if args else ''
                 return _autocomplete(
-                        table[auto_cmd], cycle, buf, _cmd, *args[1:])
+                    table[auto_cmd], cycle, buf, _cmd, *args[1:])
         elif auto_cmd.lower().startswith(cmd.lower()):
             # partial match, error if arguments not valid,
             args_ok = bool(not args or args and has_args)
@@ -1102,9 +1116,10 @@ def _autocomplete(table, cycle, buf, cmd, *args):
                 buf = ''.join((postfix(buf), escape_quote(args)))
             return (buf, args_ok)
     # no matches
-    buf = '{}{}{}'.format(postfix(buf),
-            cmd, escape_quote(args))
+    buf = '{}{}{}'.format(
+        postfix(buf), cmd, escape_quote(args))
     return (buf, False)
+
 
 def escape_quote(args, quote_char="'", join_char=' '):
     """ .. function::quote(args : list, quote_char="'") -> string
@@ -1120,6 +1135,7 @@ def escape_quote(args, quote_char="'", join_char=' '):
         return (''.join(quote_char, arg, quote_char)
                 if join_char in arg else arg)
     return join_char.join([quoted(arg) for arg in args] if args else [])
+
 
 def name_unicode(ucs):
     """ Return 7-bit ascii printable of any string. """
