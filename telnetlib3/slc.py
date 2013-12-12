@@ -342,9 +342,17 @@ def eightbits(number):
 
 def name_unicode(ucs):
     """ Return 7-bit ascii printable of any string. """
-    if ord(ucs) < ord(' ') or ord(ucs) == 127:
+    if ord(ucs) == 0:
+        ucs = r'^@'
+    elif ord(ucs) >= 27 and ord(ucs) < ord(' '):
+        # 27<=>31,
+        ucs = r'^{}'.format('[\\]^_'[ord(' ') - ord(ucs)])
+    elif ord(ucs) < ord(' ') or ord(ucs) == 127:
+        # <=32, 127,
         ucs = r'^{}'.format(chr(ord(ucs) ^ ord('@')))
     elif ord(ucs) > 127 or not ucs.isprintable():
+        # >=127
         ucs = r'\x{:02x}'.format(ord(ucs))
+    # remaining (33<=>126) (isprint)
     return ucs
 
