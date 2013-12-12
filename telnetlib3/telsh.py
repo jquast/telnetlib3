@@ -199,6 +199,7 @@ class Telsh():
         ('echo', None),
         ('status', None),
         ('set', None),  # args injected during tab_received()
+        ('slc', None),
         ('whoami', None),
         ('whereami', None),
         ('toggle', collections.OrderedDict([
@@ -821,6 +822,8 @@ class Telsh():
             return self.cmdset_whereami(*args)
         elif cmd == 'set':
             return self.cmdset_set(*args)
+        elif cmd == 'slc':
+            return self.cmdset_slc(*args)
         elif cmd == 'toggle':
             return self.cmdset_toggle(*args)
         elif '=' in cmd:
@@ -860,6 +863,8 @@ class Telsh():
             self.stream.write('\r\nDisplay session identifier.')
         elif cmd == 'set':
             self.stream.write('\r\nSet or display session values.')
+        elif cmd == 'slc':
+            self.stream.write('\r\nDisplay Special Line Characters.')
         elif cmd == 'whereami':
             self.stream.write('\r\nDisplay server name')
         elif cmd == 'toggle':
@@ -898,6 +903,26 @@ class Telsh():
                 self.stream.write(', {}'.format(telopt.name_commands(cmd)))
         self.stream.write('.')
         return 0
+
+    def cmdset_slc(self, *args):
+        from .slc import name_slc_command, theNULL
+        self.stream.write('\r\nSpecial Line Characters:\r\n{}'.format(
+            '\r\n'.join(['{:>10}: {}'.format(
+                name_slc_command(slc_func), slc_def)
+                for (slc_func, slc_def) in sorted(
+                    self.server.stream.slctab.items())
+                if not (slc_def.nosupport or slc_def.val == slc.theNULL)])))
+        self.stream.write('\r\n\r\nUnset by client: {}'.format(
+            ', '.join([name_slc_command(slc_func)
+                       for (slc_func, slc_def) in sorted(
+                           self.server.stream.slctab.items())
+                       if slc_def.val == slc.theNULL])))
+        self.stream.write('\r\n\r\nNot supported by server: {}'.format(
+            ', '.join([name_slc_command(slc_func)
+                       for (slc_func, slc_def) in sorted(
+                           self.server.stream.slctab.items())
+                       if slc_def.nosupport])))
+        self.stream.write('\r\n')
 
     def cmdset_toggle(self, *args):
         lopt = self.server.stream.local_option
