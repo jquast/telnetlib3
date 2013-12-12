@@ -75,7 +75,7 @@ class TalkerShell(telnetlib3.Telsh):
     shell_name = 'pytalk'
 
     #: version of shell %v in prompt escape
-    shell_ver = '0.1'
+    shell_ver = '0.2'
 
     #: A cyclical collections.OrderedDict of command names and nestable
     #  arguments, or None for end-of-command, used by ``tab_received()``
@@ -102,9 +102,11 @@ class TalkerShell(telnetlib3.Telsh):
             ('bell', None),
             ]), ),
         ('/status', None),
+        ('/slc', None),
         ('/whoami', None),
         ('/whereami', None),
-        ('/listclients', None),
+        ('/channels', None),
+        ('/users', None),
         ('/logoff', None),
         ('/nick', None),
         ('/join', None),
@@ -164,14 +166,18 @@ class TalkerShell(telnetlib3.Telsh):
             return self.cmdset_assign('CHANNEL=')
         elif cmd == '/nick':
             return self.cmdset_nick(*args)
-        elif cmd == '/listclients':
-            return self.cmdset_listclients()
+        elif cmd == '/channels':
+            return self.cmdset_channels()
+        elif cmd == '/users':
+            return self.cmdset_users()
         elif cmd == '/whoami':
             self.stream.write('\r\n{}.'.format(self.server.__str__()))
         elif cmd == '/whereami':
             return self.cmdset_whereami(*args)
         elif cmd == '/toggle':
             return self.cmdset_toggle(*args)
+        elif cmd == '/slc':
+            return self.cmdset_slc(*args)
         elif cmd == '/debug':
             return self.cmdset_debug(*args)
         elif cmd:
@@ -180,14 +186,35 @@ class TalkerShell(telnetlib3.Telsh):
             return 1
         return 0
 
-    def cmdset_listclients(self):
+    def cmdset_channels(self):
         """
-        List clients currently connected. 
+        List active channels and number of users.
         """
-        clients_info = ("{} - {}".format(server.env['USER'], key_)
-                        for (key_, server) in clients.items())
-        output = "\r\n".join(clients_info)
-        self.stream.write("\r\n{}".format(output))
+        channels = {}
+        for client in clients.values():
+            channel = client.env['CHANNEL']
+            channels[channel] = channels.get(channel, 0) + 1
+        self.stream.write("\r\n{}  {}".format(
+            self.underline('channel'.rjust(15)),
+            self.underline('# users')))
+        self.stream.write("\r\n\r\n{}".format(
+            '\r\n'.join([
+                "{:>15}  {:<7}".format(channel, num_users)
+                for channel, num_users in sorted(channels.items())])))
+        return 0
+
+    def cmdset_users(self):
+        """
+        List clients currently connected.
+        """
+        self.stream.write("\r\n{}  {}  {}".format(
+            self.underline('user'.rjust(15)),
+            self.underline('channel'.rjust(15)),
+            self.underline('origin'.rjust(15))))
+        output = ["{env[USER]:>15}  {env[CHANNEL]:>15}  {env[REMOTE_HOST]:>15}"
+                  .format(env=server.env) for server in clients.values()]
+        self.stream.write("\r\n\r\n{}".format(
+            '\r\n'.join(sorted(output))))
         return 0
 
     def cmdset_help(self, *args):
@@ -203,6 +230,8 @@ class TalkerShell(telnetlib3.Telsh):
             self.stream.write('\r\nTerminate connection.')
         elif cmd == 'status':
             self.stream.write('\r\nDisplay operating parameters.')
+        elif cmd == 'users':
+            self.stream.write('\r\nList connected clients.')
         elif cmd == 'whoami':
             self.stream.write('\r\nDisplay session identifier.')
         elif cmd == 'whereami':
