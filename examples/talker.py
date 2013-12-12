@@ -43,10 +43,11 @@ class TalkerServer(telnetlib3.TelnetServer):
         global clients
         self.id = (self.client_ip, self.client_port)
         clients[self.id] = self
-        self.env_update({'CHANNEL': '#default',        # the default 'channel',
-                         'PS1': '%s-%v [%$CHANNEL] ',  # shell-version [#channel]
-                         'TIMEOUT': '360',             # timeout is 6h (360m)
-                         })
+        self.env_update(
+            {'CHANNEL': '#default',        # the default 'channel',
+             'PS1': '%s-%v [%$CHANNEL] ',  # shell-version [#channel]
+             'TIMEOUT': '360',             # timeout is 6h (360m)
+             })
 
     def connection_lost(self, exc):
         telnetlib3.TelnetServer.connection_lost(self, exc)
