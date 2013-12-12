@@ -19,10 +19,10 @@ from . import slc
 __all__ = ('TelnetStream', 'escape_iac', 'name_command', 'name_commands')
 
 (EOF, SUSP, ABORT, EOR_CMD) = (
-        bytes([const]) for const in range(236, 240))
+    bytes([const]) for const in range(236, 240))
 (IS, SEND, INFO) = (bytes([const]) for const in range(3))
 (LFLOW_OFF, LFLOW_ON, LFLOW_RESTART_ANY, LFLOW_RESTART_XON) = (
-        bytes([const]) for const in range(4))
+    bytes([const]) for const in range(4))
 (REQUEST, ACCEPTED, REJECTED, TTABLE_IS, TTABLE_REJECTED,
     TTABLE_ACK, TTABLE_NAK) = (bytes([const]) for const in range(1, 8))
 
@@ -30,6 +30,7 @@ __all__ = ('TelnetStream', 'escape_iac', 'name_command', 'name_commands')
 
 _MAXSIZE_SB = 2048
 _MAXSIZE_SLC = slc.NSLC * 6
+
 
 def escape_iac(buf):
     """ .. function:: escape_iac(buf : bytes) -> type(bytes)
@@ -39,6 +40,7 @@ def escape_iac(buf):
     """
     assert isinstance(buf, (bytes, bytearray)), buf
     return buf.replace(IAC, IAC + IAC)
+
 
 class TelnetStream:
     """
@@ -57,20 +59,24 @@ class TelnetStream:
     #: a list of system environment variables requested by the server after
     # a client agrees to negotiate NEW_ENVIRON.
     default_env_request = (
-            "USER HOSTNAME UID TERM COLUMNS LINES DISPLAY LANG SYSTEMTYPE "
-            "ACCT JOB PRINTER SFUTLNTVER SFUTLNTMODE LC_ALL VISUAL EDITOR "
-            "LC_COLLATE LC_CTYPE LC_MESSAGES LC_MONETARY LC_NUMERIC LC_TIME"
-            ).split()
+        "USER HOSTNAME UID TERM COLUMNS LINES DISPLAY LANG SYSTEMTYPE "
+        "ACCT JOB PRINTER SFUTLNTVER SFUTLNTMODE LC_ALL VISUAL EDITOR "
+        "LC_COLLATE LC_CTYPE LC_MESSAGES LC_MONETARY LC_NUMERIC LC_TIME"
+    ).split()
     default_slc_tab = slc.BSD_SLC_TAB
-    default_codepages = ('UTF-8', 'UTF-16', 'US-ASCII', 'LATIN1', 'BIG5',
-            'GBK', 'SHIFTJIS', 'GB18030', 'KOI8-R', 'KOI8-U',) + tuple(
-                    'ISO8859-{}'.format(iso) for iso in range(16)) + tuple(
-                          'CP{}'.format(cp) for cp in (
-                              154, 437, 500, 737, 775, 850, 852, 855, 856, 857,
-                             860, 861, 862, 863, 864, 865, 866, 869, 874,
-                             875, 932, 949, 950, 1006, 1026, 1140, 1250,
-                             1251, 1252, 1253, 1254, 1255, 1257, 1257, 1258,
-                             1361, ))
+    default_codepages = (
+        'UTF-8', 'UTF-16', 'US-ASCII', 'LATIN1', 'BIG5',
+        'GBK', 'SHIFTJIS', 'GB18030', 'KOI8-R', 'KOI8-U',
+    ) + tuple(
+        'ISO8859-{}'.format(iso) for iso in range(16)
+    ) + tuple(
+        'CP{}'.format(cp) for cp in (
+            154, 437, 500, 737, 775, 850, 852, 855, 856, 857,
+            860, 861, 862, 863, 864, 865, 866, 869, 874, 875,
+            932, 949, 950, 1006, 1026, 1140, 1250, 1251, 1252,
+            1253, 1254, 1255, 1257, 1257, 1258, 1361,
+        )
+    )
 
     @property
     def mode(self):
@@ -142,13 +148,13 @@ class TelnetStream:
         callback handlers; mainly those beginning with ``handle``, or by
         registering using the methods beginning with ``set_callback``.
         """
-        assert not client == False or not server == False, (
+        assert not client is False or not server is False, (
             "Arguments 'client' and 'server' are mutually exclusive")
         self.log = log
         self.transport = transport
         self._is_server = (
-                client in (None, False) or
-                server not in (None, False))
+            client in (None, False) or
+            server not in (None, False))
 
         #: Total bytes sent to ``feed_byte()``
         self.byte_count = 0
@@ -224,8 +230,8 @@ class TelnetStream:
                 (BRK, 'brk'), (IP, 'ip'), (AO, 'ao'), (AYT, 'ayt'), (EC, 'ec'),
                 (EL, 'el'), (EOF, 'eof'), (SUSP, 'susp'), (ABORT, 'abort'),
                 (NOP, 'nop'), (DM, 'dm'), (GA, 'ga'), (EOR_CMD, 'eor'), ):
-            self.set_iac_callback(iac_cmd,
-                    getattr(self, 'handle_{}'.format(key)))
+            self.set_iac_callback(
+                cmd=iac_cmd, func=getattr(self, 'handle_{}'.format(key)))
 
         self._slc_callback = {}
         for slc_cmd, key in (
@@ -237,8 +243,8 @@ class TelnetStream:
                 (slc.SLC_EL, 'el'), (slc.SLC_EW, 'ew'),
                 (slc.SLC_RP, 'rp'), (slc.SLC_LNEXT, 'lnext'),
                 (slc.SLC_XON, 'xon'), (slc.SLC_XOFF, 'xoff'),):
-            self.set_slc_callback(slc_cmd,
-                    getattr(self, 'handle_{}'.format(key)))
+            self.set_slc_callback(
+                slc_byte=slc_cmd, func=getattr(self, 'handle_{}'.format(key)))
 
         self._ext_callback = {}
         for ext_cmd, key in (
@@ -246,25 +252,24 @@ class TelnetStream:
                 (TSPEED, 'tspeed'), (TTYPE, 'ttype'), (XDISPLOC, 'xdisploc'),
                 (NEW_ENVIRON, 'env'), (CHARSET, 'charset'),
                 ):
-            self.set_ext_callback(ext_cmd,
-                    getattr(self, 'handle_{}'.format(key)))
+            self.set_ext_callback(
+                cmd=ext_cmd, func=getattr(self, 'handle_{}'.format(key)))
 
         self._ext_send_callback = {}
         for ext_cmd, key in (
                 (TTYPE, 'ttype'), (TSPEED, 'tspeed'), (XDISPLOC, 'xdisploc'),
                 (NEW_ENVIRON, 'env'), (NAWS, 'naws'), (SNDLOC, 'sndloc'),
                 (CHARSET, 'charset'), ):
-            self.set_ext_send_callback(ext_cmd,
-                    getattr(self, 'handle_send_{}'.format(key)))
+            self.set_ext_send_callback(
+                cmd=ext_cmd, func=getattr(self,'handle_send_{}'.format(key)))
 
     def __str__(self):
         """ XXX Returns string suitable for status of telnet stream.
         """
-        return '{{{}}}'.format(
-                ', '.join(
-                    ['{!r}: {!r}'.format(key, ','.join([_opt for _opt in options]))
-                        for key, options in describe_stream(self).items()
-                        if len(options)]))
+        return '{{{}}}'.format(', '.join(
+            ['{!r}: {!r}'.format(key, ','.join([_opt for _opt in options]))
+             for key, options in describe_stream(self).items()
+             if len(options)]))
 
     def feed_byte(self, byte):
         """ .. method:: feed_byte(byte : bytes)
@@ -365,11 +370,12 @@ class TelnetStream:
                 self.mode == 'kludge' and self.slc_simulated):
             # 'byte' is tested for SLC characters
             (callback, slc_name, slc_def) = slc.snoop(
-                    byte, self.slctab, self._slc_callback)
+                byte, self.slctab, self._slc_callback)
             if slc_name is not None:
                 self.log.debug('_slc_snoop({!r}): {}, callback is {}.'.format(
-                        byte, slc.name_slc_command(slc_name),
-                        callback.__name__ if callback is not None else None))
+                    byte, slc.name_slc_command(slc_name),
+                    callback.__name__ if callback is not None
+                    else None))
                 if slc_def.flushin:
                     # SLC_FLUSHIN not supported, requires SYNCH? (urgent TCP).
                     # XXX or TM?
@@ -1501,10 +1507,10 @@ class TelnetStream:
         elif cmd in (DO, DONT, WILL, WONT):
             opt = buf.popleft()
             self.log.debug('recv SB LINEMODE %s FORWARDMASK%s.',
-                    name_command(cmd), '(...)' if len(buf) else '')
+                           name_command(cmd), '(...)' if len(buf) else '')
             assert opt == slc.LMODE_FORWARDMASK, (
-                    'Illegal byte follows IAC SB LINEMODE %s: %r, '
-                    ' expected LMODE_FORWARDMASK.' (name_command(cmd), opt))
+                'Illegal byte follows IAC SB LINEMODE %s: %r, '
+                ' expected LMODE_FORWARDMASK.' (name_command(cmd), opt))
             self._handle_sb_forwardmask(cmd, buf)
         else:
             raise ValueError('Illegal IAC SB LINEMODE command, %r' % (
@@ -1575,7 +1581,7 @@ class TelnetStream:
         if slc_def is None:
             slc_def = self.slctab[func]
         self.log.debug('_slc_add ({:<10} {})'.format(
-                   slc.name_slc_command(func) + ',', slc_def))
+            slc.name_slc_command(func) + ',', slc_def))
         self._slc_buffer.extend([func, slc_def.mask, slc_def.val])
 
     def _slc_process(self, func, slc_def):
@@ -1619,7 +1625,7 @@ class TelnetStream:
             return
         elif slc_def.ack:
             self.log.debug('slc value mismatch with ack bit set: (%r,%r)',
-                    myvalue, slc_def.val)
+                           myvalue, slc_def.val)
             return
         else:
             self._slc_change(func, slc_def)
@@ -1652,7 +1658,7 @@ class TelnetStream:
             else:
                 # set current flag to the flag indicated in default tab
                 self.slctab[func].set_mask(
-                        self.default_slc_tab.get(func).mask)
+                    self.default_slc_tab.get(func).mask)
             # set current value to value indicated in default tab
             self.default_slc_tab.get(func, slc.SLC_nosupport())
             self.slctab[func].set_value(slc_def.val)
@@ -1687,7 +1693,7 @@ class TelnetStream:
             self.slctab[func].set_mask(self.slctab[func].level)
             if mylevel == slc.SLC_CANTCHANGE:
                 slc_def = self.default_slc_tab.get(
-                        func, slc.SLC_nosupport())
+                    func, slc.SLC_nosupport())
                 self.slctab[func].val = slc_def.val
             self._slc_add(func)
 
@@ -1697,23 +1703,22 @@ class TelnetStream:
         # set and report about pending options by 2-byte opt,
         if self.is_server:
             assert self.remote_option.enabled(LINEMODE), (
-                    'cannot recv LMODE_FORWARDMASK %s (%r) '
-                    'without first sending DO LINEMODE.' % (cmd, buf,))
+                'cannot recv LMODE_FORWARDMASK %s (%r) '
+                'without first sending DO LINEMODE.' % (cmd, buf,))
             assert cmd not in (DO, DONT), (
-                    'cannot recv %s LMODE_FORWARDMASK on server end',
-                    name_command(cmd,))
+                'cannot recv %s LMODE_FORWARDMASK on server end',
+                name_command(cmd,))
         if self.is_client:
             assert self.local_option.enabled(LINEMODE), (
-                    'cannot recv %s LMODE_FORWARDMASK without first '
-                    ' sending WILL LINEMODE.')
+                'cannot recv %s LMODE_FORWARDMASK without first '
+                ' sending WILL LINEMODE.')
             assert cmd not in (WILL, WONT), (
-                    'cannot recv %s LMODE_FORWARDMASK on client end',
-                    name_command(cmd,))
+                'cannot recv %s LMODE_FORWARDMASK on client end',
+                name_command(cmd,))
             assert cmd not in (DONT) or len(buf) == 0, (
-                    'Illegal bytes follow DONT LMODE_FORWARDMASK: %r' % (
-                        buf,))
+                'Illegal bytes follow DONT LMODE_FORWARDMASK: %r' % (buf,))
             assert cmd not in (DO) and len(buf), (
-                    'bytes must follow DO LMODE_FORWARDMASK')
+                'bytes must follow DO LMODE_FORWARDMASK')
 
         opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
         if cmd in (WILL, WONT):
@@ -1727,6 +1732,7 @@ class TelnetStream:
         """ Callback handles IAC-SB-LINEMODE-DO-FORWARDMASK-<buf>.
         """ # XXX
         raise NotImplementedError
+
 
 class Option(dict):
     def __init__(self, name, log=logging):
@@ -1749,8 +1755,8 @@ class Option(dict):
     def __setitem__(self, key, value):
         if value != dict.get(self, key, None):
             descr = ' + '.join([name_command(bytes([byte]))
-                for byte in key[:2]] + [repr(byte)
-                    for byte in key[2:]])
+                                for byte in key[:2]
+                                ] + [repr(byte) for byte in key[2:]])
             self.log.debug('{}[{}] = {}'.format(self.name, descr, value))
         dict.__setitem__(self, key, value)
     __setitem__.__doc__ = dict.__setitem__.__doc__
@@ -1774,14 +1780,17 @@ _DEBUG_OPTS = dict([(value, key)
                       'NAOP', 'NAOCRD', 'NAOHTS', 'NAOHTD', 'NAOFFD', 'NAOVTS',
                       'NAOVTD', 'NAOLFD', )])
 
+
 def name_command(byte):
     """ Given an IAC byte, return its mnumonic global constant. """
     return (repr(byte) if byte not in _DEBUG_OPTS
             else _DEBUG_OPTS[byte])
 
+
 def name_commands(cmds, sep=' '):
     return ' '.join([
         name_command(bytes([byte])) for byte in cmds])
+
 
 def describe_stream(stream):
     local = stream.local_option
@@ -1791,9 +1800,8 @@ def describe_stream(stream):
     local_is = 'server' if stream.is_server else 'client'
     remote_is = 'server' if stream.is_client else 'client'
     if any(pending.values()):
-        status.update({'failed-reply': [name_commands(opt)
-            for (opt, val) in pending.items()
-            if val]})
+        status.update({'failed-reply': [
+            name_commands(opt) for (opt, val) in pending.items() if val]})
     if len(local):
         status.update({'local-{}'.format(local_is): [
             name_commands(opt) for (opt, val) in local.items()
