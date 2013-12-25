@@ -469,16 +469,6 @@ class TelnetServer(asyncio.protocols.Protocol):
 
             self.shell.feed_byte(byte)
 
-    def interrupt_received(self, cmd):
-        """ XXX Callback receives telnet IAC or SLC interrupt byte.
-
-            This is suitable for the receipt of interrupt signals,
-            such as iac(AO) and SLC_AO.
-        """
-        from .telopt import name_command
-        self.log.debug('interrupt_received: {}'.format(name_command(cmd)))
-        self.shell.display_prompt()
-
     def encoding(self, outgoing=False, incoming=False):
         """ Returns the session's preferred input or output encoding.
 
@@ -495,13 +485,67 @@ class TelnetServer(asyncio.protocols.Protocol):
                     outgoing and incoming and self.outbinary and self.inbinary
                     ) else 'ascii')
 
-    def handle_ayt(self, *args):
-        """ XXX Callback when AYT or SLC_AYT is received.
+    def handle_ayt(self, opt_byte):
+        """ XXX Callback when IAC, AYT or SLC_AYT is received.
+            opt_byte is value slc.SLC_AYT or telopt.AYT, indicating
+            which method AYT was received by.
 
-            Outputs status of connection and re-displays prompt.
+            Default implementation outputs the status of connection
+            and displays shell prompt when opt_byte is AYT. Nothing
+            is done when opt_byte is SLC_AYT, it is presumed handled
+            by the shell as an editing command.
         """
-        self.shell.stream.write('\r\n{}.'.format(self.__str__()))
-        self.shell.display_prompt()
+        from .telopt import AYT
+        from .slc import SLC_AYT
+        self.log.debug('client sends: Are You There?')
+        if opt_byte == AYT:
+            # if (IAC, AYT) is recieved, and the editing command
+            # SLC_AYT is unsupported, display connection status
+            # and re-display the shell prompt.
+            if self.stream.slctab[SLC_AYT].nosupport:
+                self.shell.display_status()
+                self.shell.display_prompt()
+            # Otherwise, emulate as though the SLC_AYT editing cmd was
+            # recieved (usually, ^T) by the shell. By default, the shell
+            # does the same thing.
+            else:
+                self.shell.feed_slc(byte=self.stream.slctab[SLC_AYT].val,
+                                    func=SLC_AYT)
+
+    def special_received(self, iac_cmd):
+        """ XXX Callback receives telnet IAC bytes for special functions.
+
+                iac_cmd indicates which IAC was recieved, the default
+                ``set_stream_callbacks()`` method registers for receipt
+                for any of (AO, IP, BRK, SUSP, ABORT, EC).
+
+                The default implementation maps these to their various
+                SLC equivalents, if supported. Otherwise, nothing is
+                done.
+        """
+        from .telopt import (AO, IP, BRK, ABORT, SUSP, EC, EL, EOR,
+                             name_command)
+        from .slc import (SLC_AO, SLC_IP, SLC_ABORT, SLC_SUSP, SLC_EC, SLC_EL,
+                          SLC_EOR, name_slc_command)
+        map_iac_slc = {
+            AO: SLC_AO, IP: SLC_IP, BRK: SLC_ABORT,
+            ABORT: SLC_ABORT, SUSP: SLC_SUSP, EC: SLC_EC,
+            EL: SLC_EL, EOR: SLC_EOR, }
+
+        slc_byte = map_iac_slc.get(iac_cmd, None)
+        named_iac = name_command(iac_cmd)
+        if slc_byte:
+            slc_value = self.stream.slctab[slc_byte].val
+            if not self.stream.slctab[slc_byte].nosupport:
+                self.shell.feed_slc(byte=slc_value, func=slc_byte)
+            else:
+                named_slc = name_slc_command(slc_byte)
+                self.log.debug('special_received unhandled: {} '
+                               '(slc {} not supported).'.format(
+                                   named_iac, named_slc))
+        else:
+            self.log.debug('special_received unhandled: {}.'
+                           .format(named_iac))
 
     def timeout(self):
         """ XXX Callback received on session timeout.
