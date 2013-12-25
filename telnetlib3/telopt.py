@@ -444,8 +444,8 @@ class TelnetStream:
         """
         short_iacs = (DM, SE)
         assert (cmd in (DO, DONT, WILL, WONT)
-                or cmd in short_iacs and opt is None), (
-                        'Uknown IAC {}.'.format(name_command(cmd)))
+                or cmd in short_iacs and opt is None
+                ), ('Unknown IAC {}.'.format(name_command(cmd)))
         if opt == LINEMODE:
             if cmd == DO and self.is_client:
                 raise ValueError('DO LINEMODE may only be sent by server.')
@@ -573,12 +573,12 @@ class TelnetStream:
         kind = NEW_ENVIRON
         if not self.remote_option.enabled(kind):
             self.log.debug('cannot send SB {} SEND IS '
-                'without receipt of WILL {}'.format(
-                    name_command(kind), name_command(kind)))
+                           'without receipt of WILL {}'.format(
+                               name_command(kind), name_command(kind)))
             return False
         if self.pending_option.enabled(SB + kind + SEND + IS):
             self.log.debug('cannot send SB {} SEND IS, '
-                'request pending.'.format(name_command(kind)))
+                           'request pending.'.format(name_command(kind)))
             return False
         self.pending_option[SB + kind + SEND + IS] = True
         response = collections.deque()
@@ -629,17 +629,17 @@ class TelnetStream:
             registered by ``slctab``.
         """
         assert self.is_server, (
-                'DO FORWARDMASK may only be sent by server end')
+            'DO FORWARDMASK may only be sent by server end')
         assert self.remote_option.enabled(LINEMODE), (
-                'cannot send DO FORWARDMASK without receipt of WILL LINEMODE.')
+            'cannot send DO FORWARDMASK without receipt of WILL LINEMODE.')
         if fmask is None:
             opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
             forwardmask_enabled = (
-                    self.is_server and self.local_option.get(opt, False)
-                    ) or self.remote_option.get(opt, False)
+                self.is_server and self.local_option.get(opt, False)
+            ) or self.remote_option.get(opt, False)
             fmask = slc.generate_forwardmask(
-                    binary_mode=self.local_option.enabled(BINARY),
-                    tabset=self.slctab, ack=forwardmask_enabled)
+                binary_mode=self.local_option.enabled(BINARY),
+                tabset=self.slctab, ack=forwardmask_enabled)
 
         assert isinstance(fmask, slc.Forwardmask), fmask
         self.pending_option[SB + LINEMODE] = True
@@ -654,11 +654,11 @@ class TelnetStream:
     def send_eor(self):
         """ .. method:: request_eor() -> bool
 
-            Send IAC EOR_CMD (End-of-Record) only if IAC DO EOR was received.
+            Send IAC EOR (End-of-Record) only if IAC DO EOR was received.
             Returns True if request is valid for telnet state, and was sent.
         """
         if not self.local_option.enabled(EOR):
-            self.send_iac(IAC + EOR_CMD)
+            self.send_iac(IAC + EOR)
 
     def send_lineflow_mode(self):
         """ .. method send_lineflow_mod() -> bool
@@ -677,10 +677,10 @@ class TelnetStream:
         of the Linemode class, or self._linemode by default.
         """
         assert self.is_server, (
-                'SB LINEMODE LMODE_MODE cannot be sent by client')
+            'SB LINEMODE LMODE_MODE cannot be sent by client')
         assert self.remote_option.enabled(LINEMODE), (
-                'SB LINEMODE LMODE_MODE cannot be sent; '
-                'WILL LINEMODE not received.')
+            'SB LINEMODE LMODE_MODE cannot be sent; '
+            'WILL LINEMODE not received.')
         if linemode is not None:
             self.log.debug('Linemode is %s', linemode)
             self._linemode = linemode
@@ -785,7 +785,7 @@ class TelnetStream:
         """
         #   Terminal servers that respond to AYT usually print the status
         #   of the client terminal session, its speed, type, and options.
-        self.log.debug('IAC AYT: Are You There?')
+        self.log.debug('IAC AYT: Are You There? (unhandled).')
 
     def handle_ip(self, byte):
         """ XXX Handle IAC Interrupt Process (IP) or SLC_IP
@@ -830,8 +830,8 @@ class TelnetStream:
             """
         assert callable(func), ('Argument func must be callable')
         assert (type(slc_byte) == bytes and
-                0 < ord(slc_byte) < slc.NSLC + 1), (
-                        'Uknown SLC byte: {!r}'.format(slc_byte))
+                0 < ord(slc_byte) < slc.NSLC + 1
+                ), ('Uknown SLC byte: {!r}'.format(slc_byte))
         self._slc_callback[slc_byte] = func
 
     def handle_ew(self, slc):
@@ -901,8 +901,8 @@ class TelnetStream:
           * CHARSET: for servers, receiving one string, the character set
             negotiated by client (rfc 2066).
         """
-        assert cmd in (SNDLOC, NAWS, TSPEED,
-                TTYPE, XDISPLOC, NEW_ENVIRON, CHARSET), cmd
+        assert cmd in (SNDLOC, NAWS, TSPEED, TTYPE, XDISPLOC,
+                       NEW_ENVIRON, CHARSET), cmd
         assert callable(func), ('Argument func must be callable')
         self._ext_send_callback[cmd] = func
 
@@ -938,8 +938,8 @@ class TelnetStream:
           * CHARSET: for servers, receiving one string, the character set
             negotiated by client (rfc 2066).
         """
-        assert cmd in (LOGOUT, SNDLOC, NAWS, TSPEED,
-                TTYPE, XDISPLOC, NEW_ENVIRON, CHARSET), cmd
+        assert cmd in (LOGOUT, SNDLOC, NAWS, TSPEED, TTYPE,
+                       XDISPLOC, NEW_ENVIRON, CHARSET), cmd
         assert callable(func), ('Argument func must be callable')
         self._ext_callback[cmd] = func
 
@@ -1100,7 +1100,7 @@ class TelnetStream:
         elif opt == LOGOUT:
             self._ext_callback[LOGOUT](DO)
         elif opt in (ECHO, LINEMODE, BINARY, SGA, LFLOW, EOR,
-                TTYPE, NAWS, NEW_ENVIRON, XDISPLOC):
+                     TTYPE, NAWS, NEW_ENVIRON, XDISPLOC):
             if not self.local_option.enabled(opt):
                 self.iac(WILL, opt)
             return True
@@ -1113,7 +1113,8 @@ class TelnetStream:
             if self.local_option.get(opt, None) is None:
                 self.iac(WONT, opt)
             self.log.warn('Unhandled: DO %s.' % (name_command(opt),))
-            self.local_option[opt] = -1 # toggles opt.unsupported()
+            # option value of -1 toggles opt.unsupported()
+            self.local_option[opt] = -1
             if self.pending_option.enabled(WILL + opt):
                 self.pending_option[WILL + opt] = False
         return False
@@ -1205,10 +1206,11 @@ class TelnetStream:
             self.remote_option[opt] = True
             self.request_tspeed()
         else:
+            # option value of -1 toggles opt.unsupported()
             self.iac(DONT, opt)
             self.remote_option[opt] = -1
             self.log.warn('Unhandled: WILL %s.' % (name_command(opt),))
-            self.local_option[opt] = -1 # toggles opt.unsupported()
+            self.local_option[opt] = -1
             if self.pending_option.enabled(DO + opt):
                 self.pending_option[DO + opt] = False
 
@@ -1251,9 +1253,9 @@ class TelnetStream:
         assert buf[0] != theNULL, ('SE: buffer is NUL')
         assert len(buf) > 1, ('SE: buffer too short: %r' % (buf,))
         cmd = buf[0]
-        assert cmd in (LINEMODE, LFLOW, NAWS, SNDLOC,
-            NEW_ENVIRON, TTYPE, TSPEED, XDISPLOC, STATUS, CHARSET
-            ), ('SB {}: not supported'.format(name_command(cmd)))
+        assert cmd in (LINEMODE, LFLOW, NAWS, SNDLOC, NEW_ENVIRON, TTYPE,
+                       TSPEED, XDISPLOC, STATUS, CHARSET
+                       ), ('SB {}: not supported'.format(name_command(cmd)))
         if self.pending_option.enabled(SB + cmd):
             self.pending_option[SB + cmd] = False
         else:
@@ -1323,7 +1325,7 @@ class TelnetStream:
                 rx, tx = int(rx), int(tx)
             except ValueError as err:
                 self.log.error('illegal TSPEED values received '
-                    '(rx=%r, tx=%r: %s', rx, tx, err)
+                               '(rx={!r}, tx={!r}: {}', rx, tx, err)
                 return
             self._ext_callback[TSPEED](rx, tx)
         elif cmd == SEND:
@@ -1387,13 +1389,13 @@ class TelnetStream:
         assert opt in (IS, INFO, SEND), opt
         assert kind == NEW_ENVIRON
         if opt == SEND:
-            raise NotImplementedError # client
+            raise NotImplementedError  # TODO: client
             assert self.is_client, (
-                    'SE: cannot recv SB NEW_ENVIRON SEND from client')
+                'SE: cannot recv SB NEW_ENVIRON SEND from client')
             response = collections.deque()
             response.extend([IAC, SB, NEW_ENVIRON, IS])
             for key, value in self._ext_send_callback[NEW_ENVIRON]():
-                pass # TODO
+                pass  # TODO
 #                response.extend([IAC, SE])
             response.extend([IAC, SE])
             self.log.debug('send: %r', response)
@@ -1413,7 +1415,7 @@ class TelnetStream:
                 # completed, subsequent environment values should have been
                 # send as INFO ..
                 self.log.debug('%s IS already recv; expected INFO.',
-                        name_command(kind))
+                               name_command(kind))
             breaks = list([idx for (idx, byte) in enumerate(buf)
                            if byte in (theNULL, b'\x03')])
             env = {}
@@ -1467,8 +1469,9 @@ class TelnetStream:
         """ Fire callback for IAC-SB-STATUS-SEND (rfc859).
         """
         assert (self.pending_option.enabled(WILL + STATUS)
-                or self.local_option.enabled(STATUS)), (u'Only the sender '
-                'of IAC WILL STATUS may send IAC SB STATUS IS.')
+                or self.local_option.enabled(STATUS)
+                ), ('Only sender of IAC WILL STATUS '
+                    'may send IAC SB STATUS IS.')
         response = collections.deque()
         response.extend([IAC, SB, STATUS, IS])
         for opt, status in self.local_option.items():
