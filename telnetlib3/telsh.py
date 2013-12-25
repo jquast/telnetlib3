@@ -507,15 +507,15 @@ class Telsh():
             self.stream.write(char_disp)
             self.display_status()
             self.display_prompt()
-        elif cmd in (EDIT.IP, EDIT.ABORT):
+        elif cmd in (EDIT.IP, EDIT.ABORT,):
             # interrupt process (^C), abort process (^\)
             self._lastline.clear()
             self.stream.write(char_disp)
             self.display_prompt()
-        elif cmd in (EDIT.XOFF, EDIT.XON):
+        elif cmd in (EDIT.XOFF, EDIT.XON,):
             # transmit-off (^S), transmit-on (^Q)
             pass
-        elif cmd in (EDIT.AO):
+        elif cmd in (EDIT.AO,):
             self.display_prompt()
         else:
             # not handled or implemented
