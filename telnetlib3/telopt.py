@@ -18,7 +18,7 @@ from . import slc
 
 __all__ = ('TelnetStream', 'escape_iac', 'name_command', 'name_commands')
 
-(EOF, SUSP, ABORT, EOR_CMD) = (
+(EOF, SUSP, ABORT, EOR) = (
     bytes([const]) for const in range(236, 240))
 (IS, SEND, INFO) = (bytes([const]) for const in range(3))
 (LFLOW_OFF, LFLOW_ON, LFLOW_RESTART_ANY, LFLOW_RESTART_XON) = (
@@ -229,7 +229,7 @@ class TelnetStream:
         for iac_cmd, key in (
                 (BRK, 'brk'), (IP, 'ip'), (AO, 'ao'), (AYT, 'ayt'), (EC, 'ec'),
                 (EL, 'el'), (EOF, 'eof'), (SUSP, 'susp'), (ABORT, 'abort'),
-                (NOP, 'nop'), (DM, 'dm'), (GA, 'ga'), (EOR_CMD, 'eor'), ):
+                (NOP, 'nop'), (DM, 'dm'), (GA, 'ga'), (EOR, 'eor'), ):
             self.set_iac_callback(
                 cmd=iac_cmd, func=getattr(self, 'handle_{}'.format(key)))
 
@@ -692,13 +692,13 @@ class TelnetStream:
     def set_iac_callback(self, cmd, func):
         """ Register callable ``func`` as callback for IAC ``cmd``.
 
-            BRK, IP, AO, AYT, EC, EL, EOR_CMD, EOF, SUSP, ABORT, and NOP.
+            BRK, IP, AO, AYT, EC, EL, EOR, EOF, SUSP, ABORT, and NOP.
 
             These callbacks receive a single argument, the IAC ``cmd`` which
             triggered it.
         """
         assert callable(func), ('Argument func must be callable')
-        assert cmd in (BRK, IP, AO, AYT, EC, EL, EOR_CMD, EOF, SUSP,
+        assert cmd in (BRK, IP, AO, AYT, EC, EL, EOR, EOF, SUSP,
                        ABORT, NOP, DM, GA), cmd
         self._iac_callback[cmd] = func
 
@@ -738,9 +738,9 @@ class TelnetStream:
         self.log.debug('IAC EL: Erase Line (unhandled).')
 
     def handle_eor(self, byte):
-        """ XXX Handle IAC End of Record (EOR_CMD) or SLC_EOR.
+        """ XXX Handle IAC End of Record (EOR) or SLC_EOR.
         """
-        self.log.debug('IAC EOR_CMD: End of Record (unhandled).')
+        self.log.debug('IAC EOR: End of Record (unhandled).')
 
     def handle_abort(self, byte):
         """ XXX Handle IAC Abort (ABORT) rfc1184, or SLC_ABORT.
