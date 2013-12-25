@@ -274,7 +274,9 @@ class TelnetStream:
     def feed_byte(self, byte):
         """ .. method:: feed_byte(byte : bytes)
 
-            Feed a single byte into Telnet option state machine.
+            Feed a single byte into Telnet option state machine. This is
+            the entry point of the 'IAC Interpreter', to be fed a single
+            byte at a time.
         """
         assert isinstance(byte, (bytes, bytearray)), byte
         assert len(byte) == 1, byte
