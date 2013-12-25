@@ -25,15 +25,6 @@ TODO: fingerprinting Client & Server
 TODO: nosetests
 TODO: example MUD server
 TODO: example wunderground.com client
-TODO: ^] 'send getstatus'
- telopt.py:1252 [SB + STATUS] unsolicited
- server.py:422   File "/home/dingo/telnetlib3/ENV/lib/python3.3/site-packages/telnetlib3/server.py", line 412, in data_received
- server.py:422     self.stream.feed_byte(byte)
- server.py:422   File "/home/dingo/telnetlib3/ENV/lib/python3.3/site-packages/telnetlib3/telopt.py", line 312, in feed_byte
- server.py:422     self.handle_subnegotiation(self._sb_buffer)
- server.py:422   File "/home/dingo/telnetlib3/ENV/lib/python3.3/site-packages/telnetlib3/telopt.py", line 1274, in handle_subnegotiation
- server.py:422     raise ValueError('SE: unhandled: %r' % (buf,))
- server.py:422 ValueError: SE: unhandled: deque([b'\x05', b'\x01'])
 TODO: enough commands... roll-up into .__doc__ for help, and dispatch
       by matching cmdset_{command} names.
 
