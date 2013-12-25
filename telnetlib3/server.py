@@ -460,6 +460,7 @@ class TelnetServer(asyncio.protocols.Protocol):
                 continue
 
             if self.stream.is_oob:
+                # byte is 'out-of-band', handled only by iac interpreter
                 continue
 
             if self.stream.slc_received:
