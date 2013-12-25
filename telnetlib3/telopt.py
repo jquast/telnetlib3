@@ -1561,11 +1561,11 @@ class TelnetStream:
         send_count = 0
         slctab = slctab or self.slctab
         for func in range(slc.NSLC + 1):
-            if self.slctab[bytes([func])].nosupport:
-                continue
             if func is 0 and self.is_client:
                 # only the server may send an octet with the first
                 # byte (func) set as 0 (SLC_NOSUPPORT).
+                continue
+            if self.slctab.get(bytes([func]), slc.SLC_nosupport()).nosupport:
                 continue
             self._slc_add(bytes([func]))
             send_count += 1
