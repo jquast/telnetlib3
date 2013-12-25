@@ -149,25 +149,25 @@ class TelnetServer(asyncio.protocols.Protocol):
             'REMOTE_HOST': self.client_ip  # override by dns, later
             })
 
-
     def set_stream_callbacks(self):
         """ XXX Set default iac, slc, and ext callbacks for telnet stream
         """
         stream, server = self.stream, self
-        # wire AYT and SLC_AYT (^T) to callback ``status()``
+        # wire AYT and SLC_AYT (^T) to callback ``handle_ayt()``
         from .slc import SLC_AYT
-        from .telopt import AYT, AO, IP, BRK, SUSP, ABORT
-        from .telopt import TTYPE, TSPEED, XDISPLOC, NEW_ENVIRON
-        from .telopt import LOGOUT, SNDLOC, CHARSET, NAWS
+        from .telopt import (AYT, AO, IP, BRK, SUSP, ABORT, EC, EL, EOR, TTYPE,
+                             TSPEED, XDISPLOC, NEW_ENVIRON, LOGOUT, SNDLOC,
+                             CHARSET, NAWS)
         stream.set_iac_callback(AYT, self.handle_ayt)
         stream.set_slc_callback(SLC_AYT, self.handle_ayt)
 
         # wire various 'interrupts', such as AO, IP to
-        # ``interrupt_received``
-        for sir in (AO, IP, BRK, SUSP, ABORT,):
-            stream.set_iac_callback(sir, self.interrupt_received)
+        # ``special_received()``, which forwards as
+        # shell editing cmds of SLC equivalents.
+        for cmd in (AO, IP, BRK, SUSP, ABORT, EC, EL, EOR):
+            stream.set_iac_callback(cmd, self.special_received)
 
-        # wire extended rfc callbacks for terminal atributes, etc.
+        # wire extended rfc callbacks for receipt of terminal atributes, etc.
         for (opt, func) in (
                 (TTYPE, self.ttype_received),
                 (TSPEED, self.tspeed_received),
@@ -447,7 +447,7 @@ class TelnetServer(asyncio.protocols.Protocol):
 
             try:
                 self.stream.feed_byte(byte)
-            except (ValueError, AssertionError) as err:
+            except (ValueError, AssertionError):
                 exc_info = sys.exc_info()
                 tbl_exception = (
                     traceback.format_tb(exc_info[2]) +
