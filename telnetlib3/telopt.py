@@ -486,8 +486,11 @@ class TelnetStream:
             Returns True if GA was sent.
         """
         if not self.local_option.enabled(SGA):
+            self.log.debug('send IAC GA')
             self.send_iac(IAC + GA)
             return True
+        return False
+
     def send_eor(self):
         """ .. method:: request_eor() -> bool
 
@@ -511,11 +514,18 @@ class TelnetStream:
             IAC-WILL-STATUS has been received. Returns True if status
             request was sent.
         """
-        if (self.remote_option.enabled(STATUS) and
-                not self.pending_option.enabled(SB + STATUS)):
-            self.send_iac(b''.join([IAC, SB, STATUS, SEND, IAC, SE]))
+        if not self.remote_option.enabled(STATUS):
+            self.log.debug('cannot send SB STATUS SEND '
+                           'without receipt of WILL STATUS')
+        elif not self.pending_option.enabled(SB + STATUS):
+            response = [IAC, SB, STATUS, SEND, IAC, SE]
+            self.log.debug('send IAC SB STATUS SEND IAC SE')
+            self.send_iac(b''.join(response))
             self.pending_option[SB + STATUS] = True
             return True
+        else:
+            self.log.debug('cannot send SB STATUS SEND, request pending.')
+        return False
 
     def request_tspeed(self):
         """ .. method:: request_tspeed() -> bool
@@ -525,13 +535,18 @@ class TelnetStream:
             request was sent.
         """
         if not self.remote_option.enabled(TSPEED):
-            pass
-        if not self.pending_option.enabled(SB + TSPEED):
+            self.log.debug('cannot send SB TSPEED SEND '
+                           'without receipt of WILL TSPEED')
+        elif not self.pending_option.enabled(SB + TSPEED):
             self.pending_option[SB + TSPEED] = True
             response = [IAC, SB, TSPEED, SEND, IAC, SE]
             self.log.debug('send: IAC SB TSPEED SEND IAC SE')
             self.send_iac(b''.join(response))
+            self.pending_option[SB + TSPEED] = True
             return True
+        else:
+            self.log.debug('cannot send SB TSPEED SEND, request pending.')
+        return False
 
     def request_charset(self, codepages=None, sep=' '):
         """ .. method:: request_charset(codepages : list, sep : string) -> bool
@@ -543,10 +558,11 @@ class TelnetStream:
             one of character sets specifed by string list ``codepages``.
         """
         codepages = self.default_codepages if codepages is None else codepages
-        if (self.remote_option.enabled(CHARSET) and
-                not self.pending_option.enabled(SB + CHARSET)):
+        if not self.remote_option.enabled(CHARSET):
+            self.log.debug('cannot send SB CHARSET REQUEST '
+                           'without receipt of WILL CHARSET')
+        elif not self.pending_option.enabled(SB + CHARSET):
             self.pending_option[SB + CHARSET] = True
-
             response = collections.deque()
             response.extend([IAC, SB, CHARSET, REQUEST])
             response.extend([bytes(sep, 'ascii')])
@@ -555,7 +571,11 @@ class TelnetStream:
             self.log.debug('send: IAC SB CHARSET REQUEST {} IAC SE'.format(
                 sep.join(codepages)))
             self.send_iac(b''.join(response))
+            self.pending_option[SB + CHARSET] = True
             return True
+        else:
+            self.log.debug('cannot send SB CHARSET REQUEST, request pending.')
+        return False
 
     def request_env(self, env=None, all_var=True, all_uservar=True):
         """ .. method:: request_env(env : list) -> bool
@@ -603,14 +623,20 @@ class TelnetStream:
             Send XDISPLOC, SEND sub-negotiation, rfc1086.
             Returns True if request is valid for telnet state, and was sent.
         """
+        assert self.is_server, (
+            'SB XDISPLOC SEND may only be sent by server end')
         if not self.remote_option.enabled(XDISPLOC):
-            pass
+            self.log.debug('cannot send SB XDISPLOC SEND'
+                           'without receipt of WILL XDISPLOC')
         if not self.pending_option.enabled(SB + XDISPLOC):
-            self.pending_option[SB + XDISPLOC] = True
             response = [IAC, SB, XDISPLOC, SEND, IAC, SE]
             self.log.debug('send: IAC SB XDISPLOC SEND IAC SE')
+            self.pending_option[SB + XDISPLOC] = True
             self.send_iac(b''.join(response))
             return True
+        else:
+            self.log.debug('cannot send SB XDISPLOC SEND, request pending.')
+        return False
 
     def request_ttype(self):
         """ .. method:: request_ttype() -> bool
@@ -618,14 +644,20 @@ class TelnetStream:
             Send TTYPE SEND sub-negotiation, rfc930.
             Returns True if request is valid for telnet state, and was sent.
         """
+        assert self.is_server, (
+            'SB TTYPE SEND may only be sent by server end')
         if not self.remote_option.enabled(TTYPE):
-            pass
+            self.log.debug('cannot send SB TTYPE SEND'
+                           'without receipt of WILL TTYPE')
         if not self.pending_option.enabled(SB + TTYPE):
-            self.pending_option[SB + TTYPE] = True
             response = [IAC, SB, TTYPE, SEND, IAC, SE]
             self.log.debug('send: IAC SB TTYPE SEND IAC SE')
+            self.pending_option[SB + TTYPE] = True
             self.send_iac(b''.join(response))
             return True
+        else:
+            self.log.debug('cannot send SB TTYPE SEND, request pending.')
+        return False
 
     def request_forwardmask(self, fmask=None):
         """ Request the client forward the control characters indicated
@@ -635,35 +667,30 @@ class TelnetStream:
         """
         assert self.is_server, (
             'DO FORWARDMASK may only be sent by server end')
-        assert self.remote_option.enabled(LINEMODE), (
-            'cannot send DO FORWARDMASK without receipt of WILL LINEMODE.')
-        if fmask is None:
-            opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
-            forwardmask_enabled = (
-                self.is_server and self.local_option.get(opt, False)
-            ) or self.remote_option.get(opt, False)
-            fmask = slc.generate_forwardmask(
-                binary_mode=self.local_option.enabled(BINARY),
-                tabset=self.slctab, ack=forwardmask_enabled)
+        if not self.remote_option.enabled(LINEMODE):
+            self.log.debug('cannot send SB LINEMODE DO'
+                           'without receipt of WILL LINEMODE')
+        else:
+            if fmask is None:
+                opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
+                forwardmask_enabled = (
+                    self.is_server and self.local_option.get(opt, False)
+                ) or self.remote_option.get(opt, False)
+                fmask = slc.generate_forwardmask(
+                    binary_mode=self.local_option.enabled(BINARY),
+                    tabset=self.slctab, ack=forwardmask_enabled)
 
-        assert isinstance(fmask, slc.Forwardmask), fmask
-        self.pending_option[SB + LINEMODE] = True
-        self.send_iac(IAC + SB + LINEMODE + DO + slc.LMODE_FORWARDMASK)
-        self.write(fmask.value)  # escape IAC+IAC
-        self.iac(SE)
+            assert isinstance(fmask, slc.Forwardmask), fmask
+            self.pending_option[SB + LINEMODE] = True
+            self.send_iac(IAC + SB + LINEMODE + DO + slc.LMODE_FORWARDMASK)
+            self.write(fmask.value)  # escape IAC+IAC
+            self.iac(SE)
 
-        self.log.debug('send IAC SB LINEMODE DO LMODE_FORWARDMASK::')
-        for maskbit_descr in fmask.__repr__():
-            self.log.debug('  %s', maskbit_descr)
-
-    def send_eor(self):
-        """ .. method:: request_eor() -> bool
-
-            Send IAC EOR (End-of-Record) only if IAC DO EOR was received.
-            Returns True if request is valid for telnet state, and was sent.
-        """
-        if not self.local_option.enabled(EOR):
-            self.send_iac(IAC + EOR)
+            self.log.debug('send IAC SB LINEMODE DO LMODE_FORWARDMASK::')
+            for maskbit_descr in fmask.__repr__():
+                self.log.debug('  {}'.format(maskbit_descr))
+            return True
+        return False
 
     def send_lineflow_mode(self):
         """ .. method send_lineflow_mod() -> bool
@@ -671,11 +698,17 @@ class TelnetStream:
         Send LFLOW mode sub-negotiation, rfc1372.
         """
         if not self.remote_option.enabled(LFLOW):
-            return
-        mode = LFLOW_RESTART_ANY if self.xon_any else LFLOW_RESTART_XON
-        desc = 'LFLOW_RESTART_ANY' if self.xon_any else 'LFLOW_RESTART_XON'
-        self.send_iac(b''.join([IAC, SB, LFLOW, mode, IAC, SE]))
-        self.log.debug('send: IAC SB LFLOW %s IAC SE', desc)
+            self.log.debug('cannot send IAC SB LFLOW '
+                           'without receipt of WILL LFLOW')
+        else:
+            if self.xon_any:
+                (mode, desc) = (LFLOW_RESTART_ANY, 'LFLOW_RESTART_ANY')
+            else:
+                (mode, desc) = (LFLOW_RESTART_XON, 'LFLOW_RESTART_XON')
+            self.log.debug('send: IAC SB LFLOW {} IAC SE'.format(desc))
+            self.send_iac(b''.join([IAC, SB, LFLOW, mode, IAC, SE]))
+            return True
+        return False
 
     def send_linemode(self, linemode=None):
         """ Request the client switch to linemode ``linemode``, an
@@ -1718,23 +1751,27 @@ class TelnetStream:
         """ Callback handles IAC-SB-LINEMODE-<cmd>-FORWARDMASK-<buf>.
         """
         # set and report about pending options by 2-byte opt,
+        # not well tested, no known implementations exist !
         if self.is_server:
             assert self.remote_option.enabled(LINEMODE), (
-                'cannot recv LMODE_FORWARDMASK %s (%r) '
-                'without first sending DO LINEMODE.' % (cmd, buf,))
-            assert cmd not in (DO, DONT), (
-                'cannot recv %s LMODE_FORWARDMASK on server end',
-                name_command(cmd,))
+                'cannot recv LMODE_FORWARDMASK {} ({!r}) '
+                'without first sending DO LINEMODE.'
+                .format(cmd, buf,))
+            assert cmd not in (DO, DONT,), (
+                'cannot recv {} LMODE_FORWARDMASK on server end'
+                .format(name_command(cmd)))
         if self.is_client:
             assert self.local_option.enabled(LINEMODE), (
-                'cannot recv %s LMODE_FORWARDMASK without first '
-                ' sending WILL LINEMODE.')
-            assert cmd not in (WILL, WONT), (
-                'cannot recv %s LMODE_FORWARDMASK on client end',
-                name_command(cmd,))
-            assert cmd not in (DONT) or len(buf) == 0, (
-                'Illegal bytes follow DONT LMODE_FORWARDMASK: %r' % (buf,))
-            assert cmd not in (DO) and len(buf), (
+                'cannot recv {} LMODE_FORWARDMASK without first '
+                ' sending WILL LINEMODE.'
+                .format(name_command(cmd)))
+            assert cmd not in (WILL, WONT,), (
+                'cannot recv {} LMODE_FORWARDMASK on client end'
+                .format(name_command(cmd)))
+            assert cmd not in (DONT,) or len(buf) == 0, (
+                'Illegal bytes follow DONT LMODE_FORWARDMASK: {!r}'
+                .format(buf))
+            assert cmd not in (DO,) and len(buf), (
                 'bytes must follow DO LMODE_FORWARDMASK')
 
         opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
