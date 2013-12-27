@@ -442,12 +442,13 @@ class TelnetClient(asyncio.protocols.Protocol):
         #self.shell.display_prompt()
 
     def eof_received(self):
-        self._closing = True
+        self.connection_lost('EOF')
+        return False
 
     def connection_lost(self, exc):
         self._closing = True
-        self.log.info('{}{}'.format(self.__str__(),
-                                    ': {}'.format(exc) if exc is not None else ''))
+        self.log.info('{}: {}'.format(self.__str__(),
+                                      exc if exc is not None else ''))
 #        for task in (self._server_name, self._server_fqdn,
 #                self._client_host, self._timeout):
 #            task.cancel()
