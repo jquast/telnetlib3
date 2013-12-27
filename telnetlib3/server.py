@@ -155,16 +155,16 @@ class TelnetServer(asyncio.protocols.Protocol):
         stream, server = self.stream, self
         # wire AYT and SLC_AYT (^T) to callback ``handle_ayt()``
         from .slc import SLC_AYT
-        from .telopt import (AYT, AO, IP, BRK, SUSP, ABORT, EC, EL, EOR, TTYPE,
-                             TSPEED, XDISPLOC, NEW_ENVIRON, LOGOUT, SNDLOC,
-                             CHARSET, NAWS)
+        from .telopt import (AYT, AO, IP, BRK, SUSP, ABORT, EC, EL, CMD_EOR,
+                             TTYPE, TSPEED, XDISPLOC, NEW_ENVIRON, LOGOUT,
+                             SNDLOC, CHARSET, NAWS)
         stream.set_iac_callback(AYT, self.handle_ayt)
         stream.set_slc_callback(SLC_AYT, self.handle_ayt)
 
         # wire various 'interrupts', such as AO, IP to
         # ``special_received()``, which forwards as
         # shell editing cmds of SLC equivalents.
-        for cmd in (AO, IP, BRK, SUSP, ABORT, EC, EL, EOR):
+        for cmd in (AO, IP, BRK, SUSP, ABORT, EC, EL, CMD_EOR):
             stream.set_iac_callback(cmd, self.special_received)
 
         # wire extended rfc callbacks for receipt of terminal atributes, etc.
@@ -574,6 +574,7 @@ class TelnetServer(asyncio.protocols.Protocol):
 
     def eof_received(self):
         self.connection_lost('EOF')
+        return False
 
     def connection_lost(self, exc):
         if self._closing:
