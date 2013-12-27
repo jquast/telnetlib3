@@ -1271,7 +1271,7 @@ class TelnetStream:
         elif opt == LOGOUT:
             assert not (self.is_server), (
                 'cannot recv WONT LOGOUT on server end')
-            if not self.pending_option(DO + LOGOUT):
+            if not self.pending_option.enabled(DO + LOGOUT):
                 self.log.warn('Server sent WONT LOGOUT unsolicited')
             self._ext_callback[LOGOUT](WONT)
         else:
