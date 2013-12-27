@@ -732,7 +732,7 @@ class TelnetStream:
     def set_iac_callback(self, cmd, func):
         """ Register callable ``func`` as callback for IAC ``cmd``.
 
-            BRK, IP, AO, AYT, EC, EL, EOR, EOF, SUSP, ABORT, and NOP.
+            BRK, IP, AO, AYT, EC, EL, CMD_EOR, EOF, SUSP, ABORT, and NOP.
 
             These callbacks receive a single argument, the IAC ``cmd`` which
             triggered it.
