@@ -21,6 +21,7 @@ __all__ = ('TelnetStream', 'name_command', 'name_commands')
 (EOF, SUSP, ABORT, CMD_EOR) = (
     bytes([const]) for const in range(236, 240))
 (IS, SEND, INFO) = (bytes([const]) for const in range(3))
+(VAR, VALUE, ESC, USERVAR) = (bytes([const]) for const in range(4))
 (LFLOW_OFF, LFLOW_ON, LFLOW_RESTART_ANY, LFLOW_RESTART_XON) = (
     bytes([const]) for const in range(4))
 (REQUEST, ACCEPTED, REJECTED, TTABLE_IS, TTABLE_REJECTED,
