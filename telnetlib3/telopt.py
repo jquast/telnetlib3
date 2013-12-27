@@ -28,7 +28,7 @@ __all__ = ('TelnetStream', 'escape_iac', 'name_command', 'name_commands')
 
 (MCCP_COMPRESS, MCCP2_COMPRESS) = (bytes([85]), bytes([86]))
 
-_MAXSIZE_SB = 2048
+_MAXSIZE_SB = 1 << 15
 _MAXSIZE_SLC = slc.NSLC * 6
 
 
