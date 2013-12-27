@@ -12,11 +12,13 @@ __credits__ = ["Jim Storch", "Wijnand Modderman-Lenstra"]
 __license__ = 'ISC'
 
 from .server import *
+from .client import *
 from .telsh import *
 from .telopt import *
 from .slc import *
 
 __all__ = (server.__all__ +
+           client.__all__ +
            telsh.__all__ +
            telopt.__all__ +
            slc.__all__)
