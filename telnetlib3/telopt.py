@@ -705,7 +705,7 @@ class TelnetStream:
             triggered it.
         """
         assert callable(func), ('Argument func must be callable')
-        assert cmd in (BRK, IP, AO, AYT, EC, EL, EOR, EOF, SUSP,
+        assert cmd in (BRK, IP, AO, AYT, EC, EL, CMD_EOR, EOF, SUSP,
                        ABORT, NOP, DM, GA), cmd
         self._iac_callback[cmd] = func
 
@@ -1159,8 +1159,8 @@ class TelnetStream:
         and the setting of ``self.remote_option[opt]`` of ``True``. For
         unsupported capabilities, RFC specifies a response of (IAC, DONT, opt).
         Similarly, set ``self.remote_option[opt]`` to ``False``.  """
-        self.log.debug('handle_will(%s)' % (name_command(opt)))
-        if opt in (BINARY, SGA, ECHO, NAWS, LINEMODE, EOR, SNDLOC):
+        self.log.debug('handle_will({})'.format(name_command(opt)))
+        if opt in (BINARY, SGA, ECHO, NAWS, LINEMODE, CMD_EOR, SNDLOC):
             if opt == ECHO and self.is_server:
                 raise ValueError('cannot recv WILL ECHO on server end')
             if opt in (NAWS, LINEMODE, SNDLOC) and self.is_client:
