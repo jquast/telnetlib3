@@ -739,7 +739,7 @@ class TelnetStream:
         """
         assert callable(func), ('Argument func must be callable')
         assert cmd in (BRK, IP, AO, AYT, EC, EL, CMD_EOR, EOF, SUSP,
-                       ABORT, NOP, DM, GA), cmd
+                       ABORT, NOP, DM, GA), name_command(cmd)
         self._iac_callback[cmd] = func
 
     def handle_nop(self, cmd):
