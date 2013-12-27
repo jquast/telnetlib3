@@ -562,7 +562,6 @@ class TelnetStream:
             self.log.debug('cannot send SB CHARSET REQUEST '
                            'without receipt of WILL CHARSET')
         elif not self.pending_option.enabled(SB + CHARSET):
-            self.pending_option[SB + CHARSET] = True
             response = collections.deque()
             response.extend([IAC, SB, CHARSET, REQUEST])
             response.extend([bytes(sep, 'ascii')])
