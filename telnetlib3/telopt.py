@@ -406,7 +406,7 @@ class TelnetStream:
                 assert byte < 128, (
                     'character value {} at pos {} not valid, send '
                     'IAC WILL BINARY first: {}'.format(byte, pos, data))
-        data = data if oob else escape_iac(data)
+        data = data if oob else _escape_iac(data)
         if self.writing or oob:
             self.transport.write(data)
         else:
