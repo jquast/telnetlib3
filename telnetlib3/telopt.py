@@ -18,7 +18,7 @@ from . import slc
 
 __all__ = ('TelnetStream', 'name_command', 'name_commands')
 
-(EOF, SUSP, ABORT, EOR) = (
+(EOF, SUSP, ABORT, CMD_EOR) = (
     bytes([const]) for const in range(236, 240))
 (IS, SEND, INFO) = (bytes([const]) for const in range(3))
 (LFLOW_OFF, LFLOW_ON, LFLOW_RESTART_ANY, LFLOW_RESTART_XON) = (
@@ -219,7 +219,7 @@ class TelnetStream:
         for iac_cmd, key in (
                 (BRK, 'brk'), (IP, 'ip'), (AO, 'ao'), (AYT, 'ayt'), (EC, 'ec'),
                 (EL, 'el'), (EOF, 'eof'), (SUSP, 'susp'), (ABORT, 'abort'),
-                (NOP, 'nop'), (DM, 'dm'), (GA, 'ga'), (EOR, 'eor'), ):
+                (NOP, 'nop'), (DM, 'dm'), (GA, 'ga'), (CMD_EOR, 'eor'), ):
             self.set_iac_callback(
                 cmd=iac_cmd, func=getattr(self, 'handle_{}'.format(key)))
 
@@ -488,6 +488,19 @@ class TelnetStream:
         if not self.local_option.enabled(SGA):
             self.send_iac(IAC + GA)
             return True
+    def send_eor(self):
+        """ .. method:: request_eor() -> bool
+
+            Send IAC EOR (End-of-Record) only if IAC DO CMD_EOR was received.
+            Returns True if EOR was sent.
+        """
+        if not self.local_option.enabled(CMD_EOR):
+            self.log.debug('cannot send IAC EOR '
+                           'without receipt of DO CMD_EOR')
+        else:
+            self.send_iac(IAC + EOR)
+            return True
+        return False
 
     def request_status(self):
         """ .. method:: request_status() -> bool
@@ -1089,7 +1102,7 @@ class TelnetStream:
             self.iac(WILL, TM)
         elif opt == LOGOUT:
             self._ext_callback[LOGOUT](DO)
-        elif opt in (ECHO, LINEMODE, BINARY, SGA, LFLOW, EOR,
+        elif opt in (ECHO, LINEMODE, BINARY, SGA, LFLOW, CMD_EOR,
                      TTYPE, NAWS, NEW_ENVIRON, XDISPLOC):
             if not self.local_option.enabled(opt):
                 self.iac(WILL, opt)
@@ -1764,7 +1777,7 @@ _DEBUG_OPTS = dict([(value, key)
                       'STATUS', 'TTYPE', 'TSPEED', 'LFLOW', 'XDISPLOC', 'IAC',
                       'DONT', 'DO', 'WONT', 'WILL', 'SE', 'NOP', 'DM', 'TM',
                       'BRK', 'IP', 'ABORT', 'AO', 'AYT', 'EC', 'EL', 'EOR',
-                      'GA', 'SB', 'EOF', 'SUSP', 'ABORT', 'LOGOUT',
+                      'GA', 'SB', 'EOF', 'SUSP', 'ABORT', 'CMD_EOR', 'LOGOUT',
                       'CHARSET', 'SNDLOC', 'MCCP_COMPRESS', 'MCCP2_COMPRESS',
                       'ENCRYPT', 'AUTHENTICATION', 'TN3270E', 'XAUTH', 'RSP',
                       'COM_PORT_OPTION', 'SUPPRESS_LOCAL_ECHO', 'TLS',
