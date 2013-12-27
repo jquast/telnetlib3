@@ -10,14 +10,16 @@ from telnetlib3.telopt import TelnetStream
 
 __all__ = ('TelnetClient',)
 
+
 def _query_term_speed(tty_fd):
     """ Returns the input and output speed of the terminal specified
     by argument ``tty_fd`` as two integers: (rx, tx).
     """
-    import fcntl
+#    import fcntl
     import termios
     iflag, oflag, cflag, lflag, ispeed, ospeed, cc = termios.tcgetattr(tty_fd)
     return ispeed, ospeed
+
 
 def _query_term_winsize(tty_fd):
     """ Returns the value of the ``winsize`` struct for the terminal
@@ -37,9 +39,9 @@ class ConsoleStream():
         self.client = client
         self.log = log
         self.stream_out = (stream_out if stream_out is not None
-                            else sys.__stdout__)
+                           else sys.__stdout__)
         self.stream_in = (stream_in if stream_in is not None
-                            else sys.__stdin__)
+                          else sys.__stdin__)
 
         #: codecs.IncrementalDecoder for current CHARSET
         self.decoder = None
@@ -143,7 +145,6 @@ class ConsoleStream():
         if ucs is not None:
             self.stream_out.write(ucs)
 
-
     def can_write(self, ucs):
         """ Returns True if transport can receive ``ucs`` as a single-cell,
             carriage-forwarding character, such as 'x' or ' '. Values outside
@@ -171,12 +172,11 @@ class ConsoleStream():
         """ Returns string describing state of stream encoding.
         """
         encoding = '{}{}'.format(
-                self.client.encoding(incoming=True), '' if
-                self.client.encoding(outgoing=True)
-                == self.client.encoding(incoming=True) else ' in, {} out'
-                .format(self.client.encoding(outgoing=True)))
+            self.client.encoding(incoming=True), '' if
+            self.client.encoding(outgoing=True)
+            == self.client.encoding(incoming=True) else ' in, {} out'
+            .format(self.client.encoding(outgoing=True)))
         return encoding
-
 
 
 class TelnetClient(asyncio.protocols.Protocol):
@@ -190,15 +190,15 @@ class TelnetClient(asyncio.protocols.Protocol):
 
     #: default client environment variables,
     default_env = {
-            'COLUMNS': '80',
-            'LINES': '24',
-            'USER': 'unknown',
-            'TERM': 'unknown',
-            'CHARSET': 'ascii',
-            }
+        'COLUMNS': '80',
+        'LINES': '24',
+        'USER': 'unknown',
+        'TERM': 'unknown',
+        'CHARSET': 'ascii',
+    }
 
     def __init__(self, shell=ConsoleStream, stream=TelnetStream,
-            encoding='utf8', log=logging):
+                 encoding='utf8', log=logging):
         self.log = log
         self._shell_factory = shell
         self._stream_factory = stream
@@ -236,7 +236,7 @@ class TelnetClient(asyncio.protocols.Protocol):
         self.log.debug('connection made')
         self.transport = transport
         self.stream = self._stream_factory(
-                transport=transport, client=True, log=self.log)
+            transport=transport, client=True, log=self.log)
         self.shell = self._shell_factory(client=self, log=self.log)
         self.init_environment()
         self.set_stream_callbacks()
@@ -248,13 +248,14 @@ class TelnetClient(asyncio.protocols.Protocol):
         # begin connect-time negotiation
         loop.call_soon(self.begin_negotiation)
 
-
     def init_environment(self):
-        """ XXX This method must initialize the class attribute, ``env`` with
-        any values wished to be exported by telnet negotiation.  namely: TERM,
-        COLUMNS, LINES, CHARSET, or any other values wished to be explicitly
-        exported from the client's environment by negotiation. Otherwise, the
-        values of ``default_env`` are used.
+        """ XXX This method must initialize the class attribute of type
+            dict, ``env``, with any values wished to be exported by telnet
+            environment sub-negotiation.  Namely: TERM, COLUMNS, LINES,
+            CHARSET, or any other values wished to be explicitly exported
+            from the client's environment by negotiation.
+
+            Otherwise, the values of ``default_env`` are used.
         """
         self.env['TERM'] = self.shell.terminal_type
         self.env['COLUMNS'] = self.shell.terminal_width
@@ -290,7 +291,6 @@ class TelnetClient(asyncio.protocols.Protocol):
         # character values above 127 should not be written to the transport
         # unless outbinary is set True.
         return self.stream.local_option.enabled(BINARY)
-
 
     def encoding(self, outgoing=False, incoming=False):
         """ Returns the session's preferred input or output encoding.
@@ -408,7 +408,6 @@ class TelnetClient(asyncio.protocols.Protocol):
         """
         return (datetime.datetime.now() - self._connected).total_seconds()
 
-
     def data_received(self, data):
         """ Process each byte as received by transport.
         """
@@ -432,7 +431,6 @@ class TelnetClient(asyncio.protocols.Protocol):
             #    self.shell.feed_slc(byte, func=self.stream.slc_received)
             #    continue
 
-
     def interrupt_received(self, cmd):
         """ XXX Callback receives telnet IAC or SLC interrupt byte.
 
@@ -449,22 +447,24 @@ class TelnetClient(asyncio.protocols.Protocol):
     def connection_lost(self, exc):
         self._closing = True
         self.log.info('{}{}'.format(self.__str__(),
-            ': {}'.format(exc) if exc is not None else ''))
+                                    ': {}'.format(exc) if exc is not None else ''))
 #        for task in (self._server_name, self._server_fqdn,
 #                self._client_host, self._timeout):
 #            task.cancel()
 
+
 def describe_connection(client):
     return '{}{}{}'.format(
-            # user [' using <terminal> ']
-            '{}{} '.format(client.env['USER'],
-                ' using' if client.env['TERM'] != 'unknown' else ''),
-            '{} '.format(client.env['TERM'])
-            if client.env['TERM'] != 'unknown' else '',
-            # state,
-            '{}connected {} '.format(
-                'dis' if client._closing else '',
-                'from' if client._closing else 'to'),
+        # user [' using <terminal> ']
+        '{}{} '.format(client.env['USER'],
+                       ' using' if client.env['TERM'] != 'unknown' else ''),
+        '{} '.format(client.env['TERM'])
+        if client.env['TERM'] != 'unknown' else '',
+        # state,
+        '{}connected {} '.format(
+            'dis' if client._closing else '',
+            'from' if client._closing else 'to'),
+        ' after {:0.3f}s'.format(client.duration))
             # ip, dns
 #            '{}{}'.format(
 #                client.client_ip, ' ({}{})'.format(
@@ -475,8 +475,6 @@ def describe_connection(client):
 #                            server.client_reverse_ip.result()))
 #                        ) if server.client_reverse_ip.done() else '')
 #                    if server.client_hostname.done() else ''),
-            ' after {:0.3f}s'.format(client.duration))
-
 
 
 
