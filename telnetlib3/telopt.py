@@ -557,7 +557,7 @@ class TelnetStream:
             self.send_iac(b''.join(response))
             return True
 
-    def request_env(self, env=None):
+    def request_env(self, env=None, all_var=True, all_uservar=True):
         """ .. method:: request_env(env : list) -> bool
 
             Request sub-negotiation NEW_ENVIRON, rfc 1572.
@@ -567,33 +567,35 @@ class TelnetStream:
             value is when unset is instance attribute ``default_env_request``.
             Returns True if request is valid for telnet state, and was sent.
         """
-        # May only be requested by the server end. Sends IAC SB ``kind``
-        # SEND IS sub-negotiation, rfc1086, using list of ascii string
-        # values ``self.default_env_request``, which is mostly variables
-        # for impl.-specific extensions, such as TERM type, or USER for auth.
-        request_ENV = self.default_env_request if env is None else env
-        assert self.is_server
         kind = NEW_ENVIRON
+        request_env_values = self.default_env_request if env is None else env
+        assert self.is_server, (
+            'SB {} SEND may only be sent by server end'
+            .format(name_command(kind)))
         if not self.remote_option.enabled(kind):
             self.log.debug('cannot send SB {} SEND IS '
                            'without receipt of WILL {}'.format(
                                name_command(kind), name_command(kind)))
-            return False
-        if self.pending_option.enabled(SB + kind + SEND + IS):
+        elif not self.pending_option.enabled(SB + kind + SEND + IS):
+            response = collections.deque()
+            response.extend([IAC, SB, kind, SEND])
+            if request_env_values:
+                for env_key in request_env_values:
+                    byte_env_key = _escape_env(env_key.encode('ascii'))
+                    response.extend([VAR] + byte_env_key)
+            if all_var:
+                response.append(VAR)
+            if all_uservar:
+                response.append(USERVAR)
+            response.extend([IAC, SE])
+            self.log.debug('request_env: {!r}'.format(b''.join(response)))
+            self.pending_option[SB + kind + SEND + IS] = True
+            self.send_iac(b''.join(response))
+            return True
+        else:
             self.log.debug('cannot send SB {} SEND IS, '
                            'request pending.'.format(name_command(kind)))
-            return False
-        self.pending_option[SB + kind + SEND + IS] = True
-        response = collections.deque()
-        response.extend([IAC, SB, kind, SEND, IS])
-        for idx, env in enumerate(request_ENV):
-            response.extend([bytes(char, 'ascii') for char in env])
-            if idx < len(request_ENV) - 1:
-                response.append(theNULL)
-        response.extend([b'\x03', IAC, SE])
-        self.log.debug('send: {!r}'.format(b''.join(response)))
-        self.send_iac(b''.join(response))
-        return True
+        return False
 
     def request_xdisploc(self):
         """ .. method:: request_xdisploc() -> bool
@@ -1384,54 +1386,56 @@ class TelnetStream:
             if self.pending_option.enabled(WILL + TTYPE):
                 self.pending_option[WILL + TTYPE] = False
 
+
     def _handle_sb_env(self, buf):
-        """ Callback handles IAC-SB-NEW_ENVIRON-<buf>-SE (rfc1073).
+        """ Callback handles (IAC, SB, NEW_ENVIRON, <buf>, SE) rfc1572,
+            responding in the affirmitive for SEND by the (key, value) of
+            the dictionary returned by callback registered by
+            set_ext_send_callback for IAC cmd NEW_ENVIRON, of argument
+            list of keys requested.
+
+            or, by requesting all keys
         """
-        kind = buf.popleft()
+        env_kind = buf.popleft()
         opt = buf.popleft()
-        assert opt in (IS, INFO, SEND), opt
-        assert kind == NEW_ENVIRON
+        assert opt in (IS, SEND, INFO), opt
+        assert env_kind == NEW_ENVIRON
+        env = _decode_env_buf(b''.join(buf))
+        self.log.debug('_handle_sb_env {}: {!r}'
+                       .format(name_command(opt), env))
         if opt == SEND:
-            raise NotImplementedError  # TODO: client
-            assert self.is_client, (
-                'SE: cannot recv SB NEW_ENVIRON SEND from client')
+            assert self.is_client, ('SE: cannot recv from client: {} SEND'
+                                    .format(name_command(env_kind)))
+            send_env = self._ext_send_callback[NEW_ENVIRON](env.keys() or None)
+            self.log.debug('send env {!r}'.format(send_env))
             response = collections.deque()
             response.extend([IAC, SB, NEW_ENVIRON, IS])
-            for key, value in self._ext_send_callback[NEW_ENVIRON]():
-                pass  # TODO
-#                response.extend([IAC, SE])
+            response.extend(_encode_env_buf(send_env))
             response.extend([IAC, SE])
-            self.log.debug('send: %r', response)
+            self.log.debug('send: {!r}'.format(response))
             self.send_iac(b''.join(response))
             if self.pending_option.enabled(WILL + TTYPE):
                 self.pending_option[WILL + TTYPE] = False
 
-        if opt in (IS, INFO):
-            assert self.is_server, ('SE: cannot recv from server: %s %s' % (
-                name_command(kind), 'IS' if opt == IS else 'INFO',))
+        elif opt in (IS, INFO):
+            opt_kind = 'IS' if opt == IS else 'INFO'
+            assert self.is_server, ('SE: cannot recv from server: {} {}'
+                                    .format(name_command(env_kind), opt_kind,))
             if opt == IS:
-                if not self.pending_option.enabled(SB + kind + SEND + IS):
-                    self.log.debug('%s IS unsolicited', name_command(opt))
-                self.pending_option[SB + kind + SEND + IS] = False
-            if self.pending_option.get(SB + kind + SEND + IS, None) is False:
+                if not self.pending_option.enabled(SB + env_kind + SEND + IS):
+                    self.log.debug('{} IS unsolicited'
+                                   .format(name_command(opt)))
+                self.pending_option[SB + env_kind + SEND + IS] = False
+            if (self.pending_option.get(SB + env_kind + SEND + IS, None)
+                    is False):
                 # a pending option of value of 'False' means it previously
                 # completed, subsequent environment values should have been
                 # send as INFO ..
-                self.log.debug('%s IS already recv; expected INFO.',
-                               name_command(kind))
-            breaks = list([idx for (idx, byte) in enumerate(buf)
-                           if byte in (theNULL, b'\x03')])
-            env = {}
-            for start, end in zip(breaks, breaks[1:]):
-                # not the best looking code, how do we splice & split bytes ..?
-                decoded = bytes([ord(byte) for byte in buf]).decode('ascii')
-                pair = decoded[start + 1:end].split('\x01', 1)
-                if 2 == len(pair):
-                    key, value = pair
-                    env[key] = value
-            self.log.debug('sb_env %s: %r', name_command(opt), env)
+                self.log.debug('{} IS already recv; expected INFO.'
+                               .format(name_command(env_kind)))
+            env = _decode_env_buf(b''.join(buf))
             if env:
-                self._ext_callback[kind](env)
+                self._ext_callback[env_kind](env)
             return
 
     def _handle_sb_sndloc(self, buf):
@@ -1831,3 +1835,65 @@ def _escape_iac(buf):
     return buf.replace(IAC, IAC + IAC)
 
 
+def _escape_env(buf):
+    """ .. function:: escape_var(buf : bytes) -> type(bytes)
+
+        Return byte array ``buf`` with VAR (\\x00) and USERVAR (\\x03)
+        escaped as ESC VAR (\\x02\\x00) or ESC USERVAR (\\x02\\x03).
+    """
+    assert isinstance(buf, (bytes, bytearray)), buf
+    return buf.replace(VAR, ESC + VAR).replace(USERVAR, ESC + USERVAR)
+
+
+def _unescape_env(buf):
+    """ .. function:: escape_var(buf : bytes) -> type(bytes)
+
+        Return byte array ``buf`` with VAR (\\x00) and USERVAR (\\x03)
+        escaped as ESC VAR (\\x02\\x00) or ESC USERVAR (\\x02\\x03).
+    """
+    assert isinstance(buf, (bytes, bytearray)), buf
+    return buf.replace(ESC + VAR, VAR).replace(ESC + USERVAR, USERVAR)
+
+
+def _decode_env_buf(buf):
+    """ Returns dictionary of environment values contained in bytes array
+        ``buf``, set forth in rfc1572, following sequence (IAC, SB,
+        NEW_ENVIRON, SEND or IS) up to (IAC, SE).
+
+        Values may have type of either USERVAR or VAR; This implementation
+        does not distinguish between the two kinds.
+
+        Environment values, oddly enough, may contain control characters,
+        and those containing values USERVAR(\\x03) or VAR(\\x00), must have
+        been escaped by ESC(\\x02), such as \\x02\\x03 or \\x02\\x00.
+    """
+    env = {}
+    breaks = [idx for (idx, byte) in enumerate(buf)
+              if byte in (VAR, USERVAR,) and (not idx or buf[idx-1] != ESC)]
+    for start, end in zip(breaks, breaks[1:]):
+        kind = buf[start]
+        print(start+1)
+        print(end)
+        print(repr(buf))
+        pair = buf[start + 1:end].split(VALUE, 1)
+        assert kind in (VAR, USERVAR), (kind, pair)
+        key = _unescape_env(pair[0]).decode('ascii', 'ignore')
+        if len(pair) == 1:
+            value = u''
+        else:
+            value = _unescape_env(pair[1]).decode('ascii', 'ignore')
+        env[key] = value
+    return env
+
+
+def _encode_env_buf(env):
+    """ Returns bytes array ``buf`` for use in sequence (IAC, SB,
+        NEW_ENVIRON, IS, <buf>, IAC, SE) as set forth in rfc1572.
+    """
+    buf = collections.deque()
+    for key, value in env.items():
+        buf.append(VAR)
+        buf.extend([_escape_env(key.encode('ascii'))])
+        buf.append(VALUE)
+        buf.extend([_escape_env('{}'.format(value).encode('ascii'))])
+    return buf
