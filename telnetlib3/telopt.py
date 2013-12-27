@@ -16,7 +16,7 @@ from telnetlib import (
 
 from . import slc
 
-__all__ = ('TelnetStream', 'escape_iac', 'name_command', 'name_commands')
+__all__ = ('TelnetStream', 'name_command', 'name_commands')
 
 (EOF, SUSP, ABORT, EOR) = (
     bytes([const]) for const in range(236, 240))
@@ -30,16 +30,6 @@ __all__ = ('TelnetStream', 'escape_iac', 'name_command', 'name_commands')
 
 _MAXSIZE_SB = 1 << 15
 _MAXSIZE_SLC = slc.NSLC * 6
-
-
-def escape_iac(buf):
-    """ .. function:: escape_iac(buf : bytes) -> type(bytes)
-        :noindex:
-
-        Return byte buffer with IAC (\xff) escaped.
-    """
-    assert isinstance(buf, (bytes, bytearray)), buf
-    return buf.replace(IAC, IAC + IAC)
 
 
 class TelnetStream:
@@ -1816,5 +1806,15 @@ def describe_stream(stream):
             name_commands(opt) for (opt, val) in remote.items()
             if val]})
     return dict(status)
+
+
+def _escape_iac(buf):
+    """ .. function:: _escape_iac(buf : bytes) -> type(bytes)
+
+        Return byte array ``buf`` with IAC (\\xff)
+        escaped as IAC IAC (\\xff\\xff).
+    """
+    assert isinstance(buf, (bytes, bytearray)), buf
+    return buf.replace(IAC, IAC + IAC)
 
 
