@@ -1,7 +1,5 @@
-#!/usr/bin/env python3
 import collections
 import datetime
-import argparse
 import logging
 import codecs
 import sys
@@ -31,27 +29,6 @@ def _query_term_winsize(tty_fd):
     import termios
     val = fcntl.ioctl(tty_fd, termios.TIOCGWINSZ, b'\x00' * 8)
     return struct.unpack('hhhh', val)
-
-def start_client(loop, log, host, port):
-    import locale
-    import os
-    locale.setlocale(locale.LC_ALL, '')
-    enc = locale.getpreferredencoding()
-    transport, protocol = yield from loop.create_connection(
-            lambda: TelnetClient(encoding=enc, log=log), host, port)
-
-    # keyboard input reader; catch stdin bytes and pass through transport
-    # line-oriented for now,
-    def stdin_callback():
-#        inp = sys.stdin.buffer.readline()
-        inp = os.read(sys.stdin.fileno(), 1)
-        transport.write(inp)
-        log.debug('stdin_callback: {!r}'.format(inp))
-#        if not inp:
-#            loop.stop()
-#        else:
-
-    loop.add_reader(sys.stdin.fileno(), stdin_callback)
 
 
 class ConsoleStream():
@@ -501,41 +478,5 @@ def describe_connection(client):
             ' after {:0.3f}s'.format(client.duration))
 
 
-ARGS = argparse.ArgumentParser(description="Connect to telnet server.")
-ARGS.add_argument(
-    '--host', action="store", dest='host',
-    default='127.0.0.1', help='Host name')
-ARGS.add_argument(
-    '--port', action="store", dest='port',
-    default=6023, type=int, help='Port number')
-ARGS.add_argument(
-    '--loglevel', action="store", dest="loglevel",
-    default='info', type=str, help='Loglevel (debug,info)')
-
-def main():
-    args = ARGS.parse_args()
-    if ':' in args.host:
-        args.host, port = args.host.split(':', 1)
-        args.port = int(port)
-
-    log_const = args.loglevel.upper()
-    assert (log_const in dir(logging)
-            and isinstance(getattr(logging, log_const), int)
-            ), args.loglevel
-    log = logging.getLogger()
-    log.setLevel(getattr(logging, log_const))
-    loop = asyncio.get_event_loop()
-    asyncio.Task(start_client(loop, log, args.host, args.port))
-    loop.run_forever()
-
-if __name__ == '__main__':
-    import tty
-    import termios
-    mode = termios.tcgetattr(sys.stdin.fileno())
-    tty.setcbreak(sys.stdin.fileno(), termios.TCSANOW)
-    try:
-        main()
-    finally:
-        termios.tcsetattr(sys.stdin.fileno(), termios.TCSAFLUSH, mode)
 
 
