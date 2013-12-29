@@ -51,6 +51,7 @@ class ConsoleShell():
         errors = errors if errors is not None else self.encoding_errors
         assert isinstance(string, str), string
         self.stream_out.write(self.encode(string, errors))
+        self.stream_out.flush()
 
     @property
     def will_echo(self):
