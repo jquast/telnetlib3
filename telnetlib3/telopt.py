@@ -517,7 +517,7 @@ class TelnetStream:
                            'without receipt of WILL STATUS')
         elif not self.pending_option.enabled(SB + STATUS):
             response = [IAC, SB, STATUS, SEND, IAC, SE]
-            self.log.debug('send IAC SB STATUS SEND IAC SE')
+            self.log.debug('send: IAC SB STATUS SEND IAC SE')
             self.send_iac(b''.join(response))
             self.pending_option[SB + STATUS] = True
             return True
