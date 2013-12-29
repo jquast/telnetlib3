@@ -1259,6 +1259,8 @@ class TelnetStream:
             self.remote_option[opt] = True
             self.send_lineflow_mode()
         elif opt == NEW_ENVIRON:
+            assert self.is_server, ('cannot recv WILL NEW_ENVIRON '
+                                    'on client end.')
             self.remote_option[opt] = True
             self.request_env()
         elif opt == CHARSET:
