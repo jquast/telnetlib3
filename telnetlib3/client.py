@@ -335,21 +335,6 @@ class TelnetClient(asyncio.protocols.Protocol):
                 continue
 
             self.shell.feed_byte(byte)
-            #sys.stdout.write(byte.
-            #print(byte)
-            #if self.stream.slc_received:
-            #    self.shell.feed_slc(byte, func=self.stream.slc_received)
-            #    continue
-
-    def interrupt_received(self, cmd):
-        """ XXX Callback receives telnet IAC or SLC interrupt byte.
-
-            This is suitable for the receipt of interrupt signals,
-            such as iac(AO) and SLC_AO.
-        """
-        from telnetlib3.telopt import name_command
-        self.log.debug('interrupt_received: {}'.format(name_command(cmd)))
-        #self.shell.display_prompt()
 
     def eof_received(self):
         self.connection_lost('EOF')
@@ -359,9 +344,6 @@ class TelnetClient(asyncio.protocols.Protocol):
         self._closing = True
         self.log.info('{}: {}'.format(self.__str__(),
                                       exc if exc is not None else ''))
-#        for task in (self._server_name, self._server_fqdn,
-#                self._client_host, self._timeout):
-#            task.cancel()
 
 
 def describe_connection(client):
