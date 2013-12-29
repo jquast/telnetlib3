@@ -313,12 +313,14 @@ class TalkerShell(telnetlib3.Telsh):
         self.log.info('{}/{}: {}'.format(mynick, mychan, data))
 
     def cmdset_join(self, *args):
+        mynick = self.server.env['USER']
         chan = args[0] if args else 'default'
         chan = '#{}'.format(chan) if not chan.startswith('#') else chan
         if len(chan) > self.MAX_CHAN:
             self.stream.write('\r\nChannel name too long.')
             return 1
         self.cmdset_assign('CHANNEL={}'.format(chan))
+        self.log.info('{} has joined {}'.format(mynick, chan))
         return 0
 
     def cmdset_nick(self, *args):
