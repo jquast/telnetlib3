@@ -255,7 +255,7 @@ def main():
 
     # use generic 'logging' instance, and set the log-level as specified by
     # command-line argument --loglevel
-    fmt = '%(asctime)s %(filename)s:%(lineno)d %(message)s'
+    fmt = '%(asctime)s %(levelname)s %(filename)s:%(lineno)d %(message)s'
     logging.basicConfig(format=fmt)
     log = logging.getLogger('telnet_server')
     log.setLevel(getattr(logging, args.loglevel.upper()))
