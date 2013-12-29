@@ -1140,7 +1140,12 @@ class TelnetStream:
         # such as LOGOUT.
         self.log.debug('handle_do({})'.format(name_command(opt)))
         if opt == ECHO and self.is_client:
-            self.log.warn('cannot recv DO ECHO on client end.')
+            # What do we have here? A Telnet Server attempting to
+            # fingerprint us as a broken 4.4BSD Telnet Client, which
+            # would respond 'WILL ECHO'.
+            self.log.debug('cannot recv DO ECHO on client end.')
+            if self.local_option.get(opt, None) is None:
+                self.iac(WONT, opt)
         elif opt == LINEMODE and self.is_server:
             self.log.warn('cannot recv DO LINEMODE on server end.')
         elif opt == LOGOUT and self.is_client:
