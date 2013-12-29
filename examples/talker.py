@@ -96,7 +96,7 @@ class TalkerShell(telnetlib3.Telsh):
     shell_name = 'pytalk'
 
     #: version of shell %v in prompt escape
-    shell_ver = '0.2'
+    shell_ver = '0.3'
 
     #: A cyclical collections.OrderedDict of command names and nestable
     #  arguments, or None for end-of-command, used by ``tab_received()``
