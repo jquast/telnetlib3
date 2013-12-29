@@ -458,7 +458,7 @@ class TelnetServer(asyncio.protocols.Protocol):
 
             try:
                 self.stream.feed_byte(byte)
-            except (ValueError, AssertionError):
+            except (ValueError, AssertionError, NotImplementedError):
                 exc_info = sys.exc_info()
                 tbl_exception = (
                     traceback.format_tb(exc_info[2]) +
