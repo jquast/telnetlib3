@@ -653,7 +653,6 @@ class TelnetServer(asyncio.protocols.Protocol):
             'REMOTE_PORT': str(self.client_port),
             'REMOTE_HOST': self.client_hostname.result(),
             })
-        self.log.error(self.env)
 
     def after_server_gethostname(self, arg):
         """ Callback receives result of server name resolution,
