@@ -165,13 +165,13 @@ class TelnetServer(asyncio.protocols.Protocol):
         """ XXX Set default iac, slc, and ext callbacks for telnet stream
         """
         stream, server = self.stream, self
-        # wire AYT and SLC_AYT (^T) to callback ``handle_ayt()``
         from .slc import SLC_AYT
         from .telopt import (AYT, AO, IP, BRK, SUSP, ABORT, EC, EL, CMD_EOR,
                              TTYPE, TSPEED, XDISPLOC, NEW_ENVIRON, LOGOUT,
-                             SNDLOC, CHARSET, NAWS)
-        stream.set_iac_callback(AYT, self.handle_ayt)
-        stream.set_slc_callback(SLC_AYT, self.handle_ayt)
+                             SNDLOC, CHARSET, NAWS, TM)
+        # wire AYT and SLC_AYT (^T) to callback ``handle_ayt()``
+        stream.set_iac_callback(AYT, self.handle_are_you_there)
+        stream.set_slc_callback(SLC_AYT, self.handle_are_you_there)
         # wire TM to callback ``handle_timing_mark(cmd)``, cmd is one
         # of (DO, DONT, WILL, WONT).
         stream.set_iac_callback(TM, self.handle_timing_mark)
@@ -513,6 +513,7 @@ class TelnetServer(asyncio.protocols.Protocol):
         self.log.debug('client sends: {} TIMING MARK.'
                        .format(name_command(cmd)))
 
+    def handle_are_you_there(self, opt_byte):
         """ XXX Callback when IAC, AYT or SLC_AYT is received.
             opt_byte is value slc.SLC_AYT or telopt.AYT, indicating
             which method AYT was received by.
@@ -520,7 +521,7 @@ class TelnetServer(asyncio.protocols.Protocol):
             Default implementation outputs the status of connection
             and displays shell prompt when opt_byte is AYT. Nothing
             is done when opt_byte is SLC_AYT, it is presumed handled
-            by the shell as an editing command.
+            by the shell as any other editing command (^T).
         """
         from .telopt import AYT
         from .slc import SLC_AYT
