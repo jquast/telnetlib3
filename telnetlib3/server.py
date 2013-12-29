@@ -318,10 +318,6 @@ class TelnetServer(asyncio.protocols.Protocol):
                 self.log.debug("`fast_edit' enabled (wont echo)")
                 self.stream.iac(WONT, ECHO)
 
-        self._client_host = self._loop.run_in_executor(
-            None, socket.gethostbyaddr, self._client_ip)
-        self._client_host.add_done_callback(self.after_client_lookup)
-
         # log about connection
         self.log.info('{}.'.format(self))
         self.log.info('stream status is {}.'.format(self.stream))
