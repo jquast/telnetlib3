@@ -299,7 +299,7 @@ class TelnetServer(asyncio.protocols.Protocol):
         """ XXX telnet stream option negotiation completed
         """
         from .telopt import WONT, ECHO
-        from .slc import SLC_nosupport, SLC_EC, SLC_CANTCHANGE
+        from .slc import SLC_nosupport, SLC_EC
         if status.cancelled():
             self.log.debug('telopt negotiation cancelled')
             return
