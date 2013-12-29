@@ -1911,9 +1911,10 @@ def _decode_env_buf(buf):
     """
     env = {}
     breaks = [idx for (idx, byte) in enumerate(buf)
-              if byte in (VAR, USERVAR,) and (not idx or buf[idx-1] != ESC)]
+              if bytes([byte]) in (VAR, USERVAR,) and
+              (idx == 0 or bytes([buf[idx - 1]]) != ESC)]
     for start, end in zip(breaks, breaks[1:]):
-        kind = buf[start]
+        kind = bytes([buf[start]])
         pair = buf[start + 1:end].split(VALUE, 1)
         assert kind in (VAR, USERVAR), (kind, pair)
         key = _unescape_env(pair[0]).decode('ascii', 'ignore')
