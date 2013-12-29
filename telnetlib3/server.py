@@ -107,7 +107,7 @@ class TelnetServer(asyncio.protocols.Protocol):
         # callback ``after_encoding_negotiation``.
         self._encoding_negotiation = asyncio.Future()
         self._encoding_negotiation.add_done_callback(
-            self.after_encoding)
+            self.after_encoding_negotiation)
 
 # XXX
     def pause_writing(self):
@@ -250,7 +250,7 @@ class TelnetServer(asyncio.protocols.Protocol):
     def check_encoding_negotiation(self):
         """ XXX encoding negotiation check-loop, schedules itself for continual
             callback until both outbinary and inbinary has been answered in
-            the affirmitive, firing ``after_encoding`` callback
+            the affirmitive, firing ``after_encoding_negotiation`` callback
             when complete.
         """
         from .telopt import DO, BINARY
@@ -324,7 +324,7 @@ class TelnetServer(asyncio.protocols.Protocol):
         self.log.info('stream status is {}.'.format(self.stream))
         self.log.info('client environment is {}.'.format(describe_env(self)))
 
-    def after_encoding(self, status):
+    def after_encoding_negotiation(self, status):
         """ XXX this callback fires after encoding negotiation has completed,
             the value of client and remote encoding are final.  Some
             implementors may wish to display a non-english login banner.
