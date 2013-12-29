@@ -1173,7 +1173,9 @@ def escape_quote(args, quote_char="'", join_char=' '):
 
 
 def name_unicode(ucs):
-    """ Return 7-bit ascii printable of any string. """
+    """ Return 7-bit ascii printable of any unprintable string.
+        8-bit printable unicodes are left as-is.
+    """
     if ord(ucs) < ord(' ') or ord(ucs) == 127:
         ucs = r'^{}'.format(chr(ord(ucs) ^ ord('@')))
     elif not ucs.isprintable():

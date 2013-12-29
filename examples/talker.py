@@ -281,6 +281,9 @@ class TalkerShell(telnetlib3.Telsh):
         mynick = self.server.env['USER']
         mychan = self.server.env['CHANNEL']
 
+        # remove unprintable characters from 'data'
+        data = u''.join([name_unicode(char) for char in data])
+
         # validate within a channel, and /nick has been set,
         if not mychan:
             self.stream.write('\r\nYou must first {} a channel !'.format(
@@ -300,8 +303,6 @@ class TalkerShell(telnetlib3.Telsh):
                                   'already taken, select a new /nick !'.format(
                                       self.standout(mynick)))
                 return 1
-        # validate that our nickname isn't already taken, in
-        data = u''.join([name_unicode(char) for char in data])
 
         # forward data to everybody in matching channel name
         for remote_client in ([client for client in clients.values()]):
