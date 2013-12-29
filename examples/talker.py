@@ -58,8 +58,8 @@ class TalkerServer(telnetlib3.TelnetServer):
         self._test_lag = self._loop.call_soon(self.send_timing_mark)
 
     def connection_lost(self, exc):
+        self._test_lag.cancel()
         telnetlib3.TelnetServer.connection_lost(self, exc)
-
         global clients
         clients.pop(self.id, None)
 
