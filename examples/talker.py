@@ -12,6 +12,7 @@ https://en.wikipedia.org/wiki/Talker
 import collections
 import argparse
 import logging
+import time
 import sys
 
 import telnetlib3
@@ -44,10 +45,17 @@ class TalkerServer(telnetlib3.TelnetServer):
         self.id = (self.client_ip, self.client_port)
         clients[self.id] = self
         self.env_update(
-            {'CHANNEL': '#default',        # the default 'channel',
-             'PS1': '%s-%v [%$CHANNEL] ',  # shell-version [#channel]
-             'TIMEOUT': '360',             # timeout is 6h (360m)
-             })
+            {   # the default 'channel',
+                'CHANNEL': '#default',
+                # {shell}-{version} [Lag: {2.2f}s] [#channel]
+                'PS1': '%s-%v [Lag: %$LAG] [%$CHANNEL] ',
+                # timeout is 6h (360m)
+                'TIMEOUT': '360',
+                # Lag/pingtime, measured with TM (Timing Mark)
+                'LAG': '??',
+            })
+        self._ping = time.time()
+        self._test_lag = self._loop.call_soon(self.send_timing_mark)
 
     def connection_lost(self, exc):
         telnetlib3.TelnetServer.connection_lost(self, exc)
@@ -55,12 +63,25 @@ class TalkerServer(telnetlib3.TelnetServer):
         global clients
         clients.pop(self.id, None)
 
-    def after_negotiation(self, status):
-        telnetlib3.TelnetServer.after_negotiation(self, status)
+    def after_telopt_negotiation(self, status):
+        telnetlib3.TelnetServer.after_telopt_negotiation(self, status)
         if not status.cancelled():
             if self.env['USER'] == 'unknown':
-                self.shell.stream.write(
-                    '** Set your nickname using /nick')
+                self.shell.stream.write('\r\n'
+                                        '** Set your nickname using /nick'
+                                        '\r\n')
+                self.shell.display_prompt()
+
+    def send_timing_mark(self):
+        from telnetlib3.telopt import DO, TM
+        self._test_lag.cancel()
+        self._ping = time.time()
+        self.stream.iac(DO, TM)
+
+    def handle_timing_mark(self, cmd):
+        lag_time = time.time() - self._ping
+        self.env_update({'LAG': '{:0.2f}'.format(lag_time)})
+        self._test_lag = self._loop.call_later(30, self.send_timing_mark)
 
     def recieve(self, nick, msg):
         self.shell.stream.write('\r\x1b[K{}: {}\r\n'.format(
