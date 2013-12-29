@@ -496,7 +496,6 @@ class TelnetServer(asyncio.protocols.Protocol):
                     outgoing and incoming and self.outbinary and self.inbinary
                     ) else 'ascii')
 
-    def handle_ayt(self, opt_byte):
     def handle_timing_mark(self, cmd):
         """ XXX Callback when IAC <cmd> TM (Timing Mark) is received,
             where <cmd> is any of (DO, DONT, WILL, WONT).
