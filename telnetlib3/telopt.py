@@ -256,10 +256,13 @@ class TelnetStream:
     def __str__(self):
         """ XXX Returns string suitable for status of telnet stream.
         """
-        return '{{{}}}'.format(', '.join(
-            ['{!r}: {!r}'.format(key, ','.join([_opt for _opt in options]))
-             for key, options in describe_stream(self).items()
-             if len(options)]))
+        all_option_states = describe_stream_option_states(self)
+        if all_option_states:
+            return '{{{}}}'.format(', '.join(
+                ['{!r}: {!r}'.format(key, ','.join([_opt for _opt in options]))
+                 for key, options in all_option_states.items()
+                 if len(options)]))
+        return '(no negotiation performed)'
 
     def feed_byte(self, byte):
         """ .. method:: feed_byte(byte : bytes)
@@ -1858,7 +1861,7 @@ def name_commands(cmds, sep=u' '):
     return sep.join([name_command(bytes([byte])) for byte in cmds])
 
 
-def describe_stream(stream):
+def describe_stream_option_states(stream):
     local = stream.local_option
     remote = stream.remote_option
     pending = stream.pending_option
