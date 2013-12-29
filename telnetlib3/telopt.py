@@ -722,7 +722,7 @@ class TelnetStream:
             'SB LINEMODE LMODE_MODE cannot be sent; '
             'WILL LINEMODE not received.')
         if linemode is not None:
-            self.log.debug('Linemode is {}'.format(linemode))
+            self.log.debug('set and send: Linemode is {}'.format(linemode))
             self._linemode = linemode
         self.log.debug('send IAC SB LINEMODE MODE {} IAC SE'
                        .format(self._linemode))
