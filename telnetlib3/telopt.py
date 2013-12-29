@@ -1938,4 +1938,4 @@ def _encode_env_buf(env):
         buf.extend([_escape_env(key.encode('ascii'))])
         buf.append(VALUE)
         buf.extend([_escape_env('{}'.format(value).encode('ascii'))])
-    return buf
+    return b''.join(buf)
