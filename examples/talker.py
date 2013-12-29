@@ -167,6 +167,9 @@ class TalkerShell(telnetlib3.Telsh):
         if data.startswith('/'):
             self.stream.write('\r\n')
             return self.cmdset_command(*data.split(None, 1))
+        if not data.strip():
+            # Nothing to say!
+            return 0
         return self.say(data)
 
     def cmdset_command(self, cmd, *args):
