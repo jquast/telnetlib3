@@ -1,6 +1,7 @@
 import collections
 import datetime
 import logging
+import socket
 
 import asyncio
 
@@ -364,27 +365,29 @@ class TelnetClient(asyncio.protocols.Protocol):
 
 
 def describe_connection(client):
-    return '{}{}{}'.format(
-        # user [' using <terminal> ']
-        '{}{} '.format(client.env['USER'],
-                       ' using' if client.env['TERM'] != 'unknown' else ''),
-        '{} '.format(client.env['TERM'])
-        if client.env['TERM'] != 'unknown' else '',
-        # state,
-        '{}connected {} '.format(
-            'dis' if client._closing else '',
-            'from' if client._closing else 'to'),
-        ' after {:0.3f}s'.format(client.duration))
-            # ip, dns
-#            '{}{}'.format(
-#                client.client_ip, ' ({}{})'.format(
-#                    client.client_hostname.result(),
-#                    ('' if server.client_ip
-#                        == server.client_reverse_ip.result()
-#                        else server.standout('!= {}, revdns-fail'.format(
-#                            server.client_reverse_ip.result()))
-#                        ) if server.client_reverse_ip.done() else '')
-#                    if server.client_hostname.done() else ''),
+    if client._closing:
+        direction = 'from'
+        state = 'Disconnected'
+    else:
+        direction = 'to'
+        state = 'Connected'
+    if (client.server_hostname.done() and
+            client.server_hostname.result() != client.server_ip):
+        hostname = ' ({})'.format(client.server_hostname.result())
+    else:
+        hostname = ''
+    if client.server_port != 23:
+        port = ' port 23'
+    else:
+        port = ''
 
-
-
+    duration = '{:0.1f}s'.format(client.duration)
+    return ('{state} {direction} {serverip}{port}{hostname} after {duration}'
+            .format(
+                state=state,
+                direction=direction,
+                serverip=client.server_ip,
+                port=port,
+                hostname=hostname,
+                duration=duration)
+            )
