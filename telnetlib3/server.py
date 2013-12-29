@@ -10,6 +10,7 @@ import asyncio
 
 from . import telsh
 from . import telopt
+from . import dns
 
 __all__ = ('TelnetServer',)
 
@@ -82,19 +83,28 @@ class TelnetServer(asyncio.protocols.Protocol):
         self._advanced = False
 
         #: prompt sequence '%h' is result of socket.gethostname().
-        self._server_name = self._loop.run_in_executor(None, socket.gethostname)
+        self._server_name = self._loop.run_in_executor(
+            None, socket.gethostname)
         self._server_name.add_done_callback(
             self.after_server_gethostname)
 
         #: prompt sequence '%H' is result of socket.getfqdn() of '%h'.
         self._server_fqdn = asyncio.Future()
+
+        #: server disconnects client after self.env['TIMEOUT'] (in minutes).
         self._timeout = asyncio.Future()
+
+        #: future result stores value of gethostbyaddr(client_ip)
         self._client_host = asyncio.Future()
 
+        #: option negotiation status as a future.  When complete, fires
+        # callback ``after_telopt_negotiation``.
         self._telopt_negotiation = asyncio.Future()
         self._telopt_negotiation.add_done_callback(
             self.after_telopt_negotiation)
 
+        #: encoding negotiation status as a future.  When complete, fires
+        # callback ``after_encoding_negotiation``.
         self._encoding_negotiation = asyncio.Future()
         self._encoding_negotiation.add_done_callback(
             self.after_encoding)
@@ -140,7 +150,7 @@ class TelnetServer(asyncio.protocols.Protocol):
         # begin connect-time negotiation
         self._loop.call_soon(self.begin_negotiation)
 
-        self.log.info('connection_made from {}:{}'.format(
+        self.log.info('Connection from {}:{}'.format(
             self.client_ip, self.client_port))
 
         self.env_update({
@@ -612,7 +622,7 @@ class TelnetServer(asyncio.protocols.Protocol):
             Logs warning if reverse dns verification failed,
         """
         if arg.cancelled():
-            self.log.debug('client ip lookup cancelled')
+            self.log.debug('client dns lookup cancelled')
             return
         if self.client_ip != self.client_reverse_ip.result():
             # OpenSSH will log 'POSSIBLE BREAK-IN ATTEMPT!'
@@ -677,16 +687,9 @@ class TelnetServer(asyncio.protocols.Protocol):
 
             Returns DNS name of client as Future.
         """
-        if self._client_host.done():
-            try:
-                val = self._client_host.result()[0]
-            except socket.herror as err:
-                if err.errno == 1:  # Errno 1: Unknown host
-                    val = self._client_ip
-                else:
-                    raise
-            return _wrap_future_result(self._client_host, val)
-        return self._client_host
+        return dns.future_hostname(
+            future_gethostbyaddr=self._client_host,
+            fallback_ip=self.client_ip)
 
     @property
     def client_fqdn(self):
@@ -694,16 +697,9 @@ class TelnetServer(asyncio.protocols.Protocol):
 
             Returns FQDN dns name of client as Future.
         """
-        if self._client_host.done():
-            try:
-                val = self._client_host.result()[0]
-            except socket.herror as err:
-                if err.errno == 1:  # Errno 1: Unknown host
-                    val = self._client_ip
-                else:
-                    raise
-            return _wrap_future_result(self._client_host, val)
-        return self._client_host
+        return dns.future_fqdn(
+            future_gethostbyaddr=self._client_host,
+            fallback_ip=self.client_ip)
 
     @property
     def client_reverse_ip(self):
@@ -711,16 +707,9 @@ class TelnetServer(asyncio.protocols.Protocol):
 
             Returns reverse DNS lookup IP address of client as Future.
         """
-        if self._client_host.done():
-            try:
-                val = self._client_host.result()[2][0]
-            except socket.herror as err:
-                if err.errno == 1:  # Errno 1: Unknown host
-                    val = self._client_ip
-                else:
-                    raise
-            return _wrap_future_result(self._client_host, val)
-        return self._client_host
+        return dns.future_reverse_ip(
+            future_gethostbyaddr=self._client_host,
+            fallback_ip=self.client_ip)
 
     @property
     def client_dumb(self):
@@ -848,9 +837,3 @@ def describe_connection(server):
                       or ''),
                 duration='{:0.3f}s'.format(server.duration))
             )
-
-
-def _wrap_future_result(future, result):
-    future = asyncio.Future()
-    future.set_result(result)
-    return future

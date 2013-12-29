@@ -6,6 +6,7 @@ import asyncio
 
 from telnetlib3.telopt import TelnetStream
 from .conio import ConsoleShell
+from . import dns
 
 __all__ = ('TelnetClient',)
 
@@ -34,6 +35,7 @@ class TelnetClient(asyncio.protocols.Protocol):
         self._shell_factory = shell
         self._stream_factory = stream
         self._default_encoding = encoding
+        self._loop = asyncio.get_event_loop()
 
         #: session environment as S.env['key'], defaults empty string value
         self._client_env = collections.defaultdict(str, **self.default_env)
@@ -49,6 +51,12 @@ class TelnetClient(asyncio.protocols.Protocol):
 
         self._negotiation = asyncio.Future()
         self._negotiation.add_done_callback(self.after_negotiation)
+        #: future result stores value of gethostbyaddr(sever_ip)
+        self._server_host = asyncio.Future()
+
+        #: server_fqdn is result of socket.getfqdn() of server_host
+        self._server_fqdn = asyncio.Future()
+
 
     def __str__(self):
         """ XXX Returns string suitable for status of server session.
@@ -66,6 +74,8 @@ class TelnetClient(asyncio.protocols.Protocol):
         """
         self.log.debug('connection made')
         self.transport = transport
+        self._server_ip, self._server_port = (
+            transport.get_extra_info('peername'))
         self.stream = self._stream_factory(
             transport=transport, client=True, log=self.log)
         self.shell = self._shell_factory(client=self, log=self.log)
@@ -75,9 +85,17 @@ class TelnetClient(asyncio.protocols.Protocol):
         self._connected = datetime.datetime.now()
 
         loop = asyncio.get_event_loop()
+        # resolve server fqdn (and later, reverse-dns)
+        self._server_host = self._loop.run_in_executor(
+            None, socket.gethostbyaddr, self._server_ip)
+        self._server_host.add_done_callback(self.after_server_lookup)
 
         # begin connect-time negotiation
         loop.call_soon(self.begin_negotiation)
+        desc_port = (
+            '' if self.server_port == 23 else
+            ' (port {})'.format(self.server_port))
+        self.log.info('Connected to {}{}.'.format(self.server_ip, desc_port))
 
     def init_environment(self):
         """ XXX This method must initialize the class attribute of type
@@ -92,6 +110,66 @@ class TelnetClient(asyncio.protocols.Protocol):
         self.env['COLUMNS'] = self.shell.terminal_width
         self.env['LINES'] = self.shell.terminal_height
         self.env['CHARSET'] = self._default_encoding
+
+    def after_server_lookup(self, arg):
+        """ Callback receives result of server name resolution,
+            Logs warning if reverse dns verification failed,
+        """
+        if arg.cancelled():
+            self.log.debug('server dns lookup cancelled')
+            return
+        if self.host_ip != self.host_reverse_ip.result():
+            # OpenSSH will log 'POSSIBLE BREAK-IN ATTEMPT!'
+            # but we dont care .. just demonstrating these values,
+            self.log.warn('reverse lookup: {sip} != {rsip} ({arg})'.format(
+                cip=self.server_ip, rcip=self.server_reverse_ip,
+                arg=arg.result()))
+
+    @property
+    def server_ip(self):
+        """ .. server_ip() -> string
+
+            Returns Server IP address as string.
+        """
+        return self._server_ip
+
+    @property
+    def server_port(self):
+        """ .. server_port() -> string
+
+            Returns Server Port address as integer.
+        """
+        return self._server_port
+
+    @property
+    def server_hostname(self):
+        """ .. server_hostname() -> Future()
+
+            Returns DNS name of server as Future.
+        """
+        return dns.future_hostname(
+            future_gethostbyaddr=self._server_host,
+            fallback_ip=self.server_ip)
+
+    @property
+    def server_fqdn(self):
+        """ .. server_fqdn() -> Future()
+
+            Returns FQDN dns name of server as Future.
+        """
+        return dns.future_fqdn(
+            future_gethostbyaddr=self._server_host,
+            fallback_ip=self.server_ip)
+
+    @property
+    def server_reverse_ip(self):
+        """ .. server_reverse_ip() -> Future()
+
+            Returns reverse DNS lookup IP address of server as Future.
+        """
+        return dns.future_reverse_ip(
+            future_gethostbyaddr=self._server_host,
+            fallback_ip=self.server_ip)
 
     @property
     def env(self):
