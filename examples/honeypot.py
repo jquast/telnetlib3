@@ -241,7 +241,8 @@ def start_server(loop, log, host, port):
     # may be used.
     func = loop.create_server(
         lambda: TelnetHoneypotServer(
-            stream=HoneyStream, shell=HoneyShell, encoding='ascii'),
+            stream=HoneyStream, shell=HoneyShell, encoding='ascii',
+            log=log),
         host, port)
     server = loop.run_until_complete(func)
     log.info('Listening on %s', server.sockets[0].getsockname())
