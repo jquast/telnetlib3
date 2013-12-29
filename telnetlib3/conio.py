@@ -75,6 +75,7 @@ class ConsoleShell():
         import os
         return os.environ.get('DISPLAY', '')
 
+    @property
     def terminal_speed(self):
         """ The terminal speed is a legacy application of determining
         the bandwidth (bits per second) of the connecting terminal, esp.
