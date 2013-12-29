@@ -599,10 +599,15 @@ class TelnetStream:
             if request_env_values:
                 for env_key in request_env_values:
                     byte_env_key = _escape_env(env_key.encode('ascii'))
-                    response.extend([VAR] + byte_env_key)
+                    response.extend([VAR])
+                    response.extend([byte_env_key])
             if all_var:
+                # VAR fllowed by IAC,SE or USERVAR indicates
+                # "send all the variables"
                 response.append(VAR)
             if all_uservar:
+                # USERVAR fllowed by IAC,SE or VAR indicates
+                # "send all the user variables"
                 response.append(USERVAR)
             response.extend([IAC, SE])
             self.log.debug('request_env: {!r}'.format(b''.join(response)))
