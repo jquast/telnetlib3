@@ -1170,7 +1170,7 @@ class TelnetStream:
         elif opt == LOGOUT:
             self._ext_callback[LOGOUT](DO)
         elif opt in (ECHO, LINEMODE, BINARY, SGA, LFLOW, CMD_EOR,
-                     TTYPE, NAWS, NEW_ENVIRON, XDISPLOC):
+                     TTYPE, NAWS, NEW_ENVIRON, XDISPLOC, TSPEED):
             if not self.local_option.enabled(opt):
                 self.iac(WILL, opt)
             return True
