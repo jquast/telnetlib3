@@ -1357,7 +1357,8 @@ class TelnetStream:
         elif cmd == STATUS:
             self._handle_sb_status(buf)
         else:
-            raise ValueError('SE: unhandled: {!r}'.format(buf))
+            raise ValueError('SE: unhandled: cmd={}, buf={!r}'
+                             .format(name_command(cmd), buf))
 
 # Private sub-negotiation (SB) routines
 #
