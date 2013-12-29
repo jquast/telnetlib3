@@ -109,13 +109,15 @@ class TelnetServer(asyncio.protocols.Protocol):
         self._encoding_negotiation.add_done_callback(
             self.after_encoding)
 
+# XXX
     def pause_writing(self):
         self.log.debug('high watermark reached')
-        self.stream.handle_xoff(None)
+#        self.stream.handle_xoff(None)
 
     def resume_writing(self):
         self.log.debug('low watermark reached')
-        self.stream.handle_xon(None)
+#        self.stream.handle_xon(None)
+# XXX
 
     def connection_made(self, transport):
         """ Receive a new telnet client connection.
