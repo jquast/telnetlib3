@@ -218,7 +218,8 @@ class TelnetStream:
         for iac_cmd, key in (
                 (BRK, 'brk'), (IP, 'ip'), (AO, 'ao'), (AYT, 'ayt'), (EC, 'ec'),
                 (EL, 'el'), (EOF, 'eof'), (SUSP, 'susp'), (ABORT, 'abort'),
-                (NOP, 'nop'), (DM, 'dm'), (GA, 'ga'), (CMD_EOR, 'eor'), ):
+                (NOP, 'nop'), (DM, 'dm'), (GA, 'ga'), (CMD_EOR, 'eor'),
+                (TM, 'tm'), ):
             self.set_iac_callback(
                 cmd=iac_cmd, func=getattr(self, 'handle_{}'.format(key)))
 
@@ -739,7 +740,7 @@ class TelnetStream:
         """
         assert callable(func), ('Argument func must be callable')
         assert cmd in (BRK, IP, AO, AYT, EC, EL, CMD_EOR, EOF, SUSP,
-                       ABORT, NOP, DM, GA), name_command(cmd)
+                       ABORT, NOP, DM, GA, TM), name_command(cmd)
         self._iac_callback[cmd] = func
 
     def handle_nop(self, cmd):
@@ -849,6 +850,16 @@ class TelnetStream:
             character from data ready on current line of input.
         """
         self.log.debug('IAC EC: Erase Character (unhandled).')
+
+    def handle_tm(self, cmd):
+        """ XXX Handle IAC (WILL, WONT, DO, DONT) Timing Mark (TM).
+
+            TM is essentially a NOP that any IAC interpreter must answer, if at
+            least it answers WONT to unknown options (required), it may still
+            be used as a means to accurately measure the "ping" time.
+        """
+        self.log.debug('IAC TM: Received {} TM (Timing Mark).'
+                       .format(name_command(cmd)))
 
 # public Special Line Mode (SLC) callbacks
 #
@@ -1135,6 +1146,7 @@ class TelnetStream:
             # interpreting, and, that all iac commands up to this point
             # have been processed.
             self.iac(WILL, TM)
+            self._iac_callback[TM](DO)
         elif opt == LOGOUT:
             self._ext_callback[LOGOUT](DO)
         elif opt in (ECHO, LINEMODE, BINARY, SGA, LFLOW, CMD_EOR,
@@ -1210,7 +1222,7 @@ class TelnetStream:
         elif opt == TM:
             if opt == TM and not self.pending_option.enabled(DO + TM):
                 raise ValueError('cannot recv WILL TM, must first send DO TM.')
-            self.log.debug('recv WILL TIMING-MARK')
+            self._iac_callback[TM](WILL)
             self.remote_option[opt] = True
         elif opt == LOGOUT:
             if opt == LOGOUT and self.is_client:
