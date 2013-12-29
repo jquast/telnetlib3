@@ -5,7 +5,7 @@ import socket
 
 import asyncio
 
-from telnetlib3.telopt import TelnetStream
+from .telopt import TelnetStream
 from .conio import ConsoleShell
 from . import dns
 
@@ -19,7 +19,7 @@ class TelnetClient(asyncio.protocols.Protocol):
     #  before negotiation is considered 'final'.
     CONNECT_MAXWAIT = 6.00
     #: timer length for check_negotiation re-scheduling
-    CONNECT_DEFERED = 0.2
+    CONNECT_DEFERED = 0.1
 
     #: default client environment variables,
     default_env = {
@@ -39,7 +39,7 @@ class TelnetClient(asyncio.protocols.Protocol):
         self._loop = asyncio.get_event_loop()
 
         #: session environment as S.env['key'], defaults empty string value
-        self._client_env = collections.defaultdict(str, **self.default_env)
+        self._env = collections.defaultdict(str, **self.default_env)
 
         #: toggled when transport is shutting down
         self._closing = False
@@ -50,17 +50,22 @@ class TelnetClient(asyncio.protocols.Protocol):
         #: datetime of connection made
         self._connected = None
 
-        self._negotiation = asyncio.Future()
-        self._negotiation.add_done_callback(self.after_negotiation)
         #: future result stores value of gethostbyaddr(sever_ip)
         self._server_host = asyncio.Future()
 
         #: server_fqdn is result of socket.getfqdn() of server_host
         self._server_fqdn = asyncio.Future()
 
+        self._telopt_negotiation = asyncio.Future()
+        self._telopt_negotiation.add_done_callback(
+            self.after_telopt_negotiation)
+
+        self._encoding_negotiation = asyncio.Future()
+        self._encoding_negotiation.add_done_callback(
+            self.after_encoding_negotiation)
 
     def __str__(self):
-        """ XXX Returns string suitable for status of server session.
+        """ Returns string reporting the status of this client session.
         """
         return describe_connection(self)
 
@@ -73,43 +78,41 @@ class TelnetClient(asyncio.protocols.Protocol):
             ``begin_negotiation()`` is fired after connection
             is registered.
         """
-        self.log.debug('connection made')
         self.transport = transport
         self._server_ip, self._server_port = (
             transport.get_extra_info('peername'))
         self.stream = self._stream_factory(
             transport=transport, client=True, log=self.log)
         self.shell = self._shell_factory(client=self, log=self.log)
-        self.init_environment()
+        self.init_environment_values()
         self.set_stream_callbacks()
         self._last_received = datetime.datetime.now()
         self._connected = datetime.datetime.now()
 
-        loop = asyncio.get_event_loop()
+        # begin connect-time negotiation
+        self._loop.call_soon(self.begin_negotiation)
+
         # resolve server fqdn (and later, reverse-dns)
         self._server_host = self._loop.run_in_executor(
             None, socket.gethostbyaddr, self._server_ip)
         self._server_host.add_done_callback(self.after_server_lookup)
 
-        # begin connect-time negotiation
-        loop.call_soon(self.begin_negotiation)
-        desc_port = (
-            '' if self.server_port == 23 else
-            ' (port {})'.format(self.server_port))
-        self.log.info('Connected to {}{}.'.format(self.server_ip, desc_port))
+        self.log.info(self)
 
-    def init_environment(self):
+    def init_environment_values(self):
         """ XXX This method must initialize the class attribute of type
             dict, ``env``, with any values wished to be exported by telnet
-            environment sub-negotiation.  Namely: TERM, COLUMNS, LINES,
-            CHARSET, or any other values wished to be explicitly exported
+            environment sub-negotiation.
+
+            Namely: TERM, COLUMNS, LINES, CHARSET (encoding),
+            or any other values wished to be explicitly exported
             from the client's environment by negotiation.
 
             Otherwise, the values of ``default_env`` are used.
         """
         self.env['TERM'] = self.shell.terminal_type
-        self.env['COLUMNS'] = self.shell.terminal_width
-        self.env['LINES'] = self.shell.terminal_height
+        self.env['COLUMNS'] = '{}'.format(self.shell.terminal_width)
+        self.env['LINES'] = '{}'.format(self.shell.terminal_height)
         self.env['CHARSET'] = self._default_encoding
 
     def set_stream_callbacks(self):
@@ -136,7 +139,7 @@ class TelnetClient(asyncio.protocols.Protocol):
         if arg.cancelled():
             self.log.debug('server dns lookup cancelled')
             return
-        if self.host_ip != self.host_reverse_ip.result():
+        if self.server_ip != self.server_reverse_ip.result():
             # OpenSSH will log 'POSSIBLE BREAK-IN ATTEMPT!'
             # but we dont care .. just demonstrating these values,
             self.log.warn('reverse lookup: {sip} != {rsip} ({arg})'.format(
@@ -193,7 +196,7 @@ class TelnetClient(asyncio.protocols.Protocol):
     def env(self):
         """ Returns hash of session environment values
         """
-        return self._client_env
+        return self._env
 
     @property
     def connected(self):
@@ -238,7 +241,7 @@ class TelnetClient(asyncio.protocols.Protocol):
     def send_ttype(self):
         """ Callback for responding to TTYPE requests.
         """
-        return (self.shell.terminal_type).encode('ascii')
+        return self.shell.terminal_type
 
     def send_tspeed(self):
         """ Callback for responding to TSPEED requests.
@@ -248,7 +251,7 @@ class TelnetClient(asyncio.protocols.Protocol):
     def send_xdisploc(self):
         """ Callback for responding to XDISPLOC requests.
         """
-        return (self.shell.xdisploc).encode('ascii')
+        return self.shell.xdisploc
 
     def send_env(self, keys):
         """ Callback for responding to NEW_ENVIRON requests.
@@ -271,38 +274,88 @@ class TelnetClient(asyncio.protocols.Protocol):
         """ XXX begin on-connect negotiation.
 
             A Telnet Server is expected to assert the preferred session
-            options immediately after connection.
+            options immediately after connection, we provide some time
+            to receive any of those before giving up.
         """
         if self._closing:
-            self._negotiation.cancel()
+            self._telopt_negotiation.cancel()
             return
 
-        asyncio.get_event_loop().call_soon(self.check_negotiation)
+        self._loop.call_soon(self.check_negotiation)
 
     def check_negotiation(self):
         """ XXX negotiation check-loop, schedules itself for continual callback
-            until negotiation is considered final, firing ``after_negotiation``
-            callback when complete.
+            until negotiation is considered final, firing
+            ``after_telopt_negotiation`` callback when complete.
         """
         if self._closing:
-            self._negotiation.cancel()
+            self._telopt_negotiation.cancel()
             return
         pots = self.stream.pending_option
         if not any(pots.values()):
             if self.duration > self.CONNECT_MINWAIT:
-                self._negotiation.set_result(self.stream.__repr__())
+                self._telopt_negotiation.set_result(self.stream.__str__())
                 return
         elif self.duration > self.CONNECT_MAXWAIT:
-            self._negotiation.set_result(self.stream.__repr__())
+            self._telopt_negotiation.set_result(self.stream.__str__())
             return
-        loop = asyncio.get_event_loop()
-        loop.call_later(self.CONNECT_DEFERED, self.check_negotiation)
+        self._loop.call_later(self.CONNECT_DEFERED, self.check_negotiation)
 
-    def after_negotiation(self, status):
-        """ XXX telnet stream option negotiation completed
+    def after_telopt_negotiation(self, status):
+        """ XXX telnet stream option negotiation completed, ``status``
+            is an asyncio.Future instance, where method ``.cancelled()``
+            returns True if telnet negotiation was not completed to
+            satisfation.  Otherwise, containing a string representation
+            of the protocol stream status.
         """
-        self.log.info('{}.'.format(self))
-        self.log.info('stream status is {}.'.format(self.stream))
+        if status.cancelled():
+            self.log.debug('telopt negotiation cancelled')
+            return
+        self.log.debug('stream status: {}.'.format(status.result()))
+
+    def check_encoding_negotiation(self):
+        """ XXX encoding negotiation check-loop, schedules itself for continual
+            callback until both outbinary and inbinary has been answered in
+            the affirmitive, firing ``after_encoding_negotiation`` callback
+            when complete.
+        """
+        from .telopt import DO, BINARY
+        if self._closing:
+            self._encoding_negotiation.cancel()
+            return
+
+        # encoding negotiation is complete
+        if self.outbinary and self.inbinary:
+            self.log.debug('outbinary and inbinary negotiated.')
+            self._encoding_negotiation.set_result(True)
+
+        # if (WILL, BINARY) requested by begin_negotiation() is answered in
+        # the affirmitive, then request (DO, BINARY) to ensure bi-directional
+        # transfer of non-ascii characters.
+        elif self.outbinary and not self.inbinary and (
+                not (DO, BINARY,) in self.stream.pending_option):
+            self.log.debug('outbinary=True, requesting inbinary.')
+            self.stream.iac(DO, BINARY)
+            self._loop.call_later(self.CONNECT_DEFERED,
+                                  self.check_encoding_negotiation)
+
+        elif self.duration > self.CONNECT_MAXWAIT:
+            # Perhaps some IAC interpretering servers do not differentiate
+            # 'local' from 'remote' options -- they are treated equivalently.
+            self._encoding_negotiation.set_result(False)
+
+        else:
+            self._loop.call_later(self.CONNECT_DEFERED,
+                                  self.check_encoding_negotiation)
+
+    def after_encoding_negotiation(self, status):
+        """ XXX this callback fires after encoding negotiation has completed.
+        """
+        if status.cancelled():
+            self.log.debug('encoding negotiation cancelled')
+            return
+        self.log.debug('client encoding is {}.'.format(
+            self.encoding(outgoing=True, incoming=True)))
 
     @property
     def duration(self):
