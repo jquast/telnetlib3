@@ -320,8 +320,8 @@ class TelnetServer(asyncio.protocols.Protocol):
 
         # log about connection
         self.log.info('{}.'.format(self))
-        self.log.info('stream status is {}.'.format(self.stream))
-        self.log.info('client environment is {}.'.format(describe_env(self)))
+        self.log.info('stream status: {}.'.format(status.result()))
+        self.log.info('client environment: {}.'.format(describe_env(self)))
 
     def after_encoding_negotiation(self, status):
         """ XXX this callback fires after encoding negotiation has completed,
