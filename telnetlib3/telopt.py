@@ -1363,29 +1363,34 @@ class TelnetStream:
 # Private sub-negotiation (SB) routines
 #
     def _handle_sb_charset(self, buf):
-        assert buf.popleft() == CHARSET
         cmd = buf.popleft()
-        if cmd == REQUEST:
+        opt = buf.popleft()
+        assert cmd == CHARSET, name_command(cmd)
+        assert opt in (REQUEST, ACCEPTED, REJECTED, TTABLE_IS,
+                       TTABLE_ACK, TTABLE_NAK, TTABLE_REJECTED)
+        if opt == REQUEST:
             #sep = buf.popleft()
             # client decodes 'buf', split by 'sep', and choses a charset
             raise NotImplementedError
-        elif cmd == ACCEPTED:
+        elif opt == ACCEPTED:
             charset = b''.join(buf).decode('ascii')
             self._ext_callback[CHARSET](charset)
-        elif cmd == REJECTED:
+        elif opt == REJECTED:
             self.log.info('Client rejects codepages')
-        elif cmd in (TTABLE_IS, TTABLE_ACK, TTABLE_NAK, TTABLE_REJECTED):
+        elif opt in (TTABLE_IS, TTABLE_ACK, TTABLE_NAK, TTABLE_REJECTED):
             raise NotImplementedError
-        else:
-            raise ValueError("SB: unknown CHARSET command: {!r}".format(cmd))
 
     def _handle_sb_tspeed(self, buf):
         """ Callback handles IAC-SB-TSPEED-<buf>-SE.
         """
-        assert buf.popleft() == TSPEED
         cmd = buf.popleft()
-        assert cmd in (IS, SEND), cmd
-        if cmd == IS:
+        opt = buf.popleft()
+        assert cmd == TSPEED, name_command(cmd)
+        assert opt in (IS, SEND), opt
+        opt_kind = 'IS' if opt == IS else 'INFO' if opt == INFO else 'SEND'
+        if opt == IS:
+            assert self.is_client, ('SE: cannot recv from server: {} {}'
+                                    .format(name_command(cmd), opt_kind,))
             rx, tx = str(), str()
             while len(buf):
                 value = buf.popleft()
@@ -1405,14 +1410,12 @@ class TelnetStream:
                                '(rx={!r}, tx={!r}: {}', rx, tx, err)
                 return
             self._ext_callback[TSPEED](rx, tx)
-        elif cmd == SEND:
-            response = collections.deque()
-            response.extend([IAC, SB, TSPEED, IS])
-            rx, tx = self._ext_send_callback[TSPEED]()
-            response.extend(['{}'.format(rx).encode('ascii')])
-            response.extend([b','])
-            response.extend(['{}'.format(tx).encode('ascii')])
-            response.extend([IAC, SE])
+        elif opt == SEND:
+            (rx, tx) = self._ext_send_callback[TSPEED]()
+            assert (type(rx), type(tx),) == (int, int), (rx, tx)
+            brx = '{}'.format(rx).encode('ascii')
+            btx = '{}'.format(tx).encode('ascii')
+            response = [IAC, SB, TSPEED, IS, brx, b',', btx, IAC, SE]
             self.log.debug('send: {!r}'.format(response))
             self.send_iac(b''.join(response))
             if self.pending_option.enabled(WILL + TSPEED):
@@ -1421,19 +1424,18 @@ class TelnetStream:
     def _handle_sb_xdisploc(self, buf):
         """ Callback handles IAC-SB-XIDISPLOC-<buf>-SE.
         """
-        assert buf.popleft() == XDISPLOC
         cmd = buf.popleft()
-        assert cmd in (IS, SEND), cmd
-        if cmd == IS:
+        opt = buf.popleft()
+        assert cmd == XDISPLOC, name_command(cmd)
+        assert opt in (IS, SEND), opt
+        if opt == IS:
             xdisploc_str = b''.join(buf).decode('ascii')
-            self.log.debug('sb_xdisploc: {}'.format(xdisploc_str))
+            self.log.debug('xdisploc recv: {}'.format(xdisploc_str))
             self._ext_callback[XDISPLOC](xdisploc_str)
-        elif cmd == SEND:
-            response = collections.deque()
-            response.extend([IAC, SB, XDISPLOC, IS])
-            response.extend([self._ext_send_callback[XDISPLOC]()])
-            response.extend([IAC, SE])
-            self.log.debug('send: {!r}'.format(response))
+        elif opt == SEND:
+            xdisploc_str = self._ext_send_callback[XDISPLOC]().encode('ascii')
+            response = [IAC, SB, XDISPLOC, IS, xdisploc_str, IAC, SE]
+            self.log.debug('xdisploc send: {!r}'.format(response))
             self.send_iac(b''.join(response))
             if self.pending_option.enabled(WILL + XDISPLOC):
                 self.pending_option[WILL + XDISPLOC] = False
@@ -1441,23 +1443,21 @@ class TelnetStream:
     def _handle_sb_ttype(self, buf):
         """ Callback handles IAC-SB-TTYPE-<buf>-SE.
         """
-        assert buf.popleft() == TTYPE
         cmd = buf.popleft()
-        assert cmd in (IS, SEND), cmd
-        if cmd == IS:
+        opt = buf.popleft()
+        assert cmd == TTYPE, name_command(cmd)
+        assert opt in (IS, SEND), opt
+        if opt == IS:
             ttype_str = b''.join(buf).decode('ascii')
-            self.log.debug('sb_ttype: {}'.format(ttype_str))
+            self.log.debug('ttype recv: {}'.format(ttype_str))
             self._ext_callback[TTYPE](ttype_str)
-        elif cmd == SEND:
-            response = collections.deque()
-            response.extend([IAC, SB, TTYPE, IS])
-            response.extend([self._ext_send_callback[TTYPE]()])
-            response.extend([IAC, SE])
-            self.log.debug('send: {!r}'.format(response))
+        elif opt == SEND:
+            ttype_str = self._ext_send_callback[TTYPE]().encode('ascii')
+            response = [IAC, SB, TTYPE, IS, ttype_str, IAC, SE]
+            self.log.debug('ttype send: {!r}'.format(response))
             self.send_iac(b''.join(response))
             if self.pending_option.enabled(WILL + TTYPE):
                 self.pending_option[WILL + TTYPE] = False
-
 
     def _handle_sb_env(self, buf):
         """ Callback handles (IAC, SB, NEW_ENVIRON, <buf>, SE), rfc1572.
@@ -1472,47 +1472,43 @@ class TelnetStream:
             requested from the server; or None if only VAR and/or USERVAR
             is requested, indicating to "send them all".
         """
-        env_kind = buf.popleft()
+        cmd = buf.popleft()
         opt = buf.popleft()
+        assert cmd == NEW_ENVIRON, name_command(cmd)
         assert opt in (IS, SEND, INFO), opt
-        assert env_kind == NEW_ENVIRON
         env = _decode_env_buf(b''.join(buf))
-        self.log.debug('_handle_sb_env {}: {!r}'
-                       .format(name_command(opt), env))
-        if opt == SEND:
-            assert self.is_client, ('SE: cannot recv from client: {} SEND'
-                                    .format(name_command(env_kind)))
-            send_env = self._ext_send_callback[NEW_ENVIRON](env.keys() or None)
-            self.log.debug('send env {!r}'.format(send_env))
-            response = collections.deque()
-            response.extend([IAC, SB, NEW_ENVIRON, IS])
-            response.extend(_encode_env_buf(send_env))
-            response.extend([IAC, SE])
-            self.log.debug('send: {!r}'.format(response))
+        opt_kind = 'IS' if opt == IS else 'INFO' if opt == INFO else 'SEND'
+        self.log.debug('env {} {}: {!r}'
+                       .format(name_command(cmd), opt_kind, env))
+        if opt in (IS, INFO):
+            assert self.is_server, ('SE: cannot recv from server: {} {}'
+                                    .format(name_command(cmd), opt_kind,))
+            if opt == IS:
+                if not self.pending_option.enabled(SB + cmd + SEND + IS):
+                    self.log.debug('{} {} unsolicited'
+                                   .format(name_command(cmd), opt_kind))
+                self.pending_option[SB + cmd + SEND + IS] = False
+            elif (self.pending_option.get(SB + cmd + SEND + IS, None)
+                    is False):
+                # a pending option of value of 'False' means it was previously
+                # completed, subsequent environment values *should* have been
+                # sent as command INFO ...
+                self.log.warn('{} IS already recv; expected INFO.'
+                              .format(name_command(cmd)))
+            if env:
+                self._ext_callback[cmd](env)
+        elif opt == SEND:
+            assert self.is_client, ('SE: cannot recv from client: {} {}'
+                                    .format(name_command(cmd), opt_kind))
+            # We do _not_ honor the 'send all VAR' or 'send all USERVAR'
+            # requests -- it is a small bit of a security issue.
+            send_env = _encode_env_buf(
+                self._ext_send_callback[NEW_ENVIRON](env.keys() or None))
+            response = [IAC, SB, NEW_ENVIRON, IS, send_env, IAC, SE]
+            self.log.debug('env send: {!r}'.format(response))
             self.send_iac(b''.join(response))
             if self.pending_option.enabled(WILL + TTYPE):
                 self.pending_option[WILL + TTYPE] = False
-
-        elif opt in (IS, INFO):
-            opt_kind = 'IS' if opt == IS else 'INFO'
-            assert self.is_server, ('SE: cannot recv from server: {} {}'
-                                    .format(name_command(env_kind), opt_kind,))
-            if opt == IS:
-                if not self.pending_option.enabled(SB + env_kind + SEND + IS):
-                    self.log.debug('{} IS unsolicited'
-                                   .format(name_command(opt)))
-                self.pending_option[SB + env_kind + SEND + IS] = False
-            if (self.pending_option.get(SB + env_kind + SEND + IS, None)
-                    is False):
-                # a pending option of value of 'False' means it previously
-                # completed, subsequent environment values should have been
-                # send as INFO ..
-                self.log.debug('{} IS already recv; expected INFO.'
-                               .format(name_command(env_kind)))
-            env = _decode_env_buf(b''.join(buf))
-            if env:
-                self._ext_callback[env_kind](env)
-            return
 
     def _handle_sb_sndloc(self, buf):
         """ Fire callback for IAC-SB-SNDLOC-<buf>-SE (rfc779).
@@ -1524,7 +1520,8 @@ class TelnetStream:
     def _handle_sb_naws(self, buf):
         """ Fire callback for IAC-SB-NAWS-<buf>-SE (rfc1073).
         """
-        assert buf.popleft() == NAWS
+        cmd = buf.popleft()
+        assert cmd == NAWS, name_command(cmd)
         columns = str((256 * ord(buf[0])) + ord(buf[1]))
         rows = str((256 * ord(buf[2])) + ord(buf[3]))
         self.log.debug('sb_naws: {}, {}'.format(columns, rows))
@@ -1533,20 +1530,22 @@ class TelnetStream:
     def _handle_sb_lflow(self, buf):
         """ Fire callback for IAC-SB-LFOW-<buf>
         """ # XXX
-        assert buf.popleft() == LFLOW
+        cmd = buf.popleft()
+        assert cmd == LFLOW, name_command(cmd)
         assert self.local_option.enabled(LFLOW), (
-            'received IAC SB LFLOW wihout IAC DO LFLOW')
+            'received IAC SB LFLOW without IAC DO LFLOW')
         raise NotImplementedError
 
     def _handle_sb_status(self, buf):
         """ Fire callback for IAC-SB-STATUS-<buf>
         """
-        assert buf.popleft() == STATUS
         cmd = buf.popleft()
-        if cmd == SEND:
+        assert cmd == STATUS, name_command(cmd)
+        sb = buf.popleft()
+        if sb == SEND:
             self._send_status()
-        elif cmd == IS:
-            raise NotImplemented
+        elif sb == IS:
+            raise NotImplementedError
 
     def _send_status(self):
         """ Fire callback for IAC-SB-STATUS-SEND (rfc859).
@@ -1586,25 +1585,24 @@ class TelnetStream:
     def _handle_sb_linemode(self, buf):
         """ Callback handles IAC-SB-LINEMODE-<buf>.
         """
-        assert buf.popleft() == LINEMODE
         cmd = buf.popleft()
-        if cmd == slc.LMODE_MODE:
+        opt = buf.popleft()
+        assert cmd == LINEMODE
+        assert opt in (slc.LMODE_MODE, slc.LMODE_SLC, DO, DONT, WILL, WONT), (
+            'Illegal IAC SB LINEMODE command, {!r}'.format(name_command(opt)))
+        if opt == slc.LMODE_MODE:
             self._handle_sb_linemode_mode(buf)
-        elif cmd == slc.LMODE_SLC:
+        elif opt == slc.LMODE_SLC:
             self._handle_sb_linemode_slc(buf)
-        elif cmd in (DO, DONT, WILL, WONT):
-            opt = buf.popleft()
-            self.log.debug('recv SB LINEMODE {} FORWARDMASK{}.'
-                           .format(name_command(cmd),
-                                   '(...)' if len(buf) else ''))
-            assert opt == slc.LMODE_FORWARDMASK, (
-                'Illegal byte follows IAC SB LINEMODE {}: {!r}, '
+        elif opt in (DO, DONT, WILL, WONT):
+            self.log.debug('recv SB {} {} FORWARDMASK,'
+                           .format(name_command(cmd), name_command(opt)))
+            sb_opt = buf.popleft()
+            assert sb_opt == slc.LMODE_FORWARDMASK, (
+                'Illegal byte follows IAC SB {} {}: {!r}, '
                 ' expected LMODE_FORWARDMASK.'
-                .format(name_command(cmd), opt))
+                .format(name_command(cmd), name_command(opt), sb_opt))
             self._handle_sb_forwardmask(cmd, buf)
-        else:
-            raise ValueError('Illegal IAC SB LINEMODE command, {!r}'
-                             .format(name_command(cmd)))
 
     def _handle_sb_linemode_mode(self, mode):
         """ Callback handles IAC-SB-LINEMODE-MODE-<mode>.
