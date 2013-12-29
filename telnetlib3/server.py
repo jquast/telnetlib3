@@ -172,6 +172,9 @@ class TelnetServer(asyncio.protocols.Protocol):
                              SNDLOC, CHARSET, NAWS)
         stream.set_iac_callback(AYT, self.handle_ayt)
         stream.set_slc_callback(SLC_AYT, self.handle_ayt)
+        # wire TM to callback ``handle_timing_mark(cmd)``, cmd is one
+        # of (DO, DONT, WILL, WONT).
+        stream.set_iac_callback(TM, self.handle_timing_mark)
 
         # wire various 'interrupts', such as AO, IP to
         # ``special_received()``, which forwards as
@@ -498,6 +501,18 @@ class TelnetServer(asyncio.protocols.Protocol):
                     ) else 'ascii')
 
     def handle_ayt(self, opt_byte):
+    def handle_timing_mark(self, cmd):
+        """ XXX Callback when IAC <cmd> TM (Timing Mark) is received,
+            where <cmd> is any of (DO, DONT, WILL, WONT).
+
+            This is a simple method by which pingtime may be measured.
+            If the remote end performs any IAC interpretation, it should
+            always answer at least WONT.
+        """
+        from .telopt import name_command
+        self.log.debug('client sends: {} TIMING MARK.'
+                       .format(name_command(cmd)))
+
         """ XXX Callback when IAC, AYT or SLC_AYT is received.
             opt_byte is value slc.SLC_AYT or telopt.AYT, indicating
             which method AYT was received by.
