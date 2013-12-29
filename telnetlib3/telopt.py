@@ -1329,8 +1329,8 @@ class TelnetStream:
         assert buf[0] != theNULL, ('SE: buffer is NUL')
         assert len(buf) > 1, ('SE: buffer too short: {!r}'.format(buf))
         cmd = buf[0]
-        assert cmd in (LINEMODE, LFLOW, NAWS, SNDLOC, NEW_ENVIRON, TTYPE,
-                       TSPEED, XDISPLOC, STATUS, CHARSET
+        assert cmd in (LINEMODE, LFLOW, NAWS, SNDLOC, NEW_ENVIRON,
+                       CHARSET, TTYPE, TSPEED, XDISPLOC, STATUS,
                        ), ('SB {}: not supported'.format(name_command(cmd)))
         if self.pending_option.enabled(SB + cmd):
             self.pending_option[SB + cmd] = False
