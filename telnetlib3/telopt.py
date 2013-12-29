@@ -1278,6 +1278,7 @@ class TelnetStream:
             self.remote_option[opt] = True
             self.request_ttype()
         elif opt == TSPEED:
+            assert self.is_server, 'cannot recv WILL TSPEED on client end.'
             self.remote_option[opt] = True
             self.request_tspeed()
         else:
