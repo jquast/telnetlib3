@@ -426,7 +426,7 @@ class TelnetStream:
         assert data and data.startswith(IAC), data
         self.transport.write(data)
 
-    def iac(self, cmd, opt=None):
+    def iac(self, cmd, opt):
         """ .. method: iac(self, cmd : bytes, opt : bytes)
 
             Send Is-A-Command (IAC) 2 or 3-byte command option.
@@ -435,16 +435,14 @@ class TelnetStream:
             context of client, server, or pending negotiation state, emitting a
             relevant debug warning to the log handler if not sent.
         """
-        short_iacs = (DM, SE)
         assert (cmd in (DO, DONT, WILL, WONT)
-                or cmd in short_iacs and opt is None
                 ), ('Unknown IAC {}.'.format(name_command(cmd)))
         if opt == LINEMODE:
             if cmd == DO and self.is_client:
                 raise ValueError('DO LINEMODE may only be sent by server.')
             if cmd == WILL and self.is_server:
                 raise ValueError('WILL LINEMODE may only be sent by client.')
-        if cmd == DO: # XXX any exclusions ?
+        if cmd == DO and opt not in (TM, LOGOUT):
             if self.remote_option.enabled(opt):
                 self.log.debug('skip {} {}; remote_option = True'.format(
                     name_command(cmd), name_command(opt)))
@@ -456,13 +454,13 @@ class TelnetStream:
                     name_command(cmd), name_command(opt)))
                 return False
             self.pending_option[cmd + opt] = True
-        if cmd == WILL and opt != TM:
+        if cmd == WILL and opt not in (TM,):
             if self.local_option.enabled(opt):
                 self.log.debug('skip {} {}; local_option = True'.format(
                     name_command(cmd), name_command(opt)))
                 self.pending_option[cmd + opt] = False
                 return False
-        if cmd == DONT and opt not in (LOGOUT,): # XXX any other exclusions?
+        if cmd == DONT and opt not in (LOGOUT,):  # XXX any other exclusions?
             if self.remote_option.enabled(opt):
                 # warning: some implementations incorrectly reply (DONT, opt),
                 # for an option we already said we WONT. This would cause
@@ -470,15 +468,11 @@ class TelnetStream:
                 self.log.debug('skip {} {}; remote_option = True'.format(
                     name_command(cmd), name_command(opt)))
             self.remote_option[opt] = False
-        elif cmd == WONT:
+        if cmd == WONT:
             self.local_option[opt] = False
-        if cmd in short_iacs:
-            self.log.debug('send IAC {}'.format(name_command(cmd)))
-            self.send_iac(IAC + cmd)
-        else:
-            self.log.debug('send IAC {} {}'.format(
-                name_command(cmd), name_command(opt)))
-            self.send_iac(IAC + cmd + opt)
+        self.log.debug('send IAC {} {}'.format(
+            name_command(cmd), name_command(opt)))
+        self.send_iac(IAC + cmd + opt)
 
 # Public methods for transmission signaling
 #
@@ -687,7 +681,7 @@ class TelnetStream:
             self.pending_option[SB + LINEMODE] = True
             self.send_iac(IAC + SB + LINEMODE + DO + slc.LMODE_FORWARDMASK)
             self.write(fmask.value)  # escape IAC+IAC
-            self.iac(SE)
+            self.send_iac(SE)
 
             self.log.debug('send IAC SB LINEMODE DO LMODE_FORWARDMASK::')
             for maskbit_descr in fmask.__repr__():
@@ -729,7 +723,7 @@ class TelnetStream:
                        .format(self._linemode))
         self.send_iac(IAC + SB + LINEMODE + slc.LMODE_MODE)
         self.write(self._linemode.mask)
-        self.iac(SE)
+        self.send_iac(SE)
 
 # Public is-a-command (IAC) callbacks
 #
