@@ -746,12 +746,16 @@ class TelnetStream:
         self._iac_callback[cmd] = func
 
     def handle_nop(self, cmd):
-        """ XXX Handle IAC No-Operation (NOP)
+        """ XXX Handle IAC No-Operation (NOP).
         """
         self.log.debug('IAC NOP: Null Operation (unhandled).')
 
     def handle_ga(self, cmd):
-        """ XXX Handle IAC Go-Ahead (GA)
+        """ XXX Handle IAC Go-Ahead (GA).
+
+            Typically, GA is only a legacy protocol for half-duplex terminals
+            such as a teletype, which cannot recieve output while also sending
+            input.
         """
         self.log.debug('IAC GA: Go-Ahead (unhandled).')
 
@@ -773,7 +777,7 @@ class TelnetStream:
 # Public mixed-mode SLC and IAC callbacks
 #
     def handle_el(self, byte):
-        """ XXX Handle IAC Erase Line (EL) or SLC_EL.
+        """ XXX Handle IAC Erase Line (EL, SLC_EL).
 
             Provides a function which discards all the data ready on current
             line of input. The prompt should be re-displayed.
@@ -781,12 +785,12 @@ class TelnetStream:
         self.log.debug('IAC EL: Erase Line (unhandled).')
 
     def handle_eor(self, byte):
-        """ XXX Handle IAC End of Record (EOR) or SLC_EOR.
+        """ XXX Handle IAC End of Record (EOR, SLC_EOR).
         """
         self.log.debug('IAC EOR: End of Record (unhandled).')
 
     def handle_abort(self, byte):
-        """ XXX Handle IAC Abort (ABORT) rfc1184, or SLC_ABORT.
+        """ XXX Handle IAC Abort (ABORT, SLC_ABORT).
 
             Similar to Interrupt Process (IP), but means only to abort or
             terminate the process to which the NVT is connected.
@@ -794,23 +798,24 @@ class TelnetStream:
         self.log.debug('IAC ABORT: Abort (unhandled).')
 
     def handle_eof(self, byte):
-        """ XXX Handle End of Record (IAC, EOF), rfc1184 or SLC_EOF.
+        """ XXX Handle IAC End of Record (EOF, SLC_EOF).
         """
         self.log.debug('IAC EOF: End of File (unhandled).')
 
     def handle_susp(self, byte):
-        """ XXX Handle Suspend Process (SUSP), rfc1184 or SLC_SUSP.
+        """ XXX Handle IAC Suspend Process (SUSP, SLC_SUSP).
 
             Suspends the execution of the current process attached to the NVT
             in such a way that another process will take over control of the
             NVT, and the suspended process can be resumed at a later time.
+
+            If the receiving system does not support this functionality, it
+            should be ignored.
         """
-        # If the receiving system does not support this functionality, it
-        # should be ignored.
         self.log.debug('IAC SUSP: Suspend (unhandled).')
 
     def handle_brk(self, byte):
-        """ XXX Handle IAC Break (BRK) or SLC_BRK (Break).
+        """ XXX Handle IAC Break (BRK, SLC_BRK).
 
             Sent by clients to indicate BREAK keypress. This is not the same
             as IP (^c), but a means to map sysystem-dependent break key such
@@ -819,17 +824,15 @@ class TelnetStream:
         self.log.debug('IAC BRK: Break (unhandled).')
 
     def handle_ayt(self, byte):
-        """ XXX Handle IAC Are You There (AYT) or SLC_AYT.
+        """ XXX Handle IAC Are You There (AYT, SLC_AYT).
 
             Provides the user with some visible (e.g., printable) evidence
             that the system is still up and running.
         """
-        #   Terminal servers that respond to AYT usually print the status
-        #   of the client terminal session, its speed, type, and options.
         self.log.debug('IAC AYT: Are You There? (unhandled).')
 
     def handle_ip(self, byte):
-        """ XXX Handle IAC Interrupt Process (IP) or SLC_IP
+        """ XXX Handle IAC Interrupt Process (IP, SLC_IP).
         """
         self.log.debug('IAC IP: Interrupt Process (unhandled).')
 
@@ -837,6 +840,7 @@ class TelnetStream:
         """ XXX Handle IAC Abort Output (AO) or SLC_AO.
 
             Discards any remaining output on the transport buffer.
+
             " [...] a reasonable implementation would be to suppress the
               remainder of the text string, but transmit the prompt character
               and the preceding <CR><LF>. "
@@ -846,7 +850,7 @@ class TelnetStream:
         self._write_buffer.clear()
 
     def handle_ec(self, byte):
-        """ XXX Handle IAC + SLC or SLC_EC (Erase Character).
+        """ XXX Handle IAC Erase Character (EC, SLC_EC).
 
             Provides a function which deletes the last preceding undeleted
             character from data ready on current line of input.
@@ -1113,9 +1117,18 @@ class TelnetStream:
     def handle_do(self, opt):
         """ XXX Process byte 3 of series (IAC, DO, opt) received by remote end.
 
-        This method can be derived to change or extend protocol capabilities.
-        The result of a supported capability is a response of (IAC, WILL, opt)
-        and the setting of ``self.local_option[opt]`` of ``True``.
+        This method can be derived to change or extend protocol capabilities,
+        for most cases, simply returning True if supported, False otherwise.
+
+        In special cases of various RFC statutes, state is stored and
+        answered in willing affirmitive, with the exception of:
+            - DO TM is *always* answered WILL TM, even if it was already
+              replied to.  No state is stored ("Timing Mark"), and the IAC
+              callback registered by ``set_ext_callback`` for cmd TM
+              is called with argument byte ``DO``.
+            - DO LOGOUT executes extended callback registered by cmd LOGOUT
+              with argument DO (indicating a request for voluntary logoff).
+            - DO STATUS sends state of all local, remote, and pending options.
         """
         # For unsupported capabilities, RFC specifies a response of
         # (IAC, WONT, opt).  Similarly, set ``self.local_option[opt]``
@@ -1232,6 +1245,8 @@ class TelnetStream:
             self._ext_callback[LOGOUT](WILL)
         elif opt == STATUS:
             self.remote_option[opt] = True
+            # This isn't really necessary, but if the server says they support
+            # it, we'd like to test them on that, so go ahead, prove it ... !
             self.request_status()
         elif opt == LFLOW:
             if opt == LFLOW and self.is_client:
@@ -1242,6 +1257,9 @@ class TelnetStream:
             self.remote_option[opt] = True
             self.request_env()
         elif opt == CHARSET:
+            # charset is bi-directional: "WILL CHARSET indicates the sender
+            # REQUESTS permission to, or AGREES to, use CHARSET option
+            # subnegotiation to choose a character set."
             self.remote_option[opt] = True
             self.request_charset()
         elif opt == XDISPLOC:
@@ -1435,13 +1453,17 @@ class TelnetStream:
 
 
     def _handle_sb_env(self, buf):
-        """ Callback handles (IAC, SB, NEW_ENVIRON, <buf>, SE) rfc1572,
-            responding in the affirmitive for SEND by the (key, value) of
-            the dictionary returned by callback registered by
-            set_ext_send_callback for IAC cmd NEW_ENVIRON, of argument
-            list of keys requested.
+        """ Callback handles (IAC, SB, NEW_ENVIRON, <buf>, SE), rfc1572.
 
-            or, by requesting all keys
+            For requests beginning with IS, or subsequent requests beginning
+            with INFO, any callback registered by ``set_ext_callback`` of
+            cmd NEW_ENVIRON is passed a dictionary of (key, value) replied-to
+            by client.
+
+            For requests beginning with SEND, the callback registered by
+            ``set_ext_send_callback`` is provided with a list of keys
+            requested from the server; or None if only VAR and/or USERVAR
+            is requested, indicating to "send them all".
         """
         env_kind = buf.popleft()
         opt = buf.popleft()
