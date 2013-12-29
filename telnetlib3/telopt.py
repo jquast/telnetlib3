@@ -1354,7 +1354,7 @@ class TelnetStream:
             self._handle_sb_tspeed(buf)
         elif cmd == XDISPLOC:
             self._handle_sb_xdisploc(buf)
-        elif cmd == STATUS and buf[1] == SEND:
+        elif cmd == STATUS:
             self._handle_sb_status(buf)
         else:
             raise ValueError('SE: unhandled: {!r}'.format(buf))
