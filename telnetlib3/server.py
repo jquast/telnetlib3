@@ -538,18 +538,17 @@ class TelnetServer(asyncio.protocols.Protocol):
     def special_received(self, iac_cmd):
         """ XXX Callback receives telnet IAC bytes for special functions.
 
-                iac_cmd indicates which IAC was recieved, the default
-                ``set_stream_callbacks()`` method registers for receipt
-                for any of (AO, IP, BRK, SUSP, ABORT, EC).
+            iac_cmd indicates which IAC was recieved, the default
+            ``set_stream_callbacks()`` method registers for receipt for any
+            of (AO, IP, BRK, SUSP, ABORT, EC).
 
-                The default implementation maps these to their various
-                SLC equivalents, if supported. Otherwise, nothing is
-                done.
+            The default implementation maps these to their various SLC
+            equivalents, if supported. Otherwise, nothing is done.
         """
         from .telopt import (AO, IP, BRK, ABORT, SUSP, EC, EL, EOR,
                              name_command)
-        from .slc import (SLC_AO, SLC_IP, SLC_ABORT, SLC_SUSP, SLC_EC, SLC_EL,
-                          SLC_EOR, name_slc_command)
+        from .slc import (SLC_AO, SLC_IP, SLC_ABORT, SLC_SUSP, SLC_EC,
+                          SLC_EL, SLC_EOR, name_slc_command)
         map_iac_slc = {
             AO: SLC_AO, IP: SLC_IP, BRK: SLC_ABORT,
             ABORT: SLC_ABORT, SUSP: SLC_SUSP, EC: SLC_EC,
