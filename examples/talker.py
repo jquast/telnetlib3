@@ -340,8 +340,7 @@ class TalkerShell(telnetlib3.Telsh):
                     self.standout(mynick)))
                 return 1
         self.cmdset_assign('USER={}'.format(newnick))
-        self.log.info('{} renamed to {}/{}'.format(
-            mynick, newnick, self.server.env['USER']))
+        self.log.info('{} renamed to {}/{}'.format(mynick, newnick))
         self.stream.write('\r\nYour name is now {}'.format(
             self.standout(newnick)))
         return 0
