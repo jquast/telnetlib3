@@ -238,13 +238,13 @@ class TelnetServer(asyncio.protocols.Protocol):
         # negotiation completed: all pending values have been replied
         if not any(pots.values()):
             if self.duration > self.CONNECT_MINWAIT:
-                self._telopt_negotiation.set_result(self.stream.__repr__())
+                self._telopt_negotiation.set_result(self.stream.__str__())
                 return
         # negotiation has gone on long enough, give up and set result,
         # either a very, very slow-to-respond client or a dumb network
         # network scanner.
         elif self.duration > self.CONNECT_MAXWAIT:
-            self._telopt_negotiation.set_result(self.stream.__repr__())
+            self._telopt_negotiation.set_result(self.stream.__str__())
             return
         # negotiation not yet complete, check again in CONNECT_DEFERED seconds,
         self._loop.call_later(self.CONNECT_DEFERED,
