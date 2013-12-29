@@ -112,6 +112,23 @@ class TelnetClient(asyncio.protocols.Protocol):
         self.env['LINES'] = self.shell.terminal_height
         self.env['CHARSET'] = self._default_encoding
 
+    def set_stream_callbacks(self):
+        """ XXX Set callbacks for returning negotiation responses
+        """
+        from telnetlib3.telopt import TTYPE, TSPEED, XDISPLOC, NEW_ENVIRON
+        from telnetlib3.telopt import CHARSET, NAWS
+
+        # wire extended rfc callbacks for terminal atributes, etc.
+        for (opt, func) in (
+                (TTYPE, self.send_ttype),
+                (TSPEED, self.send_tspeed),
+                (XDISPLOC, self.send_xdisploc),
+                (NEW_ENVIRON, self.send_env),
+                (NAWS, self.send_naws),
+                (CHARSET, self.send_charset),
+                ):
+            self.stream.set_ext_send_callback(opt, func)
+
     def after_server_lookup(self, arg):
         """ Callback receives result of server name resolution,
             Logs warning if reverse dns verification failed,
@@ -217,31 +234,6 @@ class TelnetClient(asyncio.protocols.Protocol):
                     not outgoing and incoming and self.inbinary) or (
                     outgoing and incoming and self.outbinary and self.inbinary
                     ) else 'ascii')
-
-    def set_stream_callbacks(self):
-        """ XXX Set callbacks for returning negotiation responses
-        """
-#        stream, server = self.stream, self
-#        # wire AYT and SLC_AYT (^T) to callback ``status()``
-#        #from telnetlib3 import slc, telopt
-#        from telnetlib3.slc import SLC_AYT
-#        from telnetlib3.telopt import AYT, AO, IP, BRK, SUSP, ABORT
-        from telnetlib3.telopt import TTYPE, TSPEED, XDISPLOC, NEW_ENVIRON
-        from telnetlib3.telopt import CHARSET, NAWS
-#        from telnetlib3.telopt import LOGOUT, SNDLOC, CHARSET, NAWS
-#        stream.set_iac_callback(AYT, self.handle_ayt)
-#        stream.set_slc_callback(SLC_AYT, self.handle_ayt)
-
-        # wire extended rfc callbacks for terminal atributes, etc.
-        for (opt, func) in (
-                (TTYPE, self.send_ttype),
-                (TSPEED, self.send_tspeed),
-                (XDISPLOC, self.send_xdisploc),
-                (NEW_ENVIRON, self.send_env),
-                (NAWS, self.send_naws),
-                (CHARSET, self.send_charset),
-                ):
-            self.stream.set_ext_send_callback(opt, func)
 
     def send_ttype(self):
         """ Callback for responding to TTYPE requests.
