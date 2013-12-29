@@ -843,15 +843,19 @@ def describe_env(server):
 
 
 def describe_connection(server):
-    return ('{user} using {terminal} {state} '
-            'from {ip}:{port}{host} after {duration}'.format(
+    state = (server._closing and 'dis' or '') + 'connected'
+    hostname = (server.client_hostname.done() and
+                ' ({})'.format(server.client_hostname.result())
+                or '')
+    duration = '{:0.1f}s'.format(server.duration)
+    return ('{user} using {terminal} '
+            '{state} from {clientip}:{port}{hostname} after {duration}'
+            .format(
                 user=server.env['USER'],
                 terminal=server.env['TERM'],
-                state=(server._closing and 'dis' or '') + 'connected',
-                ip=server.client_ip,
+                state=state,
+                clientip=server.client_ip,
                 port=server.client_port,
-                host=(server.client_hostname.done() and
-                      ' ({})'.format(server.client_hostname.result())
-                      or ''),
-                duration='{:0.3f}s'.format(server.duration))
+                hostname=hostname,
+                duration=duration)
             )
