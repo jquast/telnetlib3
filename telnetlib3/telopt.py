@@ -1245,7 +1245,7 @@ class TelnetStream:
             self._iac_callback[TM](WILL)
             self.remote_option[opt] = True
         elif opt == LOGOUT:
-            if opt == LOGOUT and self.is_client:
+            if self.is_client:
                 raise ValueError('cannot recv WILL LOGOUT on server end')
             self._ext_callback[LOGOUT](WILL)
         elif opt == STATUS:
@@ -1254,8 +1254,8 @@ class TelnetStream:
             # it, we'd like to test them on that, so go ahead, prove it ... !
             self.request_status()
         elif opt == LFLOW:
-            if opt == LFLOW and self.is_client:
-                raise ValueError('WILL LFLOW not supported on client end')
+            if self.is_client:
+                raise ValueError('cannot recv WILL LFLOW on client end')
             self.remote_option[opt] = True
             self.send_lineflow_mode()
         elif opt == NEW_ENVIRON:
@@ -1268,13 +1268,11 @@ class TelnetStream:
             self.remote_option[opt] = True
             self.request_charset()
         elif opt == XDISPLOC:
-            if opt == XDISPLOC and self.is_client:
-                raise ValueError('cannot recv WILL XDISPLOC on client end')
+            assert self.is_server, 'cannot recv WILL XDISPLOC on client end.'
             self.remote_option[opt] = True
             self.request_xdisploc()
         elif opt == TTYPE:
-            if opt == TTYPE and self.is_client:
-                raise ValueError('cannot recv WILL TTYPE on client end')
+            assert self.is_server, 'cannot recv WILL TTYPE on client end.'
             self.remote_option[opt] = True
             self.request_ttype()
         elif opt == TSPEED:
