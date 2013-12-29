@@ -578,7 +578,7 @@ class TelnetServer(asyncio.protocols.Protocol):
         self.transport.close()
 
     def logout(self, opt=None):
-        """ XXX Callback received by shell exit or IAC-<opt>-LOGOUT.
+        """ XXX Callback received by shell exit or IAC <opt> LOGOUT.
         """
         from .telopt import DO
         if opt is not None and opt != DO:
@@ -672,7 +672,7 @@ class TelnetServer(asyncio.protocols.Protocol):
                 self.log.debug('HOSTNAME is {}'.format(arg.result()))
 
     def __str__(self):
-        """ XXX Returns string suitable for status of server session.
+        """ Returns string reporting the status of this server session.
         """
         return describe_connection(self)
 
