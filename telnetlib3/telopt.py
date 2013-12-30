@@ -416,14 +416,14 @@ class TelnetStream:
             # XOFF (Transmit Off) enabled, buffer in-band data until XON.
             self._write_buffer.extend([data])
 
-    def send_iac(self, data, partial=False):
+    def send_iac(self, data):
         """ .. method: send_iac(self, data : bytes)
 
             No transformations of bytes are performed, Only complete
             IAC commands are legal (unless ``partial`` is set ``False``).
         """
         assert isinstance(data, (bytes, bytearray)), data
-        assert data and (partial or data.startswith(IAC)), data
+        assert data and data.startswith(IAC)
         self.transport.write(data)
 
     def iac(self, cmd, opt):
@@ -686,7 +686,7 @@ class TelnetStream:
             self.pending_option[SB + LINEMODE] = True
             self.send_iac(IAC + SB + LINEMODE + DO + slc.LMODE_FORWARDMASK)
             self.write(fmask.value)  # escape IAC+IAC
-            self.send_iac(SE, partial=True)
+            self.send_iac(IAC + SE)
 
             self.log.debug('send IAC SB LINEMODE DO LMODE_FORWARDMASK::')
             for maskbit_descr in fmask.__repr__():
@@ -728,7 +728,7 @@ class TelnetStream:
                        .format(self._linemode))
         self.send_iac(IAC + SB + LINEMODE + slc.LMODE_MODE)
         self.write(self._linemode.mask)
-        self.send_iac(SE, partial=True)
+        self.send_iac(IAC + SE)
 
 # Public is-a-command (IAC) callbacks
 #
