@@ -696,79 +696,9 @@ class Telsh():
         """ Returns PS1 or PS2 prompt depending on current multiline context,
             with prompt escape `%' resolved for special values.
         """
-        def _resolve_prompt(input, esc_char=None):
-            """ Escape prompt characters and return value, using escape value
-                ``prompt_esc_char`` of matching regular expression values for
-                ``prompt_escapes``, and the following value lookup table:
-
-              '%%'     a single '%'
-              '%#'     prompt character
-              '%u'     username
-              '%h'     hostname
-              '%H'     full hostname
-              '%$'     value of session parameter following $
-              '%?'     Return code last command processed
-              '%000'   8-bit character for octal '077'
-              '%x00'   8-bit character for 16-bit hexidecimal pair
-              '%E'     Encoding of session
-              '%s'     name of shell
-              '%v'     version of shell
-              """
-            # TODO:
-            # '%t'     time of day in 12-hour AM/PM format
-            # '%T'     time of day in 24-hour format
-            # '%p'     time of day in 12-hour format with seconds
-            # '%P'     time of day in 24-hour format with seconds
-            # '%d      The weekday in `Day' format.
-            # '%D'     The day in `dd' format.
-            # '%w'     The month in `Mon' format.
-            # '%W'     The month in `mm' format.
-            # '%y'     The year in `yy' format.
-            # '%Y'     The year in `yyyy' format.
-            esc_char = self.prompt_esc_char if esc_char is None else esc_char
-            if input == esc_char:
-                return esc_char
-            if input == '#':
-                return self.prompt_char
-            if input == 'u':
-                return self.server.env['USER']
-            if input == 'h':
-                return '{}'.format(
-                    self.server.server_name.result().split('.')[0]
-                    if self.server.server_name.done()
-                    else '')
-            if input == 'H':
-                return '{}'.format(self.server.server_fqdn.result()
-                                   if self.server.server_fqdn.done() else
-                                   self.server.server_name.result()
-                                   if self.server.server_name.done()
-                                   else '')
-            if input[0] == '$':
-                return self.server.env[input[1:]]
-            if input == '?':
-                if self.retval or self.retval == 0:
-                    return '{}'.format(self.retval & 255)
-                return ''
-            if input.isdigit():
-                return chr(int(input, 8))
-            if input.startswith('x'):
-                return chr(int('0x{}'.format(input[1:]), 16))
-            if input == 's':
-                return self.shell_name
-            if input == 'v':
-                return self.shell_ver
-            if input == 'E':
-                return '{}'.format(self.stream)
-            return input
-
-        def prompt_eval(input, literal_escape=True):
-            def _getter(match):
-                return _resolve_prompt(match.group('val'))
-            return self._eval(input, self._re_prompt, _getter, literal_escape)
-
-        return ('{}'.format(prompt_eval(
-            self.server.env['PS2'] if self.is_multiline
-            else self.server.env['PS1'])))
+        ps = (self.server.env['PS2'] if self.is_multiline
+              else self.server.env['PS1'])
+        return ('{}'.format(prompt_eval(self, ps)))
 
     def display_exception(self, *exc_info):
         """ Dispaly exception to client when ``show_traceback`` is True,
@@ -1188,3 +1118,100 @@ def name_unicode(ucs):
     elif not ucs.isprintable():
         ucs = r'\x{:02x}'.format(ord(ucs))
     return ucs
+
+
+def _resolve_prompt(shell, input, esc_char=None):
+    """ Escape prompt characters and return value, using escape value
+        ``prompt_esc_char`` of matching regular expression values for
+        ``prompt_escapes``, and the following value lookup table::
+
+          '%%'     a single '%'.
+          '%#'     prompt character.
+          '%u'     username.
+          '%h'     hostname.
+          '%H'     full hostname.
+          '%$'     value of session parameter following $.
+          '%?'     Return code last command processed.
+          '%000'   8-bit character for octal '077'.
+          '%x00'   8-bit character for 16-bit hexidecimal pair.
+          '%E'     Encoding of session.
+          '%s'     name of shell.
+          '%v'     version of shell.
+          '%t'     time of day in 12-hour AM/PM format.
+          '%T'     time of day in 24-hour format.
+          '%p'     time of day in 12-hour format with seconds, AM/PM format.
+          '%P'     time of day in 24-hour format with seconds.
+          '%d      The weekday in `Day' format.
+          '%D'     The day in `dd' format.
+          '%w'     The month in `Mon' format.
+          '%W'     The month in `mm' format.
+          '%y'     The year in `yy' format.
+          '%Y'     The year in `yyyy' format.
+          '%z'     The timezone in `[-+]NNNN' format.
+          '%Z'     The timezone name in `TZNAME' format.
+      """
+    esc_char = shell.prompt_esc_char if esc_char is None else esc_char
+    if input == esc_char:
+        return esc_char
+    if input == '#':
+        return shell.prompt_char
+    if input == 'u':
+        return shell.server.env['USER']
+    if input == 'h':
+        return '{}'.format(
+            shell.server.server_name.result().split('.')[0]
+            if shell.server.server_name.done()
+            else '')
+    if input == 'H':
+        return '{}'.format(shell.server.server_fqdn.result()
+                           if shell.server.server_fqdn.done() else
+                           shell.server.server_name.result()
+                           if shell.server.server_name.done()
+                           else '')
+    if input[0] == '$':
+        return shell.server.env[input[1:]]
+    if input == '?':
+        if shell.retval or shell.retval == 0:
+            return '{}'.format(shell.retval & 255)
+        return ''
+    if input.isdigit():
+        return chr(int(input, 8))
+    if input.startswith('x'):
+        return chr(int('0x{}'.format(input[1:]), 16))
+    if input == 's':
+        return shell.shell_name
+    if input == 'v':
+        return shell.shell_ver
+    if input == 'E':
+        return shell.stream.__str__()
+    if input == 't':
+        return time.strftime('%I:%M%p')
+    if input == 'T':
+        return time.strftime('%H:%M')
+    if input == 'p':
+        return time.strftime('%I:%M:%S %p')
+    if input == 'P':
+        return time.strftime('%H:%M:%S')
+    if input == 'd':
+        return time.strftime('%a')
+    if input == 'D':
+        return time.strftime('%D')
+    if input == 'w':
+        return time.strftime('%b')
+    if input == 'W':
+        return time.strftime('%d')
+    if input == 'y':
+        return time.strftime('%y')
+    if input == 'Y':
+        return time.strftime('%Y')
+    if input == 'z':
+        return time.strftime('%z')
+    if input == 'Z':
+        return time.strftime('%Z')
+    return input
+
+
+def prompt_eval(shell, input, literal_escape=True):
+    def _getter(match):
+        return _resolve_prompt(shell, match.group('val'))
+    return shell._eval(input, shell._re_prompt, _getter, literal_escape)
