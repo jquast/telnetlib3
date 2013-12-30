@@ -50,6 +50,8 @@ SLC_TAB = {SLC_FORW1: SLC(SLC_NOSUPPORT, _POSIX_VDISABLE),
 
 
 class HoneyShell(Telsh):
+    show_traceback = False
+
     def __init__(self, server, stream=TelnetShellStream, log=logging):
         Telsh.__init__(self, server, stream, log)
         self.behaviors = [

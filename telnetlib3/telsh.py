@@ -215,7 +215,7 @@ class Telsh():
         ])
 
     #: display full traceback to output stream ``display_exception()``
-    show_traceback = False
+    show_traceback = True
 
     #: Whether to send video attributes; toggled by ``set_term()``, updated
     #  to 'True' in certain conditions in callback ``term_received()``.
