@@ -308,6 +308,13 @@ class Telsh():
             term.startswith('ansi') or
             term == 'linux' or term == 'screen')
 
+    def winsize_received(self, lines, columns):
+        """ .. method:: winsize_received(lines : int, columns : int)
+
+            callback fired by telnet iac to set or update window size
+        """
+        pass
+
     def bell(self):
         """ ..method:: bell()
 

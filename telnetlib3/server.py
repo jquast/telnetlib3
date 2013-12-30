@@ -624,8 +624,19 @@ class TelnetServer(asyncio.protocols.Protocol):
                     env['TIMEOUT'], err))
                 del env['TIMEOUT']
         if 'TERM' in env:
-            env['TERM'] = env['TERM'].lower()
-            self.shell.term_received(env['TERM'])
+            if env['TERM']:
+                env['TERM'] = env['TERM'].lower()
+                self.shell.term_received(env['TERM'])
+            else:
+                del env['TERM']
+        if 'COLUMNS' in env:
+            if not env['COLUMNS']:
+                del env['COLUMNS']
+        if 'LINES' in env:
+            if not env['LINES']:
+                del env['LINES']
+        if 'LINES' in env and 'COLUMNS' in env:
+            self.shell.winsize_received(int(env['LINES']), int(env['COLUMNS']))
         self.log.debug('env_update: %r', env)
         self._client_env.update(env)
 
