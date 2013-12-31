@@ -217,39 +217,6 @@ class TalkerShell(Telsh):
             '\r\n'.join(sorted(output))))
         return 0
 
-    def cmdset_help(self, *args):
-        if not len(args):
-            self.stream.write('\r\nAvailable commands:\r\n')
-            self.stream.write(', '.join(self.cmdset_autocomplete.keys()))
-            return 0
-        cmd = args[0].lower()
-        if cmd == 'help':
-            self.stream.write('\r\nDON\'T PANIC.')
-            return -42
-        elif cmd == 'logoff':
-            self.stream.write('\r\nTerminate connection.')
-        elif cmd == 'status':
-            self.stream.write('\r\nDisplay operating parameters.')
-        elif cmd == 'users':
-            self.stream.write('\r\nList connected clients.')
-        elif cmd == 'whoami':
-            self.stream.write('\r\nDisplay session identifier.')
-        elif cmd == 'whereami':
-            self.stream.write('\r\nDisplay server name')
-        elif cmd == 'toggle':
-            self.stream.write('\r\nToggle operating parameters.')
-        elif cmd == 'join':
-            self.stream.write('\r\nSwitch-to talker channel.')
-        elif cmd == 'part':
-            self.stream.write('\r\nSwitch-off talker channel.')
-        elif cmd == 'nick':
-            self.stream.write('\r\nSet your handle.')
-        else:
-            return 1
-        if (cmd and cmd in self.cmdset_autocomplete
-                and self.cmdset_autocomplete[cmd] is not None):
-            self.stream.write('\r\n{}'.format(', '.join(
-                self.cmdset_autocomplete[cmd].keys())))
         return 0
 
     def say(self, data):
