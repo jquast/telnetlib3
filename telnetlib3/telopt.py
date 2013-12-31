@@ -1389,7 +1389,7 @@ class TelnetStream:
         assert opt in (IS, SEND), opt
         opt_kind = 'IS' if opt == IS else 'INFO' if opt == INFO else 'SEND'
         if opt == IS:
-            assert self.is_client, ('SE: cannot recv from server: {} {}'
+            assert self.is_server, ('SE: cannot recv from server: {} {}'
                                     .format(name_command(cmd), opt_kind,))
             rx, tx = str(), str()
             while len(buf):
@@ -1411,6 +1411,8 @@ class TelnetStream:
                 return
             self._ext_callback[TSPEED](rx, tx)
         elif opt == SEND:
+            assert self.is_client, ('SE: cannot recv from client: {} {}'
+                                    .format(name_command(cmd), opt_kind,))
             (rx, tx) = self._ext_send_callback[TSPEED]()
             assert (type(rx), type(tx),) == (int, int), (rx, tx)
             brx = '{}'.format(rx).encode('ascii')
