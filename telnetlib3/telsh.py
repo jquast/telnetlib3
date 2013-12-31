@@ -888,7 +888,8 @@ class Telsh():
                 '{}{} [{}]'.format('\r\n' if num % 4 == 0 else '',
                                    opt, self.standout('ON') if enabled
                                    else self.dim('off'))
-                for num, (opt, enabled) in enumerate(sorted(tbl_opt.items()))))
+                for num, (opt, enabled) in enumerate(
+                    sorted(tbl_opt.items()))))
             return 0
         opt = args[0].lower()
         if len(args) > 1:
