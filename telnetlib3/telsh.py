@@ -899,44 +899,37 @@ class Telsh():
             self.stream.write('\r\ntoggle: not option.')
             return 1
         if opt in ('echo', '_all'):
-            _opt = 'echo' if opt == '_all' else opt
-            cmd = (telopt.WONT if tbl_opt[_opt] else telopt.WILL)
+            cmd = (telopt.WONT if tbl_opt['echo'] else telopt.WILL)
             self.server.stream.iac(cmd, telopt.ECHO)
             self.stream.write('\r\n{} echo.'.format(
                 telopt.name_command(cmd).lower()))
         if opt in ('outbinary', 'binary', '_all'):
-            _opt = 'outbinary' if opt in ('_all', 'binary') else opt
-            cmd = (telopt.WONT if tbl_opt[_opt] else telopt.WILL)
+            cmd = (telopt.WONT if tbl_opt['outbinary'] else telopt.WILL)
             self.server.stream.iac(cmd, telopt.BINARY)
             self.stream.write('\r\n{} binary.'.format(
                 telopt.name_command(cmd).lower()))
         if opt in ('inbinary', 'binary', '_all'):
-            _opt = 'inbinary' if opt in ('_all', 'binary') else opt
-            cmd = (telopt.DONT if tbl_opt[_opt] else telopt.DO)
+            cmd = (telopt.DONT if tbl_opt['inbinary'] else telopt.DO)
             self.server.stream.iac(cmd, telopt.BINARY)
             self.stream.write('\r\n{} binary.'.format(
                 telopt.name_command(cmd).lower()))
         if opt in ('goahead', '_all'):
-            _opt = 'goahead' if opt == '_all' else opt
-            cmd = (telopt.WILL if tbl_opt[_opt] else telopt.WONT)
+            cmd = (telopt.WILL if tbl_opt['goahead'] else telopt.WONT)
             self.stream.send_go_ahead = cmd is telopt.WONT
             self.server.stream.iac(cmd, telopt.SGA)
             self.stream.write('\r\n{} supress go-ahead.'.format(
                 telopt.name_command(cmd).lower()))
         if opt in ('bell', '_all'):
-            _opt = 'bell' if opt == '_all' else opt
-            self.send_bell = not tbl_opt[_opt]
+            self.send_bell = not tbl_opt['bell']
             self.stream.write('\r\nbell {}abled.'.format(
                 'en' if self.send_bell else 'dis'))
         if opt in ('xon-any', '_all'):
-            _opt = 'xon-any' if opt == '_all' else opt
-            self.server.stream.xon_any = not tbl_opt[_opt]
+            self.server.stream.xon_any = not tbl_opt['xon-any']
             self.server.stream.send_lineflow_mode()
             self.stream.write('\r\nxon-any {}abled.'.format(
                 'en' if self.server.stream.xon_any else 'dis'))
         if opt in ('color', '_all'):
-            _opt = 'color' if opt == '_all' else opt
-            self.does_styling = not self.does_styling
+            self.does_styling = not tbl_opt['color']
             self.stream.write('\r\ncolor {}.'.format(
                 'on' if self.does_styling else 'off'))
         return 0
