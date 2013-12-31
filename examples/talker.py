@@ -234,7 +234,8 @@ class TalkerShell(Telsh):
     MAX_NICK = 9
 
     #: Maximum channel size
-    MAX_CHAN = 32
+    MAX_CHAN = 24
+
     #: Has a prompt yet been displayed? (after_telopt_negotiation)
     _prompt_displayed = False
 
