@@ -190,19 +190,23 @@ class TalkerShell(Telsh):
     #: A cyclical collections.OrderedDict of command names and nestable
     #  arguments, or None for end-of-command, used by ``tab_received()``
     #  to provide autocomplete and argument cycling.
-    cmdset_autocomplete = collections.OrderedDict([
-        ('/help', collections.OrderedDict([
-            ('status', None),
-            ('whoami', None),
+    autocomplete_cmdset = collections.OrderedDict(sorted([
+        ('/help', collections.OrderedDict(sorted([
             ('toggle', None),
-            ('logoff', None),
+            ('status', None),
+            ('slc', None),
+            ('whoami', None),
             ('whereami', None),
+            ('channels', None),
+            ('users', None),
             ('nick', None),
             ('join', None),
             ('part', None),
+            ('say', None),
+            ('me', None),
             ('quit', None),
-            ]), ),
-        ('/toggle', collections.OrderedDict([
+            ])), ),
+        ('/toggle', collections.OrderedDict(sorted([
             ('echo', None),
             ('outbinary', None),
             ('inbinary', None),
@@ -210,18 +214,21 @@ class TalkerShell(Telsh):
             ('color', None),
             ('xon-any', None),
             ('bell', None),
-            ]), ),
+            ('fullscreen', None),
+            ])), ),
         ('/status', None),
         ('/slc', None),
         ('/whoami', None),
         ('/whereami', None),
         ('/channels', None),
         ('/users', None),
-        ('/logoff', None),
         ('/nick', None),
         ('/join', None),
         ('/part', None),
-        ])
+        ('/say', None),
+        ('/me', None),
+        ('/quit', None),
+        ]))
 
     #: Maximum nickname size
     MAX_NICK = 9
