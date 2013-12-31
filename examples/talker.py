@@ -29,8 +29,14 @@ ARGS.add_argument(
     '--loglevel', action="store", dest="loglevel",
     default='info', type=str, help='Loglevel (debug,info)')
 
-
 clients = {}
+
+# TODO: We should be using blessings(terminfo database), for various
+#       terminal capabilities used here, would require dispatching
+#       terminfo lookups to subprocesses.
+# TODO: If we do use blessings, we could use the keyboard-awareness
+#       branch to provide readline history abilities.
+
 
 class TalkerServer(TelnetServer):
     def __init__(self,
