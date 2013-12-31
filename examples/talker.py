@@ -15,9 +15,8 @@ import logging
 import time
 import sys
 
-import telnetlib3
-from telnetlib3.telsh import name_unicode
 import asyncio
+from telnetlib3 import Telsh, TelnetStream, TelnetServer
 
 ARGS = argparse.ArgumentParser(description="Run simple telnet server.")
 ARGS.add_argument(
@@ -33,13 +32,19 @@ ARGS.add_argument(
 
 clients = {}
 
+class TalkerServer(TelnetServer):
+    def __init__(self,
+                 shell=Telsh,
+                 stream=TelnetStream,
+                 encoding='utf8',
+                 log=logging):
+        super().__init__(shell, stream, encoding, log)
 
-class TalkerServer(telnetlib3.TelnetServer):
     # remove 'USER' as a readonly env, we use this to set the actual /nick
     readonly_env = ['HOSTNAME', 'REMOTE_IP', 'REMOTE_HOST', 'REMOTE_PORT',]
 
     def connection_made(self, transport):
-        telnetlib3.TelnetServer.connection_made(self, transport)
+        super().connection_made(transport)
 
         global clients
         self.id = (self.client_ip, self.client_port)
@@ -59,18 +64,18 @@ class TalkerServer(telnetlib3.TelnetServer):
 
     def connection_lost(self, exc):
         self._test_lag.cancel()
-        telnetlib3.TelnetServer.connection_lost(self, exc)
+        super().connection_lost(exc)
         global clients
         clients.pop(self.id, None)
 
     def after_telopt_negotiation(self, status):
-        telnetlib3.TelnetServer.after_telopt_negotiation(self, status)
         if not status.cancelled():
             if self.env['USER'] == 'unknown':
                 self.shell.stream.write('\r\n'
                                         '** Set your nickname using /nick'
                                         '\r\n')
                 self.shell.display_prompt()
+        super().after_telopt_negotiation(status)
 
     def send_timing_mark(self):
         from telnetlib3.telopt import DO, TM
@@ -89,7 +94,7 @@ class TalkerServer(telnetlib3.TelnetServer):
         self.shell.display_prompt(redraw=True)
 
 
-class TalkerShell(telnetlib3.Telsh):
+class TalkerShell(Telsh):
     """ A remote line editing shell for a "talker" implementation.
     """
     #: name of shell %s in prompt escape
