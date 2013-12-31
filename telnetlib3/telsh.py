@@ -190,8 +190,8 @@ class Telsh():
     #: A cyclical collections.OrderedDict of command names and nestable
     #  arguments, or None for end-of-command, used by ``tab_received()``
     #  to provide autocomplete and argument cycling.
-    cmdset_autocomplete = collections.OrderedDict([
-        ('help', collections.OrderedDict([
+    autocomplete_cmdset = collections.OrderedDict(sorted([
+        ('help', collections.OrderedDict(sorted([
             ('status', None),
             ('whoami', None),
             ('toggle', None),
@@ -199,7 +199,7 @@ class Telsh():
             ('whereami', None),
             ('set', None),
             ('echo', None),
-            ]), ),
+            ])), ),
         ('echo', None),
         ('status', None),
         ('set', None),  # args injected during tab_received()
@@ -216,7 +216,7 @@ class Telsh():
             ('bell', None),
             ]), ),
         ('logoff', None),
-        ])
+        ]))
 
     #: display full traceback to output stream ``display_exception()``
     show_traceback = True
