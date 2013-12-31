@@ -53,19 +53,17 @@ class TalkerServer(TelnetServer):
     def connection_made(self, transport):
         super().connection_made(transport)
 
+        # register channel in global list `clients', which it is removed from
+        # on disconnect. This is used for a very primitive, yet effective
+        # method of IPC and client<->server<->client communication.
         global clients
         self.id = (self.client_ip, self.client_port)
         clients[self.id] = self
-        self.env_update(
-            {   # the default 'channel',
-                'CHANNEL': '#default',
-                # {shell}-{version} [Lag: {2.2f}s] [#channel]
-                'PS1': '%s-%v [Lag: %$LAG] [%$CHANNEL] ',
-                # timeout is 6h (360m)
-                'TIMEOUT': '360',
-                # Lag/pingtime, measured with TM (Timing Mark)
-                'LAG': '??',
-            })
+        self.env_update({'CHANNEL': '#default',
+                         'PS1': '[Lag: %$LAG] [%$CHANNEL] ',
+                         'TIMEOUT': '360',
+                         'LAG': '??',
+                         })
         self._ping = time.time()
         self._test_lag = self._loop.call_soon(self.send_timing_mark)
 
