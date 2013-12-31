@@ -29,7 +29,7 @@ class TelnetServer(asyncio.protocols.Protocol):
         kludge mode, and finally default NVT half-duplex local-line mode.
     """
     #: mininum on-connect time to wait for client-initiated negotiation options
-    CONNECT_MINWAIT = 2.00
+    CONNECT_MINWAIT = 0.50
     #: maximum on-connect time to wait for client-initiated negotiation options
     #  before negotiation is considered 'final'. some telnet clients will fail
     #  to acknowledge bi-directionally, appearing as a timeout, while others
