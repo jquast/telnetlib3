@@ -156,13 +156,12 @@ class TelnetShellStream():
     def __str__(self):
         """ Returns string describing state of stream encoding.
         """
-        encoding = '{}{}'.format(
-            self.server.encoding(incoming=True),
-            '' if self.server.encoding(outgoing=True)
-            == self.server.encoding(incoming=True)
-            else ' in, {} out'.format(self.server.encoding(outgoing=True)))
-        return encoding
-
+        enc_in = self.server.encoding(incoming=True)
+        enc_out = self.server.encoding(outgoing=True)
+        if enc_in == enc_out:
+            return enc_in
+        else:
+            return '{} in, {} out'.format(enc_in, enc_out)
 
 class Telsh():
     """ A remote line editing shell for host command processing.
