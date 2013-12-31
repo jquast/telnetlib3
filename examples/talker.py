@@ -46,8 +46,9 @@ class TalkerServer(TelnetServer):
                  log=logging):
         super().__init__(shell, stream, encoding, log)
 
-    # remove 'USER' as a readonly env, we use this to set the actual /nick
-    readonly_env = ['HOSTNAME', 'REMOTE_IP', 'REMOTE_HOST', 'REMOTE_PORT',]
+        if 'USER' in self.readonly_env:
+            self.readonly_env.remove('USER')
+        self._test_lag = asyncio.Future()
 
     def connection_made(self, transport):
         super().connection_made(transport)
