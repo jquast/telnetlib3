@@ -3,8 +3,9 @@ import traceback
 import logging
 import codecs
 import shlex
-import re
+import time
 import sys
+import re
 
 from . import slc
 from . import telopt
