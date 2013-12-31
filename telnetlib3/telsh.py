@@ -600,8 +600,8 @@ class Telsh():
         """ Receive a single (non-editing) Unicode character.
         """
         CR, LF, NUL = '\r\n\x00'
-        self.log.debug('character_received: {!r} literal={}'.format(
-            char, literal))
+#        self.log.debug('character_received: {!r} literal={}'.format(
+#            char, literal))
 
         # a printable ASCII representation of unprintables,
         char_disp = (char
