@@ -22,8 +22,8 @@ TODO: TelnetClient (also using TelnetStreamReader)
       a tty-driven interface of some sort to rapidly test it
 TODO: fingerprinting Client & Server
       somewhere there with examples/honeypot.py
-TODO: nosetests
-TODO: example MUD server
+TODO: tests :-)
+TODO: example MUD server, or nibbles, or pong, something worth playing
 TODO: example wunderground.com client
 
 telsh
