@@ -25,8 +25,6 @@ TODO: fingerprinting Client & Server
 TODO: nosetests
 TODO: example MUD server
 TODO: example wunderground.com client
-TODO: enough commands... roll-up into .__doc__ for help, and dispatch
-      by matching cmdset_{command} names.
 
 telsh
 =====
