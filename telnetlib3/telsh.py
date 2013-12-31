@@ -712,17 +712,16 @@ class Telsh():
         tbl_exception = (
             traceback.format_tb(exc_info[2]) +
             traceback.format_exception_only(exc_info[0], exc_info[1]))
-        level = logging.ERROR
         for num, tb in enumerate(tbl_exception):
             tb_msg = tb.splitlines()
             if self.show_traceback:
-                self.stream.write('\r\n' + '\r\n>> '.join(
+                self.stream.write('\r\n' + '\r\n'.join(
                     self.standout(row.rstrip())
                     if num == len(tbl_exception) - 1
                     else row.rstrip() for row in tb_msg))
             tbl_srv = [row.rstrip() for row in tb_msg]
             for line in tbl_srv:
-                self.log.log(level, line)
+                self.log.log(logging.ERROR, line)
 
     def process_cmd(self, input):
         """ .. method:: process_cmd(input : string) -> int
