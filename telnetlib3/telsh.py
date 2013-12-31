@@ -80,7 +80,9 @@ class TelnetShellStream():
         errors = errors if errors is not None else self.encoding_errors
         assert isinstance(string, str), string
         try:
-            self.server.stream.write(self.encode(string, errors))
+            bytestring = self.encode(string, errors)
+            self.log.debug('write: {!r}'.format(bytestring))
+            self.server.stream.write(bytestring)
         except LookupError as err:
             assert (self.server.encoding(outgoing=True)
                     != self.server._default_encoding)
