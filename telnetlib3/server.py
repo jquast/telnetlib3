@@ -612,10 +612,7 @@ class TelnetServer(asyncio.protocols.Protocol):
             task.cancel()
 
     def env_update(self, env):
-        " Callback receives no environment variables "
-        # if client sends a readonly_env variable as part of host neogitation,
-        # such as volunteering their 'HOSTNAME', replace it with the same name,
-        # prefixed by '_'.
+        " Callback receives new environment variables "
         if 'TIMEOUT' in env:
             try:
                 val = int(env['TIMEOUT'])
