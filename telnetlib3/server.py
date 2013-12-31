@@ -633,10 +633,10 @@ class TelnetServer(asyncio.protocols.Protocol):
         if 'LINES' in env:
             if not env['LINES']:
                 del env['LINES']
-        if 'LINES' in env and 'COLUMNS' in env:
-            self.shell.winsize_received(int(env['LINES']), int(env['COLUMNS']))
         self.log.debug('env_update: %r', env)
         self._client_env.update(env)
+        if 'LINES' in env and 'COLUMNS' in env:
+            self.shell.winsize_received(int(env['LINES']), int(env['COLUMNS']))
 
     def after_client_lookup(self, arg):
         """ Callback receives result of client name resolution,
