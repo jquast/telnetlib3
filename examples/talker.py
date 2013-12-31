@@ -73,6 +73,33 @@ class TalkerServer(TelnetServer):
         global clients
         clients.pop(self.id, None)
 
+    def begin_negotiation(self):
+        """ Begin negotiation just as the standard TelnetServer,
+            except that the prompt is not displayed early.  Instead,
+            display a banner, showing the prompt only *after*
+            negotiation has completed (or timed out).
+        """
+        if self._closing:
+            self._telopt_negotiation.cancel()
+            return
+        from telnetlib3.telopt import DO, TTYPE
+        self.stream.iac(DO, TTYPE)
+        self._loop.call_soon(self.check_telopt_negotiation)
+        self.display_banner()
+
+    def display_banner(self):
+        """ Our own on-connect banner. """
+        from telnetlib3.telsh import prompt_eval
+        # we do not display the prompt until negotiation
+        # is considered succesful.
+        self.shell.display_text(
+            prompt_eval(self.shell, u'\r\n'.join((
+                u'', u'',
+                u'Welcome to %s version %v',
+                u'Local time is %t %Z (%z)',
+                u'Plese wait... {}'.format(random_busywait()),
+                u'',))))
+
     def after_telopt_negotiation(self, status):
         if not status.cancelled():
             if self.env['USER'] == 'unknown':
@@ -384,6 +411,40 @@ class TalkerShell(Telsh):
         if self.mode_fullscreen:
             self.exit_fullscreen()
         return self.server.logout()
+
+def random_busywait():
+    # Just a silly function for the on-connect banner
+    import random
+    word_a = random.choice(('initializing', 'indexing', 'configuring',
+                            'particulating', 'prioritizing',
+                            'preparing', 'iterating', 'modeling',
+                            'generating', 'gathering', 'computing',
+                            'building', 'resolving', 'adjusting',
+                            're-ordering', 'sorting', 'allocating',
+                            'multiplexing', 'scheduling', 'routing',
+                            'parsing', 'pairing', 'partitioning',
+                            'refactoring', 'factoring', 'freeing',
+                            'repositioning',
+                            ))
+    word_b = random.choice(('b-tree', 'directory', 'hash',
+                            'random-order', 'compute', 'lookup',
+                            'in-order', 'inverse', 'root',
+                            'first-order', 'threaded',
+                            'priority', 'bit', 'circular',
+                            'bi-directional', 'multi-dimensional',
+                            'decision', 'module', 'dynamic',
+                            'associative', 'linked', 'acyclic',
+                            'radix', 'binomial', 'binary', 'parallel',
+                            'sparse', 'cartesian', 'redundant',
+                            'duplicate', 'unique', ))
+    word_c = random.choice(('structure', 'tree', 'datasets',
+                            'stores', 'jobs', 'functions',
+                            'callbacks', 'matrices', 'arrays',
+                            'tables', 'queues', 'fields', 'stack',
+                            'heap', 'segments', 'map', 'graph',
+                            'namespaces', 'procedure', 'processes',
+                            'lists', 'sectors', 'stackframe',))
+    return u'{} {} {}'.format(word_a.capitalize(), word_b, word_c)
 
 
 def start_server(loop, log, host, port):
