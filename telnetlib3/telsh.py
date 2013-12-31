@@ -851,7 +851,7 @@ class Telsh():
         " Display special line editing characters. "
         # TODO: support re-assignment
         from .slc import name_slc_command, theNULL
-        self.stream.write('\r\nSpecial Line Characters:\r\n{}'.format(
+        self.stream.write('Special Line Characters:\r\n{}'.format(
             '\r\n'.join(['{:>10}: {}'.format(
                 name_slc_command(slc_func), slc_def)
                 for (slc_func, slc_def) in sorted(
