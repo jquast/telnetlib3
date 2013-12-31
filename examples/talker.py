@@ -110,9 +110,9 @@ class TalkerServer(TelnetServer):
             return
         mynick = self.env['USER']
         if mynick == 'unknown':
-            self.shell.display_text(u''.join(
+            self.shell.display_text(u''.join((
                 '\r\n', '{} Set your nickname using /nick'.format(
-                    self.shell.standout('!!')), '\r\n'))
+                    self.shell.standout('!!')), '\r\n')))
         else:
             for client in clients.values():
                 while (client != self and
