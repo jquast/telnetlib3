@@ -161,60 +161,25 @@ class TalkerShell(Telsh):
             self.bell()
 
     def process_cmd(self, data):
-        """ .. method:: process_cmd(input : string) -> int
-
-            Callback from ``line_received()`` for input line processing.
+        """ Callback from ``line_received()`` for input line processing.
 
             Derived from telsh: this 'talker' implementation does not implement
             shell escaping (shlex). Anything beginning with '/' is passed to
-            cmdset_command; all else is passed to method 'say' (public chat)
+            cmdset_command with leading '/' removed, and certain commands
+            such as /assign, /set, /command, and; anything else is passed
+            to method 'cmdset_say' (public chat)
         """
+        self.display_text()
         if data.startswith('/'):
-            self.stream.write('\r\n')
-            return self.cmdset_command(*data.split(None, 1))
+            cmd, *args = data.split(None, 1)
+            self.log.info((data, cmd, args))
+            val = self.cmdset_command(cmd[1:], *args)
+            if val != None:
+                self.stream.write('\r\n')
+            return val
         if not data.strip():
             # Nothing to say!
             return 0
-        return self.say(data)
-
-    def cmdset_command(self, cmd, *args):
-        self.log.debug('command {!r}{!r}'.format(cmd, args))
-        if not len(cmd) and not len(args):
-            return None
-        if cmd in ('/help',):
-            return self.cmdset_help(*args)
-        elif cmd == '/debug':
-            return self.cmdset_debug(*args)
-        elif cmd in ('/quit', '/logoff',):
-            self.server.logout()
-        elif cmd == '/status':
-            self.display_status()
-        elif cmd == '/join':
-            return self.cmdset_join(*args)
-        elif cmd == '/part':
-            return self.cmdset_assign('CHANNEL=')
-        elif cmd == '/nick':
-            return self.cmdset_nick(*args)
-        elif cmd == '/channels':
-            return self.cmdset_channels()
-        elif cmd == '/users':
-            return self.cmdset_users()
-        elif cmd == '/whoami':
-            self.stream.write('\r\n{}.'.format(self.server.__str__()))
-        elif cmd == '/whereami':
-            return self.cmdset_whereami(*args)
-        elif cmd == '/toggle':
-            return self.cmdset_toggle(*args)
-        elif cmd == '/slc':
-            return self.cmdset_slc(*args)
-        elif cmd == '/debug':
-            return self.cmdset_debug(*args)
-        elif cmd:
-            disp_cmd = u''.join([name_unicode(char) for char in cmd])
-            self.stream.write('\r\n{!s}: command not found.'.format(disp_cmd))
-            return 1
-        return 0
-
     def cmdset_channels(self):
         """
         List active channels and number of users.
