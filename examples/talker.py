@@ -101,13 +101,33 @@ class TalkerServer(TelnetServer):
                 u'',))))
 
     def after_telopt_negotiation(self, status):
-        if not status.cancelled():
-            if self.env['USER'] == 'unknown':
-                self.shell.stream.write('\r\n'
-                                        '** Set your nickname using /nick'
-                                        '\r\n')
-                self.shell.display_prompt()
+        """ augment default callback, checking and warning if
+            /nick is unset, and displaying the prompt for the first
+            time (unless the user already smashed the return key.)
+        """
         super().after_telopt_negotiation(status)
+        if status.cancelled():
+            return
+        mynick = self.env['USER']
+        if mynick == 'unknown':
+            self.shell.display_text(u''.join(
+                '\r\n', '{} Set your nickname using /nick'.format(
+                    self.shell.standout('!!')), '\r\n'))
+        else:
+            for client in clients.values():
+                while (client != self and
+                       client.env['USER'] == self.env['USER']):
+                    self.env['USER'] = '{}_'.format(self.env['USER'])
+            if self.env['USER'] != mynick:
+                old, new = mynick, self.env['USER']
+                self.shell.display_text('{} Handle {} already taken, '
+                                        'using {}.'.format(
+                                            self.dim('**'),
+                                            self.standout(old),
+                                            self.standout(new)))
+        if not self.shell._prompt_displayed:
+            self.shell.display_text(u'')
+            self.shell.display_prompt()
 
     def send_timing_mark(self):
         from telnetlib3.telopt import DO, TM
@@ -208,21 +228,61 @@ class TalkerShell(Telsh):
 
     #: Maximum channel size
     MAX_CHAN = 32
+    #: Has a prompt yet been displayed? (after_telopt_negotiation)
+    _prompt_displayed = False
 
-    def line_received(self, input):
+    #: Fullscreen mode? (Entered when does_styling is True)
+    mode_fullscreen = False
+
+    def display_text(self, text=None):
+        """ prepare for displaying text to scroll region when fullscreen,
+            otherwise, simply output '\r\n', then display value of `text',
+            if any.  """
+        if self.mode_fullscreen and self.window_height:
+            # CSI y;x H, cursor address (y,x) (cup)
+            self.stream.write('\x1b[{};1H'.format(self.window_height - 1))
+            #self.stream.write('\r\n')
+        else:
+            self.stream.write('\r\n')
+        if text:
+            self.stream.write(text.rstrip())
+            self.stream.write('\r\n')
+
+    def line_received(self, text):
         """ Callback for each line received, processing command(s) at EOL.
         """
-        self.log.debug('line_received: {!r}'.format(input))
-        input = input.rstrip(self.strip_eol)
+        self.log.debug('line_received: {!r}'.format(text))
+        text = text.rstrip(self.strip_eol)
         try:
             self._lastline.clear()
-            retval = self.process_cmd(input)
-            if retval is not None:
-                self.stream.write('\r\n')
-                self.display_prompt()
+            self.process_cmd(text)
         except Exception:
-            self.display_exception(*sys.exc_info(), level=logging.INFO)
+            self.display_exception(*sys.exc_info())
             self.bell()
+        self.display_prompt()
+
+    def display_prompt(self, redraw=False):
+        """ Talker shell prompt supports fullscreen mode: when
+            fullscreen, send cursor position sequence for bottom
+            of window, prefixing the prompt string; otherwise
+            simply prefix with \r\n, or, only \r when redraw
+            is True (standard behavior).
+        """
+        from telnetlib3.telsh import name_unicode
+        if self.mode_fullscreen and self.window_height:
+            disp_char = lambda char: (
+                self.standout(name_unicode(char))
+                if not self.stream.can_write(char)
+                or not char.isprintable()
+                else char)
+            text = ''.join([disp_char(char) for char in self.lastline])
+            prefix = '\x1b[{};1H\x1b[K'.format(self.window_height)
+            output = ''.join((prefix, self.prompt, text,))
+            self.stream.write(output)
+            self.stream.send_ga()
+        else:
+            super().display_prompt(redraw)
+        self._prompt_displayed = True
 
     def process_cmd(self, data):
         """ Callback from ``line_received()`` for input line processing.
@@ -266,6 +326,36 @@ class TalkerShell(Telsh):
             self.display_text('fullscreen {}abled.'.format(
                 'en' if self.send_bell else 'dis'))
     cmdset_toggle.__doc__ = Telsh.cmdset_toggle.__doc__
+
+    def winsize_received(self, lines, cols):
+        """ Reset scrolling region size on receipt of winsize changes. """
+        self.enter_fullscreen(lines)
+        self.display_prompt()
+
+    @property
+    def window_height(self):
+        return int(self.server.env['LINES'])
+
+    def enter_fullscreen(self, lines=None):
+        """ Enter fullscreen mode (scrolling region, inputbar @bottom). """
+        lines = lines or self.window_height
+        if self.window_height and self.does_styling:
+            # (scroll region) CSI #1; #2 r: set scrolling region (csr)
+            self.stream.write('\x1b[1;{}r'.format(lines - 1))
+            # (move-to prompt) CSI y;x H, cursor address (y,x) (cup)
+            self.stream.write('\x1b[{};1H'.format(lines))
+            self.mode_fullscreen = True
+
+    def exit_fullscreen(self, lines=None):
+        """ Exit fullscreen mode. """
+        lines = lines or self.window_height
+        if lines and self.does_styling:
+            # CSI r: reset scrolling region (csr)
+            self.stream.write('\x1b[r')
+            self.stream.write('\x1b[{};1H'.format(lines))
+            self.stream.write('\r\x1b[K\r\n')
+        self.mode_fullscreen = False
+
     def cmdset_channels(self, *args):
         " List active channels and number of users. "
         channels = {}
