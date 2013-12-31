@@ -173,7 +173,10 @@ class Telsh():
     prompt_char = '%'
 
     #: regular expression pattern string for prompt escape sequences
-    re_prompt = r'(?P<val>\d{3}|x[0-9a-fA-F]{2}|\$([a-zA-Z_]+)|[Ee#\?hHusv])'
+    re_prompt = (r'(?P<val>\d{3}'
+                 r'|x[0-9a-fA-F]{2}'
+                 r'|\$([a-zA-Z_]+)'
+                 r'|[Ee#\?hHusvtTpPdDwWyYzZ])')
 
     #: regular expression pattern for echo variable matches, $var or ${var}
     re_echo = r'\${?(\?|[a-zA-Z_]+)}?'
