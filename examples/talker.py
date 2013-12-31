@@ -94,9 +94,41 @@ class TalkerServer(TelnetServer):
         self.env_update({'LAG': '{:0.2f}'.format(lag_time)})
         self._test_lag = self._loop.call_later(30, self.send_timing_mark)
 
-    def recieve(self, nick, msg):
-        self.shell.stream.write('\r\x1b[K{}: {}\r\n'.format(
-            self.shell.standout(nick), msg))
+    def recieve(self, action, *args):
+        if action == 'say':
+            (nick, msg) = args
+            self.shell.display_text('{}: {}'.format(
+                self.shell.standout(nick), msg))
+        elif action == 'me':
+            (nick, msg) = args
+            self.shell.display_text(
+                '{decorator} {nick} {msg}'
+                .format(decorator=self.shell.dim('*'),
+                        nick=nick,
+                        msg=msg))
+        elif action == 'join':
+            (nick, msg) = args
+            self.shell.display_text(
+                '{decorator} {nick} has joined {channel}{msg}'
+                .format(decorator=self.shell.dim('**'),
+                        nick=self.shell.standout(nick),
+                        channel=self.shell.dim(self.env['CHANNEL']),
+                        msg=' (:: {})'.format(msg) if msg else ''))
+        elif action == 'part':
+            (nick, msg) = args
+            self.shell.display_text(
+                '{decorator} {nick} has left {channel}{msg}'
+                .format(decorator=self.shell.dim('**'),
+                        nick=self.shell.standout(nick),
+                        channel=self.shell.dim(self.env['CHANNEL']),
+                        msg=' (:: {})'.format(msg) if msg else ''))
+        elif action == 'rename':
+            (newnick, oldnick) = args
+            self.shell.display_text(
+                '{decorator} {oldnick} has renamed to {newnick}'
+                .format(decorator=self.shell.dim('**'),
+                        oldnick=self.shell.standout(oldnick),
+                        newnick=self.shell.standout(newnick),))
         self.shell.display_prompt(redraw=True)
 
 
@@ -186,107 +218,173 @@ class TalkerShell(Telsh):
         if not data.strip():
             # Nothing to say!
             return 0
-    def cmdset_channels(self):
-        """
-        List active channels and number of users.
-        """
+        val = self.cmdset_say(data)
+        if val != None:
+            self.stream.write('\r\n')
+        return val
+
+    def cmdset_toggle(self, *args):
+        self.log.debug((self, args))
+        if len(args) is 0:
+            self.stream.write('{} [{}]'.format(
+                'fullscreen', self.standout('ON') if self.mode_fullscreen
+                else self.dim('off')))
+            return super().cmdset_toggle(*args)
+        opt = args[0].lower()
+        if opt in ('fullscreen', '_all'):
+            self.mode_fullscreen = not self.mode_fullscreen
+            if self.mode_fullscreen:
+                self.enter_fullscreen()
+            else:
+                self.exit_fullscreen()
+            self.display_text('fullscreen {}abled.'.format(
+                'en' if self.send_bell else 'dis'))
+    cmdset_toggle.__doc__ = Telsh.cmdset_toggle.__doc__
+    def cmdset_channels(self, *args):
+        " List active channels and number of users. "
         channels = {}
         for client in clients.values():
             channel = client.env['CHANNEL']
             channels[channel] = channels.get(channel, 0) + 1
-        self.stream.write("\r\n{}  {}".format(
+        self.stream.write("{}  {}".format(
             self.underline('channel'.rjust(15)),
             self.underline('# users')))
-        self.stream.write("\r\n\r\n{}".format(
+        self.stream.write("\r\n{}".format(
             '\r\n'.join([
                 "{:>15}  {:<7}".format(channel, num_users)
                 for channel, num_users in sorted(channels.items())])))
         return 0
 
-    def cmdset_users(self):
-        """
-        List clients currently connected.
-        """
-        self.stream.write("\r\n{}  {}  {}".format(
+    def cmdset_users(self, *args):
+        " List clients currently connected. "
+        self.stream.write("{}  {}  {}".format(
             self.underline('user'.rjust(15)),
             self.underline('channel'.rjust(15)),
             self.underline('origin'.rjust(15))))
-        output = ["{env[USER]:>15}  {env[CHANNEL]:>15}  {env[REMOTE_HOST]:>15}"
-                  .format(env=server.env) for server in clients.values()]
-        self.stream.write("\r\n\r\n{}".format(
-            '\r\n'.join(sorted(output))))
+        userlist = ['{env[USER]:>15}  '
+                    '{env[CHANNEL]:>15}  '
+                    '{env[REMOTE_HOST]:>15}'.format(env=server.env)
+                    for server in clients.values()]
+        self.stream.write("\r\n{}".format(
+            '\r\n'.join(sorted(userlist))))
         return 0
 
-        return 0
-
-    def say(self, data):
-
+    def broadcast(self, action, data):
         mynick = self.server.env['USER']
         mychan = self.server.env['CHANNEL']
 
-        # remove unprintable characters from 'data'
-        data = u''.join([name_unicode(char) for char in data])
-
         # validate within a channel, and /nick has been set,
         if not mychan:
-            self.stream.write('\r\nYou must first {} a channel !'.format(
+            self.stream.write('You must first {} a channel !'.format(
                 self.standout('/join')))
             return 1
+
         elif mynick == 'unknown':
             self.stream.write('\r\nYou must first set a {} !'.format(
                 self.standout('/nick')))
             return 1
 
-        # validate that our nickname isn't already taken, in
-        # which case we become blocked until we select a new /nick
-        for rc in ([client for client in clients.values()
-                    if client != self.server]):
-            if rc.env['USER'] == mynick:
-                self.stream.write('\r\nYou cannot speak! Your nickname {} is '
-                                  'already taken, select a new /nick !'.format(
-                                      self.standout(mynick)))
-                return 1
+        else:
+            # validate that our nickname isn't already taken, in
+            # which case we become blocked until we select a new /nick
+            for rc in ([client for client in clients.values()
+                        if client != self.server]):
+                if rc.env['USER'] == mynick:
+                    self.stream.write('Your nickname {} is already taken, '
+                                      'select a new /nick !'.format(
+                                          self.standout(mynick)))
+                    return 1
 
         # forward data to everybody in matching channel name
         for remote_client in ([client for client in clients.values()]):
             if remote_client.env['CHANNEL'] == mychan:
-                remote_client.recieve(mynick, data)
+                remote_client.recieve(action, mynick, data)
 
-        # loglevel info only for ourselves
-        self.log.info('{}/{}: {}'.format(mynick, mychan, data))
+        self.log.info('{} {} {}: {}'.format(mychan, mynick, action, data))
+        return None
+
+    def cmdset_me(self, *args):
+        " Broadcast 'action' message to current channel. "
+        from telnetlib3.telsh import name_unicode
+        # transpose any unprintable characters from input, to prevent a
+        # user from broadcasting cursor position sequences, for example.
+        msg = u''.join([name_unicode(char) for char in ' '.join(args)])
+        if msg:
+            return self.broadcast('me', msg)
+
+    def cmdset_say(self, *args):
+        " Broadcast message to current channel. "
+        from telnetlib3.telsh import name_unicode
+        # transpose any unprintable characters from input, to prevent a
+        # user from broadcasting cursor position sequences, for example.
+        msg = u''.join([name_unicode(char) for char in ' '.join(args)])
+        if msg:
+            return self.broadcast('say', msg)
 
     def cmdset_join(self, *args):
+        " Switch-to talker channel. "
         mynick = self.server.env['USER']
-        chan = args[0] if args else 'default'
-        chan = '#{}'.format(chan) if not chan.startswith('#') else chan
+        chan, msg = (args[0].split(None, 1) if args
+                     else ('default', ''))
+        if not chan.startswith('#'):
+            chan = '#{}'.format(chan)
         if len(chan) > self.MAX_CHAN:
-            self.stream.write('\r\nChannel name too long.')
+            self.stream.write('Channel name too long.')
             return 1
         self.cmdset_assign('CHANNEL={}'.format(chan))
-        self.log.info('{} has joined {}'.format(mynick, chan))
-        return 0
+        self.log.info('{} has joined {}{}'.format(
+            mynick, chan, msg and ': {}'.format(msg) or ''))
+        return self.broadcast('join', msg)
+
+    def cmdset_part(self, *args):
+        " Switch-off talker channel. "
+        mynick = self.server.env['USER']
+        chan, msg = (args[0].split(None, 1) if args
+                     else (self.server.env['CHANNEL'], ''))
+        if not chan:
+            self.stream.write('Channel not set.')
+            return 1
+        if not chan.startswith('#'):
+            chan = '#{}'.format(chan)
+        if len(chan) > self.MAX_CHAN:
+            self.stream.write('Channel name too long.')
+            return 1
+        val = self.broadcast('part', msg)
+        self.cmdset_assign('CHANNEL=')
+        self.log.info('{} has left {}{}'.format(
+            mynick, chan, msg and ': {}'.format(msg) or ''))
+        return val
 
     def cmdset_nick(self, *args):
+        " Display or change handle. "
         mynick = self.server.env['USER']
         if not args:
-            self.stream.write('\r\nYour name is {}'.format(
+            self.stream.write('Your handle is {}'.format(
                 self.standout(mynick)))
             return 0
-
         newnick = args[0]
         if len(newnick) > self.MAX_NICK:
-            self.stream.write('\r\nNickname too long.')
+            self.stream.write('Nickname too long.')
+            return 1
+        elif newnick == mynick:
+            self.stream.write('You is what it is.')
             return 1
         for client in clients.values():
             if client.env['USER'] == newnick:
-                self.stream.write('\r\nNickname {} already taken.'.format(
-                    self.standout(mynick)))
+                self.stream.write('Nickname {} already taken.'.format(
+                    self.standout(newnick)))
                 return 1
         self.cmdset_assign('USER={}'.format(newnick))
-        self.log.info('{} renamed to {}/{}'.format(mynick, newnick))
-        self.stream.write('\r\nYour name is now {}'.format(
+        self.log.info('{} renamed to {}'.format(mynick, newnick))
+        self.stream.write('Your name is now {}'.format(
             self.standout(newnick)))
-        return 0
+        return self.broadcast('rename', mynick)
+
+    def cmdset_quit(self, *args):
+        " Disconnect from server. "
+        if self.mode_fullscreen:
+            self.exit_fullscreen()
+        return self.server.logout()
 
 
 def start_server(loop, log, host, port):
