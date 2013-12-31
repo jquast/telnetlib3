@@ -435,12 +435,12 @@ class Telsh():
             XXX Callback for receipt of autocompletion key (default \t),
                 providing command or argument completion, using default
                 ``table`` of type ``OrderedDict``. If unspecified, the
-                instance attribute ``cmdset_autocomplete`` is used.
+                instance attribute ``autocomplete_cmdset`` is used.
         """
         self.log.debug('tab_received: {!r}'.format(input))
         # dynamic injection of variables for set command,
         cmd, args = input.rstrip(), []
-        table = self.cmdset_autocomplete if table is None else table
+        table = self.autocomplete_cmdset if table is None else table
         # inject session variables for set command,
         if 'set' in table:
             table['set'] = collections.OrderedDict([
@@ -756,26 +756,10 @@ class Telsh():
         self.log.debug('command {!r} {!r}'.format(cmd, args))
         if not len(cmd) and not len(args):
             return None
-        elif cmd in ('help', '?',):
-            return self.cmdset_help(*args)
-        elif cmd == '_debug':
-            return self.cmdset_debug(*args)
-        elif cmd == 'echo':
-            self.cmdset_echo(*args)
-        elif cmd in ('quit', 'exit', 'logoff', 'logout', 'bye'):
-            self.server.logout()
-        elif cmd == 'status':
-            self.display_status()
-        elif cmd == 'whoami':
-            self.stream.write('\r\n{}.'.format(self.server.__str__()))
-        elif cmd == 'whereami':
-            return self.cmdset_whereami(*args)
-        elif cmd == 'set':
-            return self.cmdset_set(*args)
-        elif cmd == 'slc':
-            return self.cmdset_slc(*args)
-        elif cmd == 'toggle':
-            return self.cmdset_toggle(*args)
+        cmd_funcname = 'cmdset_{}'.format(cmd)
+        if hasattr(self, cmd_funcname):
+            func = getattr(self, cmd_funcname)
+            return func(*args)
         elif '=' in cmd:
             return self.cmdset_assign(*((cmd,) + args))
         elif cmd:
@@ -784,7 +768,47 @@ class Telsh():
             return 1
         return 0
 
+    def cmdset_help(self, *args):
+        if not len(args):
+            self.stream.write('Available commands:\r\n')
+            self.stream.write(', '.join(self.autocomplete_cmdset.keys()))
+            return 0
+        cmd = args[0].lower()
+        if cmd == 'help':
+            self.stream.write("\r\nDON'T PANIC.")
+            return -42
+
+        method_name = 'cmdset_{}'.format(cmd)
+        if not hasattr(self, method_name):
+            self.stream.write('\r\nCommand not found.')
+            return 1
+        else:
+            method = getattr(self, method_name)
+            docstr = method.__doc__
+            docstr = 'No help available.' if docstr is None else docstr
+            self.stream.write('\r\n{}: {}'.format(cmd, docstr.strip()))
+            # display command arguments
+            if (cmd in self.autocomplete_cmdset
+                    and self.autocomplete_cmdset[cmd] is not None):
+                self.stream.write('\r\n{}'.format(', '.join(
+                    self.autocomplete_cmdset[cmd].keys())))
+        return 0
+
+    def cmdset_status(self, *args):
+        " Display session status. "
+        return self.display_status()
+
+    def cmdset_quit(self, *args):
+        " Disconnect from server. "
+        return self.server.logout()
+
+    def cmdset_whoami(self, *args):
+        " Display session identifier. "
+        self.stream.write('{}.'.format(self.server.__str__()))
+        return 0
+
     def cmdset_echo(self, *args):
+        " Display arguments. "
         def echo_eval(input, literal_escape=True):
             def _getter(match):
                 if match.group(1) == '?':
@@ -796,41 +820,9 @@ class Telsh():
         self.stream.write('\r\n{}'.format(output))
         return 0
 
-    def cmdset_help(self, *args):
-        if not len(args):
-            self.stream.write('\r\nAvailable commands:\r\n')
-            self.stream.write(', '.join(self.cmdset_autocomplete.keys()))
-            return 0
-        cmd = args[0].lower()
-        if cmd == 'help':
-            self.stream.write('\r\nDON\'T PANIC.')
-            return -42
-        elif cmd == 'logoff':
-            self.stream.write('\r\nTerminate connection.')
-        elif cmd == 'status':
-            self.stream.write('\r\nDisplay operating parameters.')
-        elif cmd == 'whoami':
-            self.stream.write('\r\nDisplay session identifier.')
-        elif cmd == 'set':
-            self.stream.write('\r\nSet or display session values.')
-        elif cmd == 'slc':
-            self.stream.write('\r\nDisplay Special Line Characters.')
-        elif cmd == 'whereami':
-            self.stream.write('\r\nDisplay server name')
-        elif cmd == 'toggle':
-            self.stream.write('\r\nView or toggle operating parameters.')
-        elif cmd == 'echo':
-            self.stream.write('\r\nDisplay arguments.')
-        else:
-            return 1
-        if (cmd and cmd in self.cmdset_autocomplete
-                and self.cmdset_autocomplete[cmd] is not None):
-            self.stream.write('\r\n{}'.format(', '.join(
-                self.cmdset_autocomplete[cmd].keys())))
-        return 0
-
     def cmdset_whereami(self, *args):
-        self.stream.write('\r\n{}'.format(
+        " Display server name. "
+        self.stream.write('{}'.format(
             (self.server.server_fqdn.result()
                 if self.server.server_fqdn.done()
                 else self.server.server_name.result()
@@ -839,7 +831,8 @@ class Telsh():
         return 0
 
     def cmdset_debug(self, *args):
-        self.stream.write('\r\nserver: DO')
+        " Display telnet option negotiation information. "
+        self.stream.write('server: DO')
         for cmd, enabled in self.server.stream.remote_option.items():
             if enabled:
                 self.stream.write(' {}'.format(telopt.name_command(cmd)))
@@ -855,6 +848,8 @@ class Telsh():
         return 0
 
     def cmdset_slc(self, *args):
+        " Display special line editing characters. "
+        # TODO: support re-assignment
         from .slc import name_slc_command, theNULL
         self.stream.write('\r\nSpecial Line Characters:\r\n{}'.format(
             '\r\n'.join(['{:>10}: {}'.format(
@@ -876,6 +871,7 @@ class Telsh():
         return 0
 
     def cmdset_toggle(self, *args):
+        " Display, set, or unset session options. "
         lopt = self.server.stream.local_option
         tbl_opt = dict([
             ('echo', lopt.enabled(telopt.ECHO)),
@@ -945,10 +941,7 @@ class Telsh():
         return 0
 
     def cmdset_set(self, *args):
-        """ The 'set' command recieved by client displays all environmentl
-            alues, or the value and key for a specified argument. When the
-            assignment operator, '=' is used, that value is assigned.
-        """
+        " Display or set operating parameters. "
         def disp_kv(key, val):
             """ display a shell-escaped version of value ``val`` of ``key``,
                 using terminal 'dim' attribute for read-only variables.
@@ -977,8 +970,7 @@ class Telsh():
         return retval
 
     def cmdset_assign(self, *args):
-        """ remote command: x=[val] set or unset session values.
-        """
+        " remote command: x=[val] set or unset session values. "
         if len(args) > 1:
             # x=1 y=2; evaluates right-left recursively
             self.cmdset_set(*args[1:])
