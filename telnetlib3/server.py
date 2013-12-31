@@ -457,7 +457,6 @@ class TelnetServer(asyncio.protocols.Protocol):
         self._last_received = datetime.datetime.now()
         self._restart_timeout()
         for byte in (bytes([value]) for value in data):
-
             try:
                 self.stream.feed_byte(byte)
             except (ValueError, AssertionError, NotImplementedError):
