@@ -689,7 +689,7 @@ class Telsh():
             if retval == '':
                 # we are in a line continuate
                 self.multiline = True
-                self.display_prompt(input='')
+                self.display_prompt(redraw=True)
             else:
                 if retval is not None:
                     # a command was processed
