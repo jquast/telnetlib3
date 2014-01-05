@@ -122,9 +122,9 @@ class TalkerServer(TelnetServer):
                 old, new = mynick, self.env['USER']
                 self.shell.display_text('{} Handle {} already taken, '
                                         'using {}.'.format(
-                                            self.dim('**'),
-                                            self.standout(old),
-                                            self.standout(new)))
+                                            self.shell.dim('**'),
+                                            self.shell.standout(old),
+                                            self.shell.standout(new)))
         if not self.shell._prompt_displayed:
             self.shell.display_text(u'')
             self.shell.display_prompt()
