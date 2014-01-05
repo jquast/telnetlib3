@@ -370,9 +370,11 @@ class Telsh():
             if not self.stream.can_write(char)
             or not char.isprintable()
             else char)
-        text = ''.join([disp_char(char) for char in self.lastline])
         if self.is_multiline:
-            text = text.split('\r')[-1]
+            text = self.lastline.split('\r')[-1]
+        else:
+            text = self.lastline
+        text = ''.join([disp_char(char) for char in text])
         # when 'redraw' is true, perform a 'carriage return'
         # followed by 'clear_eol' sequence, otherwise CR+LF is fine.
         prefix = '\r\x1b[K' if redraw else '\r\n'
