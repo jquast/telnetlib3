@@ -2,12 +2,15 @@
 """
 An example 'Talker' implementation using the telnetlib3 library.
 
-A talker is a chat system that people use to talk to each other.
-Dating back to the 1980s, they were a predecessor of instant messaging.
-People log into the talkers remotely (usually via telnet), and have
-a basic text interface with which to communicate with each other.
+    A talker is a chat system that people use to talk to each other.
+    Dating back to the 1980s, they were a predecessor of instant messaging.
+    People log into the talkers remotely (usually via telnet), and have
+    a basic text interface with which to communicate with each other.
 
-https://en.wikipedia.org/wiki/Talker
+    https://en.wikipedia.org/wiki/Talker
+
+This demonstrates augmenting the Telsh shell to provide an irc-like interface,
+as well as a "fullscreen" experience with basic terminal capabilities
 """
 import collections
 import argparse
@@ -39,6 +42,9 @@ clients = {}
 
 
 class TalkerServer(TelnetServer):
+    """ This TelnetServer implementation registers each new connection in a
+    globals `clients' hash, and recieves irc events by method `recieve'.
+    """
     def __init__(self,
                  shell=Telsh,
                  stream=TelnetStream,
