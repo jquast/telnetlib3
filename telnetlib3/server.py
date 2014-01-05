@@ -442,7 +442,8 @@ class TelnetServer(asyncio.protocols.Protocol):
             return
 
         else:
-            self.log.debug('TTYPE{} is {}, requesting another.'.format())
+            self.log.debug('TTYPE{} is {}, requesting another.'.format(
+                self._advanced, ttype))
             self.env_update({'TERM': ttype})
             self.stream.request_ttype()
             self._advanced += 1
