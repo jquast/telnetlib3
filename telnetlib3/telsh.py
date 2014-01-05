@@ -732,6 +732,7 @@ class Telsh():
             no command was processed, and '' indicates a continuation of
             multi-line.
         """
+        self.stream.write('\r\n')
         commands = []
         for cmd_args in input.split(';'):
             cmd, args = cmd_args.rstrip(), []
@@ -764,7 +765,7 @@ class Telsh():
             return self.cmdset_assign(*((cmd,) + args))
         elif cmd:
             disp_cmd = u''.join([name_unicode(char) for char in cmd])
-            self.stream.write('\r\n{!s}: command not found.'.format(disp_cmd))
+            self.stream.write('{!s}: command not found.'.format(disp_cmd))
             return 1
         return 0
 
@@ -775,18 +776,18 @@ class Telsh():
             return 0
         cmd = args[0].lower()
         if cmd == 'help':
-            self.stream.write("\r\nDON'T PANIC.")
+            self.stream.write("DON'T PANIC.")
             return -42
 
         method_name = 'cmdset_{}'.format(cmd)
         if not hasattr(self, method_name):
-            self.stream.write('\r\nCommand not found.')
+            self.stream.write('Command not found.')
             return 1
         else:
             method = getattr(self, method_name)
             docstr = method.__doc__
             docstr = 'No help available.' if docstr is None else docstr
-            self.stream.write('\r\n{}: {}'.format(cmd, docstr.strip()))
+            self.stream.write('{}: {}'.format(cmd, docstr.strip()))
             # display command arguments
             if (cmd in self.autocomplete_cmdset
                     and self.autocomplete_cmdset[cmd] is not None):
@@ -817,7 +818,7 @@ class Telsh():
                 return self.server.env[match.group(1)]
             return self._eval(input, self._re_echo, _getter, literal_escape)
         output = ' '.join(echo_eval(arg) for arg in args)
-        self.stream.write('\r\n{}'.format(output))
+        self.stream.write('{}'.format(output))
         return 0
 
     def cmdset_whereami(self, *args):
@@ -893,10 +894,10 @@ class Telsh():
             return 0
         opt = args[0].lower()
         if len(args) > 1:
-            self.stream.write('\r\ntoggle: too many arguments.')
+            self.stream.write('toggle: too many arguments.')
             return 1
         elif args[0] not in tbl_opt and opt != '_all':
-            self.stream.write('\r\ntoggle: not option.')
+            self.stream.write('toggle: not option.')
             return 1
         if opt in ('echo', '_all'):
             cmd = (telopt.WONT if tbl_opt['echo'] else telopt.WILL)
@@ -956,7 +957,6 @@ class Telsh():
                 retval = -1  # query unmatched
         if not args:
             # display all values
-            self.stream.write('\r\n')
             kv = [(_key, _val) for (_key, _val)
                   in sorted(self.server.env.items())]
             self.stream.write('\r\n'.join(['{key}={val}'.format(
