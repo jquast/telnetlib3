@@ -850,9 +850,11 @@ def describe_connection(server):
     hostname = (server.client_hostname.done() and
                 ' ({})'.format(server.client_hostname.result())
                 or '')
-    duration = '{:0.1f}s'.format(server.duration)
-    return ('{user} using {terminal} '
-            '{state} from {clientip}:{port}{hostname} after {duration}'
+    duration = '{}{:0.1f}s{}'.format(
+        'after ' if server._closing else '',
+        server.duration, ' ago' if not server._closing else '')
+    return ('{user} using {terminal} {state} from '
+            '{clientip}:{port}{hostname} {duration} ({idle:0.0f}s idle)'
             .format(
                 user=server.env['USER'],
                 terminal=server.env['TERM'],
@@ -860,5 +862,6 @@ def describe_connection(server):
                 clientip=server.client_ip,
                 port=server.client_port,
                 hostname=hostname,
-                duration=duration)
+                duration=duration,
+                idle=server.idle)
             )
