@@ -455,8 +455,7 @@ class TelnetServer(asyncio.protocols.Protocol):
             shell stream methods ``feed_byte()`` and ``feed_slc()``.
         """
         self.log.debug('data_received: {!r}'.format(data))
-        self._last_received = datetime.datetime.now()
-        self._restart_timeout()
+        recieved_inband = False
         for byte in (bytes([value]) for value in data):
             try:
                 self.stream.feed_byte(byte)
@@ -475,6 +474,11 @@ class TelnetServer(asyncio.protocols.Protocol):
             if self.stream.is_oob:
                 # byte is 'out-of-band', handled only by iac interpreter
                 continue
+            elif not recieved_inband:
+                # first inband recieved character resets timeout timer,
+                recieved_inband = True
+                self._last_received = datetime.datetime.now()
+                self._restart_timeout()
 
             if self.stream.slc_received:
                 self.shell.feed_slc(byte, func=self.stream.slc_received)
