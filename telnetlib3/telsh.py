@@ -990,10 +990,12 @@ class Telsh():
             replacing matches with return value of ``getter(match)``.
         """
         def _resolve_literal(char):
+            # transtable changed 2.x -> 3.x,
+            # still worth it? XXX
             if char == 'e':
-                return '\x1b'  # transtable changed 2.x -> 3.x,
+                return '\x1b'
             elif char == 'f':
-                return '\f'  # still worth it? XXX
+                return '\f'
             elif char == 'n':
                 return '\n'
             elif char == 'r':
