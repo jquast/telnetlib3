@@ -967,7 +967,9 @@ class Telsh():
 
     def cmdset_assign(self, *args):
         " remote command: x=[val] set or unset session values. "
-        if len(args) > 1:
+        if not len(args):
+            return -1
+        elif len(args) > 1:
             # x=1 y=2; evaluates right-left recursively
             self.cmdset_set(*args[1:])
         key, val = args[0].split('=', 1)
