@@ -1,11 +1,11 @@
 About
 =====
 
-telnetlib3.py is an ISC-licensed Telnet Server library.
+telnetlib3.py is an ISC-licensed Telnet Client and Telnet Server library.
 
-Implemented using the "tulip" module of PEP 3156, the proposed Asynchronous I/O framework for Python 3.4 and forward. This framework should be compatible with existing frameworks such as Twisted.
+Implemented using the "tulip" module of PEP 3156, the proposed Asynchronous I/O framework for Python 3.4 and forward as module 'asyncio'. asyncio aims to be compatible with existing frameworks such as Twisted and gevent.
 
-Development is currently in progress, Telnet Server is complete, and under testing. Feel free to make use of github's fork and "Issues" service to report any bugs or greivances.
+Development is currently in progress, Telnet Server Protocol and examples are complete, and Telnet Client Protocol is complete with example client programs under development. Feel free to make use of github's fork and "Issues" service to report any bugs or grievances.
 
 Status
 ======
@@ -45,18 +45,11 @@ This implementation aims to implement only those capabilities "found in the wild
 UTF-8
 =====
 
-CHARSET (rfc 2066) specifies a codepage, not an encoding. At the time, this more or less limited to the 127-255 range of an 8-bit codepage.
+CHARSET (rfc 2066) specifies a codepage, not an encoding. At the time, this was more or less limited to specifying the codepage used to display bytes of the range 127 through 255.  Unimplemented in bsd client, and generally found implemented only in recent MUD client (Atlantis) and servers. Most common values are: ASCII, UTF-8, BIG5, and LATIN1.
 
-It is unimplemented in bsd client, and generally found implemented only in recent MUD client and servers, and possibly some vendor implementations. Most common values are:
-    ASCII
-    UTF-8
-    LATIN1
+The default preferred encoding for clients that negotiate BINARY but not CHARSET, such as the bsd client, is defined by the TelnetServer keyword argument ``default_encoding`` ('utf-8' by default).  The example shell 'telsh' allows changing encoding on the fly by setting the 'CHARSET' session environment value at the command prompt by issuing command 'set CHARSET=utf-8'.
 
-The default preferred encoding for clients that negotiate BINARY but not CHARSET, such as the bsd client, is defined by the TelnetServer keyword argument ``default_encoding``, which is 'utf-8' by default.
-
-The 'telsh' shell allows changing encoding on the fly, by setting the 'CHARSET' session environment value at the command prompt.
-
-Setting binary for only a single direction (outbinary or inbinary) is supported, and client support of one does not immediately toggle the other, it must be negotiated both ways for full UTF-8 input and output.
+Setting binary for only a single direction (outbinary or inbinary) is supported. Client support of one does not immediately toggle the other, it must be negotiated both ways for full UTF-8 input and output. Some clients (TinTin++) incorrectly negotiation either directions (WILL, DO/WONT, DONT) as a single option, causing only one reply for a request of either 'outbinary' or 'inbinary' for which it always declines, only once, for either request (Even when configured for utf-8).
 
 Remote Linemode
 ===============
@@ -94,18 +87,16 @@ Local Linemode
 
 Unless otherwise negotiatied, the specification describes Telnet's default mode as half-duplex, local line editing. This most basic "dummy" mode is modeled after a Teletype 33, which runs in "half-duplex" mode.
 
-A Telnet implmentation attached to 7-bit ASCII teletype may implement the Telnet protocol by hardware circuit, or by minimal changes to their terminal line drivers.
+A Telnet implmentation attached to 7-bit ASCII teletype may implement the Telnet protocol by hardware circuit, or by minimal changes to their terminal line drivers: when the connecting CPU is without MMU or process control, an IAC interpreter or hardware device could be "interrupted" when the 8th bit is set high, "Out of band" in regards to 7-bit terminals, the receipt of value 255 indicates that the byte following it *Is-A-Command* (IAC).
 
-Often, the connecting CPU is without MMU or process control. An IAC interpreter or hardware device could be "interrupted" when the 8th bit is set high. "Out of band" in regards to 7-bit terminals, the receipt of value 255 indicates that the byte following it *Is-a-command* (IAC).
-
-Telnet Specification Default
-----------------------------
+Default Telnet Mode
+-------------------
 
   * Each end transmits only 7-bit ASCII, (except as used in the interpreter).
 
-  * A line prompting input be followed by the 'Go-Ahead' (GA) command
+  * A server's prompt must be followed by the 'Go-Ahead' (GA) command.
 
-  * Client signals end of input (send) by CR LF (Carriage Return + Linefeed)
+  * Client signals end of input (send) by CR, LF (Carriage Return, Linefeed).
 
 
 "Synch" Mechanism
@@ -296,11 +287,7 @@ RFC 818 The Remote User Telnet Service.
 Others
 ------
 
-It should be said, that as far as historical source code of note, BSD 2.11's telnet source of UCLA, or NSCA Telnet client of Univ. of IL for MacOS is most notable.
-
-There are a notable few modern Telnet servers, many implementations are minimal: local editing (simple linemode), or kludge mode only. Some modern Telnet clients support only kludge mode, with the exception of MUD clients, which are often linemode only. TinTin++ supports both modes.
-
-Twisted is the only other known asynchronous callback implementation of note, though, provides few handlers for rich negotiation, instead requiring overriding and replacing the backend IAC interpretation methods entirely to support them.
+It should be said as historical source code of note, BSD 2.11's telnet source of UCLA and NSCA Telnet client of Univ. of IL for MacOS is most notable. There are a notable few modern Telnet servers, however, many implementations are minimal: local editing (simple linemode), or kludge mode only. Some modern Telnet clients support only kludge mode, with the exception of MUD clients, which are often linemode only. TinTin++ is the only known client to support both modes.
 
 RFC 495
 -------
