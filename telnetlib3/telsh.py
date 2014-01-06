@@ -196,7 +196,7 @@ class Telsh():
             ('status', None),
             ('whoami', None),
             ('toggle', None),
-            ('logoff', None),
+            ('quit', None),
             ('whereami', None),
             ('set', None),
             ('echo', None),
@@ -216,8 +216,8 @@ class Telsh():
             ('xon-any', None),
             ('bell', None),
             ]), ),
-        ('logoff', None),
-        ]))
+        ('quit', None),
+    ]))  # TODO: auto-generated
 
     #: display full traceback to output stream ``display_exception()``
     show_traceback = True
