@@ -888,7 +888,7 @@ class Telsh():
             ('bell', self.send_bell)])
         if len(args) is 0:
             self.stream.write(', '.join(
-                '{}{} [{}]'.format('\r\n' if num % 4 == 0 else '',
+                '{}{} [{}]'.format('\r\n' if num and num % 4 == 0 else '',
                                    opt, self.standout('ON') if enabled
                                    else self.dim('off'))
                 for num, (opt, enabled) in enumerate(
@@ -952,7 +952,7 @@ class Telsh():
                 retval = self.cmdset_assign(arg)  # assigned
             elif arg in self.server.env:
                 val = self.server.env[arg]
-                self.stream.write('\r\n{key}={val}'.format(
+                self.stream.write('{key}={val}'.format(
                     key=arg, val=disp_kv(arg, val)))
                 retval = 0  # displayed query
             else:
