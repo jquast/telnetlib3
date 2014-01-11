@@ -287,7 +287,7 @@ RFC 818 The Remote User Telnet Service.
 Others
 ------
 
-It should be said as historical source code of note, BSD 2.11's telnet source of UCLA and NSCA Telnet client of Univ. of IL for MacOS is most notable. There are a notable few modern Telnet servers, however, many implementations are minimal: local editing (simple linemode), or kludge mode only. Some modern Telnet clients support only kludge mode, with the exception of MUD clients, which are often linemode only. TinTin++ is the only known client to support both modes.
+It should be said as historical source code, BSD 2.11's telnet source of UCLA and NSCA Telnet client of Univ. of IL for MacOS is most notable. There are also a few modern Telnet servers. Some modern Telnet clients support only kludge mode, with the exception of MUD clients, which are often linemode only. TinTin++ is the only known client to support both modes.
 
 RFC 495
 -------
