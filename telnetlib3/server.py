@@ -618,6 +618,13 @@ class TelnetServer(asyncio.protocols.Protocol):
 
     def env_update(self, env):
         " Callback receives new environment variables "
+        # remove any key, vals where val is ''; a common
+        # response for clients, acknowledging our request
+        # for values they do not wish to divulge.
+        deleted = [env.pop(key) or key
+                   for key, val in list(env.items()) if not val]
+        self.log.debug('env_update: ignoring valueless keys: {!r}'
+                       .format(deleted))
         if 'TIMEOUT' in env:
             try:
                 val = int(env['TIMEOUT'])
@@ -632,12 +639,6 @@ class TelnetServer(asyncio.protocols.Protocol):
                 self.shell.term_received(env['TERM'])
             else:
                 del env['TERM']
-        if 'COLUMNS' in env:
-            if not env['COLUMNS']:
-                del env['COLUMNS']
-        if 'LINES' in env:
-            if not env['LINES']:
-                del env['LINES']
         self.log.debug('env_update: %r', env)
         self._client_env.update(env)
         if 'LINES' in env and 'COLUMNS' in env:

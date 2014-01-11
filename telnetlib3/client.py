@@ -258,7 +258,8 @@ class TelnetClient(asyncio.protocols.Protocol):
         """
         if keys is None:
             return self.env
-        return dict([(key, self.env.get(key, '')) for key in keys])
+        return dict([(key, self.env.get(key, '')) for key in keys
+                     if self.env.get(key, '')])
 
     def send_charset(self):
         """ Callback for responding to CHARSET requests.
