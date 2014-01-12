@@ -1860,21 +1860,21 @@ class Option(dict):
 #: List of globals that may match an iac command option bytes
 _DEBUG_OPTS = dict([(value, key)
                     for key, value in globals().items() if key in
-                  ('LINEMODE', 'LMODE_FORWARDMASK', 'NAWS', 'NEW_ENVIRON',
-                      'ENCRYPT', 'AUTHENTICATION', 'BINARY', 'SGA', 'ECHO',
-                      'STATUS', 'TTYPE', 'TSPEED', 'LFLOW', 'XDISPLOC', 'IAC',
-                      'DONT', 'DO', 'WONT', 'WILL', 'SE', 'NOP', 'DM', 'TM',
-                      'BRK', 'IP', 'ABORT', 'AO', 'AYT', 'EC', 'EL', 'EOR',
-                      'GA', 'SB', 'EOF', 'SUSP', 'ABORT', 'CMD_EOR', 'LOGOUT',
-                      'CHARSET', 'SNDLOC', 'MCCP_COMPRESS', 'MCCP2_COMPRESS',
-                      'ENCRYPT', 'AUTHENTICATION', 'TN3270E', 'XAUTH', 'RSP',
-                      'COM_PORT_OPTION', 'SUPPRESS_LOCAL_ECHO', 'TLS',
-                      'KERMIT', 'SEND_URL', 'FORWARD_X', 'PRAGMA_LOGON',
-                      'SSPI_LOGON', 'PRAGMA_HEARTBEAT', 'EXOPL', 'X3PAD',
-                      'VT3270REGIME', 'TTYLOC', 'SUPDUPOUTPUT', 'SUPDUP',
-                      'DET', 'BM', 'XASCII', 'RCP', 'NAMS', 'RCTE', 'NAOL',
-                      'NAOP', 'NAOCRD', 'NAOHTS', 'NAOHTD', 'NAOFFD', 'NAOVTS',
-                      'NAOVTD', 'NAOLFD', )])
+                    ('LINEMODE', 'LMODE_FORWARDMASK', 'NAWS', 'NEW_ENVIRON',
+                     'ENCRYPT', 'AUTHENTICATION', 'BINARY', 'SGA', 'ECHO',
+                     'STATUS', 'TTYPE', 'TSPEED', 'LFLOW', 'XDISPLOC', 'IAC',
+                     'DONT', 'DO', 'WONT', 'WILL', 'SE', 'NOP', 'DM', 'TM',
+                     'BRK', 'IP', 'ABORT', 'AO', 'AYT', 'EC', 'EL', 'EOR',
+                     'GA', 'SB', 'EOF', 'SUSP', 'ABORT', 'CMD_EOR', 'LOGOUT',
+                     'CHARSET', 'SNDLOC', 'MCCP_COMPRESS', 'MCCP2_COMPRESS',
+                     'ENCRYPT', 'AUTHENTICATION', 'TN3270E', 'XAUTH', 'RSP',
+                     'COM_PORT_OPTION', 'SUPPRESS_LOCAL_ECHO', 'TLS',
+                     'KERMIT', 'SEND_URL', 'FORWARD_X', 'PRAGMA_LOGON',
+                     'SSPI_LOGON', 'PRAGMA_HEARTBEAT', 'EXOPL', 'X3PAD',
+                     'VT3270REGIME', 'TTYLOC', 'SUPDUPOUTPUT', 'SUPDUP',
+                     'DET', 'BM', 'XASCII', 'RCP', 'NAMS', 'RCTE', 'NAOL',
+                     'NAOP', 'NAOCRD', 'NAOHTS', 'NAOHTD', 'NAOFFD', 'NAOVTS',
+                     'NAOVTD', 'NAOLFD', )])
 
 
 def name_command(byte):
