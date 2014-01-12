@@ -905,33 +905,39 @@ class Telsh():
         if opt in ('echo', '_all'):
             cmd = (telopt.WONT if tbl_opt['echo'] else telopt.WILL)
             self.server.stream.iac(cmd, telopt.ECHO)
-            self.stream.write('\r\n{} echo.'.format(
-                telopt.name_command(cmd).lower()))
+            self.stream.write('{} echo.{}'.format(
+                telopt.name_command(cmd).lower(),
+                opt == '_all' and '\r\n' or ''))
         if opt in ('outbinary', 'binary', '_all'):
             cmd = (telopt.WONT if tbl_opt['outbinary'] else telopt.WILL)
             self.server.stream.iac(cmd, telopt.BINARY)
-            self.stream.write('\r\n{} binary.'.format(
-                telopt.name_command(cmd).lower()))
+            self.stream.write('{} outbinary.{}'.format(
+                telopt.name_command(cmd).lower(),
+                opt == '_all' and '\r\n' or ''))
         if opt in ('inbinary', 'binary', '_all'):
             cmd = (telopt.DONT if tbl_opt['inbinary'] else telopt.DO)
             self.server.stream.iac(cmd, telopt.BINARY)
-            self.stream.write('\r\n{} binary.'.format(
-                telopt.name_command(cmd).lower()))
+            self.stream.write('{} inbinary.{}'.format(
+                telopt.name_command(cmd).lower(),
+                opt == '_all' and '\r\n' or ''))
         if opt in ('goahead', '_all'):
             cmd = (telopt.WILL if tbl_opt['goahead'] else telopt.WONT)
             self.stream.send_go_ahead = cmd is telopt.WONT
             self.server.stream.iac(cmd, telopt.SGA)
-            self.stream.write('\r\n{} supress go-ahead.'.format(
-                telopt.name_command(cmd).lower()))
+            self.stream.write('{} supress go-ahead.{}'.format(
+                telopt.name_command(cmd).lower(),
+                opt == '_all' and '\r\n' or ''))
         if opt in ('bell', '_all'):
             self.send_bell = not tbl_opt['bell']
-            self.stream.write('\r\nbell {}abled.'.format(
-                'en' if self.send_bell else 'dis'))
+            self.stream.write('bell {}abled.{}'.format(
+                'en' if self.send_bell else 'dis',
+                opt == '_all' and '\r\n' or ''))
         if opt in ('xon-any', '_all'):
             self.server.stream.xon_any = not tbl_opt['xon-any']
             self.server.stream.send_lineflow_mode()
-            self.stream.write('\r\nxon-any {}abled.'.format(
-                'en' if self.server.stream.xon_any else 'dis'))
+            self.stream.write('xon-any {}abled.{}'.format(
+                'en' if self.server.stream.xon_any else 'dis',
+                opt == '_all' and '\r\n' or ''))
         if opt in ('lflow', '_all'):
             self.server.stream.lflow = not tbl_opt['lflow']
             self.server.stream.send_lineflow_mode()
@@ -940,8 +946,8 @@ class Telsh():
                 opt == '_all' and '\r\n' or ''))
         if opt in ('color', '_all'):
             self.does_styling = not tbl_opt['color']
-            self.stream.write('\r\ncolor {}.'.format(
-                'on' if self.does_styling else 'off'))
+            self.stream.write('color {}.'.format(
+                'on' if self.does_styling else 'off',))
         return 0
 
     def cmdset_set(self, *args):
