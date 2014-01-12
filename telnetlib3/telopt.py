@@ -1178,8 +1178,8 @@ class TelnetStream:
             self._iac_callback[TM](DO)
         elif opt == LOGOUT:
             self._ext_callback[LOGOUT](DO)
-        elif opt in (ECHO, LINEMODE, BINARY, SGA, LFLOW, CMD_EOR,
-                     TTYPE, NAWS, NEW_ENVIRON, XDISPLOC, TSPEED):
+        elif opt in (ECHO, LINEMODE, BINARY, SGA, LFLOW, CMD_EOR, TTYPE,
+                     NAWS, NEW_ENVIRON, XDISPLOC, TSPEED, CHARSET):
             if not self.local_option.enabled(opt):
                 self.iac(WILL, opt)
             return True
@@ -1381,14 +1381,32 @@ class TelnetStream:
         assert opt in (REQUEST, ACCEPTED, REJECTED, TTABLE_IS,
                        TTABLE_ACK, TTABLE_NAK, TTABLE_REJECTED)
         if opt == REQUEST:
-            #sep = buf.popleft()
-            # client decodes 'buf', split by 'sep', and choses a charset
-            raise NotImplementedError
+            # "<Sep>  is a separator octet, the value of which is chosen by the
+            # sender.  Examples include a space or a semicolon."
+            sep = buf.popleft()
+            # decode any offered character sets (b'CHAR-SET')
+            # to a python-normalized unicode string (u'charset').
+            offers = [charset.decode('ascii')
+                      for charset in b''.join(buf).split(sep)]
+            selected = self._ext_send_callback[CHARSET](offers)
+            if selected is None:
+                self.log.debug('send: IAC SB CHARSET REJECTED IAC SE')
+                self.send_iac(IAC + SB + CHARSET + REJECTED + IAC + SE)
+            else:
+                response = collections.deque()
+                response.extend([IAC, SB, CHARSET, ACCEPTED])
+                response.extend([bytes(selected, 'ascii')])
+                response.extend([IAC, SE])
+                self.log.debug('send: IAC SB CHARSET ACCEPTED {} IAC SE'
+                               .format(selected))
+                self.send_iac(b''.join(response))
         elif opt == ACCEPTED:
             charset = b''.join(buf).decode('ascii')
+            self.log.debug('recv: IAC SB CHARSET ACCEPTED {} IAC SE'
+                           .format(charset))
             self._ext_callback[CHARSET](charset)
         elif opt == REJECTED:
-            self.log.info('Client rejects codepages')
+            self.log.warn('recv: IAC SB CHARSET REJECTED IAC SE')
         elif opt in (TTABLE_IS, TTABLE_ACK, TTABLE_NAK, TTABLE_REJECTED):
             raise NotImplementedError
 
