@@ -2,6 +2,7 @@ import collections
 import datetime
 import logging
 import socket
+import codecs
 
 import asyncio
 
@@ -267,10 +268,32 @@ class TelnetClient(asyncio.protocols.Protocol):
             return self.env
         return dict([(key, self.env.get(key, '')) for key in keys])
 
-    def send_charset(self):
-        """ Callback for responding to CHARSET requests.
+    def send_charset(self, offered):
+        """ Callback for responding to CHARSET requests, receiving a list of
+            character encodings offered by the server, such as 'LATIN-1'.
+
+            Return the character set agreed to use. The default implementation
+            selects any matching encoding that python is capable of using, or
+            the same as self.encoding if matched in the offered list.
         """
-        return self._default_encoding
+        selected = None
+        for (match, offer) in ((_charset.lower().replace('-', ''), _charset)
+                               for _charset in offered):
+            if match == self.env['CHARSET']:
+                # target charset matches ours
+                selected = (match, offer)
+                break
+            if codecs.lookup(match):
+                # switch-to and confirm
+                self.env['CHARSET'] = match
+                selected = (match, offer)
+        if selected:
+            (match, offer) = selected
+            self.log.info('Character encoding is {}.'.format(match))
+            return offer
+        self.log.info('No suitable encoding offered by server: {!r}.'
+                      .format(offered))
+        return None
 
     def send_naws(self):
         """ Callback for responding to NAWS requests.
