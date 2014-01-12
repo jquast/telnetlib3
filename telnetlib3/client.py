@@ -415,9 +415,11 @@ class TelnetClient(asyncio.protocols.Protocol):
         return False
 
     def connection_lost(self, exc):
+        if not self._closing:
+            self.log.info('{about}{reason}'.format(
+                about=self.__str__(),
+                reason='{}: '.format(exc) if exc is not None else ''))
         self._closing = True
-        self.log.info('{}: {}'.format(self.__str__(),
-                                      exc if exc is not None else ''))
 
 
 def describe_connection(client):
