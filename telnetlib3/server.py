@@ -268,16 +268,6 @@ class TelnetServer(asyncio.protocols.Protocol):
             self.log.debug('outbinary and inbinary negotiated.')
             self._encoding_negotiation.set_result(True)
 
-        # if (WILL, BINARY) requested by begin_negotiation() is answered in
-        # the affirmitive, then request (DO, BINARY) to ensure bi-directional
-        # transfer of non-ascii characters.
-        elif self.outbinary and not self.inbinary and (
-                not (DO, BINARY,) in self.stream.pending_option):
-            self.log.debug('outbinary=True, requesting inbinary.')
-            self.stream.iac(DO, BINARY)
-            self._loop.call_later(self.CONNECT_DEFERED,
-                                  self.check_encoding_negotiation)
-
         elif self.duration > self.CONNECT_MAXWAIT:
             # Many IAC interpreters do not differentiate 'local' from 'remote'
             # options -- they are treated equivalently.
@@ -292,6 +282,16 @@ class TelnetServer(asyncio.protocols.Protocol):
             # requesting (DO, ECHO): the client replies (WILL, ECHO),
             # which is proposterous!
             self._encoding_negotiation.set_result(False)
+
+        # if (WILL, BINARY) requested by begin_negotiation() is answered in
+        # the affirmitive, then request (DO, BINARY) to ensure bi-directional
+        # transfer of non-ascii characters.
+        elif self.outbinary and not self.inbinary and (
+                not DO + BINARY in self.stream.pending_option):
+            self.log.debug('outbinary=True, requesting inbinary.')
+            self.stream.iac(DO, BINARY)
+            self._loop.call_later(self.CONNECT_DEFERED,
+                                  self.check_encoding_negotiation)
 
         else:
             self._loop.call_later(self.CONNECT_DEFERED,
