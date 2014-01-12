@@ -222,7 +222,7 @@ class TalkerShell(Telsh):
             ('say', None),
             ('me', None),
             ('quit', None),
-            ])), ),
+        ])), ),
         ('/toggle', collections.OrderedDict(sorted([
             ('echo', None),
             ('outbinary', None),
@@ -232,7 +232,7 @@ class TalkerShell(Telsh):
             ('xon-any', None),
             ('bell', None),
             ('fullscreen', None),
-            ])), ),
+        ])),),
         ('/status', None),
         ('/slc', None),
         ('/whoami', None),
@@ -326,14 +326,14 @@ class TalkerShell(Telsh):
             # special return value `None' indicates that we expect
             # to recieve a broadcast to update and cause scroll,
             # otherwise, suffix with CR+LF to cause scroll.
-            if val != None:
+            if val is not None:
                 self.stream.write('\r\n')
             return val
         if not data.strip():
             # Nothing to say!
             return 0
         val = self.cmdset_say(data)
-        if val != None:
+        if val is not None:
             self.stream.write('\r\n')
         return val
 
