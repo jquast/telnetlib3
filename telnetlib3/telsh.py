@@ -885,6 +885,7 @@ class Telsh():
                 not lopt.enabled(telopt.SGA)) and self.stream.send_go_ahead),
             ('color', self.does_styling),
             ('xon-any', self.server.stream.xon_any),
+            ('lflow', self.server.stream.lflow),
             ('bell', self.send_bell)])
         if len(args) is 0:
             self.stream.write(', '.join(
@@ -931,6 +932,12 @@ class Telsh():
             self.server.stream.send_lineflow_mode()
             self.stream.write('\r\nxon-any {}abled.'.format(
                 'en' if self.server.stream.xon_any else 'dis'))
+        if opt in ('lflow', '_all'):
+            self.server.stream.lflow = not tbl_opt['lflow']
+            self.server.stream.send_lineflow_mode()
+            self.stream.write('lineflow {}abled.{}'.format(
+                'en' if self.server.stream.lflow else 'dis',
+                opt == '_all' and '\r\n' or ''))
         if opt in ('color', '_all'):
             self.does_styling = not tbl_opt['color']
             self.stream.write('\r\ncolor {}.'.format(
