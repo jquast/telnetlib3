@@ -245,6 +245,7 @@ class TalkerShell(Telsh):
         ('/say', None),
         ('/me', None),
         ('/msg', None),
+        ('/clear', None),
         ('/quit', None),
     ]))  # TODO: auto-generated
 
@@ -589,6 +590,11 @@ class TalkerShell(Telsh):
         if self.mode_fullscreen:
             self.exit_fullscreen()
         return self.server.logout()
+
+    def cmdset_clear(self, *args):
+        " Clear the screen. "
+        self.stream.write('\x1b[H\x1b[2J')
+
 
 def random_busywait():
     # Just a silly function for the on-connect banner
