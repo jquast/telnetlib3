@@ -363,7 +363,7 @@ class TelnetServer(asyncio.protocols.Protocol):
         self.stream.iac(WILL, STATUS)
 
         # lineflow allows pause/resume of transmission.
-        self.stream.iac(WILL, LFLOW)
+        self.stream.iac(DO, LFLOW)
 
         # the 'new_environ' variables reveal client exported values.
         self.stream.iac(DO, NEW_ENVIRON)
