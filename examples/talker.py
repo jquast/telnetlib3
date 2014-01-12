@@ -49,7 +49,7 @@ class TalkerServer(TelnetServer):
     def __init__(self,
                  shell=Telsh,
                  stream=TelnetStream,
-                 encoding='utf8',
+                 encoding='utf-8',
                  log=logging):
         super().__init__(shell, stream, encoding, log)
 

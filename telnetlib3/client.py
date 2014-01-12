@@ -32,7 +32,7 @@ class TelnetClient(asyncio.protocols.Protocol):
     }
 
     def __init__(self, shell=ConsoleShell, stream=TelnetStream,
-                 encoding='utf8', log=logging):
+                 encoding='utf-8', log=logging):
         self.log = log
         self._shell_factory = shell
         self._stream_factory = stream
