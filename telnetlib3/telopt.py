@@ -265,8 +265,7 @@ class TelnetStream:
         if all_option_states:
             return '{{{}}}'.format(', '.join(
                 ['{!r}: {!r}'.format(key, ','.join([_opt for _opt in options]))
-                 for key, options in all_option_states.items()
-                 if len(options)]))
+                 for key, options in all_option_states.items() if len(options)]))
         return '(no negotiation performed)'
 
     def feed_byte(self, byte):
@@ -761,7 +760,7 @@ class TelnetStream:
         """ XXX Handle IAC Go-Ahead (GA).
 
             Typically, GA is only a legacy protocol for half-duplex terminals
-            such as a teletype, which cannot recieve output while also sending
+            such as a teletype, which cannot receive output while also sending
             input.
         """
         self.log.debug('IAC GA: Go-Ahead (unhandled).')
@@ -930,7 +929,7 @@ class TelnetStream:
         """ XXX Handle SLC XOFF (Transmit-Off)
 
             The default implementation disables transmission of
-            in-band data until XON is recieved.
+            in-band data until XON is received.
         """
         self.log.debug('SLC XOFF: Transmit Off.')
         self.writing = False
@@ -960,8 +959,9 @@ class TelnetStream:
           * NEW_ENVIRON: for clients, returning a dictionary of (key, val)
             pairs of environment item values (rfc 1408).
 
-          * CHARSET: for servers, receiving one string, the character set
-            negotiated by client (rfc 2066).
+          * CHARSET: for clients, receiving iterable of strings of character
+            sets requested by server. Must returns one of those strings.
+            chose one !negotiated by client (rfc 2066).
         """
         assert cmd in (SNDLOC, NAWS, TSPEED, TTYPE, XDISPLOC,
                        NEW_ENVIRON, CHARSET), cmd
@@ -1275,7 +1275,10 @@ class TelnetStream:
         elif opt == CHARSET:
             # charset is bi-directional: "WILL CHARSET indicates the sender
             # REQUESTS permission to, or AGREES to, use CHARSET option
-            # subnegotiation to choose a character set."
+            # subnegotiation to choose a character set."; however, the selected
+            # encoding is, regarding SB CHARSET REQUEST, "The sender requests
+            # that all text sent to and by it be encoded in one of the
+            # specified character sets. "
             self.remote_option[opt] = True
             self.request_charset()
         elif opt == XDISPLOC:
