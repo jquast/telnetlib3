@@ -254,12 +254,18 @@ class TelnetClient(asyncio.protocols.Protocol):
         return self.shell.xdisploc
 
     def send_env(self, keys):
-        """ Callback for responding to NEW_ENVIRON requests.
+        """ Callback for responding to NEW_ENVIRON requests, from rfc1572:
+
+               The "type"/VALUE pairs must be returned in the same order as
+               the SEND request specified them, and there must be a response
+               for each "type ..." explicitly requested.
+
+            Returns an ordered iterable of (key, val) pairs, where both key
+            and val are ascii-encodable unicode strings.
         """
         if keys is None:
             return self.env
-        return dict([(key, self.env.get(key, '')) for key in keys
-                     if self.env.get(key, '')])
+        return dict([(key, self.env.get(key, '')) for key in keys])
 
     def send_charset(self):
         """ Callback for responding to CHARSET requests.
