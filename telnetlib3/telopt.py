@@ -310,8 +310,9 @@ class TelnetStream:
                     name_command(cmd)))
                 self._sb_buffer.clear()
             else:
-                self.log.debug('recv IAC SE')
                 # sub-negotiation end (SE), fire handle_subnegotiation
+                self.log.debug('recieved sub-negotiation cmd {}'
+                               .format(name_command(self._sb_buffer[0])))
                 try:
                     self.handle_subnegotiation(self._sb_buffer)
                 finally:
@@ -394,6 +395,7 @@ class TelnetStream:
             # standard inband data
             return
         if not self.writing and self.xon_any and not self.is_oob:
+                # sub-negotiation end (SE), fire handle_subnegotiation
             # any key after XOFF enables XON
             self._slc_callback[slc.SLC_XON](byte)
 
@@ -597,7 +599,7 @@ class TelnetStream:
             self.log.debug('cannot send SB {} SEND IS '
                            'without receipt of WILL {}'.format(
                                name_command(kind), name_command(kind)))
-        elif not self.pending_option.enabled(SB + kind + SEND + IS):
+        elif not self.pending_option.enabled(SB + kind):
             response = collections.deque()
             response.extend([IAC, SB, kind, SEND])
             if request_env_values:
@@ -615,7 +617,7 @@ class TelnetStream:
                 response.append(USERVAR)
             response.extend([IAC, SE])
             self.log.debug('request_env: {!r}'.format(b''.join(response)))
-            self.pending_option[SB + kind + SEND + IS] = True
+            self.pending_option[SB + kind] = True
             self.send_iac(b''.join(response))
             return True
         else:
@@ -1182,6 +1184,10 @@ class TelnetStream:
                      NAWS, NEW_ENVIRON, XDISPLOC, TSPEED, CHARSET):
             if not self.local_option.enabled(opt):
                 self.iac(WILL, opt)
+            if opt in (NAWS, LFLOW, TTYPE, NEW_ENVIRON,
+                       XDISPLOC, TSPEED, CHARSET, LINEMODE):
+                # expect follow-up subnegotation
+                self.pending_option[SB + opt] = True
             return True
         elif opt == STATUS:
             if not self.local_option.enabled(opt):
@@ -1237,13 +1243,14 @@ class TelnetStream:
         if opt in (BINARY, SGA, ECHO, NAWS, LINEMODE, CMD_EOR, SNDLOC):
             if opt == ECHO and self.is_server:
                 raise ValueError('cannot recv WILL ECHO on server end')
-            if opt in (NAWS, LINEMODE, SNDLOC) and self.is_client:
+            elif opt in (NAWS, LINEMODE, SNDLOC) and self.is_client:
                 raise ValueError('cannot recv WILL {} on client end'.format(
                     name_command(opt),))
             if not self.remote_option.enabled(opt):
-                self.remote_option[opt] = True
                 self.iac(DO, opt)
+                self.remote_option[opt] = True
             if opt in (NAWS, LINEMODE, SNDLOC):
+                # expect to receive some sort of follow-up subnegotiation
                 self.pending_option[SB + opt] = True
                 if opt == LINEMODE:
                     # server sets the initial mode and sends forwardmask,
@@ -1516,11 +1523,11 @@ class TelnetStream:
             assert self.is_server, ('SE: cannot recv from server: {} {}'
                                     .format(name_command(cmd), opt_kind,))
             if opt == IS:
-                if not self.pending_option.enabled(SB + cmd + SEND + IS):
+                if not self.pending_option.enabled(SB + cmd):
                     self.log.debug('{} {} unsolicited'
                                    .format(name_command(cmd), opt_kind))
-                self.pending_option[SB + cmd + SEND + IS] = False
-            elif (self.pending_option.get(SB + cmd + SEND + IS, None)
+                self.pending_option[SB + cmd] = False
+            elif (self.pending_option.get(SB + cmd, None)
                     is False):
                 # a pending option of value of 'False' means it was previously
                 # completed, subsequent environment values *should* have been
