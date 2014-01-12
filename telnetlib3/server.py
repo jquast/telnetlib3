@@ -623,8 +623,9 @@ class TelnetServer(asyncio.protocols.Protocol):
         # for values they do not wish to divulge.
         deleted = [env.pop(key) or key
                    for key, val in list(env.items()) if not val]
-        self.log.debug('env_update: ignoring valueless keys: {!r}'
-                       .format(deleted))
+        if deleted:
+            self.log.debug('env_update: ignoring valueless keys: {!r}'
+                           .format(deleted))
         if 'TIMEOUT' in env:
             try:
                 val = int(env['TIMEOUT'])
