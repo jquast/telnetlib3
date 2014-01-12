@@ -277,20 +277,19 @@ class TelnetClient(asyncio.protocols.Protocol):
             the same as self.encoding if matched in the offered list.
         """
         selected = None
-        for (match, offer) in ((_charset.lower().replace('-', ''), _charset)
-                               for _charset in offered):
-            if match == self.env['CHARSET']:
-                # target charset matches ours
-                selected = (match, offer)
-                break
-            if codecs.lookup(match):
-                # switch-to and confirm
-                self.env['CHARSET'] = match
-                selected = (match, offer)
+        for offer in offered:
+                try:
+                    codec = codecs.lookup(offer)
+                except LookupError as err:
+                    self.log.debug('{}'.format(err))
+                else:
+                    if (codec.name == self.env['CHARSET'] or not selected):
+                        self.env['CHARSET'] = codec.name
+                        selected = offer
         if selected:
-            (match, offer) = selected
-            self.log.info('Character encoding is {}.'.format(match))
-            return offer
+            self.log.info('Encoding negotiated: {env[CHARSET]}.'
+                          .format(env=self.env))
+            return selected
         self.log.info('No suitable encoding offered by server: {!r}.'
                       .format(offered))
         return None
