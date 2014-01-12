@@ -1902,11 +1902,11 @@ def describe_stream_option_states(stream):
     if len(local):
         status.update({'local-{}'.format(local_is): [
             name_commands(opt) for (opt, val) in local.items()
-            if val]})
+            if local.enabled(opt)]})
     if len(remote):
         status.update({'remote-{}'.format(remote_is): [
             name_commands(opt) for (opt, val) in remote.items()
-            if val]})
+            if remote.enabled(opt)]})
     return dict(status)
 
 
