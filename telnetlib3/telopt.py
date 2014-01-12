@@ -148,6 +148,9 @@ class TelnetStream:
         #: Total bytes sent to ``feed_byte()``
         self.byte_count = 0
 
+        #: Wether flow control is enabled.
+        self.lflow = True
+
         #: Wether flow control enabled by Transmit-Off (XOFF) (defaults
         #  to Ctrl-s), should re-enable Transmit-On (XON) only on receipt
         #  of the XON key (Ctrl-q). Or, when unset, any keypress from client
@@ -186,11 +189,6 @@ class TelnetStream:
         # indicating state of remote capabilities.
         self.remote_option = Option('remote_option', self.log)
 
-        #: bool implementing Flow Control, False when XOFF recieved,
-        #  pending data buffered into self._write_buffer
-        self.writing = True
-        self._write_buffer = collections.deque()
-
         #: Sub-negotiation buffer
         self._sb_buffer = collections.deque()
 
@@ -204,9 +202,16 @@ class TelnetStream:
         #  attribute ``ack`` returns True if it is in use.
         self._linemode = slc.Linemode()
 
-        #: Wether to write along the transport, allowing for flow control
-        #  (XOFF/^S, activated by SLC_XOFF, and XON/^Q, activated by SLC_XON)
-        self._writing = True
+# 
+#        #: Wether to write along the transport, allowing for flow control
+#        #  (XOFF/^S, activated by SLC_XOFF, and XON/^Q, activated by SLC_XON)
+#        self._writing = True
+# 
+        #: bool implementing Flow Control, False when XOFF received,
+        #  pending data buffered into self._write_buffer
+        self.writing = True
+        self._write_buffer = collections.deque()
+# 
 
         #: Initial line mode requested by server if client supports LINEMODE
         #  negotiation (remote line editing and literal echo of control chars)
@@ -695,12 +700,14 @@ class TelnetStream:
         return False
 
     def send_lineflow_mode(self):
-        """ .. method send_lineflow_mod() -> bool
+        """ .. method send_lineflow_mode() -> bool
 
         Send LFLOW mode sub-negotiation, rfc1372.
         """
-        if not self.remote_option.enabled(LFLOW):
-            self.log.debug('cannot send IAC SB LFLOW '
+        if self.is_client:
+            self.log.error('only server may send IAC SB LINEFLOW <MODE>')
+        elif not self.remote_option.enabled(LFLOW):
+            self.log.error('cannot send IAC SB LFLOW '
                            'without receipt of WILL LFLOW')
         else:
             if self.xon_any:
@@ -1158,6 +1165,8 @@ class TelnetStream:
             self.log.warn('cannot recv DO NEW_ENVIRON on server end.')
         elif opt == XDISPLOC and self.is_server:
             self.log.warn('cannot recv DO XDISPLOC on server end.')
+        elif opt == LFLOW and self.is_server:
+            self.log.warn('cannot recv DO LFLOW on server end.')
         elif opt == TM:
             # timing mark is special: simply by replying, the effect
             # is accomplished ('will' or 'wont' is non-consequential):
@@ -1530,13 +1539,24 @@ class TelnetStream:
         self._ext_callback[NAWS](int(columns), int(rows))
 
     def _handle_sb_lflow(self, buf):
-        """ Fire callback for IAC-SB-LFOW-<buf>
+        """ Fire callback for IAC-SB-LFLOW-<buf>
         """ # XXX
         cmd = buf.popleft()
         assert cmd == LFLOW, name_command(cmd)
         assert self.local_option.enabled(LFLOW), (
             'received IAC SB LFLOW without IAC DO LFLOW')
-        raise NotImplementedError
+        opt = buf.popleft()
+        if opt in (LFLOW_OFF, LFLOW_ON):
+            self.lflow = opt is LFLOW_ON
+            self.log.debug('LFLOW (toggle-flow-control) {}'.format(
+                'ON' if self.lflow else 'OFF'))
+        elif opt in (LFLOW_RESTART_ANY, LFLOW_RESTART_XON):
+            self.xon_any = opt is LFLOW_RESTART_XON
+            self.log.debug('LFLOW (toggle-flow-control) {}'.format(
+                'RESTART_ANY' if self.xon_any else 'RESTART_XON'))
+        else:
+            raise NotImplementedError(
+                'Unknown IAC SB LFLOW option recieved: {!r}'.format(buf))
 
     def _handle_sb_status(self, buf):
         """ Fire callback for IAC-SB-STATUS-<buf>
