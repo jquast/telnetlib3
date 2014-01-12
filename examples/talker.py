@@ -501,10 +501,10 @@ class TalkerShell(Telsh):
         if not msg:
             self.stream.write("{} didn't hear you.".format(nick))
             return 1
-        if (self.broadcast('privmsg', nick, msg[0], target=nick)
-            not in (0, None)):
+        retval = self.broadcast('privmsg', nick, msg[0], target=nick)
+        if (retval not in (0, None)):
             self.stream.write("{} wasn't listening.".format(nick))
-            return 1
+            return retval
         return None
 
     def cmdset_say(self, *args):
