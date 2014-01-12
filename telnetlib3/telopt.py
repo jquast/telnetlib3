@@ -1547,7 +1547,52 @@ class TelnetStream:
         if sb == SEND:
             self._send_status()
         elif sb == IS:
-            raise NotImplementedError
+            self._receive_status(buf)
+
+    def _receive_status(self, buf):
+        # TODO: read the rfc; do we honor what we see here?
+        # just error log mismatches for now
+        for pos in range(len(buf) // 2):
+            cmd = buf.popleft()
+            try:
+                opt = buf.popleft()
+            except IndexError:
+                self.log.error('STATUS incomplete at pos {}, cmd: {}'
+                               .format(pos, name_command(cmd)))
+                break
+            matching = False
+            if cmd in (DO, DONT):
+                enabled = self.local_option.enabled(opt)
+                matching = ((cmd == DO and enabled) or
+                            (cmd == DONT and not enabled))
+                side = 'local'
+            elif cmd in (WILL, WONT):
+                enabled = self.remote_option.enabled(opt)
+                matching = ((cmd == WILL and enabled) or
+                            (cmd == WONT and not enabled))
+                side = 'remote'
+            else:
+                self.log.error('STATUS invalid cmd at pos {}: {}.'
+                               .format(pos, name_command(cmd)))
+                break
+            mode = 'enabled' if enabled else 'not enabled'
+            if matching:
+                self.log.debug('STATUS {} {} (agreed).'
+                               .format(name_command(cmd), name_command(opt),))
+            else:
+                self.log.error('STATUS {cmd} {opt}: disagreed, '
+                               '{side} option is {mode}.'.format(
+                                   cmd=name_command(cmd),
+                                   opt=name_command(opt),
+                                   side=side, mode=mode))
+                self.log.error('r {!r}|{}'.format(
+                    [(name_command(opt), val)
+                     for opt, val in self.remote_option.items()],
+                    self.remote_option.enabled(opt)))
+                self.log.error('l {!r}|{}'.format(
+                    [(name_command(opt), val)
+                     for opt, val in self.local_option.items()],
+                    self.local_option.enabled(opt)))
 
     def _send_status(self):
         """ Fire callback for IAC-SB-STATUS-SEND (rfc859).
