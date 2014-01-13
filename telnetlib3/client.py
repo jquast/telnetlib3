@@ -65,6 +65,9 @@ class TelnetClient(asyncio.protocols.Protocol):
         self._encoding_negotiation.add_done_callback(
             self.after_encoding_negotiation)
 
+        #: waiter is a Future that completes when connection is closed.
+        self.waiter = asyncio.Future()
+
     def __str__(self):
         """ Returns string reporting the status of this client session.
         """
@@ -418,7 +421,8 @@ class TelnetClient(asyncio.protocols.Protocol):
         if not self._closing:
             self.log.info('{about}{reason}'.format(
                 about=self.__str__(),
-                reason='{}: '.format(exc) if exc is not None else ''))
+                reason=': {}'.format(exc) if exc is not None else ''))
+            self.waiter.set_result(None)
         self._closing = True
 
 

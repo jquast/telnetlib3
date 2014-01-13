@@ -45,13 +45,20 @@ class ConsoleShell():
         #: default encoding 'errors' argument
         self.encoding_errors = 'replace'
 
-    def write(self, string, errors=None):
-        """ Write string to output using preferred encoding.
+    def write(self, string=u''):
+        """ Write string to console output stream.
         """
-        errors = errors if errors is not None else self.encoding_errors
-        assert isinstance(string, str), string
-        self.stream_out.write(self.encode(string, errors))
-        self.stream_out.flush()
+        if string:
+            try:
+                self.stream_out.write(string)
+            except BlockingIOError:
+                # output is blocking, defer write for another 50ms,
+                self.client._loop.call_later(0.05, self.write, string)
+        try:
+            self.stream_out.flush()
+        except BlockingIOError:
+            # output cannot flush, defer flush for another 50ms,
+            self.client._loop.call_later(0.05, self.write)
 
     @property
     def will_echo(self):
@@ -141,7 +148,7 @@ class ConsoleShell():
         """ Receive byte from telnet server, display to console """
         ucs = self.decode(byte)
         if ucs is not None:
-            self.stream_out.write(ucs)
+            self.write(ucs)
 
     def can_write(self, ucs):
         """ Returns True if transport can receive ``ucs`` as a single-cell,
