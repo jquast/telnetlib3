@@ -19,8 +19,14 @@ def _query_term_winsize(tty_fd):
 
         Returns the value of the `winsize' struct returned by ioctl of
         TIOCGWINSZ for the terminal specified by argument ``tty_fd``
-        as its natural four integers: (rows, cols, xheight, yheight).
+        as its natural four integers: (rows, cols, xpixels, ypixels).
     """
+    #struct winsize {
+    #            unsigned short  ws_row;         /* rows, in characters */
+    #            unsigned short  ws_col;         /* columns, in characters */
+    #            unsigned short  ws_xpixel;      /* horizontal size, pixels */
+    #            unsigned short  ws_ypixel;      /* vertical size, pixels */
+    #};
     import fcntl
     import struct
     import termios
@@ -109,7 +115,7 @@ class ConsoleShell():
         import os
         if (hasattr(self.stream_out, 'fileno')
                 and os.isatty(self.stream_out.fileno())):
-            cols, rows, xpixels, ypixels = _query_term_winsize(self.stream_out)
+            rows, cols, xpixels, ypixels = _query_term_winsize(self.stream_out)
             return cols
         try:
             cols = int(os.environ.get('COLUMNS', '80'))
@@ -126,7 +132,7 @@ class ConsoleShell():
         import os
         if (hasattr(self.stream_out, 'fileno')
                 and os.isatty(self.stream_out.fileno())):
-            cols, rows, xpixels, ypixels = _query_term_winsize(self.stream_out)
+            rows, cols, xpixels, ypixels = _query_term_winsize(self.stream_out)
             return rows
         try:
             rows = int(os.environ.get('LINES', '24'))

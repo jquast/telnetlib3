@@ -1,5 +1,6 @@
 import collections
 import logging
+import struct
 from telnetlib import (
     LINEMODE, NAWS, NEW_ENVIRON, BINARY, SGA, ECHO, STATUS,
     TTYPE, TSPEED, LFLOW, XDISPLOC, IAC, DONT, DO, WONT,
@@ -1181,13 +1182,20 @@ class TelnetStream:
         elif opt == LOGOUT:
             self._ext_callback[LOGOUT](DO)
         elif opt in (ECHO, LINEMODE, BINARY, SGA, LFLOW, CMD_EOR, TTYPE,
-                     NAWS, NEW_ENVIRON, XDISPLOC, TSPEED, CHARSET):
+                     NEW_ENVIRON, XDISPLOC, TSPEED, CHARSET):
             if not self.local_option.enabled(opt):
                 self.iac(WILL, opt)
-            if opt in (NAWS, LFLOW, TTYPE, NEW_ENVIRON,
+            if opt in (LFLOW, TTYPE, NEW_ENVIRON,
                        XDISPLOC, TSPEED, CHARSET, LINEMODE):
                 # expect follow-up subnegotation
                 self.pending_option[SB + opt] = True
+            return True
+        elif opt == NAWS:
+            if not self.local_option.enabled(opt):
+                self.iac(WILL, opt)
+            # on first receipt of DO NAWS, or any repeated requests,
+            # just go ahead and send our window size.
+            self._send_naws()
             return True
         elif opt == STATUS:
             if not self.local_option.enabled(opt):
@@ -1556,14 +1564,30 @@ class TelnetStream:
         location_str = b''.join(buf).decode('ascii')
         self._ext_callback[SNDLOC](location_str)
 
+    def _send_naws(self):
+        """ XXX Fire callback for IAC-DO-NAWS and another one ??
+            does server send IAC-DO-NAWS anytime it wants to know,
+            or an SB? TODO
+        """
+        rows, cols = self._ext_send_callback[NAWS]()
+        # NAWS limits columns and rows to a size of 0-65534 (unsigned short)
+        rows, cols = max(min(65534, rows), 0), max(min(65534, cols), 0)
+        self.log.debug('sb_naws: send rows={}, cols={}' .format(rows, cols))
+        response = [IAC, SB, NAWS, struct.pack('!HH', cols, rows), IAC, SE]
+        self.log.debug('send: {!r}'.format(response))
+        self.send_iac(b''.join(response))
+
     def _handle_sb_naws(self, buf):
         """ Fire callback for IAC-SB-NAWS-<buf>-SE (rfc1073).
         """
         cmd = buf.popleft()
         assert cmd == NAWS, name_command(cmd)
-        columns = str((256 * ord(buf[0])) + ord(buf[1]))
-        rows = str((256 * ord(buf[2])) + ord(buf[3]))
-        self.log.debug('sb_naws: {}, {}'.format(columns, rows))
+        assert len(buf) is 4, 'bad length {}: {!r}'.format(len(buf), buf)
+        assert self.local_option.enabled(NAWS), (
+            'received IAC SB NAWS without IAC DO NAWS')
+        columns, rows = struct.unpack('!HH', b''.join(buf))
+        self.log.debug('sb_naws: client is {}, {}'
+                       .format(columns, rows))
         self._ext_callback[NAWS](int(columns), int(rows))
 
     def _handle_sb_lflow(self, buf):

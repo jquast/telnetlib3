@@ -298,9 +298,10 @@ class TelnetClient(asyncio.protocols.Protocol):
         return None
 
     def send_naws(self):
-        """ Callback for responding to NAWS requests.
+        """ Callback for responding to NAWS requests, should
+            return integers (columns, rows)
         """
-        return self.shell.terminal_width, self.shell.terminal_height
+        return (self.shell.terminal_height, self.shell.terminal_width)
 
     def begin_negotiation(self):
         """ XXX begin on-connect negotiation.
