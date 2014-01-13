@@ -290,7 +290,7 @@ class TelnetClient(asyncio.protocols.Protocol):
                         self.env['CHARSET'] = codec.name
                         selected = offer
         if selected:
-            self.log.info('Encoding negotiated: {env[CHARSET]}.'
+            self.log.debug('Encoding negotiated: {env[CHARSET]}.'
                           .format(env=self.env))
             return selected
         self.log.info('No suitable encoding offered by server: {!r}.'
