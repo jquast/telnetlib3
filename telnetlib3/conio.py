@@ -71,7 +71,7 @@ class ConsoleShell():
         """ Returns wether to expect the server to display our input; if
             False, it is our own responsibility to write a copy to screen.
         """
-        from telopt import ECHO
+        from .telopt import ECHO
         return self.client.stream.remote_option.enabled(ECHO)
 
     @property
