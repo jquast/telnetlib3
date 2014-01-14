@@ -316,14 +316,14 @@ class TalkerShell(Telsh):
 
             Derived from telsh: this 'talker' implementation does not implement
             shell escaping (shlex). Anything beginning with '/' is passed to
-            cmdset_command with leading '/' removed, and certain commands
+            ``command()`` with leading '/' removed, and certain commands
             such as /assign, /set, /command, and; anything else is passed
             to method 'cmdset_say' (public chat)
         """
         self.display_text()
         if data.startswith('/'):
             cmd, *args = data.split(None, 1)
-            val = self.cmdset_command(cmd[1:], *args)
+            val = self.command(cmd[1:], *args)
             # special return value `None' indicates that we expect
             # to recieve a broadcast to update and cause scroll,
             # otherwise, suffix with CR+LF to cause scroll.
