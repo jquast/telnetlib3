@@ -1583,8 +1583,8 @@ class TelnetStream:
         cmd = buf.popleft()
         assert cmd == NAWS, name_command(cmd)
         assert len(buf) is 4, 'bad length {}: {!r}'.format(len(buf), buf)
-        assert self.local_option.enabled(NAWS), (
-            'received IAC SB NAWS without IAC DO NAWS')
+        assert self.remote_option.enabled(NAWS), (
+            'received IAC SB NAWS without receipt of IAC WILL NAWS')
         columns, rows = struct.unpack('!HH', b''.join(buf))
         self.log.debug('sb_naws: client is {}, {}'
                        .format(columns, rows))
