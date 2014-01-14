@@ -3,28 +3,29 @@ About
 
 telnetlib3.py is an ISC-licensed Telnet Client and Telnet Server library.
 
-Implemented using the "tulip" module of PEP 3156, the proposed Asynchronous I/O framework for Python 3.4 and forward as module 'asyncio'. asyncio aims to be compatible with existing frameworks such as Twisted and gevent.
+It is in development state, and feedback is encouraged. It uses the 'asyncio' module of python 3.4, also available as a package on pypi for python 3.3, for which this is currently targeted. 'asyncio' aims to be compatible with existing frameworks such as Twisted and gevent.
 
-Development is currently in progress, Telnet Server Protocol and examples are complete, and Telnet Client Protocol is complete with example client programs under development. Feel free to make use of github's fork and "Issues" service to report any bugs or grievances.
+Examples
+========
 
-Status
-======
+Telnet Server and Client example programs are provided in the examples_ sub-folder of the source project. *talker.py* can be used to demonstrate building a multi-user server. *server.py* provides a debugging shell for testing compatible clients. *client.py* provides a simple client for connecting to telnet servers.
 
-TODO: Proper XON/XOFF/AO, this was previously implemented with
-      the proposed pause/resume_writing() methods for tulip, but
-      these have been complicated a great deal upstream in asyncio/py 3.4,
-      looks like a custom StreamWriter will need to be implemented ?
-TODO: Proper abort_output()/IAC rewind, have yet 
-TODO: handling duplication of echo and flow control by LINEMODE opts
-      need to cross-wire these all correctly
-TODO: TelnetClient (also using TelnetStreamReader)
-      this is rudimentarily implemented, but we need to implement
-      a tty-driven interface of some sort to rapidly test it
-TODO: fingerprinting Client & Server
-      somewhere there with examples/honeypot.py
-TODO: tests :-)
-TODO: example MUD server, or nibbles, or pong, something worth playing
-TODO: example wunderground.com client
+Feel free to make use of github's fork and "Issues" service to report any bugs or grievances.
+
+client.py and Favorite boards
+-----------------------------
+
+Most notably, *examples/client.py* provides a *--cp437* command-line option that can be used to connect to DOS Bulletin-board systems that would otherwise require a DOS-emulating client. This client demonstrates python's powerful encoding capabilities of translating the DOS codepage cp437 to utf-8, allowing fancyful ansi artwork to be displayed directly in xterm, rxvt, iTerm, or any other client supporting utf-8. In this way, this simple client program example replaces the need for SyncTerm, mtelnet, netrunner, or other special-purpose DOS emulating clients.
+
+Some of my favorite telnet destinations,
+
+* blackflag.acid.org (cp437 only)
+* htc.zapto.org (cp437 only)
+* ssl.archaicbinary.net (cp437 only)
+* 1984.ws (**utf8** or cp437 only)
+* bbs.pharcyde.org (cp437 only)
+* rainmaker.wunderground.com (ascii)
+* nethack.alt.org (ascii or latin1)
 
 telsh
 =====
@@ -157,13 +158,13 @@ This sends IAC marked MSG_OOB, followed by DM, not marked MSG_OOB. The BSD serve
 Abort Output
 ============
 
-BSD Telnet Server sets "Packet mode" with the pty driver:
+BSD Telnet Server sets "Packet mode" with the pty driver::
 
         (void) ioctl(p, TIOCPKT, (char *)&on);
 
-And when TIOCPKT_FLUSHWRITE is signaled by the pty driver:
+And when TIOCPKT_FLUSHWRITE is signaled by the pty driver::
 
-#define         TIOCPKT_FLUSHWRITE      0x02    /* flush packet */
+        #define         TIOCPKT_FLUSHWRITE      0x02    /* flush packet */
 
 awaiting data buffered on the write transport is cleared; taking care to ensure all IAC commands were sent in the netclear() alogorithm, which also sets the neturgent pointer.
 
@@ -191,13 +192,13 @@ Not Implemented
 
 RFC-1416 "Telnet Authentication Option", RFC-1411 "Telnet Authentication: Kerberos Version 4", and RFC-1412 "Telnet Authentication: SPX" are supported by the BSD telnetd.c, but there are no plans to implement any of them.
 
-RFC-861 "Telnet Extended Options List", May 1983. describes a method of negotiating options after all possible 255 option bytes are exausted by future implementations. This never happened (about 100 remain), it was perhaps, ambitious in thinking more protocols would incorperate with Telnet (such as FTP does).
+RFC-861 "Telnet Extended Options List", May 1983. describes a method of negotiating options after all possible 255 option bytes are exausted by future implementations. This never happened (about 100 remain), it was perhaps, ambitious in thinking more protocols would incorperate Telnet (such as FTP did).
 
-RFC-927, "TACACS User Identification Telnet Option", describes a method of identifying terminal clients by a 32-bit UUID, providing a form of 'rlogin'. This system, published in 1984, was designed for MILNET by BBN, and the actual TACACS implementation is undocumented, though partially re-imagined by Cisco in rfc1492. Essentially, the users' credentials are forwarded to a TACAS daemon to verify that the client does in fact have access. The UUID is a form of an early kerberos token.
+RFC-927, "TACACS User Identification Telnet Option", describes a method of identifying terminal clients by a 32-bit UUID, providing a form of 'rlogin'. This system, published in 1984, was designed for MILNET by BBN, and the actual TACACS implementation is undocumented, though partially re-imagined by Cisco in rfc1492. Essentially, the user's credentials are forwarded to a TACAS daemon to verify that the client does in fact have access. The UUID is a form of an early kerberos token.
 
 RFC 933, "Output Marking Telnet Option", describes a method of sending "banners", such as displayed on login, with an associated ID to be stored by the client. The server may then indicate at which time during the sesssion the banner is relevant. This was implemented by Mitre for DOD installations that much, for instance, need to display various levels of "TOP SECRET" messages each time a record is opened, preferably on the top, bottom, left or right of the screen.
 
-RFC 946, "Telnet Terminal Location Number Option", only known to be implemented at Carnnige Mellon Univ in the mid-80's, this was a mechanism to identify a Terminal by ID, which would then be read and forwarded by gatewaying hosts. So that user travelling from host A -> B -> C appears as though his "from" address is host A in the system "who" and "finger" services. There exists more appropriate solutions, such as the "Report Terminal ID" sequences CSI + c and CSI + 0c for vt102, and ESC + z (vt52), which send a terminal ID inband as ASCII.
+RFC 946, "Telnet Terminal Location Number Option", only known to be implemented at Carnnige Mellon University in the mid-80's, this was a mechanism to identify a Terminal by ID, which would then be read and forwarded by gatewaying hosts. So that user travelling from host A -> B -> C appears as though his "from" address is host A in the system "who" and "finger" services. There exists more appropriate solutions, such as the "Report Terminal ID" sequences CSI + c and CSI + 0c for vt102, and ESC + z (vt52), which send a terminal ID inband as ASCII.
 
 RFC 1041, "Telnet 3270 Regime Option", Jan 1988
 RFC 1043, "TELNET Data Entry Terminal Option", Feb 1988
@@ -206,6 +207,26 @@ RFC 1097, "Telnet Subliminal-Message Option", Apr 1989
 RFC 1205, "5250 Telnet Interface", Feb 1991
 RFC 1411, "Telnet Authentication: Kerberos Version 4", Jan 1993
 RFC 2217, "Telnet Com Port Control Option", Oct 1997
+
+Status
+======
+
+TODO: Proper XON/XOFF/AO, this was previously implemented with
+      the proposed pause/resume_writing() methods for tulip, but
+      these have been complicated a great deal upstream in asyncio/py 3.4,
+      looks like a custom StreamWriter will need to be implemented ?
+TODO: Proper abort_output()/IAC rewind, have yet 
+TODO: handling duplication of echo and flow control by LINEMODE opts
+      need to cross-wire these all correctly
+TODO: TelnetClient (also using TelnetStreamReader)
+      this is rudimentarily implemented, but we need to implement
+      a tty-driven interface of some sort to rapidly test it
+TODO: fingerprinting Client & Server
+      somewhere there with examples/honeypot.py
+TODO: tests :-)
+TODO: example MUD server, or nibbles, or pong, something worth playing
+TODO: example wunderground.com client
+
 
 Implemented
 ===========
@@ -312,3 +333,5 @@ RFC 495, NIC #15371 "TELNET Protocol Specification." 1 May 1973, A. McKenzie, li
 """
 
 If anybody can locate these documents, please forward them along.
+
+.. _examples: https://github.com/jquast/telnetlib3/tree/master/examples
