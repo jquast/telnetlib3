@@ -1,16 +1,16 @@
 About
 =====
 
-telnetlib3.py is an ISC-licensed Telnet Client and Telnet Server library.
+telnetlib3.py is a Telnet Client and Telnet Server library for python 3.3 and 3.4
 
-It is in development state, and feedback is encouraged. It uses the 'asyncio' module of python 3.4, also available as a package on pypi for python 3.3, for which this is currently targeted. 'asyncio' aims to be compatible with existing frameworks such as Twisted and gevent.
+It is in development state, and feedback is encouraged. It uses the 'asyncio' module of python 3.4, also available as a package on pypi for python 3.3, for which this is currently targeted, though it may be backported (along with asyncio) to earlier versions of python.
 
 Examples
 ========
 
 Telnet Server and Client example programs are provided in the examples_ sub-folder of the source project. *talker.py* can be used to demonstrate building a multi-user server. *server.py* provides a debugging shell for testing compatible clients. *client.py* provides a simple client for connecting to telnet servers.
 
-Feel free to make use of github's fork and "Issues" service to report any bugs or grievances.
+Feel free to make use of github's fork and *Issues* service to report any bugs or grievances.
 
 client.py and Favorite boards
 -----------------------------
@@ -20,9 +20,9 @@ Most notably, *examples/client.py* provides a *--cp437* command-line option that
 Some of my favorite telnet destinations,
 
 * blackflag.acid.org (cp437 only)
-* htc.zapto.org (cp437 only)
+* htc.zapto.org (**utf8** or cp437)
 * ssl.archaicbinary.net (cp437 only)
-* 1984.ws (**utf8** or cp437 only)
+* 1984.ws (**utf8** or cp437)
 * bbs.pharcyde.org (cp437 only)
 * rainmaker.wunderground.com (ascii)
 * nethack.alt.org (ascii or latin1)
@@ -30,32 +30,34 @@ Some of my favorite telnet destinations,
 telsh
 =====
 
-In adition to remote line editing as described below, a pure-python shell, 'telsh' is provided to allow toggling of server options and session parameters. In this way, it provides a suitable interface for testing telnet client capabilities.
+In addition to remote line editing as described below, a pure-python shell, 'telsh' is provided to allow toggling of server options and session parameters. In this way, it provides a suitable interface for testing telnet client capabilities.
 
-It is only in the interest of this project to provide enough shell-like capabilities to demonstrate remote line editing and an extensible environment for session introspection. An example of this is assigning a new value to CHARSET, toggling in and outbinary, thereby enabling utf-8 input/output, etc.
+It is only in the interest of this project to provide enough shell-like capabilities to demonstrate remote line editing and an extensible environment for session introspection. An example of this is assigning a new value to CHARSET, toggling in and out-binary, thereby enabling utf-8 input/output, etc.
 
 Telnet
 ======
 
-The Telnet protocol is over 40 years old and still in use today. Telnet predates TCP, and was used over a wide array of transports, especially on academic and military systems. Nearly all computer networking that interacted with human interfaces was done using the Telnet protocol prior to the mass-adapation of the World Wide Web in the mid 90's, when SSH became more commonplace.
+The Telnet protocol is over 40 years old and still in use today. Telnet predates TCP, and was used over a wide array of transports, especially on academic and military systems. Nearly all computer networking that interacted with human interfaces (Through an NVT, Networked Virtual Terminal) was done using the Telnet protocol prior to the mass-adaption of the World Wide Web in the mid 90's, when SSH became more commonplace.
 
 Naturally, Telnet as a code project inevitably must handle a wide variety of connecting clients and hosts, due to limitations of their networking Transports, Terminals, their drivers, and host operating systems. 
 
-This implementation aims to implement only those capabilities "found in the wild", and includes, or does not include, mechanisms that are suitable only for legacy or vendor-implemented options. It even makes one of its own: the 'encoding' used in binary mode is the value replied by the CHARSET negotation (rfc 2066).
+This implementation aims to implement only those capabilities "found in the wild", and includes, or does not include, mechanisms that are suitable only for legacy or vendor-implemented options.
+
+It even introduces a feature of its own: the 'encoding' used in binary mode is the value replied by the CHARSET negotiation (RFC 2066). This would make it the first telnet library that supports any of cp437, utf8, bige, shiftjis, etc.
 
 UTF-8
 =====
 
-CHARSET (rfc 2066) specifies a codepage, not an encoding. At the time, this was more or less limited to specifying the codepage used to display bytes of the range 127 through 255.  Unimplemented in bsd client, and generally found implemented only in recent MUD client (Atlantis) and servers. Most common values are: ASCII, UTF-8, BIG5, and LATIN1.
+CHARSET (RFC 2066) specifies a codepage, not an encoding. At the time, this was more or less limited to specifying the codepage used to display bytes of the range 127 through 255.  Unimplemented in bsd client, and generally found implemented only in recent MUD client (Atlantis) and servers. Most common values are: ASCII, UTF-8, BIG5, and LATIN1.
 
 The default preferred encoding for clients that negotiate BINARY but not CHARSET, such as the bsd client, is defined by the TelnetServer keyword argument ``default_encoding`` ('utf-8' by default).  The example shell 'telsh' allows changing encoding on the fly by setting the 'CHARSET' session environment value at the command prompt by issuing command 'set CHARSET=utf-8'.
 
 Setting binary for only a single direction (outbinary or inbinary) is supported. Client support of one does not immediately toggle the other, it must be negotiated both ways for full UTF-8 input and output. Some clients (TinTin++) incorrectly negotiation either directions (WILL, DO/WONT, DONT) as a single option, causing only one reply for a request of either 'outbinary' or 'inbinary' for which it always declines, only once, for either request (Even when configured for utf-8).
 
-Remote Linemode
+Remote LineMode
 ===============
 
-This project is the only known Server-side implementation of *Special Linemode Character* (SLC) negotiation and *Remote line editing* (rfc1184), other than bsd telnet, which was used as a guide for the bulk of this python implementation.
+This project is the only known Server-side implementation of *Special Line Mode Character* (SLC) negotiation and *Remote line editing* (rfc1184), other than BSD telnet, which was used as a guide for the bulk of this python implementation.
 
 Remote line editing is a comprehensive approach to providing responsive, low-latency output of characters received over slow network links, allowing incomplete lines to be buffered, while still providing editing facilities (such as backspace, kill line, etc.), remotely.
 
@@ -83,12 +85,12 @@ Only a few 1970-era hosts (AMES-67, UCLA-CON) require the GA signal. For this re
 
 The GA signal has been re-implemented even for character-at-a-time servers, such as the competition nethack server alt.nethack.org, targeted at client scripts that play using AI decision-making routines.
 
-Local Linemode
+Local Line Mode
 ==============
 
-Unless otherwise negotiatied, the specification describes Telnet's default mode as half-duplex, local line editing. This most basic "dummy" mode is modeled after a Teletype 33, which runs in "half-duplex" mode.
+Unless otherwise negotiated, the specification describes Telnet's default mode as half-duplex, local line editing. This most basic "dummy" mode is modeled after a Teletype 33, which runs in "half-duplex" mode.
 
-A Telnet implmentation attached to 7-bit ASCII teletype may implement the Telnet protocol by hardware circuit, or by minimal changes to their terminal line drivers: when the connecting CPU is without MMU or process control, an IAC interpreter or hardware device could be "interrupted" when the 8th bit is set high, "Out of band" in regards to 7-bit terminals, the receipt of value 255 indicates that the byte following it *Is-A-Command* (IAC).
+A Telnet implementation attached to 7-bit ASCII teletype may implement the Telnet protocol by hardware circuit, or by minimal changes to their terminal line drivers: when the connecting CPU is without MMU or process control, an IAC interpreter or hardware device could be "interrupted" when the 8th bit is set high, "Out of band" in regards to 7-bit terminals, the receipt of value 255 indicates that the byte following it *Is-A-Command* (IAC).
 
 Default Telnet Mode
 -------------------
@@ -100,16 +102,14 @@ Default Telnet Mode
   * Client signals end of input (send) by CR, LF (Carriage Return, Linefeed).
 
 
-"Synch" Mechanism
+"Synch" Mechanism, not supported
 =================
-
-*NOT SUPPORTED*.
 
 A supervisor connecting a (7-bit) teletype to a telnet (8-bit) data line would simply pipe the streams together by the 7 bits; The teletypist may press 'BREAK' at any time to signal a control line: the supervisor then enters "Telnet Synch" mode by sending an "Urgent" mechanism, and ceases printing data received on the transport.
 
 A user could then instruct "Abort Output" (AO), "Interrupt Process" (IP), or others, and then presumably return to normal processing.
 
-Consider the description of a PDP-10 session in rfc139 (May 1971), presented here as a faux naif unix session:
+Consider the description of a PDP-10 session in rfc139 (May 1971), presented here as a unix session:
 
     1. Teletype sends command input,
 
@@ -123,7 +123,7 @@ Consider the description of a PDP-10 session in rfc139 (May 1971), presented her
 
 At this point, however, the half-dupex Teletype cannot transmit any input.
 
-The only way to signal the attention of the supervisor, which is currently blocking the half-duplex transmission with output (having not yet received GA), is by a special line signal wired seperately from the teletype keyboard. This is the 'BREAK' or 'ATTN' key.
+The only way to signal the attention of the supervisor, which is currently blocking the half-duplex transmission with output (having not yet received GA), is by a special line signal wired separately from the teletype keyboard. This is the 'BREAK' or 'ATTN' key.
 
 The terminal driver may then signal the 'supervisor', which then sends 'INS' (rfc139). Although the teletype is capable of "flushing" its input buffer, it does not flush control codes. Remaining control codes from the teletype (^t^t^c) continues to the remote end, but is discarded by that end, until the Data-Mark (DM) is sent by the supervisor.
 
@@ -132,7 +132,7 @@ This ensures the ^t and ^c characters are not received by the remote program.
 TCP Implementation
 ------------------
 
-In the TCP implementation of telnet, where presumably a half-duplex terminal may still interconnect, the 'INS' marker referenced in pre-TCP documents is, instead, marked by sending the TCP Urgent option:
+In the TCP implementation of Telnet, where presumably a half-duplex terminal may still interconnect, the 'INS' marker referenced in pre-TCP documents is, instead, marked by sending the TCP Urgent option:
 
     socket.send(IAC, socket.MSG_OOB).
 
@@ -171,9 +171,9 @@ awaiting data buffered on the write transport is cleared; taking care to ensure 
 Carriage Return
 ===============
 
-There are five supported signalling mechanisms for "send" or "end of line" received by clients.  The default implementation supplies remote line editing and callback of ``line_received`` with all client-supported carriage returns, but may cause loss of data for implementors wishing to distinguish among them.
+There are five supported signalling mechanisms for "send" or "end of line" received by clients.  The default implementation supplies remote line editing and callback of ``line_received`` with all client-supported carriage returns, but may cause loss of data for implementers wishing to distinguish among them.
 
-Namely, the difference between 'return' and 'enter' or raw file transfers. Those implementors should directly override ``data_received``, or carefully deriving their own implementations of ``editing_received`` and ``character_received``.
+Namely, the difference between 'return' and 'enter' or raw file transfers. Those implementers should directly override ``data_received``, or carefully deriving their own implementations of ``editing_received`` and ``character_received``.
 
 An overview of the primary callbacks and their interaction with carriage returns are described below for those wishing to extend the basic remote line editing or 'character-at-a-time' capabilities.
 
@@ -190,23 +190,35 @@ IAC EOR: In addition to line-oriented or character-oriented terminals, IAC EOR i
 Not Implemented
 ===============
 
-RFC-1416 "Telnet Authentication Option", RFC-1411 "Telnet Authentication: Kerberos Version 4", and RFC-1412 "Telnet Authentication: SPX" are supported by the BSD telnetd.c, but there are no plans to implement any of them.
+  RFC-1416 "Telnet Authentication Option"
+  RFC-1411 "Telnet Authentication: Kerberos Version 4"
+  RFC-1412 "Telnet Authentication: SPX"
 
-RFC-861 "Telnet Extended Options List", May 1983. describes a method of negotiating options after all possible 255 option bytes are exausted by future implementations. This never happened (about 100 remain), it was perhaps, ambitious in thinking more protocols would incorperate Telnet (such as FTP did).
+These are supported by the BSD telnetd.c, but there are no plans to implement any of them.
 
-RFC-927, "TACACS User Identification Telnet Option", describes a method of identifying terminal clients by a 32-bit UUID, providing a form of 'rlogin'. This system, published in 1984, was designed for MILNET by BBN, and the actual TACACS implementation is undocumented, though partially re-imagined by Cisco in rfc1492. Essentially, the user's credentials are forwarded to a TACAS daemon to verify that the client does in fact have access. The UUID is a form of an early kerberos token.
+  RFC-861 "Telnet Extended Options List", May 1983.
 
-RFC 933, "Output Marking Telnet Option", describes a method of sending "banners", such as displayed on login, with an associated ID to be stored by the client. The server may then indicate at which time during the sesssion the banner is relevant. This was implemented by Mitre for DOD installations that much, for instance, need to display various levels of "TOP SECRET" messages each time a record is opened, preferably on the top, bottom, left or right of the screen.
+Describes a method of negotiating options after all possible 255 option bytes are exhausted by future implementations. This never happened (about 100 remain), it was perhaps, ambitious in thinking more protocols would incorporate Telnet (such as FTP did).
 
-RFC 946, "Telnet Terminal Location Number Option", only known to be implemented at Carnnige Mellon University in the mid-80's, this was a mechanism to identify a Terminal by ID, which would then be read and forwarded by gatewaying hosts. So that user travelling from host A -> B -> C appears as though his "from" address is host A in the system "who" and "finger" services. There exists more appropriate solutions, such as the "Report Terminal ID" sequences CSI + c and CSI + 0c for vt102, and ESC + z (vt52), which send a terminal ID inband as ASCII.
+RFC-927, "TACACS User Identification Telnet Option"
 
-RFC 1041, "Telnet 3270 Regime Option", Jan 1988
-RFC 1043, "TELNET Data Entry Terminal Option", Feb 1988
-RFC 1143, "The Q Method of Implementing .. Option Negotiation", Feb 1990
-RFC 1097, "Telnet Subliminal-Message Option", Apr 1989
-RFC 1205, "5250 Telnet Interface", Feb 1991
-RFC 1411, "Telnet Authentication: Kerberos Version 4", Jan 1993
-RFC 2217, "Telnet Com Port Control Option", Oct 1997
+Describes a method of identifying terminal clients by a 32-bit UUID, providing a form of 'rlogin'. This system, published in 1984, was designed for MILNET by BBN, and the actual TACACS implementation is undocumented, though partially re-imagined by Cisco in rfc1492. Essentially, the user's credentials are forwarded to a TACAS daemon to verify that the client does in fact have access. The UUID is a form of an early kerberos token.
+
+RFC 933, "Output Marking Telnet Option"
+
+Describes a method of sending "banners", such as displayed on login, with an associated ID to be stored by the client. The server may then indicate at which time during the sesssion the banner is relevant. This was implemented by Mitre (A US. defense contractor) for DOD installations that, for instance, need to display various levels of "TOP SECRET" messages each time a record is opened, preferably on the top, bottom, left or right of the screen.
+
+RFC 946, "Telnet Terminal Location Number Option"
+
+Only known to be implemented at Carnegie Mellon University in the mid-80's, this was a mechanism to identify a Terminal by ID, which would then be read and forwarded by gatewaying hosts. So that a user traveling from host A -> B -> C appears as though his "from" address is host A in the system "who" and "finger" services on host C. There exists more appropriate solutions, such as the "Report Terminal ID" sequences CSI + c and CSI + 0c for vt102, and ESC + z (vt52), which send a terminal ID in-band as ASCII.
+
+  RFC 1041, "Telnet 3270 Regime Option", Jan 1988
+  RFC 1043, "TELNET Data Entry Terminal Option", Feb 1988
+  RFC 1143, "The Q Method of Implementing .. Option Negotiation", Feb 1990
+  RFC 1097, "Telnet Subliminal-Message Option", Apr 1989
+  RFC 1205, "5250 Telnet Interface", Feb 1991
+  RFC 1411, "Telnet Authentication: Kerberos Version 4", Jan 1993
+  RFC 2217, "Telnet Com Port Control Option", Oct 1997
 
 Status
 ======
@@ -227,77 +239,75 @@ TODO: tests :-)
 TODO: example MUD server, or nibbles, or pong, something worth playing
 TODO: example wunderground.com client
 
-
 Implemented
 ===========
 
-* RFC 727 TELNET Logout Option.
-* RFC 779 "Telnet Send-Location Option", Apr 1981
-+ RFC 854 "Telnet Protocol Specification", May 1983
-+ RFC 855 "Telnet Option Specifications", May 1983
+  RFC 727 TELNET Logout Option. (1)
+  RFC 779 "Telnet Send-Location Option", Apr 1981 (1)
+  RFC 854 "Telnet Protocol Specification", May 1983 (2)
+  RFC 855 "Telnet Option Specifications", May 1983 (2)
   RFC 856 "Telnet Binary Transmission", May 1983
-+ RFC 857 "Telnet Echo Option", May 1983
-+ RFC 858 "Telnet Supress Go Ahead Option", May 1983
+  RFC 857 "Telnet Echo Option", May 1983 (2)
+  RFC 858 "Telnet Suppress Go Ahead Option", May 1983 (2)
   RFC 859 "Telnet Status Option", May 1983
-+ RFC 860 "Telnet Timing mark Option", May 1983
-* RFC 885 "Telnet End of Record Option", Dec 1983
+  RFC 860 "Telnet Timing mark Option", May 1983 (2)
+  RFC 885 "Telnet End of Record Option", Dec 1983 (1)
   RFC 1073, "Telnet Window Size Option", Oct 1988
   RFC 1079, "Telnet Terminal Speed Option", Dec 1988
-+ RFC 1091, "Telnet Terminal-Type Option", Feb 1989
+  RFC 1091, "Telnet Terminal-Type Option", Feb 1989 (2)
   RFC 1096, "Telnet X Display Location Option", Mar 1989
-  RFC 1184, "Telnet Linemode Option (extended options)", Oct 1990
-+ RFC 1123, "Requirements for Internet Hosts", Oct 1989
-* RFC 2066, "Telnet Charset Option", Jan 1997
+  RFC 1184, "Telnet LineMode Option (extended options)", Oct 1990
+  RFC 1123, "Requirements for Internet Hosts", Oct 1989 (1)
+  RFC 2066, "Telnet Charset Option", Jan 1997 (2)
   RFC 1372, "Telnet Remote Flow Control Option", Oct 1992
   RFC 1408, "Telnet Environment Option", Jan 1993
   RFC 1571, "Telnet Environment Option Interoperability Issues", Jan 1994
   RFC 1572, "Telnet Environment Option", Jan 1994
 
-* = Not implemented in bsd telnet (rare!)
-
-+ = Required by specification (complies!)
+(1): Not implemented in bsd telnet (rare!)
+(2): Required by specification (complies!)
 
 Resources
 =========
 
-These RFCs predate RFC 854, but are often relevant (or not)
+These RFCs predate RFC 854, they are related but mostly not relevant, but are interesting to read in historical context of the development of the telnet protocol and NVT (Network Virtual Terminal)
 
-RFC 97 A FIRST CUT AT A PROPOSED TELNET PROTOCOL
-RFC 137 TELNET Protocol.
-RFC 139 Discussion of TELNET Protocol.
-RFC 318 Telnet Protocol.
-RFC 328 Suggested Telnet Protocol Changes.
-RFC 340 PROPOSED TELNET CHANGES.
-RFC 393 Comments on TELNET Protocol Changes.
-RFC 435 TELNET Issues.
-RFC 513 COMMENTS ON THE NEW TELNET SPECIFICATIONS.
-RFC 529 A Note on Protocol Synch Sequences.
-RFC 559 Comments on the new TELNET Protocol and its Implementation.
-RFC 563 Comments on the RCTE TELNET Option.
-RFC 593 Telnet and FTP Implementation Schedule Change.
-RFC 595 Some Thoughts in Defense of the TELNET Go-Ahead.
-RFC 596 Second Thoughts on Telnet Go-Ahead.
-RFC 652 Telnet Output Carriage-Return Disposition Option.
-RFC 653 TELNET OUTPUT HORIZONTAL TABSTOPS OPTION.
-RFC 654 TELNET OUTPUT HORIZONTAL TAB DISPOSITION OPTION.
-RFC 655 TELNET OUTPUT FORMFEED DISPOSITION OPTION.
-RFC 656 TELNET OUTPUT VERTICAL TABSTOPS OPTION.
-RFC 657 TELNET OUTPUT VERTICAL TAB DISPOSITION OPTION.
-RFC 658 TELNET OUTPUT LINEFEED DISPOSITION.
-RFC 659 Announcing Addtional Telnet Options.
-RFC 698 TELNET EXTENDED ASCII OPTION.
-RFC 701 AUGUST, 1974, SURVEY OF NEW-PROTOCOL TELNET SERVERS.
-RFC 702 SEPTEMBER, 1974, SURVEY OF NEW-PROTOCOL TELNET SERVERS.
-RFC 703 July, 1975, Survey of New-Protocol TELNET Servers.
-RFC 718 Comments on RCTE from the TENEX Implementation Experience.
-RFC 719 Discussion on RCTE.
-RFC 726 Remote Controlled Transmssion and Echoing Telnet Option.
-RFC 728 A Minor Pitfall in the Telnet Protocol.
-RFC 732 Telnet Data Entry Terminal Option (Obsoletes: RFC 731)
-RFC 734 SUPDUP Protocol.
-RFC 735 Revised TELNET Byte Macro Option (Obsoletes: RFC 729, RFC 736)
-RFC 749 Telnet SUPDUP-OUTPUT Option.
-RFC 818 The Remote User Telnet Service.
+  RFC 97 A First Cut at a Proposed Telnet Protocol.
+  RFC 137 TELNET Protocol.
+  RFC 139 Discussion of TELNET Protocol.
+  RFC 318 Telnet Protocol.
+  RFC 328 Suggested Telnet Protocol Changes.
+  RFC 340 Proposed TELNET Changes.
+  RFC 393 Comments on TELNET Protocol Changes.
+  RFC 435 TELNET Issues.
+  RFC 513 Comments on the New Telnet Specifications.
+  RFC 529 A Note on Protocol Synch Sequences.
+  RFC 559 Comments on the new TELNET Protocol and its Implementation.
+  RFC 563 Comments on the RCTE TELNET Option.
+  RFC 593 Telnet and FTP Implementation Schedule Change.
+  RFC 595 Some Thoughts in Defense of the TELNET Go-Ahead.
+  RFC 596 Second Thoughts on Telnet Go-Ahead.
+  RFC 652 Telnet Output Carriage-Return Disposition Option.
+  RFC 653 Telnet Output Horizontal Tabstops Option.
+  RFC 654 Telnet Output Horizontal Tab Disposition Option.
+  RFC 655 Telnet Output Formfeed Disposition Option.
+  RFC 656 Telnet Output Vertical Tabstops Option.
+  RFC 657 Telnet Output Vertical Tab Disposition Option.
+  RFC 658 Telnet Output Linefeed Disposition.
+  RFC 659 Announcing Additional Telnet Options.
+  RFC 698 Telnet Extended ASCII Option.
+  RFC 701 August, 1974, Survey of New-Protocol Telnet Servers.
+  RFC 702 September, 1974, Survey of New-Protocol Telnet Servers.
+  RFC 703 July, 1975, Survey of New-Protocol TELNET Servers.
+  RFC 718 Comments on RCTE from the TENEX Implementation Experience.
+  RFC 719 Discussion on RCTE.
+  RFC 726 Remote Controlled Transmission and Echoing Telnet Option.
+  RFC 728 A Minor Pitfall in the Telnet Protocol.
+  RFC 732 Telnet Data Entry Terminal Option (Obsoletes: RFC 731)
+  RFC 734 SUPDUP Protocol.
+  RFC 735 Revised TELNET Byte Macro Option (Obsoletes: RFC 729, RFC 736)
+  RFC 749 Telnet SUPDUP-OUTPUT Option.
+  RFC 818 The Remote User Telnet Service.
 
 "Telnet Protocol," MIL-STD-1782, U.S. Department of Defense, May 1984.
 "Mud Terminal Type Standard," http://tintin.sourceforge.net/mtts/
@@ -309,12 +319,12 @@ RFC 818 The Remote User Telnet Service.
 Others
 ------
 
-It should be said as historical source code, BSD 2.11's telnet source of UCLA and NSCA Telnet client of Univ. of IL for MacOS is most notable. There are also a few modern Telnet servers. Some modern Telnet clients support only kludge mode, with the exception of MUD clients, which are often linemode only. TinTin++ is the only known client to support both modes.
+It should be said as historical source code, BSD 2.11's telnet source of UCLA and NSCA Telnet client of Univ. of IL for MacOS is most notable. There are also a few modern Telnet servers. Some modern Telnet clients support only kludge mode, with the exception of MUD clients, which are often Linemode (half-duplex) only. TinTin++ is the only known client to support both modes.
 
 RFC 495
 -------
 
-RFC 495, NIC #15371 "TELNET Protocol Specification." 1 May 1973, A. McKenzie, lists the following "attatched documents", which are not available to the public or in digitized form.
+RFC 495, NIC #15371 "TELNET Protocol Specification." 1 May 1973, A. McKenzie, lists the following "attached documents", which are not available to the public or in digitized form.
 
 """ [...] specifications for TELNET options which allow negotiation of:
 
