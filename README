@@ -13,7 +13,7 @@ on pypi for python 3.3, for which this is currently targeted.
 Examples
 ========
 
-Telnet Server and Client example programs are provided in the `github examples`_
+Telnet Server and Client example programs are provided in the `examples`_
 sub-folder of the source project. talker.py_ demonstrates a multi-user server
 chat program). server.py_ provides a debugging shell for testing compatible
 clients, using the default telsh_ shell. client.py_ provides a simple client
@@ -467,9 +467,9 @@ A. McKenzie, lists the following attached documents, which are not available::
 
 If anybody can locate these documents, please forward them along.
 
-.. _github examples: https://github.com/jquast/telnetlib3/tree/master/examples
 .. _github: https://github.com/jquast/telnetlib3
 .. _asyncio: http://docs.python.org/3.4/library/asyncio.html
+.. _examples: https://github.com/jquast/telnetlib3/tree/master/examples
 .. _talker.py: https://github.com/jquast/telnetlib3/tree/master/examples/talker.py
 .. _server.py: https://github.com/jquast/telnetlib3/tree/master/examples/server.py
 .. _client.py: https://github.com/jquast/telnetlib3/tree/master/examples/client.py
