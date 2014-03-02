@@ -100,7 +100,7 @@ DO/WONT, DONT) as a single option, causing only one reply for a request of
 either 'outbinary' or 'inbinary' for which it always declines, only once, for
 either request (Even when configured for UTF8).
 
-Remote Linemode
+Remote LineMode
 ===============
 
 This project is the only known Server-side implementation of *Special Linemode
@@ -158,7 +158,7 @@ The GA signal has been re-implemented even for character-at-a-time servers,
 such as the competition nethack server alt.nethack.org, targeted at client
 scripts that play using AI decision-making routines.
 
-Local Linemode
+Local Line Mode
 ==============
 
 Unless otherwise negotiated, the specification describes Telnet's default mode
@@ -179,10 +179,8 @@ Default Telnet Mode
   * A server's prompt must be followed by the 'Go-Ahead' (GA) command.
   * Client signals end of input (send) by CR, LF (Carriage Return, Linefeed).
 
-"Synch" Mechanism
-=================
-
-*NOT SUPPORTED*.
+"Synch" Mechanism, not supported
+================================
 
 A supervisor connecting a (7-bit) teletype to a telnet (8-bit) data line would
 simply pipe the streams together by the 7 bits; The teletypist may press
@@ -212,7 +210,7 @@ At this point, however, the half-dupex Teletype cannot transmit any input.
 The only way to signal the attention of the supervisor, which is currently
 blocking the half-duplex transmission with output (having not yet received
 GA), is by a special line signal wired separately from the teletype keyboard.
-This is the 'BREAK' or 'ATTN' key.
+This is the *BREAK* or *ATTN* key.
 
 The terminal driver may then signal the 'supervisor', which then sends 'INS'
 (RFC_139_). Although the teletype is capable of "flushing" its input buffer,
@@ -568,4 +566,3 @@ If anybody can locate these documents, please forward them along.
 .. _BBN: https://en.wikipedia.org/wiki/BBN_Technologies
 .. _TACACS: https://en.wikipedia.org/wiki/TACACS
 .. _Kerberos: https://en.wikipedia.org/wiki/Kerberos_%28protocol%29
-
