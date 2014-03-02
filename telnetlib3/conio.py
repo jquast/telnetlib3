@@ -1,6 +1,10 @@
 import logging
+import termios
 import codecs
+import struct
+import fcntl
 import sys
+import os
 
 
 def _query_term_speed(tty_fd):
@@ -9,7 +13,6 @@ def _query_term_speed(tty_fd):
         Returns the input and output speed of the terminal specified
         by argument ``tty_fd`` as two integers: (rx, tx).
     """
-    import termios
     iflag, oflag, cflag, lflag, ispeed, ospeed, cc = termios.tcgetattr(tty_fd)
     return ispeed, ospeed
 
@@ -19,17 +22,15 @@ def _query_term_winsize(tty_fd):
 
         Returns the value of the `winsize' struct returned by ioctl of
         TIOCGWINSZ for the terminal specified by argument ``tty_fd``
-        as its natural four integers: (rows, cols, xpixels, ypixels).
+        as its natural 4 unsigned short integers:
+            (ws_rows, ws_cols, ws_xpixels, ws_ypixels).
     """
-    #struct winsize {
+    #  struct winsize {
     #            unsigned short  ws_row;         /* rows, in characters */
     #            unsigned short  ws_col;         /* columns, in characters */
     #            unsigned short  ws_xpixel;      /* horizontal size, pixels */
     #            unsigned short  ws_ypixel;      /* vertical size, pixels */
-    #};
-    import fcntl
-    import struct
-    import termios
+    #  };
     val = fcntl.ioctl(tty_fd, termios.TIOCGWINSZ, b'\x00' * 8)
     return struct.unpack('hhhh', val)
 
@@ -54,16 +55,17 @@ class ConsoleShell():
     def write(self, string=u''):
         """ Write string to console output stream.
         """
-        if string:
-            try:
+        # XXX probably an out-of-order timing condition, here
+        try:
+            if string:
                 self.stream_out.write(string)
-            except BlockingIOError:
-                # output is blocking, defer write for another 50ms,
-                self.client._loop.call_later(0.05, self.write, string)
+        except BlockingIOError:
+            # output is blocking, defer *write* for another 50ms,
+            self.client._loop.call_later(0.05, self.write, string)
         try:
             self.stream_out.flush()
         except BlockingIOError:
-            # output cannot flush, defer flush for another 50ms,
+            # output cannot flush, defer *flush* for another 50ms,
             self.client._loop.call_later(0.05, self.write)
 
     @property
@@ -79,14 +81,12 @@ class ConsoleShell():
         """ The terminfo(5) terminal type name: the value found in the
         ``TERM`` environment variable, if exists; otherwise 'unknown'.
         """
-        import os
         return os.environ.get('TERM', 'unknown')
 
     @property
     def xdisploc(self):
         """ The XDISPLAY value: the value found as os environ key ``DISPLAY``.
         """
-        import os
         return os.environ.get('DISPLAY', '')
 
     @property
@@ -99,7 +99,6 @@ class ConsoleShell():
         If the connecting output stream's terminal speed cannot be
         determined, a default value of (38400, 38400) is returned.
         """
-        import os
         if (hasattr(self.stream_out, 'fileno')
                 and os.isatty(self.stream_out.fileno())):
             return _query_term_speed(self.stream_out)
@@ -112,7 +111,6 @@ class ConsoleShell():
         queried for its size; otherwise the value found in the ``COLUMNS``
         environment variable is returned.
         """
-        import os
         if (hasattr(self.stream_out, 'fileno')
                 and os.isatty(self.stream_out.fileno())):
             rows, cols, xpixels, ypixels = _query_term_winsize(self.stream_out)
@@ -129,7 +127,6 @@ class ConsoleShell():
         if the stream_out file descriptor is a terminal, the terminal is
         queried for its size; otherwise the value found in the ``LINES``
         environment variable is returned.  """
-        import os
         if (hasattr(self.stream_out, 'fileno')
                 and os.isatty(self.stream_out.fileno())):
             rows, cols, xpixels, ypixels = _query_term_winsize(self.stream_out)
