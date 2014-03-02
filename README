@@ -46,7 +46,7 @@ telsh
 =====
 
 In addition to remote line editing as described below, a pure-python shell,
-*telsh* is provided to allow toggling of server options and session parameters.
+telsh_ is provided to allow toggling of server options and session parameters.
 In this way, it provides a suitable interface for testing telnet client
 capabilities.
 
@@ -85,7 +85,7 @@ values are: ASCII, UTF8, BIG5, and LATIN1.
 
 The default preferred encoding for clients that negotiate BINARY but not
 CHARSET, such as the BSD client, is defined by the TelnetServer keyword
-argument ``default_encoding`` ('UTF8' by default).  The example shell 'telsh'
+argument ``default_encoding`` ('UTF8' by default).  The example shell telsh_
 allows changing encoding on the fly by setting the 'CHARSET' session
 environment value at the telsh_ command prompt by issuing command::
 
