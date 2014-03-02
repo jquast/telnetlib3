@@ -123,7 +123,7 @@ In kludge mode, *SLC* characters are simulated for remote editing, provide an
 almost readline-like experience for all telnet clients, except those that
 perform only local editing, which are unaffected.
 
-The "magic" sequence sent by server, *WILL-SGA*, *WILL-ECHO* enables "kludge
+The sequence sent by server, *WILL-SGA*, *WILL-ECHO* enables "kludge
 mode", a form of line mode editing that is compatible with all minimally
 implemented telnet clients. This is the most frequent implementation used by
 Windows 98 telnet, SyncTerm_, netrunner_, or `TinTin++`_ to provide
