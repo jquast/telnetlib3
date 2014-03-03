@@ -24,20 +24,22 @@ class PyTest(TestCommand):
 
 here = os.path.abspath(os.path.dirname(__file__))
 readme_rst = os.path.join(here, 'README.rst')
-long_description = io.open(readme_rst, encoding='utf8').read()
 requirements = parse_requirements(os.path.join(here, 'requirements.txt'))
 install_requires = [str(req.req) for req in requirements]
 
 setup(name='telnetlib3',
-      version='0.2',
+      version='0.2.2',
       url='http://telnetlib3.rtfd.org/',
       license='ISC',
       author='Jeff Quast',
       description="Telnet server and client Protocol library using asyncio",
-      long_description=long_description,
-      packages=['telnetlib3', 'telnetlib3.contrib'],
-      scripts=['bin/telnet-client', 'bin/telnet-server', 'bin/telnet-talker'],
-      #include_package_data=True,
+      long_description=io.open(readme_rst, encoding='utf8').read(),
+      packages=['telnetlib3', 'telnetlib3.contrib', ],
+      package_data={'': ['README.rst', 'requirements.txt', ], },
+      include_package_data=True,
+      scripts=['bin/telnet-client',
+               'bin/telnet-server',
+               'bin/telnet-talker', ],
       author_email='contact@jeffquast.com',
       platforms='any',
       keywords=', '.join(('telnet', 'server', 'client', 'bbs', 'mud', 'utf8',
