@@ -466,7 +466,7 @@ Others
 ------
 
 It should be said as historical source code, BSD 2.11's telnet source of UCLA
-and NCSA_Telnet_ client of Univ. of IL for MacOS is most notable. There are also
+and `NCSA Telnet`_ client of Univ. of IL for MacOS is most notable. There are also
 a few modern Telnet servers. Some modern Telnet clients support only kludge mode,
 with the exception of MUD clients, which are often Linemode only. `TinTin++`_ is the
 only known client to support both modes.
@@ -513,7 +513,7 @@ If anybody can locate these documents, please forward them along.
 .. _netrunner: http://www.mysticbbs.com/downloads.html
 .. _sixteencolors.net: http://www.sixteencolors.net
 .. _tehmaze: https://github.com/tehmaze
-.. _NCSA_Telnet: https://en.wikipedia.org/wiki/NCSA_Telnet
+.. _NCSA Telnet: https://en.wikipedia.org/wiki/NCSA_Telnet
 .. _MIL-STD-1782: http://www.everyspec.com/MIL-STD/MIL-STD-1700-1799/MIL-STD-1782_6678/
 .. _RFC 97: https://www.rfc-editor.org/rfc/rfc97.txt
 .. _RFC 137: https://www.rfc-editor.org/rfc/rfc137.txt
