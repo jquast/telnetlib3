@@ -37,9 +37,9 @@ Scripts
   a DOS Emulating program SyncTerm_, mtelnet_, netrunner_. Instead, these
   systems may be used with a standard terminal emulator, such as xterm_,
   rxvt_, or iTerm2_. Some example telnet destinations:
-  * htc.zapto.org: Supports UTF8_ or CP437 encodings (enthral).
-  * 1984.ws: Supports UTF8_ or CP437 encodings (x/84).
-  * nethack.alt.org: Supports latin1, CP437, or UTF8_ encoding (dgamelaunch).
+  * htc.zapto.org: Supports UTF8 or CP437 encodings (enthral).
+  * 1984.ws: Supports UTF8 or CP437 encodings (x/84).
+  * nethack.alt.org: Supports latin1, CP437, or UTF8 encoding (dgamelaunch).
   * blackflag.acid.org: DOS-based CP437 bbs, requires a 80x24 window (mystic).
   * bbs.pharcyde.org: DOS-based CP437 bbs, requires a 80x24 window (synchronet).
 * telnet-server_: This provides a simple cmd-line interface (telsh_) for
@@ -52,14 +52,14 @@ telsh
 =====
 
 In addition to remote line editing as described below, a pure-python shell,
-telsh_ is provided to allow toggling of server options and session parameters.
+*telsh* is provided to allow toggling of server options and session parameters.
 In this way, it provides a suitable interface for testing telnet client
 capabilities.
 
 It is only in the interest of this project to provide enough shell-like
 capabilities to demonstrate remote line editing and an extensible environment
 for session introspection. An example of this is assigning a new value to
-CHARSET, toggling in and outbinary, thereby enabling UTF8_ input/output, etc.
+CHARSET, toggling in and outbinary, thereby enabling UTF8 input/output, etc.
 
 UTF8
 ====
@@ -74,8 +74,8 @@ The default preferred encoding for clients that negotiate BINARY but not
 CHARSET, such as the BSD client, is defined by the TelnetServer keyword
 argument ``default_encoding`` ('UTF8' by default).
 
-The example shell telsh_ allows changing encoding on the fly by setting the
-'CHARSET' session environment value at the telsh_ command prompt by issuing
+The example shell *telsh* allows changing encoding on the fly by setting the
+'CHARSET' session environment value at the *telsh* command prompt by issuing
 command::
 
     set CHARSET=UTF8
