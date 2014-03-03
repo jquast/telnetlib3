@@ -1,3 +1,8 @@
 *.pyc
 .DS_Store
 build
+MANIFEST
+MANIFEST.in
+dist
+telnetlib3.egg-info
+*.egg
