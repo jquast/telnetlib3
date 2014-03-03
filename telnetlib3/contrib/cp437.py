@@ -57,5 +57,5 @@ CP437 = (
 )
 
 
-def convert(text):
+def convert_cp437(text):
     return u''.join([CP437[ord(char)] for char in text])
