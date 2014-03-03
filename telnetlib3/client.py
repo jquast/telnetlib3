@@ -31,9 +31,10 @@ class TelnetClient(asyncio.protocols.Protocol):
         'CHARSET': 'ascii',
     }
 
-                 encoding='utf-8', log=logging):
     def __init__(self, shell=TerminalShell, stream=TelnetStream,
+                 encoding='utf-8', log=logging, force_binary=False):
         self.log = log
+        self.force_binary = force_binary
         self._shell_factory = shell
         self._stream_factory = stream
         self._default_encoding = encoding
@@ -214,21 +215,23 @@ class TelnetClient(asyncio.protocols.Protocol):
 
     @property
     def inbinary(self):
-        """ Returns True if server status ``inbinary`` is True.
+        """ Returns True if server status ``inbinary`` is True,
+            or TelnetClient argument ``force_binary`` is True.
         """
         from telnetlib3.telopt import BINARY
         # character values above 127 should not be expected to be read
         # inband from the transport unless inbinary is set True.
-        return self.stream.remote_option.enabled(BINARY)
+        return self.force_binary or self.stream.remote_option.enabled(BINARY)
 
     @property
     def outbinary(self):
-        """ Returns True if server status ``outbinary`` is True.
+        """ Returns True if server status ``outbinary`` is True,
+            or TelnetClient argument ``force_binary`` is True.
         """
         from telnetlib3.telopt import BINARY
         # character values above 127 should not be written to the transport
         # unless outbinary is set True.
-        return self.stream.local_option.enabled(BINARY)
+        return self.force_binary or self.stream.local_option.enabled(BINARY)
 
     def encoding(self, outgoing=False, incoming=False):
         """ Returns the session's preferred input or output encoding.
