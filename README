@@ -21,11 +21,11 @@ Installing
 
 3. Ensure pip is up-to-date::
 
-   pip install --upgrade pip
+    pip install --upgrade pip
 
 4. Install telnetlib3::
 
-   pip install telnetlib3
+    pip install telnetlib3
 
 Scripts
 =======
@@ -180,7 +180,7 @@ such as the competition nethack server alt.nethack.org, targeted at client
 scripts that play using AI decision-making routines.
 
 Local Line Mode
---------------
+---------------
 
 Unless otherwise negotiated, the specification describes Telnet's default mode
 as half-duplex, local line editing. This most basic "dummy" mode is modeled
