@@ -28,7 +28,7 @@ requirements = parse_requirements(os.path.join(here, 'requirements.txt'))
 install_requires = [str(req.req) for req in requirements]
 
 setup(name='telnetlib3',
-      version='0.2.2',
+      version='0.2.3',
       url='http://telnetlib3.rtfd.org/',
       license='ISC',
       author='Jeff Quast',
@@ -36,7 +36,6 @@ setup(name='telnetlib3',
       long_description=io.open(readme_rst, encoding='utf8').read(),
       packages=['telnetlib3', 'telnetlib3.contrib', ],
       package_data={'': ['README.rst', 'requirements.txt', ], },
-      include_package_data=True,
       scripts=['bin/telnet-client',
                'bin/telnet-server',
                'bin/telnet-talker', ],
