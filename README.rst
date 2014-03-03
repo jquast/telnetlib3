@@ -38,11 +38,11 @@ Scripts
   systems may be used with a standard terminal emulator, such as xterm_,
   rxvt_, or iTerm2_. Some example telnet destinations,
 
-  * htc.zapto.org: Supports UTF8 or CP437 encodings (enthral).
-  * 1984.ws: Supports UTF8 or CP437 encodings (`x/84`_).
+  * htc.zapto.org: Supports UTF8 or CP437 encoding (enthral).
+  * 1984.ws: Supports UTF8 or CP437 encoding (`x/84`_).
   * nethack.alt.org: Supports latin1, CP437, or UTF8 encoding (dgamelaunch).
-  * blackflag.acid.org: DOS-based CP437 bbs, requires a 80x24 window (mystic).
-  * bbs.pharcyde.org: DOS-based CP437 bbs, requires a 80x24 window (synchronet).
+  * blackflag.acid.org: DOS-based CP437 bbs, requires a 80x24 window (mystic_).
+  * bbs.pharcyde.org: DOS-based CP437 bbs, requires a 80x24 window (synchronet_).
 
 * telnet-server_: This provides a simple cmd-line interface (telsh_) for
   interactively toggling and displaying telnet session parameters. This serves
@@ -597,3 +597,5 @@ If anybody can locate these documents, please forward them along.
 .. _Kerberos: https://en.wikipedia.org/wiki/Kerberos_%28protocol%29
 .. _sockatmark(3): http://netbsd.gw.com/cgi-bin/man-cgi?sockatmark+3
 .. _x/84: http://pypi.python.org/pypi/x84 
+.. _mystic: http://www.mysticbbs.com/about.html
+.. _synchronet: http://www.synchro.net/ 
