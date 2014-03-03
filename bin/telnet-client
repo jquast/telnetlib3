@@ -5,6 +5,7 @@ A Demonstrating TelnetClient implementation.
 This script provides a keyboard-interactive shell for connecting to a Server.
 
 """
+import urllib.parse
 import argparse
 import logging
 import asyncio
@@ -18,24 +19,25 @@ import os
 
 import telnetlib3
 
-from cp437 import convert as convert_cp437
+from telnetlib3.contrib.cp437 import convert_cp437
 
 
 ARGS = argparse.ArgumentParser(
     description="Connect to telnet host",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-ARGS.add_argument('host', nargs=1, help='Host name', action='store')
-ARGS.add_argument('port', nargs='?', help='Port number',
-                  default=23, type=int)
+ARGS.add_argument('host', nargs=1, help='Host name or url', action='store')
+ARGS.add_argument('port', nargs='?', help='Port number', default=23, type=int)
 ARGS.add_argument('--loglevel', help='Logging level',
                   action="store", dest="loglevel",
                   default='info', type=str)
+ARGS.add_argument('--logfile', help='Logfile path',
+                  action='store', dest='logfile', type=str)
 ARGS.add_argument('--cp437', help='enable utf-8 translation of PC-DOS art',
                   action="store_true", dest="cp437",
                   default=False)
 
 
-class CP437ConsoleShell(telnetlib3.conio.ConsoleShell):
+class CP437ConsoleShell(telnetlib3.TerminalShell):
     def write(self, string=u''):
         """ Write string to output using cp437->utf-8 encoding
         """
@@ -43,11 +45,13 @@ class CP437ConsoleShell(telnetlib3.conio.ConsoleShell):
 
 
 @asyncio.coroutine
-def start_client(loop, log, Client, host, port, cp437=False):
+def start_client(loop, log, Client, host, port, cp437=False, send_cr=False):
     transport, protocol = yield from loop.create_connection(Client, host, port)
 
     def keyboard_input():
         ucs = sys.stdin.read(1000)
+        if send_cr:
+            ucs = ucs.replace('\n', '\r')
         protocol.stream.write(protocol.shell.encode(ucs))
         if not protocol.shell.will_echo:
             protocol.shell.write(ucs)
@@ -59,12 +63,20 @@ def start_client(loop, log, Client, host, port, cp437=False):
 def main():
     args = ARGS.parse_args()
     args.host = args.host[0]
-    if ':' in args.host:
+    if '://' in args.host:
+        url = urllib.parse.urlparse(args.host)
+        assert url.scheme == 'telnet', url
+        args.host = url.hostname
+        args.port = url.port or 23
+    elif ':' in args.host:
         args.host, port = args.host.split(':', 1)
         args.port = int(port)
 
     fmt = '%(asctime)s %(levelname)s %(filename)s:%(lineno)d %(message)s'
-    logging.basicConfig(format=fmt)
+    cfg = {'format': fmt}
+    if args.logfile:
+        cfg['filename'] = args.logfile
+    logging.basicConfig(**cfg)
     log = logging.getLogger('telnet_server')
     log.setLevel(getattr(logging, args.loglevel.upper()))
 
@@ -73,14 +85,15 @@ def main():
     if args.cp437:
         assert enc == 'utf-8', ('cp437 is only for utf-8 clients', enc)
         Client = lambda: telnetlib3.TelnetClient(
-            encoding='latin1', log=log, shell=CP437ConsoleShell)
+            encoding='latin1', log=log, shell=CP437ConsoleShell,
+            force_binary=True)
     else:
         Client = lambda: telnetlib3.TelnetClient(
             encoding=enc, log=log)
 
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_client(
-        loop, log, Client, args.host, args.port))
+        loop, log, Client, args.host, args.port, send_cr=bool(args.cp437)))
 
 
 if __name__ == '__main__':
