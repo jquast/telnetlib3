@@ -488,6 +488,8 @@ A. McKenzie, lists the following attached documents, which are not available::
 
 If anybody can locate these documents, please forward them along.
 
+.. _python: https://www.python.org
+.. _pip: http://www.pip-installer.org/en/latest/installing.html
 .. _github: https://github.com/jquast/telnetlib3
 .. _asyncio: http://docs.python.org/3.4/library/asyncio.html
 .. _examples: https://github.com/jquast/telnetlib3/tree/master/examples
