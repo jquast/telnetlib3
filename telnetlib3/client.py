@@ -57,6 +57,10 @@ class TelnetClient(asyncio.protocols.Protocol):
         #: server_fqdn is result of socket.getfqdn() of server_host
         self._server_fqdn = asyncio.Future()
 
+        #: values for properties ``server_ip`` and ``server_port``
+        self._server_ip = None
+        self._server_port = None
+
         self._telopt_negotiation = asyncio.Future()
         self._telopt_negotiation.add_done_callback(
             self.after_telopt_negotiation)
@@ -394,7 +398,9 @@ class TelnetClient(asyncio.protocols.Protocol):
     def duration(self):
         """ Returns seconds elapsed since connected to server.
         """
-        return (datetime.datetime.now() - self._connected).total_seconds()
+        if self._connected:
+            return (datetime.datetime.now() - self._connected).total_seconds()
+        return float('inf')
 
     def data_received(self, data):
         """ Process each byte as received by transport.

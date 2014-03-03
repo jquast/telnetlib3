@@ -97,6 +97,13 @@ class TelnetServer(asyncio.protocols.Protocol):
         #: future result stores value of gethostbyaddr(client_ip)
         self._client_host = asyncio.Future()
 
+        #: values for properties ``client_ip`` and ``client_port``
+        self._client_ip = None
+        self._client_port = None
+
+        #: transport set after ``connection_made``
+        self.transport = None
+
         #: option negotiation status as a future.  When complete, fires
         # callback ``after_telopt_negotiation``.
         self._telopt_negotiation = asyncio.Future()
@@ -779,13 +786,17 @@ class TelnetServer(asyncio.protocols.Protocol):
     def duration(self):
         """ Returns seconds elapsed since client connected.
         """
-        return (datetime.datetime.now() - self._connected).total_seconds()
+        if self.connected:
+            return (datetime.datetime.now() - self._connected).total_seconds()
+        return float('inf')
 
     @property
     def idle(self):
         """ Returns seconds elapsed since last received data on transport.
         """
-        return (datetime.datetime.now() - self._last_received).total_seconds()
+        if self._last_received:
+            return (datetime.datetime.now() - self._last_received).total_seconds()
+        return float('inf')
 
     @property
     def inbinary(self):
