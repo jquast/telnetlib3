@@ -9,7 +9,7 @@ import re
 
 from . import slc
 from . import telopt
-from . import wcwidth
+from .contrib import wcwidth
 
 __all__ = ('TelnetShellStream', 'Telsh')
 
