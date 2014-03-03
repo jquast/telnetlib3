@@ -7,7 +7,7 @@ import codecs
 import asyncio
 
 from .telopt import TelnetStream
-from .conio import ConsoleShell
+from .conio import TerminalShell
 from . import dns
 
 __all__ = ('TelnetClient',)
@@ -31,8 +31,8 @@ class TelnetClient(asyncio.protocols.Protocol):
         'CHARSET': 'ascii',
     }
 
-    def __init__(self, shell=ConsoleShell, stream=TelnetStream,
                  encoding='utf-8', log=logging):
+    def __init__(self, shell=TerminalShell, stream=TelnetStream,
         self.log = log
         self._shell_factory = shell
         self._stream_factory = stream
