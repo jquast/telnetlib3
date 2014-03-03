@@ -10,37 +10,43 @@ report any bugs, grievances, or enhancements.
 This project uses the asyncio_ module of python 3.4, available
 on pypi for python 3.3, for which this is currently targeted.
 
-Examples
-========
+Example scripts are provided that make use of the protocol.
 
-Telnet Server and Client example programs are provided in the `examples`_
-sub-folder of the source project. talker.py_ demonstrates a multi-user server
-chat program). server.py_ provides a debugging shell for testing compatible
-clients, using the default telsh_ shell. client.py_ provides a simple client
-for connecting to telnet servers. honeypot.py_ provides a sort of honeypot for
-gathering client details.
+Installing
+==========
 
-client.py and Favorite boards
------------------------------
+1. Install python_ 3
 
-Most notably, *examples/client.py* provides a *--CP437* command-line option
-that can be used to connect to DOS Bulletin-board systems that would otherwise
-require a DOS-emulating client. This client demonstrates python's powerful
-encoding capabilities of translating the DOS Codepage 437 to UTF8, allowing
-US-based "ANSI artwork", such as that found on sixteencolors.net_ to be
-displayed directly in xterm_, rxvt_, iTerm2_, or any other client supporting
-UTF8.  In this way, this simple client program example replaces the need for
-SyncTerm_, mtelnet_, netrunner_, or other special-purpose DOS emulating clients.
+2. Install pip_
 
-Some of my favorite telnet destinations,
+3. Ensure pip is up-to-date::
 
-  * blackflag.acid.org (CP437 only)
-  * htc.zapto.org (UTF8 or CP437)
-  * ssl.archaicbinary.net (CP437 only)
-  * 1984.ws (UTF8 or CP437)
-  * bbs.pharcyde.org (CP437 only)
-  * rainmaker.wunderground.com (ascii)
-  * nethack.alt.org (latin1, CP437, or UTF8)
+   pip install --upgrade pip
+
+4. Install telnetlib3::
+
+   pip install telnetlib3
+
+Scripts
+=======
+
+* telnet-client_: This provides a simple interactive shell for terminals
+  for communicating with any telnet server and the keyboard & screen. Most
+  notably, it provides a ``--cp437`` argument that allows connecting to
+  telnet BBS systems from any posix shell, that otherwise would require
+  a DOS Emulating program SyncTerm_, mtelnet_, netrunner_. Instead, these
+  systems may be used with a standard terminal emulator, such as xterm_,
+  rxvt_, or iTerm2_. Some example telnet destinations:
+  * htc.zapto.org: Supports UTF8_ or CP437 encodings (enthral).
+  * 1984.ws: Supports UTF8_ or CP437 encodings (x/84).
+  * nethack.alt.org: Supports latin1, CP437, or UTF8_ encoding (dgamelaunch).
+  * blackflag.acid.org: DOS-based CP437 bbs, requires a 80x24 window (mystic).
+  * bbs.pharcyde.org: DOS-based CP437 bbs, requires a 80x24 window (synchronet).
+* telnet-server_: This provides a simple cmd-line interface (telsh_) for
+  interactively toggling and displaying telnet session parameters. This serves
+  as an example of a basic prompting server with which commands may be issued.
+* telnet-talker_: An example multi-user telnet server shell that is basically
+  a simple chat system, sometimes called a talker_.
 
 telsh
 =====
@@ -53,7 +59,46 @@ capabilities.
 It is only in the interest of this project to provide enough shell-like
 capabilities to demonstrate remote line editing and an extensible environment
 for session introspection. An example of this is assigning a new value to
-CHARSET, toggling in and outbinary, thereby enabling UTF8 input/output, etc.
+CHARSET, toggling in and outbinary, thereby enabling UTF8_ input/output, etc.
+
+UTF8
+====
+
+CHARSET (`RFC 2066`_) specifies a codepage, not an encoding. At the time, this
+was more or less limited to specifying the codepage used to display bytes of the
+range 127 through 255.  Unimplemented in BSD client, and generally found
+implemented only in recent MUD client (Atlantis_) and servers. Most common
+values are: ASCII, UTF8, BIG5, and LATIN1.
+
+The default preferred encoding for clients that negotiate BINARY but not
+CHARSET, such as the BSD client, is defined by the TelnetServer keyword
+argument ``default_encoding`` ('UTF8' by default).
+
+The example shell telsh_ allows changing encoding on the fly by setting the
+'CHARSET' session environment value at the telsh_ command prompt by issuing
+command::
+
+    set CHARSET=UTF8
+
+Setting binary for only a single direction ('outbinary' or 'inbinary') is
+supported. Client support of one does not immediately toggle the other, it
+must be negotiated both ways for full UTF8 input and output.
+
+Some clients (`TinTin++`_) incorrectly negotiation either directions (WILL,
+DO/WONT, DONT) as a single option, causing only one reply for a request of
+either 'outbinary' or 'inbinary' for which it always declines, only once, for
+either request (Even when configured for UTF8).
+
+CP437
+=====
+
+Additionally, a contrib.cp437 module is included (authored by tehmaze_) which
+translates output meant to be translated by DOS Emulating programs to their
+comparable UTF-8 font. This is used by argument *--cp437* of the telnet-client_
+program.
+
+Some bulletin-board systems will send extended ascii characters (such as those
+used by 
 
 Telnet
 ======
@@ -74,37 +119,13 @@ for legacy or vendor-implemented options. It even makes one of its own: the
 encoding' used in binary mode is the value replied by the CHARSET negotation
 (`RFC 2066`_).
 
-UTF8
-=====
 
-CHARSET (`RFC 2066`_) specifies a codepage, not an encoding. At the time, this was
-more or less limited to specifying the codepage used to display bytes of the
-range 127 through 255.  Unimplemented in BSD client, and generally found
-implemented only in recent MUD client (Atlantis_) and servers. Most common
-values are: ASCII, UTF8, BIG5, and LATIN1.
-
-The default preferred encoding for clients that negotiate BINARY but not
-CHARSET, such as the BSD client, is defined by the TelnetServer keyword
-argument ``default_encoding`` ('UTF8' by default).  The example shell telsh_
-allows changing encoding on the fly by setting the 'CHARSET' session
-environment value at the telsh_ command prompt by issuing command::
-
-    set CHARSET=UTF8
-
-Setting binary for only a single direction ('outbinary' or 'inbinary') is
-supported. Client support of one does not immediately toggle the other, it
-must be negotiated both ways for full UTF8 input and output.
-
-Some clients (`TinTin++`_) incorrectly negotiation either directions (WILL,
-DO/WONT, DONT) as a single option, causing only one reply for a request of
-either 'outbinary' or 'inbinary' for which it always declines, only once, for
-either request (Even when configured for UTF8).
 
 Remote LineMode
-===============
+---------------
 
 This project is the only known Server-side implementation of *Special Linemode
-Character* (SLC) negotiation and *Remote line editing* (RFC_1184), other than
+Character* (SLC) negotiation and *Remote line editing* (`RFC 1184`_), other than
 BSD telnet, which was used as a guide for the bulk of this python implementation.
 
 Remote line editing is a comprehensive approach to providing responsive,
@@ -117,7 +138,7 @@ function values, to agree on the keyboard characters used for Backspace,
 Interrupt Process (^C), Repaint (^R), Erase Word (^W), etc.
 
 Kludge Mode
-===========
+-----------
 
 In kludge mode, *SLC* characters are simulated for remote editing, provide an
 almost readline-like experience for all telnet clients, except those that
@@ -143,7 +164,7 @@ as a user cannot know whether the input was legal, ignored, or not yet replied
 to, causing some frustration over high latency links.
 
 Go-Ahead
-========
+--------
 
 The IAC-GA signal would seemingly be of little use over today's bi-directional
 TCP protocol and virtual terminal emulators -- its original purpose was to
@@ -159,7 +180,7 @@ such as the competition nethack server alt.nethack.org, targeted at client
 scripts that play using AI decision-making routines.
 
 Local Line Mode
-==============
+--------------
 
 Unless otherwise negotiated, the specification describes Telnet's default mode
 as half-duplex, local line editing. This most basic "dummy" mode is modeled
@@ -173,14 +194,14 @@ set high, "Out of band" in regards to 7-bit terminals, the receipt of value
 255 indicates that the byte following it *Is-A-Command* (IAC).
 
 Default Telnet Mode
--------------------
+^^^^^^^^^^^^^^^^^^^
 
   * Each end transmits only 7-bit ASCII, (except as used in the interpreter).
   * A server's prompt must be followed by the 'Go-Ahead' (GA) command.
   * Client signals end of input (send) by CR, LF (Carriage Return, Linefeed).
 
 "Synch" Mechanism, not supported
-================================
+--------------------------------
 
 A supervisor connecting a (7-bit) teletype to a telnet (8-bit) data line would
 simply pipe the streams together by the 7 bits; The teletypist may press
@@ -221,7 +242,7 @@ the Data-Mark (DM) is sent by the supervisor.
 This ensures the ^t and ^c characters are not received by the remote program.
 
 TCP Implementation
-------------------
+^^^^^^^^^^^^^^^^^^
 
 In the TCP implementation of telnet, where presumably a half-duplex terminal
 may still interconnect, the 'INS' marker referenced in pre-TCP documents is,
@@ -259,7 +280,7 @@ still marked urgent, by continuing to test *errorfds* (third argument to select
 select, a modern implementation might rather use *sockatmark(3)*).
 
 Abort Output
-============
+------------
 
 BSD Telnet Server sets "Packet mode" with the pty driver::
 
@@ -274,7 +295,7 @@ ensure all IAC commands were sent in the *netclear()* algorithm, which also
 sets the *neturgent* pointer.
 
 Carriage Return
-===============
+---------------
 
 There are five supported signaling mechanisms for "send" or "end of line"
 received by clients.  The default implementation supplies remote line editing
@@ -317,8 +338,36 @@ editing or 'character-at-a-time' capabilities.
   included in the client "history buffer". To register receipt of *IAC EOR*,
   a client must call ``set_iac_callback(telopt.EOR, func)``.
 
-Not Implemented
-===============
+RFCs Implemented
+================
+
+* `RFC 727`_ "Telnet Logout Option," Apr 1977. *(1)*
+* `RFC 779`_ "Telnet Send-Location Option", Apr 1981. *(1)*
+* `RFC 854`_ "Telnet Protocol Specification", May 1983. *(2)*
+* `RFC 855`_ "Telnet Option Specifications", May 1983. *(2)*
+* `RFC 856`_ "Telnet Binary Transmission", May 1983.
+* `RFC 857`_ "Telnet Echo Option", May 1983. *(2)*
+* `RFC 858`_ "Telnet Suppress Go Ahead Option", May 1983. *(2)*
+* `RFC 859`_ "Telnet Status Option", May 1983.
+* `RFC 860`_ "Telnet Timing mark Option", May 1983. *(2)*
+* `RFC 885`_ "Telnet End of Record Option", Dec 1983. *(1)*
+* `RFC 1073`_, "Telnet Window Size Option", Oct 1988.
+* `RFC 1079`_, "Telnet Terminal Speed Option", Dec 1988.
+* `RFC 1091`_, "Telnet Terminal-Type Option", Feb 1989. *(2)*
+* `RFC 1123`_, "Requirements for Internet Hosts", Oct 1989. *(2)*
+* `RFC 1184`_, "Telnet Linemode Option (extended options)", Oct 1990.
+* `RFC 1096`_, "Telnet X Display Location Option", Mar 1989.
+* `RFC 1372`_, "Telnet Remote Flow Control Option", Oct 1992.
+* `RFC 1408`_, "Telnet Environment Option", Jan 1993.
+* `RFC 1571`_, "Telnet Environment Option Interoperability Issues", Jan 1994.
+* `RFC 1572`_, "Telnet Environment Option", Jan 1994.
+* `RFC 2066`_, "Telnet Charset Option", Jan 1997. *(1)*
+
+*(1)*: Not implemented in BSD telnet (rare!)
+*(2)*: Required by specification (complies!)
+
+RFCs Not Implemented
+====================
 
 * `RFC 861`_, "Telnet Extended Options List", May 1983. describes a method of
   negotiating options after all possible 255 option bytes are exhausted by
@@ -357,36 +406,8 @@ Not Implemented
 * `RFC 1416`_, "Telnet Authentication Option"
 * `RFC 2217`_, "Telnet Com Port Control Option", Oct 1997
 
-Implemented
-===========
-
-* `RFC 727`_ "Telnet Logout Option," Apr 1977. *(1)*
-* `RFC 779`_ "Telnet Send-Location Option", Apr 1981. *(1)*
-* `RFC 854`_ "Telnet Protocol Specification", May 1983. *(2)*
-* `RFC 855`_ "Telnet Option Specifications", May 1983. *(2)*
-* `RFC 856`_ "Telnet Binary Transmission", May 1983.
-* `RFC 857`_ "Telnet Echo Option", May 1983. *(2)*
-* `RFC 858`_ "Telnet Suppress Go Ahead Option", May 1983. *(2)*
-* `RFC 859`_ "Telnet Status Option", May 1983.
-* `RFC 860`_ "Telnet Timing mark Option", May 1983. *(2)*
-* `RFC 885`_ "Telnet End of Record Option", Dec 1983. *(1)*
-* `RFC 1073`_, "Telnet Window Size Option", Oct 1988.
-* `RFC 1079`_, "Telnet Terminal Speed Option", Dec 1988.
-* `RFC 1091`_, "Telnet Terminal-Type Option", Feb 1989. *(2)*
-* `RFC 1123`_, "Requirements for Internet Hosts", Oct 1989. *(2)*
-* `RFC 1184`_, "Telnet Linemode Option (extended options)", Oct 1990.
-* `RFC 1096`_, "Telnet X Display Location Option", Mar 1989.
-* `RFC 1372`_, "Telnet Remote Flow Control Option", Oct 1992.
-* `RFC 1408`_, "Telnet Environment Option", Jan 1993.
-* `RFC 1571`_, "Telnet Environment Option Interoperability Issues", Jan 1994.
-* `RFC 1572`_, "Telnet Environment Option", Jan 1994.
-* `RFC 2066`_, "Telnet Charset Option", Jan 1997. *(1)*
-
-*(1)*: Not implemented in BSD telnet (rare!)
-*(2)*: Required by specification (complies!)
-
-Resources
-=========
+Additional Resources
+====================
 
 These RFCs predate, or are superseded by, `RFC 854`_, but may be relevant.
 
@@ -470,10 +491,10 @@ If anybody can locate these documents, please forward them along.
 .. _github: https://github.com/jquast/telnetlib3
 .. _asyncio: http://docs.python.org/3.4/library/asyncio.html
 .. _examples: https://github.com/jquast/telnetlib3/tree/master/examples
-.. _talker.py: https://github.com/jquast/telnetlib3/tree/master/examples/talker.py
-.. _server.py: https://github.com/jquast/telnetlib3/tree/master/examples/server.py
-.. _client.py: https://github.com/jquast/telnetlib3/tree/master/examples/client.py
-.. _honeypot.py: https://github.com/jquast/telnetlib3/tree/master/examples/honeypot.py
+.. _telnet-client: https://github.com/jquast/telnetlib3/tree/master/bin/telnet-client
+.. _telnet-server: https://github.com/jquast/telnetlib3/tree/master/bin/telnet-server
+.. _telnet-talker: https://github.com/jquast/telnetlib3/tree/master/bin/telnet-talker
+.. _talker: https://en.wikipedia.org/wiki/Talker
 .. _xterm: http://invisible-island.net/xterm/
 .. _rxvt: http://rxvt.sourceforge.net/
 .. _iTerm2: http://www.iterm2.com/
@@ -483,6 +504,7 @@ If anybody can locate these documents, please forward them along.
 .. _Atlantis: http://www.riverdark.net/atlantis/
 .. _netrunner: http://www.mysticbbs.com/downloads.html
 .. _sixteencolors.net: http://www.sixteencolors.net
+.. _tehmaze: https://github.com/tehmaze
 .. _NCSA_Telnet: https://en.wikipedia.org/wiki/NCSA_Telnet
 .. _MIL-STD-1782: http://www.everyspec.com/MIL-STD/MIL-STD-1700-1799/MIL-STD-1782_6678/
 .. _RFC 97: https://www.rfc-editor.org/rfc/rfc97.txt
