@@ -36,12 +36,14 @@ Scripts
   telnet BBS systems from any posix shell, that otherwise would require
   a DOS Emulating program SyncTerm_, mtelnet_, netrunner_. Instead, these
   systems may be used with a standard terminal emulator, such as xterm_,
-  rxvt_, or iTerm2_. Some example telnet destinations:
+  rxvt_, or iTerm2_. Some example telnet destinations,
+
   * htc.zapto.org: Supports UTF8 or CP437 encodings (enthral).
   * 1984.ws: Supports UTF8 or CP437 encodings (`x/84`_).
   * nethack.alt.org: Supports latin1, CP437, or UTF8 encoding (dgamelaunch).
   * blackflag.acid.org: DOS-based CP437 bbs, requires a 80x24 window (mystic).
   * bbs.pharcyde.org: DOS-based CP437 bbs, requires a 80x24 window (synchronet).
+
 * telnet-server_: This provides a simple cmd-line interface (telsh_) for
   interactively toggling and displaying telnet session parameters. This serves
   as an example of a basic prompting server with which commands may be issued.
