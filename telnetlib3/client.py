@@ -295,7 +295,7 @@ class TelnetClient(asyncio.protocols.Protocol):
                         selected = offer
         if selected:
             self.log.debug('Encoding negotiated: {env[CHARSET]}.'
-                          .format(env=self.env))
+                           .format(env=self.env))
             return selected
         self.log.info('No suitable encoding offered by server: {!r}.'
                       .format(offered))
