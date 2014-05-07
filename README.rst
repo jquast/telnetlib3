@@ -388,7 +388,7 @@ RFCs Not Implemented
   TACACS_ daemon to verify that the client does in fact have access. The UUID is
   a form of an early Kerberos_ token.
 * `RFC 933`_, "Output Marking Telnet Option", describes a method of sending
-  banners", such as displayed on login, with an associated ID to be stored by
+  banners, such as displayed on login, with an associated ID to be stored by
   the client. The server may then indicate at which time during the session
   the banner is relevant. This was implemented by Mitre_ for DOD installations
   that might, for example, display various levels of "TOP SECRET" messages
