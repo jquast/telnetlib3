@@ -107,7 +107,7 @@ class TalkerServer(TelnetServer):
                 u'Welcome to %s version %v',
                 u'Local time is %t %Z (%z)',
                 u'Plese wait... {}'.format(random_busywait()),
-                u'',))))
+                u'' u'',))))
 
     def after_telopt_negotiation(self, status):
         """ augment default callback, checking and warning if
