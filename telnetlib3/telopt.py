@@ -418,9 +418,11 @@ class TelnetStream:
                     'IAC WILL BINARY first: {}'.format(byte, pos, data))
         data = data if oob else _escape_iac(data)
         if self.writing or oob:
+            self.log.debug('write: {!r}'.format(data))
             self.transport.write(data)
         else:
             # XOFF (Transmit Off) enabled, buffer in-band data until XON.
+            self.log.debug('buffered (XOFF): {!r}'.format(data))
             self._write_buffer.extend([data])
 
     def send_iac(self, data):

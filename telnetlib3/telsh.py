@@ -9,7 +9,7 @@ import re
 
 from . import slc
 from . import telopt
-from . import wcwidth
+from .contrib import wcwidth
 
 __all__ = ('TelnetShellStream', 'Telsh')
 
@@ -752,10 +752,10 @@ class Telsh():
                     raise err
             commands.append((cmd, args))
         for cmd, args in commands:
-            retval = self.cmdset_command(cmd, *args)
+            retval = self.command(cmd, *args)
         return retval
 
-    def cmdset_command(self, cmd, *args):
+    def command(self, cmd, *args):
         self.log.debug('command {!r} {!r}'.format(cmd, args))
         if not len(cmd) and not len(args):
             return None
@@ -764,7 +764,7 @@ class Telsh():
             func = getattr(self, cmd_funcname)
             return func(*args)
         elif '=' in cmd:
-            return self.cmdset_assign(*((cmd,) + args))
+            return self.assign(*((cmd,) + args))
         elif cmd:
             disp_cmd = u''.join([name_unicode(char) for char in cmd])
             self.stream.write('{!s}: command not found.'.format(disp_cmd))
@@ -962,7 +962,7 @@ class Telsh():
         retval = 0
         for arg in args:
             if '=' in arg:
-                retval = self.cmdset_assign(arg)  # assigned
+                retval = self.assign(arg)  # assigned
             elif arg in self.server.env:
                 val = self.server.env[arg]
                 self.stream.write('{key}={val}'.format(
@@ -978,13 +978,13 @@ class Telsh():
                 key=_key, val=disp_kv(_key, _val)) for _key, _val in kv]))
         return retval
 
-    def cmdset_assign(self, *args):
-        " remote command: x=[val] set or unset session values. "
+    def assign(self, *args):
+        " x=[val] [...] set or unset session values. "
         if not len(args):
             return -1
         elif len(args) > 1:
             # x=1 y=2; evaluates right-left recursively
-            self.cmdset_set(*args[1:])
+            return self.assign(*args[1:])
         key, val = args[0].split('=', 1)
         if key in self.server.readonly_env:
             # value is read-only
