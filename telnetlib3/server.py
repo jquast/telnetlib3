@@ -1,5 +1,6 @@
 import collections
 import traceback
+import functools
 import datetime
 import logging
 import socket
@@ -24,14 +25,14 @@ class TelnetServer(asyncio.protocols.Protocol):
 
         The negotiation DO-TTYPE is twofold: provide at least one option to
         negotiate to test the remote iac interpreter. If the remote end
-        replies in the affirmitive, then ``request_advanced_opts()`` is
+        replies in the affirmative, then ``request_advanced_opts()`` is
         called. The default implementation prefers remote line editing,
         kludge mode, and finally default NVT half-duplex local-line mode.
     """
-    #: mininum on-connect time to wait for client-initiated negotiation options
+    #: minimum on-connect time to wait for client-initiated negotiation options
     CONNECT_MINWAIT = 0.50
     #: maximum on-connect time to wait for client-initiated negotiation options
-    #  before negotiation is considered 'final'. some telnet clients will fail
+    #  before negotiation is considered 'final'.  Some telnet clients will fail
     #  to acknowledge bi-directionally, appearing as a timeout, while others
     #  are simply on very high-latency links.
     CONNECT_MAXWAIT = 6.00
@@ -189,30 +190,33 @@ class TelnetServer(asyncio.protocols.Protocol):
         for cmd in (AO, IP, BRK, SUSP, ABORT, EC, EL, CMD_EOR):
             stream.set_iac_callback(cmd, self.special_received)
 
-        # wire extended rfc callbacks for receipt of terminal atributes, etc.
+        # wire extended rfc callbacks for receipt of terminal attributes, etc.
         for (opt, func) in (
-                (TTYPE, self.ttype_received),
-                (TSPEED, self.tspeed_received),
-                (XDISPLOC, self.xdisploc_received),
-                (NEW_ENVIRON, self.env_update),
-                (NAWS, self.naws_received),
-                (LOGOUT, self.logout),
-                (SNDLOC, self.sndloc_received),
-                (CHARSET, self.charset_received),):
+            (TTYPE, self.ttype_received),
+            (TSPEED, self.tspeed_received),
+            (XDISPLOC, self.xdisploc_received),
+            # responses to NEW_ENVIRON toggle argument 'clear_unset',
+            # so that empty responses do not set empty environment values.
+            (NEW_ENVIRON, functools.partial(self.env_update,
+                                            clear_unset=True)),
+            (NAWS, self.naws_received),
+            (LOGOUT, self.logout),
+            (SNDLOC, self.sndloc_received),
+            (CHARSET, self.charset_received),):
             stream.set_ext_callback(opt, func)
 
     def begin_negotiation(self):
         """ XXX begin on-connect negotiation.
 
-            A Telnet Server is expected to assert the preferred session
-            options immediately after connection.
+        A Telnet Server is expected to assert the preferred session
+        options immediately after connection.
 
-            The default implementation sends only (DO, TTYPE) and the
-            shell prompt. The default ``ttype_received()`` handler fires
-            ``request_advanced_opts()``, further requesting more advanced
-            negotiations that may otherwise confuse or corrupt output of the
-            remote end if it is not equipped with an IAC interpreter (such as
-            a network scanner).
+        The default implementation sends only (DO, TTYPE) and the
+        shell prompt. The default ``ttype_received()`` handler fires
+        ``request_advanced_opts()``, further requesting more advanced
+        negotiations that may otherwise confuse or corrupt output of the
+        remote end if it is not equipped with an IAC interpreter (such as
+        a network scanner).
         """
         if self._closing:
             self._telopt_negotiation.cancel()
@@ -223,8 +227,9 @@ class TelnetServer(asyncio.protocols.Protocol):
         self.shell.display_prompt()
 
     def begin_encoding_negotiation(self):
-        """ XXX Request bi-directional binary encoding and CHARSET;
-            called only if remote end replies affirmitively to (DO, TTYPE).
+        """ XXX Request bi-directional binary encoding and CHARSET.
+
+        Called only if remote end replies affirmatively to (DO, TTYPE).
         """
         from .telopt import WILL, BINARY, DO, CHARSET
         self.stream.iac(WILL, BINARY)
@@ -234,8 +239,8 @@ class TelnetServer(asyncio.protocols.Protocol):
 
     def check_telopt_negotiation(self):
         """ XXX negotiation check-loop, schedules itself for continual callback
-            until negotiation is considered final, firing
-            ``after_telopt_negotiation`` callback when complete.
+        until negotiation is considered final, firing
+        ``after_telopt_negotiation`` callback when complete.
         """
         if self._closing:
             self._telopt_negotiation.cancel()
@@ -261,9 +266,9 @@ class TelnetServer(asyncio.protocols.Protocol):
 
     def check_encoding_negotiation(self):
         """ XXX encoding negotiation check-loop, schedules itself for continual
-            callback until both outbinary and inbinary has been answered in
-            the affirmitive, firing ``after_encoding_negotiation`` callback
-            when complete.
+        callback until both outbinary and inbinary has been answered in
+        the affirmative, firing ``after_encoding_negotiation`` callback
+        when complete.
         """
         from .telopt import DO, BINARY
         if self._closing:
@@ -287,11 +292,11 @@ class TelnetServer(asyncio.protocols.Protocol):
             #
             # Note: these kinds of IAC interpreters may be discovered by
             # requesting (DO, ECHO): the client replies (WILL, ECHO),
-            # which is proposterous!
+            # which is preposterous!
             self._encoding_negotiation.set_result(False)
 
         # if (WILL, BINARY) requested by begin_negotiation() is answered in
-        # the affirmitive, then request (DO, BINARY) to ensure bi-directional
+        # the affirmative, then request (DO, BINARY) to ensure bi-directional
         # transfer of non-ascii characters.
         elif self.outbinary and not self.inbinary and (
                 not DO + BINARY in self.stream.pending_option):
@@ -310,7 +315,7 @@ class TelnetServer(asyncio.protocols.Protocol):
         from .telopt import WONT, ECHO
         from .slc import SLC_nosupport, SLC_EC
         if status.cancelled():
-            self.log.debug('telopt negotiation cancelled')
+            self.log.debug('telopt negotiation canceled')
             return
 
         # enable 'fast edit' for remote line editing by sending 'wont echo'
@@ -333,19 +338,22 @@ class TelnetServer(asyncio.protocols.Protocol):
         self.log.info('client environment: {}.'.format(describe_env(self)))
 
     def after_encoding_negotiation(self, status):
-        """ XXX this callback fires after encoding negotiation has completed,
-            the value of client and remote encoding are final.  Some
-            implementors may wish to display a non-english login banner.
+        """ Callback after encoding negotiation has completed.
+
+        The value of client and remote encodings and option negotiation
+        is final.  Derived implementations may display a non-ASCII
+        login banner at this time if the encoding allows it.
         """
         if status.cancelled():
-            self.log.debug('encoding negotiation cancelled')
+            self.log.debug('encoding negotiation canceled')
             return
         self.log.debug('client encoding is {}.'.format(
             self.encoding(outgoing=True, incoming=True)))
 
     def request_advanced_opts(self):
-        """ XXX Request advanced telnet options; called only if remote
-            end replies affirmitively to (DO, TTYPE).
+        """ Callback requests advanced telnet options.
+
+        Called only when remote end replies affirmatively to (DO, TTYPE).
         """
         # Once the remote end has been identified as capable of at least TTYPE,
         # this callback is fired a single time. This is the preferred method
@@ -390,14 +398,14 @@ class TelnetServer(asyncio.protocols.Protocol):
         self.begin_encoding_negotiation()
 
     def ttype_received(self, ttype):
-        """ XXX Callback for TTYPE response.
+        """ Callback for TTYPE response.
 
-        In the default implementation, an affirmitive reply to TTYPE acts
+        In the default implementation, an affirmative reply to TTYPE acts
         as a canary for detecting more advanced options by firing the callback
         ``request_advanced_opts()``.
 
         The value of 'TERM' in class instance lookup table ``client_env`` is
-        set to the lowercased value of ``ttype`` recieved.
+        set to the lowercased value of ``ttype`` received.
 
         TTYPE may be requested multiple times, MUD implementations will
         reply a curses-capable terminal type (usually xterm-256color) on the
@@ -406,7 +414,7 @@ class TelnetServer(asyncio.protocols.Protocol):
         """
         if self.client_dumb:
             self.log.debug('client terminal is {}.'.format(ttype))
-            # track TTYPE seperately from the NEW_ENVIRON 'TERM' value to
+            # track TTYPE separately from the NEW_ENVIRON 'TERM' value to
             # avoid telnet loops in TTYPE cycling
             self.env_update({'TERM': ttype, 'TTYPE0': ttype})
             self._advanced = 1
@@ -458,11 +466,11 @@ class TelnetServer(asyncio.protocols.Protocol):
     def data_received(self, data):
         """ Process each byte as received by transport.
 
-            Derived impl. should instead extend or override the
-            shell stream methods ``feed_byte()`` and ``feed_slc()``.
+        Derived implementations should instead extend or override
+        the shell stream methods ``feed_byte()`` and ``feed_slc()``.
         """
         self.log.debug('data_received: {!r}'.format(data))
-        recieved_inband = False
+        received_inband = False
         for byte in (bytes([value]) for value in data):
             try:
                 self.stream.feed_byte(byte)
@@ -481,9 +489,9 @@ class TelnetServer(asyncio.protocols.Protocol):
             if self.stream.is_oob:
                 # byte is 'out-of-band', handled only by iac interpreter
                 continue
-            elif not recieved_inband:
-                # first inband recieved character resets timeout timer,
-                recieved_inband = True
+            elif not received_inband:
+                # first inband received character resets timeout timer,
+                received_inband = True
                 self._last_received = datetime.datetime.now()
                 self._restart_timeout()
 
@@ -496,10 +504,10 @@ class TelnetServer(asyncio.protocols.Protocol):
     def encoding(self, outgoing=False, incoming=False):
         """ Returns the session's preferred input or output encoding.
 
-            Always 'ascii' for the direction(s) indicated unless ``inbinary``
-            or ``outbinary`` has been negotiated. Then, the session value
-            CHARSET is used, or the constructor kwarg ``encoding`` if CHARSET
-            is not negotiated.
+        Always 'ascii' for the direction(s) indicated unless ``inbinary``
+        or ``outbinary`` has been negotiated. Then, the session value
+        CHARSET is used, or the constructor kwarg ``encoding`` if CHARSET
+        is not negotiated.
         """
         # of note: UTF-8 input with ascii output or vice-versa is possible.
         assert outgoing or incoming
@@ -511,11 +519,11 @@ class TelnetServer(asyncio.protocols.Protocol):
 
     def handle_timing_mark(self, cmd):
         """ XXX Callback when IAC <cmd> TM (Timing Mark) is received,
-            where <cmd> is any of (DO, DONT, WILL, WONT).
+        where <cmd> is any of (DO, DONT, WILL, WONT).
 
-            This is a simple method by which pingtime may be measured.
-            If the remote end performs any IAC interpretation, it should
-            always answer at least WONT.
+        This is a simple method by which ping-time may be measured.
+        If the remote end performs any IAC interpretation, it should
+        always answer at least WONT.
         """
         from .telopt import name_command
         self.log.debug('client sends: {} TIMING MARK.'
@@ -523,26 +531,27 @@ class TelnetServer(asyncio.protocols.Protocol):
 
     def handle_are_you_there(self, opt_byte):
         """ XXX Callback when IAC, AYT or SLC_AYT is received.
-            opt_byte is value slc.SLC_AYT or telopt.AYT, indicating
-            which method AYT was received by.
 
-            Default implementation outputs the status of connection
-            and displays shell prompt when opt_byte is AYT. Nothing
-            is done when opt_byte is SLC_AYT, it is presumed handled
-            by the shell as any other editing command (^T).
+        opt_byte is value slc.SLC_AYT or telopt.AYT, indicating
+        which method AYT was received by.
+
+        Default implementation outputs the status of connection
+        and displays shell prompt when opt_byte is AYT. Nothing
+        is done when opt_byte is SLC_AYT, it is presumed handled
+        by the shell as any other editing command (^T).
         """
         from .telopt import AYT
         from .slc import SLC_AYT
         self.log.debug('client sends: Are You There?')
         if opt_byte == AYT:
-            # if (IAC, AYT) is recieved, and the editing command
+            # if (IAC, AYT) is received, and the editing command
             # SLC_AYT is unsupported, display connection status
             # and re-display the shell prompt.
             if self.stream.slctab[SLC_AYT].nosupport:
                 self.shell.display_status()
                 self.shell.display_prompt()
             # Otherwise, emulate as though the SLC_AYT editing cmd was
-            # recieved (usually, ^T) by the shell. By default, the shell
+            # received (usually, ^T) by the shell. By default, the shell
             # does the same thing.
             else:
                 self.shell.feed_slc(byte=self.stream.slctab[SLC_AYT].val,
@@ -551,12 +560,12 @@ class TelnetServer(asyncio.protocols.Protocol):
     def special_received(self, iac_cmd):
         """ XXX Callback receives telnet IAC bytes for special functions.
 
-            iac_cmd indicates which IAC was recieved, the default
-            ``set_stream_callbacks()`` method registers for receipt for any
-            of (AO, IP, BRK, SUSP, ABORT, EC).
+        iac_cmd indicates which IAC was received, the default
+        ``set_stream_callbacks()`` method registers for receipt for any
+        of (AO, IP, BRK, SUSP, ABORT, EC).
 
-            The default implementation maps these to their various SLC
-            equivalents, if supported. Otherwise, nothing is done.
+        The default implementation maps these to their various SLC
+        equivalents, if supported. Otherwise, nothing is done.
         """
         from .telopt import (AO, IP, BRK, ABORT, SUSP, EC, EL, EOR,
                              name_command)
@@ -575,11 +584,11 @@ class TelnetServer(asyncio.protocols.Protocol):
                 self.shell.feed_slc(byte=slc_value, func=slc_byte)
             else:
                 named_slc = name_slc_command(slc_byte)
-                self.log.debug('special_received unhandled: {} '
+                self.log.debug('special_received not handled: {} '
                                '(slc {} not supported).'.format(
                                    named_iac, named_slc))
         else:
-            self.log.debug('special_received unhandled: {}.'
+            self.log.debug('special_received not handled: {}.'
                            .format(named_iac))
 
     def timeout(self):
@@ -598,7 +607,7 @@ class TelnetServer(asyncio.protocols.Protocol):
             return self.stream.handle_logout(opt)
         self.log.debug('Logout by client.')
         msgs = ('The black thing inside rejoices at your departure',
-                'The very earth groans at your depature',
+                'The very earth groans at your departure',
                 'The very trees seem to moan as you leave',
                 'Echoing screams fill the wastelands as you close your eyes',
                 'Your very soul aches as you wake up from your favorite dream')
@@ -610,6 +619,8 @@ class TelnetServer(asyncio.protocols.Protocol):
     def eof_received(self):
         self.connection_lost('EOF')
         return False
+    eof_received.__doc__ = (asyncio.protocols.Protocol
+                            .eof_received.__doc__)
 
     def connection_lost(self, exc):
         if self._closing:
@@ -622,17 +633,24 @@ class TelnetServer(asyncio.protocols.Protocol):
                      self._client_host, self._timeout,
                      self._telopt_negotiation):
             task.cancel()
+    connection_lost.__doc__ = (asyncio.protocols.Protocol
+                               .connection_lost.__doc__)
 
-    def env_update(self, env):
-        " Callback receives new environment variables "
+    def env_update(self, env, clear_unset=False):
+        """ Callback receives new environment variables.
+
+        When ``clear_unset`` is True, empty-valued keys are discarded.
+        """
         # remove any key, vals where val is ''; a common
         # response for clients, acknowledging our request
         # for values they do not wish to divulge.
-        deleted = [env.pop(key) or key
-                   for key, val in list(env.items()) if not val]
-        if deleted:
-            self.log.debug('env_update: ignoring valueless keys: {!r}'
-                           .format(deleted))
+        if clear_unset:
+            deleted = [env.pop(key) or key
+                       for key, val in list(env.items())
+                       if not val]
+            if deleted:
+                self.log.debug('env_update: ignoring valueless keys: {!r}'
+                               '(clear_unset is True)'.format(deleted))
         if 'TIMEOUT' in env:
             try:
                 val = int(env['TIMEOUT'])
@@ -653,15 +671,16 @@ class TelnetServer(asyncio.protocols.Protocol):
             self.shell.winsize_received(int(env['LINES']), int(env['COLUMNS']))
 
     def after_client_lookup(self, arg):
-        """ Callback receives result of client name resolution,
-            Logs warning if reverse dns verification failed,
+        """ Callback receives result of client name resolution.
+
+        Logs warning if reverse dns verification failed.
         """
         if arg.cancelled():
             self.log.debug('client dns lookup cancelled')
             return
         if self.client_ip != self.client_reverse_ip.result():
             # OpenSSH will log 'POSSIBLE BREAK-IN ATTEMPT!'
-            # but we dont care .. just demonstrating these values,
+            # but we dont care, just demonstrating these values,
             self.log.warn('reverse lookup: {cip} != {rcip} ({arg})'.format(
                 cip=self.client_ip, rcip=self.client_reverse_ip,
                 arg=arg.result()))
@@ -673,7 +692,8 @@ class TelnetServer(asyncio.protocols.Protocol):
 
     def after_server_gethostname(self, arg):
         """ Callback receives result of server name resolution,
-            Begins fqdn resolution, available as '%H' prompt character.
+
+        Begins fqdn resolution, available as '%H' prompt character.
         """
         if arg.cancelled():
             self.log.debug('server gethostname cancelled')
@@ -685,41 +705,35 @@ class TelnetServer(asyncio.protocols.Protocol):
         self.env_update({'HOSTNAME': self.server_name.result()})
 
     def after_server_getfqdn(self, arg):
-        """ Callback receives result of server fqdn resolution,
+        """ Callback receives result of server fqdn resolution.
         """
         if arg.cancelled():
-            self.log.debug('server getfqdn cancelled')
+            self.log.debug('server getfqdn canceled')
         else:
             if self.env['HOSTNAME'] != arg.result():
                 self.env_update({'HOSTNAME': arg.result()})
                 self.log.debug('HOSTNAME is {}'.format(arg.result()))
 
     def __str__(self):
-        """ Returns string reporting the status of this server session.
+        """ The status of this server session.
         """
         return describe_connection(self)
 
     @property
     def client_ip(self):
-        """ .. client_ip() -> string
-
-            Returns Client IP address as string.
+        """ Client IP address.
         """
         return self._client_ip
 
     @property
     def client_port(self):
-        """ .. client_port() -> string
-
-            Returns Client Port address as integer.
+        """ Client Port address as integer.
         """
         return self._client_port
 
     @property
     def client_hostname(self):
-        """ .. client_hostname() -> Future()
-
-            Returns DNS name of client as Future.
+        """ DNS name of client as Future.
         """
         return dns.future_hostname(
             future_gethostbyaddr=self._client_host,
@@ -727,9 +741,7 @@ class TelnetServer(asyncio.protocols.Protocol):
 
     @property
     def client_fqdn(self):
-        """ .. client_fqdn() -> Future()
-
-            Returns FQDN dns name of client as Future.
+        """ FQDN of client as Future.
         """
         return dns.future_fqdn(
             future_gethostbyaddr=self._client_host,
@@ -737,9 +749,7 @@ class TelnetServer(asyncio.protocols.Protocol):
 
     @property
     def client_reverse_ip(self):
-        """ .. client_reverse_ip() -> Future()
-
-            Returns reverse DNS lookup IP address of client as Future.
+        """ Reverse DNS of client as Future.
         """
         return dns.future_reverse_ip(
             future_gethostbyaddr=self._client_host,
@@ -747,44 +757,38 @@ class TelnetServer(asyncio.protocols.Protocol):
 
     @property
     def client_dumb(self):
-        """ .. client_dumb() -> bool
-
-            Indicates the client is a dumb terminal (fe., a network scanner).
+        """ True if client is incapable of advanced telnet negotiation.
         """
         # _advanced is incremented by response to TTYPE negotiation.
         return not self._advanced
 
     @property
     def server_name(self):
-        """ .. server_name() -> Future()
-
-            Returns name of server as string as Future.
+        """ Name of server as Future.
         """
         return self._server_name
 
     @property
     def server_fqdn(self):
-        """ .. server_fqdn() -> Future()
-
-            Returns fqdn string of server as Future String.
+        """ FQDN of server as Future.
         """
         return self._server_fqdn
 
     @property
     def env(self):
-        """ Returns hash of session environment values
+        """ Hash of session environment values
         """
         return self._client_env
 
     @property
     def connected(self):
-        """ Returns datetime connection was made.
+        """ datetime connection was made.
         """
         return self._connected
 
     @property
     def duration(self):
-        """ Returns seconds elapsed since client connected.
+        """ seconds elapsed since client connected.
         """
         if self.connected:
             return (datetime.datetime.now() - self._connected).total_seconds()
@@ -792,7 +796,7 @@ class TelnetServer(asyncio.protocols.Protocol):
 
     @property
     def idle(self):
-        """ Returns seconds elapsed since last received data on transport.
+        """ seconds elapsed since data last received from client.
         """
         if self._last_received:
             return (datetime.datetime.now() - self._last_received).total_seconds()
@@ -800,23 +804,27 @@ class TelnetServer(asyncio.protocols.Protocol):
 
     @property
     def inbinary(self):
-        """ Returns True if server status ``inbinary`` is True.
+        """ True when server status ``inbinary`` is toggled.
+
+        When True, non-ASCII characters may be received by server.
         """
         from .telopt import BINARY
-        # character values above 127 should not be expected to be read
-        # inband from the transport unless inbinary is set True.
         return self.stream.remote_option.enabled(BINARY)
 
     @property
     def outbinary(self):
-        """ Returns True if server status ``outbinary`` is True.
+        """ True when server status ``outbinary`` is toggled.
+
+        When True, non-ASCII characters may be sent by server.
         """
         from .telopt import BINARY
-        # character values above 127 should not be written to the transport
-        # unless outbinary is set True.
         return self.stream.local_option.enabled(BINARY)
 
     def _restart_timeout(self, val=None):
+        """ Cancel _timeout Future.
+
+        If env['TIMEOUT'] is set or non-zero, it is re-scheduled.
+        """
         self._timeout.cancel()
         val = val if val is not None else self.env['TIMEOUT']
         if val:
@@ -832,19 +840,23 @@ class TelnetServer(asyncio.protocols.Protocol):
         self.env_update({'CHARSET': charset.lower()})
 
     def naws_received(self, width, height):
-        " Callback receives NAWS (negotiate about window size), rfc1073. "
+        """ Callback receives NAWS (negotiate about window size), rfc1073.
+        """
         self.env_update({'COLUMNS': str(width), 'LINES': str(height)})
 
     def xdisploc_received(self, xdisploc):
-        " Callback receives XDISPLOC value, rfc1096. "
+        """ Callback receives XDISPLOC value, rfc1096.
+        """
         self.env_update({'DISPLAY': xdisploc})
 
     def tspeed_received(self, rx, tx):
-        " Callback receives TSPEED values, rfc1079. "
+        """ Callback receives TSPEED values, rfc1079.
+        """
         self.env_update({'TSPEED': '%s,%s' % (rx, tx)})
 
     def sndloc_received(self, location):
-        " Callback receives SNDLOC values, rfc779. "
+        """ Callback receives SNDLOC values, rfc779.
+        """
         self.env_update({'SNDLOC': location})
 
 
@@ -882,3 +894,4 @@ def describe_connection(server):
                 duration=duration,
                 idle=server.idle)
             )
+# vim: shiftwidth=4 tabstop=4 softtabstop=4 expandtab textwidth=79
