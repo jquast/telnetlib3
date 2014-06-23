@@ -1,5 +1,6 @@
 import collections
 import traceback
+import functools
 import logging
 import codecs
 import shlex
@@ -82,7 +83,6 @@ class TelnetShellStream():
         assert isinstance(string, str), string
         try:
             bytestring = self.encode(string, errors)
-            self.log.debug('write: {!r}'.format(bytestring))
             self.server.stream.write(bytestring)
         except LookupError as err:
             assert (self.server.encoding(outgoing=True)
@@ -188,88 +188,74 @@ class Telsh():
     #: version of shell %v in prompt escape
     shell_ver = '0.1'
 
-    #: A cyclical collections.OrderedDict of command names and nestable
-    #  arguments, or None for end-of-command, used by ``tab_received()``
-    #  to provide autocomplete and argument cycling.
-    autocomplete_cmdset = collections.OrderedDict(sorted([
-        ('help', collections.OrderedDict(sorted([
-            ('status', None),
-            ('whoami', None),
-            ('toggle', None),
-            ('quit', None),
-            ('whereami', None),
-            ('set', None),
-            ('echo', None),
-            ])), ),
-        ('echo', None),
-        ('status', None),
-        ('set', None),  # args injected during tab_received()
-        ('slc', None),
-        ('whoami', None),
-        ('whereami', None),
-        ('toggle', collections.OrderedDict([
-            ('echo', None),
-            ('outbinary', None),
-            ('inbinary', None),
-            ('goahead', None),
-            ('color', None),
-            ('xon-any', None),
-            ('bell', None),
-            ]), ),
-        ('quit', None),
-    ]))  # TODO: auto-generated
-
     #: display full traceback to output stream ``display_exception()``
     show_traceback = True
 
     #: Whether to send video attributes; toggled by ``set_term()``, updated
-    #  to 'True' in certain conditions in callback ``term_received()``.
+    #: to 'True' in callback ``term_received()``
     does_styling = False
 
-    #: if set, input character fires ``autocomplete()``
+    #: If the str ``ttype`` in callback ``term_received()`` starts with
+    #: any of the following, set ``self.does_styling`` to ``True``.
+    term_does_styling = ('vt220 xterm rxvt urxvt ansi screen linux '
+                         'dtterm screen'.split())
+
+    #: If set, input character fires ``autocomplete()``
     autocomplete_char = '\t'
 
-    #: if set, these chars stripped from end of line in ``line_received()``
+    #: Discover commands for this shell by matching against methods whose
+    #: names begin with this value.
+    cmd_prefix = 'cmdset_'
+
+    #: Class attributes or properties for cmd completion,
+    #: see method ``autocomplete_for_command()``.
+    ac_postfix = '_subcmds'
+
+    #: If set, these chars stripped from end of line in ``line_received()``
     strip_eol = '\r\n\00'
 
-    #: boolean toggle: write ASCII BELL on error?
+    #: Write ASCII BELL (^G) on error?
     send_bell = False
 
-    #: if set, maximum base10 digit that may be entered using ^V[0-9]+
-    _max_litval = 65535
+    #: Maximum base-10 digit that may be entered using ^V[0-9]+
+    max_litval = 65535
 
-    #: maximum length of in-memory input buffer, (default, 8K)
-    _max_lastline = 8192
+    #: Maximum length of in-memory input buffer, (default is 4K)
+    max_lastline = 4192
+
+    #: Current state is multi-line? If so, PS2 prompt is displayed.
+    multiline = False
+
+    # Last character received by ``character_received()``.  Used internally
+    # to handle many combinations of return key that may be received.
+    last_char = None
+
+    # Exit status of last command. Set by ``line_received()``.
+    # Accessed by @property ``retval``
+    _retval = None
+
+    # Whether edit mode is literal, Set by ``editing_received``.
+    # Accessed by @property ``is_literal``
+    _literal = False
+
 
     def __init__(self, server, stream=TelnetShellStream, log=logging):
         #: TelnetServer instance associated with shell
+        #: TelnetShellStream provides encoding for Telnet NVT
         self.server = server
 
-        #: TelnetShellStream provides encoding for Telnet NVT
         self.stream = stream(server=server, log=log)
-
         self.log = log
 
-        #: boolean toggle: Current state is multiline? PS2 is displayed.
-        self.multiline = False
-
-        #: if set, last character received by ``character_received()``.
-        self.last_char = None
-
-        #: if set, exit status of last command; accessed by property ``retval``
-        self._retval = None
-
-        #: boolean toggle: set on editing_received of EDIT.LNEXT (^v)
-        self._literal = False
-
-        #: buffer of line input until command process.
-        self._lastline = collections.deque(maxlen=self._max_lastline)
+        #: buffer of line input until command process.  Accessed by
+        #: @property ``lastline``.
+        self._lastline = collections.deque(maxlen=self.max_lastline)
 
         #: compiled expression for prompt evaluation in ``resolve_prompt()``
         self._re_prompt = re.compile('{esc}{pattern}'.format(
             esc=self.prompt_esc_char, pattern=self.re_prompt), re.DOTALL)
 
-        #: compiled expression for variable expanson in ``echo_eval()``
+        #: compiled expression for variable expansion in ``echo_eval()``
         self._re_echo = re.compile(self.re_echo, re.DOTALL)
 
 #
@@ -295,7 +281,7 @@ class Telsh():
         return u''.join(self._lastline)
 
 #
-# internal methods
+# public callbacks
 #
     def term_received(self, term):
         """ .. method:: term_received(string)
@@ -303,15 +289,9 @@ class Telsh():
             callback fired by telnet iac to set or update TERM
         """
         self.term = term
-        self.log.debug('term_received: {}'.format(term))
-        self.does_styling = (
-            term.startswith('vt') or
-            term.startswith('xterm') or
-            term.startswith('dtterm') or
-            term.startswith('rxvt') or
-            term.startswith('urxvt') or
-            term.startswith('ansi') or
-            term == 'linux' or term == 'screen')
+        self.does_styling = any(map(term.startswith, self.term_does_styling))
+        self.log.debug('term_received: {self.term} '
+                       '(does_styling={self.does_styling}'.format(self=self))
 
     def winsize_received(self, lines, columns):
         """ .. method:: winsize_received(lines : int, columns : int)
@@ -357,9 +337,6 @@ class Telsh():
             # (2) whereas '^h' moves the cursor left one (displayable) cell !
             return '\b' * (vtlen - 1) + '\x1b[K'
 
-#
-# public callbacks
-#
     def display_prompt(self, redraw=False):
         """ .. method::display_prompt(redraw=False)
 
@@ -424,7 +401,7 @@ class Telsh():
                 else (_standout + string + _normal))
 
     def underline(self, string):
-        """ .. method:: standout(string) -> string
+        """ .. method:: underline(string) -> string
 
             XXX Returns ``string`` decorated using preferred terminal sequence.
         """
@@ -432,13 +409,42 @@ class Telsh():
         return (string if not self.does_styling
                 else (_underline + string + _normal))
 
+    def autocomplete_for_command(self, cmd_name):
+        """ .. method:: cmd_name(string) -> OrderedDict or None
+
+        Returns None or OrderedDict of sub-cmds for command ``cmd_name``.
+
+        The default implementation looks for properties or static class
+        attribute of name ``{cmd_name}{ac_postfix}``, such that the
+        command 'toggle' has its sub-cmds returned by @property of name
+        ``cmdset_toggle_subcmds`` for the default value
+        ``_subcmds`` of class attribute ``ac_postfix``.
+        """
+
+        ac = '{0}{1}{2}'.format(self.cmd_prefix,
+                                cmd_name,
+                                self.ac_postfix)
+        if hasattr(self, ac):
+            return getattr(self, ac)
+        return None
+
+    @property
+    def autocomplete_cmdset(self):
+        table = []
+        for f_name in filter(functools.partial(is_a_command, self),
+                             sorted(dir(self))):
+            cmd_name = f_name[len(self.cmd_prefix):]
+            ac = self.autocomplete_for_command(cmd_name)
+            table.append((cmd_name, ac,))
+        return collections.OrderedDict(table)
+
     def autocomplete(self, input, table=None):
         """ .. method:: autocomplete(input : string, table=None) -> bool
 
-            XXX Callback for receipt of autocompletion key (default \t),
-                providing command or argument completion, using default
-                ``table`` of type ``OrderedDict``. If unspecified, the
-                instance attribute ``autocomplete_cmdset`` is used.
+        Callback for receipt of ``autocomplete_char`` (default is TAB ),
+        providing command or argument completion, using default ``table``
+        of type ``OrderedDict``.  If unspecified, the instance attribute
+        or @property ``autocomplete_cmdset`` is used.
         """
         self.log.debug('tab_received: {!r}'.format(input))
         # dynamic injection of variables for set command,
@@ -453,7 +459,7 @@ class Telsh():
         if ' ' in cmd:
             cmd, *args = shlex.split(cmd)
         do_cycle = bool(self.last_char == '\t')
-        buf, match = _autocomplete(table, do_cycle, '', cmd, *args)
+        buf, match = autocomplete(table, do_cycle, '', cmd, *args)
         self.last_char = '\t'
         self._lastline = collections.deque(buf)
         return match
@@ -467,8 +473,9 @@ class Telsh():
             though, without any insertion.
         """
         # it could be said the default SLC function values are emacs-like.
-        # it is not suprising, given rms' involvement with late 70's telnet
-        # line editing and video attribute negotiation protocols ..
+        # it is not surprising, given Richard Stallman's involvement with
+        # late 1970's era telnet line editing and video attribute negotiation
+        # protocols (rfc734, SUPDUP Protocol, 7 October 1977).
         def _name(cmd):
             for key in dir(EDIT):
                 if key.isupper() and getattr(EDIT, key) == cmd:
@@ -581,13 +588,13 @@ class Telsh():
             self.character_received(ucs, literal=True)
             self._literal = False
             return
-        if self._max_litval and ord('0') <= ord(ucs) <= ord('9'):
+        if self.max_litval and ord('0') <= ord(ucs) <= ord('9'):
             # base10 digit
             self._literal = (val*10) + int(ucs)
-            if (self._literal >= self._max_litval or
+            if (self._literal >= self.max_litval or
                     len('{}'.format(self._literal))
-                    == len('{}'.format(self._max_litval))):
-                ucs = chr(min(self._literal, self._max_litval))
+                    == len('{}'.format(self.max_litval))):
+                ucs = chr(min(self._literal, self.max_litval))
                 self.character_received(ucs, literal=True)
                 self._literal = False
             return
@@ -645,8 +652,8 @@ class Telsh():
             self.display_prompt(redraw=True)
 
         # perform tab completion for kludge or remote line editing.
-        elif (char == self.autocomplete_char
-                and self.autocomplete_char
+        elif (self.autocomplete_char and
+              char == self.autocomplete_char
                 and self.server.stream.mode != 'local'):
             try:
                 if not self.autocomplete(self.lastline):
@@ -759,10 +766,10 @@ class Telsh():
         self.log.debug('command {!r} {!r}'.format(cmd, args))
         if not len(cmd) and not len(args):
             return None
-        cmd_funcname = 'cmdset_{}'.format(cmd)
-        if hasattr(self, cmd_funcname):
-            func = getattr(self, cmd_funcname)
-            return func(*args)
+
+        method_name = '{0}{1}'.format(self.cmd_prefix, cmd)
+        if is_a_command(self, method_name):
+            return getattr(self, method_name)(*args)
         elif '=' in cmd:
             return self.assign(*((cmd,) + args))
         elif cmd:
@@ -771,39 +778,52 @@ class Telsh():
             return 1
         return 0
 
+    @property
+    def cmdset_help_subcmds(self):
+        " sub-cmds for auto-completion of `help' command. "
+        table = collections.OrderedDict()
+        for f_name in filter(functools.partial(is_a_command, self),
+                             sorted(dir(self))):
+            cmd_name = f_name[len(self.cmd_prefix):]
+            if getattr(self, f_name).__doc__:
+                table[cmd_name] = None
+        return table
+
     def cmdset_help(self, *args):
+        " DON'T PANIC "
         if not len(args):
             self.stream.write('Available commands:\r\n')
             self.stream.write(', '.join(self.autocomplete_cmdset.keys()))
             return 0
         cmd = args[0].lower()
-        if cmd == 'help':
-            self.stream.write("DON'T PANIC.")
-            return -42
 
-        method_name = 'cmdset_{}'.format(cmd)
-        if not hasattr(self, method_name):
+        method_name = '{0}{1}'.format(self.cmd_prefix, cmd)
+        if not is_a_command(self, method_name):
             self.stream.write('Command not found.')
             return 1
-        else:
-            method = getattr(self, method_name)
-            docstr = method.__doc__
-            docstr = 'No help available.' if docstr is None else docstr
-            self.stream.write('{}: {}'.format(cmd, docstr.strip()))
-            # display command arguments
-            if (cmd in self.autocomplete_cmdset
-                    and self.autocomplete_cmdset[cmd] is not None):
-                self.stream.write('\r\n{}'.format(', '.join(
-                    self.autocomplete_cmdset[cmd].keys())))
+
+        # display docstring
+        method = getattr(self, method_name)
+        docstr = method.__doc__
+        if docstr is None:
+            docstr = 'No help available.'
+        self.stream.write('{}: {}'.format(cmd, docstr.strip()))
+
+        # display command arguments
+        cmd_args = self.autocomplete_cmdset.get(cmd, None)
+        if cmd_args:
+            self.stream.write('\r\n{}'.format(', '.join(cmd_args.keys())))
         return 0
 
     def cmdset_status(self, *args):
         " Display session status. "
-        return self.display_status()
+        self.display_status()
+        return 0
 
     def cmdset_quit(self, *args):
         " Disconnect from server. "
-        return self.server.logout()
+        self.server.logout()
+        return 0
 
     def cmdset_whoami(self, *args):
         " Display session identifier. "
@@ -873,20 +893,38 @@ class Telsh():
         self.stream.write('\r\n')
         return 0
 
-    def cmdset_toggle(self, *args):
-        " Display, set, or unset session options. "
-        lopt = self.server.stream.local_option
-        tbl_opt = dict([
-            ('echo', lopt.enabled(telopt.ECHO)),
+    @property
+    def cmdset_toggle_subcmds(self):
+        " sub-cmds for auto-completion of `toggle' command. "
+        return collections.OrderedDict([
+            (key, None) for key in sorted([
+                'echo', 'outbinary', 'inbinary', 'binary', 'color',
+                'xon-any', 'lflow', 'bell', 'goahead'
+            ])
+        ])
+
+    @property
+    def table_toggle_options(self):
+        " Hash of toggle options and their on/off status. "
+        return dict([
+            ('echo', self.server.stream.local_option.enabled(telopt.ECHO)),
             ('outbinary', self.server.outbinary),
             ('inbinary', self.server.inbinary),
-            ('binary', self.server.outbinary + self.server.inbinary),
-            ('goahead', (
-                not lopt.enabled(telopt.SGA)) and self.stream.send_go_ahead),
+            ('binary', self.server.outbinary and self.server.inbinary),
             ('color', self.does_styling),
             ('xon-any', self.server.stream.xon_any),
             ('lflow', self.server.stream.lflow),
-            ('bell', self.send_bell)])
+            ('bell', self.send_bell),
+            ('goahead', (
+                not self.server.stream.local_option.enabled(telopt.SGA))
+                and self.stream.send_go_ahead),
+        ])
+
+    def cmdset_toggle(self, *args):
+        " Display, set, or unset session options. "
+        tbl_opt = self.table_toggle_options
+
+        # display all toggle options, 4 per line.
         if len(args) is 0:
             self.stream.write(', '.join(
                 '{}{} [{}]'.format('\r\n' if num and num % 4 == 0 else '',
@@ -990,6 +1028,7 @@ class Telsh():
             # value is read-only
             return -2
         if not val:
+            # unset value
             if not key in self.server.env:
                 # key not found
                 return -3
@@ -999,7 +1038,7 @@ class Telsh():
         return 0
 
     def _eval(self, input, pattern, getter, literal_escape=True):
-        """ Evalutes ``input`` for variable substituion using ``pattern``,
+        """ Evaluates ``input`` for variable substitution using ``pattern``,
             replacing matches with return value of ``getter(match)``.
         """
         def _resolve_literal(char):
@@ -1042,16 +1081,16 @@ class Telsh():
                     output.append(input[n])
         return ''.join(output)
 
-
-def _autocomplete(table, cycle, buf, cmd, *args):
+def autocomplete(table, cycle, buf, cmd, *args):
     """
-    .. function::fnc_autocomplete(
+    .. function::autocomplete(
             table : collections.OrderedDict, cycle : bool,
             buf : string, cmd : string, *args) -> (buf, bool)
 
-    Recursive autocompletion function. This provides no "found last match"
-    state tracking, but rather simply cycles 'next match' if cycle is True,
-    meaning 's'<tab> -> 'set', then subsequent <tab> -> 'status'. """
+    Recursive autocompete function. This provides no "found last match"
+    state tracking, but rather simply cycles 'next match' when cycle
+    is True, meaning 's'<tab> -> 'set', then, subsequent <tab> -> 'status'.
+    """
 
     def postfix(buf, using=' '):
         return '{}{}'.format(buf, using) if buf else ''
@@ -1064,6 +1103,7 @@ def _autocomplete(table, cycle, buf, cmd, *args):
             postfix(buf),
             postfix(auto_cmds[0], using=(' ' if has_args else '')),))
         return (buf, True)
+
     # scan for partial/complete matches, recurse if applicable
     for ptr, auto_cmd in enumerate(auto_cmds):
         has_args = table[auto_cmd] is not None
@@ -1087,7 +1127,7 @@ def _autocomplete(table, cycle, buf, cmd, *args):
                 # match at this step, have/will args, recruse;
                 buf = ''.join((postfix(buf), auto_cmd,))
                 _cmd = args[0] if args else ''
-                return _autocomplete(
+                return autocomplete(
                     table[auto_cmd], cycle, buf, _cmd, *args[1:])
         elif auto_cmd.lower().startswith(cmd.lower()):
             # partial match, error if arguments not valid,
@@ -1102,6 +1142,17 @@ def _autocomplete(table, cycle, buf, cmd, *args):
     return (buf, False)
 
 
+def is_a_command(cls, f_name):
+    """ .. function:: is_a_command(cls, string) -> bool
+
+    if method named ``f_name`` of ``cls`` represents a command.
+    """
+    return (f_name.startswith(cls.cmd_prefix) and not
+            f_name.endswith(cls.ac_postfix) and
+            hasattr(cls, f_name) and
+            callable(getattr(cls, f_name)))
+
+
 def escape_quote(args, quote_char="'", join_char=' '):
     """ .. function::quote(args : list, quote_char="'") -> string
 
@@ -1112,6 +1163,7 @@ def escape_quote(args, quote_char="'", join_char=' '):
         >>> print(escape_quote(['x', 'y', 'zz y']))
         "x y 'zz y'"
     """
+    # shlex.quote ..
     def quoted(arg):
         return (''.join(quote_char, arg, quote_char)
                 if join_char in arg else arg)
@@ -1129,10 +1181,10 @@ def name_unicode(ucs):
     return ucs
 
 
-def _resolve_prompt(shell, input, esc_char=None):
+def resolve_prompt(shell, input, esc_char=None, timevalue=None):
     """ Escape prompt characters and return value, using escape value
-        ``prompt_esc_char`` of matching regular expression values for
-        ``prompt_escapes``, and the following value lookup table::
+    ``prompt_esc_char`` of matching regular expression values for
+    ``prompt_escapes``, and the following value lookup table::
 
           '%%'     a single '%'.
           '%#'     prompt character.
@@ -1158,8 +1210,14 @@ def _resolve_prompt(shell, input, esc_char=None):
           '%Y'     The year in `yyyy' format.
           '%z'     The timezone in `[-+]NNNN' format.
           '%Z'     The timezone name in `TZNAME' format.
-      """
+
+    The shell's ``prompt_esc_char`` is used for '%' unless otherwise
+    specified by ``esc_char``. ``time.localtime`` is used for all
+    time-based prompt escapes unless ``timevalue`` is specified as a
+    ``time.struct_time`` instance.
+    """
     esc_char = shell.prompt_esc_char if esc_char is None else esc_char
+    timevalue = timevalue if timevalue is not None else time.localtime()
     if input == esc_char:
         return esc_char
     if input == '#':
@@ -1194,33 +1252,34 @@ def _resolve_prompt(shell, input, esc_char=None):
     if input == 'E':
         return shell.stream.__str__()
     if input == 't':
-        return time.strftime('%I:%M%p')
+        return time.strftime('%I:%M%p', timevalue)
     if input == 'T':
-        return time.strftime('%H:%M')
+        return time.strftime('%H:%M', timevalue)
     if input == 'p':
-        return time.strftime('%I:%M:%S %p')
+        return time.strftime('%I:%M:%S %p', timevalue)
     if input == 'P':
-        return time.strftime('%H:%M:%S')
+        return time.strftime('%H:%M:%S', timevalue)
     if input == 'd':
-        return time.strftime('%a')
+        return time.strftime('%a', timevalue)
     if input == 'D':
-        return time.strftime('%D')
+        return time.strftime('%D', timevalue)
     if input == 'w':
-        return time.strftime('%b')
+        return time.strftime('%b', timevalue)
     if input == 'W':
-        return time.strftime('%d')
+        return time.strftime('%d', timevalue)
     if input == 'y':
-        return time.strftime('%y')
+        return time.strftime('%y', timevalue)
     if input == 'Y':
-        return time.strftime('%Y')
+        return time.strftime('%Y', timevalue)
     if input == 'z':
-        return time.strftime('%z')
+        return time.strftime('%z', timevalue)
     if input == 'Z':
-        return time.strftime('%Z')
+        return time.strftime('%Z', timevalue)
     return input
 
 
-def prompt_eval(shell, input, literal_escape=True):
+def prompt_eval(shell, input, literal_escape=True, resolver=None):
+    resolver = resolver or resolve_prompt
     def _getter(match):
-        return _resolve_prompt(shell, match.group('val'))
+        return resolver(shell, match.group('val'))
     return shell._eval(input, shell._re_prompt, _getter, literal_escape)
