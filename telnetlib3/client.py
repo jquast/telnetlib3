@@ -294,7 +294,7 @@ class TelnetClient(asyncio.protocols.Protocol):
         """ Callback for responding to TTYPE requests.
 
         Default implementation returns the value of
-        :py:attr`self.shell.terminal_type`.
+        :py:attr:`self.shell.terminal_type`.
         """
         return self.shell.terminal_type
 
@@ -302,7 +302,7 @@ class TelnetClient(asyncio.protocols.Protocol):
         """ Callback for responding to TSPEED requests.
 
         Default implementation returns the value of
-        :py:attr`self.shell.terminal_speed`.
+        :py:attr:`self.shell.terminal_speed`.
         """
         return self.shell.terminal_speed
 
@@ -310,7 +310,7 @@ class TelnetClient(asyncio.protocols.Protocol):
         """ Callback for responding to XDISPLOC requests.
 
         Default implementation returns the value of
-        :py:attr`self.shell.xdisploc`.
+        :py:attr:`self.shell.xdisploc`.
         """
         return self.shell.xdisploc
 
@@ -523,8 +523,6 @@ class TelnetClient(asyncio.protocols.Protocol):
                 reason=': {}'.format(exc) if exc is not None else ''))
             self.waiter.set_result(None)
         self._closing = True
-    connection_lost.__doc__ = (asyncio.protocols.Protocol.eof_received
-                               .__connection_lost__.__doc__)
 
 
 def describe_connection(client):
