@@ -106,3 +106,5 @@ if __name__ == '__main__':
     finally:
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSAFLUSH, mode)
         fcntl.fcntl(sys.stdin.fileno(), fcntl.F_SETFL, fl)
+
+# vim: set shiftwidth=4 tabstop=4 softtabstop=4 expandtab textwidth=79 :
