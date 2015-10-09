@@ -8,6 +8,7 @@ import io
 
 from setuptools.command.test import test as TestCommand
 from pip.req import parse_requirements
+from pip.download import PipSession
 from distutils.core import setup
 
 
@@ -24,7 +25,8 @@ class PyTest(TestCommand):
 
 here = os.path.abspath(os.path.dirname(__file__))
 readme_rst = os.path.join(here, 'README.rst')
-requirements = parse_requirements(os.path.join(here, 'requirements.txt'))
+requirements = parse_requirements(os.path.join(here, 'requirements.txt'),
+    session=PipSession())
 install_requires = [str(req.req) for req in requirements]
 
 setup(name='telnetlib3',
