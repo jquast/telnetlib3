@@ -1,64 +1,58 @@
-#! /usr/bin/env python
-"""
-Distribution file for telnetlib3
-"""
-import sys
+#!/usr/bin/env python
+"""Distutils setup script."""
 import os
-import io
-
-from setuptools.command.test import test as TestCommand
-from pip.req import parse_requirements
-from pip.download import PipSession
-from distutils.core import setup
+import setuptools
 
 
-class PyTest(TestCommand):
-    def finalize_options(self):
-        TestCommand.finalize_options(self)
-        self.test_args = []
-        self.test_suite = True
+def _get_install_requires(fname):
+    return [req_line.strip() for req_line in open(fname)
+            if req_line.strip() and not req_line.startswith('#')]
 
-    def run_tests(self):
-        import pytest
-        errcode = pytest.main(self.test_args)
-        sys.exit(errcode)
 
-here = os.path.abspath(os.path.dirname(__file__))
-readme_rst = os.path.join(here, 'README.rst')
-requirements = parse_requirements(os.path.join(here, 'requirements.txt'),
-    session=PipSession())
-install_requires = [str(req.req) for req in requirements]
+def _get_version(fname):
+    import json
+    return json.load(open(fname, 'r'))['version']
 
-setup(name='telnetlib3',
-      version='0.2.3',
-      url='http://telnetlib3.rtfd.org/',
-      license='ISC',
-      author='Jeff Quast',
-      description="Telnet server and client Protocol library using asyncio",
-      long_description=io.open(readme_rst, encoding='utf8').read(),
-      packages=['telnetlib3', 'telnetlib3.contrib', ],
-      package_data={'': ['README.rst', 'requirements.txt', ], },
-      scripts=['bin/telnet-client',
-               'bin/telnet-server',
-               'bin/telnet-talker', ],
-      author_email='contact@jeffquast.com',
-      platforms='any',
-      keywords=', '.join(('telnet', 'server', 'client', 'bbs', 'mud', 'utf8',
-                          'cp437', 'api', 'library', 'asyncio', 'talker',
-                          'tulip', )),
-      classifiers=['License :: OSI Approved :: ISC License (ISCL)',
-                   'Programming Language :: Python :: 3.3',
-                   'Programming Language :: Python :: 3.4',
-                   'Intended Audience :: Developers',
-                   'Development Status :: 4 - Beta',
-                   'Topic :: System :: Networking',
-                   'Topic :: Terminals :: Telnet',
-                   'Topic :: System :: Shells',
-                   'Topic :: Internet',
-                   ],
-      tests_require=['pytest'],
-      install_requires=install_requires,
-      cmdclass={'test': PyTest},
-      extras_require={'testing': ['pytest'], },
-      test_suite='tests',
-      )
+
+def _get_long_description(fname):
+    import codecs
+    return codecs.open(fname, 'r', 'utf8').read()
+
+HERE = os.path.dirname(__file__)
+
+setuptools.setup(
+    name='telnetlib3',
+    version=_get_version(
+        fname=os.path.join(HERE, 'version.json')),
+    install_requires=_get_install_requires(
+        fname=os.path.join(HERE, 'requirements.txt')),
+    long_description=_get_long_description(
+        fname=os.path.join(HERE, 'docs', 'intro.rst')),
+    description="Telnet server and client Protocol library using asyncio",
+    author='Jeff Quast',
+    author_email='contact@jeffquast.com',
+    platforms='any',
+    license='MIT',
+    packages=['telnetlib3', 'telnetlib3.contrib', ],
+    url='https://github.com/jquast/telnetlib3',
+    include_package_data=True,
+    zip_safe=True,
+    classifiers=[
+        'Programming Language :: Python :: 3.4',
+        'Intended Audience :: Developers',
+        'Natural Language :: English',
+        'Development Status :: 4 - Beta',
+        'License :: OSI Approved :: ISC License (ISCL)',
+        'Operating System :: POSIX',
+        'Programming Language :: Python :: 3.4',
+        'Programming Language :: Python :: 3.5',
+        'Topic :: Software Development :: Libraries',
+        'Topic :: System :: Networking',
+        'Topic :: Terminals :: Telnet',
+        'Topic :: System :: Shells',
+        'Topic :: Internet',
+    ],
+    keywords=['telnet', 'server', 'client', 'bbs', 'mud', 'utf8',
+              'cp437', 'api', 'library', 'asyncio', 'talker',
+              'tulip'],
+)
