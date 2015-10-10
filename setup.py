@@ -37,6 +37,10 @@ setuptools.setup(
     url='https://github.com/jquast/telnetlib3',
     include_package_data=True,
     zip_safe=True,
+    scripts=['bin/telnet-client',
+             'bin/telnet-server',
+             'bin/telnet-talker',
+             ],
     classifiers=[
         'Programming Language :: Python :: 3.4',
         'Intended Audience :: Developers',
