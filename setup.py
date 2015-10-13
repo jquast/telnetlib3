@@ -30,7 +30,7 @@ requirements = parse_requirements(os.path.join(here, 'requirements.txt'),
 install_requires = [str(req.req) for req in requirements]
 
 setup(name='telnetlib3',
-      version='0.2.3',
+      version='0.2.4',
       url='http://telnetlib3.rtfd.org/',
       license='ISC',
       author='Jeff Quast',
