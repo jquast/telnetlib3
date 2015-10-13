@@ -31,6 +31,7 @@ def bind_host(request):
     return request.param
 
 
+@pytest.mark.asyncio
 def test_bsdtelnet(event_loop, bind_host, unused_tcp_port, log):
     func = event_loop.create_server(lambda: telnetlib3.TelnetServer(log=log),
                                     bind_host, unused_tcp_port)
@@ -41,10 +42,15 @@ def test_bsdtelnet(event_loop, bind_host, unused_tcp_port, log):
 
     pexpect_log = io.StringIO()
 
-    child = pexpect.spawn(command='telnet', timeout=5,
-                          encoding='utf-8', logfile=pexpect_log)
+    child = pexpect.spawnu(command='telnet', timeout=5,
+                           logfile=pexpect_log)
 
     child.sendline("status")
-#    yield from child.expect_exact("No connection.", async=True)
-#    yield from child.expect_exact("Escape character is '^]'.", async=True)
-#    yield from child.expect_exact('telnet>', async=True)
+    yield from child.expect_exact("No connection.", async=True)
+    yield from child.expect_exact("Escape character is '^]'.", async=True)
+    yield from child.expect_exact('telnet>', async=True)
+    child.sendline("open {0} {1}".format(bind_host, unused_tcp_port))
+
+#    val = yield from server.connected
+#    assert val
+#    assert child.read()

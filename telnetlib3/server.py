@@ -77,9 +77,6 @@ class TelnetServer(asyncio.protocols.Protocol):
         #: datetime of last byte received
         self._last_received = None
 
-        #: datetime of connection made
-        self._connected = None
-
         #: client performed ttype; probably human
         self._advanced = False
 
@@ -117,6 +114,13 @@ class TelnetServer(asyncio.protocols.Protocol):
         self._encoding_negotiation.add_done_callback(
             self.after_encoding_negotiation)
 
+        #: a Future that completes when the first connection is closed.
+        self.connection_done = asyncio.Future()
+
+        #: a Future that completes when the first connect is made.
+        self.connected = asyncio.Future()
+
+
 # XXX
     def pause_writing(self):
         self.log.debug('high watermark reached')
@@ -150,7 +154,8 @@ class TelnetServer(asyncio.protocols.Protocol):
         self.shell = self._shell_factory(server=self, log=self.log)
         self.set_stream_callbacks()
         self._last_received = datetime.datetime.now()
-        self._connected = datetime.datetime.now()
+
+        self.connected.set_result(datetime.datetime.now())
 
         # resolve client fqdn (and later, reverse-dns)
         self._client_host = self._loop.run_in_executor(
@@ -779,12 +784,6 @@ class TelnetServer(asyncio.protocols.Protocol):
         """ Hash of session environment values
         """
         return self._client_env
-
-    @property
-    def connected(self):
-        """ datetime connection was made.
-        """
-        return self._connected
 
     @property
     def duration(self):
