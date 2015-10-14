@@ -2,7 +2,7 @@
     :alt: Travis Continuous Integration
     :target: https://travis-ci.org/jquast/telnetlib3/
 
-.. image:: https://img.shields.io/teamcity/http/teamcity-master.pexpect.org/s/Telnetlib3_FullBuild.png
+.. image:: https://img.shields.io/teamcity/https/teamcity-master.pexpect.org/s/Telnetlib3_FullBuild.svg
     :alt: TeamCity Build status
     :target: https://teamcity-master.pexpect.org/viewType.html?buildTypeId=Telnetlib3_FullBuild&branch_Telnetlib3=%3Cdefault%3E&tab=buildTypeStatusDiv
 
