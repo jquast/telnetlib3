@@ -1,3 +1,4 @@
+# std imports
 import collections
 import traceback
 import functools
@@ -8,9 +9,12 @@ import time
 import sys
 import re
 
+# local
 from . import slc
 from . import telopt
-from .contrib import wcwidth
+
+# 3rd party
+import wcwidth
 
 __all__ = ('TelnetShellStream', 'Telsh')
 
