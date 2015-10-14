@@ -1,4 +1,4 @@
-0.3.0
+0.2.5
   * bugfix: cannot bind to IPv6 address :ghissue:`5`.
 
 0.2.4
