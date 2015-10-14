@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-"""Functionally tests telnetlib3 as a server, driving bsd telnet by pexpect!"""
+"""Functionally tests telnetlib3 as a server, using telnet(1)"""
 # std imports
 import functools
 import logging
