@@ -1,11 +1,19 @@
 #!/usr/bin/env python
 """Distutils setup script."""
 import os
-import setuptools
+from setuptools import setup
+
+
+def _get_here(fname):
+    return os.path.join(os.path.dirname(__file__), fname)
+
+
+def _get_long_description(fname, encoding='utf8'):
+    return open(fname, 'r', encoding=encoding).read()
 
 
 def _get_install_requires(fname):
-    return [req_line.strip() for req_line in open(fname)
+    return [req_line.strip() for req_line in open(fname, 'r')
             if req_line.strip() and not req_line.startswith('#')]
 
 
@@ -15,12 +23,12 @@ def _get_version(fname):
 
 
 setup(name='telnetlib3',
-      version='0.2.4',
+      version=_get_version(fname=_get_here('version.json')),
       url='http://telnetlib3.rtfd.org/',
       license='ISC',
       author='Jeff Quast',
       description="Telnet server and client Protocol library using asyncio",
-      long_description=io.open(readme_rst, encoding='utf8').read(),
+      long_description=_get_long_description(fname=_get_here('README.rst')),
       packages=['telnetlib3', 'telnetlib3.contrib', ],
       package_data={'': ['README.rst', 'requirements.txt', ], },
       scripts=['bin/telnet-client',
@@ -41,9 +49,5 @@ setup(name='telnetlib3',
                    'Topic :: System :: Shells',
                    'Topic :: Internet',
                    ],
-      tests_require=['pytest'],
-      install_requires=install_requires,
-      cmdclass={'test': PyTest},
-      extras_require={'testing': ['pytest'], },
-      test_suite='tests',
+      install_requires=_get_install_requires(_get_here('requirements.txt')),
       )
