@@ -1,3 +1,28 @@
+.. image:: https://img.shields.io/travis/jquast/telnetlib3.svg
+    :alt: Travis Continuous Integration
+    :target: https://travis-ci.org/jquast/telnetlib3/
+
+.. image:: https://img.shields.io/teamcity/http/teamcity-master.pexpect.org/s/Telnetlib3_FullBuild.png
+    :alt: TeamCity Build status
+    :target: https://teamcity-master.pexpect.org/viewType.html?buildTypeId=Telnetlib3_FullBuild&branch_Telnetlib3=%3Cdefault%3E&tab=buildTypeStatusDiv
+
+.. image:: https://coveralls.io/repos/jquast/telnetlib3/badge.svg?branch=master&service=github
+    :alt: Coveralls Code Coverage
+    :target: https://coveralls.io/github/jquast/telnetlib3?branch=master
+
+.. image:: https://img.shields.io/pypi/v/telnetlib3.svg
+    :alt: Latest Version
+    :target: https://pypi.python.org/pypi/telnetlib3
+
+.. image:: https://img.shields.io/pypi/dm/telnetlib3.svg
+    :alt: Downloads
+    :target: https://pypi.python.org/pypi/telnetlib3
+
+.. image:: https://badges.gitter.im/Join%20Chat.svg
+    :alt: Join Chat
+    :target: https://gitter.im/jquast/telnetlib3
+
+
 About
 =====
 
