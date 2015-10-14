@@ -22,3 +22,7 @@ notifications:
       - contact@jeffquast.com
     on_success: change
     on_failure: change
+
+before_install:
+  # on ubuntu 12.04 this is linux debian 'netkit-telnet' package renamed,
+  - sudo apt-get install -y telnet
