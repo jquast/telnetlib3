@@ -155,7 +155,7 @@ class TelnetServer(asyncio.protocols.Protocol):
         """
         self.transport = transport
         self._client_ip, self._client_port = (
-            transport.get_extra_info('peername'))
+            transport.get_extra_info('peername')[:2])
         self.stream = self._stream_factory(
             transport=transport, server=True, log=self.log)
         self.shell = self._shell_factory(server=self, log=self.log)
