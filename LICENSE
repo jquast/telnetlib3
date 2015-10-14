@@ -32,13 +32,3 @@ SLC functions were transcribed from NetBSD:
  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  SUCH DAMAGE.
-
-wcwidth.py is a python implementation of wcswidth.c:
-
-Markus Kuhn -- 2003-05-20 (Unicode 4.0)
-
-Permission to use, copy, modify, and distribute this software
-for any purpose and without fee is hereby granted. The author
-disclaims all warranties with regard to this software.
-
-Latest version: http://www.cl.cam.ac.uk/~mgk25/ucs/wcwidth.c
