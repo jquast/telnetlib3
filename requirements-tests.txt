@@ -1,10 +1,8 @@
 pytest-capturelog
 pytest-asyncio
 pytest-xdist
-pytest-cov
 coverage
 # needed until next release w/async bugfixes
 git+git://github.com/pexpect/pexpect.git#egg=pexpect
-pytest
 mock
 six
