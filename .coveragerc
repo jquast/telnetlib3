@@ -1,0 +1,14 @@
+[run]
+branch = True
+source = telnetlib3
+parallel = True
+
+[report]
+omit = telnetlib3/tests/*
+exclude_lines = pragma: no cover
+precision = 1
+
+[paths]
+source =
+    telnetlib3/
+    /opt/TeamCity/*/telnetlib3/*.py
