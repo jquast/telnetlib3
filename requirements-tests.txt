@@ -2,6 +2,7 @@ pytest-capturelog
 pytest-asyncio
 pytest-xdist
 pytest-cov
-pexpect<5.0,>=4.0
+# needed until next release w/async bugfixes
+git+git://github.com/pexpect/pexpect.git#egg=pexpect
 pytest
 mock
