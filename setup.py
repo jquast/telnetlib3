@@ -1,33 +1,18 @@
-#! /usr/bin/env python
-"""
-Distribution file for telnetlib3
-"""
-import sys
+#!/usr/bin/env python
+"""Distutils setup script."""
 import os
-import io
-
-from setuptools.command.test import test as TestCommand
-from pip.req import parse_requirements
-from pip.download import PipSession
-from distutils.core import setup
+import setuptools
 
 
-class PyTest(TestCommand):
-    def finalize_options(self):
-        TestCommand.finalize_options(self)
-        self.test_args = []
-        self.test_suite = True
+def _get_install_requires(fname):
+    return [req_line.strip() for req_line in open(fname)
+            if req_line.strip() and not req_line.startswith('#')]
 
-    def run_tests(self):
-        import pytest
-        errcode = pytest.main(self.test_args)
-        sys.exit(errcode)
 
-here = os.path.abspath(os.path.dirname(__file__))
-readme_rst = os.path.join(here, 'README.rst')
-requirements = parse_requirements(os.path.join(here, 'requirements.txt'),
-    session=PipSession())
-install_requires = [str(req.req) for req in requirements]
+def _get_version(fname):
+    import json
+    return json.load(open(fname, 'r'))['version']
+
 
 setup(name='telnetlib3',
       version='0.2.4',
