@@ -14,7 +14,6 @@ install:
   - pip install tox
 script:
   - tox
-sudo: false
 
 notifications:
   email:
@@ -26,3 +25,4 @@ notifications:
 before_install:
   # on ubuntu 12.04 this is linux debian 'netkit-telnet' package renamed,
   - sudo apt-get install -y telnet
+sudo: true
