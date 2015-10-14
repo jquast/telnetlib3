@@ -22,7 +22,9 @@ notifications:
     on_success: change
     on_failure: change
 
-before_install:
-  # on ubuntu 12.04 this is linux debian 'netkit-telnet' package renamed,
-  - sudo apt-get install -y telnet
-sudo: true
+sudo: false
+addons:
+  apt:
+    packages:
+      # on ubuntu 12.04 this is linux debian 'netkit-telnet' package renamed,
+      - telnet
