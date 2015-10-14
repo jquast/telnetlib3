@@ -1,0 +1,24 @@
+language: python
+matrix:
+  fast_finish: true
+  include:
+    - env: TOXENV=sa
+    - env: TOXENV=sphinx
+    - python: 3.3
+      env: TOXENV=py33 COVERAGE_ID=travis-ci
+    - python: 3.4
+      env: TOXENV=py34 COVERAGE_ID=travis-ci
+    - python: 3.5
+      env: TOXENV=py35 COVERAGE_ID=travis-ci
+install:
+  - pip install tox
+script:
+  - tox
+sudo: false
+
+notifications:
+  email:
+    recipients:
+      - contact@jeffquast.com
+    on_success: change
+    on_failure: change
