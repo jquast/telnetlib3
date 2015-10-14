@@ -2,8 +2,6 @@ language: python
 matrix:
   fast_finish: true
   include:
-    - env: TOXENV=sa
-    - env: TOXENV=sphinx
     - python: 3.3
       env: TOXENV=py33 COVERAGE_ID=travis-ci
     - python: 3.4
