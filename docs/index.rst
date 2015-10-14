@@ -1,23 +1,21 @@
-.. telnetlib3 documentation master file, created by
-   sphinx-quickstart on Sun Jun 29 23:20:11 2014.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
-
-Welcome to telnetlib3's documentation!
-======================================
+====================================
+Welcome to telnetlib3 documentation!
+====================================
 
 Contents:
 
 .. toctree::
-   :maxdepth: 4
+   :maxdepth: 3
+   :glob:
 
-   telnetlib3.rst
+   intro
+   api
+   contributing
+   history
 
-
-Indices and tables
-==================
+=======
+Indexes
+=======
 
 * :ref:`genindex`
 * :ref:`modindex`
-* :ref:`search`
-

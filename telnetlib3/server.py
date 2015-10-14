@@ -55,7 +55,11 @@ class TelnetServer(asyncio.protocols.Protocol):
 
     def __init__(self, shell=telsh.Telsh,
                  stream=telopt.TelnetStream,
-                 encoding='utf-8', log=logging):
+                 encoding='utf-8', log=logging,
+                 waiter_connected=None,
+                 waiter_telopt=None,
+                 waiter_encoding=None,
+                 waiter_closed=None):
         self.log = log
         self._shell_factory = shell
         self._stream_factory = stream
@@ -76,9 +80,6 @@ class TelnetServer(asyncio.protocols.Protocol):
 
         #: datetime of last byte received
         self._last_received = None
-
-        #: datetime of connection made
-        self._connected = None
 
         #: client performed ttype; probably human
         self._advanced = False
@@ -117,15 +118,25 @@ class TelnetServer(asyncio.protocols.Protocol):
         self._encoding_negotiation.add_done_callback(
             self.after_encoding_negotiation)
 
-# XXX
-    def pause_writing(self):
-        self.log.debug('high watermark reached')
-#        self.stream.handle_xoff(None)
+        #: a Future that completes when the connection is made.
+        if waiter_connected is None:
+            waiter_connected = asyncio.Future()
+        self.waiter_connected = waiter_connected
 
-    def resume_writing(self):
-        self.log.debug('low watermark reached')
-#        self.stream.handle_xon(None)
-# XXX
+        #: a Future that completes when negotiations are complete.
+        if waiter_telopt is None:
+            waiter_telopt = asyncio.Future()
+        self.waiter_telopt = waiter_telopt
+
+        #: a Future that completes when the encoding is negotiated.
+        if waiter_encoding is None:
+            waiter_encoding = asyncio.Future()
+        self.waiter_encoding = waiter_encoding
+
+        #: a Future that completes when the connection is closed.
+        if waiter_closed is None:
+            waiter_closed = asyncio.Future()
+        self.waiter_closed = waiter_closed
 
     def connection_made(self, transport):
         """ Receive a new telnet client connection.
@@ -144,13 +155,14 @@ class TelnetServer(asyncio.protocols.Protocol):
         """
         self.transport = transport
         self._client_ip, self._client_port = (
-            transport.get_extra_info('peername'))
+            transport.get_extra_info('peername')[:2])
         self.stream = self._stream_factory(
             transport=transport, server=True, log=self.log)
         self.shell = self._shell_factory(server=self, log=self.log)
         self.set_stream_callbacks()
         self._last_received = datetime.datetime.now()
-        self._connected = datetime.datetime.now()
+
+        self.waiter_connected.set_result(datetime.datetime.now())
 
         # resolve client fqdn (and later, reverse-dns)
         self._client_host = self._loop.run_in_executor(
@@ -337,6 +349,8 @@ class TelnetServer(asyncio.protocols.Protocol):
         self.log.info('stream status: {}.'.format(status.result()))
         self.log.info('client environment: {}.'.format(describe_env(self)))
 
+        self.waiter_telopt.set_result(datetime.datetime.now())
+
     def after_encoding_negotiation(self, status):
         """ Callback after encoding negotiation has completed.
 
@@ -347,8 +361,12 @@ class TelnetServer(asyncio.protocols.Protocol):
         if status.cancelled():
             self.log.debug('encoding negotiation canceled')
             return
-        self.log.debug('client encoding is {}.'.format(
-            self.encoding(outgoing=True, incoming=True)))
+
+        encoding = self.encoding(outgoing=True, incoming=True)
+
+        self.log.debug('client encoding is {}.'.format(encoding))
+
+        self.waiter_encoding.set_result(encoding)
 
     def request_advanced_opts(self):
         """ Callback requests advanced telnet options.
@@ -629,10 +647,15 @@ class TelnetServer(asyncio.protocols.Protocol):
         self.log.info('{}{}'.format(self.__str__(),
                                     ': {}'.format(exc) if exc is not None
                                     else ''))
-        for task in (self._server_name, self._server_fqdn,
-                     self._client_host, self._timeout,
-                     self._telopt_negotiation):
+        for task in (self._server_name,
+                     self._server_fqdn,
+                     self._client_host,
+                     self._timeout,
+                     self._telopt_negotiation,
+                     self.waiter_connected):
             task.cancel()
+        self.waiter_closed.set_result(datetime.datetime.now())
+
     connection_lost.__doc__ = (asyncio.protocols.Protocol
                                .connection_lost.__doc__)
 
@@ -781,18 +804,19 @@ class TelnetServer(asyncio.protocols.Protocol):
         return self._client_env
 
     @property
-    def connected(self):
-        """ datetime connection was made.
-        """
-        return self._connected
-
-    @property
     def duration(self):
-        """ seconds elapsed since client connected.
         """
-        if self.connected:
-            return (datetime.datetime.now() - self._connected).total_seconds()
-        return float('inf')
+        Seconds elapsed since client connected.
+
+        If this property is called prior to the firing of callback of method
+        connection_made, value ``-1`` is returned to indicate that the duration
+        of the connection is not yet determined.
+        """
+        if self.waiter_connected.done():
+            return (datetime.datetime.now() - self.waiter_connected.result()
+                    ).total_seconds()
+        # nc -z ?
+        return -1
 
     @property
     def idle(self):
@@ -872,6 +896,16 @@ def describe_env(server):
     sfp_items = sorted(env_fingerprint.items())
     return '{{{}}}'.format(', '.join(['{!r}: {!r}'.format(key, value)
                                       for key, value in sfp_items]))
+
+# XXX
+    def pause_writing(self):
+        self.log.debug('high watermark reached')
+#        self.stream.handle_xoff(None)
+
+    def resume_writing(self):
+        self.log.debug('low watermark reached')
+#        self.stream.handle_xon(None)
+# XXX
 
 
 def describe_connection(server):

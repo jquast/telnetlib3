@@ -1,1 +1,5 @@
+include docs/*.rst
+include LICENSE
+include version.json
 include *.txt
+include blessed/tests/wall.ans

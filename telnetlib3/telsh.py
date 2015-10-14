@@ -1,3 +1,4 @@
+# std imports
 import collections
 import traceback
 import functools
@@ -8,9 +9,12 @@ import time
 import sys
 import re
 
+# local
 from . import slc
 from . import telopt
-from .contrib import wcwidth
+
+# 3rd party
+import wcwidth
 
 __all__ = ('TelnetShellStream', 'Telsh')
 
@@ -366,20 +370,18 @@ class Telsh():
             (AYT) requests, or command 'status'.
         """
         self.stream.write(
-            '\r\nConnected {:0.3f}s ago from {}.'
-            '\r\nLinemode is {}.'
-            '\r\nFlow control is {}.'
-            '\r\nEncoding is {}.'
-            '\r\n{} rows; {} cols.'.format(
-                self.server.duration,
-                (self.server.client_fqdn.result()
-                 if self.server.client_fqdn.done()
-                 else self.server.client_ip),
-                self.server.stream.mode,
-                'xon-any' if self.server.stream.xon_any else 'xon',
-                self.stream,
-                self.server.env['COLUMNS'],
-                self.server.env['LINES'],
+            'Connected {self.server.duration:0.1f}s ago '
+            'from {origin}.'
+            '\r\nLinemode is {self.server.stream.mode}.'
+            '\r\nFlow control is {xon}.'
+            '\r\nEncoding is {self.stream}.'
+            '\r\n{self.server.env[LINES]} rows; '
+            '{self.server.env[COLUMNS]} cols.'.format(
+                origin=(self.server.client_fqdn.result()
+                        if self.server.client_fqdn.done()
+                        else self.server.client_ip),
+                xon=('xon-any' if self.server.stream.xon_any else u'xon'),
+                self=self,
             ))
 
     def dim(self, string):
