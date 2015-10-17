@@ -23,13 +23,12 @@ import pexpect
 
 
 def get_netcat():
-    # several problems -- mostly that GNU netcat can't connect to IPv6, just
-    # avoid using GNU's netcat entirely, which is available on most any systems
-    # except linux by default, otherwise, maybe 'openbsd-netcat' or similar
-    # pkg requirement?
-
-    NETCAT_PROG = None
-    for nc_name in ('nc', 'netcat', '/usr/bin/nc', '/usr/local/bin/nc'):
+    netcat_paths=('nc',
+                  'netcat',
+                  '/usr/bin/nc',
+                  '/usr/local/bin/nc',
+                  '/bin/nc.openbsd')
+    for nc_name in netcat_paths:
         prog = pexpect.which(nc_name)
         if prog is None:
             continue
@@ -40,11 +39,10 @@ def get_netcat():
             stderr=subprocess.PIPE
         ).communicate()
 
-        if b'GNU' in stdout or b'GNU' in stderr:
-            continue
-
-        # this might be an OK version of netcat ...
-        return prog
+        # only openbsd netcat supports IPv6.
+        # So that's the only one we'll use!
+        if b'-46' in (stdout + stderr):
+            return prog
     return None
 
 
