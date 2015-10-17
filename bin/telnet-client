@@ -19,9 +19,6 @@ import os
 
 import telnetlib3
 
-from telnetlib3.contrib.cp437 import convert_cp437
-
-
 ARGS = argparse.ArgumentParser(
     description="Connect to telnet host",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -41,7 +38,8 @@ class CP437ConsoleShell(telnetlib3.TerminalShell):
     def write(self, string=u''):
         """ Write string to output using cp437->utf-8 encoding
         """
-        super().write(convert_cp437(string))
+        cp437_to_utf8 = lambda ucs: bytes([ord(ucs)]).decode('cp437')
+        super().write(u''.join(cp437_to_utf8(ucs) for ucs in string))
 
 
 @asyncio.coroutine

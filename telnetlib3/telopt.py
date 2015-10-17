@@ -270,12 +270,23 @@ class TelnetStream:
         return '(no negotiation performed)'
 
     def feed_byte(self, byte):
-        """ .. method:: feed_byte(byte : bytes)
-
-            Feed a single byte into Telnet option state machine. This is
-            the entry point of the 'IAC Interpreter', to be fed a single
-            byte at a time.
         """
+        Feed a single byte into Telnet option state machine.
+
+        :param int byte: an 8-bit byte value as integer (0-255), or
+            a bytes array.  When a bytes array, it must be of length
+            1.
+
+        This is the entry point of the 'IAC Interpreter', to be fed a single
+        byte at a time.
+        """
+        # Python 3 lesson: it is more convenient to work with a bytes array of
+        # length 1 than it is to work with "a byte", as, iterating over a bytes
+        # array produces an integer, it must be translated back to a bytes type
+        # so that it may be used with comparators against equal types.
+        if isinstance(byte, int):
+            assert 0 <= byte <= 255
+            byte = bytes([byte])
         assert isinstance(byte, (bytes, bytearray)), byte
         assert len(byte) == 1, byte
         self.byte_count += 1
@@ -401,15 +412,19 @@ class TelnetStream:
             self._slc_callback[slc.SLC_XON](byte)
 
     def write(self, data, oob=False):
-        """ .. method:: feed_byte(byte : bytes)
-
-            Write data bytes to transport end connected to stream reader.
-
-            Bytes matching IAC (\xff, Is-A-Command) are escaped by (IAC, IAC),
-            unless ``oob`` is ``True``. When oob is True, data is always
-            written regardless of XON/XOFF. Otherwise, this data may be
-            held in-memory until XON (the default state).
         """
+        Write a single to transport end connected to stream reader.
+
+        Bytes matching IAC (\xff, Is-A-Command) are escaped by (IAC, IAC)
+        here, unless ``oob`` is ``True``.  When oob is True, data is always
+        written regardless of XON/XOFF.  Otherwise, this data may be
+        held in-memory until XON (the default state).
+        """
+        # Note(jquast): Our OOB implementation is not RFC-correct, but we're
+        # having a very difficult time implementing these old MSG_OOB-flagged
+        # tcp socket writes.  We may have to provide a unix-only derived impl.?
+        #
+        # is 'oob' even the correct keyword, here?
         assert isinstance(data, (bytes, bytearray)), repr(data)
         if not oob and not self.local_option.enabled(BINARY):
             for pos, byte in enumerate(data):
