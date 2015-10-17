@@ -1,3 +1,10 @@
+0.4.0
+  * bugfix: cannot connect to IPv6 address as client.
+  * change: TelnetClient.CONNECT_DEFERED class attribute renamed DEFERRED.
+    Default value changed to 50ms from 100ms.
+  * change: TelnetClient.waiter renamed to TelnetClient.waiter_closed.
+  * enhancement: TelnetClient.waiter_connected future added.
+
 0.3.0
   * bugfix: cannot bind to IPv6 address :ghissue:`5`.
   * enhancement: Futures waiter_connected, and waiter_closed added to server.
