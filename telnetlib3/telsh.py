@@ -54,22 +54,30 @@ SLC_EDIT_TRANSTABLE = dict((
 
 
 class TelnetShellStream():
-    def __init__(self, server, log=logging):
+
+    #: boolean toggle: call ``TelnetServer.stream.send_ga()`` if client
+    #: refuses suppress go-ahead (WONT SGA) ? RFC compliance requires 'yes',
+    #: but if you wish to use TelnetServer.PROMPT_IMMEDIATELY, you may disable
+    #: the GA character, which may appear in a non-compliant rfc agent.
+    send_go_ahead = True
+
+    def __init__(self, server, log=logging, encoding_errors='replace'):
         self.server = server
         self.log = log
+        self.encoding_errors = encoding_errors
 
-        #: codecs.IncrementalDecoder for current CHARSET
+        #: codecs.IncrementalDecoder for current CHARSET, late-binding
+        #: and re-instantiating, allowing encoding changes during session.
         self.decoder = None
 
-        #: default encoding 'errors' argument
-        self.encoding_errors = 'replace'
-
-        #: boolean toggle: call ``TelnetServer.stream.send_ga()`` if client
-        #  refuses supress goahead (WONT SGA) ?
-        self.send_go_ahead = True
+        # use surrounding methods ``pause_writing`` and ``resume_writing``.
+        self._writing = True
+        self._write_buf = u''
 
     def display_charset_err(self, err):
-        """ XXX Carefully notify client of encoding error. """
+        """
+        Carefully notify client of encoding error (in ASCII, of course!).
+        """
         encoding = self.server.encoding(outgoing=True)
         err_bytes = bytes(err.args[0].encode(encoding))
         charset = bytes(self.server.env['CHARSET'].encode(encoding))
@@ -80,11 +88,33 @@ class TelnetShellStream():
         if self.send_go_ahead:
             self.server.stream.send_ga()
 
+    def pause_writing(self):
+        self.log.debug('shell stream: pause_writing')
+        self._writing = False
+
+    def resume_writing(self):
+        self.log.debug('shell stream: resume_writing')
+        self._writing = True
+        self.write(string=u'')
+
     def write(self, string, errors=None):
-        """ Write string to output using preferred encoding.
+        """
+        Write string to output using preferred encoding.
         """
         errors = errors if errors is not None else self.encoding_errors
         assert isinstance(string, str), string
+        if self._write_buf:
+            string = u''.join((self._write_buf, string))
+
+        # writing is paused, defer encoding and socket write.  Data will
+        # be sent immediately on call to ``resume_writing`` !
+        if not self._writing:
+            self.log.debug('{0}queued output: {1}'.format(
+                're-' if self._write_buf else '', string))
+            self._write_buf = string
+            return
+        self._write_buf = u''
+
         try:
             bytestring = self.encode(string, errors)
             self.server.stream.write(bytestring)
@@ -242,7 +272,6 @@ class Telsh():
     # Accessed by @property ``is_literal``
     _literal = False
 
-
     def __init__(self, server, stream=TelnetShellStream, log=logging):
         #: TelnetServer instance associated with shell
         #: TelnetShellStream provides encoding for Telnet NVT
@@ -310,7 +339,7 @@ class Telsh():
             writes ASCII bell (\a) unless ``send_bell`` is set False.
         """
         if self.send_bell:
-            self.stream.write('\a')
+            self.stream.write(u'\a')
 
     def erase(self, string, keypress=chr(127)):
         """ .. method:: erase(string, keypress=chr(127)) -> string
@@ -326,7 +355,7 @@ class Telsh():
                                 and _char.isprintable()
                                 else name_unicode(_char))
                                for _char in string))
-        vtlen = wcwidth.wcswidth_cjk(string_disp)
+        vtlen = wcwidth.wcswidth(string_disp)
         assert vtlen >= 0, string
 
         # non-BSD clients will echo
@@ -342,9 +371,12 @@ class Telsh():
             return '\b' * (vtlen - 1) + '\x1b[K'
 
     def display_prompt(self, redraw=False):
-        """ .. method::display_prompt(redraw=False)
+        """
+        Display prompt to client end.
 
-            XXX Display or redraw prompt.
+        :param bool redraw: When True, perform a carriage return, followed by
+            ``clear_eol`` sequence.  This is used to accompany (^r)epaint:
+            EDIT.RP.  Otherwise, CR+LF only (default).
         """
         disp_char = lambda char: (
             self.standout(name_unicode(char))
@@ -352,21 +384,20 @@ class Telsh():
             or not char.isprintable()
             else char)
         if self.is_multiline:
-            text = self.lastline.split('\r')[-1]
+            text = self.lastline.split(u'\r')[-1]
         else:
             text = self.lastline
         text = ''.join([disp_char(char) for char in text])
-        # when 'redraw' is true, perform a 'carriage return'
-        # followed by 'clear_eol' sequence, otherwise CR+LF is fine.
-        prefix = '\r\x1b[K' if redraw else '\r\n'
-        output = ''.join((prefix, self.prompt, text,))
+
+        prefix = u'\r\x1b[K' if redraw else u'\r\n'
+        output = u''.join((prefix, self.prompt, text,))
         self.stream.write(output)
         self.stream.send_ga()
 
     def display_status(self):
         """ .. method::display_status()
 
-            XXX Output status of telnet session, respoding to 'are you there?'
+            XXX Output status of telnet session, responding to 'are you there?'
             (AYT) requests, or command 'status'.
         """
         self.stream.write(
@@ -555,14 +586,19 @@ class Telsh():
         """
         return self._literal is not False
 
-    def feed_byte(self, byte):
+    def feed_byte(self, byte, **kwargs):
+        """
+        """
+        if isinstance(byte, int):
+            byte = bytes([byte])
         ucs = self.stream.decode(byte, final=False)
-        if ucs:
+
+        slc_function = kwargs.get('slc_function', None)
+        if slc_function is not None:
+            self.editing_received(ucs, cmd=SLC_EDIT_TRANSTABLE[slc_function])
+        else:
             self.character_received(ucs)
 
-    def feed_slc(self, byte, func):
-        ucs = self.stream.decode(byte, final=True)
-        self.editing_received(ucs, SLC_EDIT_TRANSTABLE[func])
 
     def literal_received(self, ucs):
         """ Receives literal character(s) EDIT.LNEXT (^v) and all subsequent

@@ -1,96 +1,83 @@
 """Functionally tests telnetlib3 as a server, using telnet(1)"""
 # std imports
-import functools
-import logging
 import asyncio
-import io
 
-# local imports
-import telnetlib3
-
-# 3rd party imports
-import pexpect
-import pytest
-from pytest_asyncio.plugin import (
+# local
+from .accessories import (
+    TestTelnetServer,
     unused_tcp_port,
     event_loop,
+    bind_host,
+    log,
 )
 
-
-@pytest.fixture
-def log():
-    _log = logging.getLogger(__name__)
-    _log.setLevel(logging.DEBUG)
-    return _log
-
-
-@pytest.fixture(scope="module", params=["0.0.0.0", "::1"])
-def bind_host(request):
-    return request.param
+# 3rd-party
+import pexpect
+import pytest
 
 
 @pytest.mark.asyncio
-def test_bsdtelnet(caplog, event_loop, bind_host, unused_tcp_port, log):
+def test_bsdtelnet(event_loop, bind_host, unused_tcp_port, log):
 
+    # if the event loop is not set in debug mode, pexpect blows up !
+    # https://github.com/pexpect/pexpect/issues/294
     event_loop.set_debug(True)
-    caplog.setLevel(logging.DEBUG)
 
-    waiter_server_connected = asyncio.Future()
-    waiter_server_telopt = asyncio.Future()
-    waiter_server_encoding = asyncio.Future()
-    waiter_server_closed = asyncio.Future()
+    waiter_connected = asyncio.Future()
+    waiter_closed = asyncio.Future()
 
     server = yield from event_loop.create_server(
-        protocol_factory=lambda: telnetlib3.TelnetServer(
-            waiter_connected=waiter_server_connected,
-            waiter_closed=waiter_server_closed,
-            waiter_telopt=waiter_server_telopt,
-            waiter_encoding=waiter_server_encoding,
+        protocol_factory=lambda: TestTelnetServer(
+            waiter_connected=waiter_connected,
+            waiter_closed=waiter_closed,
             log=log),
         host=bind_host, port=unused_tcp_port)
 
-    log.info('Listening on {host} {port}'.format(
-             host=server.sockets[0].getsockname(),
-             port=unused_tcp_port))
+    log.info('Listening on {0}'.format(server.sockets[0].getsockname()))
 
-    child = pexpect.spawn(
-        command='telnet', timeout=1,
-        encoding='utf8', echo=False)
+    child = pexpect.spawn(command='telnet', encoding='utf8',
+                          echo=False, maxread=65534,
+                          searchwindowsize=1024, timeout=1)
 
-    # patch pexpect to debug-copy i/o to separate streams
     child.delaybeforesend = 0.0
-    child.logfile_read = io.StringIO()
-    child.logfile_send = io.StringIO()
+    child.delayafterterminate = 0.0
+    child.delayafterclose = 0.0
 
-    telnet_options = ('options',)
-    # telnet_options = ('options', 'debug', 'netdata', 'prettydump',)
-    # and to enable all telnet client options
-    for opt in telnet_options:
-        yield from child.expect("telnet> ", async=True)
-        child.sendline(u"set {0}".format(opt))
+    # set client-side debugging of telnet negotiation
+    yield from child.expect("telnet> ", async=True)
+    child.sendline(u"set options")
 
-    # before connecting,
+    # and connect,
     yield from child.expect(u"telnet> ", async=True)
     child.sendline(u"open {0} {1}".format(bind_host, unused_tcp_port))
-    yield from child.expect_exact("Escape character is '^]'.", async=True)
 
-    # now await all completed negotiations
-    child_expect = functools.partial(child.expect_exact,
-                                     timeout=None,
-                                     async=True)
+    # await connection banner,
+    yield from child.expect_exact("Trying {0}...\r\n".format(bind_host),
+                                  timeout=5,
+                                  async=True)
+
+    waiter_client = child.expect('test-telsh % ', async=True, timeout=None)
 
     done, pending = yield from asyncio.wait(
-        [child_expect('SENT WILL BINARY'), waiter_server_encoding],
-        loop=event_loop, timeout=2,
+        [waiter_client, waiter_connected],
+        loop=event_loop, timeout=1,
         return_when=asyncio.ALL_COMPLETED)
 
-    # inquire server of our known status and exit.
+    cancelled = {future for future in done if future.cancelled()}
+    log.debug('done {0}'.format(done))
+    log.debug('pending {0}'.format(pending))
+    log.debug('cancelled {0}'.format(cancelled))
+
+    assert not cancelled, (done, pending, cancelled, child.buffer)
+
     child.sendline(u"quit")
 
     done, pending = yield from asyncio.wait(
-        [child_expect('Connection closed by foreign host.'),
-         waiter_server_closed],
+        [child.expect(pexpect.EOF, async=True, timeout=None),
+         waiter_closed],
         loop=event_loop, timeout=1,
         return_when=asyncio.ALL_COMPLETED)
+
+    assert not any(future.cancelled() for future in done), done
 
     assert not pending
