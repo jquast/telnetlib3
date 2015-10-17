@@ -87,12 +87,16 @@ def test_netcat_z_timeout(event_loop, bind_host, unused_tcp_port, log):
 
     netcat = yield from asyncio.create_subprocess_exec(
         get_netcat(), '-t', bind_host, '{0}'.format(unused_tcp_port),
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
     )
+
+    netcat.stdin.write(u'set TIMEOUT=1\r'.encode('ascii'))
 
     stime = time.time()
     done, pending = yield from asyncio.wait(
-        [waiter_closed, netcat.wait()],
+        [waiter_closed, netcat.stdin.drain(), netcat.wait()],
         loop=event_loop, timeout=3)
     duration = time.time() - stime
 
