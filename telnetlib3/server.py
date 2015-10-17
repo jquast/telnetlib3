@@ -50,6 +50,12 @@ class TelnetServer(asyncio.protocols.Protocol):
     #: it even precedes negotiation of SGA.
     PROMPT_IMMEDIATELY = False
 
+    #: By default, the environment value 'TIMEOUT' represents the amount
+    #: in seconds as multiplied by this value -- therefor, the default
+    #: timeout of '5', using TIMEOUT_MULTIPLIER 60 results in a timeout
+    #: of 5 minutes.
+    TIMEOUT_MULTIPLIER = 60
+
     default_env = {
         'COLUMNS': '80',
         'LINES': '24',
@@ -880,7 +886,9 @@ class TelnetServer(asyncio.protocols.Protocol):
             except ValueError:
                 val = ''
             if val:
-                self._timeout = self._loop.call_later(val * 60, self.timeout)
+                self._timeout = self._loop.call_later(
+                    val * self.TIMEOUT_MULTIPLIER, self.timeout
+                )
 
     def charset_received(self, charset):
         """
