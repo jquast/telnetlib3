@@ -41,7 +41,7 @@ class TestTelnetServer(telnetlib3.TelnetServer):
         'PS1': 'test-telsh %# ',
         'TIMEOUT': '1',
     }
-    TIMEOUT_MULTIPLIER = 0.5
+    TIMEOUT_MULTIPLIER = 1
 
 
 class TestTelnetClient(telnetlib3.TelnetClient):
