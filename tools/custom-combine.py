@@ -47,7 +47,10 @@ def main():
 
     fout = six.StringIO()
     cov.report(file=fout, ignore_errors=True)
+    header = u''
     for line in fout.getvalue().splitlines():
+        if not header and line:
+            header = line
         if u'TOTAL' in line:
             total_line = line
             break
@@ -63,6 +66,8 @@ def main():
     print("##teamcity[buildStatisticValue "
           "key='CodeCoverageAbsLCovered' "
           "value='{0}']".format(no_covered))
+    print(header)
+    print(total_line)
 
 if __name__ == '__main__':
     main()

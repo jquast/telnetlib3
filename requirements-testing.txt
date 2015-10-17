@@ -1,5 +1,6 @@
 pytest-capturelog
 pytest-asyncio
+pytest-random
 pytest-xdist
 pytest-cov
 # needed until next release w/async bugfixes
