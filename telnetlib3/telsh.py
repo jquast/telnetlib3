@@ -59,7 +59,20 @@ class TelnetShellStream():
     #: refuses suppress go-ahead (WONT SGA) ? RFC compliance requires 'yes',
     #: but if you wish to use TelnetServer.PROMPT_IMMEDIATELY, you may disable
     #: the GA character, which may appear in a non-compliant rfc agent.
-    send_go_ahead = True
+    #:
+    #: An example of a non-compliant RFC agent is apple's netcat.c, distributed
+    #: as /bin/nc, which, in receipt of 'IAC GA IAC [...]' into responding
+    #: phrase IAC \x00 {IAC}, where the third byte {IAC} is the matching
+    #: incoming third byte {IAC} which has meaning to begin new command. That
+    #: is: it replies a command without knowing how to complete it, ofsetting
+    #: all future communications into mush.
+    #:
+    #: The default condition errs on the side of non-compliancy, favoring
+    #: compatibility. The only true purpose of the 'go ahead' signal in
+    #: modern times would be as a signalling mechanism for automation,
+    #: or perhaps MUD protocols, but not the half-duplex transmissions as they
+    #: were originally intended.
+    send_go_ahead = False
 
     def __init__(self, server, log=logging, encoding_errors='replace'):
         self.server = server
@@ -85,7 +98,9 @@ class TelnetShellStream():
         self.server.stream.write(msg)
 
     def send_ga(self):
-        if self.send_go_ahead:
+        # only send go-ahead signal when output is not paused.
+        if self.send_go_ahead and self._writing:
+            self.log.debug('send-ga')
             self.server.stream.send_ga()
 
     def pause_writing(self):
@@ -95,11 +110,18 @@ class TelnetShellStream():
     def resume_writing(self):
         self.log.debug('shell stream: resume_writing')
         self._writing = True
-        self.write(string=u'')
+        written = self.write(string=u'')
+        if written and self.send_go_ahead:
+            self.log.debug('resume-ga')
+            self.send_ga()
 
     def write(self, string, errors=None):
         """
         Write string to output using preferred encoding.
+
+        :returns: number of bytes written, which may differ from the length
+            of string as multibyte encoding, or 0 when transport is paused,
+            indicating it has been queued until resumed.
         """
         errors = errors if errors is not None else self.encoding_errors
         assert isinstance(string, str), string
@@ -112,12 +134,12 @@ class TelnetShellStream():
             self.log.debug('{0}queued output: {1!r}'.format(
                 're-' if self._write_buf else '', string))
             self._write_buf = string
-            return
+            return 0
         self._write_buf = u''
 
         try:
             bytestring = self.encode(string, errors)
-            self.server.stream.write(bytestring)
+            return self.server.stream.write(bytestring)
         except LookupError as err:
             assert (self.server.encoding(outgoing=True)
                     != self.server._default_encoding)
@@ -599,7 +621,6 @@ class Telsh():
         else:
             self.character_received(ucs)
 
-
     def literal_received(self, ucs):
         """ Receives literal character(s) EDIT.LNEXT (^v) and all subsequent
             characters until the boolean toggle ``_literal`` is set False.
@@ -647,8 +668,6 @@ class Telsh():
         """ Receive a single (non-editing) Unicode character.
         """
         CR, LF, NUL = '\r\n\x00'
-#        self.log.debug('character_received: {!r} literal={}'.format(
-#            char, literal))
 
         # a printable ASCII representation of unprintables,
         char_disp = (char

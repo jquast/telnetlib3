@@ -1,3 +1,12 @@
+0.5.0
+  * change: TelnetStream.writing boolean now replaced by methods
+    ``pause_writing`` and ``resume_writing``, matching basic
+    transports.
+  * change: IAC GA is no longer sent by the default shell,
+    :class:`telnetlib3.telsh.TelSh`.  This is intentionally not RFC
+    compliant: such feature coerces apple's netcat.c into an illegal
+    IAC response state (responding ``IAC BINARY``).
+
 0.4.0
   * bugfix: cannot connect to IPv6 address as client.
   * change: TelnetClient.CONNECT_DEFERED class attribute renamed DEFERRED.
