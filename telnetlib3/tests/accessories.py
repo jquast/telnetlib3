@@ -25,13 +25,24 @@ def bind_host(request):
 
 
 class TestTelnetServer(telnetlib3.TelnetServer):
+    # we instruct our Test telnet client
+    # to timeout if it receives no client data
+    # for any duration more than 1/2 second.
+    #
+    # first, because as using asyncio, we should
+    # be aggressively semaphore/signaling our await
+    # calls.  we wish to force an idle condition otherwise.
+
     CONNECT_MINWAIT = 0.10
     CONNECT_MAXWAIT = 0.50
     CONNECT_DEFERRED = 0.01
     TTYPE_LOOPMAX = 2
     default_env = {
         'PS1': 'test-telsh %# ',
+        'TIMEOUT': '1',
     }
+    TIMEOUT_MULTIPLIER = 0.5
+
 
 class TestTelnetClient(telnetlib3.TelnetClient):
     #: mininum on-connect time to wait for server-initiated negotiation options
