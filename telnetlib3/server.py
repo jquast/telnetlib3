@@ -934,6 +934,7 @@ def describe_env(server):
     return '{{{}}}'.format(', '.join(['{!r}: {!r}'.format(key, value)
                                       for key, value in sfp_items]))
 
+
 def describe_connection(server):
     state = (server._closing and 'dis' or '') + 'connected'
     hostname = (server.client_hostname.done() and
@@ -942,11 +943,9 @@ def describe_connection(server):
     duration = '{}{:0.1f}s{}'.format(
         'after ' if server._closing else '',
         server.duration, ' ago' if not server._closing else '')
-    return ('{user} using {terminal} {state} from '
-            '{clientip}:{port}{hostname} {duration} ({idle:0.0f}s idle)'
+    return ('{state} from {clientip}:{port}{hostname} {duration} '
+            '({idle:0.2f}s idle)'
             .format(
-                user=server.env['USER'],
-                terminal=server.env['TERM'],
                 state=state,
                 clientip=server.client_ip,
                 port=server.client_port,
