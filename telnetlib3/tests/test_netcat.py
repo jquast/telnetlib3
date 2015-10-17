@@ -92,15 +92,17 @@ def test_netcat_z_timeout(event_loop, bind_host, unused_tcp_port, log):
         stderr=subprocess.PIPE
     )
 
+    # set idle period to 1s.
     netcat.stdin.write(u'set TIMEOUT=1\r'.encode('ascii'))
-
+    yield from netcat.stdin.drain()
     stime = time.time()
+
     done, pending = yield from asyncio.wait(
-        [waiter_closed, netcat.stdin.drain(), netcat.wait()],
+        [waiter_closed, netcat.wait()],
         loop=event_loop, timeout=3)
     duration = time.time() - stime
 
-    assert not pending, (netcat, waiter_closed)
+    assert len(pending) == 0, (waiter_closed, netcat)
 
-    # we were disconnected for idling for 1 second.
+    # we were disconnected after idling for ~1 second.
     assert math.floor(duration) == 1
