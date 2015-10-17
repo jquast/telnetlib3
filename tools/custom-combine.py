@@ -17,10 +17,16 @@ import six
 PROJ_ROOT = os.path.join(os.path.dirname(__file__), os.pardir)
 COVERAGERC = os.path.join(PROJ_ROOT, '.coveragerc')
 
+
 def main():
     """Program entry point."""
     cov = coverage.Coverage(config_file=COVERAGERC)
-    cov.combine()
+    assert os.path.abspath(PROJ_ROOT) == os.path.abspath(os.getcwd()), (
+        # it would seem coverage.py has no variables that manage the input and
+        # output folder path, it must use getcwd() under the hood -- make sure
+        # its the one we want.
+        'Coverage must be executed from the root project folder',
+        os.getcwd(), PROJ_ROOT)
 
     # we must duplicate these files, coverage.py unconditionally
     # deletes them on .combine().
