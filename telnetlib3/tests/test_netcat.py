@@ -72,9 +72,4 @@ def test_netcat_z(event_loop, bind_host, unused_tcp_port, log):
         [waiter_closed, netcat.wait()],
         loop=event_loop, timeout=1)
 
-    assert not pending, (done,
-                         pending,
-                         netcat,
-                         waiter_closed)
-
-
+    assert not pending, (netcat, waiter_closed)

@@ -47,6 +47,8 @@ def test_curltelnet(event_loop, bind_host, unused_tcp_port, log):
         stderr=subprocess.PIPE
     )
 
-    stdout, stderr = yield from curl.communicate(input=b'quit\r\n')
+    done, pending = yield from asyncio.wait(
+        [waiter_connected, curl.communicate(input=b'quit\r'), waiter_closed],
+        loop=event_loop, timeout=1)
 
-    server = yield from waiter_closed
+    assert not pending, (waiter_connected, curl, waiter_closed)
