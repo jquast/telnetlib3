@@ -24,6 +24,6 @@ sudo: false
 addons:
   apt:
     packages:
-      # on ubuntu 12.04 this is linux debian 'netkit-telnet' package renamed,
       - telnet
       - curl
+      - netcat-openbsd

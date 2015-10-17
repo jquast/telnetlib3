@@ -35,9 +35,6 @@ def start_server(loop, log, host, port):
 
 def main():
     args = ARGS.parse_args()
-    if ':' in args.host:
-        args.host, port = args.host.split(':', 1)
-        args.port = int(port)
 
     # use generic 'logging' instance, and set the log-level as specified by
     # command-line argument --loglevel

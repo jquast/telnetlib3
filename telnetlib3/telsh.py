@@ -109,7 +109,7 @@ class TelnetShellStream():
         # writing is paused, defer encoding and socket write.  Data will
         # be sent immediately on call to ``resume_writing`` !
         if not self._writing:
-            self.log.debug('{0}queued output: {1}'.format(
+            self.log.debug('{0}queued output: {1!r}'.format(
                 're-' if self._write_buf else '', string))
             self._write_buf = string
             return
