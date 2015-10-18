@@ -37,7 +37,7 @@ class TelnetClient(asyncio.protocols.Protocol):
 
     def __init__(self, shell=TerminalShell, stream=TelnetStream,
                  encoding='utf-8', log=logging, force_binary=False,
-                 waiter_connected=None, waiter_closed=False):
+                 waiter_connected=None, waiter_closed=None):
         """ Constructor method for TelnetClient.
 
         :param shell: Terminal Client shell factory class.
@@ -415,7 +415,7 @@ class TelnetClient(asyncio.protocols.Protocol):
             # with telnet options pending, we set waiter_connected anyway -- it
             # is unlikely after such time elapsed that the server will complete
             # negotiation after this time.
-            self.water_connected.set_result(self)
+            self.waiter_connected.set_result(self)
             return
 
         self._loop.call_later(self.CONNECT_DEFERRED, self.check_negotiation)
