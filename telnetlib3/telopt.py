@@ -199,20 +199,14 @@ class TelnetStream:
         #: SLC Tab (SLC Functions and their support level, and ascii value)
         self.slctab = slc.generate_slctab(self.default_slc_tab)
 
-        #: Represents LINEMODE MODE neogtiated or requested by client.
+        #: Represents LINEMODE MODE negotiated or requested by client.
         #  attribute ``ack`` returns True if it is in use.
         self._linemode = slc.Linemode()
 
-# 
-#        #: Wether to write along the transport, allowing for flow control
-#        #  (XOFF/^S, activated by SLC_XOFF, and XON/^Q, activated by SLC_XON)
-#        self._writing = True
-# 
         #: bool implementing Flow Control, False when XOFF received,
         #  pending data buffered into self._write_buffer
         self.writing = True
         self._write_buffer = collections.deque()
-# 
 
         #: Initial line mode requested by server if client supports LINEMODE
         #  negotiation (remote line editing and literal echo of control chars)
@@ -266,7 +260,8 @@ class TelnetStream:
         if all_option_states:
             return '{{{}}}'.format(', '.join(
                 ['{!r}: {!r}'.format(key, ','.join([_opt for _opt in options]))
-                 for key, options in all_option_states.items() if len(options)]))
+                 for key, options in all_option_states.items()
+                 if len(options)]))
         return '(no negotiation performed)'
 
     def feed_byte(self, byte):
@@ -291,15 +286,15 @@ class TelnetStream:
         assert len(byte) == 1, byte
         self.byte_count += 1
         self.slc_received = False
-        # list of IAC commands needing 3+ bytes
+        # list of IAC commands needing 3+ bytes (mbs: multibyte sequence)
         iac_mbs = (DO, DONT, WILL, WONT, SB)
-        # cmd received is toggled false, unless its a msb.
+        # cmd received is toggled false, unless its a mbs.
         self.cmd_received = self.cmd_received in iac_mbs and self.cmd_received
 
         if byte == IAC:
             self.iac_received = (not self.iac_received)
             if not self.iac_received and self.cmd_received == SB:
-                # SB buffer recvs escaped IAC values
+                # SB buffer receives escaped IAC values
                 self._sb_buffer.append(IAC)
 
         elif self.iac_received and not self.cmd_received:
@@ -308,7 +303,7 @@ class TelnetStream:
             if cmd not in iac_mbs:
                 # DO, DONT, WILL, WONT are 3-byte commands and
                 # SB can be of any length. Otherwise, this 2nd byte
-                # is the final iac sequence command byte.
+                # is the final IAC sequence command byte.
                 assert cmd in self._iac_callback, name_command(cmd)
                 self._iac_callback[cmd](cmd)
             self.iac_received = False
@@ -318,12 +313,12 @@ class TelnetStream:
             # IAC SB sub-negotiation buffer, assert command is SE.
             self.cmd_received = cmd = byte
             if cmd != SE:
-                self.log.warn('SB buffer interrupted by IAC {}'.format(
-                    name_command(cmd)))
+                self.log.error('sub-negotiation buffer interrupted '
+                               'by IAC {}'.format(name_command(cmd)))
                 self._sb_buffer.clear()
             else:
                 # sub-negotiation end (SE), fire handle_subnegotiation
-                self.log.debug('recieved sub-negotiation cmd {}'
+                self.log.debug('sub-negotiation cmd {} SE completion byte'
                                .format(name_command(self._sb_buffer[0])))
                 try:
                     self.handle_subnegotiation(self._sb_buffer)
@@ -369,7 +364,7 @@ class TelnetStream:
                     self.handle_wont(opt)
                     self.pending_option[DO + opt] = False
             finally:
-                # toggle iac_received on ValueErrors/AssertionErrors raised
+                # toggle iac_received on any ValueErrors/AssertionErrors raised
                 self.iac_received = False
                 self.cmd_received = (opt, byte)
 
@@ -443,8 +438,8 @@ class TelnetStream:
     def send_iac(self, data):
         """ .. method: send_iac(self, data : bytes)
 
-            No transformations of bytes are performed, Only complete
-            IAC commands are legal (unless ``partial`` is set ``False``).
+            no transformations of bytes are performed, only complete
+            iac commands are legal (unless ``partial`` is set ``false``).
         """
         assert isinstance(data, (bytes, bytearray)), data
         assert data and data.startswith(IAC)
@@ -523,6 +518,7 @@ class TelnetStream:
             self.log.debug('cannot send IAC EOR '
                            'without receipt of DO CMD_EOR')
         else:
+            self.log.debug('send IAC EOR')
             self.send_iac(IAC + EOR)
             return True
         return False
@@ -541,7 +537,7 @@ class TelnetStream:
                            'without receipt of WILL STATUS')
         elif not self.pending_option.enabled(SB + STATUS):
             response = [IAC, SB, STATUS, SEND, IAC, SE]
-            self.log.debug('send: IAC SB STATUS SEND IAC SE')
+            self.log.debug('send IAC SB STATUS SEND IAC SE')
             self.send_iac(b''.join(response))
             self.pending_option[SB + STATUS] = True
             return True
@@ -562,7 +558,7 @@ class TelnetStream:
         elif not self.pending_option.enabled(SB + TSPEED):
             self.pending_option[SB + TSPEED] = True
             response = [IAC, SB, TSPEED, SEND, IAC, SE]
-            self.log.debug('send: IAC SB TSPEED SEND IAC SE')
+            self.log.debug('send IAC SB TSPEED SEND IAC SE')
             self.send_iac(b''.join(response))
             self.pending_option[SB + TSPEED] = True
             return True
@@ -589,7 +585,7 @@ class TelnetStream:
             response.extend([bytes(sep, 'ascii')])
             response.extend([bytes(sep.join(codepages), 'ascii')])
             response.extend([IAC, SE])
-            self.log.debug('send: IAC SB CHARSET REQUEST {} IAC SE'.format(
+            self.log.debug('send IAC SB CHARSET REQUEST {} IAC SE'.format(
                 sep.join(codepages)))
             self.send_iac(b''.join(response))
             self.pending_option[SB + CHARSET] = True
@@ -656,7 +652,7 @@ class TelnetStream:
                            'without receipt of WILL XDISPLOC')
         if not self.pending_option.enabled(SB + XDISPLOC):
             response = [IAC, SB, XDISPLOC, SEND, IAC, SE]
-            self.log.debug('send: IAC SB XDISPLOC SEND IAC SE')
+            self.log.debug('send IAC SB XDISPLOC SEND IAC SE')
             self.pending_option[SB + XDISPLOC] = True
             self.send_iac(b''.join(response))
             return True
@@ -677,7 +673,7 @@ class TelnetStream:
                            'without receipt of WILL TTYPE')
         if not self.pending_option.enabled(SB + TTYPE):
             response = [IAC, SB, TTYPE, SEND, IAC, SE]
-            self.log.debug('send: IAC SB TTYPE SEND IAC SE')
+            self.log.debug('send IAC SB TTYPE SEND IAC SE')
             self.pending_option[SB + TTYPE] = True
             self.send_iac(b''.join(response))
             return True
@@ -707,19 +703,22 @@ class TelnetStream:
                     tabset=self.slctab, ack=forwardmask_enabled)
 
             assert isinstance(fmask, slc.Forwardmask), fmask
-            self.pending_option[SB + LINEMODE] = True
-            self.send_iac(IAC + SB + LINEMODE + DO + slc.LMODE_FORWARDMASK)
-            self.write(fmask.value)  # escape IAC+IAC
-            self.send_iac(IAC + SE)
 
             self.log.debug('send IAC SB LINEMODE DO LMODE_FORWARDMASK::')
-            for maskbit_descr in fmask.__repr__():
+            for maskbit_descr in fmask.description_table():
                 self.log.debug('  {}'.format(maskbit_descr))
+            self.log.debug('send IAC SE')
+
+            self.send_iac(IAC + SB + LINEMODE + DO + slc.LMODE_FORWARDMASK)
+            self.transport.write(fmask.value)
+            self.send_iac(IAC + SE)
+
             return True
         return False
 
     def send_lineflow_mode(self):
-        """ .. method send_lineflow_mode() -> bool
+        """
+        .. method send_lineflow_mode() -> bool
 
         Send LFLOW mode sub-negotiation, rfc1372.
         """
@@ -733,27 +732,32 @@ class TelnetStream:
                 (mode, desc) = (LFLOW_RESTART_ANY, 'LFLOW_RESTART_ANY')
             else:
                 (mode, desc) = (LFLOW_RESTART_XON, 'LFLOW_RESTART_XON')
-            self.log.debug('send: IAC SB LFLOW {} IAC SE'.format(desc))
+            self.log.debug('send IAC SB LFLOW {} IAC SE'.format(desc))
             self.send_iac(b''.join([IAC, SB, LFLOW, mode, IAC, SE]))
             return True
         return False
 
     def send_linemode(self, linemode=None):
-        """ Request the client switch to linemode ``linemode``, an
-        of the Linemode class, or self._linemode by default.
         """
-        assert self.is_server, (
-            'SB LINEMODE LMODE_MODE cannot be sent by client')
-        assert self.remote_option.enabled(LINEMODE), (
-            'SB LINEMODE LMODE_MODE cannot be sent; '
-            'WILL LINEMODE not received.')
+        Set and Inform other end to agree to change to linemode, ``linemode``.
+
+        An instance of the Linemode class, or self._linemode when unset.
+        """
+
+        if not (self.local_option.enabled(LINEMODE) or
+                self.remote_option.enabled(LINEMODE)):
+            assert False, ('Cannot send LINEMODE-MODE without first '
+                           '(DO, WILL) LINEMODE received.')
+
         if linemode is not None:
-            self.log.debug('set and send: Linemode is {}'.format(linemode))
+            self.log.debug('set Linemode {0!r}'.format(linemode))
             self._linemode = linemode
-        self.log.debug('send IAC SB LINEMODE MODE {} IAC SE'
+
+        self.log.debug('send IAC SB LINEMODE LINEMODE-MODE {0!r} IAC SE'
                        .format(self._linemode))
+
         self.send_iac(IAC + SB + LINEMODE + slc.LMODE_MODE)
-        self.write(self._linemode.mask)
+        self.transport.write(self._linemode.mask)
         self.send_iac(IAC + SE)
 
 # Public is-a-command (IAC) callbacks
@@ -793,7 +797,7 @@ class TelnetStream:
             control sequences up until now,
 
             Oh well.  """
-        self.log.debug('IAC DM: received (unhandled).')
+        self.log.debug('IAC DM: Data-Mark (unhandled).')
         #: ``True`` if the last byte sent to ``feed_byte()`` was the end
         #  of an *IAC DM* has been received. MSG_OOB not implemented, so
         #  this mechanism _should not be implmeneted_.
@@ -1337,7 +1341,7 @@ class TelnetStream:
     def handle_wont(self, opt):
         """ Process byte 3 of series (IAC, WONT, opt) received by remote end.
 
-        (IAC, WONT, opt) is a negative acknolwedgement of (IAC, DO, opt) sent.
+        (IAC, WONT, opt) is a negative acknowledgment of (IAC, DO, opt) sent.
 
         The remote end requests we do not perform a telnet capability.
 
@@ -1417,28 +1421,28 @@ class TelnetStream:
             # sender.  Examples include a space or a semicolon."
             sep = buf.popleft()
             # decode any offered character sets (b'CHAR-SET')
-            # to a python-normalized unicode string (u'charset').
+            # to a python-normalized unicode string ('charset').
             offers = [charset.decode('ascii')
                       for charset in b''.join(buf).split(sep)]
             selected = self._ext_send_callback[CHARSET](offers)
             if selected is None:
-                self.log.debug('send: IAC SB CHARSET REJECTED IAC SE')
+                self.log.debug('send IAC SB CHARSET REJECTED IAC SE')
                 self.send_iac(IAC + SB + CHARSET + REJECTED + IAC + SE)
             else:
                 response = collections.deque()
                 response.extend([IAC, SB, CHARSET, ACCEPTED])
                 response.extend([bytes(selected, 'ascii')])
                 response.extend([IAC, SE])
-                self.log.debug('send: IAC SB CHARSET ACCEPTED {} IAC SE'
+                self.log.debug('send IAC SB CHARSET ACCEPTED {} IAC SE'
                                .format(selected))
                 self.send_iac(b''.join(response))
         elif opt == ACCEPTED:
             charset = b''.join(buf).decode('ascii')
-            self.log.debug('recv: IAC SB CHARSET ACCEPTED {} IAC SE'
+            self.log.debug('recv IAC SB CHARSET ACCEPTED {} IAC SE'
                            .format(charset))
             self._ext_callback[CHARSET](charset)
         elif opt == REJECTED:
-            self.log.warn('recv: IAC SB CHARSET REJECTED IAC SE')
+            self.log.warn('recv IAC SB CHARSET REJECTED IAC SE')
         elif opt in (TTABLE_IS, TTABLE_ACK, TTABLE_NAK, TTABLE_REJECTED):
             raise NotImplementedError
 
@@ -1480,7 +1484,8 @@ class TelnetStream:
             brx = '{}'.format(rx).encode('ascii')
             btx = '{}'.format(tx).encode('ascii')
             response = [IAC, SB, TSPEED, IS, brx, b',', btx, IAC, SE]
-            self.log.debug('send: {!r}'.format(response))
+            self.log.debug('send: IAC SB TSPEED IS {0!r},{1!r} IAC SE'
+                           .format(brx, btx))
             self.send_iac(b''.join(response))
             if self.pending_option.enabled(WILL + TSPEED):
                 self.pending_option[WILL + TSPEED] = False
@@ -1494,12 +1499,14 @@ class TelnetStream:
         assert opt in (IS, SEND), opt
         if opt == IS:
             xdisploc_str = b''.join(buf).decode('ascii')
-            self.log.debug('xdisploc recv: {}'.format(xdisploc_str))
+            self.log.debug('recv IAC SB XDISPLOC IS {0!r} IAC SE'
+                           .format(xdisploc_str))
             self._ext_callback[XDISPLOC](xdisploc_str)
         elif opt == SEND:
             xdisploc_str = self._ext_send_callback[XDISPLOC]().encode('ascii')
             response = [IAC, SB, XDISPLOC, IS, xdisploc_str, IAC, SE]
-            self.log.debug('xdisploc send: {!r}'.format(response))
+            self.log.debug('send IAC SB XDISPLOC IS {0!r} IAC SE'
+                           .format(xdisploc_str))
             self.send_iac(b''.join(response))
             if self.pending_option.enabled(WILL + XDISPLOC):
                 self.pending_option[WILL + XDISPLOC] = False
@@ -1513,12 +1520,14 @@ class TelnetStream:
         assert opt in (IS, SEND), opt
         if opt == IS:
             ttype_str = b''.join(buf).decode('ascii')
-            self.log.debug('ttype recv: {}'.format(ttype_str))
+            self.log.debug('recv IAC SB TTYPE IS {0!r}'
+                           .format(ttype_str))
             self._ext_callback[TTYPE](ttype_str)
         elif opt == SEND:
             ttype_str = self._ext_send_callback[TTYPE]().encode('ascii')
             response = [IAC, SB, TTYPE, IS, ttype_str, IAC, SE]
-            self.log.debug('ttype send: {!r}'.format(response))
+            self.log.debug('send IAC SB TTYPE IS {0!r} IAC SE'
+                           .format(ttype_str))
             self.send_iac(b''.join(response))
             if self.pending_option.enabled(WILL + TTYPE):
                 self.pending_option[WILL + TTYPE] = False
@@ -1542,7 +1551,7 @@ class TelnetStream:
         assert opt in (IS, SEND, INFO), opt
         env = _decode_env_buf(b''.join(buf))
         opt_kind = 'IS' if opt == IS else 'INFO' if opt == INFO else 'SEND'
-        self.log.debug('env {} {}: {!r}'
+        self.log.debug('recv {} {}: {!r}'
                        .format(name_command(cmd), opt_kind, env))
         if opt in (IS, INFO):
             assert self.is_server, ('SE: cannot recv from server: {} {}'
@@ -1583,15 +1592,20 @@ class TelnetStream:
 
     def _send_naws(self):
         """ XXX Fire callback for IAC-DO-NAWS and another one ??
-            does server send IAC-DO-NAWS anytime it wants to know,
+            can a server send IAC-DO-NAWS anytime it wants to know,
             or an SB? TODO
         """
         rows, cols = self._ext_send_callback[NAWS]()
-        # NAWS limits columns and rows to a size of 0-65534 (unsigned short)
-        rows, cols = max(min(65534, rows), 0), max(min(65534, cols), 0)
-        self.log.debug('sb_naws: send rows={}, cols={}' .format(rows, cols))
+
+        # NAWS limits columns and rows to a size of 0-65535 (unsigned short)
+        # >>> struct.unpack('!HH', b'\xff\xff\xff\xff')
+        # (65535, 65535)
+        rows, cols = max(min(65535, rows), 0), max(min(65535, cols), 0)
+
+        #
         response = [IAC, SB, NAWS, struct.pack('!HH', cols, rows), IAC, SE]
-        self.log.debug('send: {!r}'.format(response))
+        self.log.debug('send IAC SB NAWS (cols={0}, rows={1}) IAC SE'
+                       .format(cols, rows))
         self.send_iac(b''.join(response))
 
     def _handle_sb_naws(self, buf):
@@ -1599,13 +1613,15 @@ class TelnetStream:
         """
         cmd = buf.popleft()
         assert cmd == NAWS, name_command(cmd)
-        assert len(buf) is 4, 'bad length {}: {!r}'.format(len(buf), buf)
+        assert len(buf) is 4, (
+            'bad NAWS length {}: {!r}'.format(len(buf), buf)
+        )
         assert self.remote_option.enabled(NAWS), (
             'received IAC SB NAWS without receipt of IAC WILL NAWS')
-        columns, rows = struct.unpack('!HH', b''.join(buf))
-        self.log.debug('sb_naws: client is {}, {}'
-                       .format(columns, rows))
-        self._ext_callback[NAWS](int(columns), int(rows))
+        cols, rows = struct.unpack('!HH', b''.join(buf))
+        self.log.debug('recv IAC SB NAWS (cols={0}, rows={1}) IAC SE'
+                       .format(cols, rows))
+        self._ext_callback[NAWS](cols, rows)
 
     def _handle_sb_lflow(self, buf):
         """ Fire callback for IAC-SB-LFLOW-<buf>
@@ -1639,13 +1655,13 @@ class TelnetStream:
             self._receive_status(buf)
 
     def _receive_status(self, buf):
-        # TODO: read the rfc; do we honor what we see here?
-        # just error log mismatches for now
         for pos in range(len(buf) // 2):
             cmd = buf.popleft()
             try:
                 opt = buf.popleft()
             except IndexError:
+                # a remainder in division step-by-two,
+                # presumed nonsense occurred.
                 self.log.error('STATUS incomplete at pos {}, cmd: {}'
                                .format(pos, name_command(cmd)))
                 break
@@ -1675,13 +1691,13 @@ class TelnetStream:
                                    opt=name_command(opt),
                                    side=side, mode=mode))
                 self.log.error('r {!r}|{}'.format(
-                    [(name_command(opt), val)
-                     for opt, val in self.remote_option.items()],
-                    self.remote_option.enabled(opt)))
+                    [(name_command(_opt), _val)
+                     for _opt, _val in self.remote_option.items()],
+                    self.remote_option.enabled(_opt)))
                 self.log.error('l {!r}|{}'.format(
-                    [(name_command(opt), val)
-                     for opt, val in self.local_option.items()],
-                    self.local_option.enabled(opt)))
+                    [(name_command(_opt), _val)
+                     for _opt, _val in self.local_option.items()],
+                    self.local_option.enabled(_opt)))
 
     def _send_status(self):
         """ Fire callback for IAC-SB-STATUS-SEND (rfc859).
@@ -1710,13 +1726,13 @@ class TelnetStream:
             elif not status or DONT + opt in self.pending_option:
                 response.extend([DONT, opt])
         response.extend([IAC, SE])
-        self.log.debug('send: {}'.format(', '.join([
-            name_command(byte) for byte in response])))
+        self.log.debug('send IAC SB STATUS IS {} IAC SE'.format(' '.join([
+            name_command(byte) for byte in list(response)[4:-2]])))
         self.send_iac(b''.join(response))
         if self.pending_option.enabled(WILL + STATUS):
             self.pending_option[WILL + STATUS] = False
 
-# Special Line Character and other LINEMODE functions
+# Special Line Character and other LINEMODE functions.
 #
     def _handle_sb_linemode(self, buf):
         """ Callback handles IAC-SB-LINEMODE-<buf>.
@@ -1731,26 +1747,74 @@ class TelnetStream:
         elif opt == slc.LMODE_SLC:
             self._handle_sb_linemode_slc(buf)
         elif opt in (DO, DONT, WILL, WONT):
-            self.log.debug('recv SB {} {} FORWARDMASK,'
-                           .format(name_command(cmd), name_command(opt)))
             sb_opt = buf.popleft()
             assert sb_opt == slc.LMODE_FORWARDMASK, (
-                'Illegal byte follows IAC SB {} {}: {!r}, '
+                'Illegal byte follows IAC SB LINEMODE {}: {!r}, '
                 ' expected LMODE_FORWARDMASK.'
-                .format(name_command(cmd), name_command(opt), sb_opt))
+                .format(name_command(opt), sb_opt))
+
+            self.log.debug('recv IAC SB LINEMODE {} LMODE_FORWARDMASK,'
+                           .format(name_command(opt)))
             self._handle_sb_forwardmask(cmd, buf)
 
     def _handle_sb_linemode_mode(self, mode):
-        """ Callback handles IAC-SB-LINEMODE-MODE-<mode>.
+        """ Callback handles IAC-SB-LINEMODE-LINEMODE_MODE-<mode>.
         """
         assert len(mode) == 1
-        self._linemode = slc.Linemode(mode[0])
-        self.log.debug('Linemode MODE is {}.'.format(self.mode,))
+
+        suggest_mode = slc.Linemode(mode[0])
+
+        self.log.debug('recv IAC SB LINEMODE LINEMODE-MODE {0!r} IAC SE'
+                       .format(suggest_mode))
+
+        if not suggest_mode.ack:
+            # This implementation acknowledges and sets local linemode
+            # to *any* setting the remote end suggests, requiring a
+            # reply.  See notes later under server receipt of acknowledged
+            # linemode.
+            self.send_linemode(linemode=slc.Linemode(
+                mask=bytes([ord(suggest_mode.mask) | ord(slc.LMODE_MODE_ACK)]))
+            )
+            return
+
+        # " In all cases, a response is never generated to a MODE
+        #   command that has the MODE_ACK bit set."
+        #
+        # simply: cannot call self.send_linemode() here forward.
+
+        if self.is_client:
+            # " When a MODE command is received with the MODE_ACK bit set,
+            #   and the mode is different that what the current mode is,
+            #   the client will ignore the new mode"
+            if self._linemode != suggest_mode:
+                self.log.warn('server mode differs from local mode, '
+                              'though ACK bit is set. Local mode will '
+                              'remain.')
+                self.log.warn('-remote: {0!r}'.format(suggest_mode))
+                self.log.warn('+ local: {0!r}'.format(self._linemode))
+            else:
+                self.log.debug('Linemode matches, acknowledged by server.')
+                self._linemode = suggest_mode
+            return
+
+        # as a server, we simply honor whatever is given.  This is also
+        # problematic in some designers may wish to implement shells
+        # that specifically do not honor some parts of the bitmask, we
+        # must provide them an any/force-on/force-off mode table interface.
+        if self._linemode != suggest_mode:
+            self.log.debug('Client choses + {0!r}'.format(suggest_mode))
+            self.log.debug('We suggested, - {0!r}'.format(self._linemode))
+        else:
+            self.log.debug('Linemode agreed by client: {0!r}'
+                           .format(self._linemode))
+
+        self._linemode = self._linemode
+
 
     def _handle_sb_linemode_slc(self, buf):
         """ Callback handles IAC-SB-LINEMODE-SLC-<buf>.
 
-            Processes slc command function triplets and replies accordingly.
+            Processes SLC command function triplets and replies accordingly.
         """
         assert 0 == len(buf) % 3, ('SLC buffer must be byte triplets')
         self._slc_start()
@@ -1765,23 +1829,25 @@ class TelnetStream:
 
     def _slc_end(self):
         """ Send any pending SLC changes stored in _slc_buffer """
-        if 0 == len(self._slc_buffer):
-            self.log.debug('slc_end: IAC SE')
-        else:
-            self.write(_escape_iac(b''.join(self._slc_buffer)), oob=True)
-            self.log.debug('slc_end: ({!r}) IAC SE'
+        if len(self._slc_buffer):
+
+            self.log.debug('slc_end: {!r}'
                            .format(b''.join(self._slc_buffer)))
+            self.transport.write(_escape_iac(b''.join(self._slc_buffer)))
+            self._slc_buffer.clear()
+
+        self.log.debug('slc_end: [..] IAC SE')
         self.send_iac(IAC + SE)
-        self._slc_buffer.clear()
 
     def _slc_start(self):
         """ Send IAC SB LINEMODE SLC header """
+        self.log.debug('slc_start: IAC SB LINEMODE SLC [..]')
         self.send_iac(IAC + SB + LINEMODE + slc.LMODE_SLC)
-        self.log.debug('slc_start: IAC + SB + LINEMODE + SLC')
 
     def _slc_send(self, slctab=None):
-        """ Send supported SLC characters of current tabset,
-            or tabspet specified by argument slctab.
+        """
+        Send supported SLC characters of current tabset,
+        or tabset specified by argument slctab.
         """
         send_count = 0
         slctab = slctab or self.slctab
@@ -1790,17 +1856,21 @@ class TelnetStream:
                 # only the server may send an octet with the first
                 # byte (func) set as 0 (SLC_NOSUPPORT).
                 continue
-            if self.slctab.get(bytes([func]), slc.SLC_nosupport()).nosupport:
+
+            _default = slc.SLC_nosupport()
+            if self.slctab.get(bytes([func]), _default).nosupport:
                 continue
+
             self._slc_add(bytes([func]))
             send_count += 1
-        self.log.debug('slc_send: {}'.format(send_count))
+        self.log.debug('slc_send: {} functions queued.'.format(send_count))
 
     def _slc_add(self, func, slc_def=None):
-        """ buffer slc triplet response as (function, flag, value),
-            for the given SLC_func byte and slc_def instance providing
-            byte attributes ``flag`` and ``val``. If no slc_def is provided,
-            the slc definition of ``slctab`` is used by key ``func``.
+        """
+        buffer slc triplet response as (function, flag, value),
+        for the given SLC_func byte and slc_def instance providing
+        byte attributes ``flag`` and ``val``. If no slc_def is provided,
+        the slc definition of ``slctab`` is used by key ``func``.
         """
         assert len(self._slc_buffer) < _MAXSIZE_SLC, ('SLC: buffer full')
         if slc_def is None:
@@ -1810,15 +1880,17 @@ class TelnetStream:
         self._slc_buffer.extend([func, slc_def.mask, slc_def.val])
 
     def _slc_process(self, func, slc_def):
-        """ Process an SLC definition provided by remote end.
+        """
+        Process an SLC definition provided by remote end.
 
-            Ensure the function definition is in-bounds and an SLC option
-            we support. Store SLC_VARIABLE changes to self.slctab, keyed
-            by SLC byte function ``func``.
+        Ensure the function definition is in-bounds and an SLC option
+        we support. Store SLC_VARIABLE changes to self.slctab, keyed
+        by SLC byte function ``func``.
 
-            The special definition (0, SLC_DEFAULT|SLC_VARIABLE, 0) has the
-            side-effect of replying with a full slc tabset, resetting to
-            the default tabset, if indicated.  """
+        The special definition (0, SLC_DEFAULT|SLC_VARIABLE, 0) has the
+        side-effect of replying with a full slc tabset, resetting to
+        the default tabset, if indicated.
+        """
         # out of bounds checking
         if ord(func) > slc.NSLC:
             self.log.warn('SLC not supported (out of range): ({!r})'
@@ -2017,7 +2089,7 @@ def name_command(byte):
     return (repr(byte) if byte not in _DEBUG_OPTS else _DEBUG_OPTS[byte])
 
 
-def name_commands(cmds, sep=u' '):
+def name_commands(cmds, sep=' '):
     """ Given array of telnet command bytes, return mnemonic global constants.
     """
     return sep.join([name_command(bytes([byte])) for byte in cmds])
@@ -2096,7 +2168,7 @@ def _decode_env_buf(buf):
         assert kind in (VAR, USERVAR), (kind, pair)
         key = _unescape_env(pair[0]).decode('ascii', 'ignore')
         if len(pair) == 1:
-            value = u''
+            value = ''
         else:
             value = _unescape_env(pair[1]).decode('ascii', 'ignore')
         env[key] = value

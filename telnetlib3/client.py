@@ -1,9 +1,11 @@
 """ Telnet Client asyncio Protocol, https://github.com/jquast/telnetlib3. """
 import collections
+import traceback
 import datetime
 import logging
 import socket
 import codecs
+import sys
 
 import asyncio
 
@@ -37,11 +39,11 @@ class TelnetClient(asyncio.protocols.Protocol):
 
     def __init__(self, shell=TerminalShell, stream=TelnetStream,
                  encoding='utf-8', log=logging, force_binary=False,
-                 waiter_connected=None, waiter_closed=False):
+                 waiter_connected=None, waiter_closed=None):
         """ Constructor method for TelnetClient.
 
         :param shell: Terminal Client shell factory class.
-        :param stream: Telnet IAC Stream interpreter factory class.
+#        :param stream: Telnet IAC Stream interpreter factory class.
         :param encoding: encoding used when BINARY is negotiated.
         :type encoding: str
         :param log: logger instance.
@@ -78,10 +80,6 @@ class TelnetClient(asyncio.protocols.Protocol):
         self._server_ip = None
         self._server_port = None
 
-        self._encoding_negotiation = asyncio.Future()
-        self._encoding_negotiation.add_done_callback(
-            self.after_encoding_negotiation)
-
         #: waiter is a Future that completes when connection is closed.
         if waiter_closed is None:
             waiter_closed = asyncio.Future()
@@ -105,12 +103,18 @@ class TelnetClient(asyncio.protocols.Protocol):
 
         ``begin_negotiation()`` is fired after connection is complete.
         """
-        self.transport = transport
+        #self._transport = transport
+
         self._server_ip, self._server_port = (
             transport.get_extra_info('peername')[:2])
+
         self.stream = self._stream_factory(
             transport=transport, client=True, log=self.log)
+
+#        self.reader = self._factory_reader()
+#        self.reader.set_transport(transport)
         self.shell = self._shell_factory(client=self, log=self.log)
+
         self.init_environment_values()
         self.set_stream_callbacks()
         self._last_received = datetime.datetime.now()
@@ -396,7 +400,7 @@ class TelnetClient(asyncio.protocols.Protocol):
         """ Callback to check negotiation state on-connect.
 
         Schedules itself for continual callback until negotiation with
-        server is considered final, firing :py:meth:`after_telopt_negotiation`
+        server is considered final, firing :py:meth:`after_negotiation`
         when complete.
         """
         if self._closing:
@@ -415,25 +419,33 @@ class TelnetClient(asyncio.protocols.Protocol):
             # with telnet options pending, we set waiter_connected anyway -- it
             # is unlikely after such time elapsed that the server will complete
             # negotiation after this time.
-            self.water_connected.set_result(self)
+            self.waiter_connected.set_result(self)
             return
 
         self._loop.call_later(self.CONNECT_DEFERRED, self.check_negotiation)
 
-    def after_telopt_negotiation(self, status):
-        """ Callback when on-connect option negotiation is complete.
-
-        :type status: asyncio.Future
-        :param status: possibly cancelled Future if connection was closed.
-            Otherwise, result value is a string describing telnet options
-            negotiated.
+    def after_negotiation(self, status):
+        """ XXX Default public callback does nothing.
         """
         if status.cancelled():
             self.log.debug('telopt negotiation cancelled')
-            self.waiter_connected.cancel()
-        else:
-            self.log.debug('stream status: {}.'.format(self.stream))
-            self.waiter_connected.set_result(self)
+            return
+        self.log.debug('stream status: {}.'.format(self.stream))
+        self.log.debug('client encoding is {}.'.format(
+            self.encoding(outgoing=True, incoming=True)))
+
+    def after_encoding_negotiation(self, status):
+        """ Callback when on-connect encoding negotiation is complete.
+
+        :type status: asyncio.Future
+        :param status: possibly cancelled Future if connection was closed.
+            Otherwise, result value is a boolean indicating whether BINARY
+            was negotiated bi-directionally.
+        """
+        if status.cancelled():
+            self.log.debug('encoding negotiation cancelled')
+            return
+
 
     def check_encoding_negotiation(self):
         """ Callback to check on-connect option negotiation for encoding.
@@ -446,13 +458,11 @@ class TelnetClient(asyncio.protocols.Protocol):
         """
         from .telopt import DO, BINARY
         if self._closing:
-            self._encoding_negotiation.cancel()
             return
 
         # encoding negotiation is complete
         if self.outbinary and self.inbinary:
-            self.log.debug('outbinary and inbinary negotiated.')
-            self._encoding_negotiation.set_result(True)
+            self.log.debug('negotiated outbinary and inbinary with client.')
 
         # if (WILL, BINARY) requested by begin_negotiation() is answered in
         # the affirmitive, then request (DO, BINARY) to ensure bi-directional
@@ -467,26 +477,11 @@ class TelnetClient(asyncio.protocols.Protocol):
         elif self.duration > self.CONNECT_MAXWAIT:
             # Perhaps some IAC interpreting servers do not differentiate
             # 'local' from 'remote' options -- they are treated equivalently.
-            self._encoding_negotiation.set_result(False)
+            self.log.debug('failed to negotiate both outbinary and inbinary.')
 
         else:
             self._loop.call_later(self.CONNECT_DEFERRED,
                                   self.check_encoding_negotiation)
-
-    def after_encoding_negotiation(self, status):
-        """ Callback when on-connect encoding negotiation is complete.
-
-        :type status: asyncio.Future
-        :param status: possibly cancelled Future if connection was closed.
-            Otherwise, result value is a boolean indicating whether BINARY
-            was negotiated bi-directionally.
-        """
-        if status.cancelled():
-            self.log.debug('encoding negotiation cancelled')
-            return
-
-        self.log.debug('client encoding is {}.'.format(
-            self.encoding(outgoing=True, incoming=True)))
 
     @property
     def duration(self):
@@ -512,13 +507,16 @@ class TelnetClient(asyncio.protocols.Protocol):
 
             try:
                 self.stream.feed_byte(byte)
-            except (ValueError, AssertionError) as err:
-                self.log.warn(err)
+            except (ValueError, AssertionError):
+                e_type, e_value, _ = sys.exc_info()
+                map(self.log.warn,
+                    traceback.format_exception_only(e_type, e_value))
                 continue
 
             if self.stream.is_oob:
                 continue
 
+            # self.reader.feed_byte()
             self.shell.feed_byte(byte)
 
     def eof_received(self):
@@ -536,6 +534,7 @@ class TelnetClient(asyncio.protocols.Protocol):
             self.log.info('{about}{reason}'.format(
                 about=self.__str__(),
                 reason=': {}'.format(exc) if exc is not None else ''))
+            self.waiter_connected.cancel()
             self.waiter_closed.set_result(self)
 
 
