@@ -55,7 +55,7 @@ def start_client(loop, log, Client, host, port, cp437=False, send_cr=False):
             protocol.shell.write(ucs)
 
     loop.add_reader(sys.stdin.buffer.fileno(), keyboard_input)
-    yield from protocol.waiter
+    yield from protocol.waiter_closed
 
 
 def main():
