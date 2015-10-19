@@ -357,7 +357,7 @@ class TelnetClient(asyncio.protocols.Protocol):
                 try:
                     codec = codecs.lookup(offer)
                 except LookupError as err:
-                    self.log.debug('{}'.format(err))
+                    self.log.info('LookupError: {}'.format(err))
                 else:
                     if (codec.name == self.env['CHARSET'] or not selected):
                         self.env['CHARSET'] = codec.name

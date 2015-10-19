@@ -58,7 +58,8 @@ class TelnetStream:
         'UTF-8', 'UTF-16', 'US-ASCII', 'LATIN1', 'BIG5',
         'GBK', 'SHIFTJIS', 'GB18030', 'KOI8-R', 'KOI8-U',
     ) + tuple(
-        'ISO8859-{}'.format(iso) for iso in range(16)
+        # "Part 12 was slated for Latin/Devanagari, but abandoned in 1997"
+        'ISO8859-{}'.format(iso) for iso in range(1, 16) if iso != 12
     ) + tuple(
         'CP{}'.format(cp) for cp in (
             154, 437, 500, 737, 775, 850, 852, 855, 856, 857,
