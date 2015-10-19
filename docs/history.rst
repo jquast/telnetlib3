@@ -2,6 +2,7 @@
   * bugfix: linemode MODE is now acknowledged.
   * bugfix: default stream handler sends 80 x 24 in cols x rows, not 24 x 80.
   * bugfix: waiter_closed future on client defaulted to wrong type.
+  * bugfix: telnet shell (TelSh) no longer paints over final exception line.
 
 0.4.0
   * bugfix: cannot connect to IPv6 address as client.

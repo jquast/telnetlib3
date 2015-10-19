@@ -480,9 +480,11 @@ class Telsh():
         or @property ``autocomplete_cmdset`` is used.
         """
         self.log.debug('tab_received: {!r}'.format(input))
+
         # dynamic injection of variables for set command,
         cmd, args = input.rstrip(), []
         table = self.autocomplete_cmdset if table is None else table
+
         # inject session variables for set command,
         if 'set' in table:
             table['set'] = collections.OrderedDict([
@@ -753,8 +755,10 @@ class Telsh():
         return ('{}'.format(prompt_eval(self, ps)))
 
     def display_exception(self, *exc_info):
-        """ Dispaly exception to client when ``show_traceback`` is True,
-            forward copy server log at debug and info levels.
+        """
+        Display exception to client when ``show_traceback`` is True.
+
+        Forward-copy to server log at DEBUG and INFO levels.
         """
         tbl_exception = (
             traceback.format_tb(exc_info[2]) +
@@ -762,10 +766,14 @@ class Telsh():
         for num, tb in enumerate(tbl_exception):
             tb_msg = tb.splitlines()
             if self.show_traceback:
-                self.stream.write('\r\n' + '\r\n'.join(
-                    self.standout(row.rstrip())
-                    if num == len(tbl_exception) - 1
-                    else row.rstrip() for row in tb_msg))
+                self.stream.write(u'\r\n'.join(
+                    (u'',
+                     '\r\n'.join(
+                         self.standout(row.rstrip())
+                         if num == len(tbl_exception) - 1
+                         else row.rstrip()
+                         for row in tb_msg),
+                     u'\r\n')))
             tbl_srv = [row.rstrip() for row in tb_msg]
             for line in tbl_srv:
                 self.log.log(logging.ERROR, line)
@@ -1125,7 +1133,7 @@ def autocomplete(table, cycle, buf, cmd, *args):
             table : collections.OrderedDict, cycle : bool,
             buf : string, cmd : string, *args) -> (buf, bool)
 
-    Recursive autocompete function. This provides no "found last match"
+    Recursive auto-complete function. This provides no "found last match"
     state tracking, but rather simply cycles 'next match' when cycle
     is True, meaning 's'<tab> -> 'set', then, subsequent <tab> -> 'status'.
     """
@@ -1154,19 +1162,22 @@ def autocomplete(table, cycle, buf, cmd, *args):
                         postfix(auto_cmd),
                         escape_quote(args))
                     return (buf, False)
+
                 # first-time exact match,
                 if not cycle:
                     return (buf, True)
+
                 # cycle next match
                 ptr = 0 if ptr + 1 == len(auto_cmds) - 1 else ptr + 1
                 buf = ''.join((postfix(buf), auto_cmds[ptr]))
                 return (buf, True)
             else:
-                # match at this step, have/will args, recruse;
+                # match at this step, have/will args, recurse;
                 buf = ''.join((postfix(buf), auto_cmd,))
                 _cmd = args[0] if args else ''
                 return autocomplete(
                     table[auto_cmd], cycle, buf, _cmd, *args[1:])
+
         elif auto_cmd.lower().startswith(cmd.lower()):
             # partial match, error if arguments not valid,
             args_ok = bool(not args or args and has_args)
@@ -1174,6 +1185,7 @@ def autocomplete(table, cycle, buf, cmd, *args):
             if args or has_args:
                 buf = ''.join((postfix(buf), escape_quote(args)))
             return (buf, args_ok)
+
     # no matches
     buf = '{}{}{}'.format(
         postfix(buf), cmd, escape_quote(args))
