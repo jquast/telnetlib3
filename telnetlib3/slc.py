@@ -229,8 +229,18 @@ class Linemode(object):
             ``LMODE_MODE_ACK``, ``LMODE_MODE_SOFT_TAB``, and
             ``LMODE_MODE_LIT_ECHO``.
         """
-        assert type(mask) is bytes and len(mask) == 1
+        assert type(mask) is bytes and len(mask) == 1, (repr(mask), mask)
         self.mask = mask
+
+    def __eq__(self, other):
+        """Compare by another Linemode (LMODE_MODE_ACK ignored)."""
+        # the inverse OR(|) of acknowledge bit UNSET in comparator,
+        # would be the AND OR(& ~) to compare modes without acknowledge
+        # bit set.
+        return (
+            (ord(self.mask) | ord(LMODE_MODE_ACK)) ==
+            (ord(other.mask) | ord(LMODE_MODE_ACK))
+        )
 
     @property
     def local(self):
@@ -266,6 +276,14 @@ class Linemode(object):
         """ Returns string representation of line mode, for debugging """
         return 'remote' if self.remote else 'local'
 
+    def __repr__(self):
+        return '<{0!r}: {1}>'.format(
+            self.mask, ', '.join([
+                '{0}:{1}'.format(prop, getattr(self, prop))
+                for prop in ('lit_echo', 'soft_tab', 'ack',
+                             'trapsig', 'remote', 'local')])
+        )
+
 
 class Forwardmask(object):
     def __init__(self, value, ack=False):
@@ -280,10 +298,9 @@ class Forwardmask(object):
         self.value = value
         self.ack = ack
 
-    def __repr__(self):
-        """ .. method:: __repr__() -> type(list)
-
-            Returns list of strings describing obj as a tabular ASCII map.
+    def description_table(self):
+        """
+        Returns list of strings describing obj as a tabular ASCII map.
         """
         result = []
         MRK_CONT = '(...)'
