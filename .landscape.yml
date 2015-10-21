@@ -5,6 +5,7 @@ ignore-patterns:
     - (^|/)\..+
     - ^docs/
     - ^build/
+    - ^telnetlib3/tests/
 
 test-warnings: true
 
@@ -23,9 +24,10 @@ frosted:
     # static analysis, pyflakes improved?
     #
     run: true
-#    disable:
-#        # Terminal imported but unused (false)
-#        - 'E101'
+    disable:
+        # conflicts with py.test fixtures,
+        # redefinition of unused 'log' from line 9 (col 1)
+        - F811
 
 mccabe:
     run: true
@@ -58,6 +60,8 @@ pylint:
     disable:
         # Access to a protected member _sugar of a client class
         - protected-access
+        # conflicts with py.test test fixtures
+        - redefined-outer-name
 
 pyroma:
     # checks setup.py
