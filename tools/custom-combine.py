@@ -4,7 +4,6 @@
 from __future__ import print_function
 
 # local
-import subprocess
 import tempfile
 import shutil
 import glob
@@ -16,6 +15,7 @@ import six
 
 PROJ_ROOT = os.path.join(os.path.dirname(__file__), os.pardir)
 COVERAGERC = os.path.join(PROJ_ROOT, '.coveragerc')
+
 
 def main():
     """Program entry point."""
