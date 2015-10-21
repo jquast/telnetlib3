@@ -2,8 +2,6 @@
 # std imports
 import subprocess
 import asyncio
-import locale
-import codecs
 
 # local imports
 from .accessories import (
@@ -14,20 +12,18 @@ from .accessories import (
     log
 )
 
-# local
-import telnetlib3
-
 # 3rd party imports
 import pytest
 import pexpect
 
 
 def get_netcat():
-    netcat_paths=('nc',
-                  'netcat',
-                  '/usr/bin/nc',
-                  '/usr/local/bin/nc',
-                  '/bin/nc.openbsd')
+    """Return IPv6-capable nc(1), if any."""
+    netcat_paths = ('nc',
+                    'netcat',
+                    '/usr/bin/nc',
+                    '/usr/local/bin/nc',
+                    '/bin/nc.openbsd')
     for nc_name in netcat_paths:
         prog = pexpect.which(nc_name)
         if prog is None:
@@ -41,7 +37,7 @@ def get_netcat():
 
         # only openbsd netcat supports IPv6.
         # So that's the only one we'll use!
-        if b'-46' in (stdout + stderr):
+        if b'-46' in stdout + stderr:
             return prog
     return None
 
@@ -50,7 +46,7 @@ def get_netcat():
                     reason="Requires IPv6 capable (OpenBSD-borne) nc(1)")
 @pytest.mark.asyncio
 def test_netcat_z(event_loop, bind_host, unused_tcp_port, log):
-
+    """Simple nc(1) -z as client (rapidly disconnecting client)."""
     waiter_closed = asyncio.Future()
 
     server = yield from event_loop.create_server(

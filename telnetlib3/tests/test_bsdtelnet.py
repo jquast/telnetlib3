@@ -1,4 +1,4 @@
-"""Functionally tests telnetlib3 as a server, using telnet(1)"""
+"""Functionally tests telnetlib3 as a server, using telnet(1)."""
 # std imports
 import asyncio
 
@@ -18,7 +18,7 @@ import pytest
 
 @pytest.mark.asyncio
 def test_bsdtelnet(event_loop, bind_host, unused_tcp_port, log):
-
+    """Simple telnet(1) as client (issues 'quit' command)."""
     # if the event loop is not set in debug mode, pexpect blows up !
     # https://github.com/pexpect/pexpect/issues/294
     event_loop.set_debug(True)

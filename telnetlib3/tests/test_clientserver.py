@@ -1,5 +1,4 @@
 """Functionally tests telnetlib3 Client against its own Server."""
-
 # std imports
 import asyncio
 
@@ -16,9 +15,10 @@ from .accessories import (
 # 3rd party
 import pytest
 
+
 @pytest.mark.asyncio
 def test_telnet_coupled(event_loop, bind_host, unused_tcp_port, log):
-
+    """Couple TelnetClient to TelnetServer as standard protocol connection."""
     waiter_server_connected = asyncio.Future()
     waiter_client_connected = asyncio.Future()
     waiter_server_closed = asyncio.Future()
@@ -33,7 +33,7 @@ def test_telnet_coupled(event_loop, bind_host, unused_tcp_port, log):
 
     log.info('Listening on {0}'.format(server.sockets[0].getsockname()))
 
-    _transport, client_protocol = yield from event_loop.create_connection(
+    _, client_protocol = yield from event_loop.create_connection(
         protocol_factory=lambda: TestTelnetClient(
             waiter_connected=waiter_client_connected,
             waiter_closed=waiter_client_closed,
@@ -59,5 +59,3 @@ def test_telnet_coupled(event_loop, bind_host, unused_tcp_port, log):
                          pending,
                          waiter_client_connected,
                          waiter_server_connected)
-
-

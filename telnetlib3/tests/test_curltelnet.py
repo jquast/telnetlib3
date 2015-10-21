@@ -2,8 +2,6 @@
 # std imports
 import subprocess
 import asyncio
-import locale
-import codecs
 
 # local imports
 from .accessories import (
@@ -14,9 +12,6 @@ from .accessories import (
     log
 )
 
-# local
-import telnetlib3
-
 # 3rd party imports
 import pytest
 import pexpect
@@ -26,6 +21,7 @@ import pexpect
                     reason="Requires curl(1)")
 @pytest.mark.asyncio
 def test_curltelnet(event_loop, bind_host, unused_tcp_port, log):
+    """Simple curl(1) as Telnet client (simple capabilities)."""
 
     waiter_closed = asyncio.Future()
     waiter_connected = asyncio.Future()
