@@ -20,7 +20,8 @@ class TelnetClient(asyncio.protocols.Protocol):
 
     """ Telnet Client Protocol. """
 
-    #: mininum on-connect time to wait for server-initiated negotiation options
+    #: Minimum on-connect time to wait for server-initiated negotiation options
+
     CONNECT_MINWAIT = 2.00
     #: maximum on-connect time to wait for server-initiated negotiation options
     #  before negotiation is considered 'final'.
