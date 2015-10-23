@@ -62,6 +62,7 @@ pylint:
         - protected-access
         # conflicts with py.test test fixtures
         - redefined-outer-name
+        - too-many-instance-attributes
 
 pyroma:
     # checks setup.py
