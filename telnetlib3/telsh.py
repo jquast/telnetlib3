@@ -12,11 +12,12 @@ import re
 # local
 from . import slc
 from . import telopt
+from . import streams
 
 # 3rd party
 import wcwidth
 
-__all__ = ('TelnetShellStream', 'Telsh')
+#__all__ = ('TelnetShellStream', 'Telsh')
 
 
 class _EDIT():
@@ -58,193 +59,13 @@ SLC_EDIT_TRANSTABLE = dict((
 CR, LF, NUL = '\r\n\x00'
 
 
-def name_unicode(ucs):
+def name_unicode(char):
     """Return 7-bit ASCII printable of any unicode string."""
-    if ord(ucs) < ord(' ') or ord(ucs) == 127:
-        ucs = r'^{}'.format(chr(ord(ucs) ^ ord('@')))
-    elif not ucs.isprintable():
-        ucs = r'\x{:02x}'.format(ord(ucs))
-    return ucs
-
-
-class TelnetServerStreamReader(asyncio.StreamReader):
-    """A reader interface to the TelnetClient from TelnetServer perspective."""
-
-    #: See class property, 'decoder'.
-    _decoder = None
-
-    def __init__(self, transport, protocol, reader=None, loop=None,
-                 log=logging, encoding_errors='replace'):
-        if loop is None:
-            loop = asyncio.get_event_loop()
-        asyncio.StreamReader.__init__(self,
-                                      transport=transport,
-                                      protocol=protocol,
-                                      reader=reader,
-                                      loop=loop)
-
-    def display_charset_err(self, err):
-        """
-        Carefully notify client of encoding error (in ASCII, of course!).
-        """
-        encoding = self.protocol.encoding(outgoing=True)
-        err_bytes = bytes(err.args[0].encode(encoding))
-        charset = bytes(self.protocol.env['CHARSET'].encode(encoding))
-        msg = b''.join((b'\r\n', err_bytes, b', CHARSET is ', charset, b'.'))
-        self.transport.write(msg)
-
-
-    @property
-    def decoder(self):
-        """
-        Late-binding instance of :class:`codecs.IncrementalDecoder`
-
-        For current encoding, negotiated by protocol or shell.  Late-binding
-        and re-instantiating, allowing encoding changes during session,
-        defaults to value of ``None`` until a byte is first sent through
-        the decoder.
-        """
-        return self._decoder
-
-    def decode(self, string, final=False):
-        """Decode ``string`` using preferred encoding."""
-        enc = self.protocol.encoding(incoming=True)
-
-        # late-binding auto-changing decoder.
-        if (self.decoder is None or enc != self.decoder._encoding):
-            try:
-                self.decoder = codecs.getincrementaldecoder(enc)(
-                    errors=self.encoding_errors)
-                self.decoder._encoding = enc
-            except LookupError as err:
-                assert (enc != self.protocol._default_encoding), err
-                self.log.info(err)
-                # notify server of change to _default_encoding, try again,
-                self.protocol.env_update(
-                    {'CHARSET': self.protocol._default_encoding})
-                self.decoder = codecs.getincrementaldecoder(enc)(
-                    errors=self.encoding_errors)
-                self.decoder._encoding = enc
-                self.display_charset_err(err)
-                self.shell.display_prompt()
-
-        return self.decoder.decode(string, final)
-
-
-class TelnetServerStreamWriter(asyncio.StreamWriter):
-    """A writer interface to the TelnetClient from TelnetServer perspective."""
-
-    #: RFC compliance demands IAC-GA, an out-of-band "go ahead" signal for
-    #: clients that fail to negotiate supress go-ahead (WONT SGA).  This
-    #: feature may be useful for synchronizing prompts with automation, but
-    #: may otherwise cause harm to non-compliant client streams.
-    send_go_ahead = True
-
-    def __init__(self, transport, protocol, reader=None, loop=None,
-                 log=logging, encoding_errors='replace'):
-        if loop is None:
-            loop = asyncio.get_event_loop()
-        self.encoding_errors = errors
-
-        asyncio.StreamWriter.__init__(self,
-                                      transport=transport,
-                                      protocol=protocol,
-                                      reader=reader,
-                                      loop=loop)
-
-    def send_ga(self):
-        """
-        Conditionally send ``GO-AHEAD``.
-
-        Sends go-ahead signal when :attr:`send_go_ahead` is True.
-        """
-        if self.send_go_ahead:
-            self.server.stream.send_ga()
-
-    def encode(self, buf, errors=None):
-        """
-        Encode ``buf`` using protocol-preferred encoding.
-
-        When ``outbinary`` mode has not been negotiated, buf must be
-        strictly 7-bit ASCII characters (valued less than 128) by RFC
-        compliance.
-
-        :param errors: Same When ``None`` (default)
-        :param str errors: same as meaning in :class:`codecs.Codec`.
-            When None, value of :attr:`errors_encoding` is used.
-        """
-        if errors is None:
-            errors = self.encoding_errors
-        return bytes(buf, self.protocol.encoding(outgoing=True), errors)
-
-    def write(self, string, errors=None):
-        """
-        Write string to output using preferred encoding.
-        """
-        errors = errors if errors is not None else self.encoding_errors
-        assert isinstance(string, str), string
-        if self._write_buf:
-            string = ''.join((self._write_buf, string))
-
-        # writing is paused, defer encoding and socket write.  Data will
-        # be sent immediately on call to ``resume_writing`` !
-        if not self._writing:
-            self.log.debug('{0}queued output: {1!r}'.format(
-                're-' if self._write_buf else '', string))
-            self._write_buf = string
-            return
-        self._write_buf = ''
-
-        try:
-            bytestring = self.encode(string, errors)
-            self.server.stream.write(bytestring)
-        except LookupError as err:
-            assert (self.server.encoding(outgoing=True)
-                    != self.server._default_encoding)
-            self.server.env_update(
-                {'CHARSET': self.server._default_encoding})
-            self.log.debug(err)
-            self.display_charset_err(err)
-            return self.write(string, errors)
-
-    def echo(self, string, errors=None):
-        """
-        Conditionally write ``string`` to stream when "remote echo" enabled.
-
-        :param str string: string received as input, to conditionally output.
-        :param str errors: same as meaning in :class:`codecs.Codec`.
-        :rtype: None
-
-        The default implementation depends on telnet negotiation willingness
-        for local echo, only an rfc compliant telnet client will correctly
-        set or unset echo accordingly by demand.  This option may be toggled
-        using shell command, ``toggle echo``.
-        """
-        if self.server.stream.local_option.enabled(telopt.ECHO):
-            self.write(string, errors)
-
-    def can_write(self, char):
-        """
-        Whether the distant end may receive ``char`` in the given mode.
-
-        :rtype: bool
-        :returns: ``False`` for any control characters, or characters outside
-            of NVT ASCII range unless allowed by mode, ``outbinary``.
-
-        False indicates that a write of this unicode character would be an
-        encoding error on the transport, or may corrupt client screen in the
-        case of :meth:`echo` called, when ``stream.will_echo`` is negotiated.
-        """
-        return ord(char) > 31 and (ord(char) < 127 or self.server.outbinary)
-
-    def __repr__(self):
-        """Description of stream encoding state."""
-        enc_in, enc_out = (self.server.encoding(incoming=True),
-                           self.server.encoding(outgoing=True))
-        if enc_in == enc_out:
-            return u'<{0}>'.format(enc_in)
-        return '<{0} in, {1} out>'.format(enc_in, enc_out)
-
+    if ord(char) < ord(' ') or ord(char) == 127:
+        char = r'^{}'.format(chr(ord(char) ^ ord('@')))
+    elif not char.isprintable():
+        char = r'\x{:02x}'.format(ord(char))
+    return char
 
 class Telsh():
     """
@@ -331,12 +152,12 @@ class Telsh():
     # See class property, 'multiline'.
     _multiline = False
 
-    def __init__(self, server, stream=TelnetShellStream, log=logging):
+    def __init__(self, server, writer=StreamWriter, log=logging):
         #: TelnetServer instance associated with shell
         #: TelnetShellStream provides encoding for Telnet NVT
         self.server = server
 
-        self.stream = stream(server=server, log=log)
+        #self.stream = stream(server=server, log=log)
         self.log = log
 
         #: buffer of line input until command process.  Accessed by
@@ -370,7 +191,7 @@ class Telsh():
         if isinstance(byte, int):
             byte = bytes([byte])
 
-        char = self.stream.decode(byte, final=False)
+        char = self.reader.decode(byte, final=False)
         if char:
             if slc_function is not None:
                 self.editing_received(char=char,
@@ -428,7 +249,7 @@ class Telsh():
                 self.display_prompt(redraw=True)
                 return
 
-            self.stream.write(self.erase(self._lastline.pop(), char))
+            self.writer.write(self.erase(self._lastline.pop(), char))
 
         elif cmd == EDIT.EW:
             # erase word (^w), rubout .(\w+)
@@ -436,17 +257,17 @@ class Telsh():
                 self.bell()
                 return
 
-            ucs = ''
+            string = ''
 
             # erase any space,
             while self._lastline and self._lastline[-1].isspace():
-                ucs += self._lastline.pop()
+                string += self._lastline.pop()
 
             # then, erase any non-space
             while self._lastline and not self._lastline[-1].isspace():
-                ucs += self._lastline.pop()
+                string += self._lastline.pop()
 
-            if not ucs:
+            if not string:
                 # bell if erase-word at beginning of line
                 self.bell()
 
@@ -467,20 +288,20 @@ class Telsh():
                 return
 
             # logout when input line is empty
-            self.stream.write(char_disp)
+            self.writer.write(char_disp)
             self.server.logout()
 
         elif cmd == EDIT.AYT:
             # are-you-there? (Ctrl - T)
             self._lastline.clear()
-            self.stream.write(char_disp)
+            self.writer.write(char_disp)
             self.display_status()
             self.display_prompt()
 
         elif cmd in (EDIT.IP, EDIT.ABORT,):
             # interrupt process (Ctrl - C), abort process (Ctrl - \)
             self._lastline.clear()
-            self.stream.write(char_disp)
+            self.writer.write(char_disp)
             self.display_prompt()
 
         elif cmd in (EDIT.XOFF, EDIT.XON,):
@@ -494,13 +315,13 @@ class Telsh():
             # not handled or implemented
             self.log.debug('{} unhandled.'.format(EDIT.name(cmd)))
             self._lastline.append(char)
-            self.stream.write(char_disp)
+            self.writer.write(char_disp)
 
-    def literal_received(self, ucs):
+    def literal_received(self, char):
         """
         Callback on receipt of *literal-next* and subsequent characters.
 
-        :param str ucs: character received.
+        :param str char: character received.
         :rtype: None
 
         Receives literal character ``EDIT.LNEXT``, normally ``Ctrl - V``,
@@ -511,10 +332,10 @@ class Telsh():
         that may conflict with an editing command character, or the user
         is otherwise incapable of generating.
         """
-        self.log.debug('literal_received: {!r}'.format(ucs))
+        self.log.debug('literal_received: {!r}'.format(char))
         if self.is_literal is False:
-            self.log.debug('begin marker {!r}'.format(name_unicode(ucs)))
-            self.stream.write(self._standout('^\b'))
+            self.log.debug('begin marker {!r}'.format(name_unicode(char)))
+            self.writer.write(self._standout('^\b'))
             self._literal = -1
             return
 
@@ -522,11 +343,11 @@ class Telsh():
         if self._literal != -1:
             val = int(self._literal)
 
-        self.log.debug('literal continued: {!r}, {!r}'.format(val, ucs))
+        self.log.debug('literal continued: {!r}, {!r}'.format(val, char))
 
-        if ord(ucs) < 32:
+        if ord(char) < 32:
             # entering a raw control character,
-            if ucs in (CR, LF) and self._literal != -1:
+            if char in (CR, LF) and self._literal != -1:
                 # when CR or LF is received, send as-is & cancel,
                 self.character_received(chr(val), literal=True)
                 self._literal = False
@@ -537,13 +358,13 @@ class Telsh():
                 self.character_received(chr(val), literal=True)
 
             # send raw control character to ``character_received``
-            self.character_received(ucs, literal=True)
+            self.character_received(char, literal=True)
             self._literal = False
             return
 
-        if self.max_litval and ord('0') <= ord(ucs) <= ord('9'):
+        if self.max_litval and ord('0') <= ord(char) <= ord('9'):
             # entering a base-10 digit
-            self._literal = (val * 10) + int(ucs)
+            self._literal = (val * 10) + int(char)
 
             # If our maximum value has been reached or exceeded, or,
             # our string literal length is equal to the maximum value's
@@ -552,15 +373,15 @@ class Telsh():
             str_max = '{}'.format(self.max_litval)
             if (self._literal >= self.max_litval or
                     len(str_val) == len(str_max)):
-                ucs = chr(min(self._literal, self.max_litval))
-                self.character_received(ucs, literal=True)
+                char = chr(min(self._literal, self.max_litval))
+                self.character_received(char, literal=True)
                 self._literal = False
             return
 
-        self._lastline.append(ucs)
+        self._lastline.append(char)
 
-        if self.stream.will_echo:
-            self.stream.echo(self._standout(name_unicode(ucs)))
+        if self.writer.will_echo:
+            self.writer.echo(self._standout(name_unicode(char)))
         else:
             self.display_prompt(redraw=True)
 
@@ -644,9 +465,9 @@ class Telsh():
 
             # echo as output.
             char_disp = char
-            if self.stream.can_write(char) and char.isprintable():
+            if self.writer.can_write(char) and char.isprintable():
                 char_disp = self._standout(name_unicode(char))
-            self.stream.echo(char_disp)
+            self.writer.echo(char_disp)
 
         # it is necessary on receipt of subsequent characters to backtrack
         # the previous, most especially for carriage return.
@@ -717,7 +538,7 @@ class Telsh():
             # this differs from the function of the same name
             # in `~.display_prompt` and `~.character_received`
             # by using self._standout.
-            if self.stream.can_write(char) and char.isprintable():
+            if self.writer.can_write(char) and char.isprintable():
                 return char
             return name_unicode(char)
 
@@ -787,22 +608,21 @@ class Telsh():
         :attr:`multiline`, expanded for special prompt characters, variables,
         and literal characters.
         """
-        # special prompt character expansion,
-        _ps = self.server.env['PS2' if self.multiline else 'PS1']
+        # prompt character expansion
+        _ps1 = self.server.env.get('PS1', '%s-%v %# ')
+        _ps2 = self.server.env.get('PS2', '> ')
         result = self.expansion(
-            string=_ps,
+            string=_ps2 if self.multiline else _ps1,
             pattern=self._re_prompt,
             getter=lambda match: self.expand_prompt(match.group(1))
         )
-
-        # variable expansion,
+        # variable expansion
         result = self.expansion(
             string=result,
             pattern=self._re_variable,
             getter=lambda match: self.expand_variable(match.group(1))
         )
-
-        # literals,
+        # literals
         result = self.expansion(
             string=result,
             pattern=self._re_literal,
@@ -823,7 +643,7 @@ class Telsh():
         def disp_char(char):
             # this differs from the function of the same name
             # in `~.erase` by using self._standout.
-            if self.stream.can_write(char) and char.isprintable():
+            if self.writer.can_write(char) and char.isprintable():
                 return char
             return self._standout(name_unicode(char))
 
@@ -1515,7 +1335,7 @@ class Telsh():
         ``'%#'``   Prompt character.
         ``'%u'``   Username.
         ``'%h'``   Hostname.
-        ``'%H'``   Full hostname.
+#        ``'%H'``   Full hostname.
         ``'%$'``   Value of session parameter following $.
         ``'%?'``   Return code last command processed.
         ``'%00'``  8-bit character string for octal '077'.
@@ -1598,17 +1418,7 @@ class Telsh():
         :returns: resolved expansion or ``default`` when unexpanded.
         """
         val = None
-        if char == 'h':
-            val = ''
-            if self.server.server_name.done():
-                val = self.server.server_name.result().split('.')[0]
-        elif char == 'H':
-            val = ''
-            if self.server.server_fqdn.done():
-                val = self.server.server_fqdn.result()
-            elif self.server.server_name.done():
-                val = self.server.server_name.result()
-        elif char == '?':
+        if char == '?':
             val = ''
             if self.retval or self.retval == 0:
                 val = '{}'.format(self.retval & 255)
@@ -1665,3 +1475,41 @@ class Telsh():
         _standout, _normal = '\x1b[31;1m', '\x1b[0m'
         return (string if not self.does_styling
                 else (_standout + string + _normal))
+
+
+
+#    def display_encoding_error(self, err):
+#        """
+#        Carefully notify client of encoding error (in ASCII, of course!).
+#        """
+#        encoding = self.protocol.encoding(outgoing=True)
+#        err_bytes = bytes(err.args[0].encode(encoding))
+#        charset = bytes(self.protocol.env['CHARSET'].encode(encoding))
+#        msg = b''.join((b'\r\n', err_bytes, b', CHARSET is ', charset, b'.'))
+#        self.transport.write(msg)
+#
+#    #: RFC compliance demands IAC-GA, an out-of-band "go ahead" signal for
+#    #: clients that fail to negotiate suppress go-ahead (WONT SGA).  This
+#    #: feature may be useful for synchronizing prompts with automation, but
+#    #: may otherwise cause harm to non-compliant client streams.
+#    send_go_ahead = True
+#
+#
+#    def send_ga(self):
+#        """
+#        Conditionally send ``GO-AHEAD``.
+#
+#        Sends go-ahead signal when :attr:`send_go_ahead` is True.
+#        """
+#        if self.send_go_ahead:
+#            self.protocol.stream.send_ga()
+#        if char == 'h':
+#            val = ''
+#            if self.server.server_name.done():
+#                val = self.server.server_name.result().split('.')[0]
+#        elif char == 'H':
+#            val = ''
+#            if self.server.server_fqdn.done():
+#                val = self.server.server_fqdn.result()
+#            elif self.server.server_name.done():
+#                val = self.server.server_name.result()
