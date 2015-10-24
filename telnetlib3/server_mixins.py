@@ -26,22 +26,33 @@ class UnicodeMixin(server_base.BaseServer):
         #: of encoding negotiation considered complete.
         self.waiter_encoding = asyncio.Future()
 
+        super().__init__(**kwargs)
+
         self._tasks.append(self.waiter_encoding)
-        super().__init__(self, **kwargs)
 
     def request_advanced_negotiation(self):
-        """
-        Request ``IAC WILL BINARY`` and ``IAC DO CHARSET``.
-
-        Schedule :meth:`_check_encoding_negotiation` for continual
-        callback to advance the completion of :attr:`waiter_encoding`
-        """
+        """Request ``IAC WILL BINARY`` and ``IAC DO CHARSET``."""
         from .telopt import WILL, BINARY, DO, CHARSET
         super().request_advanced_opts()
 
         self.writer.iac(WILL, BINARY)
         self.writer.iac(DO, CHARSET)
-        self._loop.call_soon(self.check_encoding_negotiation)
+
+    def check_negotiation(self, final=False):
+        """Periodically check for completion of ``waiter_encoding``."""
+        parent = super().check_negotiation()
+        result = self.waiter_encoding.done()
+        if not result:
+            result = self._check_encoding()
+            if result:
+                encoding = self.encoding(outgoing=True, incoming=True)
+                self.log.debug('encoding complete: {0!r}'.format(encoding))
+                self.waiter_encoding.set_result(self)
+            elif final:
+                self.log.debug('encoding failed after {:1.2f}s.'
+                               .format(self.duration))
+                self.waiter_encoding.set_result(self)
+        return parent and result
 
     def encoding(self, outgoing=None, incoming=None):
         """
@@ -100,48 +111,16 @@ class UnicodeMixin(server_base.BaseServer):
         from .telopt import BINARY
         return self._stream.local_option.enabled(BINARY)
 
-    def _check_encoding_negotiation(self):
-        """Scheduled callback checks bi-directional encoding state success."""
-        # Method schedules itself for continual callback until encoding
-        # negotiation is considered final, setting 'waiter_encoding'
-        # to value 'self' when complete.
-        #
-        # Negotiation is final when only 'outbinary' and 'inbinary' have
-        # been answered in the affirmative.
+    def _check_encoding(self):
+        """Periodically check for completion of ``waiter_encoding``."""
         from .telopt import DO, BINARY
-        if self._closing:
-            return
-
-        later = max(self.CONNECT_DEFERRED,
-                    max(0, self.CONNECT_MAXWAIT - self.duration))
-
-        # encoding negotiation is complete
-        if self.outbinary and self.inbinary:
-            encoding = self.encoding(outgoing=True, incoming=True)
-            self.log.debug('encoding negotiated, {0!r}'.format(encoding))
-            self.waiter_encoding.set_result(self)
-
-        elif self.duration > self.CONNECT_MAXWAIT:
-            # tintin++ for example, would not answer "DONT BINARY" after
-            # having sent "WONT BINARY". These kinds of IAC interpreters may
-            # be discovered by requesting (DO, ECHO): the client replies
-            # (WILL, ECHO), which is preposterous!
-            self.log.debug('encoding: negotiation failed.')
-            self.waiter_encoding.set_result(self)
-
-        # if (WILL, BINARY) requested by begin_negotiation() is answered in
-        # the affirmative, then request (DO, BINARY) to ensure bi-directional
-        # transfer of non-ascii characters.
-        elif (
-            self.outbinary and not self.inbinary and
-            not DO + BINARY in self._stream.pending_option
-        ):
-            self.log.debug('encoding: outbinary=True, requesting inbinary.')
+        if (self.outbinary and not self.inbinary and
+                not DO + BINARY in self._stream.pending_option):
+            self.log.debug('encoding requesting inbinary direction.')
             self.writer.iac(DO, BINARY)
-            self._loop.call_later(later, self.check_encoding_negotiation)
+            return False
 
-        else:
-            self._loop.call_later(later, self.check_encoding_negotiation)
+        return self.outbinary and self.inbinary
 
 
 class TimeoutServerMixin(server_base.BaseServer):
@@ -153,12 +132,14 @@ class TimeoutServerMixin(server_base.BaseServer):
             method :meth:`on_timeout` after given seconds have elapsed
             without client input.
         """
-        self._tasks.append(self.waiter_timeout)
         self._timer = asyncio.Future()
-        self._extra['timeout'] = timeout
-
         self.waiter_timeout = asyncio.Future()
         self.waiter_timeout.add_done_callback(self.on_timeout)
+
+        super().__init__(**kwargs)
+
+        self._extra['timeout'] = timeout
+        self._tasks.append(self.waiter_timeout)
 
     def data_received(self, data):
         """Derive and cause timer reset."""

@@ -42,8 +42,9 @@ def main():
     logging.basicConfig(format=fmt)
     log = logging.getLogger('telnet_server')
     log.setLevel(getattr(logging, args.loglevel.upper()))
-
+    logging.getLogger().setLevel(logging.DEBUG)
     loop = asyncio.get_event_loop()
+    loop.set_debug(True)
     start_server(loop, log, args.host, args.port)
     loop.run_forever()
 

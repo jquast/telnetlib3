@@ -17,10 +17,10 @@ class ConsoleShell():
         callbacks for window size, xdisploc, and speed return
         static default values.
     """
-    def __init__(self, client, log=logging, stream_out=None):
+    def __init__(self, client, log=None, stream_out=None):
         #: TelnetClient instance associated with console
         self.client = client
-        self.log = log
+        self.log = log or logging.getLogger(__name__)
         self.stream_out = stream_out or io.StringIO()
 
         #: default encoding 'errors' argument
@@ -117,7 +117,7 @@ class TerminalShell(ConsoleShell):
         for send terminal window size, and speed query the
         connected terminal and environment values.
     """
-    def __init__(self, client, log=logging, stream_out=None):
+    def __init__(self, client, log=None, stream_out=None):
         self.stream_out = stream_out or sys.__stdout__
         super().__init__(client, log, self.stream_out)
 
@@ -251,4 +251,3 @@ class TerminalShell(ConsoleShell):
 #        """
 #        return ord(ucs) > 31 and (ord(ucs) < 127 or self.client.outbinary)
 #
-

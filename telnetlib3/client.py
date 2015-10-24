@@ -9,14 +9,14 @@ import sys
 
 import asyncio
 
-from .telopt import TelnetStream
+from .stream_writer import TelnetWriter
 from .conio import TerminalShell
 from . import dns
 
-__all__ = ('TelnetClient',)
+__all__ = ('Client', 'TelnetClient',)
 
 
-class TelnetClient(asyncio.protocols.Protocol):
+class Client(asyncio.protocols.Protocol):
 
     """ Telnet Client Protocol. """
 
@@ -38,12 +38,13 @@ class TelnetClient(asyncio.protocols.Protocol):
         'CHARSET': 'ascii',
     }
 
-    def __init__(self, shell=TerminalShell, stream=TelnetStream,
-                 encoding='utf-8', log=logging, force_binary=False,
-                 waiter_connected=None, waiter_closed=None):
+    def __init__(self, reader_factory=None, writer_factory=None,
+                 shell_factory=None, encoding='utf-8', log=None,
+                 force_binary=False, waiter_connected=None,
+                 waiter_closed=None):
         """ Constructor method for TelnetClient.
 
-        :param shell: Terminal Client shell factory class.
+#        :param shell: Terminal Client shell factory class.
 #        :param stream: Telnet IAC Stream interpreter factory class.
         :param encoding: encoding used when BINARY is negotiated.
         :type encoding: str
@@ -52,11 +53,25 @@ class TelnetClient(asyncio.protocols.Protocol):
         :param force_binary: Use BINARY even if server will not negotiate.
         :type foce_binary: bool
         """
-        self.log = log
+        self.log = log or logging.getLogger(__name__)
         self.force_binary = force_binary
-        self._shell_factory = shell
-        self._stream_factory = stream
-        self._default_encoding = encoding
+
+        if reader_factory is None:
+            reader_factory = asyncio.StreamReader
+        self._reader_factory = reader_factory
+        self.reader = None
+
+        if writer_factory is None:
+            writer_factory = TelnetWriter
+        self._writer_factory = writer_factory
+        self.writer = None
+
+        if shell_factory is None:
+            shell_factory = TerminalShell
+        self._shell_factory = shell_factory
+        self.shell = None
+
+        self.default_encoding = encoding
         self._loop = asyncio.get_event_loop()
 
         #: session environment as S.env['key'], defaults empty string value
@@ -98,7 +113,7 @@ class TelnetClient(asyncio.protocols.Protocol):
         """
         Callback begins new telnet client connection on ``transport``.
 
-        A ``self.stream`` instance is created for reading on the
+        A ``self.writer`` instance is created for reading on the
         ``transport``, environment variables are prepared, and
         various IAC and SLC callbacks are registered.
 
@@ -109,11 +124,13 @@ class TelnetClient(asyncio.protocols.Protocol):
         self._server_ip, self._server_port = (
             transport.get_extra_info('peername')[:2])
 
-        self.stream = self._stream_factory(
-            transport=transport, client=True, log=self.log)
+        self.reader = self.reader_factory(protocol=self, log=self.log)
 
-#        self.reader = self._factory_reader()
-#        self.reader.set_transport(transport)
+        self.writer = self._writer_factory(
+            transport=transport, protocol=self,
+            reader=self.reader, client=True,
+            loop=self._loop, log=self.log)
+
         self.shell = self._shell_factory(client=self, log=self.log)
 
         self.init_environment_values()
@@ -145,7 +162,7 @@ class TelnetClient(asyncio.protocols.Protocol):
         self.env['TERM'] = self.shell.terminal_type
         self.env['COLUMNS'] = '{}'.format(self.shell.terminal_width)
         self.env['LINES'] = '{}'.format(self.shell.terminal_height)
-        self.env['CHARSET'] = self._default_encoding
+        self.env['CHARSET'] = self.default_encoding
 
     def set_stream_callbacks(self):
         """
@@ -169,7 +186,7 @@ class TelnetClient(asyncio.protocols.Protocol):
                 (NAWS, self.send_naws),
                 (CHARSET, self.send_charset),
                 ):
-            self.stream.set_ext_send_callback(opt, func)
+            self.writer.set_ext_send_callback(opt, func)
 
     def after_server_lookup(self, arg):
         """
@@ -260,7 +277,7 @@ class TelnetClient(asyncio.protocols.Protocol):
         :rtype: bool
         """
         from telnetlib3.telopt import BINARY
-        return self.force_binary or self.stream.remote_option.enabled(BINARY)
+        return self.force_binary or self.writer.remote_option.enabled(BINARY)
 
     @property
     def outbinary(self):
@@ -275,7 +292,7 @@ class TelnetClient(asyncio.protocols.Protocol):
         :rtype: bool
         """
         from telnetlib3.telopt import BINARY
-        return self.force_binary or self.stream.local_option.enabled(BINARY)
+        return self.force_binary or self.writer.local_option.enabled(BINARY)
 
     def encoding(self, outgoing=False, incoming=False):
         """ Client-preferred input or output encoding of BINARY data.
@@ -292,7 +309,7 @@ class TelnetClient(asyncio.protocols.Protocol):
         'utf8'.
         """
         assert outgoing or incoming
-        return (self.env.get('CHARSET', self._default_encoding)
+        return (self.env.get('CHARSET', self.default_encoding)
                 if (outgoing and not incoming and self.outbinary) or (
                     not outgoing and incoming and self.inbinary) or (
                     outgoing and incoming and self.outbinary and self.inbinary
@@ -407,7 +424,7 @@ class TelnetClient(asyncio.protocols.Protocol):
         if self._closing:
             self.waiter_connected.cancel()
             return
-        pots = self.stream.pending_option
+        pots = self.writer.pending_option
         if not any(pots.values()):
             if self.duration > self.CONNECT_MINWAIT:
                 # the number of seconds since connection has reached
@@ -431,7 +448,7 @@ class TelnetClient(asyncio.protocols.Protocol):
         if status.cancelled():
             self.log.debug('telopt negotiation cancelled')
             return
-        self.log.debug('stream status: {}.'.format(self.stream))
+        self.log.debug('stream status: {}.'.format(self.writer))
         self.log.debug('client encoding is {}.'.format(
             self.encoding(outgoing=True, incoming=True)))
 
@@ -469,9 +486,9 @@ class TelnetClient(asyncio.protocols.Protocol):
         # the affirmitive, then request (DO, BINARY) to ensure bi-directional
         # transfer of non-ascii characters.
         elif self.outbinary and not self.inbinary and (
-                not (DO, BINARY,) in self.stream.pending_option):
+                not (DO, BINARY,) in self.writer.pending_option):
             self.log.debug('outbinary=True, requesting inbinary.')
-            self.stream.iac(DO, BINARY)
+            self.writer.iac(DO, BINARY)
             self._loop.call_later(self.CONNECT_DEFERRED,
                                   self.check_encoding_negotiation)
 
@@ -507,17 +524,17 @@ class TelnetClient(asyncio.protocols.Protocol):
         for byte in (bytes([value]) for value in data):
 
             try:
-                self.stream.feed_byte(byte)
+                self.writer.feed_byte(byte)
             except (ValueError, AssertionError):
                 e_type, e_value, _ = sys.exc_info()
                 map(self.log.warn,
                     traceback.format_exception_only(e_type, e_value))
                 continue
 
-            if self.stream.is_oob:
+            if self.writer.is_oob:
                 continue
 
-            # self.reader.feed_byte()
+            # self.reader.feed_byte() -- reader should be shell !
             self.shell.feed_byte(byte)
 
     def eof_received(self):
@@ -564,3 +581,5 @@ def describe_connection(client):
                 hostname=hostname,
                 duration=duration)
             )
+
+TelnetClient = Client # XXX

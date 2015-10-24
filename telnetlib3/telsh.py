@@ -2,8 +2,6 @@
 import collections
 import traceback
 import logging
-import asyncio
-import codecs
 import shlex
 import time
 import sys
@@ -12,13 +10,11 @@ import re
 # local
 from . import slc
 from . import telopt
-from . import streams
 
 # 3rd party
 import wcwidth
 
-#__all__ = ('TelnetShellStream', 'Telsh')
-
+__all__ = ('Telsh',)
 
 class _EDIT():
     """ Enums for value of ``cmd`` in ``Telsh.editing_received()``.
@@ -152,13 +148,13 @@ class Telsh():
     # See class property, 'multiline'.
     _multiline = False
 
-    def __init__(self, server, writer=StreamWriter, log=logging):
+    def __init__(self, server, writer=None, log=None):
         #: TelnetServer instance associated with shell
         #: TelnetShellStream provides encoding for Telnet NVT
         self.server = server
 
-        #self.stream = stream(server=server, log=log)
-        self.log = log
+        #self.stream = stream(server=server, log=log) xxx
+        self.log = log or logging.getLogger(__name__)
 
         #: buffer of line input until command process.  Accessed by
         #: @property ``lastline``.

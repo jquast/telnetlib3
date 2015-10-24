@@ -1,34 +1,31 @@
-# std imports
-import logging
-
 # local
-from .server_base import BaseServer
 from .server_mixins import UnicodeMixin, TimeoutServerMixin
 
 __all__ = ('Server', 'TelnetServer')
 
 
-class Server(BaseServer, UnicodeMixin, TimeoutServerMixin):
+class Server(UnicodeMixin, TimeoutServerMixin):
     """Telnet Server protocol performing common negotiation."""
     #: Maximum number of cycles to seek for all terminal types offered.
     TTYPE_LOOPMAX = 8
 
+    _ttype = 1
+
     def __init__(self, term='unknown', cols=80, rows=25,
                  reader_factory=None, writer_factory=None,
-                 encoding=None, log=logging, loop=None):
+                 encoding=None, log=None, loop=None):
         """
         :param str term: Default terminal type unless negotiated.
         :param int cols: Default terminal width.
         :param int rows: Default terminal height.
         """
-        super().__init__(self,
-                         reader_factory=reader_factory,
+        super().__init__(reader_factory=reader_factory,
                          writer_factory=writer_factory,
                          encoding=encoding, log=log, loop=loop)
         self._extra.update({'term': term, 'cols': cols, 'rows': rows})
 
     def connection_made(self, transport):
-        from .iac import NAWS, NEW_ENVIRON, TSPEED, TTYPE, XDISPLOC
+        from .telopt import NAWS, NEW_ENVIRON, TSPEED, TTYPE, XDISPLOC
         super().connection_made(transport)
 
         for tel_opt, callback_fn in [
@@ -47,7 +44,7 @@ class Server(BaseServer, UnicodeMixin, TimeoutServerMixin):
         super().begin_negotiation()
 
         from .telopt import DO, TTYPE
-        self._stream.iac(DO, TTYPE)
+        self.writer.iac(DO, TTYPE)
 
     def begin_advanced_negotiation(self):
         """
@@ -60,11 +57,11 @@ class Server(BaseServer, UnicodeMixin, TimeoutServerMixin):
         Only called if sub-classing ``begin_negotiation`` method causes
         at least one negotiation option to be affirmatively acknowledged.
         """
-        from .iac import DO, NEW_ENVIRON, NAWS, WILL, SGA, ECHO
-        self._stream.iac(DO, NEW_ENVIRON)
-        self._stream.iac(DO, NAWS)
-        self._stream.iac(WILL, SGA)
-        self._stream.iac(WILL, ECHO)
+        from .telopt import DO, NEW_ENVIRON, NAWS, WILL, SGA, ECHO
+        self.writer.iac(DO, NEW_ENVIRON)
+        self.writer.iac(DO, NAWS)
+        self.writer.iac(WILL, SGA)
+        self.writer.iac(WILL, ECHO)
 
     def on_naws(self, width, height):
         """Callback receives NAWS response, rfc-1073_."""
@@ -104,39 +101,39 @@ class Server(BaseServer, UnicodeMixin, TimeoutServerMixin):
         # not be their most significant. All responses held as 'ttype{n}',
         # where {n} is their serial response order number.
 
-        key = 'ttype{}'.format(self._advanced)
+        key = 'ttype{}'.format(self._ttype)
         self._extra[key] = ttype
 
-        lastval = self.env['ttype{}'.format(self._advanced - 1)]
+        _lastval = self.get_extra_info('ttype{0}'.format(self._ttype - 1))
 
-        if ttype == self.env.get('ttype0', None):
+        if ttype == self.get_extra_info('ttype0', None):
             # cycle has looped
             self.log.debug('ttype cycle {0}: {1}.'
                            .format(key, ttype))
             self._extra['TERM'] = self.get_extra_info('ttype0')
 
-        elif (not ttype or self._advanced == self.TTYPE_LOOPMAX):
+        elif (not ttype or self._ttype == self.TTYPE_LOOPMAX):
             # empty reply string, too many responses!
             self.log.warn('ttype cycle stop at {0}: {1}.'
                           .format(key, ttype))
             self._extra['TERM'] = self.get_extra_info('ttype0')
 
-        elif (self._advanced == 2 and ttype.upper().startswith('MTTS ')):
+        elif (self._ttype == 2 and ttype.upper().startswith('MTTS ')):
             self.log.debug('ttype mud at {0}: {1}'
                            .format(key, ttype))
             self._extra['TERM'] = self.get_extra_info('ttype1')
 
-        elif (ttype == lastval):
+        elif (ttype == _lastval):
             self.log.debug('ttype repeated {0}: {1}'
                            .format(key, ttype))
             self._extra['TERM'] = ttype
 
         else:
-            self.log.debug('ttype{} is {}, requesting another.'
-                           .format(self._advanced, ttype))
+            self.log.debug('ttype{}={}: requesting another.'
+                           .format(self._ttype, ttype))
             self._extra['TERM'] = ttype
-            self._stream.request_ttype()
-            self._advanced += 1
+            self._ttype += 1
+            self.writer.request_ttype()
 
     def on_xdisploc(self, xdisploc):
         """Callback for XDISPLOC response, rfc-1096_."""

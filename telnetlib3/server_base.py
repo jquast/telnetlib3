@@ -2,7 +2,6 @@
 import traceback
 import asyncio
 import datetime
-import logging
 import sys
 
 from .stream_writer import TelnetWriter
@@ -10,11 +9,6 @@ from .stream_writer import TelnetWriter
 
 class BaseServer(asyncio.protocols.Protocol):
     """Base Telnet Server Protocol API."""
-    #: Minimum on-connect time to wait for the client to insist on any
-    #: negotiations before completing :attr:`waiter_connected`.  This does
-    #: not need to be very long, RFC does not require any time at all.
-    CONNECT_MINWAIT = 0.15
-
     #: Maximum on-connect time to wait for all pending negotiation options to
     #: complete before negotiation is considered 'final', signaled by the
     #: completion of waiter :attr:`waiter_connected`.
@@ -29,13 +23,13 @@ class BaseServer(asyncio.protocols.Protocol):
     _transport = None
     _advanced = False
     _closing = False
-    _stream = None
 
     def __init__(self, reader_factory=None, writer_factory=None,
-                 log=logging, loop=None):
+                 log=None, loop=None):
         """Class initializer."""
         if reader_factory is None:
-            reader_factory = asyncio.StreamReader
+            reader_factory = lambda protocol, log: (
+                asyncio.StreamReader())
         self._reader_factory = reader_factory
         self.reader = None
 
@@ -53,6 +47,7 @@ class BaseServer(asyncio.protocols.Protocol):
         self.waiter_connected = asyncio.Future()
         self.waiter_closed = asyncio.Future()
         self._tasks = [self.waiter_connected, self._timer]
+        self._extra = dict()
 
     # Base protocol methods
 
@@ -90,15 +85,18 @@ class BaseServer(asyncio.protocols.Protocol):
         """
         peername = transport.get_extra_info('peername')
         self.log.info('Connection from {0}'.format(peername))
+
         self._transport = transport
         self._when_connected = datetime.datetime.now()
         self._last_received = datetime.datetime.now()
 
-        self.reader = self.reader_factory(protocol=self, log=self.log)
+        self.reader = self._reader_factory(
+            protocol=self, log=self.log)
 
-        self.writer = self.writer_factory(transport=transport, protocol=self,
-                                          reader=self.reader, loop=self._loop,
-                                          log=self.log)
+        self.writer = self._writer_factory(
+            transport=transport, protocol=self,
+            reader=self.reader, server=True,
+            loop=self._loop, log=self.log)
 
         self._loop.call_soon(self.begin_negotiation)
 
@@ -109,7 +107,7 @@ class BaseServer(asyncio.protocols.Protocol):
 
         for byte in (bytes([value]) for value in data):
             try:
-                self._stream.feed_byte(byte)
+                self.writer.feed_byte(byte)
             except (ValueError, AssertionError, NotImplementedError):
                 e_type, e_value, e_tb = sys.exc_info()
 
@@ -122,14 +120,15 @@ class BaseServer(asyncio.protocols.Protocol):
                 for line in rows_tbk + rows_exc:
                     self.log.debug(line)
 
-            if not self.writer.is_oob:
-                # If the given byte was determined not to be "out of band",
-                # that is, intended for transmission to user, the byte is
-                # forwarded to our reader's "feed_byte" method.
-                _slc_function = self.writer.slc_received
-                self.reader.feed_byte(byte, slc_function=_slc_function)
+            # command byte, check completion of waiter_connected.
+            if self.writer.is_oob and not self.waiter_connected.done():
+                self._check_negotiation()
 
     # Our protocol methods
+
+    def get_extra_info(self, name, default=None):
+        """Get optional server information."""
+        return self._extra.get(name, default)
 
     def begin_negotiation(self):
         """
@@ -141,8 +140,7 @@ class BaseServer(asyncio.protocols.Protocol):
         """
         if self._closing:
             return
-
-        self._loop.call_soon(self._check_negotiation)
+        self._loop.call_soon(self._check_negotiation_timer)
 
     def begin_advanced_negotiation(self):
         """
@@ -173,9 +171,7 @@ class BaseServer(asyncio.protocols.Protocol):
         """Time elapsed since data last received, in seconds as float."""
         return (datetime.datetime.now() - self._last_received).total_seconds()
 
-    # private methods
-
-    def _negotiation_should_advance(self):
+    def negotiation_should_advance(self):
         """
         Whether advanced negotiation should commence.
 
@@ -189,42 +185,67 @@ class BaseServer(asyncio.protocols.Protocol):
         # Generally, this separates a bare TCP connect() from a True
         # RFC-compliant telnet client with responding IAC interpreter.
         server_do = sum(enabled for _, enabled in
-                        self._stream.remote_option.items())
+                        self.writer.remote_option.items())
         client_will = sum(enabled for _, enabled in
-                          self._stream.local_option.items())
+                          self.writer.local_option.items())
 
         return server_do or client_will
 
+    def check_negotiation(self, final=False):
+        """
+        Returns whether negotiation is complete.
+
+        :param bool final: Whether this is the final time this callback
+            will be requested to answer regarding protocol negotiation.
+        :returns: Whether negotiation is final.
+        :rtype: bool
+
+        Ensure ``super().check_negotiation()`` is called when derived.
+        """
+        result = self._check_negotiation()
+        if final and not result:
+            self.log.debug('negotiation failed after {:1.2f}s.'
+                           .format(self.duration))
+            self.waiter_connected.set_result(self)
+
+    # private methods
+
+    def _check_negotiation_timer(self):
+        self._check_later.cancel()
+
+        later = self.CONNECT_MAXWAIT - self.duration
+
+        if self.check_negotiation(final=bool(later < 0)):
+            self.log.debug('negotiation complete after {:1.2f}s.'
+                           .format(self.duration))
+            self.waiter_connected.set_result(self)
+
+        else:
+            # typically, we re-schedule ourselves for the timeout period but
+            # never reach it, satisfying all pending negotiation options
+            # upon receipt very immediately in the `data_received` method.
+            self._check_later = self._loop.call_later(
+                later, self._check_negotiation_timer)
+
     def _check_negotiation(self):
         """
-        Scheduled callback determines when on-connect negotiation is complete.
+        Callback check until on-connect negotiation is complete.
 
-        Method schedules itself for continual callback until negotiation is
-        considered final, setting :attr:`waiter_connected` to value ``self``
-        when complete.
+        Method is called on each new command byte processed until negotiation
+        is considered final, or after :attr:`CONNECT_MAXWAIT` has elapsed,
+        setting :attr:`waiter_connected` to value ``self`` when complete.
         """
         if self._closing:
             return
-
-        later = max(self.CONNECT_DEFERRED,
-                    max(0, self.CONNECT_MAXWAIT - self.duration))
+        if self.waiter_connected.done():
+            return
 
         if not self._advanced:
-            if self._negotiation_should_advance():
+            if self.negotiation_should_advance():
                 self._advanced = True
                 self._loop.call_soon(self.begin_advanced_negotiation)
-                self.debug('negotiation will advance')
+                self.log.debug('negotiation will advance')
 
-        if not any(self._stream.pending_option.values()):
-            self.log.debug('negotiation completed after {:0.01f}s.'
-                           .format(self.duration))
-            self.waiter_connected.set_result(self)
-            return
-
-        elif self.duration > self.CONNECT_MAXWAIT:
-            self.log.debug('negotiation cancelled after {:0.01f}s.'
-                           .format(self.duration))
-            self.waiter_connected.set_result(self)
-            return
-
-        self._loop.call_later(later, self._check_negotiation)
+        # negotiation is complete (returns True) when all negotiation options
+        # that have been requested have been acknowledged.
+        return not any(self.writer.pending_option.values())

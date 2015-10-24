@@ -72,7 +72,6 @@ class TelnetWriter(asyncio.StreamWriter):
     #: transport remote editing function callbacks for dumb clients.
     slc_simulated = True
 
-class TelnetStream:
     #: a list of system environment variables requested by the server after
     # a client agrees to negotiate NEW_ENVIRON.
     default_env_request = (
@@ -96,10 +95,8 @@ class TelnetStream:
         )
     )
 
-
-    def __init__(self, transport, protocol,
-                 client=False, server=False,
-                 reader=None, loop=None, log=logging):
+    def __init__(self, transport, protocol, client=False, server=False,
+                 reader=None, loop=None, log=None):
         """
         :param bool client: Whether the IAC interpreter should react from
             the client point of view.
@@ -111,7 +108,7 @@ class TelnetStream:
         if not any((client, server)) or all((client, server)):
             raise TypeError("kwargs client, server are mutually exclusive.")
         self._server = server
-        self.log = log
+        self.log = log or logging.getLogger(__name__)
 
         #: Dictionary of telnet option byte(s) that follow an
         #: IAC-DO or IAC-DONT command, and contains a value of ``True``
@@ -2171,13 +2168,14 @@ class TelnetStream:
 
 
 class Option(dict):
-    def __init__(self, name, log=logging):
+    def __init__(self, name, log=None):
         """ .. class:: Option(name : str, log: logging.logger)
 
             Initialize a Telnet Option database for capturing option
-            negotation changes to ``log`` if enabled for debug logging.
+            negotiation changes to ``log`` if enabled for debug logging.
         """
-        self.name, self.log = name, log
+        self.name = name
+        self.log = log or logging.getLogger(__name__)
         dict.__init__(self)
 
     def enabled(self, key):
@@ -2290,25 +2288,4 @@ def _encode_env_buf(env):
         buf.extend([_escape_env('{}'.format(value).encode('ascii'))])
     return b''.join(buf)
 
-
-
-
-#    """
-#    """
-#
-
-
-
-#        Write single to transport end connected to stream reader.
-#
-#        Bytes matching IAC (\xff, Is-A-Command) are escaped by (IAC, IAC)
-#        here, unless ``oob`` is ``True``.  When oob is True, buf is always
-#        written regardless of XON/XOFF.  Otherwise, this buf may be
-#        held in-memory until XON (the default state).
-#        """
-# # Note(jquast): Our OOB implementation is not RFC-correct, but we're
-# # having a very difficult time implementing these old MSG_OOB-flagged
-# # tcp socket writes.  We may have to provide a unix-only derived impl.?
-# #
-# # is 'oob' even the correct keyword, here?
-
+TelnetStream = TelnetWriter  # 1.0 deprecation

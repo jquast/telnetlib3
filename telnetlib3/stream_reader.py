@@ -5,9 +5,6 @@ import asyncio
 import codecs
 import sys
 
-# local
-from . import telopt
-
 
 class StreamReader(asyncio.StreamReader):
     """
@@ -29,7 +26,8 @@ class StreamReader(asyncio.StreamReader):
     _decoder = None
 
     def __init__(self, protocol, limit=asyncio._DEFAULT_LIMIT, loop=None,
-                 log=logging, encoding_error='replace'):
+                 log=None, encoding_error='replace'):
+        self.log = log or logging.getLogger(__name__)
         self._protocol = protocol
         if loop is None:
             loop = asyncio.get_event_loop()
