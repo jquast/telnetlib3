@@ -25,14 +25,14 @@ class StreamReader(asyncio.StreamReader):
     #: a new encoding.
     _decoder = None
 
-    def __init__(self, protocol, limit=asyncio._DEFAULT_LIMIT, loop=None,
-                 log=None, encoding_error='replace'):
+    def __init__(self, protocol, limit=asyncio.streams._DEFAULT_LIMIT,
+                 loop=None, log=None, encoding_error='replace'):
         self.log = log or logging.getLogger(__name__)
         self._protocol = protocol
         if loop is None:
             loop = asyncio.get_event_loop()
 
-        super().__init__(self, limit=limit, loop=loop)
+        super().__init__(limit=limit, loop=loop)
 
         #: same as meaning as ``error`` in :class:`codecs.Codec`.
         self.encoding_error = encoding_error
@@ -40,6 +40,7 @@ class StreamReader(asyncio.StreamReader):
     def decode(self, buf, final=False):
         """Decode bytes ``buf`` using preferred encoding."""
         encoding = self._protocol.encoding(incoming=True)
+        self.log.debug('decode: {!r}'.format(encoding))
 
         # late-binding,
         if (self._decoder is None or encoding != self._decoder._encoding):
@@ -146,7 +147,5 @@ class StreamReader(asyncio.StreamReader):
 
     def __repr__(self):
         """Description of stream encoding state."""
-        postfix = super().__repr__().split(None, 1)[1]
         encoding = self._protocol.encoding(outgoing=True)
-        return ('<StreamReader encoding={0} {1}'
-                .format(encoding, postfix))
+        return '<StreamReader encoding={0}>'.format(encoding)

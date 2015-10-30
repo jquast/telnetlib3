@@ -14,7 +14,10 @@ from . import telopt
 # 3rd party
 import wcwidth
 
-__all__ = ('Telsh',)
+__all__ = ('TelnetShell',)
+
+class Logout(Exception):
+    """User-requested logout by shell."""
 
 class _EDIT():
     """ Enums for value of ``cmd`` in ``Telsh.editing_received()``.
@@ -63,7 +66,7 @@ def name_unicode(char):
         char = r'\x{:02x}'.format(ord(char))
     return char
 
-class Telsh():
+class TelnetShell():
     """
     A remote line editing shell for host command processing.
 
@@ -148,12 +151,12 @@ class Telsh():
     # See class property, 'multiline'.
     _multiline = False
 
-    def __init__(self, server, writer=None, log=None):
-        #: TelnetServer instance associated with shell
-        #: TelnetShellStream provides encoding for Telnet NVT
-        self.server = server
+    def __init__(self, protocol, reader, writer, log=None, loop=None):
+        #: telnetlib3.BaseServer instance associated with shell
+        self.protocol = protocol
+        self.reader = reader
+        self.writer = writer
 
-        #self.stream = stream(server=server, log=log) xxx
         self.log = log or logging.getLogger(__name__)
 
         #: buffer of line input until command process.  Accessed by
@@ -189,7 +192,7 @@ class Telsh():
 
         char = self.reader.decode(byte, final=False)
         if char:
-            if slc_function is not None:
+            if slc_function:
                 self.editing_received(char=char,
                                       cmd=SLC_EDIT_TRANSTABLE[slc_function])
                 return
@@ -283,9 +286,9 @@ class Telsh():
                 self.bell()
                 return
 
-            # logout when input line is empty
+            # logout when input line is empty and EOF received
             self.writer.write(char_disp)
-            self.server.logout()
+            self.protocol.connection_lost(exc=Logout('logout by EOF'))
 
         elif cmd == EDIT.AYT:
             # are-you-there? (Ctrl - T)
@@ -438,7 +441,7 @@ class Telsh():
             # Ctrl - L, refresh
             self.display_prompt(redraw=True)
 
-        elif (self.server.stream.mode != 'local' and
+        elif (self.writer.mode != 'local' and
               self.autocomplete_char and
               char == self.autocomplete_char):
 
@@ -463,6 +466,7 @@ class Telsh():
             char_disp = char
             if self.writer.can_write(char) and char.isprintable():
                 char_disp = self._standout(name_unicode(char))
+            self.log.debug('echo {!r}'.format(char_disp))
             self.writer.echo(char_disp)
 
         # it is necessary on receipt of subsequent characters to backtrack
@@ -543,7 +547,7 @@ class Telsh():
         assert vtlen >= 0, (string, disp_text, vtlen)
 
         # non-BSD clients are generally will echo,
-        if self.stream.will_echo:
+        if self.will_echo:
             return ('\b' * vtlen) + '\x1b[K'
 
         # BSD has strange behavior for line editing with local echo,
@@ -593,7 +597,7 @@ class Telsh():
         When :attr:`send_bell` is False, nothing happens!
         """
         if self.send_bell:
-            self.stream.write('\a')
+            self.writer.write('\a')
 
     @property
     def prompt(self):
@@ -605,8 +609,10 @@ class Telsh():
         and literal characters.
         """
         # prompt character expansion
-        _ps1 = self.server.env.get('PS1', '%s-%v %# ')
-        _ps2 = self.server.env.get('PS2', '> ')
+        # XXX
+        #_ps1 = self.server.env.get('PS1', '%s-%v %# ')
+        #_ps2 = self.server.env.get('PS2', '> ')
+        _ps1, _ps2 = '%s-%v %# ', '> '
         result = self.expansion(
             string=_ps2 if self.multiline else _ps1,
             pattern=self._re_prompt,
@@ -653,8 +659,8 @@ class Telsh():
 
         disp_text = ''.join([disp_char(char) for char in text])
         output = ''.join((prefix, self.prompt, disp_text,))
-        self.stream.write(output)
-        self.stream.send_ga()
+        self.writer.write(output)
+        #self.stream.send_ga()
 
     def display_status_details(self, tee=None):
         """
@@ -669,17 +675,17 @@ class Telsh():
 
         # what the server has demanded by IAC 'DO'.
         server_do = [cmd for cmd, enabled in
-                     self.server.stream.remote_option.items()
+                     self.writer.remote_option.items()
                      if enabled]
 
         # what the client has promised by IAC 'WILL'.
         client_will = [cmd for cmd, enabled in
-                       self.server.stream.local_option.items()
+                       self.writer.local_option.items()
                        if enabled]
 
         # unacknowledged option negotiation, often failed replies.
         pending = [cmd_args for cmd_args, _pending in
-                   self.server.stream.pending_option.items()
+                   self.writer.pending_option.items()
                    if _pending]
 
         details = [
@@ -694,7 +700,7 @@ class Telsh():
                          for cmd_args in pending)),
         ]
 
-        self.stream.write('\r\n' + '\r\n'.join(details))
+        self.writer.write('\r\n' + '\r\n'.join(details))
         if tee:
             map(tee, details)
 
@@ -709,26 +715,29 @@ class Telsh():
         if tee is None:
             tee = self.log.debug
 
-        origin = self.server.client_ip
-        if self.server.client_fqdn.done():
-            origin = self.server.client_fqdn.result()
+#        origin = self.server.client_ip
+#        if self.server.client_fqdn.done():
+#            origin = self.server.client_fqdn.result()
 
         xon = 'xon'
-        if self.server.stream.xon_any:
+        if self.writer.xon_any:
             xon = 'xon-any'
 
-        kwds = {'origin': origin, 'xon': xon, 'self': self}
+        # TODO this all ..
+
+        #kwds = {'origin': origin, 'xon': xon, 'self': self}
+        kwds = {'xon': xon, 'self': self}
         summary = [
-            'connected: {self.server.duration:0.1f}s ago'.format(**kwds),
-            'from: {origin}'.format(**kwds),
-            'linemode: {self.server.stream.mode}'.format(**kwds),
-            'encoding: {self.stream}'.format(**kwds),
-            'flow control is {xon}'.format(**kwds),
-            'rows: {self.server.env[LINES]}'.format(**kwds),
-            'cols: {self.server.env[COLUMNS]}'.format(**kwds),
+            'connected: {self.protocol.duration:0.1f}s ago'.format(**kwds),
+#            'from: {origin}'.format(**kwds),
+            'linemode: {self.writer.mode}'.format(**kwds),
+#            'writer: {self.writer}'.format(**kwds),
+#            'flow control is {xon}'.format(**kwds),
+#            'rows: {self.server.env[LINES]}'.format(**kwds),
+#            'cols: {self.server.env[COLUMNS]}'.format(**kwds),
         ]
 
-        self.stream.write('\r\n' + '\r\n'.join(summary))
+        self.writer.write('\r\n' + '\r\n'.join(summary))
         if tee:
             map(tee, summary)
 
@@ -790,7 +799,7 @@ class Telsh():
 
         for num, tb_string in enumerate(tbl_exception):
             if self.show_traceback:
-                self.stream.write('\r\n'.join((
+                self.writer.write('\r\n'.join((
                     '',
                     '\r\n'.join(
                         self._standout(line.rstrip())
@@ -816,7 +825,7 @@ class Telsh():
             line (a quoted argument is not yet completed), otherwise the
             command exit value: 0 meaning success, non-zero meaning failure.
         """
-        self.stream.write('\r\n')
+        self.writer.write('\r\n')
         commands = []
         for cmd_args in string.split(';'):
             cmd, args = cmd_args.rstrip(), []
@@ -864,7 +873,7 @@ class Telsh():
 
         # safely display user input back with 'command not found.'
         disp_cmd = ''.join([name_unicode(char) for char in cmd])
-        self.stream.write('{!s}: command not found.'.format(disp_cmd))
+        self.writer.write('{!s}: command not found.'.format(disp_cmd))
         return 1
 
     def is_a_command(self, f_name):
@@ -888,14 +897,14 @@ class Telsh():
             not available.
         """
         if not len(args):
-            self.stream.write('Available commands:\r\n')
-            self.stream.write(', '.join(self.autocomplete_cmdset))
+            self.writer.write('Available commands:\r\n')
+            self.writer.write(', '.join(self.autocomplete_cmdset))
             return 0
         cmd = args[0].lower()
 
         method_name = '{0}{1}'.format(self.cmd_prefix, cmd)
         if not self.is_a_command(method_name):
-            self.stream.write('help: not a command, {0}.'.format(cmd))
+            self.writer.write('help: not a command, {0}.'.format(cmd))
             return 1
 
         # get doc string
@@ -908,7 +917,7 @@ class Telsh():
         # we avoid leaking into inner sphinx abstractions, and just
         # use the pep257-compliant 1-line sentence summary.
         help_summary = (docstr.splitlines() or [''])[0]
-        self.stream.write('{0}: {1}'.format(cmd, help_summary))
+        self.writer.write('{0}: {1}'.format(cmd, help_summary))
         return 0
 
     def assign(self, *args):
@@ -928,21 +937,25 @@ class Telsh():
         # allow ValueError to unpack naturally and report to client.
         key, val = args[0].split('=', 1)
 
-        if key in self.server.readonly_env:
-            # variable is read-only
-            return -2
-
-        if not val:
-            # unset variable (set blank)
-            self.server.env_update({key: ''})
-            return 0
-
-        if not key:
-            # cannot assign empty string
-            return -1
-
-        self.server.env_update({key: val})
+# XXX
         return 0
+#ifdef
+#        if key in self.server.readonly_env:
+#            # variable is read-only
+#            return -2
+#
+#        if not val:
+#            # unset variable (set blank)
+#            self.server.env_update({key: ''})
+#            return 0
+#
+#        if not key:
+#            # cannot assign empty string
+#            return -1
+#
+#        self.server.env_update({key: val})
+#        return 0
+#endif
 
     def cmdset_status(self, *args):
         """
@@ -952,7 +965,7 @@ class Telsh():
         :returns: shell return code, 0 is success (displayed).
         """
         if len(args):
-            self.stream.write('status: too many arguments.')
+            self.writer.write('status: too many arguments.')
             return 1
         self.display_status(tee=self.log.debug)
         self.display_status_details(tee=self.log.debug)
@@ -968,9 +981,9 @@ class Telsh():
         retval = 0
         if len(args):
             # even with too many arguments, logoff anyway
-            self.stream.write('quit: too much arguing.')
+            self.writer.write('quit: too much arguing.')
             retval = 1
-        self.server.logout()
+        self.protocol.connection_lost(exc=Logout('logout by command'))
         return retval
 
     def cmdset_raise(self, *args):
@@ -990,9 +1003,9 @@ class Telsh():
         :returns: shell return code, 0 is success (displayed).
         """
         if len(args):
-            self.stream.write('whoami: too many arguments.')
+            self.writer.write('whoami: too many arguments.')
             return 1
-        self.stream.write('{}.'.format(self.server))
+        self.writer.write('{}.'.format(self.protocol))
         return 0
 
     def cmdset_echo(self, *args):
@@ -1020,25 +1033,7 @@ class Telsh():
             return result
 
         output = ' '.join(echo_eval(arg) for arg in args)
-        self.stream.write('{}'.format(output))
-        return 0
-
-    def cmdset_whereami(self, *args):
-        """
-        Display Server DNS Name.
-
-        :rtype: int
-        :returns: shell return code, 0 is success (displayed).
-        """
-        if len(args):
-            self.stream.write('whereami: too many arguments.')
-            return 1
-        if self.server.server_fqdn.done():
-            result = self.server.server_fqdn.result()
-        elif self.server.server_name.done():
-            result = self.server.server_name.result()
-        result = repr(self.server.server_name)
-        self.stream.write('{}'.format(result))
+        self.writer.write('{}'.format(output))
         return 0
 
     def cmdset_slc(self, *args):
@@ -1049,25 +1044,25 @@ class Telsh():
         :returns: shell return code, 0 is success (toggled or displayed).
         """
         if len(args):
-            self.stream.write('slc: too many arguments.')
+            self.writer.write('slc: too many arguments.')
             return 1
-        self.stream.write('Special Line Characters:\r\n{}'.format(
+        self.writer.write('Special Line Characters:\r\n{}'.format(
             '\r\n'.join(['{:>10}: {}'.format(
                 slc.name_slc_command(slc_func), slc_def)
                 for (slc_func, slc_def) in sorted(
-                    self.server.stream.slctab.items())
+                    self.writer.slctab.items())
                 if not (slc_def.nosupport or slc_def.val == slc.theNULL)])))
-        self.stream.write('\r\n\r\nUnset by client: {}'.format(
+        self.writer.write('\r\n\r\nUnset by client: {}'.format(
             ', '.join([slc.name_slc_command(slc_func)
                        for (slc_func, slc_def) in sorted(
-                           self.server.stream.slctab.items())
+                           self.writer.slctab.items())
                        if slc_def.val == slc.theNULL])))
-        self.stream.write('\r\n\r\nNot supported by server: {}'.format(
+        self.writer.write('\r\n\r\nNot supported by server: {}'.format(
             ', '.join([slc.name_slc_command(slc_func)
                        for (slc_func, slc_def) in sorted(
-                           self.server.stream.slctab.items())
+                           self.writer.slctab.items())
                        if slc_def.nosupport])))
-        self.stream.write('\r\n')
+        self.writer.write('\r\n')
         return 0
 
     def get_toggle_options(self):
@@ -1082,24 +1077,24 @@ class Telsh():
         """
         return {
             'echo':
-                self.server.stream.local_option.enabled(telopt.ECHO),
+                self.writer.local_option.enabled(telopt.ECHO),
             'outbinary':
-                self.server.outbinary,
+                self.protocol.outbinary,
             'inbinary':
-                self.server.inbinary,
+                self.protocol.inbinary,
             'binary':
-                self.server.outbinary and self.server.inbinary,
+                self.protocol.outbinary and self.protocol.inbinary,
             'color':
                 self.does_styling,
             'xon-any':
-                self.server.stream.xon_any,
+                self.writer.xon_any,
             'lflow':
-                self.server.stream.lflow,
+                self.writer.lflow,
             'bell':
                 self.send_bell,
             'goahead': (
-                not self.server.stream.local_option.enabled(telopt.SGA) and
-                self.stream.send_go_ahead),
+                not self.writer.local_option.enabled(telopt.SGA) and
+                self.protocol.send_go_ahead),
         }
 
     def cmdset_toggle(self, *args):
@@ -1114,7 +1109,7 @@ class Telsh():
 
         # display all toggle options, 4 per line.
         if len(args) is 0:
-            self.stream.write(', '.join(
+            self.writer.write(', '.join(
                 '{}{} [{}]'.format('\r\n' if num and num % 4 == 0 else '',
                                    opt, self._standout('ON') if enabled
                                    else self._dim('off'))
@@ -1124,11 +1119,11 @@ class Telsh():
 
         opt = args[0].lower()
         if len(args) > 1:
-            self.stream.write('toggle: too many arguments.')
+            self.writer.write('toggle: too many arguments.')
             return 1
 
         elif args[0] not in tbl_opt and opt != 'all':
-            self.stream.write('toggle: not option.')
+            self.writer.write('toggle: not option.')
             return 1
 
         # this can't get a lot more simple than a long case sequence,
@@ -1137,49 +1132,49 @@ class Telsh():
         # and others the shell.
         if opt in ('echo', 'all'):
             cmd = (telopt.WONT if tbl_opt['echo'] else telopt.WILL)
-            self.server.stream.iac(cmd, telopt.ECHO)
-            self.stream.write('{} echo.{}'.format(
+            self.writer.iac(cmd, telopt.ECHO)
+            self.writer.write('{} echo.{}'.format(
                 telopt.name_command(cmd).lower(),
                 opt == 'all' and '\r\n' or ''))
         if opt in ('outbinary', 'binary', 'all'):
             cmd = (telopt.WONT if tbl_opt['outbinary'] else telopt.WILL)
-            self.server.stream.iac(cmd, telopt.BINARY)
-            self.stream.write('{} outbinary.{}'.format(
+            self.writer.iac(cmd, telopt.BINARY)
+            self.writer.write('{} outbinary.{}'.format(
                 telopt.name_command(cmd).lower(),
                 opt == 'all' and '\r\n' or ''))
         if opt in ('inbinary', 'binary', 'all'):
             cmd = (telopt.DONT if tbl_opt['inbinary'] else telopt.DO)
-            self.server.stream.iac(cmd, telopt.BINARY)
-            self.stream.write('{} inbinary.{}'.format(
+            self.writer.iac(cmd, telopt.BINARY)
+            self.writer.write('{} inbinary.{}'.format(
                 telopt.name_command(cmd).lower(),
                 opt == 'all' and '\r\n' or ''))
         if opt in ('goahead', 'all'):
             cmd = (telopt.WILL if tbl_opt['goahead'] else telopt.WONT)
-            self.stream.send_go_ahead = cmd is telopt.WONT
-            self.server.stream.iac(cmd, telopt.SGA)
-            self.stream.write('{} supress go-ahead.{}'.format(
+            self.protocol.send_go_ahead = cmd is telopt.WONT
+            self.writer.iac(cmd, telopt.SGA)
+            self.writer.write('{} suppress go-ahead.{}'.format(
                 telopt.name_command(cmd).lower(),
                 opt == 'all' and '\r\n' or ''))
         if opt in ('bell', 'all'):
             self.send_bell = not tbl_opt['bell']
-            self.stream.write('bell {}abled.{}'.format(
+            self.writer.write('bell {}abled.{}'.format(
                 'en' if self.send_bell else 'dis',
                 opt == 'all' and '\r\n' or ''))
         if opt in ('xon-any', 'all'):
-            self.server.stream.xon_any = not tbl_opt['xon-any']
-            self.server.stream.send_lineflow_mode()
-            self.stream.write('xon-any {}abled.{}'.format(
-                'en' if self.server.stream.xon_any else 'dis',
+            self.writer.xon_any = not tbl_opt['xon-any']
+            self.writer.send_lineflow_mode()
+            self.writer.write('xon-any {}abled.{}'.format(
+                'en' if self.writer.xon_any else 'dis',
                 opt == 'all' and '\r\n' or ''))
         if opt in ('lflow', 'all'):
-            self.server.stream.lflow = not tbl_opt['lflow']
-            self.server.stream.send_lineflow_mode()
-            self.stream.write('lineflow {}abled.{}'.format(
-                'en' if self.server.stream.lflow else 'dis',
+            self.writer.lflow = not tbl_opt['lflow']
+            self.writer.send_lineflow_mode()
+            self.writer.write('lineflow {}abled.{}'.format(
+                'en' if self.writer.lflow else 'dis',
                 opt == 'all' and '\r\n' or ''))
         if opt in ('color', 'all'):
             self.does_styling = not tbl_opt['color']
-            self.stream.write('color {}.'.format(
+            self.writer.write('color {}.'.format(
                 'on' if self.does_styling else 'off',))
         return 0
 
@@ -1194,37 +1189,38 @@ class Telsh():
         :returns: shell return code, 0 is success (assigned).
         """
         def disp_kv(key, val):
+            return shlex.quote(val)
             # Display shell-escaped version of value ``val`` of ``key``.
             # Uses terminal 'dim' attribute for read-only variables.
-            return (
-                self._dim(shlex.quote(val))
-                if key in self.server.readonly_env
-                else shlex.quote(val))
+#            return (
+#                self._dim(shlex.quote(val))
+#                if key in self.server.readonly_env
+#                else shlex.quote(val))
 
         retval = 0
-        for arg in args:
-            if '=' in arg:
-                retval = self.assign(arg)
-            elif arg in self.server.env:
-                key = arg
-                val = self.server.env[arg]
-                self.stream.write('{key}={val}'.format(
-                    key=key,
-                    val=disp_kv(key, val)))
-                retval = 0  # displayed query
-            else:
-                retval = -1  # query unmatched
-
-        if not args:
-            # display all values, in sorted, filtered order
-            sorted_keyvalues = [
-                (_key, _val) for (_key, _val)
-                in sorted(self.server.env.items())
-                if _key]
-            self.stream.write('\r\n'.join(['{key}={val}'.format(
-                key=_key,
-                val=disp_kv(_key, _val))
-                for _key, _val in sorted_keyvalues]))
+#        for arg in args:
+#            if '=' in arg:
+#                retval = self.assign(arg)
+#            elif arg in self.server.env:
+#                key = arg
+#                val = self.server.env[arg]
+#                self.writer.write('{key}={val}'.format(
+#                    key=key,
+#                    val=disp_kv(key, val)))
+#                retval = 0  # displayed query
+#            else:
+#                retval = -1  # query unmatched
+#
+#        if not args:
+#            # display all values, in sorted, filtered order
+#            sorted_keyvalues = [
+#                (_key, _val) for (_key, _val)
+#                in sorted(self.server.env.items())
+#                if _key]
+#            self.writer.write('\r\n'.join(['{key}={val}'.format(
+#                key=_key,
+#                val=disp_kv(_key, _val))
+#                for _key, _val in sorted_keyvalues]))
         return retval
 
     def expand_variable(self, string):
@@ -1262,7 +1258,8 @@ class Telsh():
             if ':' in string:
                 string, default = string.split(':', 1)
 
-        return self.server.env.get(string, default)
+        return default
+#        return self.server.env.get(string, default)
 
     def expand_literal(self, string):
         r"""
@@ -1395,11 +1392,11 @@ class Telsh():
         """
         return {
             '#': self.prompt_char,
-            'u': self.server.env['USER'],
-            '$': self.server.env[char[1:]],
+            'u': '', #self.server.env['USER'],
+            '$': '', #self.server.env[char[1:]],
             's': self.shell_name,
             'v': self.shell_ver,
-            'E': self.stream.__str__(),
+            'E': self.writer.__str__(),
         }.get(char, default)
 
     def _expand_prompt_complex(self, char, default):
@@ -1472,6 +1469,9 @@ class Telsh():
         return (string if not self.does_styling
                 else (_standout + string + _normal))
 
+    @property
+    def will_echo(self):
+       return self.writer.local_option.enabled(telopt.ECHO)
 
 
 #    def display_encoding_error(self, err):
@@ -1484,11 +1484,6 @@ class Telsh():
 #        msg = b''.join((b'\r\n', err_bytes, b', CHARSET is ', charset, b'.'))
 #        self.transport.write(msg)
 #
-#    #: RFC compliance demands IAC-GA, an out-of-band "go ahead" signal for
-#    #: clients that fail to negotiate suppress go-ahead (WONT SGA).  This
-#    #: feature may be useful for synchronizing prompts with automation, but
-#    #: may otherwise cause harm to non-compliant client streams.
-#    send_go_ahead = True
 #
 #
 #    def send_ga(self):

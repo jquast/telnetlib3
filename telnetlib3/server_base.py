@@ -5,6 +5,8 @@ import datetime
 import sys
 
 from .stream_writer import TelnetWriter
+from .stream_reader import StreamReader
+from .shell import TelnetShell
 
 
 class BaseServer(asyncio.protocols.Protocol):
@@ -18,6 +20,12 @@ class BaseServer(asyncio.protocols.Protocol):
     #: re-scheduling (default: 50ms)
     CONNECT_DEFERRED = 0.05
 
+    #: RFC compliance demands IAC-GA, an out-of-band "go ahead" signal for
+    #: clients that fail to negotiate suppress go-ahead (WONT SGA).  This
+    #: feature may be useful for synchronizing prompts with automation, but
+    #: may otherwise cause harm to non-compliant client streams.
+    send_go_ahead = True
+
     _when_connected = None
     _last_received = None
     _transport = None
@@ -25,29 +33,21 @@ class BaseServer(asyncio.protocols.Protocol):
     _closing = False
 
     def __init__(self, reader_factory=None, writer_factory=None,
-                 log=None, loop=None):
+                 shell_factory=None, waiter_connected=None,
+                 waiter_closed=None, log=None, loop=None):
         """Class initializer."""
-        if reader_factory is None:
-            reader_factory = lambda protocol, log: (
-                asyncio.StreamReader())
-        self._reader_factory = reader_factory
-        self.reader = None
-
-        if writer_factory is None:
-            writer_factory = TelnetWriter
-        self._writer_factory = writer_factory
-        self.writer = None
-
-        self.log = log
-
-        if loop is None:
-            loop = asyncio.get_event_loop()
-        self._loop = loop
-
-        self.waiter_connected = asyncio.Future()
-        self.waiter_closed = asyncio.Future()
-        self._tasks = [self.waiter_connected, self._timer]
+        # XXX
+        self._reader_factory = reader_factory or StreamReader
+        self._writer_factory = writer_factory or TelnetWriter
+        self._shell_factory = shell_factory or TelnetShell
+        self._loop = loop or asyncio.get_event_loop()
         self._extra = dict()
+        self.waiter_connected = waiter_connected or asyncio.Future()
+        self.waiter_closed = waiter_closed or asyncio.Future()
+        self.reader = None
+        self.writer = None
+        self.log = log
+        self._tasks = [self.waiter_connected, self._timer]
 
     # Base protocol methods
 
@@ -71,6 +71,9 @@ class BaseServer(asyncio.protocols.Protocol):
         # cancel protocol tasks
         for task in self._tasks:
             task.cancel()
+
+        # close transport if it is not already, such as user-requested Logout.
+        self._transport.close()
 
         self.waiter_closed.set_result(self)
 
@@ -98,34 +101,45 @@ class BaseServer(asyncio.protocols.Protocol):
             reader=self.reader, server=True,
             loop=self._loop, log=self.log)
 
+        # XXX "self.shell" needs interface finalization
+        if self._shell_factory:
+            self.shell = self._shell_factory(
+                protocol=self, reader=self.reader, writer=self.writer,
+                loop=self._loop, log=self.log)
+            self.waiter_connected.add_done_callback(
+                lambda result: self.shell.display_prompt())
         self._loop.call_soon(self.begin_negotiation)
 
     def data_received(self, data):
-        """Process bytes received by transport."""
-        self.log.debug('data_received: {!r}'.format(data))
+        """
+        Process bytes received by transport.
+
+        You should not override this method, but rather the ``shell``
+        protocol is a reader receiving ``feed_byte(byte)`` XXX ?
+        """
         self._last_received = datetime.datetime.now()
 
-        for byte in (bytes([value]) for value in data):
+        cmd_received = False
+        for byte in data:
             try:
-                self.writer.feed_byte(byte)
-            except (ValueError, AssertionError, NotImplementedError):
-                e_type, e_value, e_tb = sys.exc_info()
+                recv = self.writer.feed_byte(byte)
+            except:
+                self._log_exception(self.log.debug, *sys.exc_info())
+            else:
+                if recv and self.shell:
+                    # forward to shell
+                    self.shell.feed_byte(
+                        byte=byte, slc_function=self.writer.slc_received)
+                else:
+                    # part of IAC command byte phrase
+                    cmd_received = True
 
-                rows_tbk = [line for line in
-                            '\n'.join(traceback.format_tb(e_tb)).split('\n')
-                            if line]
-                rows_exc = [line.rstrip() for line in
-                            traceback.format_exception_only(e_type, e_value)]
-
-                for line in rows_tbk + rows_exc:
-                    self.log.debug(line)
-
-            # command byte, check completion of waiter_connected.
-            if self.writer.is_oob and not self.waiter_connected.done():
-                self._check_negotiation()
+        # until negotiation is complete, re-check aggressively upon
+        # receipt of any command byte.
+        if not self.waiter_connected.done() and cmd_received:
+            self._check_negotiation_timer()
 
     # Our protocol methods
-
     def get_extra_info(self, name, default=None):
         """Get optional server information."""
         return self._extra.get(name, default)
@@ -140,7 +154,7 @@ class BaseServer(asyncio.protocols.Protocol):
         """
         if self._closing:
             return
-        self._loop.call_soon(self._check_negotiation_timer)
+        self._check_later = self._loop.call_soon(self._check_negotiation_timer)
 
     def begin_advanced_negotiation(self):
         """
@@ -153,6 +167,9 @@ class BaseServer(asyncio.protocols.Protocol):
 
         Only called if sub-classing :meth:`begin_negotiation` causes
         at least one negotiation option to be affirmatively acknowledged.
+
+        Deriving implementations should always call
+        ``super().begin_advanced_negotiation()``.
         """
         pass
 
@@ -188,7 +205,7 @@ class BaseServer(asyncio.protocols.Protocol):
                         self.writer.remote_option.items())
         client_will = sum(enabled for _, enabled in
                           self.writer.local_option.items())
-
+        self.log.debug('any DO or WILL? {0}'.format(server_do or client_will))
         return server_do or client_will
 
     def check_negotiation(self, final=False):
@@ -207,6 +224,8 @@ class BaseServer(asyncio.protocols.Protocol):
             self.log.debug('negotiation failed after {:1.2f}s.'
                            .format(self.duration))
             self.waiter_connected.set_result(self)
+            return False
+        return True
 
     # private methods
 
@@ -221,9 +240,6 @@ class BaseServer(asyncio.protocols.Protocol):
             self.waiter_connected.set_result(self)
 
         else:
-            # typically, we re-schedule ourselves for the timeout period but
-            # never reach it, satisfying all pending negotiation options
-            # upon receipt very immediately in the `data_received` method.
             self._check_later = self._loop.call_later(
                 later, self._check_negotiation_timer)
 
@@ -243,9 +259,23 @@ class BaseServer(asyncio.protocols.Protocol):
         if not self._advanced:
             if self.negotiation_should_advance():
                 self._advanced = True
-                self._loop.call_soon(self.begin_advanced_negotiation)
-                self.log.debug('negotiation will advance')
+                val = self._loop.call_soon(self.begin_advanced_negotiation)
+                self.log.debug('negotiation will advance: {0}'.format(val))
 
         # negotiation is complete (returns True) when all negotiation options
         # that have been requested have been acknowledged.
         return not any(self.writer.pending_option.values())
+
+    @staticmethod
+    def _log_exception(logger, e_type, e_value, e_tb):
+        rows_tbk = [line for line in
+                    '\n'.join(traceback.format_tb(e_tb)).split('\n')
+                    if line]
+        rows_exc = [line.rstrip() for line in
+                    traceback.format_exception_only(e_type, e_value)]
+
+        for line in rows_tbk + rows_exc:
+            logger(line)
+
+
+

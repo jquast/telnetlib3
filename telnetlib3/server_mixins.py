@@ -19,7 +19,8 @@ class UnicodeMixin(server_base.BaseServer):
         """
         # set default encoding, may be negotiated !
         self.default_encoding = encoding
-        self._encoding_error = encoding_error
+        assert encoding, encoding
+        self.encoding_error = encoding_error
         self.force_binary = force_binary
 
         #: Future receives ``self`` as result after completion
@@ -30,28 +31,32 @@ class UnicodeMixin(server_base.BaseServer):
 
         self._tasks.append(self.waiter_encoding)
 
-    def request_advanced_negotiation(self):
+    def begin_advanced_negotiation(self):
         """Request ``IAC WILL BINARY`` and ``IAC DO CHARSET``."""
         from .telopt import WILL, BINARY, DO, CHARSET
-        super().request_advanced_opts()
+        super().begin_advanced_negotiation()
 
         self.writer.iac(WILL, BINARY)
         self.writer.iac(DO, CHARSET)
 
     def check_negotiation(self, final=False):
-        """Periodically check for completion of ``waiter_encoding``."""
+        """Periodically check for completion of :attr:`waiter_encoding`."""
         parent = super().check_negotiation()
-        result = self.waiter_encoding.done()
-        if not result:
-            result = self._check_encoding()
-            if result:
-                encoding = self.encoding(outgoing=True, incoming=True)
-                self.log.debug('encoding complete: {0!r}'.format(encoding))
-                self.waiter_encoding.set_result(self)
-            elif final:
-                self.log.debug('encoding failed after {:1.2f}s.'
-                               .format(self.duration))
-                self.waiter_encoding.set_result(self)
+
+        if self.waiter_encoding.done():
+            return parent
+
+        result = self._check_encoding()
+        encoding = self.encoding(outgoing=True, incoming=True)
+        if result:
+            self.log.debug('encoding complete: {0!r}'.format(encoding))
+            self.waiter_encoding.set_result(self)
+
+        elif final:
+            self.log.debug('encoding failed after {0:1.2f}s: {1}'
+                           .format(self.duration, encoding))
+            self.waiter_encoding.set_result(self)
+
         return parent and result
 
     def encoding(self, outgoing=None, incoming=None):
@@ -89,8 +94,10 @@ class UnicodeMixin(server_base.BaseServer):
                        (_bidirectional and self.outbinary and self.inbinary))
 
         encoding = 'US-ASCII'
+        assert self.default_encoding, repr(self.default_encoding)
         if self.force_binary or _may_encode:
             encoding = self.default_encoding
+
             # TODO: how do we better parse LANG using std library?
             _lang = self.get_extra_info('LANG', None)
             if _lang and '.' in _lang:
@@ -103,20 +110,20 @@ class UnicodeMixin(server_base.BaseServer):
     def inbinary(self):
         """Whether server status ``inbinary`` is toggled."""
         from .telopt import BINARY
-        return self._stream.remote_option.enabled(BINARY)
+        return self.writer.remote_option.enabled(BINARY)
 
     @property
     def outbinary(self):
         """Whether server status ``outbinary`` is toggled."""
         from .telopt import BINARY
-        return self._stream.local_option.enabled(BINARY)
+        return self.writer.local_option.enabled(BINARY)
 
     def _check_encoding(self):
         """Periodically check for completion of ``waiter_encoding``."""
         from .telopt import DO, BINARY
         if (self.outbinary and not self.inbinary and
-                not DO + BINARY in self._stream.pending_option):
-            self.log.debug('encoding requesting inbinary direction.')
+                not DO + BINARY in self.writer.pending_option):
+            self.log.debug('BINARY in: direction request.')
             self.writer.iac(DO, BINARY)
             return False
 

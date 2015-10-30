@@ -22,27 +22,29 @@ class TelnetWriter(asyncio.StreamWriter):
     by instance attributes following the call to :meth:`feed_byte`.
 
     A minimal Telnet Service :meth:`asyncio.Protocol.data_received`
-    method should forward each byte, then inspect the class attribute
-    :attr:`is_oob`.  When ``False``, any given byte should be forwarded
-    to the Protocol reader method :meth:`asyncio.StreamReader.feed_data`.
+    method should forward each byte to ``feed_byte``.  When True,
+    the given byte should be forwarded to a Protocol reader method
+    :meth:`asyncio.StreamReader.feed_data`.
 
     This :class:`asyncio.StreamWriter` interface uses the outgoing encoding
     direction indicated by protocol method callback,
     ``protocol.encoding(outgoing=True)`` for :meth:`write`, accepting unicode
-    string rather than bytes.  The encoding may be conditionally negotiated
-    by CHARSET, rfc-2066_, or discovered by ``LANG`` environment variables
-    by NEW_ENVIRON, rfc-1572_.
+    string rather than bytes.
 
-    If the encoding fails to lookup, ``protocol.set_encoding`` is
-    called with value ``protocol.default_encoding`` before trying
-    again.  This fail recovery is intended to be resilient to
-    incompatible encodings without stream interruption.
+    The encoding may be conditionally negotiated by CHARSET, rfc-2066_, or
+    discovered by ``LANG`` environment variables by NEW_ENVIRON, rfc-1572_.
 
-    Required by the attached protocol:
+    If the encoding fails to lookup, ``protocol.set_encoding`` is called with
+    value ``protocol.default_encoding`` before trying again.  This fail
+    recovery is intended to be resilient to incompatible encodings without
+    stream interruption.
 
-    - ``protocol.default_encoding`` attribute.
-    - ``protocol.set_encoding`` method.
-    - ``protocol.encoding`` method.
+    Required of the attached protocol:
+
+    - attribute ``protocol.default_encoding: str``
+    - attribute ``protocol.encoding_error: str``
+    - method ``protocol.set_encoding(encoding: str)``
+    - method ``protocol.encoding(incoming: bool, outgoing: bool)``
     """
     #: Total bytes sent to ``feed_byte()``
     byte_count = 0
@@ -192,7 +194,7 @@ class TelnetWriter(asyncio.StreamWriter):
 
     def __repr__(self):
         """Description of stream encoding state."""
-        postfix = super().__repr__().split(None, 1)[1]
+        postfix = super().__repr__().split(None, 1)[-1]
         info = ['TelnetWriter']
         if self.server:
             info.append('server')
@@ -224,21 +226,23 @@ class TelnetWriter(asyncio.StreamWriter):
         if _failed_reply:
             info.append('failed-reply:{opts}'.format(
                 opts=','.join(_failed_reply)))
+
         _local = [name_commands(opt) for (opt, val)
                   in self.local_option.items()
-                  if local.enabled(opt)]
+                  if self.local_option.enabled(opt)]
         if _local:
             info.append('local-{kind}:{opts}'.format(
                 kind=info[1], opts=','.join(_local)))
+
         _remote = [
             name_commands(opt) for (opt, val)
-            in stream.remote_option.items()
-            if remote.enabled(opt)]
+            in self.remote_option.items()
+            if self.remote_option.enabled(opt)]
         if _remote:
             info.append('remote-{kind}:{opts}'.format(
                 kind=info[1], opts=','.join(_remote)))
 
-        return '<{} {1}>'.format(' '.join(info), postfix)
+        return '<{0} {1}>'.format(' '.join(info), postfix)
 
     @staticmethod
     def _escape_iac(buf):
@@ -255,14 +259,14 @@ class TelnetWriter(asyncio.StreamWriter):
             escape bytes ``IAC``.  This should be set ``False`` for direct
             writes of ``IAC`` commands.
         """
-        if not isinstance(data, (bytes, bytearray)):
+        if not isinstance(buf, (bytes, bytearray)):
             raise TypeError("buf expected bytes, got {0}".format(type(buf)))
 
         if escape_iac:
             #ifdef 0
             if (not self.local_option.enabled(BINARY)
-                    and not self.protocol.force_binary):
-                for pos, byte in enumerate(data):
+                    and not self._protocol.force_binary):
+                for pos, byte in enumerate(buf):
                     if byte < 128:
                         raise TypeError(
                             'character value {0!r} at pos {1} not valid, '
@@ -284,7 +288,7 @@ class TelnetWriter(asyncio.StreamWriter):
         :rtype: None
         """
         if errors is None:
-            errors = self.encoding_error
+            errors = self._protocol.encoding_error
 
         try:
             self._write(self.encode(string, errors))
@@ -310,27 +314,21 @@ class TelnetWriter(asyncio.StreamWriter):
         :param int byte: an 8-bit byte value as integer (0-255), or
             a bytes array.  When a bytes array, it must be of length
             1.
-
-        This is the entry point of the 'IAC Interpreter', to be fed a single
-        byte at a time.
-
-        TODO: Use a coroutine
+        :rtype bool: Whether the given ``byte`` is "in band", that is, should
+            be duplicated to a connected terminal or device.  ``False`` is
+            returned for an ``IAC`` command for each byte until its completion.
         """
-        # Python 3 lesson: it is more convenient to work with a bytes array of
-        # length 1 than it is to work with "a byte", as, iterating over a bytes
-        # array produces an integer, it must be translated back to a bytes type
-        # so that it may be used with comparators against equal types, and
-        # especially when combined with other bytes using addition operator.
         if isinstance(byte, int):
-            assert 0 <= byte <= 255
             byte = bytes([byte])
-        assert isinstance(byte, (bytes, bytearray)), byte
-        assert len(byte) == 1, byte
+
         self.byte_count += 1
         self.slc_received = False
+
         # list of IAC commands needing 3+ bytes (mbs: multibyte sequence)
         iac_mbs = (DO, DONT, WILL, WONT, SB)
-        # cmd received is toggled false, unless its a mbs.
+
+        # cmd received is toggled False, unless its a mbs, then it is the
+        # actual command that was received in (opt, byte) form.
         self.cmd_received = self.cmd_received in iac_mbs and self.cmd_received
 
         if byte == IAC:
@@ -440,13 +438,8 @@ class TelnetWriter(asyncio.StreamWriter):
                 self.slc_received = slc_name
             if callback is not None:
                 callback(slc_name)
-        else:
-            # standard inband data
-            return
-        if not self.writing and self.xon_any and not self.is_oob:
-                # sub-negotiation end (SE), fire handle_subnegotiation
-            # any key after XOFF enables XON
-            self._slc_callback[slc.SLC_XON](byte)
+
+        return not self.is_oob
 
     def writelines(self, lines):
         """
@@ -487,7 +480,7 @@ class TelnetWriter(asyncio.StreamWriter):
             When None, value of :attr:`errors_encoding` is used.
         """
         if errors is None:
-            errors = self.encoding_error
+            errors = self._protocol.encoding_error
 
         encoding = self._protocol.encoding(outgoing=True)
         return bytes(string, encoding, errors)
@@ -506,8 +499,8 @@ class TelnetWriter(asyncio.StreamWriter):
 
         This option may be toggled using shell command, ``toggle echo``.
         """
-        if self.writer.local_option.enabled(telopt.ECHO):
-            self.writer.write(string, errors)
+        if self.local_option.enabled(ECHO):
+            self.write(string, errors)
 
     def can_write(self, char):
         """
@@ -566,15 +559,15 @@ class TelnetWriter(asyncio.StreamWriter):
         #   ``lit_echo``, ``remote``, ``local``.
         return (self._linemode if self.mode != 'kludge' else None)
 
-    def send_iac(self, data):
-        """ .. method: send_iac(self, data : bytes)
+    def send_iac(self, buf):
+        """ .. method: send_iac(self, buf : bytes)
 
             no transformations of bytes are performed, only complete
             iac commands are legal (unless ``partial`` is set ``false``).
         """
-        assert isinstance(data, (bytes, bytearray)), data
-        assert data and data.startswith(IAC)
-        self._transport.write(data)
+        assert isinstance(buf, (bytes, bytearray)), buf
+        assert buf and buf.startswith(IAC)
+        self._transport.write(buf)
 
     def iac(self, cmd, opt):
         """ .. method: iac(self, cmd : bytes, opt : bytes)
@@ -2183,7 +2176,7 @@ class Option(dict):
         return bool(self.get(key, None) is True)
 
     def unhandled(self, key):
-        """ Returns True of option is requested but unhandled by stream. """
+        """ Returns True of option is requested but not handled by stream. """
         return bool(self.get(key, None) == -1)
 
     def __setitem__(self, key, value):

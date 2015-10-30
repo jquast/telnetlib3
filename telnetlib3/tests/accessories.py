@@ -25,17 +25,18 @@ def bind_host(request):
     return request.param
 
 
-class TestTelnetServer(telnetlib3.TelnetServer):
-    CONNECT_MINWAIT = 0.10
-    CONNECT_MAXWAIT = 0.50
-    CONNECT_DEFERRED = 0.01
-    TTYPE_LOOPMAX = 2
-    default_env = {
-        'PS1': 'test-telsh %# ',
-    }
+class TestTelnetServer(telnetlib3.Server):
+    pass
+#    CONNECT_MINWAIT = 0.10
+#    CONNECT_MAXWAIT = 0.50
+#    CONNECT_DEFERRED = 0.01
+#    TTYPE_LOOPMAX = 2
+#    default_env = {
+#        'PS1': 'test-telsh %# ',
+#    }
 
 
-class TestTelnetClient(telnetlib3.TelnetClient):
+class TestTelnetClient(telnetlib3.Client):
     CONNECT_MINWAIT = 0.20
     CONNECT_MAXWAIT = 0.75
     CONNECT_DEFERRED = 0.01

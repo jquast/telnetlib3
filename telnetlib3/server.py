@@ -11,17 +11,14 @@ class Server(UnicodeMixin, TimeoutServerMixin):
 
     _ttype = 1
 
-    def __init__(self, term='unknown', cols=80, rows=25,
-                 reader_factory=None, writer_factory=None,
-                 encoding=None, log=None, loop=None):
+    # TODO: 'encoding=None' is bytes-only interface
+    def __init__(self, term='unknown', cols=80, rows=25, *args, **kwargs):
         """
         :param str term: Default terminal type unless negotiated.
         :param int cols: Default terminal width.
         :param int rows: Default terminal height.
         """
-        super().__init__(reader_factory=reader_factory,
-                         writer_factory=writer_factory,
-                         encoding=encoding, log=log, loop=loop)
+        super().__init__(*args, **kwargs)
         self._extra.update({'term': term, 'cols': cols, 'rows': rows})
 
     def connection_made(self, transport):
@@ -38,7 +35,12 @@ class Server(UnicodeMixin, TimeoutServerMixin):
             self.writer.set_ext_callback(tel_opt, callback_fn)
 
     def begin_negotiation(self):
-        """Send ``DO TTYPE``."""
+        """
+        Begin on-connect negotiation.
+
+        Deriving implementations should always call
+        ``super().begin_negotiation()``.
+        """
         if self._closing:
             return
         super().begin_negotiation()
@@ -50,14 +52,11 @@ class Server(UnicodeMixin, TimeoutServerMixin):
         """
         Begin advanced negotiation.
 
-        Callback method further requests advanced telnet options.  Called
-        once on receipt of any ``DO`` or ``WILL`` acknowledgments received,
-        indicating that the remote end is capable of negotiating further.
-
-        Only called if sub-classing ``begin_negotiation`` method causes
-        at least one negotiation option to be affirmatively acknowledged.
+        Deriving implementations should always call
+        ``super().begin_advanced_negotiation()``.
         """
         from .telopt import DO, NEW_ENVIRON, NAWS, WILL, SGA, ECHO
+        super().begin_advanced_negotiation()
         self.writer.iac(DO, NEW_ENVIRON)
         self.writer.iac(DO, NAWS)
         self.writer.iac(WILL, SGA)

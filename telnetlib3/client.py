@@ -56,20 +56,9 @@ class Client(asyncio.protocols.Protocol):
         self.log = log or logging.getLogger(__name__)
         self.force_binary = force_binary
 
-        if reader_factory is None:
-            reader_factory = asyncio.StreamReader
-        self._reader_factory = reader_factory
-        self.reader = None
-
-        if writer_factory is None:
-            writer_factory = TelnetWriter
-        self._writer_factory = writer_factory
-        self.writer = None
-
-        if shell_factory is None:
-            shell_factory = TerminalShell
-        self._shell_factory = shell_factory
-        self.shell = None
+        self._reader_factory = reader_factory or StreamReader
+        self._writer_factory = reader_factory or TelnetWriter
+        self._shell_factory = shell_factory or TerminalShell
 
         self.default_encoding = encoding
         self._loop = asyncio.get_event_loop()
@@ -124,7 +113,7 @@ class Client(asyncio.protocols.Protocol):
         self._server_ip, self._server_port = (
             transport.get_extra_info('peername')[:2])
 
-        self.reader = self.reader_factory(protocol=self, log=self.log)
+        self.reader = self._reader_factory(protocol=self, log=self.log)
 
         self.writer = self._writer_factory(
             transport=transport, protocol=self,
