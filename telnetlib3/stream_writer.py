@@ -267,7 +267,7 @@ class TelnetWriter(asyncio.StreamWriter):
             if (not self.local_option.enabled(BINARY)
                     and not self._protocol.force_binary):
                 for pos, byte in enumerate(buf):
-                    if byte < 128:
+                    if byte >= 128:
                         raise TypeError(
                             'character value {0!r} at pos {1} not valid, '
                             'send IAC WILL BINARY first, buf={2!r}'.format(
