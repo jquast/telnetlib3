@@ -49,7 +49,7 @@ def test_telnet_coupled(event_loop, bind_host, unused_tcp_port, log):
                          waiter_client_connected,
                          waiter_server_connected)
 
-    client_protocol.stream.write(u'quit\r'.encode('ascii'))
+    client_protocol.writer.write(u'quit\r')
 
     done, pending = yield from asyncio.wait(
         [waiter_client_closed, waiter_server_closed],

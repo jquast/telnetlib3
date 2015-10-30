@@ -10,6 +10,7 @@ import sys
 import asyncio
 
 from .stream_writer import TelnetWriter
+from .stream_reader import StreamReader
 from .conio import TerminalShell
 from . import dns
 
@@ -41,7 +42,7 @@ class Client(asyncio.protocols.Protocol):
     def __init__(self, reader_factory=None, writer_factory=None,
                  shell_factory=None, encoding='utf-8', log=None,
                  force_binary=False, waiter_connected=None,
-                 waiter_closed=None):
+                 waiter_closed=None, encoding_error='replace'):
         """ Constructor method for TelnetClient.
 
 #        :param shell: Terminal Client shell factory class.
@@ -61,6 +62,7 @@ class Client(asyncio.protocols.Protocol):
         self._shell_factory = shell_factory or TerminalShell
 
         self.default_encoding = encoding
+        self.encoding_error = encoding_error
         self._loop = asyncio.get_event_loop()
 
         #: session environment as S.env['key'], defaults empty string value
