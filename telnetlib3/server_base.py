@@ -1,15 +1,15 @@
 """Module provides class BaseServer."""
 import traceback
 import asyncio
+import logging
 import datetime
 import sys
 
 from .stream_writer import TelnetWriter
 from .stream_reader import StreamReader
-from .shell import TelnetShell
+from .shell import TelnetShell, telnet_shell
 
-
-class BaseServer(asyncio.protocols.Protocol):
+class BaseServer(asyncio.Protocol):
     """Base Telnet Server Protocol API."""
     #: Maximum on-connect time to wait for all pending negotiation options to
     #: complete before negotiation is considered 'final', signaled by the
@@ -33,28 +33,32 @@ class BaseServer(asyncio.protocols.Protocol):
     _closing = False
 
     def __init__(self, reader_factory=None, writer_factory=None,
-                 shell_factory=None, waiter_connected=None,
+                 shell=None, waiter_connected=None,
                  waiter_closed=None, log=None, loop=None):
         """Class initializer."""
-        # XXX
-        self._reader_factory = reader_factory or StreamReader
+        self.log = log or logging.getLogger(__name__)
+        if shell:
+            self._reader_factory = reader_factory or StreamReader
+        else:
+            # provide default debug shell, here.
+            self._reader_factory = reader_factory or TelnetShell
         self._writer_factory = writer_factory or TelnetWriter
-        self._shell_factory = shell_factory or TelnetShell
         self._loop = loop or asyncio.get_event_loop()
         self._extra = dict()
         self.waiter_connected = waiter_connected or asyncio.Future()
+        self._tasks = [self.waiter_connected]
         self.waiter_closed = waiter_closed or asyncio.Future()
+        self.shell = shell
         self.reader = None
         self.writer = None
-        self.log = log
-        self._tasks = [self.waiter_connected, self._timer]
+
 
     # Base protocol methods
 
     def eof_received(self):
         """Called when the other end calls write_eof() or equivalent."""
+        self.reader.feed_eof()
         self.connection_lost('EOF')
-        return False
 
     def connection_lost(self, exc):
         """Called when the connection is lost or closed."""
@@ -63,10 +67,12 @@ class BaseServer(asyncio.protocols.Protocol):
         self._closing = True
 
         # inform about closed connection
-        postfix = ''
+        self.log.info('Connection lost to %s: %s.', self,
+                      'EOF' if exc is None else exc)
+        if exc is None:
+            self.reader.feed_eof()
         if exc:
-            postfix = ': {0}'.format(exc)
-        self.log.info('{0}{1}'.format(self, postfix))
+            self.reader.set_exception(exc)
 
         # cancel protocol tasks
         for task in self._tasks:
@@ -76,6 +82,7 @@ class BaseServer(asyncio.protocols.Protocol):
         self._transport.close()
 
         self.waiter_closed.set_result(self)
+
 
     def connection_made(self, transport):
         """
@@ -87,38 +94,42 @@ class BaseServer(asyncio.protocols.Protocol):
         Ensure ``super().connection_made(transport)`` is called when derived.
         """
         peername = transport.get_extra_info('peername')
-        self.log.info('Connection from {0}'.format(peername))
 
         self._transport = transport
         self._when_connected = datetime.datetime.now()
         self._last_received = datetime.datetime.now()
 
         self.reader = self._reader_factory(
-            protocol=self, log=self.log)
+            protocol=self, log=self.log, loop=self._loop)
 
         self.writer = self._writer_factory(
             transport=transport, protocol=self,
             reader=self.reader, server=True,
             loop=self._loop, log=self.log)
 
-        # XXX "self.shell" needs interface finalization
-        if self._shell_factory:
-            self.shell = self._shell_factory(
-                protocol=self, reader=self.reader, writer=self.writer,
-                loop=self._loop, log=self.log)
-            self.waiter_connected.add_done_callback(
-                lambda result: self.shell.display_prompt())
+        self.log.info('Connection from %s', self)
+
+        if self.shell:
+            self.waiter_connected.add_done_callback(self.begin_shell)
+
         self._loop.call_soon(self.begin_negotiation)
 
-    def data_received(self, data):
-        """
-        Process bytes received by transport.
+    def begin_shell(self, result):
+        if self.shell is not None:
+            res = self.shell(self.reader, self.writer)
+            if asyncio.iscoroutine(res):
+                self._loop.create_task(res)
 
-        You should not override this method, but rather the ``shell``
-        protocol is a reader receiving ``feed_byte(byte)`` XXX ?
-        """
+    def data_received(self, data):
+        """Process bytes received by transport."""
+        # This may seem strange; feeding all bytes received to the **writer**,
+        # and, only if they test positive, duplicating to the **reader**.
+        #
+        # The writer receives a copy of all raw bytes because, as an IAC
+        # interpreter, it may likely **write** a responding reply.
         self._last_received = datetime.datetime.now()
 
+        #inband = collections.deque()
         cmd_received = False
         for byte in data:
             try:
@@ -126,12 +137,10 @@ class BaseServer(asyncio.protocols.Protocol):
             except:
                 self._log_exception(self.log.debug, *sys.exc_info())
             else:
-                if recv and self.shell:
-                    # forward to shell
-                    self.shell.feed_byte(
-                        byte=byte, slc_function=self.writer.slc_received)
+                if recv:
+                    # forward to reader (shell).
+                    self.reader.feed_data(bytes([byte]))
                 else:
-                    # part of IAC command byte phrase
                     cmd_received = True
 
         # until negotiation is complete, re-check aggressively upon
@@ -140,6 +149,11 @@ class BaseServer(asyncio.protocols.Protocol):
             self._check_negotiation_timer()
 
     # Our protocol methods
+
+    def __repr__(self):
+        hostport = self._transport.get_extra_info('peername')[:2]
+        return '<Peer {0} {1}>'.format(*hostport)
+
     def get_extra_info(self, name, default=None):
         """Get optional server information."""
         return self._extra.get(name, default)
@@ -155,6 +169,7 @@ class BaseServer(asyncio.protocols.Protocol):
         if self._closing:
             return
         self._check_later = self._loop.call_soon(self._check_negotiation_timer)
+        self._tasks.append(self._check_later)
 
     def begin_advanced_negotiation(self):
         """
@@ -230,7 +245,10 @@ class BaseServer(asyncio.protocols.Protocol):
     # private methods
 
     def _check_negotiation_timer(self):
+        if self._closing:
+            return
         self._check_later.cancel()
+        self._tasks.remove(self._check_later)
 
         later = self.CONNECT_MAXWAIT - self.duration
 
@@ -242,6 +260,7 @@ class BaseServer(asyncio.protocols.Protocol):
         else:
             self._check_later = self._loop.call_later(
                 later, self._check_negotiation_timer)
+            self._tasks.append(self._check_later)
 
     def _check_negotiation(self):
         """
@@ -277,5 +296,4 @@ class BaseServer(asyncio.protocols.Protocol):
         for line in rows_tbk + rows_exc:
             logger(line)
 
-
-
+## TelnetServer.reader => .shell

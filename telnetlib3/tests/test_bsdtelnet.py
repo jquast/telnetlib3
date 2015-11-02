@@ -16,6 +16,8 @@ import pexpect
 import pytest
 
 
+@pytest.mark.skipif(
+    True, reason="https://github.com/pexpect/pexpect/issues/294")
 @pytest.mark.asyncio
 def test_bsdtelnet(event_loop, bind_host, unused_tcp_port, log):
     """Simple telnet(1) as client (issues 'quit' command)."""

@@ -9,6 +9,15 @@ import asyncio
 # local
 import telnetlib3
 
+@asyncio.coroutine
+def shell(reader, writer):
+    #print((reader, writer))
+    writer.write('Would you like to play a game? ')
+    resp = yield from reader.read(1)
+    writer.write('\r\nThe only way to win is to not play at all.\r\n')
+    writer.close()
+
+
 def get_logger(loglevel='info'):
     fmt = '%(asctime)s %(levelname)s %(filename)s:%(lineno)d %(message)s'
     lvl = getattr(logging, loglevel.upper())
@@ -55,6 +64,7 @@ def disp_kv(keyvalues):
 def main(host, port, **kwds):
     log = get_logger(kwds.pop('loglevel'))
     loop = asyncio.get_event_loop()
+    kwds['shell'] = shell
     server = loop.run_until_complete(telnetlib3.create_server(
         host=host, port=port, log=log, **kwds))
 
@@ -63,8 +73,5 @@ def main(host, port, **kwds):
     loop.run_until_complete(server.wait_closed())
     return 0
 
-
 if __name__ == '__main__':
     exit(main(**parse_args()))
-
-# vim: set shiftwidth=4 tabstop=4 softtabstop=4 expandtab textwidth=79 :

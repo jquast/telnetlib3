@@ -5,6 +5,8 @@ import asyncio
 import codecs
 import sys
 
+from .stream_writer import TelnetWriter
+
 
 class StreamReader(asyncio.StreamReader):
     """

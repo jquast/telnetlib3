@@ -1,10 +1,14 @@
+# std imports
+import asyncio
+import socket
+
 # local
 from .server_mixins import UnicodeMixin, TimeoutServerMixin
 
-__all__ = ('Server', 'TelnetServer')
+__all__ = ('TelnetServer', 'create_server')
 
 
-class Server(UnicodeMixin, TimeoutServerMixin):
+class TelnetServer(UnicodeMixin, TimeoutServerMixin):
     """Telnet Server protocol performing common negotiation."""
     #: Maximum number of cycles to seek for all terminal types offered.
     TTYPE_LOOPMAX = 8
@@ -139,5 +143,31 @@ class Server(UnicodeMixin, TimeoutServerMixin):
         self._extra['xdisploc'] = xdisploc
 
 
-# TODO(1.0): mark by deprecation warning
-TelnetServer = Server
+@asyncio.coroutine
+def create_server(
+    server_factory=None, host=None, port=23, *,
+    loop=None, log=None, encoding='utf8', encoding_error='replace',
+    force_binary=False, term='unknown', cols=80, rows=25, timeout=300,
+    shell=None, reader_factory=None, writer_factory=None,
+    waiter_connected=None, waiter_closed=None
+):
+    """
+    Create a Telnet Server
+
+    [...]
+    """
+
+    if not server_factory:
+        server_factory = TelnetServer
+
+    if not loop:
+        loop = asyncio.get_event_loop()
+
+    def on_connect():
+        return server_factory(
+            loop=loop, log=log, encoding='utf8', encoding_error='replace',
+            force_binary=False, term='unknown', cols=80, rows=25, timeout=300,
+            shell=shell, reader_factory=reader_factory, writer_factory=writer_factory,
+            waiter_connected=None, waiter_closed=None)
+
+    return (yield from loop.create_server(on_connect, host, port))

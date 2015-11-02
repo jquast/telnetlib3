@@ -1,11 +1,12 @@
 """
 Special Line Character support for Telnet Linemode Option (rfc1184)
 """
+from .accessories import eightbits, name_unicode
 
 __all__ = ('SLC', 'SLC_AYT', 'NSLC', 'BSD_SLC_TAB', 'generate_slctab',
            'Linemode', 'LMODE_MODE_REMOTE', 'SLC_SYNCH', 'SLC_IP', 'SLC_AYT',
            'SLC_ABORT', 'SLC_SUSP', 'SLC_EL', 'SLC_RP', 'SLC_XON', 'snoop',
-           'name_slc_command', 'generate_forwardmask', 'Forwardmask',
+           'generate_forwardmask', 'Forwardmask', 'name_slc_command',
            'LMODE_FORWARDMASK', 'LMODE_MODE', 'NSLC', 'LMODE_MODE',
            'LMODE_SLC', 'SLC', 'SLC_nosupport', 'SLC_DEFAULT', 'SLC_VARIABLE',
            'SLC_NOSUPPORT', 'SLC_ACK', 'SLC_CANTCHANGE', 'SLC_LNEXT', 'SLC_EC',
@@ -357,31 +358,7 @@ _DEBUG_SLC_OPTS = dict([(value, key)
                             'SLC_OVER', 'SLC_ECR', 'SLC_EWR', 'SLC_EBOL',
                             'SLC_EEOL',)])
 
-
 def name_slc_command(byte):
     """ Given an SLC ``byte``, return global mnumonic as string. """
     return (repr(byte) if byte not in _DEBUG_SLC_OPTS
             else _DEBUG_SLC_OPTS[byte])
-
-
-def eightbits(number):
-    """ return binary representation of ``number`` padded to 8 bits. """
-    prefix, value = bin(number).split('b')
-    return '0b%0.8i' % (int(value),)
-
-
-def name_unicode(ucs):
-    """ Return 7-bit ascii printable of any string. """
-    if ord(ucs) == 0:
-        ucs = r'^@'
-    elif ord(ucs) >= 27 and ord(ucs) < ord(' '):
-        # 27<=>31,
-        ucs = r'^{}'.format('[\\]^_'[ord(' ') - ord(ucs)])
-    elif ord(ucs) < ord(' ') or ord(ucs) == 127:
-        # <=32, 127,
-        ucs = r'^{}'.format(chr(ord(ucs) ^ ord('@')))
-    elif ord(ucs) > 127 or not ucs.isprintable():
-        # >=127
-        ucs = r'\x{:02x}'.format(ord(ucs))
-    # remaining (33<=>126) (isprint)
-    return ucs

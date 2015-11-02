@@ -2,6 +2,7 @@
 import collections
 import traceback
 import logging
+import asyncio
 import shlex
 import time
 import sys
@@ -10,11 +11,13 @@ import re
 # local
 from . import slc
 from . import telopt
+from .stream_reader import StreamReader
+from .accessories import name_unicode
 
 # 3rd party
 import wcwidth
 
-__all__ = ('TelnetShell',)
+__all__ = ('TelnetShell', 'telnet_shell')
 
 class Logout(Exception):
     """User-requested logout by shell."""
@@ -58,15 +61,7 @@ SLC_EDIT_TRANSTABLE = dict((
 CR, LF, NUL = '\r\n\x00'
 
 
-def name_unicode(char):
-    """Return 7-bit ASCII printable of any unicode string."""
-    if ord(char) < ord(' ') or ord(char) == 127:
-        char = r'^{}'.format(chr(ord(char) ^ ord('@')))
-    elif not char.isprintable():
-        char = r'\x{:02x}'.format(ord(char))
-    return char
-
-class TelnetShell():
+class TelnetShell(StreamReader):
     """
     A remote line editing shell for host command processing.
 
@@ -151,12 +146,10 @@ class TelnetShell():
     # See class property, 'multiline'.
     _multiline = False
 
-    def __init__(self, protocol, reader, writer, log=None, loop=None):
-        #: telnetlib3.BaseServer instance associated with shell
+    def __init__(self, protocol, limit=asyncio.streams._DEFAULT_LIMIT,
+                 loop=None, log=None, **kwds):
+        super().__init__(protocol=protocol, limit=limit, loop=loop)
         self.protocol = protocol
-        self.reader = reader
-        self.writer = writer
-
         self.log = log or logging.getLogger(__name__)
 
         #: buffer of line input until command process.  Accessed by
@@ -176,28 +169,40 @@ class TelnetShell():
         #: compiled expression for pairing by :meth:`expand_literal`
         self._re_literal = re.compile(self.re_literal, re.DOTALL)
 
-    def feed_byte(self, byte, slc_function=None):
-        """
-        Send byte input data to command shell.
+    @property
+    def writer(self):
+        return self.protocol.writer
 
-        :param byte: raw byte received as input, to be negotiated by
-            shell-preferred encoding (as defined by 'CHARSET').
-        :param byte slc_function: a special line character function
-            constant defined by :mod:`telnetlib3.slc` was received,
-            as indicated by the given function byte.  Its natural
-            character is received as ``byte``.
-        """
-        if isinstance(byte, int):
-            byte = bytes([byte])
-
-        char = self.reader.decode(byte, final=False)
-        if char:
-            if slc_function:
-                self.editing_received(char=char,
-                                      cmd=SLC_EDIT_TRANSTABLE[slc_function])
-                return
-
+    def feed_data(self, data):
+        text = self.decode(data, final=False)
+        for char in text:
             self.character_received(char)
+
+#        for byte in data:
+#            self.feed_byte(bytes([byte]))
+#        char = self.reader.decode(byte, final=False)
+#        if char:
+#            if slc_function:
+#                self.editing_received(char=char,
+#                                      cmd=SLC_EDIT_TRANSTABLE[slc_function])
+#                return
+#
+#            self.character_received(char)
+#
+#    def feed_byte(self, byte, slc_function=None):
+#        """
+#        Send byte input data to command shell.
+#
+#        :param byte: raw byte received as input, to be negotiated by
+#            shell-preferred encoding (as defined by 'CHARSET').
+#        :param byte slc_function: a special line character function
+#            constant defined by :mod:`telnetlib3.slc` was received,
+#            as indicated by the given function byte.  Its natural
+#            character is received as ``byte``.
+#        """
+#        if isinstance(byte, int):
+#            byte = bytes([byte])
+#
 
     def editing_received(self, char, cmd):
         """
@@ -1240,7 +1245,6 @@ class TelnetShell():
         the value of variable ``USER``, defaulting to word ``unknown`` when
         undefined.
         """
-        self.log.debug('expand: {}'.format(string))
         if string == '?':
             # return code
             if self._retval is not None:
@@ -1272,7 +1276,6 @@ class TelnetShell():
 
         This method called when matched by :attr:`~.re_literal` pattern.
         """
-        self.log.debug('expand: {}'.format(string))
         return {
             'a': '\a',    # bell
             'b': '\b',    # backspace
@@ -1354,7 +1357,6 @@ class TelnetShell():
         if timevalue is None:
             timevalue = time.localtime()
 
-        self.log.debug('expand: {0!r}'.format(char))
         # although this allows some form of chaining (multiple 'subscriptions'
         # to the same pattern), highly suggest against it, what do you think?
         return self._expand_prompt_simple(
@@ -1473,34 +1475,9 @@ class TelnetShell():
     def will_echo(self):
        return self.writer.local_option.enabled(telopt.ECHO)
 
-
-#    def display_encoding_error(self, err):
-#        """
-#        Carefully notify client of encoding error (in ASCII, of course!).
-#        """
-#        encoding = self.protocol.encoding(outgoing=True)
-#        err_bytes = bytes(err.args[0].encode(encoding))
-#        charset = bytes(self.protocol.env['CHARSET'].encode(encoding))
-#        msg = b''.join((b'\r\n', err_bytes, b', CHARSET is ', charset, b'.'))
-#        self.transport.write(msg)
-#
-#
-#
-#    def send_ga(self):
-#        """
-#        Conditionally send ``GO-AHEAD``.
-#
-#        Sends go-ahead signal when :attr:`send_go_ahead` is True.
-#        """
-#        if self.send_go_ahead:
-#            self.protocol.stream.send_ga()
-#        if char == 'h':
-#            val = ''
-#            if self.server.server_name.done():
-#                val = self.server.server_name.result().split('.')[0]
-#        elif char == 'H':
-#            val = ''
-#            if self.server.server_fqdn.done():
-#                val = self.server.server_fqdn.result()
-#            elif self.server.server_name.done():
-#                val = self.server.server_name.result()
+@asyncio.coroutine
+def telnet_shell(reader, writer):
+    writer.write('Would you like to play a game? ')
+    resp = yield from reader.readline()
+    writer.write('\r\nThe only way to win is to not play at all.\r\n')
+    writer.close()

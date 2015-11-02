@@ -9,6 +9,7 @@ Contents:
    :glob:
 
    intro
+   overview
    api
    contributing
    history

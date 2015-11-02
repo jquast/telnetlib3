@@ -25,7 +25,7 @@ def bind_host(request):
     return request.param
 
 
-class TestTelnetServer(telnetlib3.Server):
+class TestTelnetServer(telnetlib3.TelnetServer):
     pass
 #    CONNECT_MINWAIT = 0.10
 #    CONNECT_MAXWAIT = 0.50
