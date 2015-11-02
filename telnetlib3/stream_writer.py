@@ -7,9 +7,7 @@ import struct
 from . import slc
 from .telopt import *  # noqa
 
-__all__ = ('TelnetIACWriter', 'name_command', 'name_commands')
-
-# TODO: BaseWriter protocol + Mixins
+__all__ = ('TelnetWriter',)
 
 class TelnetWriter(asyncio.StreamWriter):
     """
@@ -2187,38 +2185,6 @@ class Option(dict):
             self.log.debug('{}[{}] = {}'.format(self.name, descr, value))
         dict.__setitem__(self, key, value)
     __setitem__.__doc__ = dict.__setitem__.__doc__
-
-#: List of globals that may match an iac command option bytes
-_DEBUG_OPTS = dict([(value, key)
-                    for key, value in globals().items() if key in
-                    ('LINEMODE', 'LMODE_FORWARDMASK', 'NAWS', 'NEW_ENVIRON',
-                     'ENCRYPT', 'AUTHENTICATION', 'BINARY', 'SGA', 'ECHO',
-                     'STATUS', 'TTYPE', 'TSPEED', 'LFLOW', 'XDISPLOC', 'IAC',
-                     'DONT', 'DO', 'WONT', 'WILL', 'SE', 'NOP', 'DM', 'TM',
-                     'BRK', 'IP', 'ABORT', 'AO', 'AYT', 'EC', 'EL', 'EOR',
-                     'GA', 'SB', 'EOF', 'SUSP', 'ABORT', 'CMD_EOR', 'LOGOUT',
-                     'CHARSET', 'SNDLOC', 'MCCP_COMPRESS', 'MCCP2_COMPRESS',
-                     'ENCRYPT', 'AUTHENTICATION', 'TN3270E', 'XAUTH', 'RSP',
-                     'COM_PORT_OPTION', 'SUPPRESS_LOCAL_ECHO', 'TLS',
-                     'KERMIT', 'SEND_URL', 'FORWARD_X', 'PRAGMA_LOGON',
-                     'SSPI_LOGON', 'PRAGMA_HEARTBEAT', 'EXOPL', 'X3PAD',
-                     'VT3270REGIME', 'TTYLOC', 'SUPDUPOUTPUT', 'SUPDUP',
-                     'DET', 'BM', 'XASCII', 'RCP', 'NAMS', 'RCTE', 'NAOL',
-                     'NAOP', 'NAOCRD', 'NAOHTS', 'NAOHTD', 'NAOFFD', 'NAOVTS',
-                     'NAOVTD', 'NAOLFD', )])
-
-
-def name_command(byte):
-    """ Given an IAC byte, return a mnemonic global constant, if any.
-    """
-    return (repr(byte) if byte not in _DEBUG_OPTS else _DEBUG_OPTS[byte])
-
-
-def name_commands(cmds, sep=' '):
-    """ Given array of telnet command bytes, return mnemonic global constants.
-    """
-    return sep.join([name_command(bytes([byte])) for byte in cmds])
-
 
 def _escape_env(buf):
     """ .. function:: escape_var(buf : bytes) -> type(bytes)

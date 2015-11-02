@@ -67,7 +67,7 @@ class BaseServer(asyncio.Protocol):
         self._closing = True
 
         # inform about closed connection
-        self.log.info('Connection lost to %s: %s.', self,
+        self.log.info('Connection lost to %s: %s', self,
                       'EOF' if exc is None else exc)
         if exc is None:
             self.reader.feed_eof()
@@ -129,7 +129,6 @@ class BaseServer(asyncio.Protocol):
         # interpreter, it may likely **write** a responding reply.
         self._last_received = datetime.datetime.now()
 
-        #inband = collections.deque()
         cmd_received = False
         for byte in data:
             try:

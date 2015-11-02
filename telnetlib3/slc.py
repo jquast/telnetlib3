@@ -2,6 +2,7 @@
 Special Line Character support for Telnet Linemode Option (rfc1184)
 """
 from .accessories import eightbits, name_unicode
+from .telopt import theNULL
 
 __all__ = ('SLC', 'SLC_AYT', 'NSLC', 'BSD_SLC_TAB', 'generate_slctab',
            'Linemode', 'LMODE_MODE_REMOTE', 'SLC_SYNCH', 'SLC_IP', 'SLC_AYT',
@@ -12,7 +13,6 @@ __all__ = ('SLC', 'SLC_AYT', 'NSLC', 'BSD_SLC_TAB', 'generate_slctab',
            'SLC_NOSUPPORT', 'SLC_ACK', 'SLC_CANTCHANGE', 'SLC_LNEXT', 'SLC_EC',
            'SLC_EW', 'SLC_EOF', 'SLC_AO',)
 
-theNULL = bytes([0])
 (SLC_NOSUPPORT, SLC_CANTCHANGE, SLC_VARIABLE, SLC_DEFAULT) = (
     bytes([const]) for const in range(4)) # 0, 1, 2, 3
 (SLC_FLUSHOUT, SLC_FLUSHIN, SLC_ACK) = (

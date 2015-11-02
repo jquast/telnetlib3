@@ -117,24 +117,24 @@ class TelnetServer(UnicodeMixin, TimeoutServerMixin):
 
         elif (not ttype or self._ttype == self.TTYPE_LOOPMAX):
             # empty reply string, too many responses!
-            self.log.warn('ttype cycle stop at {0}: {1}.'
-                          .format(key, ttype))
-            self._extra['TERM'] = self.get_extra_info('ttype0')
+            val = self._extra['TERM'] = self.get_extra_info('ttype0')
+            self.log.warn('ttype cycle stop at {0}: {1}, using {2}.'
+                          .format(key, ttype, val))
 
-        elif (self._ttype == 2 and ttype.upper().startswith('MTTS ')):
-            self.log.debug('ttype mud at {0}: {1}'
+        elif (self._ttype == 3 and ttype.upper().startswith('MTTS ')):
+            val = self.get_extra_info('ttype2')
+            self.log.debug('ttype mud at {0}: {1}, using {2}'
                            .format(key, ttype))
-            self._extra['TERM'] = self.get_extra_info('ttype1')
+            self._extra['TERM'] = val
 
         elif (ttype == _lastval):
-            self.log.debug('ttype repeated {0}: {1}'
+            self.log.debug('ttype repeated, using {0}: {1}'
                            .format(key, ttype))
             self._extra['TERM'] = ttype
 
         else:
             self.log.debug('ttype{}={}: requesting another.'
                            .format(self._ttype, ttype))
-            self._extra['TERM'] = ttype
             self._ttype += 1
             self.writer.request_ttype()
 

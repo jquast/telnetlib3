@@ -95,7 +95,7 @@ class ConsoleShell():
 
     @property
     def will_echo(self):
-        """ Returns wether to expect the server to display our input; if
+        """ Returns whether to expect the server to display our input; if
             False, it is our own responsibility to write a copy to screen.
         """
         from .telopt import ECHO

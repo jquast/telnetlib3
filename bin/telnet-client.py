@@ -1,108 +1,111 @@
 #!/usr/bin/env python3
+"""Telnet Demonstration Client for the 'telnetlib3' python package.
 """
-A Demonstrating TelnetClient implementation.
-
-This script provides a keyboard-interactive shell for connecting to a Server.
-
-"""
-import urllib.parse
+# std imports
+import contextlib
 import argparse
 import logging
 import asyncio
-import termios
-import locale
-import codecs
-import fcntl
-import tty
 import sys
-import os
 
+# local
 import telnetlib3
 
-ARGS = argparse.ArgumentParser(
-    description="Connect to telnet host",
-    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-ARGS.add_argument('host', nargs=1, help='Host name or url', action='store')
-ARGS.add_argument('port', nargs='?', help='Port number', default=23, type=int)
-ARGS.add_argument('--loglevel', help='Logging level',
-                  action="store", dest="loglevel",
-                  default='info', type=str)
-ARGS.add_argument('--logfile', help='Logfile path',
-                  action='store', dest='logfile', type=str)
-ARGS.add_argument('--cp437', help='enable utf-8 translation of PC-DOS art',
-                  action="store_true", dest="cp437",
-                  default=False)
 
+def get_logger(loglevel='info', logfile=None):
+    fmt = '%(asctime)s %(levelname)s %(filename)s:%(lineno)d %(message)s'
+    lvl = getattr(logging, loglevel.upper())
+    logging.getLogger().setLevel(lvl)
 
-class CP437ConsoleShell(telnetlib3.TerminalShell):
-    def write(self, string=u''):
-        """ Write string to output using cp437->utf-8 encoding
-        """
-        cp437_to_utf8 = lambda ucs: bytes([ord(ucs)]).decode('cp437')
-        super().write(u''.join(cp437_to_utf8(ucs) for ucs in string))
+    _cfg = {'format': fmt}
+    if logfile:
+        _cfg['filename'] = logfile
+    logging.basicConfig(**_cfg)
 
+    return logging.getLogger(__name__)
 
-@asyncio.coroutine
-def start_client(loop, log, Client, host, port, cp437=False, send_cr=False):
-    transport, protocol = yield from loop.create_connection(Client, host, port)
+def get_encoding():
+    import locale, codecs
+    locale.setlocale(locale.LC_ALL, '')
+    enc = codecs.lookup(locale.getpreferredencoding()).name
 
-    def keyboard_input():
-        ucs = sys.stdin.read(1000)
-        if send_cr:
-            ucs = ucs.replace('\n', '\r')
-        protocol.stream.write(protocol.shell.encode(ucs))
-        if not protocol.shell.will_echo:
-            protocol.shell.write(ucs)
+def get_argparser():
+    parser = argparse.ArgumentParser(
+        description="Simple telnet client.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('host', action='store',
+                        help='Host name or url')
+    parser.add_argument('port', nargs='?', default=23, type=int,
+                        help='Port number')
+    parser.add_argument('--loglevel', dest="loglevel", default='info',
+                        help='Logging level')
+    parser.add_argument('--logfile', dest='logfile', type=str,
+                        help='Logfile path')
+    parser.add_argument('--encoding', dest='encoding', type=str,
+                        help='Encoding of remote end.')
+    parser.add_argument('--force-binary', action='store_true',
+                        dest='force_binary')
+    return parser
 
-    loop.add_reader(sys.stdin.buffer.fileno(), keyboard_input)
-    yield from protocol.waiter_closed
-
-
-def main():
-    args = ARGS.parse_args()
-    args.host = args.host[0]
+def parse_args():
+    args = get_argparser().parse_args()
     if '://' in args.host:
         url = urllib.parse.urlparse(args.host)
         assert url.scheme == 'telnet', url
         args.host = url.hostname
         args.port = url.port or 23
-    elif ':' in args.host:
-        args.host, port = args.host.split(':', 1)
-        args.port = int(port)
 
-    fmt = '%(asctime)s %(levelname)s %(filename)s:%(lineno)d %(message)s'
-    cfg = {'format': fmt}
-    if args.logfile:
-        cfg['filename'] = args.logfile
-    logging.basicConfig(**cfg)
-    log = logging.getLogger('telnet_server')
-    log.setLevel(getattr(logging, args.loglevel.upper()))
+    return {
+        'host': args.host,
+        'port': args.port,
+        'loglevel': args.loglevel,
+        'logfile': args.logfile,
+        'encoding': args.encoding,
+        'force_binary': args.force_binary,
+    }
 
-    locale.setlocale(locale.LC_ALL, '')
-    enc = codecs.lookup(locale.getpreferredencoding()).name
-    if args.cp437:
-        assert enc == 'utf-8', ('cp437 is only for utf-8 clients', enc)
-        Client = lambda: telnetlib3.TelnetClient(
-            encoding='latin1', log=log, shell=CP437ConsoleShell,
-            force_binary=True)
-    else:
-        Client = lambda: telnetlib3.TelnetClient(
-            encoding=enc, log=log)
+def disp_kv(keyvalues):
+    return ' '.join('='.join(map(str, kv)) for kv in keyvalues)
 
+@contextlib.contextmanager
+def cbreak(fobj):
+    import fcntl, tty, termios, os
+    mode = termios.tcgetattr(fobj.fileno())
+    tty.setcbreak(fobj.fileno())
+    fl = fcntl.fcntl(fobj.fileno(), fcntl.F_GETFL)
+    fcntl.fcntl(fobj.fileno(), fcntl.F_SETFL, fl | os.O_NONBLOCK)
+    try:
+        yield
+    finally:
+        termios.tcsetattr(fobj.fileno(), termios.TCSAFLUSH, mode)
+        fcntl.fcntl(fobj.fileno(), fcntl.F_SETFL, fl)
+
+@asyncio.coroutine
+def start_client(loop, log, Client, host, port):
+    transport, protocol = yield from loop.create_connection(Client, host, port)
+    log.info('Connected.')
+
+    with cbreak(sys.stdin):
+        def keyboard_input():
+            ucs = sys.stdin.read(1000)
+
+            # transmit
+            protocol.writer.write(ucs)
+
+            if not protocol.writer.remote_option.enabled(telnetlib3.ECHO):
+                # local echo
+                protocol.reader.write(ucs)
+
+        loop.add_reader(sys.stdin.buffer.fileno(), keyboard_input)
+        yield from protocol.waiter_closed
+
+def main(host, port, **kwds):
+    log = get_logger(kwds.pop('loglevel'), kwds.pop('logfile'))
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(start_client(
-        loop, log, Client, args.host, args.port, send_cr=bool(args.cp437)))
-
+    Client = lambda: telnetlib3.TelnetClient(log=log)
+    log.info('Connecting %s %s', host, port)
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(start_client(loop, log, Client, host, port))
 
 if __name__ == '__main__':
-    mode = termios.tcgetattr(sys.stdin.fileno())
-    tty.setcbreak(sys.stdin.fileno())
-    fl = fcntl.fcntl(sys.stdin.fileno(), fcntl.F_GETFL)
-    fcntl.fcntl(sys.stdin.fileno(), fcntl.F_SETFL, fl | os.O_NONBLOCK)
-    try:
-        main()
-    finally:
-        termios.tcsetattr(sys.stdin.fileno(), termios.TCSAFLUSH, mode)
-        fcntl.fcntl(sys.stdin.fileno(), fcntl.F_SETFL, fl)
-
-# vim: set shiftwidth=4 tabstop=4 softtabstop=4 expandtab textwidth=79 :
+    exit(main(**parse_args()))
