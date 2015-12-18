@@ -11,6 +11,7 @@ Contents:
    intro
    overview
    api
+   rfcs
    contributing
    history
 

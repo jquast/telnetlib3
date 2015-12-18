@@ -30,45 +30,44 @@ telnetlib3 is a Telnet Client and Server Protocol library for python.
 
 This project requires the asyncio_ module, first made available in python 3.4.
 
-Usage
-=====
+Server Usage
+============
 
-Basic Server::
-
-   import asyncio, telnetlib3
-
-   loop = asyncio.get_event_loop()
-   server = loop.run_until_complete(telnetlib3.create_server(port=6023))
-   print('Server Listening %s %s' % server.sockets[0].getsockname()[:2])
-   loop.run_until_complete(server.wait_closed())
-
-Basic Server, using streams interface::
+Basic Telnet Server::
 
    import asyncio, telnetlib3
-
+   
    @asyncio.coroutine
    def shell(reader, writer):
+
         writer.write('Would you like to play a game? ')
-        echo = yield from reader.read(1)
-        writer.write('{0}\r\nThey say the only way to win is '
-                     'to not play at all.\r\n'.format(echo))
+
+        resp = yield from reader.read(1)
+        if writer.will_echo:
+            writer.write(resp)
+
+        msg = 'They say the only way to win is to not play at all.'
+        writer.write('\r\n{msg}\r\n'.format(resp))
         writer.close()
+    
+    @asyncio.coroutine
+    def start_server():
+        yield from telnetlib3.create_server(shell=shell, port=6023)
+    
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(start_server())
+    loop.run_forever()
 
-   loop = asyncio.get_event_loop()
-   coro = telnetlib3.create_server(port=6023, shell=shell)
-   server = loop.run_until_complete(coro)
-   print('Server Listening %s %s' % server.sockets[0].getsockname()[:2])
-   loop.run_until_complete(server.wait_closed())
+Basic Telnet Client::
 
-# WIP
-#    transport, protocol = yield from loop.create_connection(
-#        lambda: telnetlib3.Client(**kwargs), host, port)
-#
-#    reader, writer = yield from telnetlib3.open_connection(
-#        host, port, **kwargs)
-#
-#    protocol = yield from telnetlib3.start_client(
-#        host, port, **kwargs)
+    transport, protocol = yield from loop.create_connection(
+        lambda: telnetlib3.Client(**kwargs), host, port)
+
+    reader, writer = yield from telnetlib3.open_connection(
+        host, port, **kwargs)
+
+    protocol = yield from telnetlib3.start_client(
+        host, port, **kwargs)
 
 Scripts
 =======

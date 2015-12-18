@@ -25,15 +25,9 @@ def bind_host(request):
     return request.param
 
 
-class TestTelnetServer(telnetlib3.TelnetServer):
-    pass
-#    CONNECT_MINWAIT = 0.10
-#    CONNECT_MAXWAIT = 0.50
-#    CONNECT_DEFERRED = 0.01
-#    TTYPE_LOOPMAX = 2
-#    default_env = {
-#        'PS1': 'test-telsh %# ',
-#    }
+@pytest.fixture(scope="module", params=[telnetlib3.TelnetServer, ])
+def server_factory(request):
+    return request.param
 
 
 class TestTelnetClient(telnetlib3.Client):

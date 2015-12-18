@@ -97,8 +97,34 @@ class Client(asyncio.protocols.Protocol):
         self.waiter_connected = waiter_connected
 
     def __str__(self):
-        """ Return string reporting status of client session. """
-        return describe_connection(self)
+        """ Report connection state. """
+        if self._closing:
+            state, direction = 'Disconnected', 'from'
+        else:
+            state, direction = 'Connected', 'to'
+
+        if (self.server_hostname.done() and
+                self.server_hostname.result() != self.server_ip):
+            hostname = ' ({})'.format(self.server_hostname.result())
+        else:
+            hostname = ''
+
+        if self.server_port != 23:
+            port = ' port {self.server_port}'.format(self=self)
+        else:
+            port = ''
+
+        duration = '{:0.2f}s'.format(self.duration)
+        return ('{state} {direction} {serverip}{port}{hostname} after {duration}'
+                .format(
+                    state=state,
+                    direction=direction,
+                    serverip=self.server_ip,
+                    port=port,
+                    hostname=hostname,
+                    duration=duration)
+                )
+
 
     def connection_made(self, transport):
         """
@@ -546,31 +572,5 @@ class Client(asyncio.protocols.Protocol):
             self.waiter_connected.cancel()
             self.waiter_closed.set_result(self)
 
-
-def describe_connection(client):
-    if client._closing:
-        state, direction = 'Disconnected', 'from'
-    else:
-        state, direction = 'Connected', 'to'
-    if (client.server_hostname.done() and
-            client.server_hostname.result() != client.server_ip):
-        hostname = ' ({})'.format(client.server_hostname.result())
-    else:
-        hostname = ''
-    if client.server_port != 23:
-        port = ' port 23'
-    else:
-        port = ''
-
-    duration = '{:0.2f}s'.format(client.duration)
-    return ('{state} {direction} {serverip}{port}{hostname} after {duration}'
-            .format(
-                state=state,
-                direction=direction,
-                serverip=client.server_ip,
-                port=port,
-                hostname=hostname,
-                duration=duration)
-            )
 
 TelnetClient = Client # XXX

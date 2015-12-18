@@ -471,7 +471,6 @@ class TelnetShell(StreamReader):
             char_disp = char
             if self.writer.can_write(char) and char.isprintable():
                 char_disp = self._standout(name_unicode(char))
-            self.log.debug('echo {!r}'.format(char_disp))
             self.writer.echo(char_disp)
 
         # it is necessary on receipt of subsequent characters to backtrack

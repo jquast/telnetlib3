@@ -1061,24 +1061,27 @@ class TelnetWriter(asyncio.StreamWriter):
         self.log.debug('SLC LNEXT: Literal Next (unhandled)')
 
     def handle_xon(self, byte):
-        """ XXX Handle SLC XON (Transmit-On).
-
-            The default implementation enables transmission and
-            writes any data buffered during XOFF.
-        """
-        self.log.debug('SLC XON: Transmit On.')
-        self.writing = True
-        self.write(b''.join(self._write_buffer), oob=True)
-        self._write_buffer.clear()
-
+        pass
+#        """ XXX Handle SLC XON (Transmit-On).
+#
+#            The default implementation enables transmission and
+#            writes any data buffered during XOFF.
+#        """
+#        #self.log.debug('SLC XON: Transmit On.')
+#        #self.writing = True
+#        #self._write(self.encode(string, errors))
+#        #self.write(b''.join(self._write_buffer), oob=True)
+#        #self._write_buffer.clear()
+#
     def handle_xoff(self, byte):
-        """ XXX Handle SLC XOFF (Transmit-Off)
-
-            The default implementation disables transmission of
-            in-band data until XON is received.
-        """
-        self.log.debug('SLC XOFF: Transmit Off.')
-        self.writing = False
+        pass
+#        """ XXX Handle SLC XOFF (Transmit-Off)
+#
+#            The default implementation disables transmission of
+#            in-band data until XON is received.
+#        """
+#        self.log.debug('SLC XOFF: Transmit Off.')
+#        self.writing = False
 
 # public Telnet extension callbacks
 #
@@ -1578,7 +1581,7 @@ class TelnetWriter(asyncio.StreamWriter):
         opt_kind = 'IS' if opt == IS else 'INFO' if opt == INFO else 'SEND'
         if opt == IS:
             assert self.server, ('SE: cannot recv from server: {} {}'
-                                    .format(name_command(cmd), opt_kind,))
+                                 .format(name_command(cmd), opt_kind,))
             rx, tx = str(), str()
             while len(buf):
                 value = buf.popleft()
@@ -1600,7 +1603,7 @@ class TelnetWriter(asyncio.StreamWriter):
             self._ext_callback[TSPEED](rx, tx)
         elif opt == SEND:
             assert self.client, ('SE: cannot recv from client: {} {}'
-                                    .format(name_command(cmd), opt_kind,))
+                                 .format(name_command(cmd), opt_kind,))
             (rx, tx) = self._ext_send_callback[TSPEED]()
             assert (type(rx), type(tx),) == (int, int), (rx, tx)
             brx = '{}'.format(rx).encode('ascii')
@@ -1671,13 +1674,17 @@ class TelnetWriter(asyncio.StreamWriter):
         opt = buf.popleft()
         assert cmd == NEW_ENVIRON, name_command(cmd)
         assert opt in (IS, SEND, INFO), opt
+
         env = _decode_env_buf(b''.join(buf))
         opt_kind = 'IS' if opt == IS else 'INFO' if opt == INFO else 'SEND'
-        self.log.debug('recv {} {}: {!r}'
-                       .format(name_command(cmd), opt_kind, env))
+
+        self.log.debug('recv {} {}: {!r}'.format(
+            name_command(cmd), opt_kind, b''.join(buf),))
+        self.log.debug('     ==> {!r}'.format(env))
+
         if opt in (IS, INFO):
             assert self.server, ('SE: cannot recv from server: {} {}'
-                                    .format(name_command(cmd), opt_kind,))
+                                 .format(name_command(cmd), opt_kind,))
             if opt == IS:
                 if not self.pending_option.enabled(SB + cmd):
                     self.log.debug('{} {} unsolicited'
@@ -1694,7 +1701,7 @@ class TelnetWriter(asyncio.StreamWriter):
                 self._ext_callback[cmd](env)
         elif opt == SEND:
             assert self.client, ('SE: cannot recv from client: {} {}'
-                                    .format(name_command(cmd), opt_kind))
+                                 .format(name_command(cmd), opt_kind))
             # We do _not_ honor the 'send all VAR' or 'send all USERVAR'
             # requests -- it is a small bit of a security issue.
             send_env = _encode_env_buf(
@@ -2186,6 +2193,7 @@ class Option(dict):
         dict.__setitem__(self, key, value)
     __setitem__.__doc__ = dict.__setitem__.__doc__
 
+
 def _escape_env(buf):
     """ .. function:: escape_var(buf : bytes) -> type(bytes)
 
@@ -2206,6 +2214,20 @@ def _unescape_env(buf):
     return buf.replace(ESC + VAR, VAR).replace(ESC + USERVAR, USERVAR)
 
 
+def _encode_env_buf(env):
+    """
+    Returns bytes array ``buf`` for use in sequence (IAC, SB,
+    NEW_ENVIRON, IS, <buf>, IAC, SE) as set forth in rfc-1572_.
+    """
+    buf = collections.deque()
+    for key, value in env.items():
+        buf.append(VAR)
+        buf.extend([_escape_env(key.encode('ascii'))])
+        buf.append(VALUE)
+        buf.extend([_escape_env('{}'.format(value).encode('ascii'))])
+    return b''.join(buf)
+
+
 def _decode_env_buf(buf):
     """ Returns dictionary of environment values contained in bytes array
         ``buf``, set forth in rfc1572, following sequence (IAC, SB,
@@ -2219,32 +2241,32 @@ def _decode_env_buf(buf):
         been escaped by ESC(\\x02), such as \\x02\\x03 or \\x02\\x00.
     """
     env = {}
+
+    # build table of (non-escaped) delimiters by index of buf[].
     breaks = [idx for (idx, byte) in enumerate(buf)
-              if bytes([byte]) in (VAR, USERVAR,) and
-              (idx == 0 or bytes([buf[idx - 1]]) != ESC)]
-    for start, end in zip(breaks, breaks[1:]):
-        kind = bytes([buf[start]])
-        pair = buf[start + 1:end].split(VALUE, 1)
+              if (bytes([byte]) in (VAR, USERVAR,) and
+                  (idx == 0 or bytes([buf[idx - 1]]) != ESC))]
+
+    for idx, ptr in enumerate(breaks):
+        kind = bytes([buf[ptr]])
         assert kind in (VAR, USERVAR), (kind, pair)
-        key = _unescape_env(pair[0]).decode('ascii', 'ignore')
+
+        # find buf[] starting, ending positions
+        start = ptr + 1
+        if idx == len(breaks) - 1:
+            end = len(buf)
+        else:
+            end = breaks[idx + 1]
+
+        pair = buf[start:end].split(VALUE, 1)
+        key = _unescape_env(pair[0]).decode('ascii', 'strict')
         if len(pair) == 1:
             value = ''
         else:
-            value = _unescape_env(pair[1]).decode('ascii', 'ignore')
+            value = _unescape_env(pair[1]).decode('ascii', 'strict')
         env[key] = value
+
     return env
 
-
-def _encode_env_buf(env):
-    """ Returns bytes array ``buf`` for use in sequence (IAC, SB,
-        NEW_ENVIRON, IS, <buf>, IAC, SE) as set forth in rfc1572.
-    """
-    buf = collections.deque()
-    for key, value in env.items():
-        buf.append(VAR)
-        buf.extend([_escape_env(key.encode('ascii'))])
-        buf.append(VALUE)
-        buf.extend([_escape_env('{}'.format(value).encode('ascii'))])
-    return b''.join(buf)
 
 TelnetStream = TelnetWriter  # 1.0 deprecation

@@ -3,8 +3,9 @@
 import asyncio
 
 # local
-from .accessories import (
-    TestTelnetServer,
+import telnetlib3
+from telnetlib3.tests.accessories import (
+    server_factory,
     unused_tcp_port,
     event_loop,
     bind_host,
@@ -19,7 +20,7 @@ import pytest
 @pytest.mark.skipif(
     True, reason="https://github.com/pexpect/pexpect/issues/294")
 @pytest.mark.asyncio
-def test_bsdtelnet(event_loop, bind_host, unused_tcp_port, log):
+def test_bsdtelnet(server_factory, event_loop, bind_host, unused_tcp_port, log):
     """Simple telnet(1) as client (issues 'quit' command)."""
     # if the event loop is not set in debug mode, pexpect blows up !
     # https://github.com/pexpect/pexpect/issues/294
@@ -28,12 +29,11 @@ def test_bsdtelnet(event_loop, bind_host, unused_tcp_port, log):
     server_connected = asyncio.Future()
     server_closed = asyncio.Future()
 
-    server = yield from event_loop.create_server(
-        protocol_factory=lambda: TestTelnetServer(
-            waiter_connected=server_connected,
-            waiter_closed=server_closed,
-            log=log),
-        host=bind_host, port=unused_tcp_port)
+    server = yield from telnetlib3.create_server(
+        host=bind_host, port=unused_tcp_port,
+        waiter_connected=server_connected,
+        waiter_closed=server_closed,
+        log=log)
 
     log.info('Listening on {0}'.format(server.sockets[0].getsockname()))
 

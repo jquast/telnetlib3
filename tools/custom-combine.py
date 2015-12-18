@@ -36,8 +36,9 @@ def main():
     cov.combine(data_paths=data_paths)
     cov.load()
     cov.html_report(ignore_errors=True)
-    print("--> open {0}/htmlcov/index.html for review."
-          .format(os.path.relpath(PROJ_ROOT)))
+    print("--> {magenta}open {proj_root}/htmlcov/index.html{normal}"
+          " for review.".format(magenta='\x1b[1;35m', normal='\x1b[0m',
+                                proj_root=os.path.relpath(PROJ_ROOT)))
 
     fout = six.StringIO()
     cov.report(file=fout, ignore_errors=True)

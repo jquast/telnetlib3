@@ -11,10 +11,10 @@ import telnetlib3
 
 @asyncio.coroutine
 def shell(reader, writer):
-    #print((reader, writer))
     writer.write('Would you like to play a game? ')
     resp = yield from reader.read(1)
-    writer.write('\r\nThe only way to win is to not play at all.\r\n')
+    writer.write('{0}\r\nThey say the only way to win is '
+                 'to not play at all.\r\n'.format(resp))
     writer.close()
 
 
@@ -23,16 +23,10 @@ def get_logger(loglevel='info'):
     lvl = getattr(logging, loglevel.upper())
     logging.getLogger().setLevel(lvl)
     logging.basicConfig(format=fmt)
+
     log = logging.getLogger('server')
-
-    # ifdef 0
-    # if log.isEnabledFor(logging.DEBUG):
-    #     # also set root logger and asyncio event loop as debug
-    #     logging.getLogger().setLevel(logging.DEBUG)
-    #     asyncio.get_event_loop().set_debug(True)
-    # endif
-
     return log
+
 
 def get_argparser():
     parser = argparse.ArgumentParser(
@@ -47,6 +41,7 @@ def get_argparser():
     parser.add_argument('--loglevel', dest="loglevel", default='info')
     return parser
 
+
 def parse_args():
     args = get_argparser().parse_args()
     return {
@@ -58,11 +53,13 @@ def parse_args():
         'loglevel': args.loglevel,
     }
 
+
 def disp_kv(keyvalues):
     return ' '.join('='.join(map(str, kv)) for kv in keyvalues)
 
+
 def main(host, port, **kwds):
-    log = get_logger(kwds.pop('loglevel'))
+    log = get_logger(loglevel=kwds.pop('loglevel'))
     loop = asyncio.get_event_loop()
     kwds['shell'] = shell
     server = loop.run_until_complete(telnetlib3.create_server(

@@ -42,7 +42,6 @@ class StreamReader(asyncio.StreamReader):
     def decode(self, buf, final=False):
         """Decode bytes ``buf`` using preferred encoding."""
         encoding = self._protocol.encoding(incoming=True)
-        self.log.debug('decode: {!r}'.format(encoding))
 
         # late-binding,
         if (self._decoder is None or encoding != self._decoder._encoding):

@@ -4,8 +4,8 @@ import subprocess
 import asyncio
 
 # local imports
-from .accessories import (
-    TestTelnetServer,
+from telnetlib3.tests.accessories import (
+    server_factory,
     unused_tcp_port,
     event_loop,
     bind_host,
@@ -47,12 +47,9 @@ def get_netcat():
 @pytest.mark.asyncio
 def test_netcat_z(event_loop, bind_host, unused_tcp_port, log):
     """Simple nc(1) -z as client (rapidly disconnecting client)."""
-    waiter_closed = asyncio.Future()
 
     server = yield from event_loop.create_server(
-        protocol_factory=lambda: TestTelnetServer(
-            waiter_closed=waiter_closed,
-            log=log),
+        protocol_factory=lambda: server_factory(log=log),
         host=bind_host, port=unused_tcp_port)
 
     log.info('Listening on {0}'.format(server.sockets[0].getsockname()))
@@ -62,8 +59,12 @@ def test_netcat_z(event_loop, bind_host, unused_tcp_port, log):
         stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )
 
-    done, pending = yield from asyncio.wait(
-        [waiter_closed, netcat.wait()],
-        loop=event_loop, timeout=1)
+    wait_for = [netcat.wait()]
+    done, pending = yield from asyncio.wait(wait_for,
+                                            loop=event_loop,
+                                            timeout=1)
+    assert not pending, (done, pending, wait_for)
 
-    assert not pending, (netcat, waiter_closed)
+    server.close()
+    yield from server.wait_closed()
+

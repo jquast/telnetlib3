@@ -7,7 +7,8 @@ import sys
 
 from .stream_writer import TelnetWriter
 from .stream_reader import StreamReader
-from .shell import TelnetShell, telnet_shell
+from .shell import TelnetShell
+
 
 class BaseServer(asyncio.Protocol):
     """Base Telnet Server Protocol API."""
@@ -33,8 +34,8 @@ class BaseServer(asyncio.Protocol):
     _closing = False
 
     def __init__(self, reader_factory=None, writer_factory=None,
-                 shell=None, waiter_connected=None,
-                 waiter_closed=None, log=None, loop=None):
+                 shell=None, waiter_connected=None, waiter_closed=None,
+                 log=None, loop=None):
         """Class initializer."""
         self.log = log or logging.getLogger(__name__)
         if shell:
@@ -46,12 +47,11 @@ class BaseServer(asyncio.Protocol):
         self._loop = loop or asyncio.get_event_loop()
         self._extra = dict()
         self.waiter_connected = waiter_connected or asyncio.Future()
-        self._tasks = [self.waiter_connected]
         self.waiter_closed = waiter_closed or asyncio.Future()
+        self._tasks = [self.waiter_connected]
         self.shell = shell
         self.reader = None
         self.writer = None
-
 
     # Base protocol methods
 
@@ -76,13 +76,12 @@ class BaseServer(asyncio.Protocol):
 
         # cancel protocol tasks
         for task in self._tasks:
-            task.cancel()
+            if not task.done():
+                task.cancel()
 
         # close transport if it is not already, such as user-requested Logout.
         self._transport.close()
-
         self.waiter_closed.set_result(self)
-
 
     def connection_made(self, transport):
         """
@@ -93,8 +92,6 @@ class BaseServer(asyncio.Protocol):
 
         Ensure ``super().connection_made(transport)`` is called when derived.
         """
-        peername = transport.get_extra_info('peername')
-
         self._transport = transport
         self._when_connected = datetime.datetime.now()
         self._last_received = datetime.datetime.now()
@@ -219,7 +216,6 @@ class BaseServer(asyncio.Protocol):
                         self.writer.remote_option.items())
         client_will = sum(enabled for _, enabled in
                           self.writer.local_option.items())
-        self.log.debug('any DO or WILL? {0}'.format(server_do or client_will))
         return server_do or client_will
 
     def check_negotiation(self, final=False):
@@ -277,8 +273,8 @@ class BaseServer(asyncio.Protocol):
         if not self._advanced:
             if self.negotiation_should_advance():
                 self._advanced = True
-                val = self._loop.call_soon(self.begin_advanced_negotiation)
-                self.log.debug('negotiation will advance: {0}'.format(val))
+                self.log.debug('begin advanced negotiation')
+                self._loop.call_soon(self.begin_advanced_negotiation)
 
         # negotiation is complete (returns True) when all negotiation options
         # that have been requested have been acknowledged.
