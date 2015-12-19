@@ -19,7 +19,6 @@ class UnicodeMixin(server_base.BaseServer):
         """
         # set default encoding, may be negotiated !
         self.default_encoding = encoding
-        assert encoding, encoding
         self.encoding_error = encoding_error
         self.force_binary = force_binary
 
@@ -41,6 +40,7 @@ class UnicodeMixin(server_base.BaseServer):
 
     def check_negotiation(self, final=False):
         """Periodically check for completion of :attr:`waiter_encoding`."""
+        from .telopt import TTYPE
         parent = super().check_negotiation()
 
         if self.waiter_encoding.done():
@@ -52,10 +52,20 @@ class UnicodeMixin(server_base.BaseServer):
             self.log.debug('encoding complete: {0!r}'.format(encoding))
             self.waiter_encoding.set_result(self)
 
+        elif self.writer.remote_option.get(TTYPE) == False:
+            # if the remote end doesn't support TTYPE, which is agreed upon
+            # to continue towards advanced negotiation of CHARSET, we assume
+            # the distant end would not support it, declaring encoding failed.
+            self.log.debug('encoding failed after {0:1.2f}s: {1}'
+                           .format(self.duration, encoding))
+            self.waiter_encoding.set_result(self)
+            result = True
+
         elif final:
             self.log.debug('encoding failed after {0:1.2f}s: {1}'
                            .format(self.duration, encoding))
             self.waiter_encoding.set_result(self)
+            result = True
 
         return parent and result
 

@@ -235,7 +235,7 @@ class BaseServer(asyncio.Protocol):
                            .format(self.duration))
             self.waiter_connected.set_result(self)
             return False
-        return True
+        return result
 
     # private methods
 

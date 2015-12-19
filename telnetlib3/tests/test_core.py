@@ -57,7 +57,7 @@ def test_create_server_on_connect(
 
 
 @pytest.mark.asyncio
-def test_telnet_server(
+def test_telnet_server_instantiation(
         server_factory, event_loop, bind_host, unused_tcp_port, log):
     """Test telnetlib3.TelnetServer() instantiation and connection_made()."""
     # given,
@@ -71,7 +71,7 @@ def test_telnet_server(
 
 
 @pytest.mark.asyncio
-def test_telnet_server(
+def test_telnet_server_advanced_negotiation(
         server_factory, event_loop, bind_host, unused_tcp_port, log):
     """Test telnetlib3.TelnetServer() advanced negotiation."""
     # given
