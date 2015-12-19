@@ -19,7 +19,7 @@ import pytest
 @pytest.mark.asyncio
 def test_telnet_server_encoding_default(
         event_loop, bind_host, unused_tcp_port, log):
-    """Test Server's default encoding."""
+    """Default encoding."""
     from telnetlib3.telopt import IAC, WONT, TTYPE
     # given
     _waiter = asyncio.Future()
@@ -48,7 +48,7 @@ def test_telnet_server_encoding_default(
 @pytest.mark.asyncio
 def test_telnet_server_encoding_client_will(
         event_loop, bind_host, unused_tcp_port, log):
-    """Test Server's default encoding."""
+    """Server Default encoding (utf8) incoming when client WILL."""
     from telnetlib3.telopt import IAC, WONT, WILL, TTYPE, BINARY
     # given
     _waiter = asyncio.Future()
@@ -74,9 +74,9 @@ def test_telnet_server_encoding_client_will(
 
 
 @pytest.mark.asyncio
-def test_telnet_server_encoding_server_will(
+def test_telnet_server_encoding_server_do(
         event_loop, bind_host, unused_tcp_port, log):
-    """Test Server's default encoding."""
+    """Server's default encoding."""
     from telnetlib3.telopt import IAC, WONT, DO, TTYPE, BINARY
     # given
     _waiter = asyncio.Future()
@@ -104,7 +104,7 @@ def test_telnet_server_encoding_server_will(
 @pytest.mark.asyncio
 def test_telnet_server_encoding_bidirectional(
         event_loop, bind_host, unused_tcp_port, log):
-    """Test Server's default encoding."""
+    """Server's default encoding with bi-directional BINARY negotiation."""
     from telnetlib3.telopt import IAC, WONT, DO, WILL, TTYPE, BINARY
     # given
     _waiter = asyncio.Future()
@@ -128,3 +128,40 @@ def test_telnet_server_encoding_bidirectional(
     assert srv_instance.encoding(incoming=True) == 'utf8'
     assert srv_instance.encoding(outgoing=True) == 'utf8'
     assert srv_instance.encoding(incoming=True, outgoing=True) == 'utf8'
+
+
+@pytest.mark.asyncio
+def test_telnet_server_encoding_by_LANG(
+        event_loop, bind_host, unused_tcp_port, log):
+    """Server's encoding negotiated by LANG value."""
+    from telnetlib3.telopt import (
+        IAC, WONT, DO, WILL, TTYPE, BINARY,
+        WILL, SB, SE, IS, NEW_ENVIRON)
+    # given
+    _waiter = asyncio.Future()
+    event_loop.set_debug(True)
+
+    yield from telnetlib3.create_server(
+        host=bind_host, port=unused_tcp_port,
+        waiter_connected=_waiter,
+        loop=event_loop, log=log)
+
+    reader, writer = yield from asyncio.open_connection(
+        host=bind_host, port=unused_tcp_port, loop=event_loop)
+
+    # exercise, quickly failing negotiation/encoding.
+    writer.write(IAC + DO + BINARY)
+    writer.write(IAC + WILL + BINARY)
+    writer.write(IAC + WILL + NEW_ENVIRON)
+    writer.write(IAC + SB + NEW_ENVIRON + IS +
+                 telnetlib3.stream_writer._encode_env_buf({
+                     'LANG': 'uk_UA.KOI8-U',
+                 }) + IAC + SE)
+    writer.write(IAC + WONT + TTYPE)
+
+    # verify,
+    srv_instance = yield from asyncio.wait_for(_waiter, 0.5)
+    assert srv_instance.encoding(incoming=True) == 'KOI8-U'
+    assert srv_instance.encoding(outgoing=True) == 'KOI8-U'
+    assert srv_instance.encoding(incoming=True, outgoing=True) == 'KOI8-U'
+    assert srv_instance.get_extra_info('LANG') == 'uk_UA.KOI8-U'
