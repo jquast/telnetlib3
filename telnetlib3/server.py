@@ -24,7 +24,6 @@ class TelnetServer(UnicodeMixin, TimeoutServerMixin):
         self._extra.update({'term': term, 'cols': cols, 'rows': rows})
         self._ttype_count = 1
 
-
     def connection_made(self, transport):
         from .telopt import NAWS, NEW_ENVIRON, TSPEED, TTYPE, XDISPLOC
         super().connection_made(transport)
@@ -45,11 +44,8 @@ class TelnetServer(UnicodeMixin, TimeoutServerMixin):
         Deriving implementations should always call
         ``super().begin_negotiation()``.
         """
-        if self._closing:
-            return
-        super().begin_negotiation()
-
         from .telopt import DO, TTYPE
+        super().begin_negotiation()
         self.writer.iac(DO, TTYPE)
 
     def begin_advanced_negotiation(self):
