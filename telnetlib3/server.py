@@ -1,6 +1,5 @@
 # std imports
 import asyncio
-import socket
 
 # local
 from .server_mixins import UnicodeMixin, TimeoutServerMixin
@@ -144,11 +143,11 @@ class TelnetServer(UnicodeMixin, TimeoutServerMixin):
 
 @asyncio.coroutine
 def create_server(
-    protocol_factory=None, host=None, port=23, *,
-    loop=None, log=None, encoding='utf8', encoding_error='replace',
-    force_binary=False, term='unknown', cols=80, rows=25, timeout=300,
-    shell=None, reader_factory=None, writer_factory=None,
-    waiter_closed=None, waiter_connected=None
+    protocol_factory=None, host=None, port=23, *, loop=None, log=None,
+    encoding='utf8', encoding_error='replace', force_binary=False,
+    term='unknown', cols=80, rows=25, timeout=300, shell=None,
+    reader_factory=None, writer_factory=None, waiter_closed=None,
+    waiter_connected=None
 ):
     """
     Create a Telnet Server
@@ -164,10 +163,10 @@ def create_server(
 
     def on_connect():
         return protocol_factory(
-            loop=loop, log=log, encoding='utf8', encoding_error='replace',
-            force_binary=False, term='unknown', cols=80, rows=25, timeout=300,
-            shell=shell, reader_factory=reader_factory,
-            writer_factory=writer_factory, waiter_closed=waiter_closed,
-            waiter_connected=waiter_connected)
+            loop=loop, log=log, encoding=encoding,
+            encoding_error=encoding_error, force_binary=force_binary,
+            term=term, cols=cols, rows=rows, timeout=timeout, shell=shell,
+            reader_factory=reader_factory, writer_factory=writer_factory,
+            waiter_closed=waiter_closed, waiter_connected=waiter_connected)
 
     return (yield from loop.create_server(on_connect, host, port))
