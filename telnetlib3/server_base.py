@@ -69,11 +69,11 @@ class BaseServer(asyncio.Protocol):
         self._closing = True
 
         # inform about closed connection
-        self.log.info('Connection lost to %s: %s', self,
-                      'EOF' if exc is None else exc)
         if exc is None:
+            self.log.info('Connection closed for %s: EOF by server', self)
             self.reader.feed_eof()
         if exc:
+            self.log.info('Connection lost to %s: %s', self, exc)
             self.reader.set_exception(exc)
 
         # cancel protocol tasks, namely on-connect negotiations
