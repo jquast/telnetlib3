@@ -6,8 +6,6 @@ import struct
 # local imports
 import telnetlib3
 from telnetlib3.tests.accessories import (
-    server_factory,
-    TestTelnetClient,
     unused_tcp_port,
     event_loop,
     bind_host,
@@ -20,12 +18,10 @@ import pytest
 
 @pytest.mark.asyncio
 def test_telnet_server_on_naws(
-        server_factory, event_loop, bind_host, unused_tcp_port, log):
+        event_loop, bind_host, unused_tcp_port, log):
     """Test Server's Negotiate about window size (NAWS)."""
     # given
-    from telnetlib3.telopt import (
-        IAC, WILL, SB, SE, NAWS
-    )
+    from telnetlib3.telopt import IAC, WILL, SB, SE, NAWS
     _waiter = asyncio.Future()
     given_cols, given_rows = 40, 20
 

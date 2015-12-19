@@ -6,7 +6,6 @@ import asyncio
 import telnetlib3
 import telnetlib3.stream_writer
 from telnetlib3.tests.accessories import (
-    server_factory,
     unused_tcp_port,
     event_loop,
     bind_host,
@@ -18,13 +17,10 @@ import pytest
 
 
 @pytest.mark.asyncio
-def test_telnet_server_on_ttype(
-        server_factory, event_loop, bind_host, unused_tcp_port, log):
+def test_telnet_server_on_ttype(event_loop, bind_host, unused_tcp_port, log):
     """Test Server's callback method on_ttype()."""
     # given
-    from telnetlib3.telopt import (
-        IAC, WILL, SB, SE, IS, TTYPE
-    )
+    from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TTYPE
     _waiter = asyncio.Future()
     event_loop.set_debug(True)
 
@@ -55,7 +51,7 @@ def test_telnet_server_on_ttype(
 
 @pytest.mark.asyncio
 def test_telnet_server_on_ttype_beyond_max(
-        server_factory, event_loop, bind_host, unused_tcp_port, log):
+        event_loop, bind_host, unused_tcp_port, log):
     """
     Test Server's callback method on_ttype() with long list.
 
@@ -65,9 +61,7 @@ def test_telnet_server_on_ttype_beyond_max(
     an infinite loop with a distant end that is not conforming.
     """
     # given
-    from telnetlib3.telopt import (
-        IAC, WILL, SB, SE, IS, TTYPE
-    )
+    from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TTYPE
     _waiter = asyncio.Future()
     event_loop.set_debug(True)
     given_ttypes = ('ALPHA', 'BETA', 'GAMMA', 'DETLA',
@@ -112,12 +106,10 @@ def test_telnet_server_on_ttype_beyond_max(
 
 @pytest.mark.asyncio
 def test_telnet_server_on_ttype_empty(
-        server_factory, event_loop, bind_host, unused_tcp_port, log):
+        event_loop, bind_host, unused_tcp_port, log):
     """Test Server's callback method on_ttype(): empty value is ignored. """
     # given
-    from telnetlib3.telopt import (
-        IAC, WILL, SB, SE, IS, TTYPE
-    )
+    from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TTYPE
     _waiter = asyncio.Future()
     event_loop.set_debug(True)
     given_ttypes = ('ALPHA', '', 'BETA')
@@ -152,12 +144,10 @@ def test_telnet_server_on_ttype_empty(
 
 @pytest.mark.asyncio
 def test_telnet_server_on_ttype_looped(
-        server_factory, event_loop, bind_host, unused_tcp_port, log):
+        event_loop, bind_host, unused_tcp_port, log):
     """Test Server's callback method on_ttype() when value looped. """
     # given
-    from telnetlib3.telopt import (
-        IAC, WILL, SB, SE, IS, TTYPE
-    )
+    from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TTYPE
     _waiter = asyncio.Future()
     event_loop.set_debug(True)
     given_ttypes = ('ALPHA', 'BETA', 'GAMMA', 'ALPHA')
@@ -197,12 +187,10 @@ def test_telnet_server_on_ttype_looped(
 
 @pytest.mark.asyncio
 def test_telnet_server_on_ttype_repeated(
-        server_factory, event_loop, bind_host, unused_tcp_port, log):
+        event_loop, bind_host, unused_tcp_port, log):
     """Test Server's callback method on_ttype() when value repeats. """
     # given
-    from telnetlib3.telopt import (
-        IAC, WILL, SB, SE, IS, TTYPE
-    )
+    from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TTYPE
     _waiter = asyncio.Future()
     event_loop.set_debug(True)
     given_ttypes = ('ALPHA', 'BETA', 'GAMMA', 'GAMMA')
@@ -242,12 +230,10 @@ def test_telnet_server_on_ttype_repeated(
 
 @pytest.mark.asyncio
 def test_telnet_server_on_ttype_mud(
-        server_factory, event_loop, bind_host, unused_tcp_port, log):
+        event_loop, bind_host, unused_tcp_port, log):
     """Test Server's callback method on_ttype() for MUD clients (MTTS). """
     # given
-    from telnetlib3.telopt import (
-        IAC, WILL, SB, SE, IS, TTYPE
-    )
+    from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TTYPE
     _waiter = asyncio.Future()
     event_loop.set_debug(True)
     given_ttypes = ('ALPHA', 'BETA', 'MTTS 137')

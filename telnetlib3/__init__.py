@@ -1,6 +1,7 @@
 """telnetlib3: an asyncio Telnet Protocol implemented in python."""
 # pylint: disable=wildcard-import,undefined-variable
 from .server import *
+from .server_base import *
 from .client import *
 from .shell import *
 from .telopt import *
@@ -8,6 +9,7 @@ from .slc import *
 from .conio import *
 
 __all__ = (server.__all__ +
+           server_base.__all__ +
            client.__all__ +
            shell.__all__ +
            telopt.__all__ +

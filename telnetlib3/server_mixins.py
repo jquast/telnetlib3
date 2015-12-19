@@ -43,16 +43,14 @@ class UnicodeMixin(server_base.BaseServer):
         from .telopt import TTYPE
         parent = super().check_negotiation()
 
-        if self.waiter_encoding.done():
-            return parent
-
         result = self._check_encoding()
         encoding = self.encoding(outgoing=True, incoming=True)
-        if result:
+        if not self.waiter_encoding.done() and result:
             self.log.debug('encoding complete: {0!r}'.format(encoding))
             self.waiter_encoding.set_result(self)
 
-        elif self.writer.remote_option.get(TTYPE) == False:
+        elif (not self.waiter_encoding.done() and
+              self.writer.remote_option.get(TTYPE) is False):
             # if the remote end doesn't support TTYPE, which is agreed upon
             # to continue towards advanced negotiation of CHARSET, we assume
             # the distant end would not support it, declaring encoding failed.
@@ -61,7 +59,7 @@ class UnicodeMixin(server_base.BaseServer):
             self.waiter_encoding.set_result(self)
             result = True
 
-        elif final:
+        elif not self.waiter_encoding.done() and final:
             self.log.debug('encoding failed after {0:1.2f}s: {1}'
                            .format(self.duration, encoding))
             self.waiter_encoding.set_result(self)
@@ -104,7 +102,6 @@ class UnicodeMixin(server_base.BaseServer):
                        (_bidirectional and self.outbinary and self.inbinary))
 
         encoding = 'US-ASCII'
-        assert self.default_encoding, repr(self.default_encoding)
         if self.force_binary or _may_encode:
             encoding = self.default_encoding
 

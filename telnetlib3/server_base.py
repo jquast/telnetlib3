@@ -9,6 +9,8 @@ from .stream_writer import TelnetWriter
 from .stream_reader import StreamReader
 from .shell import TelnetShell
 
+__all__ = ('BaseServer',)
+
 
 class BaseServer(asyncio.Protocol):
     """Base Telnet Server Protocol API."""
@@ -17,7 +19,7 @@ class BaseServer(asyncio.Protocol):
     #: completion of waiter :attr:`waiter_connected`.
     CONNECT_MAXWAIT = 4.00
 
-    #: maximum timer length for ``_check_negotiation``
+    #: maximum timer length for ``check_negotiation``
     #: re-scheduling (default: 50ms)
     CONNECT_DEFERRED = 0.05
 
@@ -74,10 +76,9 @@ class BaseServer(asyncio.Protocol):
         if exc:
             self.reader.set_exception(exc)
 
-        # cancel protocol tasks
+        # cancel protocol tasks, namely on-connect negotiations
         for task in self._tasks:
-            if not task.done():
-                task.cancel()
+            task.cancel()
 
         # close transport if it is not already, such as user-requested Logout.
         self._transport.close()
@@ -106,9 +107,7 @@ class BaseServer(asyncio.Protocol):
 
         self.log.info('Connection from %s', self)
 
-        if self.shell:
-            self.waiter_connected.add_done_callback(self.begin_shell)
-
+        self.waiter_connected.add_done_callback(self.begin_shell)
         self._loop.call_soon(self.begin_negotiation)
 
     def begin_shell(self, result):
@@ -162,8 +161,6 @@ class BaseServer(asyncio.Protocol):
         immediately after connection.  Deriving implementations should always
         call ``super().begin_negotiation()``.
         """
-        if self._closing:
-            return
         self._check_later = self._loop.call_soon(self._check_negotiation_timer)
         self._tasks.append(self._check_later)
 
@@ -185,9 +182,13 @@ class BaseServer(asyncio.Protocol):
         pass
 
     def encoding(self, outgoing=False, incoming=False):
-        """Encoding that should be used for the direction indicated."""
+        """
+        Encoding that should be used for the direction indicated.
+
+        The base implementation **always** returns ``US-ASCII``.
+        """
         # pylint: disable=unused-argument,no-self-use
-        return 'US-ASCII'
+        return 'US-ASCII'  # pragma: no cover
 
     @property
     def duration(self):
@@ -216,69 +217,53 @@ class BaseServer(asyncio.Protocol):
                         self.writer.remote_option.items())
         client_will = sum(enabled for _, enabled in
                           self.writer.local_option.items())
-        return server_do or client_will
+        return bool(server_do or client_will)
 
     def check_negotiation(self, final=False):
         """
-        Returns whether negotiation is complete.
+        Callback, return whether negotiation is complete.
 
         :param bool final: Whether this is the final time this callback
             will be requested to answer regarding protocol negotiation.
-        :returns: Whether negotiation is final.
+        :returns: Whether negotiation is over (server end is satisfied).
         :rtype: bool
-
-        Ensure ``super().check_negotiation()`` is called when derived.
-        """
-        result = self._check_negotiation()
-        if final and not result:
-            self.log.debug('negotiation failed after {:1.2f}s.'
-                           .format(self.duration))
-            self.waiter_connected.set_result(self)
-            return False
-        return result
-
-    # private methods
-
-    def _check_negotiation_timer(self):
-        if self._closing:
-            return
-        self._check_later.cancel()
-        self._tasks.remove(self._check_later)
-
-        later = self.CONNECT_MAXWAIT - self.duration
-
-        if self.check_negotiation(final=bool(later < 0)):
-            self.log.debug('negotiation complete after {:1.2f}s.'
-                           .format(self.duration))
-            self.waiter_connected.set_result(self)
-
-        else:
-            self._check_later = self._loop.call_later(
-                later, self._check_negotiation_timer)
-            self._tasks.append(self._check_later)
-
-    def _check_negotiation(self):
-        """
-        Callback check until on-connect negotiation is complete.
 
         Method is called on each new command byte processed until negotiation
         is considered final, or after :attr:`CONNECT_MAXWAIT` has elapsed,
         setting :attr:`waiter_connected` to value ``self`` when complete.
-        """
-        if self._closing:
-            return
-        if self.waiter_connected.done():
-            return
 
-        if not self._advanced:
-            if self.negotiation_should_advance():
-                self._advanced = True
-                self.log.debug('begin advanced negotiation')
-                self._loop.call_soon(self.begin_advanced_negotiation)
+        Ensure ``super().check_negotiation()`` is called and conditionally
+        combined when derived.
+        """
+        if not self._advanced and self.negotiation_should_advance():
+            self._advanced = True
+            self.log.debug('begin advanced negotiation')
+            self._loop.call_soon(self.begin_advanced_negotiation)
 
         # negotiation is complete (returns True) when all negotiation options
         # that have been requested have been acknowledged.
         return not any(self.writer.pending_option.values())
+
+    def _check_negotiation_timer(self):
+        self._check_later.cancel()
+        self._tasks.remove(self._check_later)
+
+        later = self.CONNECT_MAXWAIT - self.duration
+        final = bool(later < 0)
+
+        if self.check_negotiation(final=final):
+            self.log.debug('negotiation complete after {:1.2f}s.'
+                           .format(self.duration))
+            self.waiter_connected.set_result(self)
+        elif final:
+            self.log.debug('negotiation failed after {:1.2f}s.'
+                           .format(self.duration))
+            self.waiter_connected.set_result(self)
+        else:
+            # keep re-queueing
+            self._check_later = self._loop.call_later(
+                later, self._check_negotiation_timer)
+            self._tasks.append(self._check_later)
 
     @staticmethod
     def _log_exception(logger, e_type, e_value, e_tb):

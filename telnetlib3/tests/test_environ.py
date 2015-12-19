@@ -6,7 +6,6 @@ import asyncio
 import telnetlib3
 import telnetlib3.stream_writer
 from telnetlib3.tests.accessories import (
-    server_factory,
     unused_tcp_port,
     event_loop,
     bind_host,
@@ -19,7 +18,7 @@ import pytest
 
 @pytest.mark.asyncio
 def test_telnet_server_on_environ(
-        server_factory, event_loop, bind_host, unused_tcp_port, log):
+        event_loop, bind_host, unused_tcp_port, log):
     """Test Server's callback method on_environ()."""
     # given
     from telnetlib3.telopt import (
