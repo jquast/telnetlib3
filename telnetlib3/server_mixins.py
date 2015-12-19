@@ -17,7 +17,6 @@ class UnicodeMixin(server_base.BaseServer):
         :param bool force_binary: When ``True``, the encoding specified is
             used for both directions without ``BINARY`` negotiation, rfc-856_.
         """
-        # set default encoding, may be negotiated !
         self.default_encoding = encoding
         self.encoding_error = encoding_error
         self.force_binary = force_binary
@@ -101,17 +100,15 @@ class UnicodeMixin(server_base.BaseServer):
                        (_incoming_only and self.inbinary) or
                        (_bidirectional and self.outbinary and self.inbinary))
 
-        encoding = 'US-ASCII'
         if self.force_binary or _may_encode:
-            encoding = self.default_encoding
-
-            # TODO: how do we better parse LANG using std library?
+            # prefer 'LANG' environment variable, if sent
             _lang = self.get_extra_info('LANG', None)
             if _lang and '.' in _lang:
                 _, encoding = _lang.split('.', 1)
-            encoding = self.get_extra_info('encoding', encoding)
-
-        return encoding
+                return encoding
+            # then our less common CHARSET negotiation,
+            return self.get_extra_info('encoding', self.default_encoding)
+        return 'US-ASCII'
 
     @property
     def inbinary(self):
@@ -126,7 +123,7 @@ class UnicodeMixin(server_base.BaseServer):
         return self.writer.local_option.enabled(BINARY)
 
     def _check_encoding(self):
-        """Periodically check for completion of ``waiter_encoding``."""
+        # Periodically check for completion of ``waiter_encoding``.
         from .telopt import DO, BINARY
         if (self.outbinary and not self.inbinary and
                 not DO + BINARY in self.writer.pending_option):
@@ -146,17 +143,12 @@ class TimeoutServerMixin(server_base.BaseServer):
             method :meth:`on_timeout` after given seconds have elapsed
             without client input.
         """
-        self._timer = asyncio.Future()
-        self.waiter_timeout = asyncio.Future()
-        self.waiter_timeout.add_done_callback(self.on_timeout)
-
         super().__init__(**kwargs)
-
-        self._extra['timeout'] = timeout
-        self._tasks.append(self.waiter_timeout)
+        self._timer = None
+        self.set_timeout(duration=timeout)
 
     def data_received(self, data):
-        """Derive and cause timer reset."""
+        # Derive and cause timer reset.
         self.set_timeout()
         super().data_received(data)
 
@@ -170,30 +162,26 @@ class TimeoutServerMixin(server_base.BaseServer):
             of :meth:`get_extra_info` for keyword ``timeout`` is used.
             When non-True, :attr:`waiter_timeout` is cancelled.
         """
-        self._timer.cancel()
         if duration == -1:
-            duration = self.get_extra_info('timeout', 0)
+            duration = self.get_extra_info('timeout')
+        if self._timer is not None:
+            if self._timer in self._tasks:
+                self._tasks.remove(self._timer)
+            self._timer.cancel()
         if duration:
-            self._timer = self._loop.call_later(duration, self._raise_timeout)
+            self._timer = self._loop.call_later(duration, self.on_timeout)
+            self._tasks.append(self._timer)
+        self._extra['timeout'] = duration
 
     def on_timeout(self, result):
         """
         Callback received on session timeout.
 
-        Default implementation closes transport.
+        Default implementation writes "Timeout." bound by CRLF and closes.
 
-        This method is added as callback to :class:`asyncio.Future`
-        instance :attr:`waiter_timeout`, and can be disabled by calling
-        :meth:`set_timeout` with :paramref:`~.set_timeout.duration`
-        value of ``0``.
+        This can be disabled by calling :meth:`set_timeout` with
+        :paramref:`~.set_timeout.duration` value of ``0`` or value of
+        the same for keyword argument ``timeout``.
         """
-        if not self._closing:
-            # emit a simple farewell message to client before closing.
-            self._transport.write(b'\r\nTimeout.\r\n')
-            self._transport.close()
-
-    def _raise_timeout(self):
-        """Callback on :attr:`_timer` set by :meth:`set_timeout`."""
-        if self._closing:
-            return
-        self.waiter_timeout.set_result(True)
+        self.writer.write('\r\nTimeout.\r\n')
+        self.connection_lost(None)
