@@ -82,16 +82,9 @@ def test_telnet_server_waitfor_timeout(
     """Test callback on_timeout() as coroutine of create_server()."""
     from telnetlib3.telopt import IAC, DO, WONT, TTYPE
     # given,
-    _waiter = asyncio.Future()
     expected_output = IAC + DO + TTYPE + b'\r\nTimeout.\r\n'
 
-    class ServerTestTimeout(telnetlib3.TelnetServer):
-        def on_timeout(self):
-            super().on_timeout(self)
-            _waiter.set_result(self)
-
     yield from telnetlib3.create_server(
-        protocol_factory=ServerTestTimeout,
         host=bind_host, port=unused_tcp_port,
         timeout=0.050, loop=event_loop, log=log)
 
@@ -101,9 +94,7 @@ def test_telnet_server_waitfor_timeout(
     writer.write(IAC + WONT + TTYPE)
 
     stime = time.time()
-    server = yield from asyncio.wait_for(_waiter, 0.5)
     output = yield from asyncio.wait_for(reader.read(), 0.5)
     elapsed = time.time() - stime
     assert 0.050 <= round(elapsed, 3) <= 0.100
     assert output == expected_output
-    assert server._closing

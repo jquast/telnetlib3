@@ -90,7 +90,7 @@ def test_telnet_server_encoding_server_do(
     reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
-    # exercise, quickly failing negotiation/encoding.
+    # exercise, server will binary
     writer.write(IAC + DO + BINARY)
     writer.write(IAC + WONT + TTYPE)
 
@@ -118,7 +118,7 @@ def test_telnet_server_encoding_bidirectional(
     reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
-    # exercise, quickly failing negotiation/encoding.
+    # exercise, bi-directional BINARY with quickly failing negotiation.
     writer.write(IAC + DO + BINARY)
     writer.write(IAC + WILL + BINARY)
     writer.write(IAC + WONT + TTYPE)
@@ -149,7 +149,7 @@ def test_telnet_server_encoding_by_LANG(
     reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
-    # exercise, quickly failing negotiation/encoding.
+    # exercise, bi-direction binary with LANG variable.
     writer.write(IAC + DO + BINARY)
     writer.write(IAC + WILL + BINARY)
     writer.write(IAC + WILL + NEW_ENVIRON)

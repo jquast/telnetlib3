@@ -149,4 +149,4 @@ class StreamReader(asyncio.StreamReader):
     def __repr__(self):
         """Description of stream encoding state."""
         encoding = self._protocol.encoding(outgoing=True)
-        return '<StreamReader encoding={0}>'.format(encoding)
+        return '<TelnetReader encoding={0}>'.format(encoding)

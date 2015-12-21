@@ -41,7 +41,7 @@ def test_create_server_on_connect(event_loop, bind_host, unused_tcp_port, log):
     """Test on_connect() anonymous function callback of create_server."""
     # given,
     given_pf = unittest.mock.MagicMock()
-    server = yield from telnetlib3.create_server(
+    yield from telnetlib3.create_server(
         protocol_factory=given_pf,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop, log=log)
@@ -54,17 +54,27 @@ def test_create_server_on_connect(event_loop, bind_host, unused_tcp_port, log):
 
 
 @pytest.mark.asyncio
-def test_telnet_server_instantiation(
+def test_telnet_server_open_close(
         event_loop, bind_host, unused_tcp_port, log):
     """Test telnetlib3.TelnetServer() instantiation and connection_made()."""
+    from telnetlib3.telopt import IAC, WONT, TTYPE
     # given,
+    _waiter = asyncio.Future()
     yield from telnetlib3.create_server(
+        waiter_connected=_waiter,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop, log=log)
 
     # exercise,
-    yield from asyncio.open_connection(
+    reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
+
+    writer.write(IAC + WONT + TTYPE + b'bye\r')
+    server = yield from asyncio.wait_for(_waiter, 0.5)
+    server.writer.write('Goodbye!')
+    server.writer.close()
+    result = yield from reader.read()
+    assert result == b'\xff\xfd\x18Goodbye!'
 
 
 @pytest.mark.asyncio
@@ -92,12 +102,10 @@ def test_telnet_server_advanced_negotiation(
 
     # exercise,
     writer.write(IAC + WILL + TTYPE)
-    srv_writer = (yield from _waiter).writer
-
     server = yield from asyncio.wait_for(_waiter, 0.5)
 
     # verify,
-    assert server.writer.remote_option[TTYPE] == True
+    assert server.writer.remote_option[TTYPE] is True
     assert server.writer.pending_option == {
         # server's request to negotiation TTYPE affirmed
         DO + TTYPE: False,
@@ -167,7 +175,7 @@ def test_telnet_server_eof_by_client(
 @pytest.mark.asyncio
 def test_telnet_server_closed_by_server(
         event_loop, bind_host, unused_tcp_port, log):
-    """Exercise TelnetServer.connection_lost."""
+    """Exercise TelnetServer.connection_lost by close()."""
     from telnetlib3.telopt import IAC, DO, WONT, TTYPE
 
     # given
@@ -185,7 +193,7 @@ def test_telnet_server_closed_by_server(
 
     # data received by client, connection is made
     expect_hello = IAC + DO + TTYPE
-    hello_reply = IAC + WONT + TTYPE
+    hello_reply = IAC + WONT + TTYPE + b'quit' + b'\r\n'
 
     # exercise,
     hello = yield from reader.readexactly(len(expect_hello))
@@ -229,6 +237,40 @@ def test_telnet_server_idle_duration(
     # exercise
     assert 0 <= server.idle <= 0.5
     assert 0 <= server.duration <= 0.5
+
+
+@pytest.mark.asyncio
+def test_telnet_server_closed_by_exception(
+        event_loop, bind_host, unused_tcp_port, log):
+    """Exercise TelnetServer.connection_lost by exception."""
+    from telnetlib3.telopt import IAC, DO, WONT, TTYPE
+
+    # given
+    _waiter_connected = asyncio.Future()
+    _waiter_closed = asyncio.Future()
+
+    yield from telnetlib3.create_server(
+        waiter_connected=_waiter_connected,
+        waiter_closed=_waiter_closed,
+        host=bind_host, port=unused_tcp_port,
+        loop=event_loop, log=log)
+
+    reader, writer = yield from asyncio.open_connection(
+        host=bind_host, port=unused_tcp_port, loop=event_loop)
+
+    writer.write(IAC + WONT + TTYPE)
+    server = yield from asyncio.wait_for(_waiter_connected, 0.5)
+
+    class CustomException(Exception):
+        pass
+
+    # exercise, by connection_lost(exc=Exception())..
+    server.writer.write('Bye!')
+    server.connection_lost(exc=CustomException('blah!'))
+
+    # verify, custom exceptiohn is thrown into any yielding reader
+    with pytest.raises(CustomException):
+        yield from server.reader.read()
 
 
 @pytest.mark.asyncio

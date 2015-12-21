@@ -96,11 +96,12 @@ class UnicodeMixin(server_base.BaseServer):
         _outgoing_only = outgoing and not incoming
         _incoming_only = not outgoing and incoming
         _bidirectional = outgoing and incoming
-        _may_encode = ((_outgoing_only and self.outbinary) or
-                       (_incoming_only and self.inbinary) or
-                       (_bidirectional and self.outbinary and self.inbinary))
+        may_encode = ((_outgoing_only and self.writer.outbinary) or
+                      (_incoming_only and self.writer.inbinary) or
+                      (_bidirectional and
+                       self.writer.outbinary and self.writer.inbinary))
 
-        if self.force_binary or _may_encode:
+        if self.force_binary or may_encode:
             # prefer 'LANG' environment variable, if sent
             _lang = self.get_extra_info('LANG', None)
             if _lang and '.' in _lang:
@@ -110,28 +111,16 @@ class UnicodeMixin(server_base.BaseServer):
             return self.get_extra_info('encoding', self.default_encoding)
         return 'US-ASCII'
 
-    @property
-    def inbinary(self):
-        """Whether server status ``inbinary`` is toggled."""
-        from .telopt import BINARY
-        return self.writer.remote_option.enabled(BINARY)
-
-    @property
-    def outbinary(self):
-        """Whether server status ``outbinary`` is toggled."""
-        from .telopt import BINARY
-        return self.writer.local_option.enabled(BINARY)
-
     def _check_encoding(self):
         # Periodically check for completion of ``waiter_encoding``.
         from .telopt import DO, BINARY
-        if (self.outbinary and not self.inbinary and
+        if (self.writer.outbinary and not self.writer.inbinary and
                 not DO + BINARY in self.writer.pending_option):
             self.log.debug('BINARY in: direction request.')
             self.writer.iac(DO, BINARY)
             return False
 
-        return self.outbinary and self.inbinary
+        return self.writer.outbinary and self.writer.inbinary
 
 
 class TimeoutServerMixin(server_base.BaseServer):
@@ -144,8 +133,12 @@ class TimeoutServerMixin(server_base.BaseServer):
             without client input.
         """
         super().__init__(**kwargs)
+        self._extra['timeout'] = timeout
         self._timer = None
-        self.set_timeout(duration=timeout)
+
+    def connection_made(self, transport):
+        super().connection_made(transport)
+        self.set_timeout()
 
     def data_received(self, data):
         # Derive and cause timer reset.
@@ -173,7 +166,7 @@ class TimeoutServerMixin(server_base.BaseServer):
             self._tasks.append(self._timer)
         self._extra['timeout'] = duration
 
-    def on_timeout(self, result):
+    def on_timeout(self):
         """
         Callback received on session timeout.
 
@@ -183,5 +176,6 @@ class TimeoutServerMixin(server_base.BaseServer):
         :paramref:`~.set_timeout.duration` value of ``0`` or value of
         the same for keyword argument ``timeout``.
         """
+        msg = 'timeout after {self.idle:1.2f}s'.format(self=self)
         self.writer.write('\r\nTimeout.\r\n')
-        self.connection_lost(None)
+        self.connection_lost(EOFError(msg))

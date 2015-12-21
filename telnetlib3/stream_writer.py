@@ -9,6 +9,7 @@ from .telopt import *  # noqa
 
 __all__ = ('TelnetWriter',)
 
+
 class TelnetWriter(asyncio.StreamWriter):
     """
     Telnet IAC Interpreter.
@@ -192,30 +193,20 @@ class TelnetWriter(asyncio.StreamWriter):
 
     def __repr__(self):
         """Description of stream encoding state."""
-        postfix = super().__repr__().split(None, 1)[-1]
         info = ['TelnetWriter']
         if self.server:
             info.append('server')
+            endpoint = 'client'
         else:
             info.append('client')
+            endpoint = 'server'
 
-        info.append('{self.mode}-mode'.format(self=self))
+        info.append('mode:{self.mode}'.format(self=self))
 
         # IAC options
-        if self.lflow:
-            info.append('+lineflow')
-        if self.xon_any:
-            info.append('+xon_any')
-        if self.slc_simulated:
-            info.append('+slc_simul')
-
-        # IAC byte state
-        if self.iac_received:
-            info.append('iac')
-        if self.cmd_received:
-            info.append('cmd')
-        if self.slc_received:
-            info.append('slc')
+        info.append('{0}lineflow'.format('+' if self.lflow else '-'))
+        info.append('{0}xon_any'.format('+' if self.xon_any else '-'))
+        info.append('{0}slc_sim'.format('+' if self.slc_simulated else '-'))
 
         # IAC negotiation status
         _failed_reply = [name_commands(opt) for (opt, val)
@@ -229,18 +220,18 @@ class TelnetWriter(asyncio.StreamWriter):
                   in self.local_option.items()
                   if self.local_option.enabled(opt)]
         if _local:
-            info.append('local-{kind}:{opts}'.format(
-                kind=info[1], opts=','.join(_local)))
+            info.append('{kind}-will:{opts}'.format(
+                kind=endpoint, opts=','.join(_local)))
 
         _remote = [
             name_commands(opt) for (opt, val)
             in self.remote_option.items()
             if self.remote_option.enabled(opt)]
         if _remote:
-            info.append('remote-{kind}:{opts}'.format(
-                kind=info[1], opts=','.join(_remote)))
+            info.append('{kind}-will:{opts}'.format(
+                kind=endpoint, opts=','.join(_remote)))
 
-        return '<{0} {1}>'.format(' '.join(info), postfix)
+        return '<{0}>'.format(' '.join(info))
 
     @staticmethod
     def _escape_iac(buf):
@@ -417,10 +408,12 @@ class TelnetWriter(asyncio.StreamWriter):
             (callback, slc_name, slc_def) = slc.snoop(
                 byte, self.slctab, self._slc_callback)
             if slc_name is not None:
-                self.log.debug('_slc_snoop({!r}): {}, callback is {}.'.format(
-                    byte, slc.name_slc_command(slc_name),
-                    callback.__name__ if callback is not None
-                    else None))
+                if callback:
+                    self.log.debug(
+                        '_slc_snoop({!r}): {}, callback is {}.'.format(
+                            byte,
+                            slc.name_slc_command(slc_name),
+                            callback.__name__))
                 if slc_def.flushin:
                     # SLC_FLUSHIN not supported, requires SYNCH? (urgent TCP).
                     # XXX or TM?
@@ -428,7 +421,7 @@ class TelnetWriter(asyncio.StreamWriter):
                 if slc_def.flushout:
                     # XXX
                     # We must call transport.pause_writing, create a new send
-                    # buffer without incompleted IAC bytes, call
+                    # buffer without uncompleted IAC bytes, call
                     # discard_output, write new buffer, then resume_writing
                     pass
                 # allow caller to know which SLC function caused linemode
@@ -464,6 +457,16 @@ class TelnetWriter(asyncio.StreamWriter):
     def client(self):
         """Whether this stream is of the client's point of view."""
         return bool(not self._server)
+
+    @property
+    def inbinary(self):
+        """Whether binary data may be received on this stream, rfc-856_."""
+        return self.remote_option.enabled(BINARY)
+
+    @property
+    def outbinary(self):
+        """Whether BINARY data may be sent on this stream, rfc-856_."""
+        return self.local_option.enabled(BINARY)
 
     def encode(self, string, errors=None):
         """

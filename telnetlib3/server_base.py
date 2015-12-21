@@ -7,7 +7,6 @@ import sys
 
 from .stream_writer import TelnetWriter
 from .stream_reader import StreamReader
-from .shell import TelnetShell
 
 __all__ = ('BaseServer',)
 
@@ -40,11 +39,7 @@ class BaseServer(asyncio.Protocol):
                  log=None, loop=None):
         """Class initializer."""
         self.log = log or logging.getLogger(__name__)
-        if shell:
-            self._reader_factory = reader_factory or StreamReader
-        else:
-            # provide default debug shell, here.
-            self._reader_factory = reader_factory or TelnetShell
+        self._reader_factory = reader_factory or StreamReader
         self._writer_factory = writer_factory or TelnetWriter
         self._loop = loop or asyncio.get_event_loop()
         self._extra = dict()
@@ -59,8 +54,8 @@ class BaseServer(asyncio.Protocol):
 
     def eof_received(self):
         """Called when the other end calls write_eof() or equivalent."""
-        self.reader.feed_eof()
-        self.connection_lost('EOF')
+        self.reader.feed_eof()  # acknowledge the eof
+        self.connection_lost(EOFError('EOF'))
 
     def connection_lost(self, exc):
         """Called when the connection is lost or closed."""
@@ -68,13 +63,13 @@ class BaseServer(asyncio.Protocol):
             return
         self._closing = True
 
-        # inform about closed connection
+        # inform yielding readers about closed connection
         if exc is None:
-            self.log.info('Connection closed for %s: EOF by server', self)
-            self.reader.feed_eof()
-        if exc:
-            self.log.info('Connection lost to %s: %s', self, exc)
-            self.reader.set_exception(exc)
+            self.log.info('Connection closed for %s', self)
+            exc = EOFError('EOF')
+        else:
+            self.log.info('Connection lost for %s: %s', self, exc)
+        self.reader.set_exception(exc)
 
         # cancel protocol tasks, namely on-connect negotiations
         for task in self._tasks:
@@ -260,7 +255,7 @@ class BaseServer(asyncio.Protocol):
                            .format(self.duration))
             self.waiter_connected.set_result(self)
         else:
-            # keep re-queueing
+            # keep re-queueing until complete
             self._check_later = self._loop.call_later(
                 later, self._check_negotiation_timer)
             self._tasks.append(self._check_later)
@@ -275,5 +270,3 @@ class BaseServer(asyncio.Protocol):
 
         for line in rows_tbk + rows_exc:
             logger(line)
-
-## TelnetServer.reader => .shell
