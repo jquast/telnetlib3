@@ -127,11 +127,9 @@ def test_telnet_given_shell(
     from telnetlib3.telopt import IAC, WILL, DO, WONT, ECHO, SGA, BINARY, TTYPE
     from telnetlib3 import telnet_shell
     # given
-    _waiter = asyncio.Future()
-
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
-        waiter_connected=_waiter, shell=telnet_shell,
+        shell=telnet_shell,
         timeout=0.25, loop=event_loop, log=log)
 
     reader, writer = yield from asyncio.open_connection(
@@ -149,20 +147,20 @@ def test_telnet_given_shell(
 
     cmd_output_table = (
         # exercise backspace in input for help command
-        ((b'hel\blp\r'), (
-            b'quit, writer, reader, slc, toggle [option|all]'
+        ((b'\bhel\blp\r'), (
+            b'\r\nquit, writer, reader, slc, toggle [option|all]'
             b'\r\ntel:sh> '
         )),
         (b'writer\r\x00', (
-            b'<TelnetWriter server mode:local +lineflow -xon_any +slc_sim>'
+            b'\r\n<TelnetWriter server mode:local +lineflow -xon_any +slc_sim>'
             b'\r\ntel:sh> '
         )),
         (b'reader\r\n', (
-            b'<TelnetReader encoding=US-ASCII>'
+            b'\r\n<TelnetReader encoding=US-ASCII>'
             b'\r\ntel:sh> '
         )),
         (b'slc\r\n', (
-            b'Special Line Characters:'
+            b'\r\nSpecial Line Characters:'
             b'\r\n         SLC_AO: (^O, variable|flushout)'
             b'\r\n         SLC_EC: (^?, variable)'
             b'\r\n         SLC_EL: (^U, variable)'
@@ -183,7 +181,7 @@ def test_telnet_given_shell(
             b'\r\ntel:sh> '
         )),
         (b'toggle\n', (
-            b'binary off'
+            b'\r\nbinary off'
             b'\r\necho off'
             b'\r\ngoahead ON'
             b'\r\ninbinary off'
@@ -193,10 +191,11 @@ def test_telnet_given_shell(
             b'\r\ntel:sh> '
         )),
         (b'toggle not-an-option\r', (
-            b'toggle: not an option.'
+            b'\r\ntoggle: not an option.'
             b'\r\ntel:sh> '
         )),
         (b'toggle all\r\n', (
+            b'\r\n' +
             # negotiation options received,
             # though ignored by our dumb client.
             IAC + WILL + ECHO +
@@ -216,7 +215,7 @@ def test_telnet_given_shell(
             # with exception of lineflow and xon-any, which are
             # states toggled by the shell directly (and presumably
             # knows what to do with it!)
-            b'binary off'
+            b'\r\nbinary off'
             b'\r\necho off'
             b'\r\ngoahead ON'
             b'\r\ninbinary off'
@@ -225,15 +224,47 @@ def test_telnet_given_shell(
             b'\r\nxon-any ON'  # flipped
             b'\r\ntel:sh> '
         )),
-        (b'quit\r', b'Goodbye.\r\n'),
+        (b'\r\n', (
+            b'\r\ntel:sh> '
+        )),
+        (b'not-a-command\n', (
+            b'\r\nno such command.'
+            b'\r\ntel:sh> '
+        )),
+        (b'quit\r', b'\r\nGoodbye.\r\n'),
     )
 
     for (cmd, output_expected) in cmd_output_table:
         writer.write(cmd)
         result = yield from asyncio.wait_for(
             reader.read(len(output_expected)), 0.5)
-        assert result == output_expected
+        assert result == output_expected, cmd
 
     # nothing more to read.
     result = yield from reader.read()
     assert result == b''
+
+
+@pytest.mark.asyncio
+def test_telnet_shell_eof(event_loop, bind_host, unused_tcp_port, log):
+    """Test EOFError in telnet_shell()."""
+    from telnetlib3.telopt import IAC, WONT, TTYPE
+    from telnetlib3 import telnet_shell
+    # given
+    _waiter_connected = asyncio.Future()
+    _waiter_closed = asyncio.Future()
+
+    yield from telnetlib3.create_server(
+        host=bind_host, port=unused_tcp_port,
+        waiter_connected=_waiter_connected,
+        waiter_closed=_waiter_closed,
+        shell=telnet_shell,
+        timeout=0.25, loop=event_loop, log=log)
+
+    reader, writer = yield from asyncio.open_connection(
+        host=bind_host, port=unused_tcp_port, loop=event_loop)
+    writer.write(IAC + WONT + TTYPE)
+
+    yield from asyncio.wait_for(_waiter_connected, 0.5)
+    writer.close()
+    yield from asyncio.wait_for(_waiter_closed, 0.5)

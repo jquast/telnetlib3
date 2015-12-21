@@ -32,7 +32,7 @@ def telnet_shell(reader, writer):
             except EOFError:
                 return
             command = linereader.send(inp)
-        writer.echo(CR + LF)
+        writer.write(CR + LF)
         if command == 'quit':
             writer.write('Goodbye.' + CR + LF)
             break
@@ -49,7 +49,6 @@ def telnet_shell(reader, writer):
             writer.write(do_toggle(writer, option))
         elif command:
             writer.write('no such command.')
-            XXX Rent
     writer.close()
 
 
@@ -77,7 +76,7 @@ def readline(reader, writer):
             last_inp = inp
             inp = yield None
 
-        elif inp:
+        else:
             # buffer and echo input
             command += inp
             writer.echo(inp)
