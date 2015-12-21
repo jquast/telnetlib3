@@ -136,13 +136,13 @@ def test_telnet_given_shell(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
     expected = IAC + DO + TTYPE
-    result = yield from reader.read(len(expected))
+    result = yield from reader.readexactly(len(expected))
     assert result == expected
 
     writer.write(IAC + WONT + TTYPE)
 
     expected = b'Ready.\r\ntel:sh> '
-    result = yield from reader.read(len(expected))
+    result = yield from reader.readexactly(len(expected))
     assert result == expected
 
     cmd_output_table = (
@@ -237,7 +237,7 @@ def test_telnet_given_shell(
     for (cmd, output_expected) in cmd_output_table:
         writer.write(cmd)
         result = yield from asyncio.wait_for(
-            reader.read(len(output_expected)), 0.5)
+            reader.readexactly(len(output_expected)), 0.5)
         assert result == output_expected, cmd
 
     # nothing more to read.
