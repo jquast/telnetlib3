@@ -402,4 +402,7 @@ def main():
 
     loop.add_signal_handler(signal.SIGTERM, asyncio.async,
                             _sigterm_handler(server, log))
-    loop.run_until_complete(server.wait_closed())
+    try:
+        loop.run_until_complete(server.wait_closed())
+    finally:
+        loop.remove_sigal_handler(signal.SIGTERM)
