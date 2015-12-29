@@ -22,7 +22,6 @@ def test_telnet_server_on_ttype(event_loop, bind_host, unused_tcp_port, log):
     # given
     from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TTYPE
     _waiter = asyncio.Future()
-    event_loop.set_debug(True)
 
     class ServerTestTtype(telnetlib3.TelnetServer):
         def on_ttype(self, ttype):
@@ -63,7 +62,6 @@ def test_telnet_server_on_ttype_beyond_max(
     # given
     from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TTYPE
     _waiter = asyncio.Future()
-    event_loop.set_debug(True)
     given_ttypes = ('ALPHA', 'BETA', 'GAMMA', 'DETLA',
                     'EPSILON', 'ZETA', 'ETA', 'THETA',
                     'IOTA', 'KAPPA', 'LAMBDA', 'MU')
@@ -111,7 +109,6 @@ def test_telnet_server_on_ttype_empty(
     # given
     from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TTYPE
     _waiter = asyncio.Future()
-    event_loop.set_debug(True)
     given_ttypes = ('ALPHA', '', 'BETA')
 
     class ServerTestTtype(telnetlib3.TelnetServer):
@@ -149,7 +146,6 @@ def test_telnet_server_on_ttype_looped(
     # given
     from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TTYPE
     _waiter = asyncio.Future()
-    event_loop.set_debug(True)
     given_ttypes = ('ALPHA', 'BETA', 'GAMMA', 'ALPHA')
 
     class ServerTestTtype(telnetlib3.TelnetServer):
@@ -192,7 +188,6 @@ def test_telnet_server_on_ttype_repeated(
     # given
     from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TTYPE
     _waiter = asyncio.Future()
-    event_loop.set_debug(True)
     given_ttypes = ('ALPHA', 'BETA', 'GAMMA', 'GAMMA')
 
     class ServerTestTtype(telnetlib3.TelnetServer):
@@ -235,7 +230,6 @@ def test_telnet_server_on_ttype_mud(
     # given
     from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TTYPE
     _waiter = asyncio.Future()
-    event_loop.set_debug(True)
     given_ttypes = ('ALPHA', 'BETA', 'MTTS 137')
 
     class ServerTestTtype(telnetlib3.TelnetServer):

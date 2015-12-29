@@ -25,7 +25,6 @@ def test_telnet_server_on_environ(
         IAC, WILL, SB, SE, IS, NEW_ENVIRON
     )
     _waiter = asyncio.Future()
-    event_loop.set_debug(True)
 
     class ServerTestEnviron(telnetlib3.TelnetServer):
         def on_environ(self, mapping):

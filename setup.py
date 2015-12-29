@@ -33,8 +33,8 @@ setup(name='telnetlib3',
       package_data={'': ['README.rst', 'requirements.txt', ], },
       entry_points={
          'console_scripts': [
-             'telnetlib3-server = telnetlib3.server.main',
-             'telnetlib3-client = telnetlib3.client.main'
+             'telnetlib3-server = telnetlib3.server:main',
+             'telnetlib3-client = telnetlib3.client:main'
          ]},
       author_email='contact@jeffquast.com',
       platforms='any',

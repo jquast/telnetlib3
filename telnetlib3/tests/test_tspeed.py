@@ -22,7 +22,6 @@ def test_telnet_server_on_tspeed(event_loop, bind_host, unused_tcp_port, log):
     # given
     from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TSPEED
     _waiter = asyncio.Future()
-    event_loop.set_debug(True)
 
     class ServerTestTspeed(telnetlib3.TelnetServer):
         def on_tspeed(self, rx, tx):

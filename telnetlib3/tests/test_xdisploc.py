@@ -25,7 +25,6 @@ def test_telnet_server_on_xdisploc(
         IAC, WILL, SB, SE, IS, XDISPLOC
     )
     _waiter = asyncio.Future()
-    event_loop.set_debug(True)
     given_xdisploc = 'alpha:0'
 
     class ServerTestXdisploc(telnetlib3.TelnetServer):

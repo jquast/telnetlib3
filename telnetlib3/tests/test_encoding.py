@@ -23,7 +23,6 @@ def test_telnet_server_encoding_default(
     from telnetlib3.telopt import IAC, WONT, TTYPE
     # given
     _waiter = asyncio.Future()
-    event_loop.set_debug(True)
 
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
@@ -52,7 +51,6 @@ def test_telnet_server_encoding_client_will(
     from telnetlib3.telopt import IAC, WONT, WILL, TTYPE, BINARY
     # given
     _waiter = asyncio.Future()
-    event_loop.set_debug(True)
 
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
@@ -80,7 +78,6 @@ def test_telnet_server_encoding_server_do(
     from telnetlib3.telopt import IAC, WONT, DO, TTYPE, BINARY
     # given
     _waiter = asyncio.Future()
-    event_loop.set_debug(True)
 
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
@@ -108,7 +105,6 @@ def test_telnet_server_encoding_bidirectional(
     from telnetlib3.telopt import IAC, WONT, DO, WILL, TTYPE, BINARY
     # given
     _waiter = asyncio.Future()
-    event_loop.set_debug(True)
 
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
@@ -139,7 +135,6 @@ def test_telnet_server_encoding_by_LANG(
         WILL, SB, SE, IS, NEW_ENVIRON)
     # given
     _waiter = asyncio.Future()
-    event_loop.set_debug(True)
 
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
