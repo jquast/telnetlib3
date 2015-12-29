@@ -372,10 +372,18 @@ def _transform_args(args):
 
 @asyncio.coroutine
 def start_server(host, port, log, **kwds):
-    yield from create_server(host=host, port=port, log=log, **kwds)
+    server = yield from create_server(host=host, port=port, log=log, **kwds)
+    return server
+
+@asyncio.coroutine
+def _sigterm_handler(server, log):
+    log.info('SIGTERM received, closing server.')
+    server.close()
+    yield from server.wait_closed()
 
 
 def main():
+    import signal
     kwargs = _transform_args(_get_argument_parser().parse_args())
     config_msg = 'Server configuration: ' + accessories.repr_mapping(kwargs)
 
@@ -388,11 +396,10 @@ def main():
     log.debug(config_msg)
 
     loop = asyncio.get_event_loop()
-    if loglevel == 'debug':
-        loop.set_debug(True)
 
-    loop.run_until_complete(start_server(host, port, log, **kwargs))
-    loop.run_forever()
+    # bind
+    server = loop.run_until_complete(start_server(host, port, log, **kwargs))
 
-if __name__ == '__main__':
-    exit(main())
+    loop.add_signal_handler(signal.SIGTERM, asyncio.async,
+                            _sigterm_handler(server, log))
+    loop.run_until_complete(server.wait_closed())

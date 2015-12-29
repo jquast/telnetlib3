@@ -117,6 +117,3 @@ def main():
     loop.run_until_complete(writer._protocol.waiter_closed)
 
     return 0
-
-if __name__ == '__main__':
-    exit(main())

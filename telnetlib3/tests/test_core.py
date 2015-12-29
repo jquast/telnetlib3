@@ -303,3 +303,45 @@ def test_telnet_server_negotiation_fail(
     # verify,
     assert server.negotiation_should_advance() is False
     assert server.writer.pending_option[DO + TTYPE] == True
+
+
+@pytest.mark.asyncio
+def test_telnet_server_cmdline(bind_host, unused_tcp_port, event_loop):
+    """Test executing telnetlib3/server.py as server"""
+    import os
+    import pexpect
+    prog = pexpect.which('telnetlib3-server')
+    _coveragerc = os.path.join(os.path.dirname(__file__),
+                               os.pardir, os.pardir,
+                               '.coveragerc')
+
+    _env = os.environ.copy()
+    # enforce asyncio debug: we rely on 'is serving'
+    # notification to await until server port is bound.
+    _env['PYTHONASYNCIODEBUG']='1'
+    args = [prog, bind_host, str(unused_tcp_port),
+            '--loglevel=debug']
+
+    proc = yield from asyncio.create_subprocess_exec(
+        *args, loop=event_loop, stderr=asyncio.subprocess.PIPE, env=_env)
+
+    while True:
+        line = yield from proc.stderr.readline()
+        if b'is serving' in line:
+            break
+
+    # client connects,
+    reader, writer = yield from asyncio.open_connection(
+        host=bind_host, port=unused_tcp_port, loop=event_loop)
+    writer.close()
+
+    # and closes,
+    while True:
+        line = yield from proc.stderr.readline()
+        if b'Connection lost' in line:
+            break
+
+    # just kill server such as ^C
+    proc.terminate()
+    yield from proc.communicate()
+    yield from proc.wait()
