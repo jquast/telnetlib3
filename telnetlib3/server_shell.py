@@ -4,11 +4,11 @@ CR, LF, NUL = '\r\n\x00'
 from . import slc
 from . import telopt
 
-__all__ = ('telnet_shell',)
+__all__ = ('telnet_server_shell',)
 
 
 @asyncio.coroutine
-def telnet_shell(reader, writer):
+def telnet_server_shell(reader, writer):
     """
     A default telnet shell, appropriate for use with telnetlib3.create_server.
 
@@ -37,7 +37,8 @@ def telnet_shell(reader, writer):
             writer.write('Goodbye.' + CR + LF)
             break
         elif command == 'help':
-            writer.write('quit, writer, reader, slc, toggle [option|all]')
+            writer.write('quit, writer, slc, toggle [option|all], '
+                         'reader, proto')
         elif command == 'writer':
             writer.write(repr(writer))
         elif command == 'reader':
@@ -47,6 +48,8 @@ def telnet_shell(reader, writer):
         elif command.startswith('toggle'):
             option = command[len('toggle '):] or None
             writer.write(do_toggle(writer, option))
+        elif command == 'proto':
+            writer.write(repr(writer._protocol))
         elif command:
             writer.write('no such command.')
     writer.close()

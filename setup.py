@@ -31,11 +31,11 @@ setup(name='telnetlib3',
       long_description=_get_long_description(fname=_get_here('README.rst')),
       packages=['telnetlib3', ],
       package_data={'': ['README.rst', 'requirements.txt', ], },
-      scripts=['bin/telnet-client.py',
-               'bin/telnet-server.py',
-               'bin/telnet-talker.py',
-               'bin/telnet-game.py',
-               ],
+      entry_points={
+         'console_scripts': [
+             'telnetlib3-server = telnetlib3.server.main',
+             'telnetlib3-client = telnetlib3.client.main'
+         ]},
       author_email='contact@jeffquast.com',
       platforms='any',
       zip_safe=True,

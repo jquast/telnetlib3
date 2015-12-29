@@ -42,13 +42,13 @@ Basic Telnet Server::
 
         writer.write('Would you like to play a game? ')
 
-        resp = yield from reader.read(1)
-        if writer.will_echo:
-            writer.write(resp)
+        inp = yield from reader.read(1)
+        if inp:
+            if writer.will_echo:
+                writer.write(inp)
+            writer.write('\r\nThey say the only way to win '
+                         'is to not play at all.\r\n')
 
-        msg = 'They say the only way to win is to not play at all.'
-        writer.write('\r\n{msg}\r\n'.format(resp))
-        writer.close()
     
     @asyncio.coroutine
     def start_server():
@@ -56,30 +56,38 @@ Basic Telnet Server::
     
     loop = asyncio.get_event_loop()
     loop.run_until_complete(start_server())
-    loop.run_forever()
 
 Basic Telnet Client::
 
-    transport, protocol = yield from loop.create_connection(
-        lambda: telnetlib3.Client(**kwargs), host, port)
+    import asyncio, telnetlib3
 
-    reader, writer = yield from telnetlib3.open_connection(
-        host, port, **kwargs)
+    @asyncio.coroutine
+    def start_client():
+        reader, writer = yield from telnetlib3.connect('localhost', port=6023)
+        while True:
+            buf = yield from reader.readexactly(1)
+            if not buf:
+                # EOF
+                break
 
-    protocol = yield from telnetlib3.start_client(
-        host, port, **kwargs)
+            print(buf, end='', flush=True)
+
+            if '?' in buf:
+                # reply all questions with 'y'.
+                writer.write('y')
+
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(start_client())
 
 Scripts
 =======
 
-These example binary programs demonstrate protocol functionality.
+The bundled binary programs ``telnetlib3-client`` and ``telnetlib3-server``
+demonstrate full protocol functionality.  The default telnet server or client
+shell function may be specified as a command line parameter in form of
+``--shell=my_module.my_shell``.
 
-* telnet-client_: Small demonstrating terminal telnet client.
-* telnet-server_: Telnet server providing debugging shell.
-* telnet-talker_: Multi-user server shell, sometimes called a talker_.
+* telnetlib3-client: Small demonstrating terminal telnet client.
+* telnetlib3-server: Telnet server providing the default debugging shell.
 
 .. _asyncio: http://docs.python.org/3.4/library/asyncio.html
-.. _talker: https://en.wikipedia.org/wiki/Talker
-.. _telnet-client: https://github.com/jquast/telnetlib3/tree/master/bin/telnet-client
-.. _telnet-server: https://github.com/jquast/telnetlib3/tree/master/bin/telnet-server
-.. _telnet-talker: https://github.com/jquast/telnetlib3/tree/master/bin/telnet-talker

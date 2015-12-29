@@ -1,26 +1,27 @@
-"""Module provides class BaseServer."""
-import traceback
-import asyncio
+"""Module provides class BaseClient."""
 import logging
 import datetime
+import traceback
+import asyncio
 import sys
 
 from .stream_writer import TelnetWriter
 from .stream_reader import TelnetReader
 
-__all__ = ('BaseServer',)
+__all__ = ('BaseClient',)
 
 
-class BaseServer(asyncio.Protocol):
-    """Base Telnet Server Protocol."""
-    #: Maximum on-connect time to wait for all pending negotiation options to
-    #: complete before negotiation is considered 'final', signaled by the
-    #: completion of waiter :attr:`waiter_connected`.
+class BaseClient(asyncio.Protocol):
+    """Base Telnet Client Protocol."""
+    #: Minimum on-connect time to wait for at least one server-initiated
+    #: negotiation option byte.  A server not demanding any telnet options
+    #: will delay the initial connection time for at least this amount.
+    CONNECT_MINWAIT = 0.80
+
+    #: Maximum on-connect time allowed for pending negotiation to occur
+    #: until it is considered 'final'.  This boundary occurs when the
+    #: remote end has failed to complete pending negotiation options.
     CONNECT_MAXWAIT = 1.80
-
-    #: maximum timer length for ``check_negotiation``
-    #: re-scheduling (default: 50ms)
-    CONNECT_DEFERRED = 0.05
 
     _when_connected = None
     _last_received = None
@@ -51,11 +52,7 @@ class BaseServer(asyncio.Protocol):
     # Base protocol methods
 
     def eof_received(self):
-        """
-        Called when the other end calls write_eof() or equivalent.
-
-        This callback may be exercised by the nc(1) client argument ``-z``.
-        """
+        """Called when the other end calls write_eof() or equivalent."""
         self.reader.feed_eof()  # acknowledge
         self.connection_lost(EOFError('EOF'))
 
@@ -72,10 +69,10 @@ class BaseServer(asyncio.Protocol):
 
         # inform yielding readers about closed connection
         if exc is None:
-            self.log.info('Connection closed for %s', self)
+            self.log.info('Connection closed to %s', self)
             exc = EOFError('EOF')
         else:
-            self.log.info('Connection lost for %s: %s', self, exc)
+            self.log.info('Connection lost to %s: %s', self, exc)
         self.reader.set_exception(exc)
 
         # cancel protocol tasks, namely on-connect negotiations
@@ -106,17 +103,19 @@ class BaseServer(asyncio.Protocol):
 
         self.writer = self._writer_factory(
             transport=transport, protocol=self,
-            reader=self.reader, server=True,
+            reader=self.reader, client=True,
             loop=self._loop, log=self.log)
 
-        self.log.info('Connection from %s', self)
+        self.log.info('Connected to %s', self)
 
         self.waiter_connected.add_done_callback(self.begin_shell)
         self._loop.call_soon(self.begin_negotiation)
 
     def begin_shell(self, result):
+        self.log.debug('hai {0}'.format(self.shell))
         if self.shell is not None:
             res = self.shell(self.reader, self.writer)
+            self.log.debug('oi {0}'.format(res))
             if asyncio.iscoroutine(res):
                 self._loop.create_task(res)
 
@@ -163,43 +162,25 @@ class BaseServer(asyncio.Protocol):
 
     def __repr__(self):
         hostport = self._transport.get_extra_info('peername')[:2]
-        _extra = ((key, val) for key, val in self._extra.items() if
-                  not key.startswith('ttype') and
-                  key not in ('timeout',))
-        extra = ' '.join('{0}={1}'.format(*item) for item in sorted(_extra))
-        return '<Peer {0} {1} {2}>'.format(*hostport, extra)
+        return '<Peer {0} {1}>'.format(*hostport)
 
     def get_extra_info(self, name, default=None):
-        """Get optional server information."""
+        """Get optional client information."""
         return self._extra.get(name, default)
 
     def begin_negotiation(self):
         """
         Begin on-connect negotiation.
 
-        A Telnet server is expected to demand preferred session options
-        immediately after connection.  Deriving implementations should always
-        call ``super().begin_negotiation()``.
+        A Telnet client is expected to send only a minimal amount of client
+        session options immediately after connection, it is generally the
+        server which dictates server option support.
+
+        Deriving implementations should always call
+        ``super().begin_negotiation()``.
         """
         self._check_later = self._loop.call_soon(self._check_negotiation_timer)
         self._tasks.append(self._check_later)
-
-    def begin_advanced_negotiation(self):
-        """
-        Begin advanced negotiation.
-
-        Callback method further requests advanced telnet options.  Called
-        once on receipt of any ``DO`` or ``WILL`` acknowledgments
-        received, indicating that the remote end is capable of negotiating
-        further.
-
-        Only called if sub-classing :meth:`begin_negotiation` causes
-        at least one negotiation option to be affirmatively acknowledged.
-
-        Deriving implementations should always call
-        ``super().begin_advanced_negotiation()``.
-        """
-        pass
 
     def encoding(self, outgoing=False, incoming=False):
         """
@@ -210,32 +191,13 @@ class BaseServer(asyncio.Protocol):
         # pylint: disable=unused-argument,no-self-use
         return 'US-ASCII'  # pragma: no cover
 
-    def negotiation_should_advance(self):
-        """
-        Whether advanced negotiation should commence.
-
-        :rtype: bool
-        :returns: True if advanced negotiation should be permitted.
-
-        The base implementation returns True if any negotiation options
-        were affirmatively acknowledged by client, more than likely
-        options requested in callback :meth:`begin_negotiation`.
-        """
-        # Generally, this separates a bare TCP connect() from a True
-        # RFC-compliant telnet client with responding IAC interpreter.
-        server_do = sum(enabled for _, enabled in
-                        self.writer.remote_option.items())
-        client_will = sum(enabled for _, enabled in
-                          self.writer.local_option.items())
-        return bool(server_do or client_will)
-
     def check_negotiation(self, final=False):
         """
         Callback, return whether negotiation is complete.
 
         :param bool final: Whether this is the final time this callback
             will be requested to answer regarding protocol negotiation.
-        :returns: Whether negotiation is over (server end is satisfied).
+        :returns: Whether negotiation is over (client end is satisfied).
         :rtype: bool
 
         Method is called on each new command byte processed until negotiation
@@ -245,13 +207,6 @@ class BaseServer(asyncio.Protocol):
         Ensure ``super().check_negotiation()`` is called and conditionally
         combined when derived.
         """
-        if not self._advanced and self.negotiation_should_advance():
-            self._advanced = True
-            self.log.debug('begin advanced negotiation')
-            self._loop.call_soon(self.begin_advanced_negotiation)
-
-        # negotiation is complete (returns True) when all negotiation options
-        # that have been requested have been acknowledged.
         return not any(self.writer.pending_option.values())
 
     # private methods
@@ -270,9 +225,10 @@ class BaseServer(asyncio.Protocol):
         elif final:
             self.log.debug('negotiation failed after {:1.2f}s.'
                            .format(self.duration))
+            self.log.debug('{0}', self.writer.pending_option.values())
             self.waiter_connected.set_result(self)
         else:
-            # keep re-queueing until complete
+            # keep re-queuing until complete
             self._check_later = self._loop.call_later(
                 later, self._check_negotiation_timer)
             self._tasks.append(self._check_later)

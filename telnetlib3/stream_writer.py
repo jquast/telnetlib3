@@ -1,5 +1,4 @@
 import asyncio
-import traceback
 import collections
 import logging
 import struct
@@ -41,7 +40,7 @@ class TelnetWriter(asyncio.StreamWriter):
     Required of the attached protocol:
 
     - attribute ``protocol.default_encoding: str``
-    - attribute ``protocol.encoding_error: str``
+    - attribute ``protocol.encoding_errors: str``
     - method ``protocol.set_encoding(encoding: str)``
     - method ``protocol.encoding(incoming: bool, outgoing: bool)``
     """
@@ -74,13 +73,17 @@ class TelnetWriter(asyncio.StreamWriter):
     slc_simulated = True
 
     #: a list of system environment variables requested by the server after
-    # a client agrees to negotiate NEW_ENVIRON.
+    #: a client agrees to negotiate NEW_ENVIRON.
     default_env_request = (
         "USER HOSTNAME UID TERM COLUMNS LINES DISPLAY LANG SYSTEMTYPE "
         "ACCT JOB PRINTER SFUTLNTVER SFUTLNTMODE LC_ALL VISUAL EDITOR "
         "LC_COLLATE LC_CTYPE LC_MESSAGES LC_MONETARY LC_NUMERIC LC_TIME"
     ).split()
+
     default_slc_tab = slc.BSD_SLC_TAB
+
+    #: list of "character set" names compatible with this writer when
+    #: requested by CHARSET negotiation in order of preference, rfc-2066_.
     default_codepages = (
         'UTF-8', 'UTF-16', 'US-ASCII', 'LATIN1', 'BIG5',
         'GBK', 'SHIFTJIS', 'GB18030', 'KOI8-R', 'KOI8-U',
@@ -236,7 +239,6 @@ class TelnetWriter(asyncio.StreamWriter):
     @staticmethod
     def _escape_iac(buf):
         r"""Replace bytes in buf ``IAC`` (``b'\xff'``) by ``IAC IAC``."""
-        assert isinstance(buf, (bytes, bytearray)), buf
         return buf.replace(IAC, IAC + IAC)
 
     def _write(self, buf, escape_iac=True):
@@ -252,18 +254,18 @@ class TelnetWriter(asyncio.StreamWriter):
             raise TypeError("buf expected bytes, got {0}".format(type(buf)))
 
         if escape_iac:
-            #ifdef 0
-            if (not self.local_option.enabled(BINARY)
-                    and not self._protocol.force_binary):
-                for pos, byte in enumerate(buf):
+            # when escape_iac is True, we may safely assume downstream
+            # application has provided an encoded string.  If force_binary
+            # is unset, we enforce strict adherence of BINARY protocol
+            # negotiation.
+            if (not self._protocol.force_binary and not self.outbinary):
+                # check each byte position by index to report location
+                for position, byte in enumerate(buf):
                     if byte >= 128:
                         raise TypeError(
-                            'character value {0!r} at pos {1} not valid, '
-                            'send IAC WILL BINARY first, buf={2!r}'.format(
-                                byte, pos, buf))
-            #endif  # should we really force rfc compliance? this costs to
-            #       # maintain, we just want to ensure **we** do not break
-            #       # RFC compliance, damned be downstream users.
+                            'Byte value {0!r} at index {1} not valid, '
+                            'send IAC WILL BINARY first: buf={2!r}'.format(
+                                byte, position, buf))
             buf = self._escape_iac(buf)
 
         self._transport.write(buf)
@@ -272,29 +274,18 @@ class TelnetWriter(asyncio.StreamWriter):
         """
         Write unicode string to transport, using protocol-preferred encoding.
 
-        :param str string: text to write.
+        :param str string: unicode string text to write to endpoint using the
+            protocol's preferred encoding.  When the protocol ``encoding``
+            keyword is explicitly set to ``False``, the given string should be
+            only raw ``b'bytes'``.
         :param str errors: same as meaning in :class:`codecs.Codec`.
         :rtype: None
         """
-        if errors is None:
-            errors = self._protocol.encoding_error
-
-        try:
+        errors = errors or self._protocol.encoding_errors
+        if not self._protocol.default_encoding:
+            self._write(string)
+        else:
             self._write(self.encode(string, errors))
-        except LookupError:
-            default_encoding = self._protocol.default_encoding
-            enc = self._protocol.encoding(outgoing=True)
-
-            if enc == default_encoding:
-                raise  # failed to fall-back to protocol.default_encoding
-
-            # Otherwise, notify server log of encoding error,
-            exc_msg = traceback.format_exception_only(*sys.exc_info[:2])
-            self.log.debug(exc_msg)
-
-            # and change to default_encoding before trying once more.
-            self._protocol.set_encoding(default_encoding)
-            self.write(string, errors=errors)
 
     def feed_byte(self, byte):
         """
@@ -448,6 +439,10 @@ class TelnetWriter(asyncio.StreamWriter):
 
     # Our protocol methods
 
+    def get_extra_info(self, name, default=None):
+        """Get optional server protocol information."""
+        return self._protocol.get_extra_info(name, default)
+
     @property
     def server(self):
         """Whether this stream is of the server's point of view."""
@@ -481,7 +476,7 @@ class TelnetWriter(asyncio.StreamWriter):
             When None, value of :attr:`errors_encoding` is used.
         """
         if errors is None:
-            errors = self._protocol.encoding_error
+            errors = self._protocol.encoding_errors
 
         encoding = self._protocol.encoding(outgoing=True)
         return bytes(string, encoding, errors)
@@ -500,22 +495,17 @@ class TelnetWriter(asyncio.StreamWriter):
 
         This option may be toggled using shell command, ``toggle echo``.
         """
-        if self.local_option.enabled(ECHO):
+        assert self.server, ('Client never performs echo of input received.')
+        if self.will_echo:
             self.write(string, errors)
 
-    def can_write(self, char):
+    @property
+    def will_echo(self):
         """
-        Whether the distant end may receive unicode ``char`` in the given mode.
-
-        :rtype: bool
-
-        False indicates that a write of this unicode character might be an
-        encoding error on the transport, falling outside of printable range
-        for the given encoding and BINARY mode.
+        Whether Server end is expected to echo back input sent by client.
         """
-        # coincidently, 127 is backspace, so it may not be transmitted
-        # unless BINARY is negotiated.
-        return self._protocol.outbinary or ord(char) < 127
+        return ((self.server and self.local_option.enabled(ECHO)) or
+                (self.client and self.remote_option.enabled(ECHO)))
 
     @property
     def mode(self):
@@ -1121,36 +1111,42 @@ class TelnetWriter(asyncio.StreamWriter):
         self._ext_send_callback[cmd] = func
 
     def set_ext_callback(self, cmd, func):
-        """ Register ``func`` as callback for receipt of ``cmd`` negotiation:
+        """
 
-          * LOGOUT: for servers and clients, receiving one argument. Server
-            end may receive DO or DONT as argument ``cmd``, indicating
+        Register ``func`` as callback for receipt of ``cmd`` negotiation.
+
+        :param bytes cmd: One of the following listed bytes:
+
+          * :obj:`LOGOUT`: for servers and clients, receiving one argument.
+            Server end may receive DO or DONT as argument ``cmd``, indicating
             client's wish to disconnect, or a response to WILL, LOGOUT,
             indicating it's wish not to be automatically disconnected.
             Client end may receive WILL or WONT, indicating server's wish
             to disconnect, or acknowledgement that the client will not be
             disconnected.
 
-          * SNDLOC: for servers, receiving one argument: the string
-            describing the client location, such as b'ROOM 641-A' (rfc 779).
+          * obj:`SNDLOC`: for servers, receiving one argument: the string
+            describing the client location, such as ``'ROOM 641-A'``
+            rfc-779_.
 
-          * NAWS: for servers, receiving two integer arguments (width,
-            height), such as (80, 24) (rfc 1073).
+          * obj:`NAWS`: for servers, receiving two integer arguments (width,
+            height), such as (80, 24). rfc-1073_.
 
-          * TSPEED: for servers, receiving two integer arguments (rx, tx)
-            such as (57600, 57600) (rfc 1079).
+          * obj:`TSPEED`: for servers, receiving two integer arguments (rx, tx)
+            such as (57600, 57600). rfc-1079_.
 
-          * TTYPE: for servers, receiving one string, usually the terminfo(5)
-            database capability name, such as 'xterm' (rfc 1091).
+          * obj:`TTYPE`: for servers, receiving one string, usually the
+            terminfo(5) database capability name, such as 'xterm'. rfc-1091_.
 
-          * XDISPLOC: for servers, receiving one string, the DISPLAY host
-            value, in form of <host>:<dispnum>[.<screennum>] (rfc 1096).
+          * obj:`XDISPLOC`: for servers, receiving one string, the DISPLAY host
+            value, in form of ``<host>:<dispnum>[.<screennum>]``. rfc-1096_.
 
-          * NEW_ENVIRON: for servers, receiving a dictionary of (key, val)
-            pairs of remote client environment item values (rfc 1408).
+          * obj:`NEW_ENVIRON`: for servers, receiving a dictionary of
+            ``(key, val)`` pairs of remote client environment item values.
+            rfc-1408_.
 
-          * CHARSET: for servers, receiving one string, the character set
-            negotiated by client (rfc 2066).
+          * obj:`CHARSET`: for servers, receiving one string, the character set
+            negotiated by client. rfc-2066_.
         """
         assert cmd in (LOGOUT, SNDLOC, NAWS, TSPEED, TTYPE,
                        XDISPLOC, NEW_ENVIRON, CHARSET), cmd
@@ -1167,8 +1163,8 @@ class TelnetWriter(asyncio.StreamWriter):
         """ XXX Send XDISPLAY value ``xdisploc``, rfc1096.
         """
         #   xdisploc string format is '<host>:<dispnum>[.<screennum>]'.
-        self.log.warn('X Display requested, returning empty response.')
-        return b''
+        self.log.warn('X Display requested, sending empty string.')
+        return ''
 
     def handle_sndloc(self, location):
         """ XXX Receive LOCATION value ``location``, rfc779.
@@ -1178,8 +1174,8 @@ class TelnetWriter(asyncio.StreamWriter):
     def handle_send_sndloc(self):
         """ XXX Send LOCATION value ``location``, rfc779.
         """
-        self.log.warn('Location requested, returning empty response.')
-        return b''
+        self.log.warn('Location requested, sending empty response.')
+        return ''
 
     def handle_ttype(self, ttype):
         """ XXX Receive TTYPE value ``ttype``, rfc1091.
@@ -1197,8 +1193,8 @@ class TelnetWriter(asyncio.StreamWriter):
     def handle_send_ttype(self):
         """ XXX Send TTYPE value ``ttype``, rfc1091.
         """
-        self.log.warn('Terminal type requested, returning empty response.')
-        return b''
+        self.log.warn('Terminal type requested, sending empty string.')
+        return ''
 
     def handle_naws(self, width, height):
         """ XXX Receive window size ``width`` and ``height``, rfc1073.
@@ -1208,7 +1204,7 @@ class TelnetWriter(asyncio.StreamWriter):
     def handle_send_naws(self):
         """ XXX Send window size ``width`` and ``height``, rfc1073.
         """
-        self.log.warn('Terminal type requested, returning 80x24.')
+        self.log.warn('Terminal size requested, sending 80x24.')
         return 80, 24
 
     def handle_env(self, env):
@@ -1222,7 +1218,7 @@ class TelnetWriter(asyncio.StreamWriter):
         sent. Otherwise, ``keys`` is a set of environment keys explicitly
         requested.
         """
-        self.log.warn('Environment values requested, returning none.')
+        self.log.warn('Environment values requested, sending {}.')
         return dict()
 
     def handle_tspeed(self, rx, tx):
@@ -1233,7 +1229,7 @@ class TelnetWriter(asyncio.StreamWriter):
     def handle_send_tspeed(self):
         """ XXX Send terminal speed from TSPEED as int, rfc1079.
         """
-        self.log.warn('Terminal Speed requested, returning 9600,9600.')
+        self.log.warn('Terminal Speed requested, sending 9600,9600.')
         return 9600, 9600
 
     def handle_charset(self, charset):
@@ -1244,8 +1240,8 @@ class TelnetWriter(asyncio.StreamWriter):
     def handle_send_charset(self, charsets):
         """ XXX Send character set as string, rfc2066.
         """
-        self.log.warn('Character Set requested, returning "ascii".')
-        return b'ascii'
+        self.log.warn('Character Set requested, sending "ascii".')
+        return 'ascii'
 
     def handle_logout(self, cmd):
         """ XXX Handle (IAC, (DO | DONT | WILL | WONT), LOGOUT), RFC 727.
@@ -1683,7 +1679,6 @@ class TelnetWriter(asyncio.StreamWriter):
 
         self.log.debug('recv {} {}: {!r}'.format(
             name_command(cmd), opt_kind, b''.join(buf),))
-        self.log.debug('     ==> {!r}'.format(env))
 
         if opt in (IS, INFO):
             assert self.server, ('SE: cannot recv from server: {} {}'
@@ -2188,13 +2183,14 @@ class Option(dict):
         return bool(self.get(key, None) == -1)
 
     def __setitem__(self, key, value):
-        if value != dict.get(self, key, None):
-            descr = ' + '.join([name_command(bytes([byte]))
-                                for byte in key[:2]
-                                ] + [repr(byte) for byte in key[2:]])
-            self.log.debug('{}[{}] = {}'.format(self.name, descr, value))
+        #ifdef 0
+        #if value != dict.get(self, key, None):
+        #    descr = ' + '.join([name_command(bytes([byte]))
+        #                        for byte in key[:2]
+        #                        ] + [repr(byte) for byte in key[2:]])
+        #    self.log.debug('{}[{}] = {}'.format(self.name, descr, value))
+        #endif
         dict.__setitem__(self, key, value)
-    __setitem__.__doc__ = dict.__setitem__.__doc__
 
 
 def _escape_env(buf):

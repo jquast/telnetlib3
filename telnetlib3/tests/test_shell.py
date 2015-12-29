@@ -114,22 +114,19 @@ def test_telnet_server_no_shell(
     client_recv = yield from client_reader.read()
     assert client_recv == client_expected
 
-    #client_writer.close()
-    #
-    #server_recv = yield from server.reader.read()
-    #assert server_recv == server_expected
-
 
 @pytest.mark.asyncio
 def test_telnet_given_shell(
         event_loop, bind_host, unused_tcp_port, log):
     """Iterate all state-reading commands of default telnet_shell."""
     from telnetlib3.telopt import IAC, WILL, DO, WONT, ECHO, SGA, BINARY, TTYPE
-    from telnetlib3 import telnet_shell
+    from telnetlib3 import telnet_server_shell
     # given
+    _waiter = asyncio.Future()
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
-        shell=telnet_shell,
+        shell=telnet_server_shell,
+        waiter_connected=_waiter,
         timeout=0.25, loop=event_loop, log=log)
 
     reader, writer = yield from asyncio.open_connection(
@@ -145,10 +142,13 @@ def test_telnet_given_shell(
     result = yield from reader.readexactly(len(expected))
     assert result == expected
 
+    server = yield from _waiter
+    server_port = str(server._transport.get_extra_info('peername')[1])
+
     cmd_output_table = (
         # exercise backspace in input for help command
         ((b'\bhel\blp\r'), (
-            b'\r\nquit, writer, reader, slc, toggle [option|all]'
+            b'\r\nquit, writer, slc, toggle [option|all], reader, proto'
             b'\r\ntel:sh> '
         )),
         (b'writer\r\x00', (
@@ -156,7 +156,14 @@ def test_telnet_given_shell(
             b'\r\ntel:sh> '
         )),
         (b'reader\r\n', (
-            b'\r\n<TelnetReader encoding=US-ASCII>'
+            b"\r\n<TelnetReader encoding='US-ASCII'>"
+            b'\r\ntel:sh> '
+        )),
+        (b'proto\n', (
+            b'\r\n<Peer ' +
+            bind_host.encode('ascii') + b' ' +
+            server_port.encode('ascii') + b' ' +
+            b'charset=utf8 cols=80 rows=25 term=unknown>' +
             b'\r\ntel:sh> '
         )),
         (b'slc\r\n', (
@@ -236,9 +243,12 @@ def test_telnet_given_shell(
 
     for (cmd, output_expected) in cmd_output_table:
         writer.write(cmd)
-        result = yield from asyncio.wait_for(
-            reader.readexactly(len(output_expected)), 0.5)
-        assert result == output_expected, cmd
+        try:
+            result = yield from asyncio.wait_for(
+                reader.readexactly(len(output_expected)), 0.5)
+        except asyncio.streams.IncompleteReadError as err:
+            result = err.partial
+        assert result == output_expected, repr(cmd)
 
     # nothing more to read.
     result = yield from reader.read()
@@ -249,7 +259,7 @@ def test_telnet_given_shell(
 def test_telnet_shell_eof(event_loop, bind_host, unused_tcp_port, log):
     """Test EOFError in telnet_shell()."""
     from telnetlib3.telopt import IAC, WONT, TTYPE
-    from telnetlib3 import telnet_shell
+    from telnetlib3 import telnet_server_shell
     # given
     _waiter_connected = asyncio.Future()
     _waiter_closed = asyncio.Future()
@@ -258,7 +268,7 @@ def test_telnet_shell_eof(event_loop, bind_host, unused_tcp_port, log):
         host=bind_host, port=unused_tcp_port,
         waiter_connected=_waiter_connected,
         waiter_closed=_waiter_closed,
-        shell=telnet_shell,
+        shell=telnet_server_shell,
         timeout=0.25, loop=event_loop, log=log)
 
     reader, writer = yield from asyncio.open_connection(

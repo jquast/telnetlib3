@@ -3,21 +3,23 @@
 from .server_base import *
 from .server_shell import *
 from .server import *
-
+from .client_base import *
+from .client_shell import *
 from .client import *
-
 from .telopt import *
 from .slc import *
-from .conio import *
 
 __all__ = (
     server_base.__all__ +
     server_shell.__all__ +
     server.__all__ +
+
+    client_base.__all__ +
+    client_shell.__all__ +
     client.__all__ +
+
     telopt.__all__ +
-    slc.__all__ +
-    conio.__all__
+    slc.__all__
 )
 
 __author__ = "Jeff Quast"

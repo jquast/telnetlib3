@@ -27,13 +27,15 @@ def get_argparser():
     parser = argparse.ArgumentParser(
         description="Simple telnet server.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('host', nargs='?', default='localhost')
-    parser.add_argument('port', nargs='?', default=6023, type=int)
+    parser.add_argument('host', nargs='?', default='localhost',
+                        help='bind address')
+    parser.add_argument('port', nargs='?', default=6023, type=int,
+                        help='bind port')
     parser.add_argument('--loglevel', default='info',
                         help='level name')
     parser.add_argument('--logfile',
                         help='filepath')
-    parser.add_argument('--shell', default='telnetlib3.telnet_shell',
+    parser.add_argument('--shell', default='telnetlib3.telnet_server_shell',
                         help='module.function_name')
     parser.add_argument('--encoding', default='utf8',
                         help='encoding name')

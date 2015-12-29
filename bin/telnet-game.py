@@ -12,7 +12,10 @@ import telnetlib3
 @asyncio.coroutine
 def shell(reader, writer):
     writer.write('Would you like to play a game? ')
-    resp = yield from reader.read(1)
+    try:
+        resp = yield from reader.read(1)
+    except EOFError:
+        return
     writer.write('{0}\r\nThey say the only way to win is '
                  'to not play at all.\r\n'.format(resp))
     writer.close()
@@ -34,7 +37,8 @@ def get_argparser():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--host', default='localhost', required=False)
     parser.add_argument('--port', default=6023, type=int, required=False)
-    parser.add_argument('--encoding', dest='encoding', type=str)
+    parser.add_argument('--encoding', default='utf8',
+                        help='encoding name')
     parser.add_argument('--force-binary', action='store_true',
                         dest='force_binary')
     parser.add_argument('--timeout', dest='timeout', default=300, type=int)
