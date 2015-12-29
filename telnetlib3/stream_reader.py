@@ -22,30 +22,19 @@ class TelnetReader(asyncio.StreamReader):
     Protocol byte data that is **not** ``IAC`` (Is A Command) escape data
     is sent to :meth:`feed_byte`.  Consumers may then yield from the various
     ``read``-family of coroutines derived from :class:`asyncio.StreamReader`.
-    The :meth:`readline` interface handles the four variants of newlines
-    received by clients:
 
-        - ``CR LF``
-        - ``CR \x00``
+    The :meth:`readline` interface handles the four variants of newlines
+    sent by telnet clients:
+
+        - ``CR LF``, received as ``CR``.
+        - ``CR \x00``, received as ``CR``.
         - ``CR``
         - ``LF``
-
-    The null byte ``\x00`` is stripped to allow the assumed friendship of
-    method :meth:`str.strip` to remove newlines, which ``CR \x00`` 
-
     """
-
-#    When ``server=True``, :meth:`readline` method will reduce ``\r\x00``
-#    to ``\r``.
-#
-#
-#    to yield from the various ``read``-family of calls.
-
-
     #: Late-binding instance of :class:`codecs.IncrementalDecoder`, some
-    #: bytes may be lost when ``final=False`` is used as an argument to
-    #: :meth:`decode` after ``protocol.set_encoding`` has been called with
-    #: a new encoding.
+    #: bytes may be lost if the protocol's encoding is changed after
+    #: previously receiving a partial multibyte.  This isn't common in
+    #: practice, however.
     _decoder = None
 
     def __init__(self, protocol, limit=asyncio.streams._DEFAULT_LIMIT,
@@ -89,7 +78,9 @@ class TelnetReader(asyncio.StreamReader):
         This method is a :func:`asyncio.coroutine`.
         """
         buf_line = yield from super().readline()
-        return self.decode(buf_line, final=True)
+        if self._protocol.default_encoding:
+            return self.decode(buf_line, final=True)
+        return buf_line
 
     @asyncio.coroutine
     def read(self, n=-1):
@@ -106,11 +97,13 @@ class TelnetReader(asyncio.StreamReader):
         This method is a :func:`asyncio.coroutine`.
         """
         buf = yield from super().read(n)
+        if not self._protocol.default_encoding:
+            return buf
+
         if n < 0:
             return self.decode(buf, final=True)
 
-        if not buf:
-            # EOF
+        if buf == b'':
             return ''
 
         ucs = self.decode(buf)
@@ -143,23 +136,9 @@ class TelnetReader(asyncio.StreamReader):
         :rtype: str
         """
         buf = yield from super().read(n)
+        if not self._protocol.default_encoding:
+            return buf
         return self.decode(buf)
-
-        # mirrors exactly what we derive, exception that it returns
-        # unicode, and not bytes.
-        #if self._exception is not None:
-        #    raise self._exception
-        #
-        #blocks = []
-        #while n > 0:
-        #    block = yield from self.read(n)
-        #    if not block:
-        #        partial = ''.join(blocks)
-        #        raise asyncio.IncompleteReadError(partial, len(partial) + n)
-        #    blocks.append(block)
-        #    n -= len(block)
-        #
-        #return ''.join(blocks)
 
     def __repr__(self):
         """Description of stream encoding state."""

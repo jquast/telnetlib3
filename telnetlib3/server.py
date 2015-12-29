@@ -59,16 +59,15 @@ class TelnetServer(server_base.BaseServer):
         self.writer.iac(DO, TTYPE)
 
     def begin_advanced_negotiation(self):
-        from .telopt import (DO, WILL, SGA, ECHO,
-                             NEW_ENVIRON, NAWS, BINARY, CHARSET)
+        from .telopt import (DO, WILL, SGA, ECHO, BINARY,
+                             NEW_ENVIRON, NAWS, CHARSET)
         super().begin_advanced_negotiation()
-        self.writer.iac(DO, NEW_ENVIRON)
-        self.writer.iac(DO, NAWS)
         self.writer.iac(WILL, SGA)
         self.writer.iac(WILL, ECHO)
-
+        self.writer.iac(WILL, BINARY)
+        self.writer.iac(DO, NEW_ENVIRON)
+        self.writer.iac(DO, NAWS)
         if self.default_encoding:
-            self.writer.iac(WILL, BINARY)
             self.writer.iac(DO, CHARSET)
 
     def check_negotiation(self, final=False):

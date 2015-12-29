@@ -160,3 +160,46 @@ def test_telnet_server_encoding_by_LANG(
     assert srv_instance.encoding(outgoing=True) == 'KOI8-U'
     assert srv_instance.encoding(incoming=True, outgoing=True) == 'KOI8-U'
     assert srv_instance.get_extra_info('LANG') == 'uk_UA.KOI8-U'
+
+
+@pytest.mark.asyncio
+def test_telnet_server_binary_mode(
+        event_loop, bind_host, unused_tcp_port, log):
+    """Server's encoding=False creates a binary reader/writer interface."""
+    from telnetlib3.telopt import IAC, WONT, DO, TTYPE, BINARY
+    # given
+    _waiter = asyncio.Future()
+
+    @asyncio.coroutine
+    def binary_shell(reader, writer):
+        # our reader and writer should provide binary output
+        writer.write(b'server_output')
+
+        val = yield from reader.read(1)
+        assert val == b'c'
+        val = yield from reader.readexactly(len(b'lient '))
+        assert val == b'lient '
+        writer.close()
+        val = yield from reader.read()
+        assert val == b'output'
+
+    yield from telnetlib3.create_server(
+        host=bind_host, port=unused_tcp_port,
+        shell=binary_shell, waiter_connected=_waiter, encoding=False,
+        loop=event_loop, log=log)
+
+    reader, writer = yield from asyncio.open_connection(
+        host=bind_host, port=unused_tcp_port, loop=event_loop)
+
+    # exercise, server will binary
+    val = yield from reader.read(len(IAC + DO + TTYPE))
+    assert val == IAC + DO + TTYPE
+
+    writer.write(IAC + WONT + TTYPE)
+    writer.write(b'client output')
+
+    val = yield from reader.readexactly(len(b'server_output'))
+    assert val == b'server_output'
+
+    eof = yield from reader.read()
+    assert eof == b''

@@ -132,7 +132,7 @@ class BaseServer(asyncio.Protocol):
         cmd_received = False
         for byte in data:
             try:
-                recv = self.writer.feed_byte(byte)
+                recv = self.writer.feed_byte(bytes([byte]))
             except:
                 self._log_exception(self.log.debug, *sys.exc_info())
             else:

@@ -298,9 +298,6 @@ class TelnetWriter(asyncio.StreamWriter):
             be duplicated to a connected terminal or device.  ``False`` is
             returned for an ``IAC`` command for each byte until its completion.
         """
-        if isinstance(byte, int):
-            byte = bytes([byte])
-
         self.byte_count += 1
         self.slc_received = False
 
@@ -2184,11 +2181,11 @@ class Option(dict):
 
     def __setitem__(self, key, value):
         #ifdef 0
-        #if value != dict.get(self, key, None):
-        #    descr = ' + '.join([name_command(bytes([byte]))
-        #                        for byte in key[:2]
-        #                        ] + [repr(byte) for byte in key[2:]])
-        #    self.log.debug('{}[{}] = {}'.format(self.name, descr, value))
+        if value != dict.get(self, key, None):
+            descr = ' + '.join([name_command(bytes([byte]))
+                                for byte in key[:2]
+                                ] + [repr(byte) for byte in key[2:]])
+            self.log.debug('{}[{}] = {}'.format(self.name, descr, value))
         #endif
         dict.__setitem__(self, key, value)
 
