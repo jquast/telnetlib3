@@ -39,13 +39,10 @@ Basic Telnet Server::
    
    @asyncio.coroutine
    def shell(reader, writer):
-
         writer.write('Would you like to play a game? ')
-
         inp = yield from reader.read(1)
         if inp:
-            if writer.will_echo:
-                writer.write(inp)
+            writer.echo(inp)
             writer.write('\r\nThey say the only way to win '
                          'is to not play at all.\r\n')
 
@@ -65,7 +62,7 @@ Basic Telnet Client::
     def start_client():
         reader, writer = yield from telnetlib3.connect('localhost', port=6023)
         while True:
-            buf = yield from reader.readexactly(1)
+            buf = yield from reader.read(1024)
             if not buf:
                 # EOF
                 break
