@@ -162,8 +162,7 @@ def test_telnet_given_shell(
         (b'proto\n', (
             b'\r\n<Peer ' +
             bind_host.encode('ascii') + b' ' +
-            server_port.encode('ascii') + b' ' +
-            b'charset=utf8 cols=80 rows=25 term=unknown>' +
+            server_port.encode('ascii') + b'>' +
             b'\r\ntel:sh> '
         )),
         (b'slc\r\n', (

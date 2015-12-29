@@ -163,11 +163,11 @@ class BaseServer(asyncio.Protocol):
 
     def __repr__(self):
         hostport = self._transport.get_extra_info('peername')[:2]
-        _extra = ((key, val) for key, val in self._extra.items() if
-                  not key.startswith('ttype') and
-                  key not in ('timeout',))
-        extra = ' '.join('{0}={1}'.format(*item) for item in sorted(_extra))
-        return '<Peer {0} {1} {2}>'.format(*hostport, extra)
+        # _extra = ((key, val) for key, val in self._extra.items() if
+        #           not key.startswith('ttype') and
+        #           key not in ('timeout',))
+        # extra = ' '.join('{0}={1}'.format(*item) for item in sorted(_extra))
+        return '<Peer {0} {1}>'.format(*hostport)
 
     def get_extra_info(self, name, default=None):
         """Get optional server information."""

@@ -1,11 +1,11 @@
 # std imports
 import asyncio
 
-__all__ = ('TelnetServer', 'create_server')
-
-
-# std imports
+# local
 from . import server_base
+from . import accessories
+
+__all__ = ('TelnetServer', 'create_server')
 
 
 class TelnetServer(server_base.BaseServer):
@@ -325,3 +325,75 @@ def create_server(
             waiter_closed=waiter_closed, waiter_connected=waiter_connected)
 
     return (yield from loop.create_server(on_connect, host, port))
+
+
+def _get_argument_parser():
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Telnet protocol server",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('host', nargs='?', default='localhost',
+                        help='bind address')
+    parser.add_argument('port', nargs='?', default=6023, type=int,
+                        help='bind port')
+    parser.add_argument('--loglevel', default='info',
+                        help='level name')
+    parser.add_argument('--logfile',
+                        help='filepath')
+    parser.add_argument('--shell', default='telnetlib3.telnet_server_shell',
+                        help='module.function_name')
+    parser.add_argument('--encoding', default='utf8',
+                        help='encoding name')
+    parser.add_argument('--force-binary', action='store_true',
+                        help='force binary transmission')
+    parser.add_argument('--timeout', default=300, type=int,
+                        help='idle disconnect (0 disables)')
+    return parser
+
+
+def _transform_args(args):
+
+    # parse --shell='module.function' into function target
+    module_name, func_name = args.shell.rsplit('.', 1)
+    module = __import__(module_name)
+    shell_function = getattr(module, func_name)
+    assert callable(shell_function), shell_function
+
+    return {
+        'host': args.host,
+        'port': args.port,
+        'encoding': args.encoding,
+        'force_binary': args.force_binary,
+        'timeout': args.timeout,
+        'loglevel': args.loglevel,
+        'logfile': args.logfile,
+        'shell': shell_function
+    }
+
+
+@asyncio.coroutine
+def start_server(host, port, log, **kwds):
+    yield from create_server(host=host, port=port, log=log, **kwds)
+
+
+def main():
+    kwargs = _transform_args(_get_argument_parser().parse_args())
+    config_msg = 'Server configuration: ' + accessories.repr_mapping(kwargs)
+
+    loglevel = kwargs.pop('loglevel')
+    logfile = kwargs.pop('logfile')
+    host = kwargs.pop('host')
+    port = kwargs.pop('port')
+
+    log = accessories.make_logger(loglevel=loglevel, logfile=logfile)
+    log.debug(config_msg)
+
+    loop = asyncio.get_event_loop()
+    if loglevel == 'debug':
+        loop.set_debug(True)
+
+    loop.run_until_complete(start_server(host, port, log, **kwargs))
+    loop.run_forever()
+
+if __name__ == '__main__':
+    exit(main())
