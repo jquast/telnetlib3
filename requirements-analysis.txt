@@ -1,3 +1,4 @@
+git+git://github.com/GreenSteam/pep257.git@master#egg=pep257
 prospector[with_frosted,with_pyroma]
 restructuredtext_lint
 doc8

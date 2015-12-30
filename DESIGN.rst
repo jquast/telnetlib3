@@ -52,3 +52,14 @@ Like our C counterparts, we should use something more advanced than
 a #define / enumeration, so that when printed, print their NAME --
 when sent as bytes, send their raw value.
 
+
+On Encoding
+-----------
+doing good so far, make sure tox.ini tests LANG=C, LANG=en_US.UTF-8 matrix,
+or push travis-ci to do that for us?
+# TODO: LANG=C, LANG=en_US.UTF-8 matrix ?
+
+On Versioning
+-------------
+
+version.json should contain "shell": "0.1" currently, 0.2 next.

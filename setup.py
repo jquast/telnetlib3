@@ -31,11 +31,14 @@ setup(name='telnetlib3',
       long_description=_get_long_description(fname=_get_here('README.rst')),
       packages=['telnetlib3', ],
       package_data={'': ['README.rst', 'requirements.txt', ], },
-      scripts=['bin/telnet-client',
-               'bin/telnet-server',
-               'bin/telnet-talker', ],
+      entry_points={
+         'console_scripts': [
+             'telnetlib3-server = telnetlib3.server:main',
+             'telnetlib3-client = telnetlib3.client:main'
+         ]},
       author_email='contact@jeffquast.com',
       platforms='any',
+      zip_safe=True,
       keywords=', '.join(('telnet', 'server', 'client', 'bbs', 'mud', 'utf8',
                           'cp437', 'api', 'library', 'asyncio', 'talker',
                           'tulip', )),

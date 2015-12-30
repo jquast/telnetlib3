@@ -1,10 +1,11 @@
-"""Functionally tests telnetlib3 as a server, using telnet(1)"""
+"""Functionally tests telnetlib3 as a server, using telnet(1)."""
 # std imports
 import asyncio
 
 # local
-from .accessories import (
-    TestTelnetServer,
+import telnetlib3
+from telnetlib3.tests.accessories import (
+    server_factory,
     unused_tcp_port,
     event_loop,
     bind_host,
@@ -16,22 +17,23 @@ import pexpect
 import pytest
 
 
+@pytest.mark.skipif(
+    True, reason="https://github.com/pexpect/pexpect/issues/294")
 @pytest.mark.asyncio
-def test_bsdtelnet(event_loop, bind_host, unused_tcp_port, log):
-
+def test_bsdtelnet(server_factory, event_loop, bind_host, unused_tcp_port, log):
+    """Simple telnet(1) as client (issues 'quit' command)."""
     # if the event loop is not set in debug mode, pexpect blows up !
     # https://github.com/pexpect/pexpect/issues/294
     event_loop.set_debug(True)
 
-    waiter_connected = asyncio.Future()
-    waiter_closed = asyncio.Future()
+    server_connected = asyncio.Future()
+    server_closed = asyncio.Future()
 
-    server = yield from event_loop.create_server(
-        protocol_factory=lambda: TestTelnetServer(
-            waiter_connected=waiter_connected,
-            waiter_closed=waiter_closed,
-            log=log),
-        host=bind_host, port=unused_tcp_port)
+    server = yield from telnetlib3.create_server(
+        host=bind_host, port=unused_tcp_port,
+        waiter_connected=server_connected,
+        waiter_closed=server_closed,
+        log=log)
 
     log.info('Listening on {0}'.format(server.sockets[0].getsockname()))
 
@@ -56,12 +58,15 @@ def test_bsdtelnet(event_loop, bind_host, unused_tcp_port, log):
                                   timeout=5,
                                   async=True)
 
-    waiter_client = child.expect('test-telsh % ', async=True, timeout=None)
+    # find the prompt, '%'
+    client_connected = child.expect('.* % ', async=True, timeout=None)
 
     done, pending = yield from asyncio.wait(
-        [waiter_client, waiter_connected],
+        [client_connected, server_connected],
         loop=event_loop, timeout=1,
         return_when=asyncio.ALL_COMPLETED)
+
+    assert not pending, (client_connected, server_connected)
 
     cancelled = {future for future in done if future.cancelled()}
     log.debug('done {0}'.format(done))
@@ -71,13 +76,12 @@ def test_bsdtelnet(event_loop, bind_host, unused_tcp_port, log):
     assert not cancelled, (done, pending, cancelled, child.buffer)
 
     child.sendline(u"quit")
-
+    telnet_closed = child.expect(pexpect.EOF, async=True, timeout=None)
     done, pending = yield from asyncio.wait(
-        [child.expect(pexpect.EOF, async=True, timeout=None),
-         waiter_closed],
+        [telnet_closed, server_closed],
         loop=event_loop, timeout=1,
         return_when=asyncio.ALL_COMPLETED)
 
     assert not any(future.cancelled() for future in done), done
 
-    assert not pending
+    assert not pending, (telnet_closed, server_closed)
