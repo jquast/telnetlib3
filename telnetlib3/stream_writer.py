@@ -110,7 +110,8 @@ class TelnetWriter(asyncio.StreamWriter):
         asyncio.StreamWriter.__init__(self, transport, protocol, reader, loop)
 
         if not any((client, server)) or all((client, server)):
-            raise TypeError("kwargs client, server are mutually exclusive.")
+            raise TypeError("keyword arguments `client', and `server' "
+                            "are mutually exclusive.")
         self._server = server
         self.log = log or logging.getLogger(__name__)
 
@@ -235,40 +236,6 @@ class TelnetWriter(asyncio.StreamWriter):
                 kind=endpoint, opts=','.join(_remote)))
 
         return '<{0}>'.format(' '.join(info))
-
-    @staticmethod
-    def _escape_iac(buf):
-        r"""Replace bytes in buf ``IAC`` (``b'\xff'``) by ``IAC IAC``."""
-        return buf.replace(IAC, IAC + IAC)
-
-    def _write(self, buf, escape_iac=True):
-        """
-        Write bytes to transport, conditionally escaping IAC.
-
-        :param bytes buf: bytes to write to transport.
-        :param bool escape_iac: whether bytes in buffer ``buf`` should be
-            escape bytes ``IAC``.  This should be set ``False`` for direct
-            writes of ``IAC`` commands.
-        """
-        if not isinstance(buf, (bytes, bytearray)):
-            raise TypeError("buf expected bytes, got {0}".format(type(buf)))
-
-        if escape_iac:
-            # when escape_iac is True, we may safely assume downstream
-            # application has provided an encoded string.  If force_binary
-            # is unset, we enforce strict adherence of BINARY protocol
-            # negotiation.
-            if (not self._protocol.force_binary and not self.outbinary):
-                # check each byte position by index to report location
-                for position, byte in enumerate(buf):
-                    if byte >= 128:
-                        raise TypeError(
-                            'Byte value {0!r} at index {1} not valid, '
-                            'send IAC WILL BINARY first: buf={2!r}'.format(
-                                byte, position, buf))
-            buf = self._escape_iac(buf)
-
-        self._transport.write(buf)
 
     def write(self, string, errors=None):
         """
@@ -500,6 +467,13 @@ class TelnetWriter(asyncio.StreamWriter):
     def will_echo(self):
         """
         Whether Server end is expected to echo back input sent by client.
+
+        From server perspective: the server should echo (duplicate) client
+        input back over the wire, the client is awaiting this data to indicate
+        their input has been received.
+
+        From client perspective: the server will not echo our input, we should
+        chose to duplicate our input to standard out ourselves.
         """
         return ((self.server and self.local_option.enabled(ECHO)) or
                 (self.client and self.remote_option.enabled(ECHO)))
@@ -1529,8 +1503,44 @@ class TelnetWriter(asyncio.StreamWriter):
             raise ValueError('SE: unhandled: cmd={}, buf={!r}'
                              .format(name_command(cmd), buf))
 
-# Private sub-negotiation (SB) routines
-#
+    # Our Private API methods
+
+    @staticmethod
+    def _escape_iac(buf):
+        r"""Replace bytes in buf ``IAC`` (``b'\xff'``) by ``IAC IAC``."""
+        return buf.replace(IAC, IAC + IAC)
+
+    def _write(self, buf, escape_iac=True):
+        """
+        Write bytes to transport, conditionally escaping IAC.
+
+        :param bytes buf: bytes to write to transport.
+        :param bool escape_iac: whether bytes in buffer ``buf`` should be
+            escape bytes ``IAC``.  This should be set ``False`` for direct
+            writes of ``IAC`` commands.
+        """
+        if not isinstance(buf, (bytes, bytearray)):
+            raise TypeError("buf expected bytes, got {0}".format(type(buf)))
+
+        if escape_iac:
+            # when escape_iac is True, we may safely assume downstream
+            # application has provided an encoded string.  If force_binary
+            # is unset, we enforce strict adherence of BINARY protocol
+            # negotiation.
+            if (not self._protocol.force_binary and not self.outbinary):
+                # check each byte position by index to report location
+                for position, byte in enumerate(buf):
+                    if byte >= 128:
+                        raise TypeError(
+                            'Byte value {0!r} at index {1} not valid, '
+                            'send IAC WILL BINARY first: buf={2!r}'.format(
+                                byte, position, buf))
+            buf = self._escape_iac(buf)
+
+        self._transport.write(buf)
+
+    # Private sub-negotiation (SB) routines
+
     def _handle_sb_charset(self, buf):
         cmd = buf.popleft()
         opt = buf.popleft()
@@ -1715,25 +1725,29 @@ class TelnetWriter(asyncio.StreamWriter):
         self._ext_callback[SNDLOC](location_str)
 
     def _send_naws(self):
-        """ XXX Fire callback for IAC-DO-NAWS and another one ??
-            can a server send IAC-DO-NAWS anytime it wants to know,
-            or an SB? TODO
-        """
+        """Fire callback for IAC-DO-NAWS from server."""
+        # Similar to the callback method order fired by _handle_sb_naws(),
+        # we expect our parameters in order of (rows, cols), matching the
+        # termios.TIOCGWINSZ and terminfo(5) cup capability order.
         rows, cols = self._ext_send_callback[NAWS]()
 
-        # NAWS limits columns and rows to a size of 0-65535 (unsigned short)
+        # NAWS limits columns and rows to a size of 0-65535 (unsigned short).
+        #
         # >>> struct.unpack('!HH', b'\xff\xff\xff\xff')
-        # (65535, 65535)
+        # (65535, 65535).
         rows, cols = max(min(65535, rows), 0), max(min(65535, cols), 0)
 
+        # NAWS is sent in (col, row) order:
+        #
+        #    IAC SB NAWS WIDTH[1] WIDTH[0] HEIGHT[1] HEIGHT[0] IAC SE
         #
         response = [IAC, SB, NAWS, struct.pack('!HH', cols, rows), IAC, SE]
-        self.log.debug('send IAC SB NAWS (cols={0}, rows={1}) IAC SE'
-                       .format(cols, rows))
+        self.log.debug('send IAC SB NAWS (rows={0}, cols={1}) IAC SE'
+                       .format(rows, cols))
         self.send_iac(b''.join(response))
 
     def _handle_sb_naws(self, buf):
-        """ Fire callback for IAC-SB-NAWS-<buf>-SE (rfc1073).
+        """ Fire callback for IAC-SB-NAWS-<cols_rows[4]>-SE (rfc1073).
         """
         cmd = buf.popleft()
         assert cmd == NAWS, name_command(cmd)
@@ -1742,10 +1756,19 @@ class TelnetWriter(asyncio.StreamWriter):
         )
         assert self.remote_option.enabled(NAWS), (
             'received IAC SB NAWS without receipt of IAC WILL NAWS')
+        # note a similar formula:
+        #
+        #    cols, rows = ((256 * buf[0]) + buf[1],
+        #                  (256 * buf[2]) + buf[3])
         cols, rows = struct.unpack('!HH', b''.join(buf))
         self.log.debug('recv IAC SB NAWS (cols={0}, rows={1}) IAC SE'
                        .format(cols, rows))
-        self._ext_callback[NAWS](cols, rows)
+
+        # Flip the bytestream order (cols, rows) -> (rows, cols).
+        #
+        # This is for good reason: it matches the termios.TIOCGWINSZ
+        # structure, which also matches the terminfo(5) capability, 'cup'.
+        self._ext_callback[NAWS](rows, cols)
 
     def _handle_sb_lflow(self, buf):
         """ Fire callback for IAC-SB-LFLOW-<buf>
