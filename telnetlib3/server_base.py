@@ -102,7 +102,7 @@ class BaseServer(asyncio.Protocol):
         self._last_received = datetime.datetime.now()
 
         self.reader = self._reader_factory(
-            protocol=self, log=self.log, loop=self._loop)
+            protocol=self, log=self.log, loop=self._loop, server=True)
 
         self.writer = self._writer_factory(
             transport=transport, protocol=self,
@@ -205,10 +205,11 @@ class BaseServer(asyncio.Protocol):
         """
         Encoding that should be used for the direction indicated.
 
-        The base implementation **always** returns ``US-ASCII``.
+        The base implementation **always** returns :attr:`default_encoding`
+        or, when unspecified, ``US-ASCII``.
         """
         # pylint: disable=unused-argument,no-self-use
-        return 'US-ASCII'  # pragma: no cover
+        return self.default_encoding or 'US-ASCII'
 
     def negotiation_should_advance(self):
         """

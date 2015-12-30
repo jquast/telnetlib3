@@ -99,7 +99,7 @@ class BaseClient(asyncio.Protocol):
         self._last_received = datetime.datetime.now()
 
         self.reader = self._reader_factory(
-            protocol=self, log=self.log, loop=self._loop)
+            protocol=self, log=self.log, loop=self._loop, client=True)
 
         self.writer = self._writer_factory(
             transport=transport, protocol=self,
@@ -112,10 +112,8 @@ class BaseClient(asyncio.Protocol):
         self._loop.call_soon(self.begin_negotiation)
 
     def begin_shell(self, result):
-        self.log.debug('hai {0}'.format(self.shell))
         if self.shell is not None:
             res = self.shell(self.reader, self.writer)
-            self.log.debug('oi {0}'.format(res))
             if asyncio.iscoroutine(res):
                 self._loop.create_task(res)
 
@@ -186,10 +184,11 @@ class BaseClient(asyncio.Protocol):
         """
         Encoding that should be used for the direction indicated.
 
-        The base implementation **always** returns ``US-ASCII``.
+        The base implementation **always** returns :attr:`default_encoding`
+        or, when unspecified, ``US-ASCII``.
         """
         # pylint: disable=unused-argument,no-self-use
-        return 'US-ASCII'  # pragma: no cover
+        return self.default_encoding or 'US-ASCII'
 
     def check_negotiation(self, final=False):
         """

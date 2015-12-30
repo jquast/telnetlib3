@@ -185,14 +185,14 @@ class TelnetServer(server_base.BaseServer):
         eof_msg = 'timeout after {self.idle:1.2f}s'.format(self=self)
         self.connection_lost(EOFError(eof_msg))
 
-    def on_naws(self, width, height):
+    def on_naws(self, rows, cols):
         """
         Callback receives NAWS response, rfc-1073_.
 
-        :param int width: screen size, by number of columns.
-        :param int height: screen size, by number of rows.
+        :param int rows: screen size, by number of cells in height.
+        :param int cols: screen size, by number of cells in width.
         """
-        self._extra.update({'cols': width, 'rows': height})
+        self._extra.update({'rows': rows, 'cols': cols})
 
     def on_environ(self, mapping):
         """Callback receives NEW_ENVIRON response, rfc-1572_."""

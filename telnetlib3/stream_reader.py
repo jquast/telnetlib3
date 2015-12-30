@@ -38,7 +38,12 @@ class TelnetReader(asyncio.StreamReader):
     _decoder = None
 
     def __init__(self, protocol, limit=asyncio.streams._DEFAULT_LIMIT,
-                 loop=None, log=None, encoding_errors='replace'):
+                 loop=None, log=None, encoding_errors='replace',
+                 server=False, client=False):
+        if not any((client, server)) or all((client, server)):
+            raise TypeError("keyword arguments `client', and `server' "
+                            "are mutually exclusive.")
+        self._server = server
         self.log = log or logging.getLogger(__name__)
         self._protocol = protocol
         if loop is None:
@@ -97,6 +102,7 @@ class TelnetReader(asyncio.StreamReader):
         This method is a :func:`asyncio.coroutine`.
         """
         buf = yield from super().read(n)
+
         if not self._protocol.default_encoding:
             return buf
 
@@ -111,12 +117,11 @@ class TelnetReader(asyncio.StreamReader):
             # we have received an incomplete multibyte encoding which so far
             # has not decoded to a completed unicode point.  We must continue
             # to read from super() until completed.  We do this *one byte at
-            # a time*, expecting very few bytes to remain to complete.
+            # a time*, expecting very few bytes remaining to complete.
             buf = yield from super().read(1)
             if not buf:
-                # an incomplete multibyte followed by EOF.  Although this
-                # should be an error, we simply discard the bytes which have so
-                # far failed to decode.
+                # an incomplete multibyte followed by EOF, discard the bytes
+                # which have so far failed to decode and signal EOF to caller.
                 break
             ucs += self.decode(buf)
         return ucs
