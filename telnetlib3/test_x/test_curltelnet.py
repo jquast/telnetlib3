@@ -2,20 +2,15 @@
 # std imports
 import subprocess
 import asyncio
-import locale
-import codecs
 
 # local imports
-from .accessories import (
-    TestTelnetServer,
+from telnetlib3.tests.accessories import (
+    server_factory,
     unused_tcp_port,
     event_loop,
     bind_host,
     log
 )
-
-# local
-import telnetlib3
 
 # 3rd party imports
 import pytest
@@ -25,14 +20,14 @@ import pexpect
 @pytest.mark.skipif(pexpect.which('curl') is None,
                     reason="Requires curl(1)")
 @pytest.mark.asyncio
-def test_curltelnet(event_loop, bind_host, unused_tcp_port, log):
+def test_curltelnet(server_factory, event_loop, bind_host, unused_tcp_port, log):
+    """Simple curl(1) as Telnet client (simple capabilities)."""
 
-    waiter_closed = asyncio.Future()
+    event_loop.set_debug(True)
     waiter_connected = asyncio.Future()
 
     server = yield from event_loop.create_server(
-        protocol_factory=lambda: TestTelnetServer(
-            waiter_closed=waiter_closed,
+        protocol_factory=lambda: server_factory(
             waiter_connected=waiter_connected,
             log=log),
         host=bind_host, port=unused_tcp_port)
@@ -47,8 +42,13 @@ def test_curltelnet(event_loop, bind_host, unused_tcp_port, log):
         stderr=subprocess.PIPE
     )
 
-    done, pending = yield from asyncio.wait(
-        [waiter_connected, curl.communicate(input=b'quit\r'), waiter_closed],
-        loop=event_loop, timeout=1)
+    wait_for = [waiter_connected,
+                curl.communicate(input=b'quit\r')]
 
-    assert not pending, (waiter_connected, curl, waiter_closed)
+    done, pending = yield from asyncio.wait(wait_for,
+                                            loop=event_loop,
+                                            timeout=1)
+    assert not pending, wait_for
+
+    server.close()
+    yield from server.wait_closed()

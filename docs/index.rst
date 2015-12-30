@@ -9,7 +9,9 @@ Contents:
    :glob:
 
    intro
+   overview
    api
+   rfcs
    contributing
    history
 

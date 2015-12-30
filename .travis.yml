@@ -27,3 +27,4 @@ addons:
       - telnet
       - curl
       - netcat-openbsd
+      - tintin++

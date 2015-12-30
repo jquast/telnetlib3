@@ -4,7 +4,6 @@
 from __future__ import print_function
 
 # local
-import subprocess
 import tempfile
 import shutil
 import glob
@@ -16,6 +15,7 @@ import six
 
 PROJ_ROOT = os.path.join(os.path.dirname(__file__), os.pardir)
 COVERAGERC = os.path.join(PROJ_ROOT, '.coveragerc')
+
 
 def main():
     """Program entry point."""
@@ -36,8 +36,9 @@ def main():
     cov.combine(data_paths=data_paths)
     cov.load()
     cov.html_report(ignore_errors=True)
-    print("--> open {0}/htmlcov/index.html for review."
-          .format(os.path.relpath(PROJ_ROOT)))
+    print("--> {magenta}open {proj_root}/htmlcov/index.html{normal}"
+          " for review.".format(magenta='\x1b[1;35m', normal='\x1b[0m',
+                                proj_root=os.path.relpath(PROJ_ROOT)))
 
     fout = six.StringIO()
     cov.report(file=fout, ignore_errors=True)
