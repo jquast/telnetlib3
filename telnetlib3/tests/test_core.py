@@ -106,6 +106,7 @@ def test_telnet_client_open_closed_by_peer(
     # read until EOF, no data received.
     data_received = yield from reader.read()
     assert data_received == ''
+    writer.close()
 
 
 @pytest.mark.asyncio
