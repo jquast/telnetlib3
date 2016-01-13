@@ -21,10 +21,10 @@ notifications:
     on_failure: change
 
 sudo: false
-addons:
-  apt:
-    packages:
-      - telnet
-      - curl
-      - netcat-openbsd
-      - tintin++
+#addons:
+#  apt:
+#    packages:
+#      - telnet
+#      - curl
+#      - netcat-openbsd
+#      - tintin++
