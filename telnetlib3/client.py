@@ -265,14 +265,7 @@ def main():
     reader, writer = loop.run_until_complete(
         start_client(host, port, log, **kwargs))
 
-    try:
-        loop.run_until_complete(writer.protocol.waiter_closed)
-    except KeyboardInterrupt:
-        writer.close()
-        loop.stop()
-        raise
-
-    return 0
+    loop.run_until_complete(writer.protocol.waiter_closed)
 
 
 def _get_argument_parser():
