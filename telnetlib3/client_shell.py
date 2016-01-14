@@ -45,8 +45,32 @@ else:
         reader = asyncio.StreamReader()
         reader_protocol = asyncio.StreamReaderProtocol(reader)
 
+        # we have a terrible bug here. This pattern was pulled from:
+        #
+        #   https://gist.github.com/nathan-hoad/8966377
+        #
+        # if we use "os.fdopen(...)" instead of "sys.stdout", as we do here,
+        # our interactive terminal (when stdin is connected to a terminal)
+        # is perfectly fine.
+        #
+        # however, if we use a pipe, like "echo input | telnetlib3-client ..."
+        # then such program will lock up indefinitely. If we then switch to use
+        # of sys.stdout, the pipe issue is resolved, but the following error
+        # occurs in interactive use:
+        #
+        #   unix_events.py:492 pipe closed by peer or os.write(pipe, data)
+        #                      raised exception.
+        #
+        # After some experimentation, this conditional seems to handle both
+        # situations. Please do contribute if you can figure this one out.
+
+        if not sys.stdin.isatty():
+            write_fobj = sys.stdout
+        else:
+            write_fobj = sys.stdin
+
         writer_transport, writer_protocol = yield from loop.connect_write_pipe(
-            asyncio.streams.FlowControlMixin, sys.stdout)
+            asyncio.streams.FlowControlMixin, write_fobj)
 
         writer = asyncio.StreamWriter(
             writer_transport, writer_protocol, None, loop)
