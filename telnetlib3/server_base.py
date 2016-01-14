@@ -210,7 +210,7 @@ class BaseServer(asyncio.Protocol):
         The base implementation **always** returns :attr:`default_encoding`
         or, when unspecified, ``US-ASCII``.
         """
-        # pylint: disable=unused-argument,no-self-use
+        # pylint: disable=unused-argument
         return self.default_encoding or 'US-ASCII'
 
     def negotiation_should_advance(self):

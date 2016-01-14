@@ -208,7 +208,7 @@ class BaseClient(asyncio.Protocol):
         The base implementation **always** returns :attr:`default_encoding`
         or, when unspecified, ``US-ASCII``.
         """
-        # pylint: disable=unused-argument,no-self-use
+        # pylint: disable=unused-argument
         return self.default_encoding or 'US-ASCII'
 
     def check_negotiation(self, final=False):
@@ -232,15 +232,14 @@ class BaseClient(asyncio.Protocol):
         combined when derived.
         """
         return (not any(self.writer.pending_option.values()) and
-                # this particular state check is interesting; what we're trying
-                # to ensure that, if the server choses to make a demand, that
-                # our transport has allowed enough time for such demands to be
-                # received.
+                # This particular state check is interesting; what we're trying
+                # to allow is a period of time where the server may chose to
+                # make demands in batches.  Let us allow our protocol
+                # negotiation enough time for such demands to be received.
                 #
-                # the most correct thing to do would be to use something like
-                # IAC TM (timing-mark) to measure the round-trip time, and
-                # double it for safety.  This delay is likely too much for
-                # a modern internet, however.
+                # A better measurement of would be to use something like TM
+                # (timing-mark) to measure the round-trip time, and double it
+                # for this value.
                 self.duration > self.CONNECT_MINWAIT)
 
     # private methods
