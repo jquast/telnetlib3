@@ -16,12 +16,12 @@ class BaseClient(asyncio.Protocol):
     #: Minimum on-connect time to wait for at least one server-initiated
     #: negotiation option byte.  A server not demanding any telnet options
     #: will delay the initial connection time for at least this amount.
-    CONNECT_MINWAIT = 0.80  # TODO: not implemented
+    CONNECT_MINWAIT = 0.6
 
     #: Maximum on-connect time allowed for pending negotiation to occur
     #: until it is considered 'final'.  This boundary occurs when the
     #: remote end has failed to complete pending negotiation options.
-    CONNECT_MAXWAIT = 1.80
+    CONNECT_MAXWAIT = 1.5
 
     _when_connected = None
     _last_received = None
@@ -44,7 +44,7 @@ class BaseClient(asyncio.Protocol):
         self._extra = dict()
         self.waiter_connected = waiter_connected or asyncio.Future()
         self.waiter_closed = waiter_closed or asyncio.Future()
-        self._tasks = [self.waiter_connected]
+        self._tasks = []
         self.shell = shell
         self.reader = None
         self.writer = None
@@ -82,7 +82,13 @@ class BaseClient(asyncio.Protocol):
         # close transport (may already be closed), set waiter_closed and
         # cancel waiter_connected.
         self._transport.close()
-        self.waiter_connected.cancel()
+        if not self.waiter_connected.done():
+            # strangely, for symmetry, our 'waiter_connected' must be set if
+            # we are disconnected before negotiation may be considered
+            # complete.  We set waiter_closed, and any function consuming
+            # the StreamReader will receive eof.
+            self.waiter_connected.set_result(self)
+
         if self.shell is None:
             # when a shell is defined, we allow the completion of the coroutine
             # to set the result of waiter_closed.
@@ -218,10 +224,24 @@ class BaseClient(asyncio.Protocol):
         is considered final, or after :attr:`CONNECT_MAXWAIT` has elapsed,
         setting :attr:`waiter_connected` to value ``self`` when complete.
 
+        This method returns False until :attr:`CONNECT_MINWAIT` has elapsed,
+        ensuring the server may batch telnet negotiation demands without
+        prematurely entering the callback shell.
+
         Ensure ``super().check_negotiation()`` is called and conditionally
         combined when derived.
         """
-        return not any(self.writer.pending_option.values())
+        return (not any(self.writer.pending_option.values()) and
+                # this particular state check is interesting; what we're trying
+                # to ensure that, if the server choses to make a demand, that
+                # our transport has allowed enough time for such demands to be
+                # received.
+                #
+                # the most correct thing to do would be to use something like
+                # IAC TM (timing-mark) to measure the round-trip time, and
+                # double it for safety.  This delay is likely too much for
+                # a modern internet, however.
+                self.duration > self.CONNECT_MINWAIT)
 
     # private methods
 
@@ -242,7 +262,12 @@ class BaseClient(asyncio.Protocol):
             self.log.debug('{0}', self.writer.pending_option.values())
             self.waiter_connected.set_result(self)
         else:
-            # keep re-queuing until complete
+            # keep re-queuing until complete.  Aggressively re-queue until
+            # CONNECT_MINWAIT, or CONNECT_MAXWAIT, whichever occurs next
+            # in our time-series.
+            sooner = self.CONNECT_MINWAIT - self.duration
+            if sooner > 0:
+                later = sooner
             self._check_later = self._loop.call_later(
                 later, self._check_negotiation_timer)
             self._tasks.append(self._check_later)

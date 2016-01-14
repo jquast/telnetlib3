@@ -89,12 +89,6 @@ def test_telnet_server_open_close(
     assert result == b'\xff\xfd\x18Goodbye!'
 
 
-@pytest.mark.xfail(platform.python_version_tuple() == ('3', '4', '2'),
-                   reason=('On Travis-CI, python 3.4.2 exhibits a peculiar '
-                           'bug: this test, which is a coroutine, raises an '
-                           'exception as a future, as it is state cancelled '
-                           'when a result is attempted to lift.  This does '
-                           'not occur on 3.4.3, though. python bug?'))
 @pytest.mark.asyncio
 def test_telnet_client_open_closed_by_peer(
         event_loop, bind_host, unused_tcp_port, log):
