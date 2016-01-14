@@ -163,15 +163,17 @@ class TelnetClient(client_base.BaseClient):
                        self.writer.outbinary and self.writer.inbinary))
 
         if self.force_binary or may_encode:
-            # prefer 'LANG' environment variable, if sent
-            _lang = self.get_extra_info('lang', None)
+            # prefer 'LANG' environment variable, if set
+            _lang = self.get_extra_info('lang', '')
+            # en_US.UTF-8@misc
             if _lang and '.' in _lang:
                 _, encoding = _lang.split('.', 1)
                 if '@' in encoding:
                     encoding, _ = encoding.split('@', 1)
                 return encoding
 
-            # otherwise, uncommon CHARSET value if negotiated
+            # otherwise, uncommon CHARSET value if negotiated,
+            # fallback to default_encoding.
             return self.get_extra_info('charset', self.default_encoding)
         return 'US-ASCII'
 
