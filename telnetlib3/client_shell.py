@@ -1,5 +1,6 @@
 # std imports
 import asyncio
+import platform
 import contextlib
 import sys
 
@@ -103,9 +104,13 @@ else:
             telnet_task = None
 
             while True:
-                stdin_task = stdin_task or asyncio.ensure_future(
+                if platform.python_version_tuple() <= ('3', '4', '4'):
+                    compat_ensure_future = asyncio.async
+                else:
+                    compat_ensure_future = asyncio.ensure_future
+                stdin_task = stdin_task or compat_ensure_future(
                     stdin.read(2**12))
-                telnet_task = telnet_task or asyncio.ensure_future(
+                telnet_task = telnet_task or compat_ensure_future(
                     reader.read(2**12))
                 done, pending = yield from asyncio.wait(
                     [stdin_task, telnet_task],
