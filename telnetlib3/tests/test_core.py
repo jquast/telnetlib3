@@ -90,6 +90,19 @@ def test_telnet_server_open_close(
 
 
 @pytest.mark.asyncio
+def test_telnet_client_open_close_by_write(
+        event_loop, bind_host, unused_tcp_port, log):
+    """Exercise BaseClient.connection_lost() on writer closed."""
+    yield from event_loop.create_server(asyncio.Protocol,
+                                        bind_host, unused_tcp_port)
+
+    reader, writer = yield from telnetlib3.open_connection(
+        host=bind_host, port=unused_tcp_port, log=log)
+    writer.close()
+    assert (yield from reader.read()) == ''
+
+
+@pytest.mark.asyncio
 def test_telnet_client_open_closed_by_peer(
         event_loop, bind_host, unused_tcp_port, log):
     """Exercise BaseClient.connection_lost()."""
@@ -110,15 +123,22 @@ def test_telnet_client_open_closed_by_peer(
 
 
 @pytest.mark.asyncio
-def test_telnet_client_open_close(
+def test_telnet_client_open_close_by_error(
         event_loop, bind_host, unused_tcp_port, log):
-    """Exercise BaseClient.connection_lost()."""
+    """Exercise BaseClient.connection_lost() on error."""
     yield from event_loop.create_server(asyncio.Protocol,
                                         bind_host, unused_tcp_port)
 
+    class GivenException(Exception):
+        pass
+
     reader, writer = yield from telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, log=log)
-    writer.close()
+
+    writer.protocol.connection_lost(GivenException("candy corn 4 everyone"))
+    with pytest.raises(GivenException):
+        yield from reader.read()
+
 
 @pytest.mark.asyncio
 def test_telnet_server_advanced_negotiation(
