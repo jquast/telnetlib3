@@ -485,23 +485,8 @@ def test_telnet_client_cmdline(bind_host, unused_tcp_port, event_loop, log):
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE)
 
-    line = yield from asyncio.wait_for(proc.stdout.readline(), 0.5)
+    line = yield from asyncio.wait_for(proc.stdout.readline(), 1.5)
     assert line.strip() == b'hello, space cadet.'
-    #    if b'Server ready' in line:
-    #        break
-    #    log.debug('stderr-1 %r', line)
-    #
-    # client connects,
-    #reader, writer = yield from asyncio.open_connection(
-    #    host=bind_host, port=unused_tcp_port, loop=event_loop)
-    #writer.close()
-
-    # and closes,
-    #while True:
-    #    line = yield from asyncio.wait_for(proc.stderr.readline(), 0.5)
-    #    if b'Connection closed' in line:
-    #        break
-    #    log.debug('stderr-2 %r', line)
 
     # send SIGTERM
     proc.terminate()
