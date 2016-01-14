@@ -227,8 +227,7 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
     def connection_factory():
         return client_factory(
             log=log, encoding=encoding, encoding_errors=encoding_errors,
-            force_binary=force_binary,
-            term=term, cols=cols, rows=rows,
+            force_binary=force_binary, term=term, cols=cols, rows=rows,
             shell=shell, waiter_closed=waiter_closed,
             waiter_connected=waiter_connected)
 
