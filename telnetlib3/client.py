@@ -261,8 +261,6 @@ def main():
     log.debug(config_msg)
 
     loop = asyncio.get_event_loop()
-    if loglevel == 'debug':
-        loop.set_debug(True)
 
     reader, writer = loop.run_until_complete(
         start_client(host, port, log, **kwargs))
