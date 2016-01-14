@@ -17,8 +17,6 @@ else:
     import fcntl
     import tty
     import os
-    def _is_atty(fobj):
-        return os.isatty(fobj.fileno())
 
     @contextlib.contextmanager
     def _set_tty(fobj, tty_func):
@@ -29,13 +27,13 @@ else:
         before or after yielding.
         """
         save_mode = None
-        if _is_atty(fobj):
+        if fobj.isatty():
             save_mode = termios.tcgetattr(fobj.fileno())
             tty_func(fobj.fileno(), termios.TCSANOW)
         try:
             yield
         finally:
-            if _is_atty(fobj):
+            if not fobj.closed and fobj.isatty():
                 termios.tcsetattr(fobj.fileno(), termios.TCSAFLUSH, save_mode)
 
 
@@ -48,7 +46,7 @@ else:
         reader_protocol = asyncio.StreamReaderProtocol(reader)
 
         writer_transport, writer_protocol = yield from loop.connect_write_pipe(
-            asyncio.streams.FlowControlMixin, os.fdopen(0, 'wb'))
+            asyncio.streams.FlowControlMixin, sys.stdout)
 
         writer = asyncio.StreamWriter(
             writer_transport, writer_protocol, None, loop)
@@ -93,17 +91,14 @@ else:
 
                 if task == stdin_task:
                     # client input
-                    #
-                    # TODO(jquast): an empty ('') result from stdin is not
-                    # received on EOF as expected.  This can be reproduced by
-                    # a shell pipe -- Did we mis-wire?
                     inp = task.result()
                     if not inp:
-                        assert False, 'EOF from stdin'
+                        # EOF
+                        telnet_task.cancel()
                         break
                     writer.write(inp.decode())
                     if not writer.will_echo:
-                        stdout.write(inp.encode())
+                        stdout.write(inp)
                     stdin_task = None
 
                 else:
