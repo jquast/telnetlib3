@@ -164,7 +164,7 @@ class TelnetClient(client_base.BaseClient):
 
         if self.force_binary or may_encode:
             # prefer 'LANG' environment variable, if sent
-            _lang = self.get_extra_info('LANG', None)
+            _lang = self.get_extra_info('lang', None)
             if _lang and '.' in _lang:
                 _, encoding = _lang.split('.', 1)
                 if '@' in encoding:
