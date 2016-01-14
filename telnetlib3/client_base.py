@@ -16,12 +16,12 @@ class BaseClient(asyncio.Protocol):
     #: Minimum on-connect time to wait for at least one server-initiated
     #: negotiation option byte.  A server not demanding any telnet options
     #: will delay the initial connection time for at least this amount.
-    CONNECT_MINWAIT = 0.6
+    CONNECT_MINWAIT = 0.3
 
     #: Maximum on-connect time allowed for pending negotiation to occur
     #: until it is considered 'final'.  This boundary occurs when the
     #: remote end has failed to complete pending negotiation options.
-    CONNECT_MAXWAIT = 1.5
+    CONNECT_MAXWAIT = 0.6
 
     _when_connected = None
     _last_received = None
