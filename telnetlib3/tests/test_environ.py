@@ -55,3 +55,30 @@ def test_telnet_server_on_environ(
     assert srv_instance.get_extra_info('BETA') == 'b'
     assert srv_instance.get_extra_info('GAMMA') == (
         u''.join(chr(n) for n in range(0, 128)))
+
+
+@pytest.mark.asyncio
+def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port,
+                                   event_loop, log):
+    """Test executing telnetlib3/client.py as client using a tty (pexpect)"""
+    # this code may be reduced when pexpect asyncio is bugfixed ..
+    # we especially need pexpect to pass sys.stdin.isatty() test.
+    import os
+    import pexpect
+    prog, args = 'telnetlib3-client', [
+        bind_host, str(unused_tcp_port), '--loglevel=warn',]
+
+    class HelloServer(asyncio.Protocol):
+        def connection_made(self, transport):
+            super().connection_made(transport)
+            transport.write(b'hello, space cadet.\r\n')
+            # hangup
+            event_loop.call_later(0.2, transport.close)
+
+    # start vanilla tcp server
+    yield from event_loop.create_server(HelloServer,
+                                        bind_host, unused_tcp_port)
+    import sys
+    proc = pexpect.spawn(prog, args)
+    yield from proc.expect(pexpect.EOF, async=True, timeout=5)
+    assert proc.before.splitlines()[0] == b'hello, space cadet.'
