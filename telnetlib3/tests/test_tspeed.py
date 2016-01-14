@@ -43,3 +43,35 @@ def test_telnet_server_on_tspeed(event_loop, bind_host, unused_tcp_port, log):
     # verify,
     srv_instance = yield from asyncio.wait_for(_waiter, 0.5)
     assert srv_instance.get_extra_info('tspeed') == '123,456'
+
+
+@pytest.mark.asyncio
+def test_telnet_client_send_tspeed(event_loop, bind_host, unused_tcp_port, log):
+    """Test Client's callback method send_tspeed()."""
+    # given
+    #from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TSPEED
+    _waiter = asyncio.Future()
+    given_rx, given_tx = 1337, 1919
+
+    class ServerTestTspeed(telnetlib3.TelnetServer):
+        def on_tspeed(self, rx, tx):
+            super().on_tspeed(rx, tx)
+            _waiter.set_result((rx, tx))
+
+        def begin_advanced_negotiation(self):
+            from telnetlib3.telopt import DO, TSPEED
+            super().begin_advanced_negotiation()
+            self.writer.iac(DO, TSPEED)
+
+    yield from telnetlib3.create_server(
+        protocol_factory=ServerTestTspeed,
+        host=bind_host, port=unused_tcp_port,
+        loop=event_loop, log=log)
+
+    reader, writer = yield from telnetlib3.open_connection(
+        host=bind_host, port=unused_tcp_port, loop=event_loop,
+        tspeed=(given_rx, given_tx))
+
+    recv_rx, recv_tx = yield from asyncio.wait_for(_waiter, 0.5)
+    assert recv_rx == given_rx
+    assert recv_tx == given_tx
