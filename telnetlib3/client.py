@@ -211,7 +211,8 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
                     family=0, flags=0, local_addr=None, log=None,
                     encoding='utf8', encoding_errors='strict',
                     force_binary=False, term='unknown', cols=80, rows=25,
-                    shell=None, waiter_closed=None, waiter_connected=None):
+                    tspeed=(38400, 38400), xdisploc='', shell=None,
+                    waiter_closed=None, waiter_connected=None):
     """
     :param client_base.BaseClient client_factory: TelnetClient class instance,
         when ``None``, :class:`TelnetTerminalClient` is used when *stdin* is
@@ -230,8 +231,8 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
         return client_factory(
             log=log, encoding=encoding, encoding_errors=encoding_errors,
             force_binary=force_binary, term=term, cols=cols, rows=rows,
-            shell=shell, waiter_closed=waiter_closed,
-            waiter_connected=waiter_connected)
+            tspeed=tspeed, xdisploc=xdisploc, shell=shell,
+            waiter_closed=waiter_closed, waiter_connected=waiter_connected)
 
     transport, protocol = yield from loop.create_connection(
         connection_factory, host, port,
