@@ -54,7 +54,7 @@ class TelnetClient(client_base.BaseClient):
         from telnetlib3.telopt import CHARSET, NAWS
         super().connection_made(transport)
 
-        # wire extended rfc callbacks for requests of
+        # Wire extended rfc callbacks for requests of
         # terminal attributes, environment values, etc.
         for (opt, func) in (
                 (TTYPE, self.send_ttype),
