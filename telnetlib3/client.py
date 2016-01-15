@@ -124,7 +124,8 @@ class TelnetClient(client_base.BaseClient):
                 else:
                     if (codec.name == self.default_encoding or not selected):
                         self._extra['charset'] = codec.name
-                        self._extra['lang'] = 'en_US' + codec.name
+                        self._extra['lang'] = (
+                            self.DEFAULT_LOCALE + '.' + codec.name)
                         selected = offer
         if selected:
             self.log.debug('Encoding negotiated: {0}'.format(selected))
@@ -179,7 +180,7 @@ class TelnetClient(client_base.BaseClient):
         if self.force_binary or may_encode:
             # prefer 'LANG' environment variable, if set
             _lang = self.get_extra_info('lang', '')
-            # en_US.UTF-8@misc
+            # parse 'UTF-8' from en_US.UTF-8@misc
             if _lang:
                 encoding = _lang
                 if '.' in _lang:
