@@ -8,6 +8,10 @@ matrix:
       env: TOXENV=py34 COVERAGE_ID=travis-ci
     - python: 3.5
       env: TOXENV=py35 COVERAGE_ID=travis-ci
+    # some errors only present themselves when using with ASYNCIODEBUG,
+    # especially exceptions in tasks and so on.
+    - python: 3.5
+      env: ASYNCIODEBUG=1 TOXENV=py35 COVERAGE_ID=travis-ci
 install:
   - pip install tox
 script:
