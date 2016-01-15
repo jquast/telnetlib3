@@ -49,7 +49,6 @@ def test_telnet_server_on_tspeed(event_loop, bind_host, unused_tcp_port, log):
 def test_telnet_client_send_tspeed(event_loop, bind_host, unused_tcp_port, log):
     """Test Client's callback method send_tspeed()."""
     # given
-    #from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TSPEED
     _waiter = asyncio.Future()
     given_rx, given_tx = 1337, 1919
 
