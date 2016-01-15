@@ -19,14 +19,28 @@ __all__ = ('TelnetClient', 'open_connection', 'start_client')
 
 
 class TelnetClient(client_base.BaseClient):
+    #: On :meth:`send_env`, the value of 'LANG' will be 'C' for binary
+    #: transmission.  When encoding is specified (utf8 by default), the LANG
+    #: variable must also contain a locale, this value is used, providing a
+    #: full default LANG value of 'en_US.utf8'
+    DEFAULT_LOCALE = 'en_US'
+
     def __init__(self, term='unknown', cols=80, rows=25,
                  tspeed=(38400, 38400), xdisploc='',
                  *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._extra.update({
             'charset': kwargs['encoding'] or '',
+            # for our purposes, we only send the second part (encoding) of our
+            # 'lang' variable, CHARSET negotiation does not provide locale
+            # negotiation; this is better left to the real LANG variable
+            # negotiated as-is by send_env().
+            #
+            # So which locale should we represent? Rather than using the
+            # locale.getpreferredencoding() method, we provide a deterministic
+            # class value DEFAULT_LOCALE (en_US), derive and modify as needed.
             'lang': ('C' if not kwargs['encoding'] else
-                     'en_US.' + kwargs['encoding']),
+                     self.DEFAULT_LOCALE + '.' + kwargs['encoding']),
             'cols': cols,
             'rows': rows,
             'term': term,
@@ -40,7 +54,8 @@ class TelnetClient(client_base.BaseClient):
         from telnetlib3.telopt import CHARSET, NAWS
         super().connection_made(transport)
 
-        # wire extended rfc callbacks for terminal atributes, etc.
+        # wire extended rfc callbacks for requests of
+        # terminal attributes, environment values, etc.
         for (opt, func) in (
                 (TTYPE, self.send_ttype),
                 (TSPEED, self.send_tspeed),
@@ -166,8 +181,10 @@ class TelnetClient(client_base.BaseClient):
             # prefer 'LANG' environment variable, if set
             _lang = self.get_extra_info('lang', '')
             # en_US.UTF-8@misc
-            if _lang and '.' in _lang:
-                _, encoding = _lang.split('.', 1)
+            if _lang:
+                encoding = _lang
+                if '.' in _lang:
+                    _, encoding = _lang.split('.', 1)
                 if '@' in encoding:
                     encoding, _ = encoding.split('@', 1)
                 return encoding
@@ -197,12 +214,7 @@ class TelnetTerminalClient(TelnetClient):
 
     def send_env(self, keys):
         env = super().send_env(keys)
-        rows, cols = self._winsize()
-        # merge over the default cols/rows with the given terminal's.
-        if 'LINES' in env:
-            env['LINES'] = cols
-        if 'COLUMNS' in env:
-            env['COLUMNS'] = rows
+        env['LINES'], env['COLUMNS'] = self._winsize()
         return env
 
 
