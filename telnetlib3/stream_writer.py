@@ -72,14 +72,6 @@ class TelnetWriter(asyncio.StreamWriter):
     #: transport remote editing function callbacks for dumb clients.
     slc_simulated = True
 
-    #: a list of system environment variables requested by the server after
-    #: a client agrees to negotiate NEW_ENVIRON.
-    default_env_request = (
-        "USER HOSTNAME UID TERM COLUMNS LINES DISPLAY LANG SYSTEMTYPE "
-        "ACCT JOB PRINTER SFUTLNTVER SFUTLNTMODE LC_ALL VISUAL EDITOR "
-        "LC_COLLATE LC_CTYPE LC_MESSAGES LC_MONETARY LC_NUMERIC LC_TIME"
-    ).split()
-
     default_slc_tab = slc.BSD_SLC_TAB
 
     #: list of "character set" names compatible with this writer when
@@ -685,50 +677,58 @@ class TelnetWriter(asyncio.StreamWriter):
             self.log.debug('cannot send SB CHARSET REQUEST, request pending.')
         return False
 
-    def request_env(self, env=None, all_var=True, all_uservar=True):
-        """ .. method:: request_env(env : list) -> bool
+    def request_environ(self):
+        """ .. method:: request_environ(env : list) -> bool
 
             Request sub-negotiation NEW_ENVIRON, rfc 1572.
             Returns True if request is valid for telnet state, and was sent.
-
-            ``env`` is list ascii uppercase keys of values requested. Default
-            value is when unset is instance attribute ``default_env_request``.
-            Returns True if request is valid for telnet state, and was sent.
         """
         kind = NEW_ENVIRON
-        request_env_values = self.default_env_request if env is None else env
+
         assert self.server, (
             'SB {} SEND may only be sent by server end'
             .format(name_command(kind)))
+
         if not self.remote_option.enabled(kind):
             self.log.debug('cannot send SB {} SEND IS '
                            'without receipt of WILL {}'.format(
                                name_command(kind), name_command(kind)))
-        elif not self.pending_option.enabled(SB + kind):
-            response = collections.deque()
-            response.extend([IAC, SB, kind, SEND])
-            if request_env_values:
-                for env_key in request_env_values:
-                    byte_env_key = _escape_env(env_key.encode('ascii'))
-                    response.extend([VAR])
-                    response.extend([byte_env_key])
-            if all_var:
-                # VAR fllowed by IAC,SE or USERVAR indicates
+            return False
+
+        request_list = self._ext_send_callback[NEW_ENVIRON]()
+
+        if not request_list:
+            self.log.debug('request_environ: server protocol makes no demand, '
+                           'no request will be made.')
+            return False
+
+        if self.pending_option.enabled(SB + NEW_ENVIRON):
+            self.log.debug('cannot send SB NEW_ENVIRON SEND IS, '
+                           'request pending.')
+            return False
+
+        response = collections.deque()
+        response.extend([IAC, SB, NEW_ENVIRON, SEND])
+
+        for env_key in request_list:
+            if env_key == VAR:
+                # VAR followed by IAC,SE or USERVAR indicates
                 # "send all the variables"
                 response.append(VAR)
-            if all_uservar:
-                # USERVAR fllowed by IAC,SE or VAR indicates
+            elif env_key == USERVAR:
+                # USERVAR followed by IAC,SE or VAR indicates
                 # "send all the user variables"
                 response.append(USERVAR)
-            response.extend([IAC, SE])
-            self.log.debug('request_env: {!r}'.format(b''.join(response)))
-            self.pending_option[SB + kind] = True
-            self.send_iac(b''.join(response))
-            return True
-        else:
-            self.log.debug('cannot send SB {} SEND IS, '
-                           'request pending.'.format(name_command(kind)))
-        return False
+                # In today's era, there is little distinction between them.
+            else:
+                response.extend([VAR])
+                response.extend([_escape_env(env_key.encode('ascii'))])
+        response.extend([IAC, SE])
+        self.log.debug('request_environ: {!r}'.format(b''.join(response)))
+        self.pending_option[SB + NEW_ENVIRON] = True
+        self.send_iac(b''.join(response))
+        return True
+
 
     def request_xdisploc(self):
         """ .. method:: request_xdisploc() -> bool
@@ -1194,7 +1194,7 @@ class TelnetWriter(asyncio.StreamWriter):
         sent. Otherwise, ``keys`` is a set of environment keys explicitly
         requested.
         """
-        self.log.warn('Environment values requested, sending {}.')
+        self.log.warn('Environment values requested, sending {{}}.')
         return dict()
 
     def handle_tspeed(self, rx, tx):
@@ -1361,8 +1361,8 @@ class TelnetWriter(asyncio.StreamWriter):
         WILL NAWS is only legally received _for servers_, answered with DO.
         BINARY and SGA are answered with DO.  STATUS, NEW_ENVIRON, XDISPLOC,
         and TTYPE is answered with sub-negotiation SEND. The env variables
-        requested in response to WILL NEW_ENVIRON is specified by list
-        ``self.default_env_request``. All others are replied with DONT.
+        requested in response to WILL NEW_ENVIRON is "SEND ANY".
+        All others are replied with DONT.
 
         The result of a supported capability is a response of (IAC, DO, opt)
         and the setting of ``self.remote_option[opt]`` of ``True``. For
@@ -1407,7 +1407,7 @@ class TelnetWriter(asyncio.StreamWriter):
             assert self.server, ('cannot recv WILL NEW_ENVIRON '
                                     'on client end.')
             self.remote_option[opt] = True
-            self.request_env()
+            self.request_environ()
         elif opt == CHARSET:
             # charset is bi-directional: "WILL CHARSET indicates the sender
             # REQUESTS permission to, or AGREES to, use CHARSET option
@@ -1712,8 +1712,8 @@ class TelnetWriter(asyncio.StreamWriter):
         elif opt == SEND:
             assert self.client, ('SE: cannot recv from client: {} {}'
                                  .format(name_command(cmd), opt_kind))
-            # We do _not_ honor the 'send all VAR' or 'send all USERVAR'
-            # requests -- it is a small bit of a security issue.
+            # client-side, we do _not_ honor the 'send all VAR' or 'send all
+            # USERVAR' requests -- it is a small bit of a security issue.
             send_env = _encode_env_buf(
                 self._ext_send_callback[NEW_ENVIRON](env.keys() or None))
             response = [IAC, SB, NEW_ENVIRON, IS, send_env, IAC, SE]

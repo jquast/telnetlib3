@@ -52,6 +52,8 @@ class TelnetServer(server_base.BaseServer):
         # begin timeout timer
         self.set_timeout()
 
+        # Wire extended rfc callbacks for responses to
+        # requests of terminal attributes, environment values, etc.
         for tel_opt, callback_fn in [
             (NAWS, self.on_naws),
             (NEW_ENVIRON, self.on_environ),
@@ -61,6 +63,11 @@ class TelnetServer(server_base.BaseServer):
             (CHARSET, self.on_charset),
         ]:
             self.writer.set_ext_callback(tel_opt, callback_fn)
+
+        # Wire up a callback used if the remote end supports NEW_ENVIRON -- its
+        # response indicates which environment variables we'd like to see (if
+        # any).
+        self.writer.set_ext_send_callback(NEW_ENVIRON, self.on_request_environ)
 
     def data_received(self, data):
         self.set_timeout()
@@ -206,6 +213,29 @@ class TelnetServer(server_base.BaseServer):
         :param int cols: screen size, by number of cells in width.
         """
         self._extra.update({'rows': rows, 'cols': cols})
+
+    def on_request_environ(self):
+        """
+        Definition for NEW_ENVIRON request of client, rfc-1572_.
+
+        This method is a callback from :meth:`TelnetWriter.request_environ`,
+        first entered on receipt of (WILL, NEW_ENVIRON) by server.  The return
+        value *defines the request made to the client* for environment values.
+
+        :rtype list: a list of unicode character strings of US-ASCII
+            characters, indicating the environment keys the server requests
+            of the client.  If this list contains the special byte constants,
+            ``USERVAR`` or ``VAR``, the client is allowed to volunteer any
+            other additional user or system values.
+
+            Any empty return value indicates that no request should be made.
+
+        The default return value is::
+
+            ['LANG', 'TERM', 'COLUMNS', 'LINES', 'DISPLAY', VAR, USERVAR]
+        """
+        from .telopt import VAR, USERVAR
+        return ['LANG', 'TERM', 'COLUMNS', 'LINES', 'DISPLAY', VAR, USERVAR]
 
     def on_environ(self, mapping):
         """Callback receives NEW_ENVIRON response, rfc-1572_."""
