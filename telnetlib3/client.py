@@ -81,8 +81,9 @@ class TelnetClient(client_base.BaseClient):
     def send_env(self, keys):
         """ Callback for responding to NEW_ENVIRON requests.
 
-        :param keys: Values are requested for the keys specified. When
-           ``None``, all environment values be returned.
+        :param keys: Values are requested for the keys specified. When empty,
+           all environment values that wish to be volunteered should be
+           returned.
         :returns: dictionary of environment values requested, or an
             empty string for keys not available. A return value must be
             given for each key requested.
@@ -95,9 +96,7 @@ class TelnetClient(client_base.BaseClient):
             'LINES': self._extra['rows'],
             'COLUMNS': self._extra['cols'],
         }
-        if keys is None:
-            return env
-        return {key: env.get(key, '') for key in keys}
+        return {key: env.get(key, '') for key in keys} or env
 
     def send_charset(self, offered):
         """ Callback for responding to CHARSET requests.

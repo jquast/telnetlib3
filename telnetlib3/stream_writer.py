@@ -1715,7 +1715,7 @@ class TelnetWriter(asyncio.StreamWriter):
             # client-side, we do _not_ honor the 'send all VAR' or 'send all
             # USERVAR' requests -- it is a small bit of a security issue.
             send_env = _encode_env_buf(
-                self._ext_send_callback[NEW_ENVIRON](env.keys() or None))
+                self._ext_send_callback[NEW_ENVIRON](env.keys()))
             response = [IAC, SB, NEW_ENVIRON, IS, send_env, IAC, SE]
             self.log.debug('env send: {!r}'.format(response))
             self.send_iac(b''.join(response))
