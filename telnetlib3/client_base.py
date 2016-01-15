@@ -7,6 +7,7 @@ import sys
 
 from .stream_writer import TelnetWriter
 from .stream_reader import TelnetReader
+from .telopt import name_commands
 
 __all__ = ('BaseClient',)
 
@@ -258,7 +259,11 @@ class BaseClient(asyncio.Protocol):
         elif final:
             self.log.debug('negotiation failed after {:1.2f}s.'
                            .format(self.duration))
-            self.log.debug('{0}', self.writer.pending_option.values())
+            _failed = [name_commands(cmd_option)
+                       for (cmd_option, pending) in
+                       self.writer.pending_option.items()
+                       if pending]
+            self.log.debug('failed-reply: {0!r}'.format(', '.join(_failed)))
             self.waiter_connected.set_result(self)
         else:
             # keep re-queuing until complete.  Aggressively re-queue until
