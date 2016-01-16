@@ -31,9 +31,17 @@ def test_open_connection(bind_host, unused_tcp_port):
     yield from telnetlib3.start_server(bind_host, unused_tcp_port,
                                        waiter_connected=_waiter,
                                        connect_maxwait=0.05)
-    yield from telnetlib3.open_connection(bind_host, unused_tcp_port,
-                                          connect_minwait=0.05)
-    yield from asyncio.wait_for(_waiter, 0.5)
+    client_reader, client_writer = yield from telnetlib3.open_connection(
+        bind_host, unused_tcp_port, connect_minwait=0.05)
+    server = yield from asyncio.wait_for(_waiter, 0.5)
+    assert repr(server.writer) == (
+        '<TelnetWriter server mode:kludge +lineflow -xon_any +slc_sim '
+        'server-will:BINARY,ECHO,SGA '
+        'client-will:BINARY,CHARSET,NAWS,NEW_ENVIRON,TTYPE>')
+    assert repr(client_writer) == (
+        '<TelnetWriter client mode:kludge +lineflow -xon_any +slc_sim '
+        'client-will:BINARY,CHARSET,NAWS,NEW_ENVIRON,TTYPE '
+        'server-will:BINARY,ECHO,SGA>')
 
 
 @pytest.mark.asyncio
@@ -391,6 +399,9 @@ def test_telnet_server_negotiation_fail(
     assert server.negotiation_should_advance() is False
     assert server.writer.pending_option[DO + TTYPE] == True
 
+    assert repr(server.writer) == ('<TelnetWriter server '
+                                   'mode:local +lineflow -xon_any +slc_sim '
+                                   'failed-reply:DO TTYPE>')
 
 @pytest.mark.asyncio
 def test_telnet_client_negotiation_fail(
