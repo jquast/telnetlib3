@@ -51,3 +51,67 @@ def test_telnet_server_on_charset(
     # verify,
     srv_instance = yield from asyncio.wait_for(_waiter, 2.0)
     assert srv_instance.get_extra_info('charset') == given_charset
+
+
+@pytest.mark.asyncio
+def test_telnet_client_send_charset(event_loop, bind_host, unused_tcp_port,
+                                    log):
+    """Test Client's callback method send_charset() selection for illegals."""
+    # given
+    _waiter = asyncio.Future()
+
+    class ServerTestCharset(telnetlib3.TelnetServer):
+        def on_request_charset(self):
+            return ['illegal', 'cp437']
+
+    class ClientTestCharset(telnetlib3.TelnetClient):
+        def send_charset(self, offered):
+            selected = super().send_charset(offered)
+            _waiter.set_result(selected)
+            return selected
+
+    yield from telnetlib3.create_server(
+        protocol_factory=ServerTestCharset,
+        host=bind_host, port=unused_tcp_port,
+        loop=event_loop, log=log)
+
+    reader, writer = yield from telnetlib3.open_connection(
+        client_factory=ClientTestCharset,
+        host=bind_host, port=unused_tcp_port, loop=event_loop,
+        encoding='latin1')
+
+    val = yield from asyncio.wait_for(_waiter, 1.5)
+    assert val == 'cp437'
+    assert writer.get_extra_info('charset') == 'cp437'
+
+
+@pytest.mark.asyncio
+def test_telnet_client_no_charset(event_loop, bind_host, unused_tcp_port, log):
+    """Test Client's callback method send_charset() does not select."""
+    # given
+    _waiter = asyncio.Future()
+
+    class ServerTestCharset(telnetlib3.TelnetServer):
+        def on_request_charset(self):
+            return ['illegal', 'this-is-no-good-either']
+
+    class ClientTestCharset(telnetlib3.TelnetClient):
+        def send_charset(self, offered):
+            selected = super().send_charset(offered)
+            _waiter.set_result(selected)
+            return selected
+
+    yield from telnetlib3.create_server(
+        protocol_factory=ServerTestCharset,
+        host=bind_host, port=unused_tcp_port,
+        loop=event_loop, log=log)
+
+    reader, writer = yield from telnetlib3.open_connection(
+        client_factory=ClientTestCharset,
+        host=bind_host, port=unused_tcp_port, loop=event_loop,
+        encoding='latin1')
+
+    # charset remains latin1
+    val = yield from asyncio.wait_for(_waiter, 0.5)
+    assert val == ''
+    assert writer.get_extra_info('charset') == 'latin1'

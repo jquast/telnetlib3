@@ -74,23 +74,6 @@ class TelnetWriter(asyncio.StreamWriter):
 
     default_slc_tab = slc.BSD_SLC_TAB
 
-    #: list of "character set" names compatible with this writer when
-    #: requested by CHARSET negotiation in order of preference, rfc-2066_.
-    default_codepages = (
-        'UTF-8', 'UTF-16', 'US-ASCII', 'LATIN1', 'BIG5',
-        'GBK', 'SHIFTJIS', 'GB18030', 'KOI8-R', 'KOI8-U',
-    ) + tuple(
-        # "Part 12 was slated for Latin/Devanagari, but abandoned in 1997"
-        'ISO8859-{}'.format(iso) for iso in range(1, 16) if iso != 12
-    ) + tuple(
-        'CP{}'.format(cp) for cp in (
-            154, 437, 500, 737, 775, 850, 852, 855, 856, 857,
-            860, 861, 862, 863, 864, 865, 866, 869, 874, 875,
-            932, 949, 950, 1006, 1026, 1140, 1250, 1251, 1252,
-            1253, 1254, 1255, 1257, 1257, 1258, 1361,
-        )
-    )
-
     def __init__(self, transport, protocol, client=False, server=False,
                  reader=None, loop=None, log=None):
         """
@@ -145,7 +128,9 @@ class TelnetWriter(asyncio.StreamWriter):
         self.default_linemode = slc.Linemode(bytes([
             ord(slc.LMODE_MODE_REMOTE) | ord(slc.LMODE_MODE_LIT_ECHO)]))
 
-        # Set default callback handlers to local methods.
+        # Set default callback handlers to local methods.  A base protocol
+        # wishing not to wire any callbacks at all may simply allow our stream
+        # to gracefully log and do nothing about in most cases.
         self._iac_callback = {}
         for iac_cmd, key in (
                 (BRK, 'brk'), (IP, 'ip'), (AO, 'ao'), (AYT, 'ayt'), (EC, 'ec'),
@@ -172,7 +157,7 @@ class TelnetWriter(asyncio.StreamWriter):
         for ext_cmd, key in (
                 (LOGOUT, 'logout'), (SNDLOC, 'sndloc'), (NAWS, 'naws'),
                 (TSPEED, 'tspeed'), (TTYPE, 'ttype'), (XDISPLOC, 'xdisploc'),
-                (NEW_ENVIRON, 'env'), (CHARSET, 'charset'),
+                (NEW_ENVIRON, 'environ'), (CHARSET, 'charset'),
                 ):
             self.set_ext_callback(
                 cmd=ext_cmd, func=getattr(self, 'handle_{}'.format(key)))
@@ -180,10 +165,16 @@ class TelnetWriter(asyncio.StreamWriter):
         self._ext_send_callback = {}
         for ext_cmd, key in (
                 (TTYPE, 'ttype'), (TSPEED, 'tspeed'), (XDISPLOC, 'xdisploc'),
-                (NEW_ENVIRON, 'env'), (NAWS, 'naws'), (SNDLOC, 'sndloc'),
-                (CHARSET, 'charset'), ):
+                (NAWS, 'naws'), (SNDLOC, 'sndloc')):
             self.set_ext_send_callback(
                 cmd=ext_cmd, func=getattr(self, 'handle_send_{}'.format(key)))
+
+        for ext_cmd, key in (
+                (CHARSET, 'charset'), (NEW_ENVIRON, 'environ')):
+            _cbname = ('handle_send_server_' if self.server else
+                      'handle_send_client_')
+            self.set_ext_send_callback(
+                cmd=ext_cmd, func=getattr(self, _cbname + key))
 
     # Base protocol methods
 
@@ -649,33 +640,38 @@ class TelnetWriter(asyncio.StreamWriter):
             self.log.debug('cannot send SB TSPEED SEND, request pending.')
         return False
 
-    def request_charset(self, codepages=None, sep=' '):
+    def request_charset(self):
         """ .. method:: request_charset(codepages : list, sep : string) -> bool
 
-            Request sub-negotiation CHARSET, rfc 2066. Returns True if request
+            Request sub-negotiation CHARSET, rfc-2066_. Returns True if request
             is valid for telnet state, and was sent.
 
             The sender requests that all text sent to and by it be encoded in
-            one of character sets specifed by string list ``codepages``.
+            one of character sets specified by string list ``codepages``.
         """
-        codepages = self.default_codepages if codepages is None else codepages
+
         if not self.remote_option.enabled(CHARSET):
             self.log.debug('cannot send SB CHARSET REQUEST '
                            'without receipt of WILL CHARSET')
-        elif not self.pending_option.enabled(SB + CHARSET):
-            response = collections.deque()
-            response.extend([IAC, SB, CHARSET, REQUEST])
-            response.extend([bytes(sep, 'ascii')])
-            response.extend([bytes(sep.join(codepages), 'ascii')])
-            response.extend([IAC, SE])
-            self.log.debug('send IAC SB CHARSET REQUEST {} IAC SE'.format(
-                sep.join(codepages)))
-            self.send_iac(b''.join(response))
-            self.pending_option[SB + CHARSET] = True
-            return True
-        else:
+            return False
+
+        if self.pending_option.enabled(SB + CHARSET):
             self.log.debug('cannot send SB CHARSET REQUEST, request pending.')
-        return False
+            return False
+
+        codepages = self._ext_send_callback[CHARSET]()
+
+        sep = ' '
+        response = collections.deque()
+        response.extend([IAC, SB, CHARSET, REQUEST])
+        response.extend([bytes(sep, 'ascii')])
+        response.extend([bytes(sep.join(codepages), 'ascii')])
+        response.extend([IAC, SE])
+        self.log.debug('send IAC SB CHARSET REQUEST {} IAC SE'.format(
+            sep.join(codepages)))
+        self.send_iac(b''.join(response))
+        self.pending_option[SB + CHARSET] = True
+        return True
 
     def request_environ(self):
         """ .. method:: request_environ(env : list) -> bool
@@ -683,16 +679,11 @@ class TelnetWriter(asyncio.StreamWriter):
             Request sub-negotiation NEW_ENVIRON, rfc 1572.
             Returns True if request is valid for telnet state, and was sent.
         """
-        kind = NEW_ENVIRON
+        assert self.server, 'SB NEW_ENVIRON SEND may only be sent by server'
 
-        assert self.server, (
-            'SB {} SEND may only be sent by server end'
-            .format(name_command(kind)))
-
-        if not self.remote_option.enabled(kind):
-            self.log.debug('cannot send SB {} SEND IS '
-                           'without receipt of WILL {}'.format(
-                               name_command(kind), name_command(kind)))
+        if not self.remote_option.enabled(NEW_ENVIRON):
+            self.log.debug('cannot send SB NEW_ENVIRON SEND IS '
+                           'without receipt of WILL NEW_ENVIRON')
             return False
 
         request_list = self._ext_send_callback[NEW_ENVIRON]()
@@ -711,18 +702,14 @@ class TelnetWriter(asyncio.StreamWriter):
         response.extend([IAC, SB, NEW_ENVIRON, SEND])
 
         for env_key in request_list:
-            if env_key == VAR:
-                # VAR followed by IAC,SE or USERVAR indicates
-                # "send all the variables"
-                response.append(VAR)
-            elif env_key == USERVAR:
-                # USERVAR followed by IAC,SE or VAR indicates
-                # "send all the user variables"
-                response.append(USERVAR)
+            if env_key in (VAR, USERVAR):
+                # VAR followed by IAC,SE indicates "send all the variables",
+                # whereas USERVAR indicates "send all the user variables".
                 # In today's era, there is little distinction between them.
+                response.append(env_key)
             else:
                 response.extend([VAR])
-                response.extend([_escape_env(env_key.encode('ascii'))])
+                response.extend([_escape_environ(env_key.encode('ascii'))])
         response.extend([IAC, SE])
         self.log.debug('request_environ: {!r}'.format(b''.join(response)))
         self.pending_option[SB + NEW_ENVIRON] = True
@@ -1183,19 +1170,25 @@ class TelnetWriter(asyncio.StreamWriter):
         self.log.warn('Terminal size requested, sending 80x24.')
         return 80, 24
 
-    def handle_env(self, env):
+    def handle_environ(self, env):
         """ XXX Receive environment variables as dict, rfc1572.
         """
         self.log.debug('Environment values are {!r}'.format(env))
 
-    def handle_send_env(self, keys=None):
-        """ XXX Send environment variables as dict, rfc1572.
-        If argument ``keys`` is None, then all available values should be
+    def handle_send_client_environ(self, keys):
+        """ XXX Send environment variables as dict, rfc-1572_.
+        If argument ``keys`` is empty, then all available values should be
         sent. Otherwise, ``keys`` is a set of environment keys explicitly
         requested.
         """
-        self.log.warn('Environment values requested, sending {{}}.')
+        self.log.debug('Environment values requested, sending {{}}.')
         return dict()
+
+    def handle_send_server_environ(self):
+        """ XXX Server requests environment variables as list, rfc-1572_.
+        """
+        self.log.debug('Environment values offered, requesting [].')
+        return []
 
     def handle_tspeed(self, rx, tx):
         """ XXX Receive terminal speed from TSPEED as int, rfc1079.
@@ -1205,7 +1198,7 @@ class TelnetWriter(asyncio.StreamWriter):
     def handle_send_tspeed(self):
         """ XXX Send terminal speed from TSPEED as int, rfc1079.
         """
-        self.log.warn('Terminal Speed requested, sending 9600,9600.')
+        self.log.debug('Terminal Speed requested, sending 9600,9600.')
         return 9600, 9600
 
     def handle_charset(self, charset):
@@ -1213,11 +1206,24 @@ class TelnetWriter(asyncio.StreamWriter):
         """
         self.log.debug('Character set: {}'.format(charset))
 
-    def handle_send_charset(self, charsets):
-        """ XXX Send character set as string, rfc2066.
+    def handle_send_client_charset(self, charsets):
         """
-        self.log.warn('Character Set requested, sending "ascii".')
-        return 'ascii'
+        XXX Send character set selection as string, rfc-2066_.
+
+        Given the available encodings presented by the server, select and
+        return only one.  Returning an empty string indicates that no
+        selection is made (request is ignored).
+        """
+        assert not self.server
+        self.log.debug('Character Set requested')
+        return ''
+
+    def handle_send_server_charset(self, charsets):
+        """
+        XXX Send character set (encodings) offered to client, rfc-2066_.
+        """
+        assert self.server
+        return ['UTF-8']
 
     def handle_logout(self, cmd):
         """ XXX Handle (IAC, (DO | DONT | WILL | WONT), LOGOUT), RFC 727.
@@ -1493,7 +1499,7 @@ class TelnetWriter(asyncio.StreamWriter):
         elif cmd == SNDLOC:
             self._handle_sb_sndloc(buf)
         elif cmd == NEW_ENVIRON:
-            self._handle_sb_env(buf)
+            self._handle_sb_environ(buf)
         elif cmd == CHARSET:
             self._handle_sb_charset(buf)
         elif cmd == TTYPE:
@@ -1668,7 +1674,7 @@ class TelnetWriter(asyncio.StreamWriter):
             if self.pending_option.enabled(WILL + TTYPE):
                 self.pending_option[WILL + TTYPE] = False
 
-    def _handle_sb_env(self, buf):
+    def _handle_sb_environ(self, buf):
         """ Callback handles (IAC, SB, NEW_ENVIRON, <buf>, SE), rfc1572.
 
             For requests beginning with IS, or subsequent requests beginning
@@ -2218,7 +2224,7 @@ class Option(dict):
         dict.__setitem__(self, key, value)
 
 
-def _escape_env(buf):
+def _escape_environ(buf):
     """ .. function:: escape_var(buf : bytes) -> type(bytes)
 
         Return byte array ``buf`` with VAR (\\x00) and USERVAR (\\x03)
@@ -2228,7 +2234,7 @@ def _escape_env(buf):
     return buf.replace(VAR, ESC + VAR).replace(USERVAR, ESC + USERVAR)
 
 
-def _unescape_env(buf):
+def _unescape_environ(buf):
     """ .. function:: escape_var(buf : bytes) -> type(bytes)
 
         Return byte array ``buf`` with VAR (\\x00) and USERVAR (\\x03)
@@ -2246,9 +2252,9 @@ def _encode_env_buf(env):
     buf = collections.deque()
     for key, value in env.items():
         buf.append(VAR)
-        buf.extend([_escape_env(key.encode('ascii'))])
+        buf.extend([_escape_environ(key.encode('ascii'))])
         buf.append(VALUE)
-        buf.extend([_escape_env('{}'.format(value).encode('ascii'))])
+        buf.extend([_escape_environ('{}'.format(value).encode('ascii'))])
     return b''.join(buf)
 
 
@@ -2283,11 +2289,11 @@ def _decode_env_buf(buf):
             end = breaks[idx + 1]
 
         pair = buf[start:end].split(VALUE, 1)
-        key = _unescape_env(pair[0]).decode('ascii', 'strict')
+        key = _unescape_environ(pair[0]).decode('ascii', 'strict')
         if len(pair) == 1:
             value = ''
         else:
-            value = _unescape_env(pair[1]).decode('ascii', 'strict')
+            value = _unescape_environ(pair[1]).decode('ascii', 'strict')
         env[key] = value
 
     return env

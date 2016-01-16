@@ -64,10 +64,12 @@ class TelnetServer(server_base.BaseServer):
         ]:
             self.writer.set_ext_callback(tel_opt, callback_fn)
 
-        # Wire up a callback used if the remote end supports NEW_ENVIRON -- its
-        # response indicates which environment variables we'd like to see (if
-        # any).
-        self.writer.set_ext_send_callback(NEW_ENVIRON, self.on_request_environ)
+        # Wire up a callbacks that return definitions for requests.
+        for tel_opt, callback_fn in [
+            (NEW_ENVIRON, self.on_request_environ),
+            (CHARSET, self.on_request_charset),
+        ]:
+            self.writer.set_ext_send_callback(tel_opt, callback_fn)
 
     def data_received(self, data):
         self.set_timeout()
@@ -158,13 +160,14 @@ class TelnetServer(server_base.BaseServer):
                        self.writer.outbinary and self.writer.inbinary))
 
         if self.force_binary or may_encode:
-            # prefer 'LANG' environment variable, if sent
-            _lang = self.get_extra_info('LANG', None)
-            if _lang and '.' in _lang:
-                _, encoding = _lang.split('.', 1)
-                return encoding
-
-            # otherwise, uncommon CHARSET value if negotiated
+            # prefer 'LANG' environment variable forwarded by client, if any.
+            # for modern systems, this is the preferred method of encoding
+            # negotiation.
+            _lang = self.get_extra_info('LANG', '')
+            if _lang:
+                return accessories.encoding_from_lang(_lang)
+            # otherwise, the less CHARSET negotiation may be found in many
+            # East-Asia BBS and Western MUD systems.
             return self.get_extra_info('charset', self.default_encoding)
         return 'US-ASCII'
 
@@ -254,7 +257,45 @@ class TelnetServer(server_base.BaseServer):
         u_mapping = {key.upper(): val for key, val in list(mapping.items())}
 
         self.log.debug('on_environ received: {0!r}'.format(u_mapping))
+
         self._extra.update(u_mapping)
+
+    def on_request_charset(self):
+        """
+        Definition for CHARSET request by client, rfc-2066_.
+
+        This method is a callback from :meth:`TelnetWriter.request_charset`,
+        first entered on receipt of (WILL, CHARSET) by server.  The return
+        value *defines the request made to the client* for encodings.
+
+        :rtype list: a list of unicode character strings of US-ASCII
+            characters, indicating the encodings offered by the server in
+            its preferred order.
+
+            Any empty return value indicates that no encodings are offered.
+
+        The default return value begins::
+
+            ['UTF-8', 'UTF-16', 'LATIN1', 'US-ASCII', 'BIG5', 'GBK', ...]
+        """
+        return ['UTF-8', 'UTF-16', 'LATIN1', 'US-ASCII', 'BIG5',
+                'GBK', 'SHIFTJIS', 'GB18030', 'KOI8-R', 'KOI8-U',
+                ] + [
+                    # "Part 12 was slated for Latin/Devanagari,
+                    # but abandoned in 1997"
+                    'ISO8859-{}'.format(iso) for iso in range(1, 16)
+                    if iso != 12
+                ] + ['CP{}'.format(cp) for cp in (
+                    154, 437, 500, 737, 775, 850, 852, 855, 856, 857,
+                    860, 861, 862, 863, 864, 865, 866, 869, 874, 875,
+                    932, 949, 950, 1006, 1026, 1140, 1250, 1251, 1252,
+                    1253, 1254, 1255, 1257, 1257, 1258, 1361,
+                )]
+
+
+    def on_charset(self, charset):
+        """Callback for CHARSET response, rfc-2066_."""
+        self._extra['charset'] = charset
 
     def on_tspeed(self, rx, tx):
         """Callback for TSPEED response, rfc-1079_."""
@@ -306,10 +347,6 @@ class TelnetServer(server_base.BaseServer):
     def on_xdisploc(self, xdisploc):
         """Callback for XDISPLOC response, rfc-1096_."""
         self._extra['xdisploc'] = xdisploc
-
-    def on_charset(self, charset):
-        """Callback for CHARSET response, rfc-2066_."""
-        self._extra['charset'] = charset
 
     # private methods
 

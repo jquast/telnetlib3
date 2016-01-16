@@ -34,6 +34,23 @@ def eightbits(number):
     return '0b%0.8i' % (int(value),)
 
 
+def encoding_from_lang(lang):
+    """
+    Parse encoding from LANG environment value.
+
+    Example::
+
+        >>> encoding_from_lang('en_US.UTF-8@misc')
+        'UTF-8'
+    """
+    encoding = lang
+    if '.' in lang:
+        _, encoding = lang.split('.', 1)
+    if '@' in encoding:
+        encoding, _ = encoding.split('@', 1)
+    return encoding
+
+
 def make_logger(loglevel='info', logfile=None):
     import logging
     fmt = '%(asctime)s %(levelname)s %(filename)s:%(lineno)d %(message)s'

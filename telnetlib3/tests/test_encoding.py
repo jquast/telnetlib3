@@ -19,7 +19,7 @@ import pytest
 @pytest.mark.asyncio
 def test_telnet_server_encoding_default(
         event_loop, bind_host, unused_tcp_port, log):
-    """Default encoding."""
+    """Default encoding US-ASCII unless it can be negotiated/confirmed!"""
     from telnetlib3.telopt import IAC, WONT, TTYPE
     # given
     _waiter = asyncio.Future()
@@ -41,7 +41,32 @@ def test_telnet_server_encoding_default(
     assert srv_instance.encoding(outgoing=True) == 'US-ASCII'
     assert srv_instance.encoding(incoming=True, outgoing=True) == 'US-ASCII'
     with pytest.raises(TypeError):
-        srv_instance.encoding()  # at least one direction should be specified
+        # at least one direction should be specified
+        srv_instance.encoding()
+
+
+@pytest.mark.asyncio
+def test_telnet_client_encoding_default(
+        event_loop, bind_host, unused_tcp_port, log):
+    """Default encoding US-ASCII unless it can be negotiated/confirmed!"""
+    from telnetlib3.telopt import IAC, WONT, TTYPE
+    # given
+    _waiter = asyncio.Future()
+
+    yield from event_loop.create_server(asyncio.Protocol,
+                                        bind_host, unused_tcp_port)
+
+    reader, writer = yield from telnetlib3.open_connection(
+        host=bind_host, port=unused_tcp_port, loop=event_loop)
+
+
+    # after MIN_CONNECT elapsed, client is in US-ASCII state.
+    assert writer.protocol.encoding(incoming=True) == 'US-ASCII'
+    assert writer.protocol.encoding(outgoing=True) == 'US-ASCII'
+    assert writer.protocol.encoding(incoming=True, outgoing=True) == 'US-ASCII'
+    with pytest.raises(TypeError):
+        # at least one direction should be specified
+        writer.protocol.encoding()
 
 
 @pytest.mark.asyncio

@@ -115,7 +115,7 @@ class TelnetClient(client_base.BaseClient):
         :returns: character encoding agreed to be used.
         :rtype: str or None.
         """
-        selected = None
+        selected = ''
         for offer in offered:
                 try:
                     codec = codecs.lookup(offer)
@@ -128,11 +128,11 @@ class TelnetClient(client_base.BaseClient):
                             self.DEFAULT_LOCALE + '.' + codec.name)
                         selected = offer
         if selected:
-            self.log.debug('Encoding negotiated: {0}'.format(selected))
-            return selected
-        self.log.info('No suitable encoding offered by server: {!r}.'
-                      .format(offered))
-        return None
+            self.log.debug('encoding negotiated: {0}'.format(selected))
+        else:
+            self.log.warn('No suitable encoding offered by server: {!r}.'
+                          .format(offered))
+        return selected
 
     def send_naws(self):
         """ Callback for responding to NAWS requests.
@@ -178,20 +178,11 @@ class TelnetClient(client_base.BaseClient):
                        self.writer.outbinary and self.writer.inbinary))
 
         if self.force_binary or may_encode:
-            # prefer 'LANG' environment variable, if set
-            _lang = self.get_extra_info('lang', '')
-            # parse 'UTF-8' from en_US.UTF-8@misc
-            if _lang:
-                encoding = _lang
-                if '.' in _lang:
-                    _, encoding = _lang.split('.', 1)
-                if '@' in encoding:
-                    encoding, _ = encoding.split('@', 1)
-                return encoding
-
-            # otherwise, uncommon CHARSET value if negotiated,
-            # fallback to default_encoding.
-            return self.get_extra_info('charset', self.default_encoding)
+            # The 'charset' value, initialized using keyword argument
+            # default_encoding, may be re-negotiated later.  Only the CHARSET
+            # negotiation method allows the server to select an encoding, so
+            # this value is reflected here by a single return statement.
+            return self._extra['charset']
         return 'US-ASCII'
 
 class TelnetTerminalClient(TelnetClient):
