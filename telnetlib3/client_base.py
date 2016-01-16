@@ -14,16 +14,6 @@ __all__ = ('BaseClient',)
 
 class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     """Base Telnet Client Protocol."""
-    #: Minimum on-connect time to wait for at least one server-initiated
-    #: negotiation option byte.  A server not demanding any telnet options
-    #: will delay the initial connection time for at least this amount.
-    CONNECT_MINWAIT = 0.3
-
-    #: Maximum on-connect time allowed for pending negotiation to occur
-    #: until it is considered 'final'.  This boundary occurs when the
-    #: remote end has failed to complete pending negotiation options.
-    CONNECT_MAXWAIT = 0.6
-
     _when_connected = None
     _last_received = None
     _transport = None
@@ -35,7 +25,8 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     def __init__(self, shell=None, log=None, loop=None,
                  waiter_connected=None, waiter_closed=None,
                  encoding='utf8', encoding_errors='strict',
-                 force_binary=False):
+                 force_binary=False, connect_minwait=1.0,
+                 connect_maxwait=4.0):
         """Class initializer."""
         super().__init__(loop=loop)
         self.log = log or logging.getLogger(__name__)
@@ -48,6 +39,8 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self.waiter_closed = waiter_closed or asyncio.Future()
         self._tasks = []
         self.shell = shell
+        self.connect_minwait = connect_minwait
+        self.connect_maxwait = connect_maxwait
         self.reader = None
         self.writer = None
 
@@ -223,10 +216,10 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         :rtype: bool
 
         Method is called on each new command byte processed until negotiation
-        is considered final, or after :attr:`CONNECT_MAXWAIT` has elapsed,
+        is considered final, or after :attr:`connect_maxwait` has elapsed,
         setting :attr:`waiter_connected` to value ``self`` when complete.
 
-        This method returns False until :attr:`CONNECT_MINWAIT` has elapsed,
+        This method returns False until :attr:`connect_minwait` has elapsed,
         ensuring the server may batch telnet negotiation demands without
         prematurely entering the callback shell.
 
@@ -242,7 +235,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 # A better measurement of would be to use something like TM
                 # (timing-mark) to measure the round-trip time, and double it
                 # for this value.
-                self.duration > self.CONNECT_MINWAIT)
+                self.duration > self.connect_minwait)
 
     # private methods
 
@@ -250,7 +243,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._check_later.cancel()
         self._tasks.remove(self._check_later)
 
-        later = self.CONNECT_MAXWAIT - self.duration
+        later = self.connect_maxwait - self.duration
         final = bool(later < 0)
 
         if self.check_negotiation(final=final):
@@ -268,9 +261,9 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             self.waiter_connected.set_result(self)
         else:
             # keep re-queuing until complete.  Aggressively re-queue until
-            # CONNECT_MINWAIT, or CONNECT_MAXWAIT, whichever occurs next
+            # connect_minwait, or connect_maxwait, whichever occurs next
             # in our time-series.
-            sooner = self.CONNECT_MINWAIT - self.duration
+            sooner = self.connect_minwait - self.duration
             if sooner > 0:
                 later = sooner
             self._check_later = self._loop.call_later(

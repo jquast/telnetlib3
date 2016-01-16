@@ -215,13 +215,21 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
                     encoding='utf8', encoding_errors='strict',
                     force_binary=False, term='unknown', cols=80, rows=25,
                     tspeed=(38400, 38400), xdisploc='', shell=None,
+                    connect_minwait=1.0, connect_maxwait=4.0,
                     waiter_closed=None, waiter_connected=None):
     """
     :param client_base.BaseClient client_factory: TelnetClient class instance,
         when ``None``, :class:`TelnetTerminalClient` is used when *stdin* is
         attached to a terminal, :class:`TelnetClient` otherwise.
+    :param float connect_minwait: The client allows any telnet negotiations to
+        be demanded by the server within this period of time before the shell
+        begins.  These demands are usually made immediately on connection.
+        A server that does not make any telnet demands, such as a non-telnet
+        server, will delay the shell for this amount of time.
+    :param float connect_maxwait: If the remote end is not complaint, or
+        otherwise confused by our demands, the shell continues anyway after the
+        greater of this value or ``connect_minwait``.
     """
-
     log = log or logging.getLogger(__name__)
     loop = loop or asyncio.get_event_loop()
 
@@ -235,6 +243,7 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
             log=log, encoding=encoding, encoding_errors=encoding_errors,
             force_binary=force_binary, term=term, cols=cols, rows=rows,
             tspeed=tspeed, xdisploc=xdisploc, shell=shell,
+            connect_minwait=connect_minwait, connect_maxwait=connect_maxwait,
             waiter_closed=waiter_closed, waiter_connected=waiter_connected)
 
     transport, protocol = yield from loop.create_connection(
@@ -294,6 +303,10 @@ def _get_argument_parser():
                         help='encoding name')
     parser.add_argument('--force-binary', action='store_true',
                         help='force encoding')
+    parser.add_argument('--connect-minwait', default=1.0, type=float,
+                        help='shell delay for negotiation')
+    parser.add_argument('--connect-maxwait', default=4.0, type=float,
+                        help='timeout for pending negotiation')
     return parser
 
 
@@ -314,5 +327,6 @@ def _transform_args(args):
         'shell': shell_function,
         'term': args.term,
         'force_binary': args.force_binary,
+        'connect_minwait': args.connect_minwait,
     }
 

@@ -368,7 +368,7 @@ def create_server(
     protocol_factory=None, host=None, port=23, *, loop=None, log=None,
     encoding='utf8', encoding_errors='strict', force_binary=False,
     term='unknown', cols=80, rows=25, timeout=300, shell=None,
-    waiter_closed=None, waiter_connected=None
+    waiter_closed=None, waiter_connected=None, connect_maxwait=4.0
 ):
     """
     Create a Telnet Server
@@ -394,6 +394,10 @@ def create_server(
     :param int timeout: Causes clients to disconnect if idle for this duration,
         ensuring resources are freed on busy servers.  When explicitly set to
         ``False``, clients will not be disconnected for timeout.
+    :param float connect_maxwait: If the remote end is not complaint, or
+        otherwise confused by our demands, the shell continues anyway after the
+        greater of this value has elapsed.  A client that is not answering
+        option negotiation will delay the start of the shell by this amount.
     """
 
     protocol_factory = protocol_factory or TelnetServer
@@ -405,7 +409,8 @@ def create_server(
             loop=loop, log=log, encoding=encoding,
             encoding_errors=encoding_errors, force_binary=force_binary,
             term=term, cols=cols, rows=rows, timeout=timeout, shell=shell,
-            waiter_closed=waiter_closed, waiter_connected=waiter_connected)
+            waiter_closed=waiter_closed, waiter_connected=waiter_connected,
+            connect_maxwait=connect_maxwait)
 
     return (yield from loop.create_server(on_connect, host, port))
 
@@ -435,6 +440,8 @@ def _get_argument_parser():
                         help='force binary transmission')
     parser.add_argument('--timeout', default=300, type=int,
                         help='idle disconnect (0 disables)')
+    parser.add_argument('--connect-maxwait', default=4.0, type=float,
+                        help='timeout for pending negotiation')
     return parser
 
 
@@ -454,7 +461,8 @@ def _transform_args(args):
         'timeout': args.timeout,
         'loglevel': args.loglevel,
         'logfile': args.logfile,
-        'shell': shell_function
+        'shell': shell_function,
+        'connect_maxwait': args.connect_maxwait,
     }
 
 

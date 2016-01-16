@@ -13,11 +13,6 @@ __all__ = ('BaseServer',)
 
 class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     """Base Telnet Server Protocol."""
-    #: Maximum on-connect time to wait for all pending negotiation options to
-    #: complete before negotiation is considered 'final', signaled by the
-    #: completion of waiter :attr:`waiter_connected`.
-    CONNECT_MAXWAIT = 1.80
-
     _when_connected = None
     _last_received = None
     _transport = None
@@ -29,7 +24,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     def __init__(self, shell=None, log=None, loop=None,
                  waiter_connected=None, waiter_closed=None,
                  encoding='utf8', encoding_errors='strict',
-                 force_binary=False):
+                 force_binary=False, connect_maxwait=4.0):
         """Class initializer."""
         super().__init__(loop=loop)
         self.log = log or logging.getLogger(__name__)
@@ -44,6 +39,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self.shell = shell
         self.reader = None
         self.writer = None
+        self.connect_maxwait = connect_maxwait
 
     # Base protocol methods
 
@@ -239,7 +235,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         :rtype: bool
 
         Method is called on each new command byte processed until negotiation
-        is considered final, or after :attr:`CONNECT_MAXWAIT` has elapsed,
+        is considered final, or after :attr:`connect_maxwait` has elapsed,
         setting :attr:`waiter_connected` to value ``self`` when complete.
 
         Ensure ``super().check_negotiation()`` is called and conditionally
@@ -260,7 +256,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._check_later.cancel()
         self._tasks.remove(self._check_later)
 
-        later = self.CONNECT_MAXWAIT - self.duration
+        later = self.connect_maxwait - self.duration
         final = bool(later < 0)
 
         if self.check_negotiation(final=final):
