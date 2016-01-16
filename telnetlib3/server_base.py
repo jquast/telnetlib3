@@ -18,10 +18,6 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     #: completion of waiter :attr:`waiter_connected`.
     CONNECT_MAXWAIT = 1.80
 
-    #: maximum timer length for ``check_negotiation``
-    #: re-scheduling (default: 50ms)
-    CONNECT_DEFERRED = 0.05
-
     _when_connected = None
     _last_received = None
     _transport = None
