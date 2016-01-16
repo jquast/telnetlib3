@@ -15,7 +15,7 @@ import os
 from . import accessories
 from . import client_base
 
-__all__ = ('TelnetClient', 'open_connection', 'start_client')
+__all__ = ('TelnetClient', 'open_connection')
 
 
 class TelnetClient(client_base.BaseClient):
@@ -255,13 +255,6 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
     return protocol.reader, protocol.writer
 
 
-@asyncio.coroutine
-def start_client(host, port, log=None, **kwds):
-    reader, writer = yield from open_connection(
-        host=host, port=port, log=log, **kwds)
-    return reader, writer
-
-
 def main():
     """ Command-line tool telnetlib3-client entry point via setuptools."""
     kwargs = _transform_args(_get_argument_parser().parse_args())
@@ -278,7 +271,7 @@ def main():
     loop = asyncio.get_event_loop()
 
     reader, writer = loop.run_until_complete(
-        start_client(host, port, log, **kwargs))
+        open_connection(host, port, log=log, **kwargs))
 
     loop.run_until_complete(writer.protocol.waiter_closed)
 

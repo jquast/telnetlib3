@@ -72,7 +72,7 @@ Basic Telnet Client using Streams interface::
         print()
               
     loop = asyncio.get_event_loop()
-    coro = telnetlib3.start_client('localhost', 6023, shell=shell)
+    coro = telnetlib3.open_connection('localhost', 6023, shell=shell)
     reader, _ = loop.run_until_complete(coro)
     loop.run_until_complete(reader.protocol.waiter_closed)
 
