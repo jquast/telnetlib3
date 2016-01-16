@@ -8,8 +8,7 @@ import telnetlib3.stream_writer
 from telnetlib3.tests.accessories import (
     unused_tcp_port,
     event_loop,
-    bind_host,
-    log
+    bind_host
 )
 
 # 3rd party
@@ -18,7 +17,7 @@ import pytest
 
 @pytest.mark.asyncio
 def test_telnet_server_on_environ(
-        event_loop, bind_host, unused_tcp_port, log):
+        event_loop, bind_host, unused_tcp_port):
     """Test Server's callback method on_environ()."""
     # given
     from telnetlib3.telopt import (
@@ -34,7 +33,7 @@ def test_telnet_server_on_environ(
     yield from telnetlib3.create_server(
         protocol_factory=ServerTestEnviron,
         host=bind_host, port=unused_tcp_port,
-        loop=event_loop, log=log)
+        loop=event_loop)
 
     reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -59,7 +58,7 @@ def test_telnet_server_on_environ(
 
 @pytest.mark.asyncio
 def test_telnet_client_send_environ(event_loop, bind_host,
-                                    unused_tcp_port, log):
+                                    unused_tcp_port):
     """Test Client's callback method send_environ() for specific requests."""
     # given
     _waiter = asyncio.Future()
@@ -76,7 +75,7 @@ def test_telnet_client_send_environ(event_loop, bind_host,
     yield from telnetlib3.create_server(
         protocol_factory=ServerTestEnviron,
         host=bind_host, port=unused_tcp_port,
-        loop=event_loop, log=log)
+        loop=event_loop)
 
     reader, writer = yield from telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
@@ -94,7 +93,7 @@ def test_telnet_client_send_environ(event_loop, bind_host,
 
 @pytest.mark.asyncio
 def test_telnet_client_send_var_uservar_environ(event_loop, bind_host,
-                                                unused_tcp_port, log):
+                                                unused_tcp_port):
     """Test Client's callback method send_environ() for VAR/USERVAR request."""
     # given
     _waiter = asyncio.Future()
@@ -115,7 +114,7 @@ def test_telnet_client_send_var_uservar_environ(event_loop, bind_host,
     yield from telnetlib3.create_server(
         protocol_factory=ServerTestEnviron,
         host=bind_host, port=unused_tcp_port,
-        loop=event_loop, log=log)
+        loop=event_loop)
 
     reader, writer = yield from telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
@@ -139,7 +138,7 @@ def test_telnet_client_send_var_uservar_environ(event_loop, bind_host,
 
 @pytest.mark.asyncio
 def test_telnet_server_reject_environ(event_loop, bind_host,
-                                      unused_tcp_port, log):
+                                      unused_tcp_port):
     """Test Client's callback method send_environ() for specific requests."""
     from telnetlib3.telopt import SB, NEW_ENVIRON
     # given
@@ -155,7 +154,7 @@ def test_telnet_server_reject_environ(event_loop, bind_host,
     yield from telnetlib3.create_server(
         protocol_factory=ServerTestEnviron,
         host=bind_host, port=unused_tcp_port,
-        loop=event_loop, log=log)
+        loop=event_loop)
 
     reader, writer = yield from telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,

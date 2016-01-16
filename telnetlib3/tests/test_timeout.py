@@ -9,8 +9,7 @@ import telnetlib3.stream_writer
 from telnetlib3.tests.accessories import (
     unused_tcp_port,
     event_loop,
-    bind_host,
-    log
+    bind_host
 )
 
 # 3rd party
@@ -19,7 +18,7 @@ import pytest
 
 @pytest.mark.asyncio
 def test_telnet_server_default_timeout(
-        event_loop, bind_host, unused_tcp_port, log):
+        event_loop, bind_host, unused_tcp_port):
     """Test callback on_timeout() as coroutine of create_server()."""
     from telnetlib3.telopt import IAC, WONT, TTYPE
     # given,
@@ -29,8 +28,7 @@ def test_telnet_server_default_timeout(
     yield from telnetlib3.create_server(
         waiter_connected=_waiter,
         host=bind_host, port=unused_tcp_port,
-        loop=event_loop, log=log,
-        timeout=given_timeout)
+        loop=event_loop, timeout=given_timeout)
 
     reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -47,7 +45,7 @@ def test_telnet_server_default_timeout(
 
 @pytest.mark.asyncio
 def test_telnet_server_set_timeout(
-        event_loop, bind_host, unused_tcp_port, log):
+        event_loop, bind_host, unused_tcp_port):
     """Test callback on_timeout() as coroutine of create_server()."""
     from telnetlib3.telopt import IAC, WONT, TTYPE
     # given,
@@ -57,7 +55,7 @@ def test_telnet_server_set_timeout(
     yield from telnetlib3.create_server(
         waiter_connected=_waiter,
         host=bind_host, port=unused_tcp_port,
-        loop=event_loop, log=log)
+        loop=event_loop)
 
     reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -78,7 +76,7 @@ def test_telnet_server_set_timeout(
 
 @pytest.mark.asyncio
 def test_telnet_server_waitfor_timeout(
-        event_loop, bind_host, unused_tcp_port, log):
+        event_loop, bind_host, unused_tcp_port):
     """Test callback on_timeout() as coroutine of create_server()."""
     from telnetlib3.telopt import IAC, DO, WONT, TTYPE
     # given,
@@ -86,7 +84,7 @@ def test_telnet_server_waitfor_timeout(
 
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
-        timeout=0.050, loop=event_loop, log=log)
+        timeout=0.050, loop=event_loop)
 
     reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)

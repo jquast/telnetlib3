@@ -8,8 +8,7 @@ import telnetlib3.stream_writer
 from telnetlib3.tests.accessories import (
     unused_tcp_port,
     event_loop,
-    bind_host,
-    log
+    bind_host
 )
 
 # 3rd party

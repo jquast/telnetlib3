@@ -8,8 +8,7 @@ import telnetlib3.stream_writer
 from telnetlib3.tests.accessories import (
     unused_tcp_port,
     event_loop,
-    bind_host,
-    log
+    bind_host
 )
 
 # 3rd party
@@ -18,7 +17,7 @@ import pytest
 
 @pytest.mark.asyncio
 def test_telnet_server_encoding_default(
-        event_loop, bind_host, unused_tcp_port, log):
+        event_loop, bind_host, unused_tcp_port):
     """Default encoding US-ASCII unless it can be negotiated/confirmed!"""
     from telnetlib3.telopt import IAC, WONT, TTYPE
     # given
@@ -27,7 +26,7 @@ def test_telnet_server_encoding_default(
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
         waiter_connected=_waiter,
-        loop=event_loop, log=log)
+        loop=event_loop)
 
     reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -47,7 +46,7 @@ def test_telnet_server_encoding_default(
 
 @pytest.mark.asyncio
 def test_telnet_client_encoding_default(
-        event_loop, bind_host, unused_tcp_port, log):
+        event_loop, bind_host, unused_tcp_port):
     """Default encoding US-ASCII unless it can be negotiated/confirmed!"""
     from telnetlib3.telopt import IAC, WONT, TTYPE
     # given
@@ -71,7 +70,7 @@ def test_telnet_client_encoding_default(
 
 @pytest.mark.asyncio
 def test_telnet_server_encoding_client_will(
-        event_loop, bind_host, unused_tcp_port, log):
+        event_loop, bind_host, unused_tcp_port):
     """Server Default encoding (utf8) incoming when client WILL."""
     from telnetlib3.telopt import IAC, WONT, WILL, TTYPE, BINARY
     # given
@@ -80,7 +79,7 @@ def test_telnet_server_encoding_client_will(
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
         waiter_connected=_waiter,
-        loop=event_loop, log=log)
+        loop=event_loop)
 
     reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -98,7 +97,7 @@ def test_telnet_server_encoding_client_will(
 
 @pytest.mark.asyncio
 def test_telnet_server_encoding_server_do(
-        event_loop, bind_host, unused_tcp_port, log):
+        event_loop, bind_host, unused_tcp_port):
     """Server's default encoding."""
     from telnetlib3.telopt import IAC, WONT, DO, TTYPE, BINARY
     # given
@@ -107,7 +106,7 @@ def test_telnet_server_encoding_server_do(
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
         waiter_connected=_waiter,
-        loop=event_loop, log=log)
+        loop=event_loop)
 
     reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -125,7 +124,7 @@ def test_telnet_server_encoding_server_do(
 
 @pytest.mark.asyncio
 def test_telnet_server_encoding_bidirectional(
-        event_loop, bind_host, unused_tcp_port, log):
+        event_loop, bind_host, unused_tcp_port):
     """Server's default encoding with bi-directional BINARY negotiation."""
     from telnetlib3.telopt import IAC, WONT, DO, WILL, TTYPE, BINARY
     # given
@@ -134,7 +133,7 @@ def test_telnet_server_encoding_bidirectional(
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
         waiter_connected=_waiter,
-        loop=event_loop, log=log)
+        loop=event_loop)
 
     reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -152,8 +151,34 @@ def test_telnet_server_encoding_bidirectional(
 
 
 @pytest.mark.asyncio
+def test_telnet_client_and_server_encoding_bidirectional(
+        event_loop, bind_host, unused_tcp_port):
+    """Given a default encoding for client and server, client always wins!"""
+    from telnetlib3.telopt import IAC, WONT, DO, WILL, TTYPE, BINARY
+    # given
+    _waiter = asyncio.Future()
+
+    yield from telnetlib3.create_server(
+        host=bind_host, port=unused_tcp_port, waiter_connected=_waiter,
+        loop=event_loop, encoding='latin1')
+
+    reader, writer = yield from telnetlib3.open_connection(
+        host=bind_host, port=unused_tcp_port, loop=event_loop,
+        encoding='cp437')
+
+    srv_instance = yield from asyncio.wait_for(_waiter, 0.5)
+
+    assert srv_instance.encoding(incoming=True) == 'cp437'
+    assert srv_instance.encoding(outgoing=True) == 'cp437'
+    assert srv_instance.encoding(incoming=True, outgoing=True) == 'cp437'
+    assert writer.protocol.encoding(incoming=True) == 'cp437'
+    assert writer.protocol.encoding(outgoing=True) == 'cp437'
+    assert writer.protocol.encoding(incoming=True, outgoing=True) == 'cp437'
+
+
+@pytest.mark.asyncio
 def test_telnet_server_encoding_by_LANG(
-        event_loop, bind_host, unused_tcp_port, log):
+        event_loop, bind_host, unused_tcp_port):
     """Server's encoding negotiated by LANG value."""
     from telnetlib3.telopt import (
         IAC, WONT, DO, WILL, TTYPE, BINARY,
@@ -164,7 +189,7 @@ def test_telnet_server_encoding_by_LANG(
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
         waiter_connected=_waiter,
-        loop=event_loop, log=log)
+        loop=event_loop)
 
     reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -189,7 +214,7 @@ def test_telnet_server_encoding_by_LANG(
 
 @pytest.mark.asyncio
 def test_telnet_server_binary_mode(
-        event_loop, bind_host, unused_tcp_port, log):
+        event_loop, bind_host, unused_tcp_port):
     """Server's encoding=False creates a binary reader/writer interface."""
     from telnetlib3.telopt import IAC, WONT, DO, TTYPE, BINARY
     # given
@@ -211,7 +236,7 @@ def test_telnet_server_binary_mode(
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
         shell=binary_shell, waiter_connected=_waiter, encoding=False,
-        loop=event_loop, log=log)
+        loop=event_loop)
 
     reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
