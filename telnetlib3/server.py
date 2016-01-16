@@ -504,3 +504,6 @@ def main():
     finally:
         # remove our signal handler
         loop.remove_signal_handler(signal.SIGTERM)
+
+if __name__ == '__main__':
+    exit(main())

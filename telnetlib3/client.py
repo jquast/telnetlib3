@@ -323,3 +323,5 @@ def _transform_args(args):
         'connect_minwait': args.connect_minwait,
     }
 
+if __name__ == '__main__':
+    exit(main())
