@@ -46,6 +46,7 @@ Basic Telnet Server using Streams interface::
             writer.echo(inp)
             writer.write('\r\nThey say the only way to win '
                          'is to not play at all.\r\n')
+            yield from writer.drain()
         writer.close()
 
     loop = asyncio.get_event_loop()
