@@ -9,8 +9,7 @@ import telnetlib3
 from telnetlib3.tests.accessories import (
     unused_tcp_port,
     event_loop,
-    bind_host,
-    log
+    bind_host
 )
 
 # 3rd party
@@ -19,7 +18,7 @@ import pytest
 
 @pytest.mark.asyncio
 def test_telnet_server_on_naws(
-        event_loop, bind_host, unused_tcp_port, log):
+        event_loop, bind_host, unused_tcp_port):
     """Test Server's Negotiate about window size (NAWS)."""
     # given
     from telnetlib3.telopt import IAC, WILL, SB, SE, NAWS
@@ -34,7 +33,7 @@ def test_telnet_server_on_naws(
     yield from telnetlib3.create_server(
         protocol_factory=ServerTestNaws,
         host=bind_host, port=unused_tcp_port,
-        loop=event_loop, log=log)
+        loop=event_loop)
 
     reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -51,7 +50,7 @@ def test_telnet_server_on_naws(
 
 
 @pytest.mark.asyncio
-def test_telnet_client_send_naws(event_loop, bind_host, unused_tcp_port, log):
+def test_telnet_client_send_naws(event_loop, bind_host, unused_tcp_port):
     """Test Client's NAWS of callback method send_naws()."""
     class ServerTestEnviron(telnetlib3.TelnetServer):
         def on_environ(self, mapping):
@@ -71,7 +70,7 @@ def test_telnet_client_send_naws(event_loop, bind_host, unused_tcp_port, log):
     yield from telnetlib3.create_server(
         protocol_factory=ServerTestNaws,
         host=bind_host, port=unused_tcp_port,
-        loop=event_loop, log=log)
+        loop=event_loop)
 
     reader, writer = yield from telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
@@ -84,7 +83,7 @@ def test_telnet_client_send_naws(event_loop, bind_host, unused_tcp_port, log):
 
 @pytest.mark.asyncio
 def test_telnet_client_send_tty_naws(event_loop, bind_host,
-                                     unused_tcp_port, log):
+                                     unused_tcp_port):
     """Test Client's NAWS of callback method send_naws()."""
     class ServerTestEnviron(telnetlib3.TelnetServer):
         def on_environ(self, mapping):
@@ -107,7 +106,7 @@ def test_telnet_client_send_tty_naws(event_loop, bind_host,
     yield from telnetlib3.create_server(
         protocol_factory=ServerTestNaws,
         host=bind_host, port=unused_tcp_port,
-        loop=event_loop, log=log)
+        loop=event_loop)
 
     proc = pexpect.spawn(prog, args, dimensions=(given_rows, given_cols))
     yield from proc.expect(pexpect.EOF, async=True, timeout=5)

@@ -8,8 +8,7 @@ import telnetlib3.stream_writer
 from telnetlib3.tests.accessories import (
     unused_tcp_port,
     event_loop,
-    bind_host,
-    log
+    bind_host
 )
 
 # 3rd party
@@ -18,7 +17,7 @@ import pytest
 
 @pytest.mark.asyncio
 def test_telnet_server_on_xdisploc(
-        event_loop, bind_host, unused_tcp_port, log):
+        event_loop, bind_host, unused_tcp_port):
     """Test Server's callback method on_xdisploc()."""
     # given
     from telnetlib3.telopt import (
@@ -35,7 +34,7 @@ def test_telnet_server_on_xdisploc(
     yield from telnetlib3.create_server(
         protocol_factory=ServerTestXdisploc,
         host=bind_host, port=unused_tcp_port,
-        loop=event_loop, log=log)
+        loop=event_loop)
 
     reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -52,7 +51,7 @@ def test_telnet_server_on_xdisploc(
 
 
 @pytest.mark.asyncio
-def test_telnet_client_send_xdisploc(event_loop, bind_host, unused_tcp_port, log):
+def test_telnet_client_send_xdisploc(event_loop, bind_host, unused_tcp_port):
     """Test Client's callback method send_xdisploc()."""
     # given
     _waiter = asyncio.Future()
@@ -71,7 +70,7 @@ def test_telnet_client_send_xdisploc(event_loop, bind_host, unused_tcp_port, log
     yield from telnetlib3.create_server(
         protocol_factory=ServerTestXdisploc,
         host=bind_host, port=unused_tcp_port,
-        loop=event_loop, log=log)
+        loop=event_loop)
 
     reader, writer = yield from telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
