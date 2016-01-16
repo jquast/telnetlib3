@@ -155,7 +155,6 @@ def test_telnet_server_encoding_bidirectional(
 def test_telnet_client_and_server_encoding_bidirectional(
         event_loop, bind_host, unused_tcp_port):
     """Given a default encoding for client and server, client always wins!"""
-    from telnetlib3.telopt import IAC, WONT, DO, WILL, TTYPE, BINARY
     # given
     _waiter = asyncio.Future()
 
@@ -253,4 +252,56 @@ def test_telnet_server_binary_mode(
     assert val == b'server_output'
 
     eof = yield from reader.read()
+    assert eof == b''
+
+
+@pytest.mark.asyncio
+def test_telnet_client_and_server_escape_iac_encoding(
+        event_loop, bind_host, unused_tcp_port):
+    """Ensure that IAC (byte 255) may be sent across the wire by encoding."""
+    # given
+    _waiter = asyncio.Future()
+    given_string = ''.join(chr(val) for val in list(range(256))) * 2
+
+    yield from telnetlib3.create_server(
+        host=bind_host, port=unused_tcp_port, waiter_connected=_waiter,
+        loop=event_loop, encoding='iso8859-1', connect_maxwait=0.05)
+
+    client_reader, client_writer = yield from telnetlib3.open_connection(
+        host=bind_host, port=unused_tcp_port, loop=event_loop,
+        encoding='iso8859-1', connect_minwait=0.05)
+
+    server = yield from asyncio.wait_for(_waiter, 0.5)
+
+    server.writer.write(given_string)
+    result = yield from client_reader.read(len(given_string))
+    assert result == given_string
+    server.writer.close()
+    eof = yield from asyncio.wait_for(client_reader.read(), 0.5)
+    assert eof == ''
+
+
+@pytest.mark.asyncio
+def test_telnet_client_and_server_escape_iac_binary(
+        event_loop, bind_host, unused_tcp_port):
+    """Ensure that IAC (byte 255) may be sent across the wire in binary."""
+    # given
+    _waiter = asyncio.Future()
+    given_string = bytes(range(256)) * 2
+
+    yield from telnetlib3.create_server(
+        host=bind_host, port=unused_tcp_port, waiter_connected=_waiter,
+        loop=event_loop, encoding=False, connect_maxwait=0.05)
+
+    client_reader, client_writer = yield from telnetlib3.open_connection(
+        host=bind_host, port=unused_tcp_port, loop=event_loop,
+        encoding=False, connect_minwait=0.05)
+
+    server = yield from asyncio.wait_for(_waiter, 0.5)
+
+    server.writer.write(given_string)
+    result = yield from client_reader.read(len(given_string))
+    assert result == given_string
+    server.writer.close()
+    eof = yield from asyncio.wait_for(client_reader.read(), 0.5)
     assert eof == b''
