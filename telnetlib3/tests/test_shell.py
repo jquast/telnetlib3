@@ -77,7 +77,7 @@ def test_telnet_client_shell_as_coroutine(event_loop, bind_host,
 
     reader, writer = yield from telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        shell=shell)
+        shell=shell, connect_minwait=0.05)
 
     yield from asyncio.wait_for(_waiter, 0.5)
 

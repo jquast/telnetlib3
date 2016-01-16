@@ -26,7 +26,7 @@ def test_telnet_server_encoding_default(
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
         waiter_connected=_waiter,
-        loop=event_loop)
+        loop=event_loop, connect_maxwait=0.05)
 
     reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -56,7 +56,8 @@ def test_telnet_client_encoding_default(
                                         bind_host, unused_tcp_port)
 
     reader, writer = yield from telnetlib3.open_connection(
-        host=bind_host, port=unused_tcp_port, loop=event_loop)
+        host=bind_host, port=unused_tcp_port, loop=event_loop,
+        connect_minwait=0.05)
 
 
     # after MIN_CONNECT elapsed, client is in US-ASCII state.
@@ -133,7 +134,7 @@ def test_telnet_server_encoding_bidirectional(
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
         waiter_connected=_waiter,
-        loop=event_loop)
+        loop=event_loop, connect_maxwait=0.05)
 
     reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -160,11 +161,11 @@ def test_telnet_client_and_server_encoding_bidirectional(
 
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port, waiter_connected=_waiter,
-        loop=event_loop, encoding='latin1')
+        loop=event_loop, encoding='latin1', connect_maxwait=0.05)
 
     reader, writer = yield from telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        encoding='cp437')
+        encoding='cp437', connect_minwait=0.05)
 
     srv_instance = yield from asyncio.wait_for(_waiter, 0.5)
 
