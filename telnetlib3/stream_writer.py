@@ -196,24 +196,25 @@ class TelnetWriter(asyncio.StreamWriter):
         info.append('{0}slc_sim'.format('+' if self.slc_simulated else '-'))
 
         # IAC negotiation status
-        _failed_reply = [name_commands(opt) for (opt, val)
-                         in self.pending_option.items()
-                         if val]
+        _failed_reply = sorted([name_commands(opt) for (opt, val)
+                                in self.pending_option.items()
+                                if val])
         if _failed_reply:
             info.append('failed-reply:{opts}'.format(
                 opts=','.join(_failed_reply)))
 
-        _local = [name_commands(opt) for (opt, val)
-                  in self.local_option.items()
-                  if self.local_option.enabled(opt)]
+        _local = sorted([name_commands(opt) for (opt, val)
+                         in self.local_option.items()
+                         if self.local_option.enabled(opt)])
         if _local:
+            localpoint = 'server' if self.server else 'client'
             info.append('{kind}-will:{opts}'.format(
-                kind=endpoint, opts=','.join(_local)))
+                kind=localpoint, opts=','.join(_local)))
 
-        _remote = [
+        _remote = sorted([
             name_commands(opt) for (opt, val)
             in self.remote_option.items()
-            if self.remote_option.enabled(opt)]
+            if self.remote_option.enabled(opt)])
         if _remote:
             info.append('{kind}-will:{opts}'.format(
                 kind=endpoint, opts=','.join(_remote)))
@@ -265,13 +266,15 @@ class TelnetWriter(asyncio.StreamWriter):
                 self._sb_buffer.append(IAC)
 
         elif self.iac_received and not self.cmd_received:
-            # parse 2nd byte of IAC, even if recv under SB
+            # parse 2nd byte of IAC
             self.cmd_received = cmd = byte
             if cmd not in iac_mbs:
-                # DO, DONT, WILL, WONT are 3-byte commands and
-                # SB can be of any length. Otherwise, this 2nd byte
-                # is the final IAC sequence command byte.
-                assert cmd in self._iac_callback, name_command(cmd)
+                # DO, DONT, WILL, WONT are 3-byte commands, expect more.
+                # Any other, expect a callback.  Otherwise this protocol
+                # does not comprehend the remote end's request.
+                if cmd not in self._iac_callback:
+                    raise ValueError('IAC {0}({1!r}): not a legal 2-byte cmd'
+                                     .format(name_command(cmd), cmd))
                 self._iac_callback[cmd](cmd)
             self.iac_received = False
 
@@ -1752,7 +1755,8 @@ class TelnetWriter(asyncio.StreamWriter):
         #
         #    IAC SB NAWS WIDTH[1] WIDTH[0] HEIGHT[1] HEIGHT[0] IAC SE
         #
-        response = [IAC, SB, NAWS, struct.pack('!HH', cols, rows), IAC, SE]
+        value = self._escape_iac(struct.pack('!HH', cols, rows))
+        response = [IAC, SB, NAWS, value, IAC, SE]
         self.log.debug('send IAC SB NAWS (rows={0}, cols={1}) IAC SE'
                        .format(rows, cols))
         self.send_iac(b''.join(response))
