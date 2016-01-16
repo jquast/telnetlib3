@@ -10,8 +10,9 @@ __all__ = ('telnet_client_shell', )
 
 if sys.platform == 'win32':
     @asyncio.coroutine
-    def telnet_client_shell(reader, writer):
-        print('win32 not yet supported as telnet client. Please contribute!')
+    def telnet_client_shell(telnet_reader, telnet_writer):
+        raise NotImplementedError(
+            'win32 not yet supported as telnet client. Please contribute!')
 
 else:
     import termios
@@ -82,7 +83,7 @@ else:
 
 
     @asyncio.coroutine
-    def telnet_client_shell(reader, writer):
+    def telnet_client_shell(telnet_reader, telnet_writer):
         """
         Rudimentary telnet client shell.
 
@@ -99,45 +100,44 @@ else:
 
         with _set_tty(fobj=sys.stdin, tty_func=tty.setcbreak):
             stdin, stdout = yield from _make_stdio(loop)
-
-            stdin_task = None
-            telnet_task = None
-
-            while True:
-                if platform.python_version_tuple() <= ('3', '4', '4'):
-                    compat_ensure_future = asyncio.async
-                else:
-                    compat_ensure_future = asyncio.ensure_future
-                stdin_task = stdin_task or compat_ensure_future(
-                    stdin.read(2**12))
-                telnet_task = telnet_task or compat_ensure_future(
-                    reader.read(2**12))
+            stdin_task = _make_reader_task(stdin)
+            telnet_task = _make_reader_task(telnet_reader)
+            wait_for = set([stdin_task, telnet_task])
+            while wait_for:
                 done, pending = yield from asyncio.wait(
-                    [stdin_task, telnet_task],
-                    return_when=asyncio.FIRST_COMPLETED)
+                    wait_for, return_when=asyncio.FIRST_COMPLETED)
 
                 task = done.pop()
+                wait_for.remove(task)
 
                 if task == stdin_task:
                     # client input
                     inp = task.result()
-                    if not inp:
-                        # EOF
-                        telnet_task.cancel()
-                        break
-                    writer.write(inp.decode())
-                    if not writer.will_echo:
-                        stdout.write(inp)
-                    stdin_task = None
+                    if inp:
+                        telnet_writer.write(inp.decode())
+                        if not telnet_writer.will_echo:
+                            stdout.write(inp)
+                        stdin_task = _make_reader_task(stdin)
+                        wait_for.add(stdin_task)
 
-                else:
+                if task == telnet_task:
                     # server output
                     out = task.result()
                     if not out:
-                        # EOF
-                        stdin_task.cancel()
-                        break
+                        # on EOF, stop reading stdin
+                        if stdin_task in wait_for:
+                            stdin_task.cancel()
+                            wait_for.remove(stdin_task)
+                    else:
+                        stdout.write(out.encode())
+                        telnet_task = _make_reader_task(telnet_reader)
+                        wait_for.add(telnet_task)
 
-                    stdout.write(out.encode())
-                    telnet_task = None
-            writer.close()
+
+def _make_reader_task(reader, size=2**12):
+    # schedule coroutine as a task that may be waited on
+    if platform.python_version_tuple() <= ('3', '4', '4'):
+        task = asyncio.async
+    else:
+        task = asyncio.ensure_future
+    return task(reader.read(size))
