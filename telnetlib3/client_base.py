@@ -12,7 +12,7 @@ from .telopt import name_commands
 __all__ = ('BaseClient',)
 
 
-class BaseClient(asyncio.Protocol):
+class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     """Base Telnet Client Protocol."""
     #: Minimum on-connect time to wait for at least one server-initiated
     #: negotiation option byte.  A server not demanding any telnet options
@@ -37,6 +37,7 @@ class BaseClient(asyncio.Protocol):
                  encoding='utf8', encoding_errors='strict',
                  force_binary=False):
         """Class initializer."""
+        super().__init__(loop=loop)
         self.log = log or logging.getLogger(__name__)
         self._loop = loop or asyncio.get_event_loop()
         self.default_encoding = encoding

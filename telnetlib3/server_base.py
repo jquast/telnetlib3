@@ -11,7 +11,7 @@ from .stream_reader import TelnetReader
 __all__ = ('BaseServer',)
 
 
-class BaseServer(asyncio.Protocol):
+class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     """Base Telnet Server Protocol."""
     #: Maximum on-connect time to wait for all pending negotiation options to
     #: complete before negotiation is considered 'final', signaled by the
@@ -35,6 +35,7 @@ class BaseServer(asyncio.Protocol):
                  encoding='utf8', encoding_errors='strict',
                  force_binary=False):
         """Class initializer."""
+        super().__init__(loop=loop)
         self.log = log or logging.getLogger(__name__)
         self._loop = loop or asyncio.get_event_loop()
         self.default_encoding = encoding
