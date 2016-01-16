@@ -2,8 +2,8 @@
 import logging
 import asyncio
 import codecs
-#import traceback
-#import sys
+
+__all__ = ('TelnetReader',)
 
 
 class TelnetReader(asyncio.StreamReader):
