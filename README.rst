@@ -34,7 +34,9 @@ This project requires the asyncio_ module, available as a module in python
 Usage
 =====
 
-Basic Telnet Server using Streams interface::
+Basic Telnet Server using Streams interface:
+
+.. code-block:: python
 
     import asyncio, telnetlib3
 
@@ -54,7 +56,9 @@ Basic Telnet Server using Streams interface::
     server = loop.run_until_complete(coro)
     loop.run_until_complete(server.wait_closed())
 
-Basic Telnet Client using Streams interface::
+Basic Telnet Client using Streams interface:
+
+.. code-block:: python
 
     import asyncio, telnetlib3
 
