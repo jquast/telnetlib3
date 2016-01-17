@@ -1482,13 +1482,14 @@ class TelnetWriter(asyncio.StreamWriter):
             equivalent methods. Implementors of additional SB options
             should extend this method.
         """
-        assert buf, ('SE: buffer empty')
-        assert buf[0] != theNULL, ('SE: buffer is NUL')
-        assert len(buf) > 1, ('SE: buffer too short: {!r}'.format(buf))
+        if not buf:
+            raise ValueError('SE: buffer empty')
+        if buf[0] == theNULL:
+            raise ValueError('SE: buffer is NUL')
+        if len(buf) == 1:
+            raise ValueError('SE: buffer too short: {!r}'.format(buf))
+
         cmd = buf[0]
-        assert cmd in (LINEMODE, LFLOW, NAWS, SNDLOC, NEW_ENVIRON,
-                       CHARSET, TTYPE, TSPEED, XDISPLOC, STATUS,
-                       ), ('SB {}: not supported'.format(name_command(cmd)))
         if self.pending_option.enabled(SB + cmd):
             self.pending_option[SB + cmd] = False
         else:
@@ -1514,7 +1515,7 @@ class TelnetWriter(asyncio.StreamWriter):
         elif cmd == STATUS:
             self._handle_sb_status(buf)
         else:
-            raise ValueError('SE: unhandled: cmd={}, buf={!r}'
+            raise ValueError('SB unhandled: cmd={}, buf={!r}'
                              .format(name_command(cmd), buf))
 
     # Our Private API methods
