@@ -158,10 +158,6 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     def __repr__(self):
         hostport = self._transport.get_extra_info('peername')[:2]
-        # _extra = ((key, val) for key, val in self._extra.items() if
-        #           not key.startswith('ttype') and
-        #           key not in ('timeout',))
-        # extra = ' '.join('{0}={1}'.format(*item) for item in sorted(_extra))
         return '<Peer {0} {1}>'.format(*hostport)
 
     def get_extra_info(self, name, default=None):
@@ -190,9 +186,6 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         Only called if sub-classing :meth:`begin_negotiation` causes
         at least one negotiation option to be affirmatively acknowledged.
-
-        Deriving implementations should always call
-        ``super().begin_advanced_negotiation()``.
         """
         pass
 
@@ -268,7 +261,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                            .format(self.duration))
             self.waiter_connected.set_result(self)
         else:
-            # keep re-queueing until complete
+            # keep re-queuing until complete
             self._check_later = self._loop.call_later(
                 later, self._check_negotiation_timer)
             self._tasks.append(self._check_later)
