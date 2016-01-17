@@ -52,7 +52,7 @@ Basic Telnet Server using Streams interface:
         writer.close()
 
     loop = asyncio.get_event_loop()
-    coro = telnetlib3.start_server(port=6023, shell=shell)
+    coro = telnetlib3.create_server(port=6023, shell=shell)
     server = loop.run_until_complete(coro)
     loop.run_until_complete(server.wait_closed())
 
