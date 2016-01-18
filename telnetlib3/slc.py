@@ -358,7 +358,8 @@ _DEBUG_SLC_OPTS = dict([(value, key)
                             'SLC_OVER', 'SLC_ECR', 'SLC_EWR', 'SLC_EBOL',
                             'SLC_EEOL',)])
 
+
 def name_slc_command(byte):
-    """ Given an SLC ``byte``, return global mnumonic as string. """
+    """ Given an SLC ``byte``, return global mnemonic as string. """
     return (repr(byte) if byte not in _DEBUG_SLC_OPTS
             else _DEBUG_SLC_OPTS[byte])
