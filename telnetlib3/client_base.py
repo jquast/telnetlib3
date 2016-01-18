@@ -145,15 +145,16 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         cmd_received = False
         for byte in data:
             try:
-                recv = self.writer.feed_byte(bytes([byte]))
+                recv_inband = self.writer.feed_byte(bytes([byte]))
             except:
                 self._log_exception(self.log.debug, *sys.exc_info())
             else:
-                if recv:
+                if recv_inband:
                     # forward to reader (shell).
                     self.reader.feed_data(bytes([byte]))
-                else:
-                    cmd_received = True
+
+                # becomes True if any out of band data is received.
+                cmd_received = cmd_received or not recv_inband
 
         # until negotiation is complete, re-check negotiation aggressively
         # upon receipt of any command byte.
