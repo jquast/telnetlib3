@@ -43,7 +43,8 @@ def test_telnet_server_shell_as_coroutine(event_loop, bind_host,
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
     # given, verify IAC DO TTYPE
-    hello = yield from reader.readexactly(len(expect_hello))
+    hello = yield from asyncio.wait_for(
+        reader.readexactly(len(expect_hello)), 0.5)
     assert hello == expect_hello
 
     # exercise,
@@ -55,7 +56,8 @@ def test_telnet_server_shell_as_coroutine(event_loop, bind_host,
 
     # client sends input, reads shell output response
     writer.write(send_input.encode('ascii'))
-    server_output = yield from reader.readexactly(len(expect_output))
+    server_output = yield from asyncio.wait_for(
+        reader.readexactly(len(expect_output)), 0.5)
 
     # verify,
     assert server_output.decode('ascii') == expect_output
@@ -145,23 +147,25 @@ def test_telnet_server_given_shell(
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
         shell=telnet_server_shell,
-        waiter_connected=_waiter,
+        waiter_connected=_waiter, connect_maxwait=0.05,
         timeout=0.25, loop=event_loop)
 
     reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
     expected = IAC + DO + TTYPE
-    result = yield from reader.readexactly(len(expected))
+    result = yield from asyncio.wait_for(
+        reader.readexactly(len(expected)), 0.5)
     assert result == expected
 
     writer.write(IAC + WONT + TTYPE)
 
     expected = b'Ready.\r\ntel:sh> '
-    result = yield from reader.readexactly(len(expected))
+    result = yield from asyncio.wait_for(
+        reader.readexactly(len(expected)), 0.5)
     assert result == expected
 
-    server = yield from _waiter
+    server = yield from asyncio.wait_for(_waiter, 0.5)
     server_port = str(server._transport.get_extra_info('peername')[1])
 
     cmd_output_table = (
@@ -266,7 +270,7 @@ def test_telnet_server_given_shell(
                 reader.readexactly(len(output_expected)), 0.5)
         except asyncio.streams.IncompleteReadError as err:
             result = err.partial
-        assert result == output_expected, repr(cmd)
+        assert result == output_expected
 
     # nothing more to read.
     result = yield from reader.read()

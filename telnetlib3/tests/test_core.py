@@ -1,13 +1,11 @@
 """Test instantiation of basic server and client forms."""
 # std imports
 import asyncio
-import platform
 import unittest.mock
 
 # local imports
 import telnetlib3
 from telnetlib3.tests.accessories import (
-    # TestTelnetClient,
     unused_tcp_port,
     event_loop,
     bind_host
@@ -28,9 +26,9 @@ def test_create_server(bind_host, unused_tcp_port):
 def test_open_connection(bind_host, unused_tcp_port):
     """Exercise telnetlib3.open_connection with default options."""
     _waiter = asyncio.Future()
-    yield from telnetlib3.start_server(bind_host, unused_tcp_port,
-                                       waiter_connected=_waiter,
-                                       connect_maxwait=0.05)
+    yield from telnetlib3.create_server(bind_host, unused_tcp_port,
+                                        waiter_connected=_waiter,
+                                        connect_maxwait=0.05)
     client_reader, client_writer = yield from telnetlib3.open_connection(
         bind_host, unused_tcp_port, connect_minwait=0.05)
     server = yield from asyncio.wait_for(_waiter, 0.5)

@@ -44,7 +44,7 @@ def test_telnet_server_on_naws(
                  struct.pack('!HH', given_cols, given_rows) +
                  IAC + SE)
 
-    srv_instance = yield from _waiter
+    srv_instance = yield from asyncio.wait_for(_waiter, 0.5)
     assert srv_instance.get_extra_info('cols') == given_cols
     assert srv_instance.get_extra_info('rows') == given_rows
 
@@ -70,7 +70,7 @@ def test_telnet_client_send_naws(event_loop, bind_host, unused_tcp_port):
         host=bind_host, port=unused_tcp_port, loop=event_loop,
         cols=given_cols, rows=given_rows, connect_minwait=0.05)
 
-    recv_cols, recv_rows = yield from _waiter
+    recv_cols, recv_rows = yield from asyncio.wait_for(_waiter, 0.5)
     assert recv_cols == given_cols
     assert recv_rows == given_rows
 
@@ -102,7 +102,7 @@ def test_telnet_client_send_tty_naws(event_loop, bind_host,
     yield from proc.expect(pexpect.EOF, async=True, timeout=5)
     assert proc.match == pexpect.EOF
 
-    recv_cols, recv_rows = yield from _waiter
+    recv_cols, recv_rows = yield from asyncio.wait_for(_waiter, 0.5)
     assert recv_cols == given_cols
     assert recv_rows == given_rows
 
