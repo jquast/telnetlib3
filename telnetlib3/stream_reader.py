@@ -9,27 +9,6 @@ __all__ = ('TelnetReader',)
 class TelnetReader(asyncio.StreamReader):
     """
     A reader interface from telnet protocol.
-
-    This API requires the attached ``protocol.encoding(incoming=True)`` method
-    call return either a string that should be used for encoding, or ``False``
-    to indicate that this interface should not perform encoding conversion.
-    When ``False``, this streams interface is bytes-only, otherwise unicode.
-
-    returning a string, this API is a unicode interface, over the pairing telnet protocol's
-    preferred encoding, unless such instance encoding is explicitly set
-    ``False`` for class initializer argument ``encoding``.
-
-    Protocol byte data that is **not** ``IAC`` (Is A Command) escape data
-    is sent to :meth:`feed_byte`.  Consumers may then yield from the various
-    ``read``-family of coroutines derived from :class:`asyncio.StreamReader`.
-
-    The :meth:`readline` interface handles the four variants of newlines
-    sent by telnet clients:
-
-        - ``CR LF``, received as ``CR``.
-        - ``CR \x00``, received as ``CR``.
-        - ``CR``
-        - ``LF``
     """
     #: Late-binding instance of :class:`codecs.IncrementalDecoder`, some
     #: bytes may be lost if the protocol's encoding is changed after
@@ -71,29 +50,55 @@ class TelnetReader(asyncio.StreamReader):
         """The protocol attached to this stream."""
         return self._protocol
 
-# TODO: handle \r\n, \r\x00, \r, \n.
     @asyncio.coroutine
-    def readline(self):
+    def readline(self, auto_decode=True):
         r"""
         Read one line.
 
-        Where "line" is a sequence of characters ending with ``\n``.
+        Where "line" is a sequence of characters ending with ``\r``.
 
-        If EOF is received, and ``\n`` was not found, the method will
+        If EOF is received, and ``\r`` was not found, the method will
         return the partial read string.
-
-        If the EOF was received and the internal buffer is empty,
-        return an empty string.
 
         This method is a :func:`asyncio.coroutine`.
         """
-        buf_line = yield from super().readline()
-        if self.protocol.default_encoding:
-            return self.decode(buf_line, final=True)
-        return buf_line
+        ## TODO: handle \r\n, \r\x00, \r, \n.
+        if self._exception is not None:
+            raise self._exception
+
+        line = bytearray()
+        not_enough = True
+
+        while not_enough:
+            while self._buffer and not_enough:
+                ichar = self._buffer.find(b'\r')
+                if ichar < 0:
+                    line.extend(self._buffer)
+                    self._buffer.clear()
+                else:
+                    ichar += 1
+                    line.extend(self._buffer[:ichar])
+                    del self._buffer[:ichar]
+                    not_enough = False
+
+                if len(line) > self._limit:
+                    self._maybe_resume_transport()
+                    raise ValueError('Line is too long')
+
+            if self._eof:
+                break
+
+            if not_enough:
+                yield from self._wait_for_data('readline')
+
+        self._maybe_resume_transport()
+        buf = bytes(line)
+        if auto_decode and self.protocol.default_encoding:
+            return self.decode(buf)
+        return buf
 
     @asyncio.coroutine
-    def read(self, n=-1):
+    def read(self, n=-1, auto_decode=True):
         """
         Read up to *n* bytes.
 
@@ -106,33 +111,48 @@ class TelnetReader(asyncio.StreamReader):
 
         This method is a :func:`asyncio.coroutine`.
         """
-        buf = yield from super().read(n)
+        if self._exception is not None:
+            raise self._exception
 
-        if not self.protocol.default_encoding:
-            return buf
+        if not n:
+            if auto_decode and self.protocol.default_encoding:
+                return ''
+            return b''
 
         if n < 0:
-            return self.decode(buf, final=True)
+            # This used to just loop creating a new waiter hoping to
+            # collect everything in self._buffer, but that would
+            # deadlock if the subprocess sends more than self.limit
+            # bytes.  So just call self.read(self._limit) until EOF.
+            blocks = []
+            while True:
+                block = yield from self.read(self._limit, auto_decode=False)
+                if not block:
+                    break
+                blocks.append(block)
+            buf = b''.join(blocks)
+            if auto_decode and self.protocol.default_encoding:
+                return self.decode(buf)
+            return buf
+        else:
+            if not self._buffer and not self._eof:
+                yield from self._wait_for_data('read')
 
-        if buf == b'':
-            return ''
+        if n < 0 or len(self._buffer) <= n:
+            data = bytes(self._buffer)
+            self._buffer.clear()
+        else:
+            # n > 0 and len(self._buffer) > n
+            data = bytes(self._buffer[:n])
+            del self._buffer[:n]
 
-        ucs = self.decode(buf)
-        while not ucs:
-            # we have received an incomplete multibyte encoding which so far
-            # has not decoded to a completed unicode point.  We must continue
-            # to read from super() until completed.  We do this *one byte at
-            # a time*, expecting very few bytes remaining to complete.
-            buf = yield from super().read(1)
-            if not buf:
-                # an incomplete multibyte followed by EOF, discard the bytes
-                # which have so far failed to decode and signal EOF to caller.
-                break
-            ucs += self.decode(buf)
-        return ucs
+        self._maybe_resume_transport()
+        if auto_decode and self.protocol.default_encoding:
+            return self.decode(data)
+        return data
 
     @asyncio.coroutine
-    def readexactly(self, n):
+    def readexactly(self, n, auto_decode=True):
         """
         Read exactly *n* bytes.
 
@@ -140,19 +160,30 @@ class TelnetReader(asyncio.StreamReader):
             reached before *n* can be read. the
             :attr:`asyncio.IncompleteReadError.partial` attribute of the
             exception contains the partial read characters.
+        :rtype: str
 
         This method is a :func:`asyncio.coroutine`.
-
-        :rtype: str
         """
-        buf = yield from super().read(n)
-        if not self.protocol.default_encoding:
-            return buf
-        return self.decode(buf)
+        if self._exception is not None:
+            raise self._exception
+
+        blocks = []
+        while n > 0:
+            block = yield from self.read(n, auto_decode=False)
+            if not block:
+                partial = b''.join(blocks)
+                raise asyncio.IncompleteReadError(partial, len(partial) + n)
+            blocks.append(block)
+            n -= len(block)
+
+        if auto_decode and self.protocol.default_encoding:
+            return self.decode(b''.join(blocks))
+        return b''.join(blocks)
 
     def __repr__(self):
         """Description of stream encoding state."""
         encoding = (self.protocol.default_encoding and
                     self.protocol.encoding(incoming=True))
+
         # may be encoding=False or encoding='utf8'
         return '<TelnetReader encoding={0!r}>'.format(encoding)
