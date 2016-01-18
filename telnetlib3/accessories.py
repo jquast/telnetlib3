@@ -65,12 +65,5 @@ def make_logger(loglevel='info', logfile=None):
     return logging.getLogger(__name__)
 
 
-def get_encoding():
-    import locale
-    import codecs
-    locale.setlocale(locale.LC_ALL, '')
-    return codecs.lookup(locale.getpreferredencoding()).name
-
-
 def repr_mapping(mapping):
     return ' '.join('='.join(map(str, kv)) for kv in mapping.items())
