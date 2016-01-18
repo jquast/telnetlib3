@@ -57,15 +57,15 @@ class TelnetWriter(asyncio.StreamWriter):
 
     #: Whether the last byte received by :meth:`feed_byte` is the beginning
     #: of an IAC command.
-    iac_received = False
+    iac_received = None
 
     #: Whether the last byte received by :meth:`feed_byte` begins an IAC
     #: command sequence.
-    cmd_received = False
+    cmd_received = None
 
     #: Whether the last byte received by :meth:`feed_byte` is a matching
     #: special line character value, if negotiated.
-    slc_received = False
+    slc_received = None
 
     #: SLC function values and callbacks are fired for clients in Kludge
     #: mode not otherwise capable of negotiating LINEMODE, providing
@@ -232,11 +232,10 @@ class TelnetWriter(asyncio.StreamWriter):
         :param str errors: same as meaning in :class:`codecs.Codec`.
         :rtype: None
         """
-        errors = errors or self.protocol.encoding_errors
         if not self.protocol.default_encoding:
             self._write(string)
         else:
-            self._write(self.encode(string, errors))
+            self._write(self.encode(string))
 
     def feed_byte(self, byte):
         """
@@ -250,7 +249,7 @@ class TelnetWriter(asyncio.StreamWriter):
             returned for an ``IAC`` command for each byte until its completion.
         """
         self.byte_count += 1
-        self.slc_received = False
+        self.slc_received = None
 
         # list of IAC commands needing 3+ bytes (mbs: multibyte sequence)
         iac_mbs = (DO, DONT, WILL, WONT, SB)
@@ -309,8 +308,9 @@ class TelnetWriter(asyncio.StreamWriter):
                 name_command(cmd), name_command(opt)))
             try:
                 if cmd == DO:
-                    if self.handle_do(opt):
-                        self.local_option[opt] = True
+                    try:
+                        self.local_option[opt] = self.handle_do(opt)
+                    finally:
                         if self.pending_option.enabled(WILL + opt):
                             self.pending_option[WILL + opt] = False
                 elif cmd == DONT:
@@ -330,7 +330,8 @@ class TelnetWriter(asyncio.StreamWriter):
                             self.pending_option[DO + opt] = False
                         if self.pending_option.enabled(DONT + opt):
                             self.pending_option[DONT + opt] = False
-                elif cmd == WONT:
+                else:
+                    # cmd is 'WONT'
                     self.handle_wont(opt)
                     self.pending_option[DO + opt] = False
             finally:
@@ -338,39 +339,21 @@ class TelnetWriter(asyncio.StreamWriter):
                 self.iac_received = False
                 self.cmd_received = (opt, byte)
 
-        elif self.pending_option.enabled(DO + TM):
-            # IAC DO TM was previously sent; discard all input until
-            # IAC WILL TM or IAC WONT TM is received by remote end.
-            self.log.debug('discarded by timing-mark: {!r}'.format(byte))
-
         elif (self.mode == 'remote' or
-                self.mode == 'kludge' and self.slc_simulated):
+              self.mode == 'kludge' and self.slc_simulated):
             # 'byte' is tested for SLC characters
             (callback, slc_name, slc_def) = slc.snoop(
                 byte, self.slctab, self._slc_callback)
-            if slc_name is not None:
-                if callback:
-                    self.log.debug(
-                        '_slc_snoop({!r}): {}, callback is {}.'.format(
-                            byte,
-                            slc.name_slc_command(slc_name),
-                            callback.__name__))
-                if slc_def.flushin:
-                    # SLC_FLUSHIN not supported, requires SYNCH? (urgent TCP).
-                    # XXX or TM?
-                    pass
-                if slc_def.flushout:
-                    # XXX
-                    # We must call transport.pause_writing, create a new send
-                    # buffer without uncompleted IAC bytes, call
-                    # discard_output, write new buffer, then resume_writing
-                    pass
-                # allow caller to know which SLC function caused linemode
-                # to process, even though CR was not yet discovered.
-                self.slc_received = slc_name
-            if callback is not None:
+
+            # Inform caller which SLC function occurred by this attribute.
+            self.slc_received = slc_name
+            if callback:
+                self.log.debug('slc.snoop({!r}): {}, callback is {}.'
+                               .format(byte, slc.name_slc_command(slc_name),
+                                       callback.__name__))
                 callback(slc_name)
 
+        # whether this data should be forwarded (to the reader)
         return not self.is_oob
 
     def writelines(self, lines):
@@ -382,10 +365,6 @@ class TelnetWriter(asyncio.StreamWriter):
         each string.
         """
         self.write(u''.join(lines))
-
-    def can_write_eof(self):
-        """Whether method ``write_eof`` may be called."""
-        return False
 
     # Our protocol methods
 
@@ -418,7 +397,7 @@ class TelnetWriter(asyncio.StreamWriter):
         """Whether BINARY data may be sent on this stream, rfc-856_."""
         return self.local_option.enabled(BINARY)
 
-    def encode(self, string, errors=None):
+    def encode(self, string):
         """
         Encode ``string`` using protocol-preferred encoding.
 
@@ -430,10 +409,8 @@ class TelnetWriter(asyncio.StreamWriter):
         :param str errors: same as meaning in :class:`codecs.Codec`.
             When None, value of :attr:`errors_encoding` is used.
         """
-        if errors is None:
-            errors = self._protocol.encoding_errors
-
         encoding = self._protocol.encoding(outgoing=True)
+        errors = self._protocol.encoding_errors
         return bytes(string, encoding, errors)
 
     def echo(self, string, errors=None):
@@ -522,53 +499,56 @@ class TelnetWriter(asyncio.StreamWriter):
         assert buf and buf.startswith(IAC)
         self._transport.write(buf)
 
-    def iac(self, cmd, opt):
-        """ .. method: iac(self, cmd : bytes, opt : bytes)
-
-            Send Is-A-Command (IAC) 2 or 3-byte command option.
-
-            Returns True if command was sent. Not all commands are legal in the
-            context of client, server, or pending negotiation state, emitting a
-            relevant debug warning to the log handler if not sent.
+    def iac(self, cmd, opt=b''):
         """
-        assert (cmd in (DO, DONT, WILL, WONT)
-                ), ('Unknown IAC {}.'.format(name_command(cmd)))
-        if opt == LINEMODE:
-            if cmd == DO and self.client:
-                raise ValueError('DO LINEMODE may only be sent by server.')
-            if cmd == WILL and self.server:
-                raise ValueError('WILL LINEMODE may only be sent by client.')
+
+        Send Is-A-Command 3-byte negotiation command.
+
+        Returns True if command was sent. Not all commands are legal in the
+        context of client, server, or pending negotiation state, emitting a
+        relevant debug warning to the log handler if not sent.
+        """
+        if cmd not in (DO, DONT, WILL, WONT):
+            raise ValueError("Expected DO, DONT, WILL, WONT, got {0}."
+                             .format(name_command(cmd)))
+
         if cmd == DO and opt not in (TM, LOGOUT):
             if self.remote_option.enabled(opt):
                 self.log.debug('skip {} {}; remote_option = True'.format(
                     name_command(cmd), name_command(opt)))
                 self.pending_option[cmd + opt] = False
                 return False
+
         if cmd in (DO, WILL):
             if self.pending_option.enabled(cmd + opt):
                 self.log.debug('skip {} {}; pending_option = True'.format(
                     name_command(cmd), name_command(opt)))
                 return False
             self.pending_option[cmd + opt] = True
+
         if cmd == WILL and opt not in (TM,):
             if self.local_option.enabled(opt):
                 self.log.debug('skip {} {}; local_option = True'.format(
                     name_command(cmd), name_command(opt)))
                 self.pending_option[cmd + opt] = False
                 return False
-        if cmd == DONT and opt not in (LOGOUT,):  # XXX any other exclusions?
-            if self.remote_option.enabled(opt):
-                # warning: some implementations incorrectly reply (DONT, opt),
-                # for an option we already said we WONT. This would cause
-                # telnet loops for implementations not doing state tracking!
-                self.log.debug('skip {} {}; remote_option = True'.format(
+
+        if cmd == DONT and opt not in (LOGOUT,):
+            # IAC-DONT-LOGOUT is not a rejection of the negotiation option
+            if (opt in self.remote_option and
+                    not self.remote_option.enabled(opt)):
+                self.log.debug('skip {} {}; remote_option = False'.format(
                     name_command(cmd), name_command(opt)))
+                return False
             self.remote_option[opt] = False
+
         if cmd == WONT:
             self.local_option[opt] = False
+
         self.log.debug('send IAC {} {}'.format(
             name_command(cmd), name_command(opt)))
         self.send_iac(IAC + cmd + opt)
+        return True
 
 # Public methods for transmission signaling
 #
@@ -1283,23 +1263,16 @@ class TelnetWriter(asyncio.StreamWriter):
             # What do we have here? A Telnet Server attempting to
             # fingerprint us as a broken 4.4BSD Telnet Client, which
             # would respond 'WILL ECHO'.
-            self.log.debug('cannot recv DO ECHO on client end.')
+            raise ValueError('cannot recv DO ECHO on client end.')
             if self.local_option.get(opt, None) is None:
                 self.iac(WONT, opt)
-        elif opt == LINEMODE and self.server:
-            self.log.warn('cannot recv DO LINEMODE on server end.')
-        elif opt == LOGOUT and self.client:
-            self.log.warn('cannot recv DO LOGOUT on client end.')
-        elif opt == TTYPE and self.server:
-            self.log.warn('cannot recv DO TTYPE on server end.')
-        elif opt == NAWS and self.server:
-            self.log.warn('cannot recv DO NAWS on server end.')
-        elif opt == NEW_ENVIRON and self.server:
-            self.log.warn('cannot recv DO NEW_ENVIRON on server end.')
-        elif opt == XDISPLOC and self.server:
-            self.log.warn('cannot recv DO XDISPLOC on server end.')
-        elif opt == LFLOW and self.server:
-            self.log.warn('cannot recv DO LFLOW on server end.')
+        elif self.server and opt in (LINEMODE, TTYPE, NAWS,
+                                     NEW_ENVIRON, XDISPLOC, LFLOW):
+            raise ValueError('cannot recv DO {0} on server end (ignored).'
+                             .format(name_command(opt)))
+        elif self.client and opt in (LOGOUT,):
+            raise ValueError('cannot recv DO {0} on client end (ignored).'
+                             .format(name_command(opt)))
         elif opt == TM:
             # timing mark is special: simply by replying, the effect
             # is accomplished ('will' or 'wont' is non-consequential):
@@ -1309,37 +1282,39 @@ class TelnetWriter(asyncio.StreamWriter):
             # have been processed.
             self.iac(WILL, TM)
             self._iac_callback[TM](DO)
+            return True
+
         elif opt == LOGOUT:
             self._ext_callback[LOGOUT](DO)
+            return True
+
         elif opt in (ECHO, LINEMODE, BINARY, SGA, LFLOW, CMD_EOR, TTYPE,
-                     NEW_ENVIRON, XDISPLOC, TSPEED, CHARSET):
+                     NEW_ENVIRON, XDISPLOC, TSPEED, CHARSET, NAWS, STATUS):
+
+            # first time we've agreed, respond accordingly.
             if not self.local_option.enabled(opt):
                 self.iac(WILL, opt)
-            if opt in (LFLOW, TTYPE, NEW_ENVIRON,
-                       XDISPLOC, TSPEED, CHARSET, LINEMODE):
-                # expect follow-up subnegotation
+
+            # and respond with status for some,
+            if opt == NAWS:
+                self._send_naws()
+            elif opt == STATUS:
+                self._send_status()
+
+            # and expect a follow-up sub-negotiation for these others.
+            elif opt in (LFLOW, TTYPE, NEW_ENVIRON, XDISPLOC,
+                         TSPEED, CHARSET, LINEMODE):
                 self.pending_option[SB + opt] = True
             return True
-        elif opt == NAWS:
-            if not self.local_option.enabled(opt):
-                self.iac(WILL, opt)
-            # on first receipt of DO NAWS, or any repeated requests,
-            # just go ahead and send our window size.
-            self._send_naws()
-            return True
-        elif opt == STATUS:
-            if not self.local_option.enabled(opt):
-                self.iac(WILL, STATUS)
-            self._send_status()
-            return True
+
         else:
             if self.local_option.get(opt, None) is None:
                 self.iac(WONT, opt)
-            self.log.warn('Unhandled: DO {}.'.format(name_command(opt),))
+            self.log.debug('DO {0} unknown, no support.'
+                           .format(name_command(opt),))
+
             # option value of -1 toggles opt.unsupported()
             self.local_option[opt] = -1
-            if self.pending_option.enabled(WILL + opt):
-                self.pending_option[WILL + opt] = False
         return False
 
     def handle_dont(self, opt):
@@ -1378,12 +1353,13 @@ class TelnetWriter(asyncio.StreamWriter):
         unsupported capabilities, RFC specifies a response of (IAC, DONT, opt).
         Similarly, set ``self.remote_option[opt]`` to ``False``.  """
         self.log.debug('handle_will({})'.format(name_command(opt)))
+
         if opt in (BINARY, SGA, ECHO, NAWS, LINEMODE, CMD_EOR, SNDLOC):
             if opt == ECHO and self.server:
                 raise ValueError('cannot recv WILL ECHO on server end')
             elif opt in (NAWS, LINEMODE, SNDLOC) and self.client:
-                raise ValueError('cannot recv WILL {} on client end'.format(
-                    name_command(opt),))
+                raise ValueError('cannot recv WILL {} on client end'
+                                 .format(name_command(opt),))
             if not self.remote_option.enabled(opt):
                 self.iac(DO, opt)
                 self.remote_option[opt] = True
@@ -1393,6 +1369,7 @@ class TelnetWriter(asyncio.StreamWriter):
                 if opt == LINEMODE:
                     # server sets the initial mode and sends forwardmask,
                     self.send_linemode(self.default_linemode)
+
         elif opt == TM:
             if opt == TM and not self.pending_option.enabled(DO + TM):
                 raise ValueError('cannot recv WILL TM, must first send DO TM.')
@@ -1413,8 +1390,8 @@ class TelnetWriter(asyncio.StreamWriter):
             self.remote_option[opt] = True
             self.send_lineflow_mode()
         elif opt == NEW_ENVIRON:
-            assert self.server, ('cannot recv WILL NEW_ENVIRON '
-                                    'on client end.')
+            if not self.server:
+                raise ValueError('cannot recv WILL NEW_ENVIRON on client end.')
             self.remote_option[opt] = True
             self.request_environ()
         elif opt == CHARSET:
@@ -1427,15 +1404,18 @@ class TelnetWriter(asyncio.StreamWriter):
             self.remote_option[opt] = True
             self.request_charset()
         elif opt == XDISPLOC:
-            assert self.server, 'cannot recv WILL XDISPLOC on client end.'
+            if not self.server:
+                raise ValueError('cannot recv WILL XDISPLOC on client end.')
             self.remote_option[opt] = True
             self.request_xdisploc()
         elif opt == TTYPE:
-            assert self.server, 'cannot recv WILL TTYPE on client end.'
+            if not self.server:
+                raise ValueError('cannot recv WILL TTYPE on client end.')
             self.remote_option[opt] = True
             self.request_ttype()
         elif opt == TSPEED:
-            assert self.server, 'cannot recv WILL TSPEED on client end.'
+            if not self.server:
+                raise ValueError('cannot recv WILL TSPEED on client end.')
             self.remote_option[opt] = True
             self.request_tspeed()
         else:
@@ -2200,14 +2180,13 @@ class TelnetWriter(asyncio.StreamWriter):
 
 
 class Option(dict):
-    def __init__(self, name, log=None):
+    def __init__(self, name, log):
         """ .. class:: Option(name : str, log: logging.logger)
 
             Initialize a Telnet Option database for capturing option
             negotiation changes to ``log`` if enabled for debug logging.
         """
-        self.name = name
-        self.log = log or logging.getLogger(__name__)
+        self.name, self.log = name, log
         dict.__init__(self)
 
     def enabled(self, key):
@@ -2219,13 +2198,12 @@ class Option(dict):
         return bool(self.get(key, None) == -1)
 
     def __setitem__(self, key, value):
-        #ifdef 0
+        # the real purpose of this class, tracking state negotiation.
         if value != dict.get(self, key, None):
             descr = ' + '.join([name_command(bytes([byte]))
                                 for byte in key[:2]
                                 ] + [repr(byte) for byte in key[2:]])
             self.log.debug('{}[{}] = {}'.format(self.name, descr, value))
-        #endif
         dict.__setitem__(self, key, value)
 
 
