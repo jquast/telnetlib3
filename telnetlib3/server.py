@@ -18,7 +18,7 @@ import signal
 from . import server_base
 from . import accessories
 
-__all__ = ('TelnetServer', 'create_server', 'start_server')
+__all__ = ('TelnetServer', 'create_server')
 
 
 class TelnetServer(server_base.BaseServer):
@@ -39,7 +39,7 @@ class TelnetServer(server_base.BaseServer):
         self._timer = None
         self._extra.update({
             'term': term,
-            'charset': kwargs['encoding'] or '',
+            'charset': kwargs.get('encoding', ''),
             'cols': cols,
             'rows': rows,
             'timeout': timeout
@@ -166,9 +166,10 @@ class TelnetServer(server_base.BaseServer):
             _lang = self.get_extra_info('LANG', '')
             if _lang:
                 return accessories.encoding_from_lang(_lang)
+
             # otherwise, the less CHARSET negotiation may be found in many
             # East-Asia BBS and Western MUD systems.
-            return self.get_extra_info('charset', self.default_encoding)
+            return self.get_extra_info('charset') or self.default_encoding
         return 'US-ASCII'
 
     def set_timeout(self, duration=-1):
@@ -292,7 +293,6 @@ class TelnetServer(server_base.BaseServer):
                     1253, 1254, 1255, 1257, 1257, 1258, 1361,
                 )]
 
-
     def on_charset(self, charset):
         """Callback for CHARSET response, rfc-2066_."""
         self._extra['charset'] = charset
@@ -364,12 +364,7 @@ class TelnetServer(server_base.BaseServer):
 
 
 @asyncio.coroutine
-def create_server(
-    protocol_factory=None, host=None, port=23, *, loop=None, log=None,
-    encoding='utf8', encoding_errors='strict', force_binary=False,
-    term='unknown', cols=80, rows=25, timeout=300, shell=None,
-    waiter_closed=None, waiter_connected=None, connect_maxwait=4.0
-):
+def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwds):
     """
     Create a Telnet Server
 
@@ -399,25 +394,11 @@ def create_server(
         greater of this value has elapsed.  A client that is not answering
         option negotiation will delay the start of the shell by this amount.
     """
-
     protocol_factory = protocol_factory or TelnetServer
-    log = log or logging.getLogger(__name__)
-    loop = loop or asyncio.get_event_loop()
+    loop = kwds.get('loop', asyncio.get_event_loop())
 
-    def on_connect():
-        return protocol_factory(
-            loop=loop, log=log, encoding=encoding,
-            encoding_errors=encoding_errors, force_binary=force_binary,
-            term=term, cols=cols, rows=rows, timeout=timeout, shell=shell,
-            waiter_closed=waiter_closed, waiter_connected=waiter_connected,
-            connect_maxwait=connect_maxwait)
-
-    return (yield from loop.create_server(on_connect, host, port))
-
-
-@asyncio.coroutine
-def start_server(host=None, port=23, log=None, **kwds):
-    return (yield from create_server(host=host, port=port, log=log, **kwds))
+    return (yield from loop.create_server(
+        lambda: protocol_factory(**kwds), host, port))
 
 
 def _get_argument_parser():
@@ -488,10 +469,12 @@ def main():
     log = accessories.make_logger(loglevel=loglevel, logfile=logfile)
     log.debug(config_msg)
 
+    kwargs['log'] = log
+
     loop = asyncio.get_event_loop()
 
     # bind
-    server = loop.run_until_complete(start_server(host, port, log, **kwargs))
+    server = loop.run_until_complete(create_server(host, port, **kwargs))
 
     # SIGTERM cases server to gracefully stop
     loop.add_signal_handler(signal.SIGTERM, asyncio.async,
