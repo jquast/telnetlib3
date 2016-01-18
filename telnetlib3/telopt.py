@@ -3,7 +3,8 @@ from telnetlib import (  # noqa
     TTYPE, TSPEED, LFLOW, XDISPLOC, IAC, DONT, DO, WONT,
     WILL, SE, NOP, TM, DM, BRK, IP, AO, AYT, EC, EL, EOR,
     GA, SB, LOGOUT, CHARSET, SNDLOC, theNULL,
-    # not supported or used,
+
+    # not supported or used, feel free to contribute support !
     ENCRYPT, AUTHENTICATION, TN3270E, XAUTH, RSP,
     COM_PORT_OPTION, SUPPRESS_LOCAL_ECHO, TLS, KERMIT,
     SEND_URL, FORWARD_X, PRAGMA_LOGON, SSPI_LOGON,
@@ -58,6 +59,7 @@ _DEBUG_OPTS = dict([(value, key)
                      'DET', 'BM', 'XASCII', 'RCP', 'NAMS', 'RCTE', 'NAOL',
                      'NAOP', 'NAOCRD', 'NAOHTS', 'NAOHTD', 'NAOFFD', 'NAOVTS',
                      'NAOVTD', 'NAOLFD', )])
+
 
 def name_command(byte):
     """ Given an IAC byte, return a mnemonic global constant, if any.
