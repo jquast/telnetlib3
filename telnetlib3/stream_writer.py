@@ -74,6 +74,12 @@ class TelnetWriter(asyncio.StreamWriter):
 
     default_slc_tab = slc.BSD_SLC_TAB
 
+    #: Initial line mode requested by server if client supports LINEMODE
+    #: negotiation (remote line editing and literal echo of control chars)
+    default_linemode = slc.Linemode(
+        bytes([ord(slc.LMODE_MODE_REMOTE) | ord(slc.LMODE_MODE_LIT_ECHO)]))
+
+
     def __init__(self, transport, protocol, client=False, server=False,
                  reader=None, loop=None, log=None):
         """
@@ -122,11 +128,6 @@ class TelnetWriter(asyncio.StreamWriter):
         #: pending data buffered into self._write_buffer
         self.writing = True
         self._write_buffer = collections.deque()
-
-        #: Initial line mode requested by server if client supports LINEMODE
-        #: negotiation (remote line editing and literal echo of control chars)
-        self.default_linemode = slc.Linemode(bytes([
-            ord(slc.LMODE_MODE_REMOTE) | ord(slc.LMODE_MODE_LIT_ECHO)]))
 
         # Set default callback handlers to local methods.  A base protocol
         # wishing not to wire any callbacks at all may simply allow our stream
@@ -802,7 +803,7 @@ class TelnetWriter(asyncio.StreamWriter):
         """
         Set and Inform other end to agree to change to linemode, ``linemode``.
 
-        An instance of the Linemode class, or self._linemode when unset.
+        An instance of the Linemode class, or self.linemode when unset.
         """
 
         if not (self.local_option.enabled(LINEMODE) or
@@ -1943,7 +1944,7 @@ class TelnetWriter(asyncio.StreamWriter):
         # as a server, we simply honor whatever is given.  This is also
         # problematic in some designers may wish to implement shells
         # that specifically do not honor some parts of the bitmask, we
-        # must provide them an any/force-on/force-off mode table interface.
+        # must provide them an any/force-on/force-off mode-table interface.
         if self._linemode != suggest_mode:
             self.log.debug('Client choses + {0!r}'.format(suggest_mode))
             self.log.debug('We suggested, - {0!r}'.format(self._linemode))

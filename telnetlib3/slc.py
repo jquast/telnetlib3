@@ -31,7 +31,7 @@ NSLC = 30
 (LMODE_MODE_REMOTE, LMODE_MODE_LOCAL, LMODE_MODE_TRAPSIG) = (
     bytes([const]) for const in range(3))
 (LMODE_MODE_ACK, LMODE_MODE_SOFT_TAB, LMODE_MODE_LIT_ECHO) = (
-    bytes([2**const]) for const in range(2, 5))  # 4, 8, 16
+    bytes([4]), bytes([8]), bytes([16]))
 
 
 class SLC(object):
