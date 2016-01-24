@@ -16,7 +16,6 @@ if sys.platform == 'win32':
 
 else:
     import termios
-    import fcntl
     import tty
     import os
 
@@ -42,7 +41,6 @@ else:
     @asyncio.coroutine
     def _make_stdio(loop):
         import sys
-        import os
 
         reader = asyncio.StreamReader()
         reader_protocol = asyncio.StreamReaderProtocol(reader)
@@ -64,11 +62,14 @@ else:
         #                      raised exception.
         #
         # After some experimentation, this conditional seems to handle both
-        # situations. Please do contribute if you can figure this one out.
-
-        if not sys.stdin.isatty():
-            write_fobj = sys.stdout
-        else:
+        # situations. Please do contribute if you can figure this one out with
+        # great certainty.
+        #
+        # Another approach uses os.path.sameopenfile(0, 1) and writes to stdout
+        # always otherwise. In the case of a tty, 0 and 1 are the same open
+        # file.
+        write_fobj = sys.stdout
+        if os.path.sameopenfile(0, 1):
             write_fobj = sys.stdin
 
         writer_transport, writer_protocol = yield from loop.connect_write_pipe(
@@ -80,7 +81,6 @@ else:
         yield from loop.connect_read_pipe(lambda: reader_protocol, sys.stdin)
 
         return reader, writer
-
 
     @asyncio.coroutine
     def telnet_client_shell(telnet_reader, telnet_writer):
