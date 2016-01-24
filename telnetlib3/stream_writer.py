@@ -483,12 +483,17 @@ class TelnetWriter(asyncio.StreamWriter):
 
     @property
     def linemode(self):
-        """ Linemode instance for stream, or None if stream is in Kludge mode.
         """
-        #   A description of the linemode entered may be tested using boolean
-        #   instance attributes ``edit``, ``trapsig``, ``soft_tab``,
-        #   ``lit_echo``, ``remote``, ``local``.
-        return (self._linemode if self.mode != 'kludge' else None)
+        Linemode instance for stream.
+
+        .. note:: value is meaningful after successful LINEMODE negotiation,
+            otherwise does not represent the linemode state of the stream.
+
+        Attributes of the stream's active linemode may be tested using boolean
+        instance attributes, ``edit``, ``trapsig``, ``soft_tab``, ``lit_echo``,
+        ``remote``, ``local``.
+        """
+        return self._linemode
 
     def send_iac(self, buf):
         """ .. method: send_iac(self, buf : bytes)
@@ -502,7 +507,6 @@ class TelnetWriter(asyncio.StreamWriter):
 
     def iac(self, cmd, opt=b''):
         """
-
         Send Is-A-Command 3-byte negotiation command.
 
         Returns True if command was sent. Not all commands are legal in the
@@ -555,34 +559,38 @@ class TelnetWriter(asyncio.StreamWriter):
 #
 
     def send_ga(self):
-        """ .. method:: send_ga() -> bool
-
-            Send IAC-GA (go ahead) only if IAC-DONT-SGA was received.
-            Returns True if GA was sent.
         """
-        if not self.local_option.enabled(SGA):
-            self.log.debug('send IAC GA')
-            self.send_iac(IAC + GA)
-            return True
-        return False
+        Transmit IAC GA (Go-Ahead).
+
+        Returns True if sent.  If IAC-DO-SGA has been received, then
+        False is returned and IAC-GA is not transmitted.
+        """
+        if self.local_option.enabled(SGA):
+            self.log.debug('cannot send GA with receipt of DO SGA')
+            return False
+
+        self.log.debug('send IAC GA')
+        self.send_iac(IAC + GA)
+        return True
 
     def send_eor(self):
-        """ .. method:: request_eor() -> bool
-
-            Send IAC EOR (End-of-Record) only if IAC DO CMD_EOR was received.
-            Returns True if EOR was sent.
         """
-        if not self.local_option.enabled(CMD_EOR):
-            self.log.debug('cannot send IAC EOR '
-                           'without receipt of DO CMD_EOR')
-        else:
-            self.log.debug('send IAC EOR')
-            self.send_iac(IAC + EOR)
-            return True
-        return False
+        Transmit IAC CMD_EOR (End-of-Record), rfc-885_.
 
-# Public methods for notifying about, or soliciting state options.
-#
+        Returns True if sent. If IAC-DO-EOR has not been received,
+        False is returned and IAC-CMD_EOR is not transmitted.
+        """
+        if not self.local_option.enabled(EOR):
+            self.log.debug('cannot send CMD_EOR without receipt of DO EOR')
+            return False
+
+        self.log.debug('send IAC CMD_EOR')
+        self.send_iac(IAC + CMD_EOR)
+        return True
+
+    # Public methods for notifying about, or soliciting state options.
+    #
+
     def request_status(self):
         """ .. method:: request_status() -> bool
 
@@ -877,7 +885,7 @@ class TelnetWriter(asyncio.StreamWriter):
         self.log.debug('IAC EL: Erase Line (unhandled).')
 
     def handle_eor(self, byte):
-        """ XXX Handle IAC End of Record (EOR, SLC_EOR).
+        """ XXX Handle IAC End of Record (CMD_EOR, SLC_EOR).
         """
         self.log.debug('IAC EOR: End of Record (unhandled).')
 
@@ -972,8 +980,8 @@ class TelnetWriter(asyncio.StreamWriter):
 
             These callbacks receive a single argument: the SLC function
             byte that fired it. Some SLC and IAC functions are intermixed;
-            which signalling mechanism used by client can be tested by
-            evaulating this argument.
+            which signaling mechanism used by client can be tested by
+            evaluating this argument.
             """
         assert callable(func), ('Argument func must be callable')
         assert (type(slc_byte) == bytes and
@@ -1289,7 +1297,7 @@ class TelnetWriter(asyncio.StreamWriter):
             self._ext_callback[LOGOUT](DO)
             return True
 
-        elif opt in (ECHO, LINEMODE, BINARY, SGA, LFLOW, CMD_EOR, TTYPE,
+        elif opt in (ECHO, LINEMODE, BINARY, SGA, LFLOW, EOR, TTYPE,
                      NEW_ENVIRON, XDISPLOC, TSPEED, CHARSET, NAWS, STATUS):
 
             # first time we've agreed, respond accordingly.
@@ -1355,7 +1363,7 @@ class TelnetWriter(asyncio.StreamWriter):
         Similarly, set ``self.remote_option[opt]`` to ``False``.  """
         self.log.debug('handle_will({})'.format(name_command(opt)))
 
-        if opt in (BINARY, SGA, ECHO, NAWS, LINEMODE, CMD_EOR, SNDLOC):
+        if opt in (BINARY, SGA, ECHO, NAWS, LINEMODE, EOR, SNDLOC):
             if opt == ECHO and self.server:
                 raise ValueError('cannot recv WILL ECHO on server end')
             elif opt in (NAWS, LINEMODE, SNDLOC) and self.client:
@@ -1909,7 +1917,7 @@ class TelnetWriter(asyncio.StreamWriter):
         suggest_mode = slc.Linemode(mode[0])
 
         self.log.debug('recv IAC SB LINEMODE LINEMODE-MODE {0!r} IAC SE'
-                       .format(suggest_mode))
+                       .format(suggest_mode.mask))
 
         if not suggest_mode.ack:
             # This implementation acknowledges and sets local linemode
@@ -1927,18 +1935,20 @@ class TelnetWriter(asyncio.StreamWriter):
         # simply: cannot call self.send_linemode() here forward.
 
         if self.client:
-            # " When a MODE command is received with the MODE_ACK bit set,
-            #   and the mode is different that what the current mode is,
-            #   the client will ignore the new mode"
             if self._linemode != suggest_mode:
+                # " When a MODE command is received with the MODE_ACK bit set,
+                #   and the mode is different that what the current mode is,
+                #   the client will ignore the new mode"
+                #
                 self.log.warn('server mode differs from local mode, '
                               'though ACK bit is set. Local mode will '
                               'remain.')
-                self.log.warn('-remote: {0!r}'.format(suggest_mode))
-                self.log.warn('+ local: {0!r}'.format(self._linemode))
-            else:
-                self.log.debug('Linemode matches, acknowledged by server.')
-                self._linemode = suggest_mode
+                self.log.warn('!remote: {0!r}'.format(suggest_mode))
+                self.log.warn('  local: {0!r}'.format(self._linemode))
+                return
+
+            self.log.debug('Linemode matches, acknowledged by server.')
+            self._linemode = suggest_mode
             return
 
         # as a server, we simply honor whatever is given.  This is also
@@ -1946,13 +1956,13 @@ class TelnetWriter(asyncio.StreamWriter):
         # that specifically do not honor some parts of the bitmask, we
         # must provide them an any/force-on/force-off mode-table interface.
         if self._linemode != suggest_mode:
-            self.log.debug('Client choses + {0!r}'.format(suggest_mode))
             self.log.debug('We suggested, - {0!r}'.format(self._linemode))
+            self.log.debug('Client choses + {0!r}'.format(suggest_mode))
         else:
             self.log.debug('Linemode agreed by client: {0!r}'
                            .format(self._linemode))
 
-        self._linemode = self._linemode
+        self._linemode = suggest_mode
 
 
     def _handle_sb_linemode_slc(self, buf):
