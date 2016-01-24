@@ -1,4 +1,3 @@
-git+git://github.com/GreenSteam/pep257.git@master#egg=pep257
-prospector[with_frosted,with_pyroma]
+git+git://github.com/jquast/prospector.git@bugfix-allerror-has-no-message#egg=prospector[with_frosted,with_pyroma]
 restructuredtext_lint
 doc8
