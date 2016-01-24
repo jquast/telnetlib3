@@ -323,3 +323,113 @@ def test_bad_iac():
         writer.iac(NOP)
 
 
+@pytest.mark.asyncio
+def test_send_ga(event_loop, bind_host, unused_tcp_port):
+    """Writer sends IAC + GA when SGA is not negotiated."""
+    from telnetlib3.telopt import IAC, GA
+    expected = IAC + GA
+
+    @asyncio.coroutine
+    def shell(reader, writer):
+        result = writer.send_ga()
+        assert result is True
+        writer.close()
+
+    yield from telnetlib3.create_server(
+        protocol_factory=telnetlib3.BaseServer, host=bind_host, shell=shell,
+        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.05)
+
+    client_reader, client_writer = yield from asyncio.open_connection(
+        host=bind_host, port=unused_tcp_port, loop=event_loop)
+
+    # verify,
+    result = yield from asyncio.wait_for(client_reader.read(), 0.5)
+
+    assert result == expected
+
+
+@pytest.mark.asyncio
+def test_not_send_ga(event_loop, bind_host, unused_tcp_port):
+    """Writer does not send IAC + GA when SGA is negotiated."""
+    from telnetlib3.telopt import IAC, DO, WILL, SGA
+
+    # we requires IAC + DO + SGA, and expect a confirming reply.  We also
+    # call writer.send_ga() from the shell, whose result should be False
+    # (not sent).  The reader never receives an IAC + GA.
+    expected = IAC + WILL + SGA
+
+    @asyncio.coroutine
+    def shell(reader, writer):
+        result = writer.send_ga()
+        assert result is False
+        writer.close()
+
+    yield from telnetlib3.create_server(
+        protocol_factory=telnetlib3.BaseServer, host=bind_host, shell=shell,
+        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.05)
+
+    client_reader, client_writer = yield from asyncio.open_connection(
+        host=bind_host, port=unused_tcp_port, loop=event_loop)
+
+    client_writer.write(IAC + DO + SGA)
+
+    # verify,
+    result = yield from asyncio.wait_for(client_reader.read(), 0.5)
+    assert result == expected
+
+
+@pytest.mark.asyncio
+def test_not_send_eor(event_loop, bind_host, unused_tcp_port):
+    """Writer does not send IAC + EOR when un-negotiated."""
+    expected = b''
+
+    @asyncio.coroutine
+    def shell(reader, writer):
+        result = writer.send_eor()
+        assert result is False
+        writer.close()
+
+    yield from telnetlib3.create_server(
+        protocol_factory=telnetlib3.BaseServer, host=bind_host, shell=shell,
+        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.05)
+
+    client_reader, client_writer = yield from asyncio.open_connection(
+        host=bind_host, port=unused_tcp_port, loop=event_loop)
+
+    # verify,
+    result = yield from asyncio.wait_for(client_reader.read(), 0.5)
+
+    assert result == expected
+
+
+@pytest.mark.asyncio
+def test_send_eor(event_loop, bind_host, unused_tcp_port):
+    """Writer sends IAC + EOR if client requests by DO."""
+    from telnetlib3.telopt import IAC, DO, WILL, CMD_EOR, EOR
+    given = IAC + DO + EOR
+    expected = IAC + WILL + EOR + b'<' + IAC + CMD_EOR + b'>'
+
+    # just verify rfc constants are used appropriately in this context
+    assert EOR == bytes([25])
+    assert CMD_EOR == bytes([239])
+
+    @asyncio.coroutine
+    def shell(reader, writer):
+        writer.write('<')
+        result = writer.send_eor()
+        assert result is True
+        writer.write('>')
+        writer.close()
+
+    yield from telnetlib3.create_server(
+        protocol_factory=telnetlib3.BaseServer, host=bind_host, shell=shell,
+        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.05)
+
+    client_reader, client_writer = yield from asyncio.open_connection(
+        host=bind_host, port=unused_tcp_port, loop=event_loop)
+
+    # verify,
+    client_writer.write(given)
+    result = yield from asyncio.wait_for(client_reader.read(), 0.5)
+
+    assert result == expected
