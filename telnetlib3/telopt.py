@@ -62,12 +62,10 @@ _DEBUG_OPTS = dict([(value, key)
 
 
 def name_command(byte):
-    """ Given an IAC byte, return a mnemonic global constant, if any.
-    """
+    """Return string description for (maybe) telnet command byte."""
     return _DEBUG_OPTS.get(byte, repr(byte))
 
 
 def name_commands(cmds, sep=' '):
-    """ Given array of telnet command bytes, return mnemonic global constants.
-    """
+    """Return string description for array of (maybe) telnet command bytes."""
     return sep.join([name_command(bytes([byte])) for byte in cmds])

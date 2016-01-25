@@ -65,9 +65,11 @@ else:
         # situations. Please do contribute if you can figure this one out with
         # great certainty.
         #
-        # Another approach uses os.path.sameopenfile(0, 1) and writes to stdout
-        # always otherwise. In the case of a tty, 0 and 1 are the same open
-        # file.
+        # In the case of a tty, 0 and 1 are the same open file, we use:
+        #
+        #        https://github.com/Orochimarufan/.files/blob/master/bin/mpr
+        #
+        # though checking that sys.stdin.isatty() may be more correct.
         write_fobj = sys.stdout
         if os.path.sameopenfile(0, 1):
             write_fobj = sys.stdin

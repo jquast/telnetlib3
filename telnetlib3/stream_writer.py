@@ -708,7 +708,6 @@ class TelnetWriter(asyncio.StreamWriter):
         self.send_iac(b''.join(response))
         return True
 
-
     def request_xdisploc(self):
         """ .. method:: request_xdisploc() -> bool
 
@@ -1250,7 +1249,7 @@ class TelnetWriter(asyncio.StreamWriter):
         for most cases, simply returning True if supported, False otherwise.
 
         In special cases of various RFC statutes, state is stored and
-        answered in willing affirmitive, with the exception of:
+        answered in willing affirmative, with the exception of:
             - DO TM is *always* answered WILL TM, even if it was already
               replied to.  No state is stored ("Timing Mark"), and the IAC
               callback registered by ``set_ext_callback`` for cmd TM
@@ -1273,8 +1272,6 @@ class TelnetWriter(asyncio.StreamWriter):
             # fingerprint us as a broken 4.4BSD Telnet Client, which
             # would respond 'WILL ECHO'.
             raise ValueError('cannot recv DO ECHO on client end.')
-            if self.local_option.get(opt, None) is None:
-                self.iac(WONT, opt)
         elif self.server and opt in (LINEMODE, TTYPE, NAWS,
                                      NEW_ENVIRON, XDISPLOC, LFLOW):
             raise ValueError('cannot recv DO {0} on server end (ignored).'
@@ -1317,14 +1314,10 @@ class TelnetWriter(asyncio.StreamWriter):
             return True
 
         else:
+            self.log.debug('DO {0} not supported.'.format(name_command(opt)))
             if self.local_option.get(opt, None) is None:
                 self.iac(WONT, opt)
-            self.log.debug('DO {0} unknown, no support.'
-                           .format(name_command(opt),))
-
-            # option value of -1 toggles opt.unsupported()
-            self.local_option[opt] = -1
-        return False
+            return False
 
     def handle_dont(self, opt):
         """ Process byte 3 of series (IAC, DONT, opt) received by remote end.
@@ -1548,9 +1541,6 @@ class TelnetWriter(asyncio.StreamWriter):
     def _handle_sb_charset(self, buf):
         cmd = buf.popleft()
         opt = buf.popleft()
-        assert cmd == CHARSET, name_command(cmd)
-        assert opt in (REQUEST, ACCEPTED, REJECTED, TTABLE_IS,
-                       TTABLE_ACK, TTABLE_NAK, TTABLE_REJECTED)
         if opt == REQUEST:
             # "<Sep>  is a separator octet, the value of which is chosen by the
             # sender.  Examples include a space or a semicolon."
@@ -1579,7 +1569,11 @@ class TelnetWriter(asyncio.StreamWriter):
         elif opt == REJECTED:
             self.log.warn('recv IAC SB CHARSET REJECTED IAC SE')
         elif opt in (TTABLE_IS, TTABLE_ACK, TTABLE_NAK, TTABLE_REJECTED):
-            raise NotImplementedError
+            raise NotImplementedError('Translation table command received '
+                                      'but not supported: {!r}'.format(opt))
+        else:
+            raise ValueError('Illegal option follows IAC SB CHARSET: {!r}.'
+                             .format(opt))
 
     def _handle_sb_tspeed(self, buf):
         """ Callback handles IAC-SB-TSPEED-<buf>-SE.
@@ -1792,72 +1786,88 @@ class TelnetWriter(asyncio.StreamWriter):
             self.log.debug('LFLOW (toggle-flow-control) {}'.format(
                 'RESTART_ANY' if self.xon_any else 'RESTART_XON'))
         else:
-            raise NotImplementedError(
+            raise ValueError(
                 'Unknown IAC SB LFLOW option recieved: {!r}'.format(buf))
 
     def _handle_sb_status(self, buf):
-        """ Fire callback for IAC-SB-STATUS-<buf>
         """
-        cmd = buf.popleft()
-        assert cmd == STATUS, name_command(cmd)
-        sb = buf.popleft()
-        if sb == SEND:
+        Callback responds to IAC SB STATUS, rfc-859_.
+
+        This method simply delegates to either of :meth:`_receive_status`
+        or :meth:`_send_status`.
+        """
+        buf.popleft()
+        opt = buf.popleft()
+        if opt == SEND:
             self._send_status()
-        elif sb == IS:
+        elif opt == IS:
             self._receive_status(buf)
+        else:
+            raise ValueError('Illegal byte following IAC SB STATUS: {!r}, '
+                             'expected SEND or IS.'.format(opt))
 
     def _receive_status(self, buf):
+        """
+        Callback responds to IAC SB STATUS IS, rfc-859_.
+
+        :param bytes buf: sub-negotiation byte buffer containing status data.
+
+        This implementation does its best to analyze our perspective's state
+        to the state options given.  Any discrepancies are reported to the
+        error log, but no action is taken.
+        """
         for pos in range(len(buf) // 2):
             cmd = buf.popleft()
             try:
                 opt = buf.popleft()
             except IndexError:
-                # a remainder in division step-by-two,
-                # presumed nonsense occurred.
-                self.log.error('STATUS incomplete at pos {}, cmd: {}'
-                               .format(pos, name_command(cmd)))
-                break
+                # a remainder in division step-by-two, presumed nonsense.
+                raise ValueError('STATUS incomplete at pos {}, cmd: {}'
+                                 .format(pos, name_command(cmd)))
+
             matching = False
+            if cmd not in (DO, DONT, WILL, WONT):
+                raise ValueError('STATUS invalid cmd at pos {}: {}, '
+                                 'expected DO DONT WILL WONT.'
+                                 .format(pos, cmd))
+
             if cmd in (DO, DONT):
+                _side = 'local'
                 enabled = self.local_option.enabled(opt)
                 matching = ((cmd == DO and enabled) or
                             (cmd == DONT and not enabled))
-                side = 'local'
-            elif cmd in (WILL, WONT):
+            else:  # (WILL, WONT)
+                _side = 'remote'
                 enabled = self.remote_option.enabled(opt)
                 matching = ((cmd == WILL and enabled) or
                             (cmd == WONT and not enabled))
-                side = 'remote'
-            else:
-                self.log.error('STATUS invalid cmd at pos {}: {}.'
-                               .format(pos, name_command(cmd)))
-                break
-            mode = 'enabled' if enabled else 'not enabled'
-            if matching:
-                self.log.debug('STATUS {} {} (agreed).'
-                               .format(name_command(cmd), name_command(opt),))
-            else:
+            _mode = 'enabled' if enabled else 'not enabled'
+
+            if not matching:
                 self.log.error('STATUS {cmd} {opt}: disagreed, '
                                '{side} option is {mode}.'.format(
                                    cmd=name_command(cmd),
                                    opt=name_command(opt),
-                                   side=side, mode=mode))
-                self.log.error('r {!r}|{}'.format(
-                    [(name_command(_opt), _val)
+                                   side=_side, mode=_mode))
+                self.log.error('remote {!r} is {}'.format(
+                    [(name_commands(_opt), _val)
                      for _opt, _val in self.remote_option.items()],
-                    self.remote_option.enabled(_opt)))
-                self.log.error('l {!r}|{}'.format(
-                    [(name_command(_opt), _val)
+                    self.remote_option.enabled(opt)))
+                self.log.error(' local {!r} is {}'.format(
+                    [(name_commands(_opt), _val)
                      for _opt, _val in self.local_option.items()],
-                    self.local_option.enabled(_opt)))
+                    self.local_option.enabled(opt)))
+                continue
+            self.log.debug('STATUS {} {} (agreed).'.format(name_command(cmd),
+                                                           name_command(opt)))
 
     def _send_status(self):
-        """ Fire callback for IAC-SB-STATUS-SEND (rfc859).
-        """
-        assert (self.pending_option.enabled(WILL + STATUS)
-                or self.local_option.enabled(STATUS)
-                ), ('Only sender of IAC WILL STATUS '
-                    'may send IAC SB STATUS IS.')
+        """Callback responds to IAC SB STATUS SEND, rfc-859_."""
+        if not (self.pending_option.enabled(WILL + STATUS) or
+                self.local_option.enabled(STATUS)):
+            raise ValueError('Only sender of IAC WILL STATUS '
+                             'may reply by IAC SB STATUS IS.')
+
         response = collections.deque()
         response.extend([IAC, SB, STATUS, IS])
         for opt, status in self.local_option.items():
@@ -1887,33 +1897,35 @@ class TelnetWriter(asyncio.StreamWriter):
 # Special Line Character and other LINEMODE functions.
 #
     def _handle_sb_linemode(self, buf):
-        """ Callback handles IAC-SB-LINEMODE-<buf>.
-        """
-        cmd = buf.popleft()
+        """Callback responds to bytes following IAC SB LINEMODE."""
+        buf.popleft()
         opt = buf.popleft()
-        assert cmd == LINEMODE
-        assert opt in (slc.LMODE_MODE, slc.LMODE_SLC, DO, DONT, WILL, WONT), (
-            'Illegal IAC SB LINEMODE command, {!r}'.format(name_command(opt)))
         if opt == slc.LMODE_MODE:
             self._handle_sb_linemode_mode(buf)
         elif opt == slc.LMODE_SLC:
             self._handle_sb_linemode_slc(buf)
         elif opt in (DO, DONT, WILL, WONT):
             sb_opt = buf.popleft()
-            assert sb_opt == slc.LMODE_FORWARDMASK, (
-                'Illegal byte follows IAC SB LINEMODE {}: {!r}, '
-                ' expected LMODE_FORWARDMASK.'
-                .format(name_command(opt), sb_opt))
-
+            if sb_opt != slc.LMODE_FORWARDMASK:
+                raise ValueError(
+                    'Illegal byte follows IAC SB LINEMODE {}: {!r}, '
+                    ' expected LMODE_FORWARDMASK.'
+                    .format(name_command(opt), sb_opt))
             self.log.debug('recv IAC SB LINEMODE {} LMODE_FORWARDMASK,'
                            .format(name_command(opt)))
-            self._handle_sb_forwardmask(cmd, buf)
+            self._handle_sb_forwardmask(LINEMODE, buf)
+        else:
+            raise ValueError('Illegal IAC SB LINEMODE option {!r}'.format(opt))
 
     def _handle_sb_linemode_mode(self, mode):
-        """ Callback handles IAC-SB-LINEMODE-LINEMODE_MODE-<mode>.
         """
-        assert len(mode) == 1
+        Callback handles mode following IAC SB LINEMODE LINEMODE_MODE.
 
+        :param bytes mode: a single byte
+
+        Result of agreement to enter ``mode`` given applied by setting the
+        value of ``self.linemode``, and sending acknowledgment if necessary.
+        """
         suggest_mode = slc.Linemode(mode[0])
 
         self.log.debug('recv IAC SB LINEMODE LINEMODE-MODE {0!r} IAC SE'
@@ -1964,13 +1976,15 @@ class TelnetWriter(asyncio.StreamWriter):
 
         self._linemode = suggest_mode
 
-
     def _handle_sb_linemode_slc(self, buf):
-        """ Callback handles IAC-SB-LINEMODE-SLC-<buf>.
-
-            Processes SLC command function triplets and replies accordingly.
         """
-        assert 0 == len(buf) % 3, ('SLC buffer must be byte triplets')
+        Callback handles IAC-SB-LINEMODE-SLC-<buf>.
+
+        Processes SLC command function triplets found in ``buf`` and replies
+        accordingly.
+        """
+        if not len(buf) % 3:
+            raise ValueError('SLC buffer wrong size: expect multiple of 3')
         self._slc_start()
         while len(buf):
             func = buf.popleft()
@@ -1982,26 +1996,28 @@ class TelnetWriter(asyncio.StreamWriter):
         self.request_forwardmask()
 
     def _slc_end(self):
-        """ Send any pending SLC changes stored in _slc_buffer """
+        """Transmit SLC commands buffered by :meth:`_slc_send`."""
         if len(self._slc_buffer):
-
-            self.log.debug('slc_end: {!r}'
+            self.log.debug('send (slc_end): {!r}'
                            .format(b''.join(self._slc_buffer)))
-            self._transport.write(_escape_iac(b''.join(self._slc_buffer)))
+            buf = b''.join(self._slc_buffer)
+            self._transport.write(self._escape_iac(buf))
             self._slc_buffer.clear()
 
         self.log.debug('slc_end: [..] IAC SE')
         self.send_iac(IAC + SE)
 
     def _slc_start(self):
-        """ Send IAC SB LINEMODE SLC header """
+        """Send IAC SB LINEMODE SLC header."""
         self.log.debug('slc_start: IAC SB LINEMODE SLC [..]')
         self.send_iac(IAC + SB + LINEMODE + slc.LMODE_SLC)
 
     def _slc_send(self, slctab=None):
         """
-        Send supported SLC characters of current tabset,
-        or tabset specified by argument slctab.
+        Send supported SLC characters of current tabset, or specified tabset.
+
+        :param dict slctab: SLC byte tabset as dictionary, such as
+            slc.BSD_SLC_TAB.
         """
         send_count = 0
         slctab = slctab or self.slctab
@@ -2021,16 +2037,18 @@ class TelnetWriter(asyncio.StreamWriter):
 
     def _slc_add(self, func, slc_def=None):
         """
-        buffer slc triplet response as (function, flag, value),
-        for the given SLC_func byte and slc_def instance providing
+        Prepare slc triplet response (function, flag, value) for transmission.
+
+        For the given SLC_func byte and slc_def instance providing
         byte attributes ``flag`` and ``val``. If no slc_def is provided,
         the slc definition of ``slctab`` is used by key ``func``.
         """
-        assert len(self._slc_buffer) < slc.NSLC * 6, ('SLC: buffer full')
         if slc_def is None:
             slc_def = self.slctab[func]
         self.log.debug('_slc_add ({:<10} {})'.format(
             slc.name_slc_command(func) + ',', slc_def))
+        if len(self._slc_buffer) >= slc.NSLC * 6:
+            raise ValueError('SLC: buffer full!')
         self._slc_buffer.extend([func, slc_def.mask, slc_def.val])
 
     def _slc_process(self, func, slc_def):
@@ -2083,15 +2101,15 @@ class TelnetWriter(asyncio.StreamWriter):
             self._slc_change(func, slc_def)
 
     def _slc_change(self, func, slc_def):
-        """ Update SLC tabset with SLC definition provided by remote end.
-
-            Modify prviate attribute ``slctab`` appropriately for the level
-            and value indicated, except for slc tab functions of SLC_NOSUPPORT.
-
-            Reply as appropriate ..
         """
-        hislevel, hisvalue = slc_def.level, slc_def.val
-        mylevel, myvalue = self.slctab[func].level, self.slctab[func].val
+        Update SLC tabset with SLC definition provided by remote end.
+
+        Modify private attribute ``slctab`` appropriately for the level
+        and value indicated, except for slc tab functions of value
+        SLC_NOSUPPORT and reply as appropriate through :meth:`_slc_add`.
+        """
+        hislevel = slc_def.level
+        mylevel = self.slctab[func].level
         if hislevel == slc.SLC_NOSUPPORT:
             # client end reports SLC_NOSUPPORT; use a
             # nosupport definition with ack bit set
@@ -2135,8 +2153,8 @@ class TelnetWriter(asyncio.StreamWriter):
             self.slctab[func].set_value(slc_def.val)
             slc_def.set_flag(slc.SLC_ACK)
             self._slc_add(func, slc_def)
-        elif (slc_def.level == slc.SLC_CANTCHANGE
-                and mylevel == slc.SLC_CANTCHANGE):
+        elif (slc_def.level == slc.SLC_CANTCHANGE and
+              mylevel == slc.SLC_CANTCHANGE):
             # "degenerate to SLC_NOSUPPORT"
             self.slctab[func].set_mask(slc.SLC_NOSUPPORT)
             self._slc_add(func)
@@ -2150,7 +2168,11 @@ class TelnetWriter(asyncio.StreamWriter):
             self._slc_add(func)
 
     def _handle_sb_forwardmask(self, cmd, buf):
-        """ Callback handles IAC-SB-LINEMODE-<cmd>-FORWARDMASK-<buf>.
+        """
+        Callback handles request for LINEMODE <cmd> LMODE_FORWARDMASK.
+
+        :param bytes cmd: one of DO, DONT, WILL, WONT.
+        :param bytes buf: bytes following IAC SB LINEMODE DO FORWARDMASK.
         """
         # set and report about pending options by 2-byte opt,
         # not well tested, no known implementations exist !
@@ -2185,28 +2207,43 @@ class TelnetWriter(asyncio.StreamWriter):
                 self._handle_do_forwardmask(buf)
 
     def _handle_do_forwardmask(self, buf):
-        """ Callback handles IAC-SB-LINEMODE-DO-FORWARDMASK-<buf>.
         """
-        raise NotImplementedError  # TODO
+        Callback handles request for LINEMODE DO FORWARDMASK.
+
+        :param bytes buf: bytes following IAC SB LINEMODE DO FORWARDMASK.
+        :raises: NotImplementedError
+        """
+        raise NotImplementedError
 
 
 class Option(dict):
-    def __init__(self, name, log):
-        """ .. class:: Option(name : str, log: logging.logger)
+    """
+    Telnet option state negotiation helper class.
 
-            Initialize a Telnet Option database for capturing option
-            negotiation changes to ``log`` if enabled for debug logging.
+    This class simply acts as a logging decorator for state changes of
+    a dictionary describing telnet option negotiation.
+    """
+
+    def __init__(self, name, log):
+        """
+        Class initializer.
+
+        :param str name: decorated name representing option class, such as
+            'local', 'remote', or 'pending'.
+        :param logging.Logger log: logging instance where debug information
+            of state changes is recorded (as DEBUG).
         """
         self.name, self.log = name, log
         dict.__init__(self)
 
     def enabled(self, key):
-        """ Returns True of option is enabled. """
-        return bool(self.get(key, None) is True)
+        """
+        Return True if option is enabled.
 
-    def unhandled(self, key):
-        """ Returns True of option is requested but not handled by stream. """
-        return bool(self.get(key, None) == -1)
+        :param bytes key: telnet option
+        :rtype: bool
+        """
+        return bool(self.get(key, None) is True)
 
     def __setitem__(self, key, value):
         # the real purpose of this class, tracking state negotiation.
@@ -2219,27 +2256,36 @@ class Option(dict):
 
 
 def _escape_environ(buf):
-    """ .. function:: escape_var(buf : bytes) -> type(bytes)
-
-        Return byte array ``buf`` with VAR (\\x00) and USERVAR (\\x03)
-        escaped as ESC VAR (\\x02\\x00) or ESC USERVAR (\\x02\\x03).
     """
-    assert isinstance(buf, (bytes, bytearray)), buf
+    Return new buffer with VAR and USERVAR escaped, if present in ``buf``.
+
+    :param bytes buf: given bytes buffer
+    :returns: bytes buffer with escape characters inserted.
+    :rtype: bytes
+    """
     return buf.replace(VAR, ESC + VAR).replace(USERVAR, ESC + USERVAR)
 
 
 def _unescape_environ(buf):
-    """ .. function:: escape_var(buf : bytes) -> type(bytes)
-
-        Return byte array ``buf`` with VAR (\\x00) and USERVAR (\\x03)
-        escaped as ESC VAR (\\x02\\x00) or ESC USERVAR (\\x02\\x03).
     """
-    assert isinstance(buf, (bytes, bytearray)), buf
+    Return new buffer with escape characters removed for VAR and USERVAR.
+
+    :param bytes buf: given bytes buffer
+    :returns: bytes buffer with escape characters removed.
+    :rtype: bytes
+    """
     return buf.replace(ESC + VAR, VAR).replace(ESC + USERVAR, USERVAR)
 
 
 def _encode_env_buf(env):
     """
+    Encode dictionary for transmission as environment variables, rfc-1572_.
+
+    :param bytes buf: dictionary of environment values.
+    :returns: bytes buffer meant to follow sequence IAC SB NEW_ENVIRON IS.
+        It is not terminated by IAC SE.
+    :rtype: bytes
+
     Returns bytes array ``buf`` for use in sequence (IAC, SB,
     NEW_ENVIRON, IS, <buf>, IAC, SE) as set forth in rfc-1572_.
     """
@@ -2253,16 +2299,15 @@ def _encode_env_buf(env):
 
 
 def _decode_env_buf(buf):
-    """ Returns dictionary of environment values contained in bytes array
-        ``buf``, set forth in rfc1572, following sequence (IAC, SB,
-        NEW_ENVIRON, SEND or IS) up to (IAC, SE).
+    """
+    Decode environment values to dictionary, rfc-1572_.
 
-        Values may have type of either USERVAR or VAR; This implementation
-        does not distinguish between the two kinds.
+    :param bytes buf: bytes array following sequence IAC SB NEW_ENVIRON
+        SEND or IS up to IAC SE.
+    :returns: dictionary representing the environment values decoded from buf.
+    :rtype: dict
 
-        Environment values, oddly enough, may contain control characters,
-        and those containing values USERVAR(\\x03) or VAR(\\x00), must have
-        been escaped by ESC(\\x02), such as \\x02\\x03 or \\x02\\x00.
+    This implementation does not distinguish between ``USERVAR`` and ``VAR``.
     """
     env = {}
 
@@ -2272,10 +2317,8 @@ def _decode_env_buf(buf):
                   (idx == 0 or bytes([buf[idx - 1]]) != ESC))]
 
     for idx, ptr in enumerate(breaks):
-        kind = bytes([buf[ptr]])
-        assert kind in (VAR, USERVAR), (kind, pair)
-
-        # find buf[] starting, ending positions
+        # find buf[] starting, ending positions, begin after
+        # buf[0], which is currently valued VAR or USERVAR
         start = ptr + 1
         if idx == len(breaks) - 1:
             end = len(buf)
