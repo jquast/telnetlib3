@@ -1770,24 +1770,28 @@ class TelnetWriter(asyncio.StreamWriter):
         self._ext_callback[NAWS](rows, cols)
 
     def _handle_sb_lflow(self, buf):
-        """ Fire callback for IAC-SB-LFLOW-<buf>
-        """ # XXX
-        cmd = buf.popleft()
-        assert cmd == LFLOW, name_command(cmd)
-        assert self.local_option.enabled(LFLOW), (
-            'received IAC SB LFLOW without IAC DO LFLOW')
+        """
+        Callback responds to IAC SB LFLOW, rfc- XXX
+        Fire callback for IAC-SB-LFLOW-<buf>
+        """
+        buf.popleft()  # LFLOW
+        if not self.local_option.enabled(LFLOW):
+            raise ValueError('received IAC SB LFLOW without '
+                             'first receiving IAC DO LFLOW.')
         opt = buf.popleft()
         if opt in (LFLOW_OFF, LFLOW_ON):
             self.lflow = opt is LFLOW_ON
             self.log.debug('LFLOW (toggle-flow-control) {}'.format(
                 'ON' if self.lflow else 'OFF'))
+
         elif opt in (LFLOW_RESTART_ANY, LFLOW_RESTART_XON):
             self.xon_any = opt is LFLOW_RESTART_XON
             self.log.debug('LFLOW (toggle-flow-control) {}'.format(
                 'RESTART_ANY' if self.xon_any else 'RESTART_XON'))
+
         else:
             raise ValueError(
-                'Unknown IAC SB LFLOW option recieved: {!r}'.format(buf))
+                'Unknown IAC SB LFLOW option received: {!r}'.format(buf))
 
     def _handle_sb_status(self, buf):
         """
