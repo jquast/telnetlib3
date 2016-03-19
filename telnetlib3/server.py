@@ -413,6 +413,8 @@ def _get_argument_parser():
                         help='level name')
     parser.add_argument('--logfile',
                         help='filepath')
+    parser.add_argument('--logfmt', default=accessories._DEFAULT_LOGFMT,
+                        help='log format')
     parser.add_argument('--shell', default='telnetlib3.telnet_server_shell',
                         help='module.function_name')
     parser.add_argument('--encoding', default='utf8',
@@ -427,13 +429,7 @@ def _get_argument_parser():
 
 
 def _transform_args(args):
-
-    # parse --shell='module.function' into function target
-    module_name, func_name = args.shell.rsplit('.', 1)
-    module = __import__(module_name)
-    shell_function = getattr(module, func_name)
-    assert callable(shell_function), shell_function
-
+    # TODO: Connect as exit(main(**parse_args(sys.argv)))
     return {
         'host': args.host,
         'port': args.port,
@@ -442,7 +438,8 @@ def _transform_args(args):
         'timeout': args.timeout,
         'loglevel': args.loglevel,
         'logfile': args.logfile,
-        'shell': shell_function,
+        'logfmt': args.logfmt,
+        'shell': accessories.function_lookup(args.shell),
         'connect_maxwait': args.connect_maxwait,
     }
 
@@ -457,35 +454,38 @@ def _sigterm_handler(server, log):
 
 
 def main():
+    """ Command-line 'telnetlib3-server' entry point, via setuptools."""
     kwargs = _transform_args(_get_argument_parser().parse_args())
-
-    config_msg = 'Server configuration: ' + accessories.repr_mapping(kwargs)
-
-    loglevel = kwargs.pop('loglevel')
-    logfile = kwargs.pop('logfile')
+    config_msg = (
+        'Server configuration: {key_values}'
+        .format(key_values=accessories.repr_mapping(kwargs)))
     host = kwargs.pop('host')
     port = kwargs.pop('port')
 
-    log = accessories.make_logger(loglevel=loglevel, logfile=logfile)
+    log = kwargs['log'] = accessories.make_logger(
+        name=__name__,
+        loglevel=kwargs.pop('loglevel'),
+        logfile=kwargs.pop('logfile'),
+        logfmt=kwargs.pop('logfmt'))
     log.debug(config_msg)
-
-    kwargs['log'] = log
 
     loop = asyncio.get_event_loop()
 
     # bind
-    server = loop.run_until_complete(create_server(host, port, **kwargs))
+    server = loop.run_until_complete(
+        create_server(host, port, **kwargs))
 
     # SIGTERM cases server to gracefully stop
     loop.add_signal_handler(signal.SIGTERM, asyncio.async,
                             _sigterm_handler(server, log))
 
     log.info('Server ready on {0}:{1}'.format(host, port))
+
     # await completion of server stop
     try:
         loop.run_until_complete(server.wait_closed())
     finally:
-        # remove our signal handler
+        # remove signal handler on stop
         loop.remove_signal_handler(signal.SIGTERM)
 
 if __name__ == '__main__':

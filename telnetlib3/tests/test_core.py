@@ -1,6 +1,10 @@
 """Test instantiation of basic server and client forms."""
 # std imports
 import asyncio
+import os
+import sys
+import tempfile
+import time
 import unittest.mock
 
 # local imports
@@ -13,6 +17,7 @@ from telnetlib3.tests.accessories import (
 
 # 3rd party
 import pytest
+import pexpect
 
 
 @pytest.mark.asyncio
@@ -303,8 +308,6 @@ def test_telnet_client_idle_duration_minwait(
 
     given_minwait = 0.100
 
-    import time
-
     stime = time.time()
     reader, writer = yield from telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
@@ -420,7 +423,6 @@ def test_telnet_client_negotiation_fail(
     given_minwait = 0.05
     given_maxwait = 0.100
 
-    import time
     stime = time.time()
     reader, writer = yield from asyncio.wait_for(telnetlib3.open_connection(
         client_factory=ClientNegotiationFail, host=bind_host,
@@ -434,21 +436,38 @@ def test_telnet_client_negotiation_fail(
 
 
 @pytest.mark.asyncio
+def test_telnet_server_as_module(event_loop):
+    """Test __main__ hook, when executing python -m telnetlib3.server --help"""
+    prog = sys.executable
+    args = [prog, '-m', 'telnetlib3.server', '--help']
+    proc = yield from asyncio.create_subprocess_exec(
+        *args, loop=event_loop, stdout=asyncio.subprocess.PIPE,
+                                stderr=asyncio.subprocess.PIPE)
+
+    # we would expect the script to display help output and exit
+    help_output, _ = yield from proc.communicate()
+    assert help_output.startswith(b'usage: server.py [-h]')
+    yield from proc.communicate()
+    yield from proc.wait()
+
+
+@pytest.mark.asyncio
 def test_telnet_server_cmdline(bind_host, unused_tcp_port, event_loop):
     """Test executing telnetlib3/server.py as server"""
     # this code may be reduced when pexpect asyncio is bugfixed ..
-    import os
-    import pexpect
     prog = pexpect.which('telnetlib3-server')
     args = [prog, bind_host, str(unused_tcp_port), '--loglevel=info',
             '--connect-maxwait=0.05']
     proc = yield from asyncio.create_subprocess_exec(
         *args, loop=event_loop, stderr=asyncio.subprocess.PIPE)
 
+    seen = b''
     while True:
         line = yield from asyncio.wait_for(proc.stderr.readline(), 0.5)
         if b'Server ready' in line:
             break
+        seen += line
+        assert line, seen.decode()  # EOF reached
 
     # client connects,
     reader, writer = yield from asyncio.open_connection(
@@ -458,10 +477,13 @@ def test_telnet_server_cmdline(bind_host, unused_tcp_port, event_loop):
     yield from reader.readexactly(3)  # IAC DO TTYPE, we ignore it!
     writer.close()
 
+    seen = b''
     while True:
         line = yield from asyncio.wait_for(proc.stderr.readline(), 0.5)
         if b'Connection closed' in line:
             break
+        seen += line
+        assert line, seen.decode()  # EOF reached
 
     # send SIGTERM
     proc.terminate()
@@ -472,12 +494,26 @@ def test_telnet_server_cmdline(bind_host, unused_tcp_port, event_loop):
 
 
 @pytest.mark.asyncio
+def test_telnet_client_as_module(event_loop):
+    """Test __main__ hook, when executing python -m telnetlib3.client --help"""
+    prog = sys.executable
+    args = [prog, '-m', 'telnetlib3.client', '--help']
+    proc = yield from asyncio.create_subprocess_exec(
+        *args, loop=event_loop, stdout=asyncio.subprocess.PIPE,
+                                stderr=asyncio.subprocess.PIPE)
+
+    # we would expect the script to display help output and exit
+    help_output, _ = yield from proc.communicate()
+    assert help_output.startswith(b'usage: client.py [-h]')
+    yield from proc.communicate()
+    yield from proc.wait()
+
+
+@pytest.mark.asyncio
 def test_telnet_client_cmdline(bind_host, unused_tcp_port, event_loop):
     """Test executing telnetlib3/client.py as client"""
     # this code may be reduced when pexpect asyncio is bugfixed ..
     # we especially need pexpect to pass sys.stdin.isatty() test.
-    import os
-    import pexpect
     prog = pexpect.which('telnetlib3-client')
     args = [prog, bind_host, str(unused_tcp_port), '--loglevel=info',
             '--connect-minwait=0.05', '--connect-maxwait=0.05']
@@ -511,8 +547,6 @@ def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port,
     """Test executing telnetlib3/client.py as client using a tty (pexpect)"""
     # this code may be reduced when pexpect asyncio is bugfixed ..
     # we especially need pexpect to pass sys.stdin.isatty() test.
-    import os
-    import pexpect
     prog, args = 'telnetlib3-client', [
         bind_host, str(unused_tcp_port), '--loglevel=warn',
         '--connect-minwait=0.05', '--connect-maxwait=0.05']
@@ -526,7 +560,6 @@ def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port,
     # start vanilla tcp server
     yield from event_loop.create_server(HelloServer,
                                         bind_host, unused_tcp_port)
-    import sys
     proc = pexpect.spawn(prog, args)
     yield from proc.expect(pexpect.EOF, async=True, timeout=5)
     assert proc.before.splitlines()[0] == b'hello, space cadet.'
@@ -538,12 +571,13 @@ def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port,
     """Test sending data through command-line client (by os PIPE)."""
     # this code may be reduced when pexpect asyncio is bugfixed ..
     # we especially need pexpect to pass sys.stdin.isatty() test.
-    import os
-    import pexpect
-
     prog = pexpect.which('telnetlib3-client')
+    fd, logfile = tempfile.mkstemp()
+    os.close(fd)
+
     args = [prog, bind_host, str(unused_tcp_port), '--loglevel=info',
-            '--connect-minwait=0.05', '--connect-maxwait=0.05']
+            '--connect-minwait=0.05', '--connect-maxwait=0.05',
+            '--logfile={0}'.format(logfile)]
 
     @asyncio.coroutine
     def shell(reader, writer):
@@ -570,3 +604,14 @@ def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port,
     # message received, expect the client to gracefully quit.
     output = yield from asyncio.wait_for(proc.communicate(b'X'), 1)
     assert output[0] == b'hello X\r\ngoodbye.\r\n'
+
+    # And finally, analyze the contents of the logfile,
+    # - 2016-03-18 20:19:25,227 INFO client_base.py:113 Connected to <Peer 127.0.0.1 51237>
+    # - 2016-03-18 20:19:25,286 INFO client_base.py:67 Connection closed to <Peer 127.0.0.1 51237>
+    logfile_output = open(logfile).read().splitlines()
+    os.unlink(logfile)
+
+    # verify,
+    assert len(logfile_output) == 2
+    assert 'Connected to <Peer' in logfile_output[0]
+    assert 'Connection closed to <Peer' in logfile_output[1]

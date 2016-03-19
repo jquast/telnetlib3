@@ -147,7 +147,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             try:
                 recv_inband = self.writer.feed_byte(bytes([byte]))
             except:
-                self._log_exception(self.log.debug, *sys.exc_info())
+                self._log_exception(self.log.warn, *sys.exc_info())
             else:
                 if recv_inband:
                     # forward to reader (shell).
@@ -205,7 +205,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         or, when unspecified, ``US-ASCII``.
         """
         # pylint: disable=unused-argument
-        return self.default_encoding or 'US-ASCII'
+        return self.default_encoding or 'US-ASCII'  # pragma: no cover
 
     def check_negotiation(self, final=False):
         """

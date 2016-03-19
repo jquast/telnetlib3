@@ -200,6 +200,7 @@ class TelnetTerminalClient(TelnetClient):
             rows, cols, _, _ = struct.unpack(fmt, val)
             return rows, cols
         except (ImportError, IOError):
+            # TODO: mock import error, or test on windows or other non-posix.
             return (int(os.environ.get('LINES', 25)),
                     int(os.environ.get('COLUMNS', 80)))
 
@@ -256,23 +257,28 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
 
 
 def main():
-    """ Command-line tool telnetlib3-client entry point via setuptools."""
+    """ Command-line 'telnetlib3-client' entry point, via setuptools."""
     kwargs = _transform_args(_get_argument_parser().parse_args())
-    config_msg = 'Client configuration: ' + accessories.repr_mapping(kwargs)
-
-    loglevel = kwargs.pop('loglevel')
-    logfile = kwargs.pop('logfile')
+    config_msg = (
+        'Client configuration: {key_values}'
+        .format(key_values=accessories.repr_mapping(kwargs)))
     host = kwargs.pop('host')
     port = kwargs.pop('port')
 
-    log = accessories.make_logger(loglevel=loglevel, logfile=logfile)
+    log = kwargs['log'] = accessories.make_logger(
+        name=__name__,
+        loglevel=kwargs.pop('loglevel'),
+        logfile=kwargs.pop('logfile'),
+        logfmt=kwargs.pop('logfmt'))
     log.debug(config_msg)
 
     loop = asyncio.get_event_loop()
 
+    # connect
     reader, writer = loop.run_until_complete(
-        open_connection(host, port, log=log, **kwargs))
+        open_connection(host, port, **kwargs))
 
+    # repl loop
     loop.run_until_complete(writer.protocol.waiter_closed)
 
 
@@ -288,6 +294,8 @@ def _get_argument_parser():
                         help='terminal type')
     parser.add_argument('--loglevel', default='warn',
                         help='log level')
+    parser.add_argument('--logfmt', default=accessories._DEFAULT_LOGFMT,
+                        help='log format')
     parser.add_argument('--logfile',
                         help='filepath')
     parser.add_argument('--shell', default='telnetlib3.telnet_client_shell',
@@ -302,22 +310,16 @@ def _get_argument_parser():
                         help='timeout for pending negotiation')
     return parser
 
-
 def _transform_args(args):
-
-    # parse --shell='module.function' into function target
-    module_name, func_name = args.shell.rsplit('.', 1)
-    module = __import__(module_name)
-    shell_function = getattr(module, func_name)
-    assert callable(shell_function), shell_function
-
+    # TODO: Connect as exit(main(**parse_args(sys.argv)))
     return {
         'host': args.host,
         'port': args.port,
         'loglevel': args.loglevel,
         'logfile': args.logfile,
+        'logfmt': args.logfmt,
         'encoding': args.encoding,
-        'shell': shell_function,
+        'shell': accessories.function_lookup(args.shell),
         'term': args.term,
         'force_binary': args.force_binary,
         'connect_minwait': args.connect_minwait,
