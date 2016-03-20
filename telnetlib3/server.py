@@ -164,7 +164,7 @@ class TelnetServer(server_base.BaseServer):
             # for modern systems, this is the preferred method of encoding
             # negotiation.
             _lang = self.get_extra_info('LANG', '')
-            if _lang:
+            if _lang and _lang != 'C':
                 return accessories.encoding_from_lang(_lang)
 
             # otherwise, the less CHARSET negotiation may be found in many

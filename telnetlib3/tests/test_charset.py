@@ -39,7 +39,7 @@ def test_telnet_server_on_charset(
     reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
-    val = yield from reader.readexactly(3)
+    val = yield from asyncio.wait_for(reader.readexactly(3), 0.5)
     # exercise,
     writer.write(IAC + WILL + CHARSET)
     writer.write(IAC + WONT + TTYPE)
@@ -68,15 +68,19 @@ def test_telnet_client_send_charset(event_loop, bind_host, unused_tcp_port):
             _waiter.set_result(selected)
             return selected
 
-    yield from telnetlib3.create_server(
-        protocol_factory=ServerTestCharset,
-        host=bind_host, port=unused_tcp_port,
-        loop=event_loop)
+    yield from asyncio.wait_for(
+        telnetlib3.create_server(
+            protocol_factory=ServerTestCharset,
+            host=bind_host, port=unused_tcp_port,
+            loop=event_loop),
+        0.15)
 
-    reader, writer = yield from telnetlib3.open_connection(
-        client_factory=ClientTestCharset,
-        host=bind_host, port=unused_tcp_port, loop=event_loop,
-        encoding='latin1', connect_minwait=0.05)
+    reader, writer = yield from asyncio.wait_for(
+        telnetlib3.open_connection(
+            client_factory=ClientTestCharset,
+            host=bind_host, port=unused_tcp_port, loop=event_loop,
+            encoding='latin1', connect_minwait=0.05),
+        0.15)
 
     val = yield from asyncio.wait_for(_waiter, 1.5)
     assert val == 'cp437'

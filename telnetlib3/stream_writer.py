@@ -6,7 +6,7 @@ import struct
 from . import slc
 from .telopt import *  # noqa
 
-__all__ = ('TelnetWriter',)
+__all__ = ('TelnetWriter', 'TelnetWriterUnicode', )
 
 
 class TelnetWriter(asyncio.StreamWriter):
@@ -20,29 +20,9 @@ class TelnetWriter(asyncio.StreamWriter):
     by instance attributes following the call to :meth:`feed_byte`.
 
     A minimal Telnet Service :meth:`asyncio.Protocol.data_received`
-    method should forward each byte to ``feed_byte``.  When True,
-    the given byte should be forwarded to a Protocol reader method
-    :meth:`asyncio.StreamReader.feed_data`.
-
-    This :class:`asyncio.StreamWriter` interface uses the outgoing encoding
-    direction indicated by protocol method callback,
-    ``protocol.encoding(outgoing=True)`` for :meth:`write`, accepting unicode
-    string rather than bytes.
-
-    The encoding may be conditionally negotiated by CHARSET, rfc-2066_, or
-    discovered by ``LANG`` environment variables by NEW_ENVIRON, rfc-1572_.
-
-    If the encoding fails to lookup, ``protocol.set_encoding`` is called with
-    value ``protocol.default_encoding`` before trying again.  This fail
-    recovery is intended to be resilient to incompatible encodings without
-    stream interruption.
-
-    Required of the attached protocol:
-
-    - attribute ``protocol.default_encoding: str``
-    - attribute ``protocol.encoding_errors: str``
-    - method ``protocol.set_encoding(encoding: str)``
-    - method ``protocol.encoding(incoming: bool, outgoing: bool)``
+    method should forward each byte to ``feed_byte``, returning True
+    to indicate the given byte should be forwarded to a Protocol reader
+    method :meth:`asyncio.StreamReader.feed_data`.
     """
     #: Total bytes sent to ``feed_byte()``
     byte_count = 0
@@ -79,8 +59,7 @@ class TelnetWriter(asyncio.StreamWriter):
     default_linemode = slc.Linemode(
         bytes([ord(slc.LMODE_MODE_REMOTE) | ord(slc.LMODE_MODE_LIT_ECHO)]))
 
-
-    def __init__(self, transport, protocol, client=False, server=False,
+    def __init__(self, transport, protocol, *, client=False, server=False,
                  reader=None, loop=None, log=None):
         """
         :param bool client: Whether the IAC interpreter should react from
@@ -124,10 +103,10 @@ class TelnetWriter(asyncio.StreamWriter):
         #: attribute ``ack`` returns True if it is in use.
         self._linemode = slc.Linemode()
 
-        #: Bool implementing Flow Control, False when XOFF received,
-        #: pending data buffered into self._write_buffer
-        self.writing = True
-        self._write_buffer = collections.deque()
+#        #: Bool implementing Flow Control, False when XOFF received,
+#        #: pending data buffered into self._write_buffer
+#        self.writing = True
+#        self._write_buffer = collections.deque()
 
         # Set default callback handlers to local methods.  A base protocol
         # wishing not to wire any callbacks at all may simply allow our stream
@@ -222,21 +201,23 @@ class TelnetWriter(asyncio.StreamWriter):
 
         return '<{0}>'.format(' '.join(info))
 
-    def write(self, string, errors=None):
+    def write(self, data):
         """
-        Write unicode string to transport, using protocol-preferred encoding.
+        Write a bytes object to the protocol transport.
 
-        :param str string: unicode string text to write to endpoint using the
-            protocol's preferred encoding.  When the protocol ``encoding``
-            keyword is explicitly set to ``False``, the given string should be
-            only raw ``b'bytes'``.
-        :param str errors: same as meaning in :class:`codecs.Codec`.
         :rtype: None
         """
-        if not self.protocol.default_encoding:
-            self._write(string)
-        else:
-            self._write(self.encode(string))
+        self._write(data)
+
+    def writelines(self, lines):
+        """
+        Write unicode strings to transport.
+
+        Note that newlines are not added.  The sequence can be any iterable
+        object producing strings. This is equivalent to calling write() for
+        each string.
+        """
+        self.write(b''.join(lines))
 
     def feed_byte(self, byte):
         """
@@ -357,16 +338,6 @@ class TelnetWriter(asyncio.StreamWriter):
         # whether this data should be forwarded (to the reader)
         return not self.is_oob
 
-    def writelines(self, lines):
-        """
-        Write unicode strings to transport.
-
-        Note that newlines are not added.  The sequence can be any iterable
-        object producing strings. This is equivalent to calling write() for
-        each string.
-        """
-        self.write(u''.join(lines))
-
     # Our protocol methods
 
     def get_extra_info(self, name, default=None):
@@ -398,39 +369,20 @@ class TelnetWriter(asyncio.StreamWriter):
         """Whether BINARY data may be sent on this stream, rfc-856_."""
         return self.local_option.enabled(BINARY)
 
-    def encode(self, string):
+    def echo(self, data):
         """
-        Encode ``string`` using protocol-preferred encoding.
+        Conditionally write ``data`` to transport when "remote echo" enabled.
 
-        When ``outbinary`` mode has not been negotiated, string must be
-        strictly 7-bit ASCII characters (valued less than 128) by RFC
-        compliance.
-
-        :param errors: Same When ``None`` (default)
-        :param str errors: same as meaning in :class:`codecs.Codec`.
-            When None, value of :attr:`errors_encoding` is used.
-        """
-        encoding = self._protocol.encoding(outgoing=True)
-        errors = self._protocol.encoding_errors
-        return bytes(string, encoding, errors)
-
-    def echo(self, string, errors=None):
-        """
-        Conditionally write ``string`` to transport when "remote echo" enabled.
-
-        :param str string: string received as input, conditionally written.
-        :param str errors: same as meaning in :class:`codecs.Codec`.
+        :param bytes data: string received as input, conditionally written.
         :rtype: None
 
         The default implementation depends on telnet negotiation willingness
         for local echo, only an RFC-compliant telnet client will correctly
         set or unset echo accordingly by demand.
-
-        This option may be toggled using shell command, ``toggle echo``.
         """
         assert self.server, ('Client never performs echo of input received.')
         if self.will_echo:
-            self.write(string, errors)
+            self.write(data=data)
 
     @property
     def will_echo(self):
@@ -944,9 +896,10 @@ class TelnetWriter(asyncio.StreamWriter):
               remainder of the text string, but transmit the prompt character
               and the preceding <CR><LF>. "
         """
-        self.log.debug('IAC AO: Abort Output, '
-                       '{} bytes discarded.'.format(len(self._write_buffer)))
-        self._write_buffer.clear()
+        self.log.debug('IAC AO: Abort Output, unhandled.')
+#        self.log.debug('IAC AO: Abort Output, '
+#                       '{} bytes discarded.'.format(len(self._write_buffer)))
+#        self._write_buffer.clear()
 
     def handle_ec(self, byte):
         """ XXX Handle IAC Erase Character (EC, SLC_EC).
@@ -2220,6 +2173,86 @@ class TelnetWriter(asyncio.StreamWriter):
         raise NotImplementedError
 
 
+class TelnetWriterUnicode(TelnetWriter):
+    """
+    Requires the ``fn_encoding`` callback, receiving mutually exclusive boolean
+    arguments, ``outgoing=True`` to determine what encoding should be used to
+    decode the value in the direction specified.
+
+    The encoding may be conditionally negotiated by CHARSET, rfc-2066_, or
+    discovered by ``LANG`` environment variables by NEW_ENVIRON, rfc-1572_.
+    """
+    def __init__(self, transport, protocol, fn_encoding, *,
+                 encoding_errors='strict', **kwds):
+        self.fn_encoding = fn_encoding
+        self.encoding_errors = encoding_errors
+        super().__init__(transport, protocol, **kwds)
+
+    def encode(self, string, errors):
+        """
+        Encode ``string`` using protocol-preferred encoding.
+
+        :param str errors: same as meaning in :class:`codecs.Codec`.
+            When None, value of :attr:`errors_encoding` is used.
+        :param str errors: same as meaning in :class:`codecs.Codec`, when
+            ``None`` (default), value of class initializer keyword argument,
+            ``encoding_errors``.
+
+        .. note: though a unicode interface, when ``outbinary`` mode has not
+            been protocol negotiated, ``fn_encoding`` strictly enforces 7-bit
+            ASCII range (ordinal byte values less than 128), as a strict
+            compliance of the telnet RFC.
+        """
+        encoding = self.fn_encoding(outgoing=True)
+        import logging
+        logging.getLogger(__name__).debug((string, encoding, errors or self.encoding_errors))
+        return bytes(string, encoding, errors or self.encoding_errors)
+
+    def write(self, string, errors=None):
+        """
+        Write unicode string to transport, using protocol-preferred encoding.
+
+        :param str string: unicode string text to write to endpoint using the
+            protocol's preferred encoding.  When the protocol ``encoding``
+            keyword is explicitly set to ``False``, the given string should be
+            only raw ``b'bytes'``.
+        :param str errors: same as meaning in :class:`codecs.Codec`, when
+            ``None`` (default), value of class initializer keyword argument,
+            ``encoding_errors``.
+        :rtype: None
+        """
+        errors = errors or self.encoding_errors
+        self._write(self.encode(string, errors))
+
+    def writelines(self, lines, errors=None):
+        """
+        Write unicode strings to transport.
+
+        Note that newlines are not added.  The sequence can be any iterable
+        object producing strings. This is equivalent to calling write() for
+        each string.
+        """
+        self.write(string=u''.join(lines), errors=errors)
+
+    def echo(self, string, errors=None):
+        """
+        Conditionally write ``string`` to transport when "remote echo" enabled.
+
+        :param str string: string received as input, conditionally written.
+        :param str errors: same as meaning in :class:`codecs.Codec`.
+        :rtype: None
+
+        The default implementation depends on telnet negotiation willingness
+        for local echo, only an RFC-compliant telnet client will correctly
+        set or unset echo accordingly by demand.
+
+        This option may be toggled using shell command, ``toggle echo``.
+        """
+        assert self.server, ('Client never performs echo of input received.')
+        if self.will_echo:
+            self.write(string=string, errors=errors)
+
+
 class Option(dict):
     """
     Telnet option state negotiation helper class.
@@ -2338,6 +2371,3 @@ def _decode_env_buf(buf):
         env[key] = value
 
     return env
-
-
-TelnetStream = TelnetWriter  # 1.0 deprecation

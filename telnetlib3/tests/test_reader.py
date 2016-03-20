@@ -1,5 +1,6 @@
 # std imports
 import asyncio
+import string
 
 # 3rd party
 import pytest
@@ -15,31 +16,23 @@ from telnetlib3.tests.accessories import (
 
 def test_reader_instantiation_safety():
     """On instantiation, one of server or client must be specified."""
-    telnetlib3.TelnetReader(protocol=None, client=True)
-    with pytest.raises(TypeError):
-        # must define at least server=True or client=True
-        telnetlib3.TelnetReader(protocol=None)
-    with pytest.raises(TypeError):
-        # but cannot define both!
-        telnetlib3.TelnetReader(protocol=None,
-                                server=True, client=True)
+    # exercise
+    def fn_encoding(incoming):
+        return 'def-ENC'
 
-def test_repr():
-    """Test reader.__repr__ for client and server viewpoint."""
-    class mock_protocol(object):
-        default_encoding = 'def-ENC'
-        def encoding(self, **kwds):
-            return self.default_encoding
+    reader = telnetlib3.TelnetReader()
+    assert repr(reader) == ("<TelnetReader encoding=False "
+                            "buflen=0 eof=False>")
 
-    srv = telnetlib3.TelnetReader(protocol=mock_protocol(), server=True)
-    clt = telnetlib3.TelnetReader(protocol=mock_protocol(), client=True)
-    assert repr(srv) == "<TelnetReader encoding='def-ENC'>"
-    assert repr(clt) == "<TelnetReader encoding='def-ENC'>"
+    reader = telnetlib3.TelnetReaderUnicode(fn_encoding=fn_encoding)
+    assert repr(reader) == ("<TelnetReaderUnicode encoding='def-ENC' "
+                            "buflen=0 eof=False>")
+
 
 @pytest.mark.asyncio
-def test_telnet_reader_using_readline(
+def test_telnet_reader_using_readline_unicode(
         event_loop, bind_host, unused_tcp_port):
-    """Ensure TelnetReader.readline() interpretation of telnet's newlines."""
+    """Ensure strict RFC interpretation of newlines in readline method."""
     # given
     _waiter = asyncio.Future()
     given_expected = {
@@ -71,3 +64,119 @@ def test_telnet_reader_using_readline(
         assert result == expected
     eof = yield from asyncio.wait_for(client_reader.read(), 0.5)
     assert eof == ''
+
+
+@pytest.mark.asyncio
+def test_telnet_reader_using_readline_bytes(
+        event_loop, bind_host, unused_tcp_port):
+    """Ensure strict RFC interpretation of newlines in readline method."""
+    # given
+    _waiter = asyncio.Future()
+    given_expected = {
+        b'alpha\r\x00': b'alpha\r',
+        b'bravo\r\n': b'bravo\r\n',
+        b'charlie\n': b'charlie\n',
+        b'---\r---\r\n': b'---\r---\r\n',
+        b'\r\x00': b'\r',
+        b'\n': b'\n',
+        b'\r\n': b'\r\n',
+        b'xxxxxxxxxxx': b'xxxxxxxxxxx',
+    }
+
+    def shell(reader, writer):
+        for item in sorted(given_expected):
+            writer.write(item)
+        writer.close()
+
+    yield from telnetlib3.create_server(
+        host=bind_host, port=unused_tcp_port, loop=event_loop,
+        connect_maxwait=0.05, shell=shell, encoding=False)
+
+    client_reader, client_writer = yield from telnetlib3.open_connection(
+        host=bind_host, port=unused_tcp_port, loop=event_loop,
+        connect_minwait=0.05, encoding=False)
+
+    for given, expected in sorted(given_expected.items()):
+        result = yield from asyncio.wait_for(client_reader.readline(), 0.5)
+        assert result == expected
+    eof = yield from asyncio.wait_for(client_reader.read(), 0.5)
+    assert eof == b''
+
+
+@pytest.mark.asyncio
+def test_telnet_reader_read_exactly_unicode(
+        event_loop, bind_host, unused_tcp_port):
+    """Ensure TelnetReader.readexactly, especially IncompleteReadError."""
+    # given
+    _waiter = asyncio.Future()
+    # TODO: count utf8!
+    given = string.ascii_letters
+    given_partial = 'zzz'
+
+    def shell(reader, writer):
+        writer.write(given)
+        writer.write(given_partial)
+        writer.close()
+
+    yield from telnetlib3.create_server(
+        host=bind_host, port=unused_tcp_port, loop=event_loop,
+        connect_maxwait=0.05, shell=shell)
+
+    client_reader, client_writer = yield from telnetlib3.open_connection(
+        host=bind_host, port=unused_tcp_port, loop=event_loop,
+        connect_minwait=0.05)
+
+    # exercise, readexactly # bytes of given
+    result = yield from asyncio.wait_for(
+        client_reader.readexactly(len(given)), 0.5)
+
+    # verify,
+    assert result == given
+
+    # exercise, read 1 byte beyond given_partial
+    given_readsize = len(given_partial) + 1
+    with pytest.raises(asyncio.IncompleteReadError) as exc_info:
+        result = yield from asyncio.wait_for(
+            client_reader.readexactly(given_readsize), 0.5)
+
+    assert exc_info.value.partial == given_partial
+    assert exc_info.value.expected == given_readsize
+
+
+@pytest.mark.asyncio
+def test_telnet_reader_read_exactly_bytes(
+        event_loop, bind_host, unused_tcp_port):
+    """Ensure TelnetReader.readexactly, especially IncompleteReadError."""
+    # given
+    _waiter = asyncio.Future()
+    # TODO: count utf8!
+    given = string.ascii_letters.encode('ascii')
+    given_partial = b'zzz'
+
+    def shell(reader, writer):
+        writer.write(given + given_partial)
+        writer.close()
+
+    yield from telnetlib3.create_server(
+        host=bind_host, port=unused_tcp_port, loop=event_loop,
+        connect_maxwait=0.05, shell=shell, encoding=False)
+
+    client_reader, client_writer = yield from telnetlib3.open_connection(
+        host=bind_host, port=unused_tcp_port, loop=event_loop,
+        connect_minwait=0.05, encoding=False)
+
+    # exercise, readexactly # bytes of given
+    result = yield from asyncio.wait_for(
+        client_reader.readexactly(len(given)), 0.5)
+
+    # verify,
+    assert result == given
+
+    # exercise, read 1 byte beyond given_partial
+    given_readsize = len(given_partial) + 1
+    with pytest.raises(asyncio.IncompleteReadError) as exc_info:
+        result = yield from asyncio.wait_for(
+            client_reader.readexactly(given_readsize), 0.5)
+
+    assert exc_info.value.partial == given_partial
+    assert exc_info.value.expected == given_readsize

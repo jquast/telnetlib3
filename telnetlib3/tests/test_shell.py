@@ -179,7 +179,7 @@ def test_telnet_server_given_shell(
             b'\r\ntel:sh> '
         )),
         (b'reader\r\n', (
-            b"\r\n<TelnetReader encoding='US-ASCII'>"
+            b"\r\n<TelnetReaderUnicode encoding='US-ASCII' buflen=1 eof=False>"
             b'\r\ntel:sh> '
         )),
         (b'proto\n', (

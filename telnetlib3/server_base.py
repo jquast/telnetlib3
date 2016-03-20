@@ -5,8 +5,8 @@ import logging
 import datetime
 import sys
 
-from .stream_writer import TelnetWriter
-from .stream_reader import TelnetReader
+from .stream_writer import (TelnetWriter, TelnetWriterUnicode)
+from .stream_reader import (TelnetReader, TelnetReaderUnicode)
 
 __all__ = ('BaseServer',)
 
@@ -19,7 +19,9 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     _advanced = False
     _closing = False
     _reader_factory = TelnetReader
+    _reader_factory_encoding = TelnetReaderUnicode
     _writer_factory = TelnetWriter
+    _writer_factory_encoding = TelnetWriterUnicode
 
     def __init__(self, shell=None, log=None, loop=None,
                  waiter_connected=None, waiter_closed=None,
@@ -30,7 +32,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self.log = log or logging.getLogger(__name__)
         self._loop = loop or asyncio.get_event_loop()
         self.default_encoding = encoding
-        self.encoding_errors = encoding_errors
+        self._encoding_errors = encoding_errors
         self.force_binary = force_binary
         self._extra = dict()
         self.waiter_connected = waiter_connected or asyncio.Future()
@@ -94,13 +96,21 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._when_connected = datetime.datetime.now()
         self._last_received = datetime.datetime.now()
 
-        self.reader = self._reader_factory(
-            protocol=self, log=self.log, loop=self._loop, server=True)
+        reader_factory = self._reader_factory
+        writer_factory = self._writer_factory
+        kwds = {'loop': self._loop}
+        if self.default_encoding:
+            kwds['fn_encoding'] = self.encoding
+            kwds['encoding_errors'] = self._encoding_errors
+            reader_factory = self._reader_factory_encoding
+            writer_factory = self._writer_factory_encoding
 
-        self.writer = self._writer_factory(
+        self.reader = reader_factory(**kwds)
+
+        self.writer = writer_factory(
             transport=transport, protocol=self,
             reader=self.reader, server=True,
-            loop=self._loop, log=self.log)
+            log=self.log, **kwds)
 
         self.log.info('Connection from %s', self)
 
