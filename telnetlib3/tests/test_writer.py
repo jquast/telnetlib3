@@ -13,12 +13,14 @@ from telnetlib3.tests.accessories import (
 )
 
 
-def test_instantiation_safety():
+def test_writer_instantiation_safety():
     """On instantiation, one of server or client must be specified."""
     telnetlib3.TelnetWriter(transport=None, protocol=None, client=True)
     with pytest.raises(TypeError):
+        # must define at least server=True or client=True
         telnetlib3.TelnetWriter(transport=None, protocol=None)
     with pytest.raises(TypeError):
+        # but cannot define both!
         telnetlib3.TelnetWriter(transport=None, protocol=None,
                                 server=True, client=True)
 
