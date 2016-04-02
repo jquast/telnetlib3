@@ -2204,8 +2204,6 @@ class TelnetWriterUnicode(TelnetWriter):
             compliance of the telnet RFC.
         """
         encoding = self.fn_encoding(outgoing=True)
-        import logging
-        logging.getLogger(__name__).debug((string, encoding, errors or self.encoding_errors))
         return bytes(string, encoding, errors or self.encoding_errors)
 
     def write(self, string, errors=None):
