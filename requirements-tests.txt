@@ -2,6 +2,5 @@ pytest-capturelog
 pytest-asyncio
 pytest-xdist
 pytest-cov
-# needed until next release w/async bugfixes
-git+git://github.com/pexpect/pexpect.git@master#egg=pexpect
+pexpect
 six
