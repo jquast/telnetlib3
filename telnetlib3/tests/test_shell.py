@@ -119,7 +119,7 @@ def test_telnet_server_no_shell(event_loop, bind_host, unused_tcp_port):
     server_expected = IAC + WONT + TTYPE + b'alpha'
     # given,
     yield from telnetlib3.create_server(
-        waiter_connected=_waiter,
+        _waiter_connected=_waiter,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop)
 
@@ -147,8 +147,8 @@ def test_telnet_server_given_shell(
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
         shell=telnet_server_shell,
-        waiter_connected=_waiter, connect_maxwait=0.05,
-        timeout=0.25, loop=event_loop)
+        _waiter_connected=_waiter, connect_maxwait=0.05,
+        timeout=0.25, loop=event_loop, limit=1337)
 
     reader, writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -179,7 +179,7 @@ def test_telnet_server_given_shell(
             b'\r\ntel:sh> '
         )),
         (b'reader\r\n', (
-            b"\r\n<TelnetReaderUnicode encoding='US-ASCII' buflen=1 eof=False>"
+            b"\r\n<TelnetReaderUnicode encoding='US-ASCII' limit=1337 buflen=1 eof=False>"
             b'\r\ntel:sh> '
         )),
         (b'proto\n', (
@@ -288,8 +288,8 @@ def test_telnet_server_shell_eof(event_loop, bind_host, unused_tcp_port):
 
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
-        waiter_connected=_waiter_connected,
-        waiter_closed=_waiter_closed,
+        _waiter_connected=_waiter_connected,
+        _waiter_closed=_waiter_closed,
         shell=telnet_server_shell,
         timeout=0.25, loop=event_loop)
 

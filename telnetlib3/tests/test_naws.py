@@ -84,7 +84,7 @@ def test_telnet_client_send_tty_naws(event_loop, bind_host,
     given_cols, given_rows = 40, 20
     prog, args = 'telnetlib3-client', [
         bind_host, str(unused_tcp_port), '--loglevel=warn',
-        '--connect-minwait=0.05']
+        '--connect-minwait=0.005', '--connect-maxwait=0.010']
 
     # a server,
     class ServerTestNaws(telnetlib3.TelnetServer):

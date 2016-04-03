@@ -26,7 +26,7 @@ def test_telnet_server_default_timeout(
     given_timeout = 19.29
 
     yield from telnetlib3.create_server(
-        waiter_connected=_waiter,
+        _waiter_connected=_waiter,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop, timeout=given_timeout)
 
@@ -53,7 +53,7 @@ def test_telnet_server_set_timeout(
 
     # exercise,
     yield from telnetlib3.create_server(
-        waiter_connected=_waiter,
+        _waiter_connected=_waiter,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop)
 

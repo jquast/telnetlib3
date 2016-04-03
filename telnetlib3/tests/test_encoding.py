@@ -25,7 +25,7 @@ def test_telnet_server_encoding_default(
 
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
-        waiter_connected=_waiter,
+        _waiter_connected=_waiter,
         loop=event_loop, connect_maxwait=0.05)
 
     reader, writer = yield from asyncio.open_connection(
@@ -79,7 +79,7 @@ def test_telnet_server_encoding_client_will(
 
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
-        waiter_connected=_waiter,
+        _waiter_connected=_waiter,
         loop=event_loop)
 
     reader, writer = yield from asyncio.open_connection(
@@ -106,7 +106,7 @@ def test_telnet_server_encoding_server_do(
 
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
-        waiter_connected=_waiter,
+        _waiter_connected=_waiter,
         loop=event_loop)
 
     reader, writer = yield from asyncio.open_connection(
@@ -133,7 +133,7 @@ def test_telnet_server_encoding_bidirectional(
 
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
-        waiter_connected=_waiter,
+        _waiter_connected=_waiter,
         loop=event_loop, connect_maxwait=0.05)
 
     reader, writer = yield from asyncio.open_connection(
@@ -159,7 +159,7 @@ def test_telnet_client_and_server_encoding_bidirectional(
     _waiter = asyncio.Future()
 
     yield from telnetlib3.create_server(
-        host=bind_host, port=unused_tcp_port, waiter_connected=_waiter,
+        host=bind_host, port=unused_tcp_port, _waiter_connected=_waiter,
         loop=event_loop, encoding='latin1', connect_maxwait=0.05)
 
     reader, writer = yield from telnetlib3.open_connection(
@@ -188,7 +188,7 @@ def test_telnet_server_encoding_by_LANG(
 
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
-        waiter_connected=_waiter,
+        _waiter_connected=_waiter,
         loop=event_loop)
 
     reader, writer = yield from asyncio.open_connection(
@@ -235,7 +235,7 @@ def test_telnet_server_binary_mode(
 
     yield from telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
-        shell=binary_shell, waiter_connected=_waiter, encoding=False,
+        shell=binary_shell, _waiter_connected=_waiter, encoding=False,
         loop=event_loop)
 
     reader, writer = yield from asyncio.open_connection(
@@ -264,7 +264,7 @@ def test_telnet_client_and_server_escape_iac_encoding(
     given_string = ''.join(chr(val) for val in list(range(256))) * 2
 
     yield from telnetlib3.create_server(
-        host=bind_host, port=unused_tcp_port, waiter_connected=_waiter,
+        host=bind_host, port=unused_tcp_port, _waiter_connected=_waiter,
         loop=event_loop, encoding='iso8859-1', connect_maxwait=0.05)
 
     client_reader, client_writer = yield from telnetlib3.open_connection(
@@ -290,7 +290,7 @@ def test_telnet_client_and_server_escape_iac_binary(
     given_string = bytes(range(256)) * 2
 
     yield from telnetlib3.create_server(
-        host=bind_host, port=unused_tcp_port, waiter_connected=_waiter,
+        host=bind_host, port=unused_tcp_port, _waiter_connected=_waiter,
         loop=event_loop, encoding=False, connect_maxwait=0.05)
 
     client_reader, client_writer = yield from telnetlib3.open_connection(

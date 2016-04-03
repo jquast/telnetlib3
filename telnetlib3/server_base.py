@@ -24,24 +24,26 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     _writer_factory_encoding = TelnetWriterUnicode
 
     def __init__(self, shell=None, log=None, loop=None,
-                 waiter_connected=None, waiter_closed=None,
+                 _waiter_connected=None, _waiter_closed=None,
                  encoding='utf8', encoding_errors='strict',
-                 force_binary=False, connect_maxwait=4.0):
+                 force_binary=False, connect_maxwait=4.0,
+                 limit=None):
         """Class initializer."""
         super().__init__(loop=loop)
-        self.log = log or logging.getLogger(__name__)
+        self.log = log or logging.getLogger('telnetlib3.server')
         self._loop = loop or asyncio.get_event_loop()
         self.default_encoding = encoding
         self._encoding_errors = encoding_errors
         self.force_binary = force_binary
         self._extra = dict()
-        self.waiter_connected = waiter_connected or asyncio.Future()
-        self.waiter_closed = waiter_closed or asyncio.Future()
-        self._tasks = [self.waiter_connected]
+        self._waiter_connected = _waiter_connected or asyncio.Future()
+        self._waiter_closed = _waiter_closed or asyncio.Future()
+        self._tasks = [self._waiter_connected]
         self.shell = shell
         self.reader = None
         self.writer = None
         self.connect_maxwait = connect_maxwait
+        self._limit = limit
 
     # Base protocol methods
 
@@ -76,12 +78,12 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         for task in self._tasks:
             task.cancel()
 
-        # close transport (may already be closed), set waiter_closed and
-        # cancel waiter_connected.
+        # close transport (may already be closed), set _waiter_closed and
+        # cancel Future _waiter_connected.
         self._transport.close()
-        self.waiter_connected.cancel()
+        self._waiter_connected.cancel()
         if self.shell is None:
-            self.waiter_closed.set_result(self)
+            self._waiter_closed.set_result(self)
 
     def connection_made(self, transport):
         """
@@ -98,23 +100,30 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         reader_factory = self._reader_factory
         writer_factory = self._writer_factory
-        kwds = {'loop': self._loop}
+        reader_kwds = {'loop': self._loop}
+        writer_kwds = {'loop': self._loop}
+
         if self.default_encoding:
-            kwds['fn_encoding'] = self.encoding
-            kwds['encoding_errors'] = self._encoding_errors
+            reader_kwds['fn_encoding'] = self.encoding
+            writer_kwds['fn_encoding'] = self.encoding
+            reader_kwds['encoding_errors'] = self._encoding_errors
+            writer_kwds['encoding_errors'] = self._encoding_errors
             reader_factory = self._reader_factory_encoding
             writer_factory = self._writer_factory_encoding
 
-        self.reader = reader_factory(**kwds)
+        if self._limit:
+            reader_kwds['limit'] = self._limit
+
+        self.reader = reader_factory(**reader_kwds)
 
         self.writer = writer_factory(
             transport=transport, protocol=self,
             reader=self.reader, server=True,
-            log=self.log, **kwds)
+            log=self.log, **writer_kwds)
 
         self.log.info('Connection from %s', self)
 
-        self.waiter_connected.add_done_callback(self.begin_shell)
+        self._waiter_connected.add_done_callback(self.begin_shell)
         self._loop.call_soon(self.begin_negotiation)
 
     def begin_shell(self, result):
@@ -123,7 +132,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             if asyncio.iscoroutine(coro):
                 fut = self._loop.create_task(coro)
                 fut.add_done_callback(
-                    lambda fut_obj: self.waiter_closed.set_result(self))
+                    lambda fut_obj: self._waiter_closed.set_result(self))
 
     def data_received(self, data):
         """Process bytes received by transport."""
@@ -150,7 +159,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         # until negotiation is complete, re-check negotiation aggressively
         # upon receipt of any command byte.
-        if not self.waiter_connected.done() and cmd_received:
+        if not self._waiter_connected.done() and cmd_received:
             self._check_negotiation_timer()
 
     # public properties
@@ -240,7 +249,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         Method is called on each new command byte processed until negotiation
         is considered final, or after :attr:`connect_maxwait` has elapsed,
-        setting :attr:`waiter_connected` to value ``self`` when complete.
+        setting :attr:`_waiter_connected` to value ``self`` when complete.
 
         Ensure ``super().check_negotiation()`` is called and conditionally
         combined when derived.
@@ -266,11 +275,11 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         if self.check_negotiation(final=final):
             self.log.debug('negotiation complete after {:1.2f}s.'
                            .format(self.duration))
-            self.waiter_connected.set_result(self)
+            self._waiter_connected.set_result(self)
         elif final:
             self.log.debug('negotiation failed after {:1.2f}s.'
                            .format(self.duration))
-            self.waiter_connected.set_result(self)
+            self._waiter_connected.set_result(self)
         else:
             # keep re-queuing until complete
             self._check_later = self._loop.call_later(

@@ -184,7 +184,7 @@ def test_send_iac_dont_dont(event_loop, bind_host, unused_tcp_port):
     yield from telnetlib3.create_server(
         protocol_factory=telnetlib3.BaseServer, host=bind_host,
         port=unused_tcp_port, loop=event_loop, connect_maxwait=0.05,
-        waiter_connected=_waiter)
+        _waiter_connected=_waiter)
 
     _, client_writer = yield from telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
@@ -292,8 +292,33 @@ def test_unhandled_do_sends_wont(event_loop, bind_host, unused_tcp_port):
 
 
 @pytest.mark.asyncio
-def test_writelines(event_loop, bind_host, unused_tcp_port):
-    """WILL/WONT replied only once for repeated DO."""
+def test_writelines_bytes(event_loop, bind_host, unused_tcp_port):
+    """Exercise bytes-only interface of writer.writelines() function."""
+    given = (b'a', b'b', b'c', b'd')
+    expected = b'abcd'
+
+    @asyncio.coroutine
+    def shell(reader, writer):
+        writer.writelines(given)
+        writer.close()
+
+    yield from telnetlib3.create_server(
+        protocol_factory=telnetlib3.BaseServer, host=bind_host, shell=shell,
+        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.05,
+        encoding=False)
+
+    client_reader, client_writer = yield from asyncio.open_connection(
+        host=bind_host, port=unused_tcp_port, loop=event_loop)
+
+    # verify,
+    result = yield from asyncio.wait_for(client_reader.read(), 0.5)
+
+    assert result == expected
+
+
+@pytest.mark.asyncio
+def test_writelines_unicode(event_loop, bind_host, unused_tcp_port):
+    """Exercise unicode interface of writer.writelines() function."""
     given = ('a', 'b', 'c', 'd')
     expected = b'abcd'
 
@@ -304,7 +329,8 @@ def test_writelines(event_loop, bind_host, unused_tcp_port):
 
     yield from telnetlib3.create_server(
         protocol_factory=telnetlib3.BaseServer, host=bind_host, shell=shell,
-        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.05)
+        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.05,
+        encoding='ascii')
 
     client_reader, client_writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)

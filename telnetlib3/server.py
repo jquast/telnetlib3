@@ -366,33 +366,58 @@ class TelnetServer(server_base.BaseServer):
 @asyncio.coroutine
 def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwds):
     """
-    Create a Telnet Server
+    Create a TCP Telnet server.
 
+    :param str host: The host parameter can be a string, in that case the TCP
+        server is bound to host and port. The host parameter can also be a
+        sequence of strings, and in that case the TCP server is bound to all
+        hosts of the sequence.
+    :param int port: listen port for TCP Server.
     :param server_base.BaseServer protocol_factory: An alternate protocol
         factory for the server, when unspecified, :class:`TelnetServer` is
         used.
-    :param str encoding: The default assumed encoding, may be negotiation by
-        client using NEW_ENVIRON value for LANG, or by CHARSET negotiation.
+    :param asyncio.coroutine shell: A coroutine that is called after
+        negotiation completes, receiving arguments ``(reader, writer)``.
+        The reader is a :class:`TelnetStreamReader` instance, the writer is
+        a :class:`TelnetStreamWriter` instance.
+    :param logging.Logger log: target logger, if None is given, one is created
+        using the namespace ``'telnetlib3.server'``.
+    :param str encoding: The default assumed encoding, or ``False`` to disable
+        unicode support.  Encoding may be negotiation to another value by
+        the client through NEW_ENVIRON rfc-1572_ by sending environment value
+        of ``LANG``, or by any legal value for CHARSET rfc-2066_ negotiation.
+
         The server's attached ``reader, writer`` streams accept and return
-        When explicitly set ``False``, the attached streams interfaces become
-        bytes-only.
-    :param str encoding_errors: Same meaning as :class:`codecs.Codec`.
+        unicode, unless this value explicitly set ``False``.  In that case, the
+        attached streams interfaces are bytes-only.
+    :param str encoding_errors: Same meaning as :class:`codecs.Codec`.  Default
+        value is ``strict``.
     :param bool force_binary: When ``True``, the encoding specified is
-        used for both directions without ``BINARY`` negotiation, rfc-856_.
-        This parameter has no effect when ``encoding=False``.
-    :param str term: Default assumed value of writer.get_extra_info('term')
-        until otherwise negotiated by TTYPE.
-    :param int cols: Default assumed value of writer.get_extra_info('cols')
-        until otherwise negotiated by NAWS.
-    :param int rows: Default assumed value of writer.get_extra_info('rows')
-        until otherwise negotiated by NAWS.
+        used for both directions even when BINARY mode, rfc-856_, is not
+        negotiated for the direction specified.  This parameter has no effect
+        when ``encoding=False``.
+    :param str term: Value returned for ``writer.get_extra_info('term')``
+        until negotiated by TTYPE rfc-930_, or NAWS rfc-1572_.  Default value
+        is ``'unknown'``.
+    :param int cols: Value returned for ``writer.get_extra_info('cols')``
+        until negotiated by NAWS rfc-1572_. Default value is 80 columns.
+    :param int rows: Value returned for ``writer.get_extra_info('rows')``
+        until negotiated by NAWS rfc-1572_. Default value is 25 rows.
     :param int timeout: Causes clients to disconnect if idle for this duration,
-        ensuring resources are freed on busy servers.  When explicitly set to
-        ``False``, clients will not be disconnected for timeout.
+        in seconds.  This ensures resources are freed on busy servers.  When
+        explicitly set to ``False``, clients will not be disconnected for
+        timeout. Default value is 300 seconds (5 minutes).
     :param float connect_maxwait: If the remote end is not complaint, or
         otherwise confused by our demands, the shell continues anyway after the
         greater of this value has elapsed.  A client that is not answering
         option negotiation will delay the start of the shell by this amount.
+    :param int limit: The buffer limit for the reader stream.
+
+    :return asyncio.Server: The return value is the same as
+        :func:`loop.create_server`, An object which can be used to stop the
+        service.
+
+    This method is a coroutine.
     """
     protocol_factory = protocol_factory or TelnetServer
     loop = kwds.get('loop', asyncio.get_event_loop())
@@ -463,7 +488,7 @@ def main():
     port = kwargs.pop('port')
 
     log = kwargs['log'] = accessories.make_logger(
-        name=__name__,
+        name='telnetlib3.server',
         loglevel=kwargs.pop('loglevel'),
         logfile=kwargs.pop('logfile'),
         logfmt=kwargs.pop('logfmt'))

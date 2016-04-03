@@ -310,6 +310,9 @@ class TelnetWriter(asyncio.StreamWriter):
                     finally:
                         if self.pending_option.enabled(DO + opt):
                             self.pending_option[DO + opt] = False
+                        # informed client, 'DONT', client responded with
+                        # illegal 'WILL' response, cancel any pending option.
+                        # Very unlikely state!
                         if self.pending_option.enabled(DONT + opt):
                             self.pending_option[DONT + opt] = False
                 else:
@@ -566,7 +569,7 @@ class TelnetWriter(asyncio.StreamWriter):
     def request_tspeed(self):
         """ .. method:: request_tspeed() -> bool
 
-            Send IAC-SB-TSPEED-SEND sub-negotiation (rfc1079) only if
+            Send IAC-SB-TSPEED-SEND sub-negotiation, rfc-1079_ only if
             IAC-WILL-TSPEED has been received. Returns True if tspeed
             request was sent.
         """
@@ -663,7 +666,7 @@ class TelnetWriter(asyncio.StreamWriter):
     def request_xdisploc(self):
         """ .. method:: request_xdisploc() -> bool
 
-            Send XDISPLOC, SEND sub-negotiation, rfc1086.
+            Send XDISPLOC, SEND sub-negotiation, rfc-1086_.
             Returns True if request is valid for telnet state, and was sent.
         """
         assert self.server, (
@@ -1577,14 +1580,19 @@ class TelnetWriter(asyncio.StreamWriter):
         """
         cmd = buf.popleft()
         opt = buf.popleft()
+        opt_kind = 'IS' if opt == IS else 'INFO' if opt == INFO else 'SEND'
         assert cmd == XDISPLOC, name_command(cmd)
         assert opt in (IS, SEND), opt
         if opt == IS:
+            assert self.server, ('SE: cannot recv from server: {} {}'
+                                 .format(name_command(cmd), opt,))
             xdisploc_str = b''.join(buf).decode('ascii')
             self.log.debug('recv IAC SB XDISPLOC IS {0!r} IAC SE'
                            .format(xdisploc_str))
             self._ext_callback[XDISPLOC](xdisploc_str)
         elif opt == SEND:
+            assert self.client, ('SE: cannot recv from client: {} {}'
+                                 .format(name_command(cmd), opt,))
             xdisploc_str = self._ext_send_callback[XDISPLOC]().encode('ascii')
             response = [IAC, SB, XDISPLOC, IS, xdisploc_str, IAC, SE]
             self.log.debug('send IAC SB XDISPLOC IS {0!r} IAC SE'
@@ -1598,14 +1606,19 @@ class TelnetWriter(asyncio.StreamWriter):
         """
         cmd = buf.popleft()
         opt = buf.popleft()
+        opt_kind = 'IS' if opt == IS else 'INFO' if opt == INFO else 'SEND'
         assert cmd == TTYPE, name_command(cmd)
         assert opt in (IS, SEND), opt
         if opt == IS:
+            assert self.server, ('SE: cannot recv from server: {} {}'
+                                 .format(name_command(cmd), opt,))
             ttype_str = b''.join(buf).decode('ascii')
             self.log.debug('recv IAC SB TTYPE IS {0!r}'
                            .format(ttype_str))
             self._ext_callback[TTYPE](ttype_str)
         elif opt == SEND:
+            assert self.client, ('SE: cannot recv from client: {} {}'
+                                 .format(name_command(cmd), opt,))
             ttype_str = self._ext_send_callback[TTYPE]().encode('ascii')
             response = [IAC, SB, TTYPE, IS, ttype_str, IAC, SE]
             self.log.debug('send IAC SB TTYPE IS {0!r} IAC SE'

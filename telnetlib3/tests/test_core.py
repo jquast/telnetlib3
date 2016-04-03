@@ -32,7 +32,7 @@ def test_open_connection(bind_host, unused_tcp_port):
     """Exercise telnetlib3.open_connection with default options."""
     _waiter = asyncio.Future()
     yield from telnetlib3.create_server(bind_host, unused_tcp_port,
-                                        waiter_connected=_waiter,
+                                        _waiter_connected=_waiter,
                                         connect_maxwait=0.05)
     client_reader, client_writer = yield from telnetlib3.open_connection(
         bind_host, unused_tcp_port, connect_minwait=0.05)
@@ -83,7 +83,7 @@ def test_telnet_server_open_close(
     # given,
     _waiter = asyncio.Future()
     yield from telnetlib3.create_server(
-        waiter_connected=_waiter,
+        _waiter_connected=_waiter,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop)
 
@@ -186,7 +186,7 @@ def test_telnet_server_closed_by_client(
     _waiter = asyncio.Future()
 
     yield from telnetlib3.create_server(
-        waiter_closed=_waiter,
+        _waiter_closed=_waiter,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop)
 
@@ -214,7 +214,7 @@ def test_telnet_server_eof_by_client(
     _waiter = asyncio.Future()
 
     yield from telnetlib3.create_server(
-        waiter_closed=_waiter,
+        _waiter_closed=_waiter,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop)
 
@@ -240,8 +240,8 @@ def test_telnet_server_closed_by_server(
     _waiter_closed = asyncio.Future()
 
     yield from telnetlib3.create_server(
-        waiter_connected=_waiter_connected,
-        waiter_closed=_waiter_closed,
+        _waiter_connected=_waiter_connected,
+        _waiter_closed=_waiter_closed,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop)
 
@@ -280,8 +280,8 @@ def test_telnet_server_idle_duration(
     _waiter_closed = asyncio.Future()
 
     yield from telnetlib3.create_server(
-        waiter_connected=_waiter_connected,
-        waiter_closed=_waiter_closed,
+        _waiter_connected=_waiter_connected,
+        _waiter_closed=_waiter_closed,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop)
 
@@ -333,8 +333,8 @@ def test_telnet_server_closed_by_error(
     _waiter_closed = asyncio.Future()
 
     yield from telnetlib3.create_server(
-        waiter_connected=_waiter_connected,
-        waiter_closed=_waiter_closed,
+        _waiter_connected=_waiter_connected,
+        _waiter_closed=_waiter_closed,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop)
 
@@ -383,7 +383,7 @@ def test_telnet_server_negotiation_fail(
     _waiter_connected = asyncio.Future()
 
     yield from telnetlib3.create_server(
-        waiter_connected=_waiter_connected,
+        _waiter_connected=_waiter_connected,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop, connect_maxwait=0.05)
 

@@ -25,26 +25,27 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     _writer_factory_encoding = TelnetWriterUnicode
 
     def __init__(self, shell=None, log=None, loop=None,
-                 waiter_connected=None, waiter_closed=None,
                  encoding='utf8', encoding_errors='strict',
                  force_binary=False, connect_minwait=1.0,
-                 connect_maxwait=4.0):
+                 connect_maxwait=4.0, limit=None,
+                 waiter_closed=None, _waiter_connected=None):
         """Class initializer."""
         super().__init__(loop=loop)
-        self.log = log or logging.getLogger(__name__)
+        self.log = log or logging.getLogger('telnetlib3.client')
         self._loop = loop or asyncio.get_event_loop()
         self.default_encoding = encoding
         self._encoding_errors = encoding_errors
         self.force_binary = force_binary
         self._extra = dict()
-        self.waiter_connected = waiter_connected or asyncio.Future()
         self.waiter_closed = waiter_closed or asyncio.Future()
+        self._waiter_connected = _waiter_connected or asyncio.Future()
         self._tasks = []
         self.shell = shell
         self.connect_minwait = connect_minwait
         self.connect_maxwait = connect_maxwait
         self.reader = None
         self.writer = None
+        self._limit = limit
 
     # Base protocol methods
 
@@ -77,14 +78,14 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             task.cancel()
 
         # close transport (may already be closed), set waiter_closed and
-        # cancel waiter_connected.
+        # cancel Future _waiter_connected.
         self._transport.close()
-        if not self.waiter_connected.done():
-            # strangely, for symmetry, our 'waiter_connected' must be set if
+        if not self._waiter_connected.done():
+            # strangely, for symmetry, our '_waiter_connected' must be set if
             # we are disconnected before negotiation may be considered
             # complete.  We set waiter_closed, and any function consuming
             # the StreamReader will receive eof.
-            self.waiter_connected.set_result(self)
+            self._waiter_connected.set_result(self)
 
         if self.shell is None:
             # when a shell is defined, we allow the completion of the coroutine
@@ -106,23 +107,32 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         reader_factory = self._reader_factory
         writer_factory = self._writer_factory
-        kwds = {'loop': self._loop}
+
+        reader_kwds = {'loop': self._loop}
+        writer_kwds = {'loop': self._loop}
+
         if self.default_encoding:
-            kwds['fn_encoding'] = self.encoding
-            kwds['encoding_errors'] = self._encoding_errors
+            reader_kwds['fn_encoding'] = self.encoding
+            writer_kwds['fn_encoding'] = self.encoding
+            reader_kwds['encoding_errors'] = self._encoding_errors
+            writer_kwds['encoding_errors'] = self._encoding_errors
             reader_factory = self._reader_factory_encoding
             writer_factory = self._writer_factory_encoding
 
-        self.reader = reader_factory(**kwds)
+        if self._limit:
+            reader_kwds['limit'] = self._limit
+
+
+        self.reader = reader_factory(**reader_kwds)
 
         self.writer = writer_factory(
             transport=transport, protocol=self,
             reader=self.reader, client=True,
-            log=self.log, **kwds)
+            log=self.log, **writer_kwds)
 
         self.log.info('Connected to %s', self)
 
-        self.waiter_connected.add_done_callback(self.begin_shell)
+        self._waiter_connected.add_done_callback(self.begin_shell)
         self._loop.call_soon(self.begin_negotiation)
 
     def begin_shell(self, result):
@@ -168,7 +178,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         # until negotiation is complete, re-check negotiation aggressively
         # upon receipt of any command byte.
-        if not self.waiter_connected.done() and cmd_received:
+        if not self._waiter_connected.done() and cmd_received:
             self._check_negotiation_timer()
 
     # public properties
@@ -228,7 +238,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         Method is called on each new command byte processed until negotiation
         is considered final, or after :attr:`connect_maxwait` has elapsed,
-        setting :attr:`waiter_connected` to value ``self`` when complete.
+        setting :attr:`_waiter_connected` to value ``self`` when complete.
 
         This method returns False until :attr:`connect_minwait` has elapsed,
         ensuring the server may batch telnet negotiation demands without
@@ -260,7 +270,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         if self.check_negotiation(final=final):
             self.log.debug('negotiation complete after {:1.2f}s.'
                            .format(self.duration))
-            self.waiter_connected.set_result(self)
+            self._waiter_connected.set_result(self)
         elif final:
             self.log.debug('negotiation failed after {:1.2f}s.'
                            .format(self.duration))
@@ -269,7 +279,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                        self.writer.pending_option.items()
                        if pending]
             self.log.debug('failed-reply: {0!r}'.format(', '.join(_failed)))
-            self.waiter_connected.set_result(self)
+            self._waiter_connected.set_result(self)
         else:
             # keep re-queuing until complete.  Aggressively re-queue until
             # connect_minwait, or connect_maxwait, whichever occurs next

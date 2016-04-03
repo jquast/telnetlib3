@@ -90,8 +90,8 @@ class TelnetReader(asyncio.StreamReader):
 
     def __repr__(self):
         """Description of stream encoding state."""
-        return ('<TelnetReader encoding=False buflen={0} eof={self._eof}>'
-                .format(len(self._buffer), self=self))
+        return ('<TelnetReader encoding=False limit={0} buflen={1} eof={self._eof}>'
+                .format(self._limit, len(self._buffer), self=self))
 
 
 class TelnetReaderUnicode(asyncio.StreamReader):
@@ -235,7 +235,7 @@ class TelnetReaderUnicode(asyncio.StreamReader):
                 if not block:
                     # eof
                     break
-                blocks.append(self.decode(bytes(block)))
+                blocks.append(block)
             return u''.join(blocks)
 
         else:
@@ -285,6 +285,6 @@ class TelnetReaderUnicode(asyncio.StreamReader):
         """Description of stream encoding state."""
         encoding = self.fn_encoding(incoming=True)
 
-        return ('<TelnetReaderUnicode encoding={0!r} buflen={1} eof={self._eof}>'
-                .format(encoding, len(self._buffer), self=self))
+        return ('<TelnetReaderUnicode encoding={0!r} limit={1} buflen={2} eof={self._eof}>'
+                .format(encoding, self._limit, len(self._buffer), self=self))
 

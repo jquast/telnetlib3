@@ -217,19 +217,81 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
                     force_binary=False, term='unknown', cols=80, rows=25,
                     tspeed=(38400, 38400), xdisploc='', shell=None,
                     connect_minwait=1.0, connect_maxwait=4.0,
-                    waiter_closed=None, waiter_connected=None):
+                    waiter_closed=None, _waiter_connected=None,
+                    limit=None):
     """
-    :param client_base.BaseClient client_factory: TelnetClient class instance,
-        when ``None``, :class:`TelnetTerminalClient` is used when *stdin* is
-        attached to a terminal, :class:`TelnetClient` otherwise.
-    :param float connect_minwait: The client allows any telnet negotiations to
-        be demanded by the server within this period of time before the shell
-        begins.  These demands are usually made immediately on connection.
-        A server that does not make any telnet demands, such as a non-telnet
-        server, will delay the shell for this amount of time.
+    Connect to a TCP Telnet server as a Telnet client.
+
+    :param str host: Remote Internet TCP Server host.
+    :param int port: Remote Internet host TCP port.
+    :param client_base.BaseClient client_factory: Client connection class
+        factory.  When ``None``, :class:`TelnetTerminalClient` is used when
+        *stdin* is attached to a terminal, :class:`TelnetClient` otherwise.
+    :param asyncio.base_events.BaseEventLoop loop: set the event loop to use.
+        The return value of :func:`asyncio.get_event_loop` is used when unset.
+    :param int family: Same meaning as
+        :meth:`asyncio.BaseEventLoop.create_connection`.
+    :param int flags: Same meaning as
+        :meth:`asyncio.BaseEventLoop.create_connection`.
+    :param tuple local_addr: Same meaning as
+        :meth:`asyncio.BaseEventLoop.create_connection`.
+    :param logging.Logger log: target logger, if None is given, one is created
+        using the namespace ``'telnetlib3.server'``.
+    :param str encoding: The default assumed encoding, or ``False`` to disable
+        unicode support.  This value is used for decoding bytes received by and
+        encoding bytes transmitted to the Server.  These values are preferred
+        in response to NEW_ENVIRON rfc-1572_ as environment value ``LANG``, and
+        by CHARSET rfc-2066_ negotiation.
+
+        The server's attached ``reader, writer`` streams accept and return
+        unicode, unless this value explicitly set ``False``.  In that case, the
+        attached streams interfaces are bytes-only.
+
+    :param str term: Terminal type sent for requests of TTYPE, rfc-930_ or as
+        Environment value TERM by NEW_ENVIRON negotiation, rfc-1672_.
+    :param int cols: Client window dimension sent as Environment value COLUMNS
+        by NEW_ENVIRON negotiation, rfc-1672_ or NAWS rfc-1073_.
+    :param int rows: Client window dimension sent as Environment value LINES by
+        NEW_ENVIRON negotiation, rfc-1672_ or NAWS rfc-1073_.
+    :param tuple tspeed: Tuple of client BPS line speed in form ``(rx, tx``)
+        for receive and transmit, respectively.  Sent when requested by TSPEED,
+        rfc-1079_.
+    :param str xdisploc: String transmitted in response for request of
+        XDISPLOC, rfc-1086_ by server (X11).
+    :param asyncio.coroutine shell: A coroutine that is called after
+        negotiation completes, receiving arguments ``(reader, writer)``.
+        The reader is a :class:`TelnetStreamReader` instance, the writer is
+        a :class:`TelnetStreamWriter` instance.
+    :param float connect_minwait: The client allows any additional telnet
+        negotiations to be demanded by the server within this period of time
+        before launching the shell.  Servers should assert desired negotiation
+        on-connect and in response to 1 or 2 round trips.
+
+        A server that does not make any telnet demands, such as a TCP server
+        that is not a telnet server will delay the execution of ``shell`` for
+        exactly this amount of time.
+    :param float connect_maxwait: If the remote end is not complaint, or
+        otherwise confused by our demands and failing to reply to pending
+        negotiations, the shell continues anyway after the greater of this
+        value or ``connect_minwait`` elapsed.
+    :param bool force_binary: When ``True``, the encoding specified is used for
+        both directions even when failing ``BINARY`` negotiation, rfc-856_. 
+        This parameter has no effect when ``encoding=False``.
+    :param str encoding_errors: Same meaning as :class:`codecs.Codec`.
+    :param int timeout: Causes clients to disconnect if idle for this duration,
+        ensuring resources are freed on busy servers.  When explicitly set to
+        ``False``, clients will not be disconnected for timeout.
     :param float connect_maxwait: If the remote end is not complaint, or
         otherwise confused by our demands, the shell continues anyway after the
-        greater of this value or ``connect_minwait``.
+        greater of this value has elapsed.  A client that is not answering
+        option negotiation will delay the start of the shell by this amount.
+
+    :param int limit: The buffer limit for reader stream.
+    :return (reader, writer): The reader is a :class:`TelnetStreamReader`
+        instance, the writer is a :class:`TelnetStreamWriter` instance.
+
+
+    This method is a coroutine
     """
     log = log or logging.getLogger(__name__)
     loop = loop or asyncio.get_event_loop()
@@ -245,13 +307,14 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
             force_binary=force_binary, term=term, cols=cols, rows=rows,
             tspeed=tspeed, xdisploc=xdisploc, shell=shell,
             connect_minwait=connect_minwait, connect_maxwait=connect_maxwait,
-            waiter_closed=waiter_closed, waiter_connected=waiter_connected)
+            waiter_closed=waiter_closed, _waiter_connected=_waiter_connected,
+            limit=limit)
 
     transport, protocol = yield from loop.create_connection(
         connection_factory, host, port,
         family=family, flags=flags, local_addr=local_addr)
 
-    yield from protocol.waiter_connected
+    yield from protocol._waiter_connected
 
     return protocol.reader, protocol.writer
 

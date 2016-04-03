@@ -89,13 +89,15 @@ else:
         """
         Rudimentary telnet client shell.
 
-        An interactive telnet session must naturally communicate with the
+        An interactive telnet client must naturally communicate with the
         standard in and output file descriptors -- one should be able to
         pipe timed input, just as done by nc(1).
 
-        When standard input is connected to a terminal, the terminal mode is
-        set using :func:`tty.setcbreak`, allowing ``Ctrl - C`` and other
-        signal-generating characters may be used to abort the connection.
+        When standard input is connected to a terminal rather than a pipe,
+        the terminal mode is set using :func:`tty.setcbreak`, allowing
+        key-at-a-time input processing, but ``Ctrl - C`` and other
+        signal-generating characters may be used to quickly abort the
+        connection.
         """
 
         loop = asyncio.get_event_loop()

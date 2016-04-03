@@ -32,7 +32,7 @@ def test_server_demands_remote_linemode_client_agrees(
     yield from telnetlib3.create_server(
         protocol_factory=ServerTestLinemode,
         host=bind_host, port=unused_tcp_port,
-        loop=event_loop, waiter_connected=_waiter)
+        loop=event_loop, _waiter_connected=_waiter)
 
     client_reader, client_writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -86,7 +86,7 @@ def test_server_demands_remote_linemode_client_demands_local(
     yield from telnetlib3.create_server(
         protocol_factory=ServerTestLinemode,
         host=bind_host, port=unused_tcp_port,
-        loop=event_loop, waiter_connected=_waiter)
+        loop=event_loop, _waiter_connected=_waiter)
 
     client_reader, client_writer = yield from asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
