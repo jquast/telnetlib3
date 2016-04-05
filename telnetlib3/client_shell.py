@@ -1,9 +1,10 @@
 # std imports
 import asyncio
-import platform
 import contextlib
 import sys
 
+# local
+from . import accessories
 
 __all__ = ('telnet_client_shell', )
 
@@ -104,8 +105,8 @@ else:
 
         with _set_tty(fobj=sys.stdin, tty_func=tty.setcbreak):
             stdin, stdout = yield from _make_stdio(loop)
-            stdin_task = _make_reader_task(stdin)
-            telnet_task = _make_reader_task(telnet_reader)
+            stdin_task = accessories.make_reader_task(stdin)
+            telnet_task = accessories.make_reader_task(telnet_reader)
             wait_for = set([stdin_task, telnet_task])
             while wait_for:
                 done, pending = yield from asyncio.wait(
@@ -121,7 +122,7 @@ else:
                         telnet_writer.write(inp.decode())
                         if not telnet_writer.will_echo:
                             stdout.write(inp)
-                        stdin_task = _make_reader_task(stdin)
+                        stdin_task = accessories.make_reader_task(stdin)
                         wait_for.add(stdin_task)
 
                 if task == telnet_task:
@@ -134,14 +135,6 @@ else:
                             wait_for.remove(stdin_task)
                     else:
                         stdout.write(out.encode())
-                        telnet_task = _make_reader_task(telnet_reader)
+                        telnet_task = accessories.make_reader_task(telnet_reader)
                         wait_for.add(telnet_task)
 
-
-def _make_reader_task(reader, size=2**12):
-    # schedule coroutine as a task that may be waited on
-    if platform.python_version_tuple() <= ('3', '4', '4'):
-        task = asyncio.async
-    else:
-        task = asyncio.ensure_future
-    return task(reader.read(size))

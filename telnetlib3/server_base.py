@@ -177,12 +177,12 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     # public protocol methods
 
     def __repr__(self):
-        hostport = self._transport.get_extra_info('peername')[:2]
+        hostport = self.get_extra_info('peername')[:2]
         return '<Peer {0} {1}>'.format(*hostport)
 
     def get_extra_info(self, name, default=None):
-        """Get optional server information."""
-        return self._extra.get(name, default)
+        """Get optional server protocol or transport information."""
+        return self._extra.get(name, self._transport._extra.get(name, default))
 
     def begin_negotiation(self):
         """

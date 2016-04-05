@@ -1,6 +1,9 @@
 """Accessory functions."""
 # std imports
+import importlib
+import platform
 import logging
+import asyncio
 
 __all__ = ('name_unicode', 'eightbits', 'make_logger', 'get_encoding')
 
@@ -74,7 +77,15 @@ def repr_mapping(mapping):
 def function_lookup(pymod_path):
     """ Return callable function target from standard module.function path. """
     module_name, func_name = pymod_path.rsplit('.', 1)
-    module = __import__(module_name)
+    module = importlib.import_module(module_name)
     shell_function = getattr(module, func_name)
     assert callable(shell_function), shell_function
     return shell_function
+
+def make_reader_task(reader, size=2**12):
+    """ Return asyncio task wrapping coroutine of reader.read(size). """
+    if platform.python_version_tuple() <= ('3', '4', '4'):
+        task = asyncio.async
+    else:
+        task = asyncio.ensure_future
+    return task(reader.read(size))

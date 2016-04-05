@@ -2,10 +2,6 @@
     :alt: Travis Continuous Integration
     :target: https://travis-ci.org/jquast/telnetlib3/
 
-.. image:: https://img.shields.io/teamcity/https/teamcity-master.pexpect.org/s/Telnetlib3_FullBuild.svg
-    :alt: TeamCity Build status
-    :target: https://teamcity-master.pexpect.org/viewType.html?buildTypeId=Telnetlib3_FullBuild&branch_Telnetlib3=%3Cdefault%3E&tab=buildTypeStatusDiv
-
 .. image:: https://coveralls.io/repos/jquast/telnetlib3/badge.svg?branch=master&service=github
     :alt: Coveralls Code Coverage
     :target: https://coveralls.io/github/jquast/telnetlib3?branch=master
@@ -23,18 +19,18 @@
     :target: https://gitter.im/jquast/telnetlib3
 
 
-About
-=====
+Introduction
+============
 
-telnetlib3 is a Telnet Client and Server Protocol library for python.
+telnetlib3 is a Telnet Client and Server library for python.  This project
+requires python 3.3 and later, using the asyncio_ module.
 
-This project requires the asyncio_ module, available as a module in python
-3.3, and as a standard module for all versions of made python 3.4 and later.
+.. _asyncio: http://docs.python.org/3.4/library/asyncio.html
 
-Usage
-=====
+Quick Example
+-------------
 
-Basic Telnet Server using Streams interface:
+Authoring a Telnet Server using Streams interface that offers a basic war game:
 
 .. code-block:: python
 
@@ -56,7 +52,7 @@ Basic Telnet Server using Streams interface:
     server = loop.run_until_complete(coro)
     loop.run_until_complete(server.wait_closed())
 
-Basic Telnet Client using Streams interface:
+Authoring a Telnet Client that plays the war game with this server:
 
 .. code-block:: python
 
@@ -68,11 +64,14 @@ Basic Telnet Client using Streams interface:
         while True:
             outp = yield from reader.read(1024)
             if not outp:
-                break
+                return
+
             print(outp, end='', flush=True)
+
             if '?' in outp:
                 # reply all questions with 'y'.
                 writer.write('y')
+
         print()
               
     loop = asyncio.get_event_loop()
@@ -80,24 +79,77 @@ Basic Telnet Client using Streams interface:
     reader, _ = loop.run_until_complete(coro)
     loop.run_until_complete(reader.protocol.waiter_closed)
 
-Please note that using the ``print()`` function from a coroutine may raise
-a ``BlockingIOError`` when a large amount of data is printed -- for this
-demonstration shell, it behaves fine.
+Command-line
+------------
 
-Scripts
-=======
+Two command-line scripts are distributed with this package.  These should be
+suitable for conn
 
 ``telnetlib3-client``
+
   Small demonstrating terminal telnet client.  This opens *stdin* and *stdout*
   for asynchronous I/O, forwarding input to the writer interface, and printing
   output received from the reader interface.
 
 ``telnetlib3-server``
+
   Telnet server providing the default debugging shell.  This provides a simple
   shell server that allows introspection of the session's values.
 
-The default telnet server or client shell function may be specified as
-command line parameter in form of ``--shell=my_module.my_shell`` This is
-coroutine defined as demonstrated in the above examples.
+Both command-line scripts accept argument ``--shell=my_module.fn_shell``
+describing a python module path to a coroutine of signature
+``shell(reader, writer)``.
 
-.. _asyncio: http://docs.python.org/3.4/library/asyncio.html
+Features
+--------
+
+The following RFC specifications are implemented:
+
+* `rfc-727`_, "Telnet Logout Option," Apr 1977.
+* `rfc-779`_, "Telnet Send-Location Option", Apr 1981.
+* `rfc-854`_, "Telnet Protocol Specification", May 1983.
+* `rfc-855`_, "Telnet Option Specifications", May 1983.
+* `rfc-856`_, "Telnet Binary Transmission", May 1983.
+* `rfc-857`_, "Telnet Echo Option", May 1983.
+* `rfc-858`_, "Telnet Suppress Go Ahead Option", May 1983.
+* `rfc-859`_, "Telnet Status Option", May 1983.
+* `rfc-860`_, "Telnet Timing mark Option", May 1983.
+* `rfc-885`_, "Telnet End of Record Option", Dec 1983.
+* `rfc-1073`_, "Telnet Window Size Option", Oct 1988.
+* `rfc-1079`_, "Telnet Terminal Speed Option", Dec 1988.
+* `rfc-1091`_, "Telnet Terminal-Type Option", Feb 1989.
+* `rfc-1096`_, "Telnet X Display Location Option", Mar 1989.
+* `rfc-1123`_, "Requirements for Internet Hosts", Oct 1989.
+* `rfc-1184`_, "Telnet Linemode Option (extended options)", Oct 1990.
+* `rfc-1372`_, "Telnet Remote Flow Control Option", Oct 1992.
+* `rfc-1408`_, "Telnet Environment Option", Jan 1993.
+* `rfc-1571`_, "Telnet Environment Option Interoperability Issues", Jan 1994.
+* `rfc-1572`_, "Telnet Environment Option", Jan 1994.
+* `rfc-2066`_, "Telnet Charset Option", Jan 1997.
+
+.. _rfc-727: https://www.rfc-editor.org/rfc/rfc727.txt
+.. _rfc-779: https://www.rfc-editor.org/rfc/rfc779.txt
+.. _rfc-854: https://www.rfc-editor.org/rfc/rfc854.txt
+.. _rfc-855: https://www.rfc-editor.org/rfc/rfc855.txt
+.. _rfc-856: https://www.rfc-editor.org/rfc/rfc856.txt
+.. _rfc-857: https://www.rfc-editor.org/rfc/rfc857.txt
+.. _rfc-858: https://www.rfc-editor.org/rfc/rfc858.txt
+.. _rfc-859: https://www.rfc-editor.org/rfc/rfc859.txt
+.. _rfc-860: https://www.rfc-editor.org/rfc/rfc860.txt
+.. _rfc-885: https://www.rfc-editor.org/rfc/rfc885.txt
+.. _rfc-1073: https://www.rfc-editor.org/rfc/rfc1073.txt
+.. _rfc-1079: https://www.rfc-editor.org/rfc/rfc1079.txt
+.. _rfc-1091: https://www.rfc-editor.org/rfc/rfc1091.txt
+.. _rfc-1096: https://www.rfc-editor.org/rfc/rfc1096.txt
+.. _rfc-1123: https://www.rfc-editor.org/rfc/rfc1123.txt
+.. _rfc-1184: https://www.rfc-editor.org/rfc/rfc1184.txt
+.. _rfc-1372: https://www.rfc-editor.org/rfc/rfc1372.txt
+.. _rfc-1408: https://www.rfc-editor.org/rfc/rfc1408.txt
+.. _rfc-1571: https://www.rfc-editor.org/rfc/rfc1571.txt
+.. _rfc-1572: https://www.rfc-editor.org/rfc/rfc1572.txt
+.. _rfc-2066: https://www.rfc-editor.org/rfc/rfc2066.txt
+
+Further Reading
+---------------
+
+Further documentation available at https://telnetlib3.readthedocs.org/

@@ -1,22 +1,22 @@
 RFCs Implemented
 ================
 
-* `rfc-727`_ "Telnet Logout Option," Apr 1977.
-* `rfc-779`_ "Telnet Send-Location Option", Apr 1981.
-* `rfc-854`_ "Telnet Protocol Specification", May 1983.
-* `rfc-855`_ "Telnet Option Specifications", May 1983.
-* `rfc-856`_ "Telnet Binary Transmission", May 1983.
-* `rfc-857`_ "Telnet Echo Option", May 1983.
-* `rfc-858`_ "Telnet Suppress Go Ahead Option", May 1983.
-* `rfc-859`_ "Telnet Status Option", May 1983.
-* `rfc-860`_ "Telnet Timing mark Option", May 1983.
-* `rfc-885`_ "Telnet End of Record Option", Dec 1983.
+* `rfc-727`_, "Telnet Logout Option," Apr 1977.
+* `rfc-779`_, "Telnet Send-Location Option", Apr 1981.
+* `rfc-854`_, "Telnet Protocol Specification", May 1983.
+* `rfc-855`_, "Telnet Option Specifications", May 1983.
+* `rfc-856`_, "Telnet Binary Transmission", May 1983.
+* `rfc-857`_, "Telnet Echo Option", May 1983.
+* `rfc-858`_, "Telnet Suppress Go Ahead Option", May 1983.
+* `rfc-859`_, "Telnet Status Option", May 1983.
+* `rfc-860`_, "Telnet Timing mark Option", May 1983.
+* `rfc-885`_, "Telnet End of Record Option", Dec 1983.
 * `rfc-1073`_, "Telnet Window Size Option", Oct 1988.
 * `rfc-1079`_, "Telnet Terminal Speed Option", Dec 1988.
 * `rfc-1091`_, "Telnet Terminal-Type Option", Feb 1989.
+* `rfc-1096`_, "Telnet X Display Location Option", Mar 1989.
 * `rfc-1123`_, "Requirements for Internet Hosts", Oct 1989.
 * `rfc-1184`_, "Telnet Linemode Option (extended options)", Oct 1990.
-* `rfc-1096`_, "Telnet X Display Location Option", Mar 1989.
 * `rfc-1372`_, "Telnet Remote Flow Control Option", Oct 1992.
 * `rfc-1408`_, "Telnet Environment Option", Jan 1993.
 * `rfc-1571`_, "Telnet Environment Option Interoperability Issues", Jan 1994.
