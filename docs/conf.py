@@ -30,9 +30,10 @@ github_project_url = "https://github.com/jquast/telnetlib3"
 # https://groups.google.com/forum/#!topic/sphinx-users/GNx7PVXoZIU
 # http://stackoverflow.com/a/28778969
 #
-def _warn_node(self, msg, node):
+def _warn_node(self, msg, node, **kwargs):
     if not msg.startswith('nonlocal image URI found:'):
-        self._warnfunc(msg, '%s:%s' % get_source_line(node))
+        self._warnfunc(msg, '%s:%s' % get_source_line(node), **kwargs)
+
 sphinx.environment.BuildEnvironment.warn_node = _warn_node
 
 # -- General configuration ----------------------------------------------------
