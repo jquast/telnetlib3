@@ -122,7 +122,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         if self._limit:
             reader_kwds['limit'] = self._limit
 
-
         self.reader = reader_factory(**reader_kwds)
 
         self.writer = writer_factory(

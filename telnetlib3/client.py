@@ -290,7 +290,6 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
     :return (reader, writer): The reader is a :class:`TelnetStreamReader`
         instance, the writer is a :class:`TelnetStreamWriter` instance.
 
-
     This method is a coroutine
     """
     log = log or logging.getLogger(__name__)
