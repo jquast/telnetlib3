@@ -18,22 +18,7 @@ HERE = os.path.dirname(__file__)
 sys.path.insert(0, os.path.abspath('sphinxext'))  # for github.py
 github_project_url = "https://github.com/jquast/telnetlib3"
 
-
-# ! Monkey Patching!
-#
-# Seems many folks beside ourselves would like to see external image urls
-# **not** generated as a warning. "nonlocal image URI found": we want our
-# "badge icons" on pypi and github, but we don't want to miss out on any
-# other "warnings as errors" which we wish to fail the build if it happens.
-#
-# https://github.com/SuperCowPowers/workbench/issues/172
-# https://groups.google.com/forum/#!topic/sphinx-users/GNx7PVXoZIU
-# http://stackoverflow.com/a/28778969
-#
-def _warn_node(self, msg, node):
-    if not msg.startswith('nonlocal image URI found:'):
-        self._warnfunc(msg, '%s:%s' % get_source_line(node))
-sphinx.environment.BuildEnvironment.warn_node = _warn_node
+suppress_warnings = ['image.nonlocal_uri']
 
 # -- General configuration ----------------------------------------------------
 
