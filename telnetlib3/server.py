@@ -9,6 +9,7 @@ variables, terminal type name, and to automatically close connections clients
 after an idle period.
 """
 # std imports
+import collections
 import argparse
 import asyncio
 import logging
@@ -18,7 +19,15 @@ import signal
 from . import server_base
 from . import accessories
 
-__all__ = ('TelnetServer', 'create_server')
+__all__ = ('TelnetServer', 'create_server', 'run_server', 'parse_server_args')
+
+CONFIG = collections.namedtuple('CONFIG', [
+    'host', 'port', 'loglevel', 'logfile', 'logfmt', 'shell', 'encoding',
+    'force_binary', 'timeout', 'connect_maxwait'])(
+        host='localhost', port=6023, loglevel='info',
+        logfile=None, logfmt=accessories._DEFAULT_LOGFMT ,
+        shell=accessories.function_lookup('telnetlib3.telnet_server_shell'),
+        encoding='utf8', force_binary=False, timeout=300, connect_maxwait=4.0)
 
 
 class TelnetServer(server_base.BaseServer):
@@ -135,7 +144,7 @@ class TelnetServer(server_base.BaseServer):
         :raises TypeError: when a direction argument, either ``outgoing``
             or ``incoming``, was not set ``True``.
         :returns: ``'US-ASCII'`` for the directions indicated, unless
-            ``BINARY`` rfc-856_ has been negotiated for the direction
+            ``BINARY`` :rfc:`856` has been negotiated for the direction
             indicated or :attr`force_binary` is set ``True``.
         :rtype: str
 
@@ -211,7 +220,7 @@ class TelnetServer(server_base.BaseServer):
 
     def on_naws(self, rows, cols):
         """
-        Callback receives NAWS response, rfc-1073_.
+        Callback receives NAWS response, :rfc:`1073`.
 
         :param int rows: screen size, by number of cells in height.
         :param int cols: screen size, by number of cells in width.
@@ -220,7 +229,7 @@ class TelnetServer(server_base.BaseServer):
 
     def on_request_environ(self):
         """
-        Definition for NEW_ENVIRON request of client, rfc-1572_.
+        Definition for NEW_ENVIRON request of client, :rfc:`1572`.
 
         This method is a callback from :meth:`TelnetWriter.request_environ`,
         first entered on receipt of (WILL, NEW_ENVIRON) by server.  The return
@@ -242,7 +251,7 @@ class TelnetServer(server_base.BaseServer):
         return ['LANG', 'TERM', 'COLUMNS', 'LINES', 'DISPLAY', VAR, USERVAR]
 
     def on_environ(self, mapping):
-        """Callback receives NEW_ENVIRON response, rfc-1572_."""
+        """Callback receives NEW_ENVIRON response, :rfc:`1572`."""
         # A well-formed client responds with empty values for variables to
         # mean "no value".  They might have it, they just may not wish to
         # divulge that information.  We pop these keys as a side effect in
@@ -263,7 +272,7 @@ class TelnetServer(server_base.BaseServer):
 
     def on_request_charset(self):
         """
-        Definition for CHARSET request by client, rfc-2066_.
+        Definition for CHARSET request by client, :rfc:`2066`.
 
         This method is a callback from :meth:`TelnetWriter.request_charset`,
         first entered on receipt of (WILL, CHARSET) by server.  The return
@@ -294,15 +303,15 @@ class TelnetServer(server_base.BaseServer):
                 )]
 
     def on_charset(self, charset):
-        """Callback for CHARSET response, rfc-2066_."""
+        """Callback for CHARSET response, :rfc:`2066`."""
         self._extra['charset'] = charset
 
     def on_tspeed(self, rx, tx):
-        """Callback for TSPEED response, rfc-1079_."""
+        """Callback for TSPEED response, :rfc:`1079`."""
         self._extra['tspeed'] = '{0},{1}'.format(rx, tx)
 
     def on_ttype(self, ttype):
-        """Callback for TTYPE response, rfc-930_."""
+        """Callback for TTYPE response, :rfc:`930`."""
         # TTYPE may be requested multiple times, we honor this system and
         # attempt to cause the client to cycle, as their first response may
         # not be their most significant. All responses held as 'ttype{n}',
@@ -345,7 +354,7 @@ class TelnetServer(server_base.BaseServer):
             self.writer.request_ttype()
 
     def on_xdisploc(self, xdisploc):
-        """Callback for XDISPLOC response, rfc-1096_."""
+        """Callback for XDISPLOC response, :rfc:`1096`."""
         self._extra['xdisploc'] = xdisploc
 
     # private methods
@@ -384,8 +393,8 @@ def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwds):
         using the namespace ``'telnetlib3.server'``.
     :param str encoding: The default assumed encoding, or ``False`` to disable
         unicode support.  Encoding may be negotiation to another value by
-        the client through NEW_ENVIRON rfc-1572_ by sending environment value
-        of ``LANG``, or by any legal value for CHARSET rfc-2066_ negotiation.
+        the client through NEW_ENVIRON :rfc:`1572` by sending environment value
+        of ``LANG``, or by any legal value for CHARSET :rfc:`2066` negotiation.
 
         The server's attached ``reader, writer`` streams accept and return
         unicode, unless this value explicitly set ``False``.  In that case, the
@@ -393,16 +402,16 @@ def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwds):
     :param str encoding_errors: Same meaning as :class:`codecs.Codec`.  Default
         value is ``strict``.
     :param bool force_binary: When ``True``, the encoding specified is
-        used for both directions even when BINARY mode, rfc-856_, is not
+        used for both directions even when BINARY mode, :rfc:`856`, is not
         negotiated for the direction specified.  This parameter has no effect
         when ``encoding=False``.
     :param str term: Value returned for ``writer.get_extra_info('term')``
-        until negotiated by TTYPE rfc-930_, or NAWS rfc-1572_.  Default value
+        until negotiated by TTYPE :rfc:`930`, or NAWS :rfc:`1572`.  Default value
         is ``'unknown'``.
     :param int cols: Value returned for ``writer.get_extra_info('cols')``
-        until negotiated by NAWS rfc-1572_. Default value is 80 columns.
+        until negotiated by NAWS :rfc:`1572`. Default value is 80 columns.
     :param int rows: Value returned for ``writer.get_extra_info('rows')``
-        until negotiated by NAWS rfc-1572_. Default value is 25 rows.
+        until negotiated by NAWS :rfc:`1572`. Default value is 25 rows.
     :param int timeout: Causes clients to disconnect if idle for this duration,
         in seconds.  This ensures resources are freed on busy servers.  When
         explicitly set to ``False``, clients will not be disconnected for
@@ -417,56 +426,13 @@ def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwds):
         :func:`loop.create_server`, An object which can be used to stop the
         service.
 
-    This method is a coroutine.
+    This function is a :func:`~asyncio.coroutine`.
     """
     protocol_factory = protocol_factory or TelnetServer
     loop = kwds.get('loop', asyncio.get_event_loop())
 
     return (yield from loop.create_server(
         lambda: protocol_factory(**kwds), host, port))
-
-
-def _get_argument_parser():
-    parser = argparse.ArgumentParser(
-        description="Telnet protocol server",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('host', nargs='?', default='localhost',
-                        help='bind address')
-    parser.add_argument('port', nargs='?', default=6023, type=int,
-                        help='bind port')
-    parser.add_argument('--loglevel', default='info',
-                        help='level name')
-    parser.add_argument('--logfile',
-                        help='filepath')
-    parser.add_argument('--logfmt', default=accessories._DEFAULT_LOGFMT,
-                        help='log format')
-    parser.add_argument('--shell', default='telnetlib3.telnet_server_shell',
-                        help='module.function_name')
-    parser.add_argument('--encoding', default='utf8',
-                        help='encoding name')
-    parser.add_argument('--force-binary', action='store_true',
-                        help='force binary transmission')
-    parser.add_argument('--timeout', default=300, type=int,
-                        help='idle disconnect (0 disables)')
-    parser.add_argument('--connect-maxwait', default=4.0, type=float,
-                        help='timeout for pending negotiation')
-    return parser
-
-
-def _transform_args(args):
-    # TODO: Connect as exit(main(**parse_args(sys.argv)))
-    return {
-        'host': args.host,
-        'port': args.port,
-        'encoding': args.encoding,
-        'force_binary': args.force_binary,
-        'timeout': args.timeout,
-        'loglevel': args.loglevel,
-        'logfile': args.logfile,
-        'logfmt': args.logfmt,
-        'shell': accessories.function_lookup(args.shell),
-        'connect_maxwait': args.connect_maxwait,
-    }
 
 
 @asyncio.coroutine
@@ -478,27 +444,65 @@ def _sigterm_handler(server, log):
     server.close()
 
 
-def main():
-    """ Command-line 'telnetlib3-server' entry point, via setuptools."""
-    kwargs = _transform_args(_get_argument_parser().parse_args())
-    config_msg = (
-        'Server configuration: {key_values}'
-        .format(key_values=accessories.repr_mapping(kwargs)))
-    host = kwargs.pop('host')
-    port = kwargs.pop('port')
+def parse_server_args():
+    parser = argparse.ArgumentParser(
+        description="Telnet protocol server",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('host', nargs='?', default=CONFIG.host,
+                        help='bind address')
+    parser.add_argument('port', nargs='?', type=int, default=CONFIG.port,
+                        help='bind port')
+    parser.add_argument('--loglevel', default=CONFIG.loglevel,
+                        help='level name')
+    parser.add_argument('--logfile', default=CONFIG.logfile,
+                        help='filepath')
+    parser.add_argument('--logfmt', default=CONFIG.logfmt,
+                        help='log format')
+    parser.add_argument('--shell', default=CONFIG.shell,
+                        type=accessories.function_lookup,
+                        help='module.function_name')
+    parser.add_argument('--encoding', default=CONFIG.encoding,
+                        help='encoding name')
+    parser.add_argument('--force-binary', action='store_true',
+                        default=CONFIG.force_binary,
+                        help='force binary transmission')
+    parser.add_argument('--timeout', default=CONFIG.timeout,
+                        help='idle disconnect (0 disables)')
+    parser.add_argument('--connect-maxwait', type=float,
+                        default=CONFIG.connect_maxwait,
+                        help='timeout for pending negotiation')
+    return vars(parser.parse_args())
 
-    log = kwargs['log'] = accessories.make_logger(
-        name='telnetlib3.server',
-        loglevel=kwargs.pop('loglevel'),
-        logfile=kwargs.pop('logfile'),
-        logfmt=kwargs.pop('logfmt'))
-    log.debug(config_msg)
+
+def run_server(host=CONFIG.host, port=CONFIG.port, loglevel=CONFIG.loglevel,
+               logfile=CONFIG.logfile, logfmt=CONFIG.logfmt,
+               shell=CONFIG.shell, encoding=CONFIG.encoding,
+               force_binary=CONFIG.force_binary, timeout=CONFIG.timeout,
+               connect_maxwait=CONFIG.connect_maxwait):
+    """
+    Program entry point for server daemon.
+
+    This function configures a logger and creates a telnet server for the
+    given keyword arguments, serving forever, completing only upon receipt of
+    SIGTERM.
+    """
+    log = accessories.make_logger(
+        name='telnetlib3.server', loglevel=loglevel,
+        logfile=logfile, logfmt=logfmt)
+
+    # log all function arguments.
+    _locals = locals()
+    _cfg_mapping = ', '.join(('{0}={{{0}}}'.format(field)
+                              for field in CONFIG._fields)).format(**_locals)
+    log.debug('Server configuration: {}'.format(_cfg_mapping))
 
     loop = asyncio.get_event_loop()
 
     # bind
     server = loop.run_until_complete(
-        create_server(host, port, **kwargs))
+        create_server(host, port, shell=shell, encoding=encoding,
+                      force_binary=force_binary, timeout=timeout,
+                      connect_maxwait=connect_maxwait))
 
     # SIGTERM cases server to gracefully stop
     loop.add_signal_handler(signal.SIGTERM, asyncio.async,
@@ -512,6 +516,14 @@ def main():
     finally:
         # remove signal handler on stop
         loop.remove_signal_handler(signal.SIGTERM)
+
+    log.info('Server stop.')
+
+
+def main():
+    """Command-line 'telnetlib3-server' entry point, via setuptools."""
+    return run_server(**parse_server_args())
+
 
 if __name__ == '__main__':
     exit(main())
