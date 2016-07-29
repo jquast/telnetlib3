@@ -278,9 +278,7 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
         both directions even when failing ``BINARY`` negotiation, :rfc:`856`. 
         This parameter has no effect when ``encoding=False``.
     :param str encoding_errors: Same meaning as :class:`codecs.Codec`.
-    :param int timeout: Causes clients to disconnect if idle for this duration,
-        ensuring resources are freed on busy servers.  When explicitly set to
-        ``False``, clients will not be disconnected for timeout.
+    :param float connect_minwait: XXX
     :param float connect_maxwait: If the remote end is not complaint, or
         otherwise confused by our demands, the shell continues anyway after the
         greater of this value has elapsed.  A client that is not answering
