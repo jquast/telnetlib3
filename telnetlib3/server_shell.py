@@ -3,6 +3,7 @@ import asyncio
 CR, LF, NUL = '\r\n\x00'
 from . import slc
 from . import telopt
+from . import accessories
 
 __all__ = ('telnet_server_shell',)
 
@@ -13,7 +14,9 @@ def telnet_server_shell(reader, writer):
     A default telnet shell, appropriate for use with telnetlib3.create_server.
 
     This shell provides very simple REPL, allowing introspection and state
-    toggling of the connecting telnet session by writer interface.
+    toggling of the connected client session.
+
+    This function is a :func:`~asyncio.coroutine`.
     """
     writer.write("Ready." + CR + LF)
 
@@ -43,13 +46,15 @@ def telnet_server_shell(reader, writer):
             writer.write(repr(writer))
         elif command == 'reader':
             writer.write(repr(reader))
+        elif command == 'proto':
+            writer.write(repr(writer.protocol))
+        elif command == 'version':
+            writer.write(accessories.get_version()['shell'])
         elif command == 'slc':
             writer.write(get_slcdata(writer))
         elif command.startswith('toggle'):
             option = command[len('toggle '):] or None
             writer.write(do_toggle(writer, option))
-        elif command == 'proto':
-            writer.write(repr(writer.protocol))
         elif command:
             writer.write('no such command.')
     writer.close()
@@ -57,7 +62,11 @@ def telnet_server_shell(reader, writer):
 
 @asyncio.coroutine
 def readline(reader, writer):
-    """A very crude readline coroutine interface."""
+    """
+    A very crude readline coroutine interface.
+
+    This function is a :func:`~asyncio.coroutine`.
+    """
     command, inp, last_inp = '', '', ''
     inp = yield None
     while True:

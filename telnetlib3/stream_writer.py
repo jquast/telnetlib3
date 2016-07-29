@@ -364,12 +364,12 @@ class TelnetWriter(asyncio.StreamWriter):
 
     @property
     def inbinary(self):
-        """Whether binary data may be received on this stream, rfc-856_."""
+        """ Whether binary data may be received on this stream, :rfc:`856`."""
         return self.remote_option.enabled(BINARY)
 
     @property
     def outbinary(self):
-        """Whether BINARY data may be sent on this stream, rfc-856_."""
+        """Whether BINARY data may be sent on this stream, :rfc:`856`."""
         return self.local_option.enabled(BINARY)
 
     def echo(self, data):
@@ -404,18 +404,19 @@ class TelnetWriter(asyncio.StreamWriter):
 
     @property
     def mode(self):
-        """ String describing NVT mode, one of:
+        """
+        String describing NVT mode, one of:
 
-            ``kludge``: Client acknowledges WILL-ECHO, WILL-SGA. character-at-
-                a-time and remote line editing may be provided.
+        ``kludge``: Client acknowledges WILL-ECHO, WILL-SGA. character-at-
+            a-time and remote line editing may be provided.
 
-            ``local``: Default NVT half-duplex mode, client performs line
-                editing and transmits only after pressing send (usually CR)
+        ``local``: Default NVT half-duplex mode, client performs line
+            editing and transmits only after pressing send (usually CR)
 
-            ``remote``: Client supports advanced remote line editing, using
-                mixed-mode local line buffering (optionally, echoing) until
-                send, but also transmits buffer up to and including special
-                line characters (SLCs).
+        ``remote``: Client supports advanced remote line editing, using
+            mixed-mode local line buffering (optionally, echoing) until
+            send, but also transmits buffer up to and including special
+            line characters (SLCs).
         """
         if self.remote_option.enabled(LINEMODE):
             if self._linemode.local:
@@ -530,7 +531,7 @@ class TelnetWriter(asyncio.StreamWriter):
 
     def send_eor(self):
         """
-        Transmit IAC CMD_EOR (End-of-Record), rfc-885_.
+        Transmit IAC CMD_EOR (End-of-Record), :rfc:`885`.
 
         Returns True if sent. If IAC-DO-EOR has not been received,
         False is returned and IAC-CMD_EOR is not transmitted.
@@ -569,7 +570,7 @@ class TelnetWriter(asyncio.StreamWriter):
     def request_tspeed(self):
         """ .. method:: request_tspeed() -> bool
 
-            Send IAC-SB-TSPEED-SEND sub-negotiation, rfc-1079_ only if
+            Send IAC-SB-TSPEED-SEND sub-negotiation, :rfc:`1079` only if
             IAC-WILL-TSPEED has been received. Returns True if tspeed
             request was sent.
         """
@@ -590,7 +591,7 @@ class TelnetWriter(asyncio.StreamWriter):
     def request_charset(self):
         """ .. method:: request_charset(codepages : list, sep : string) -> bool
 
-            Request sub-negotiation CHARSET, rfc-2066_. Returns True if request
+            Request sub-negotiation CHARSET, :rfc:`2066`. Returns True if request
             is valid for telnet state, and was sent.
 
             The sender requests that all text sent to and by it be encoded in
@@ -621,10 +622,10 @@ class TelnetWriter(asyncio.StreamWriter):
         return True
 
     def request_environ(self):
-        """ .. method:: request_environ(env : list) -> bool
+        """
+        Request sub-negotiation NEW_ENVIRON, :rfc:`1572`.
 
-            Request sub-negotiation NEW_ENVIRON, rfc 1572.
-            Returns True if request is valid for telnet state, and was sent.
+        Returns True if request is valid for telnet state, and was sent.
         """
         assert self.server, 'SB NEW_ENVIRON SEND may only be sent by server'
 
@@ -666,7 +667,7 @@ class TelnetWriter(asyncio.StreamWriter):
     def request_xdisploc(self):
         """ .. method:: request_xdisploc() -> bool
 
-            Send XDISPLOC, SEND sub-negotiation, rfc-1086_.
+            Send XDISPLOC, SEND sub-negotiation, :rfc:`1086`.
             Returns True if request is valid for telnet state, and was sent.
         """
         assert self.server, (
@@ -706,10 +707,11 @@ class TelnetWriter(asyncio.StreamWriter):
         return False
 
     def request_forwardmask(self, fmask=None):
-        """ Request the client forward the control characters indicated
-            in the Forwardmask class instance ``fmask``. When fmask is
-            None, a forwardmask is generated for the SLC characters
-            registered by ``slctab``.
+        """
+        Request the client forward the control characters indicated
+        in the Forwardmask class instance ``fmask``. When fmask is
+        None, a forwardmask is generated for the SLC characters
+        registered by ``slctab``.
         """
         assert self.server, (
             'DO FORWARDMASK may only be sent by server end')
@@ -787,12 +789,13 @@ class TelnetWriter(asyncio.StreamWriter):
 # Public is-a-command (IAC) callbacks
 #
     def set_iac_callback(self, cmd, func):
-        """ Register callable ``func`` as callback for IAC ``cmd``.
+        """
+        Register callable ``func`` as callback for IAC ``cmd``.
 
-            BRK, IP, AO, AYT, EC, EL, CMD_EOR, EOF, SUSP, ABORT, and NOP.
+        BRK, IP, AO, AYT, EC, EL, CMD_EOR, EOF, SUSP, ABORT, and NOP.
 
-            These callbacks receive a single argument, the IAC ``cmd`` which
-            triggered it.
+        These callbacks receive a single argument, the IAC ``cmd`` which
+        triggered it.
         """
         assert callable(func), ('Argument func must be callable')
         assert cmd in (BRK, IP, AO, AYT, EC, EL, CMD_EOR, EOF, SUSP,
@@ -800,124 +803,113 @@ class TelnetWriter(asyncio.StreamWriter):
         self._iac_callback[cmd] = func
 
     def handle_nop(self, cmd):
-        """ XXX Handle IAC No-Operation (NOP).
-        """
+        """ Handle IAC No-Operation (NOP).  """
         self.log.debug('IAC NOP: Null Operation (unhandled).')
 
     def handle_ga(self, cmd):
-        """ XXX Handle IAC Go-Ahead (GA).
-
-            Typically, GA is only a legacy protocol for half-duplex terminals
-            such as a teletype, which cannot receive output while also sending
-            input.
-        """
+        """ Handle IAC Go-Ahead (GA).  """
         self.log.debug('IAC GA: Go-Ahead (unhandled).')
 
     def handle_dm(self, cmd):
-        """ XXX Handle IAC Data-Mark (DM)
-
-            The TCP transport is not tested for OOB/TCP Urgent, so an old
-            teletype half-duplex terminal may inadvertantly send unintended
-            control sequences up until now,
-
-            Oh well.  """
+        """ Handle IAC Data-Mark (DM) """
         self.log.debug('IAC DM: Data-Mark (unhandled).')
-        #: ``True`` if the last byte sent to ``feed_byte()`` was the end
-        #  of an *IAC DM* has been received. MSG_OOB not implemented, so
-        #  this mechanism _should not be implmeneted_.
-        #self._dm_recv = True
-        #self.iac(DM)
 
 # Public mixed-mode SLC and IAC callbacks
 #
     def handle_el(self, byte):
-        """ XXX Handle IAC Erase Line (EL, SLC_EL).
+        """
+        Handle IAC Erase Line (EL, SLC_EL).
 
-            Provides a function which discards all the data ready on current
-            line of input. The prompt should be re-displayed.
+        Provides a function which discards all the data ready on current
+        line of input. The prompt should be re-displayed.
         """
         self.log.debug('IAC EL: Erase Line (unhandled).')
 
     def handle_eor(self, byte):
-        """ XXX Handle IAC End of Record (CMD_EOR, SLC_EOR).
-        """
+        """ Handle IAC End of Record (CMD_EOR, SLC_EOR).  """
         self.log.debug('IAC EOR: End of Record (unhandled).')
 
     def handle_abort(self, byte):
-        """ XXX Handle IAC Abort (ABORT, SLC_ABORT).
+        """
+        Handle IAC Abort (ABORT, SLC_ABORT).
 
-            Similar to Interrupt Process (IP), but means only to abort or
-            terminate the process to which the NVT is connected.
+        Similar to Interrupt Process (IP), but means only to abort or
+        terminate the process to which the NVT is connected.
         """
         self.log.debug('IAC ABORT: Abort (unhandled).')
 
     def handle_eof(self, byte):
-        """ XXX Handle IAC End of Record (EOF, SLC_EOF).
+        """
+        Handle IAC End of Record (EOF, SLC_EOF).
         """
         self.log.debug('IAC EOF: End of File (unhandled).')
 
     def handle_susp(self, byte):
-        """ XXX Handle IAC Suspend Process (SUSP, SLC_SUSP).
+        """
+        Handle IAC Suspend Process (SUSP, SLC_SUSP).
 
-            Suspends the execution of the current process attached to the NVT
-            in such a way that another process will take over control of the
-            NVT, and the suspended process can be resumed at a later time.
+        Suspends the execution of the current process attached to the NVT
+        in such a way that another process will take over control of the
+        NVT, and the suspended process can be resumed at a later time.
 
-            If the receiving system does not support this functionality, it
-            should be ignored.
+        If the receiving system does not support this functionality, it
+        should be ignored.
         """
         self.log.debug('IAC SUSP: Suspend (unhandled).')
 
     def handle_brk(self, byte):
-        """ XXX Handle IAC Break (BRK, SLC_BRK).
+        """
+        Handle IAC Break (BRK, SLC_BRK).
 
-            Sent by clients to indicate BREAK keypress. This is not the same
-            as IP (^c), but a means to map sysystem-dependent break key such
-            as found on an IBM Systems.
+        Sent by clients to indicate BREAK keypress. This is not the same
+        as IP (^c), but a means to map sysystem-dependent break key such
+        as found on an IBM Systems.
         """
         self.log.debug('IAC BRK: Break (unhandled).')
 
     def handle_ayt(self, byte):
-        """ XXX Handle IAC Are You There (AYT, SLC_AYT).
+        """
+        Handle IAC Are You There (AYT, SLC_AYT).
 
-            Provides the user with some visible (e.g., printable) evidence
-            that the system is still up and running.
+        Provides the user with some visible (e.g., printable) evidence
+        that the system is still up and running.
         """
         self.log.debug('IAC AYT: Are You There? (unhandled).')
 
     def handle_ip(self, byte):
-        """ XXX Handle IAC Interrupt Process (IP, SLC_IP).
+        """
+        Handle IAC Interrupt Process (IP, SLC_IP).
         """
         self.log.debug('IAC IP: Interrupt Process (unhandled).')
 
     def handle_ao(self, byte):
-        """ XXX Handle IAC Abort Output (AO) or SLC_AO.
+        """
+        Handle IAC Abort Output (AO) or SLC_AO.
 
-            Discards any remaining output on the transport buffer.
+        Discards any remaining output on the transport buffer.
 
-            " [...] a reasonable implementation would be to suppress the
-              remainder of the text string, but transmit the prompt character
-              and the preceding <CR><LF>. "
+            [...] a reasonable implementation would be to suppress the
+            remainder of the text string, but transmit the prompt character
+            and the preceding <CR><LF>.
         """
         self.log.debug('IAC AO: Abort Output, unhandled.')
-#        self.log.debug('IAC AO: Abort Output, '
-#                       '{} bytes discarded.'.format(len(self._write_buffer)))
-#        self._write_buffer.clear()
 
     def handle_ec(self, byte):
-        """ XXX Handle IAC Erase Character (EC, SLC_EC).
+        """
+        Handle IAC Erase Character (EC, SLC_EC).
 
-            Provides a function which deletes the last preceding undeleted
-            character from data ready on current line of input.
+        Provides a function which deletes the last preceding undeleted
+        character from data ready on current line of input.
         """
         self.log.debug('IAC EC: Erase Character (unhandled).')
 
     def handle_tm(self, cmd):
-        """ XXX Handle IAC (WILL, WONT, DO, DONT) Timing Mark (TM).
+        """
+        Handle IAC (WILL, WONT, DO, DONT) Timing Mark (TM).
 
-            TM is essentially a NOP that any IAC interpreter must answer, if at
-            least it answers WONT to unknown options (required), it may still
-            be used as a means to accurately measure the "ping" time.
+        TM is essentially a NOP that any IAC interpreter must answer, if at
+        least it answers WONT to unknown options (required), it may still
+        be used as a means to accurately measure the "ping" time.
         """
         self.log.debug('IAC TM: Received {} TM (Timing Mark).'
                        .format(name_command(cmd)))
@@ -925,19 +917,20 @@ class TelnetWriter(asyncio.StreamWriter):
 # public Special Line Mode (SLC) callbacks
 #
     def set_slc_callback(self, slc_byte, func):
-        """ Register ``func`` as callbable for receipt of SLC character
-            negotiated for the SLC command ``slc`` in  ``_slc_callback``,
-            keyed by ``slc`` and valued by its handling function.
+        """
+        Register ``func`` as callbable for receipt of SLC character
+        negotiated for the SLC command ``slc`` in  ``_slc_callback``,
+        keyed by ``slc`` and valued by its handling function.
 
-            SLC_SYNCH, SLC_BRK, SLC_IP, SLC_AO, SLC_AYT, SLC_EOR, SLC_ABORT,
-            SLC_EOF, SLC_SUSP, SLC_EC, SLC_EL, SLC_EW, SLC_RP, SLC_XON,
-            SLC_XOFF, (...)
+        SLC_SYNCH, SLC_BRK, SLC_IP, SLC_AO, SLC_AYT, SLC_EOR, SLC_ABORT,
+        SLC_EOF, SLC_SUSP, SLC_EC, SLC_EL, SLC_EW, SLC_RP, SLC_XON,
+        SLC_XOFF, (...)
 
-            These callbacks receive a single argument: the SLC function
-            byte that fired it. Some SLC and IAC functions are intermixed;
-            which signaling mechanism used by client can be tested by
-            evaluating this argument.
-            """
+        These callbacks receive a single argument: the SLC function
+        byte that fired it. Some SLC and IAC functions are intermixed;
+        which signaling mechanism used by client can be tested by
+        evaluating this argument.
+        """
         assert callable(func), ('Argument func must be callable')
         assert (type(slc_byte) == bytes and
                 0 < ord(slc_byte) < slc.NSLC + 1
@@ -945,75 +938,61 @@ class TelnetWriter(asyncio.StreamWriter):
         self._slc_callback[slc_byte] = func
 
     def handle_ew(self, slc):
-        """ XXX Handle SLC_EW (Erase Word).
+        """
+        Handle SLC_EW (Erase Word).
 
-            Provides a function which deletes the last preceding undeleted
-            character, and any subsequent bytes until next whitespace character
-            from data ready on current line of input.
+        Provides a function which deletes the last preceding undeleted
+        character, and any subsequent bytes until next whitespace character
+        from data ready on current line of input.
         """
         self.log.debug('SLC EC: Erase Word (unhandled).')
 
     def handle_rp(self, slc):
-        """ XXX Handle SLC Repaint.
-        """
+        """ Handle SLC Repaint. """
         self.log.debug('SLC RP: Repaint (unhandled).')
 
     def handle_lnext(self, slc):
-        """ XXX Handle SLC Literal Next (Next character(s) received raw)
+        """ Handle SLC Literal Next (Next character(s) received raw)
         """
         self.log.debug('SLC LNEXT: Literal Next (unhandled)')
 
     def handle_xon(self, byte):
-        pass
-#        """ XXX Handle SLC XON (Transmit-On).
-#
-#            The default implementation enables transmission and
-#            writes any data buffered during XOFF.
-#        """
-#        #self.log.debug('SLC XON: Transmit On.')
-#        #self.writing = True
-#        #self._write(self.encode(string, errors))
-#        #self.write(b''.join(self._write_buffer), oob=True)
-#        #self._write_buffer.clear()
-#
+        """ Handle SLC XON (Transmit-On).  """
+        self.log.debug('SLC XON: Transmit On (unhandled).')
+
     def handle_xoff(self, byte):
-        pass
-#        """ XXX Handle SLC XOFF (Transmit-Off)
-#
-#            The default implementation disables transmission of
-#            in-band data until XON is received.
-#        """
-#        self.log.debug('SLC XOFF: Transmit Off.')
-#        self.writing = False
+        """ Handle SLC XOFF (Transmit-Off). """
+        self.log.debug('SLC XOFF: Transmit Off.')
 
 # public Telnet extension callbacks
 #
     def set_ext_send_callback(self, cmd, func):
-        """ Register ``func`` as a callback for inquries of subnegotiation
+        """
+        Register ``func`` as a callback for inquires of sub-negotiation
         response values of ``cmd``. These callbacks must return any number
         of arguments:
 
-          * SNDLOC: for clients, returing one argument: the string
-            describing client location, such as b'ROOM 641-A' (rfc 779).
+        * SNDLOC: for clients, returning one argument: the string
+          describing client location, such as ``b'ROOM 641-A'``, :rfc:`779`.
 
-          * NAWS: for clients, returning two integer arguments (width,
-            height), such as (80, 24) (rfc 1073).
+        * NAWS: for clients, returning two integer arguments (width,
+          height), such as (80, 24), :rfc:`1073`.
 
-          * TSPEED: for clients, returning two integer arguments (rx, tx)
-            such as (57600, 57600) (rfc 1079).
+        * TSPEED: for clients, returning two integer arguments (rx, tx)
+          such as (57600, 57600), :rfc:`1079`.
 
-          * TTYPE: for clients, returning one string, usually the terminfo(5)
-            database capability name, such as 'xterm' (rfc 1091).
+        * TTYPE: for clients, returning one string, usually the terminfo(5)
+          database capability name, such as 'xterm', :rfc:`1091`.
 
-          * XDISPLOC: for clients, returning one string, the DISPLAY host
-            value, in form of <host>:<dispnum>[.<screennum>] (rfc 1096).
+        * XDISPLOC: for clients, returning one string, the DISPLAY host
+          value, in form of <host>:<dispnum>[.<screennum>], :rfc:`1096`.
 
-          * NEW_ENVIRON: for clients, returning a dictionary of (key, val)
-            pairs of environment item values (rfc 1408).
+        * NEW_ENVIRON: for clients, returning a dictionary of (key, val)
+          pairs of environment item values, :rfc:`1408`.
 
-          * CHARSET: for clients, receiving iterable of strings of character
-            sets requested by server. Must returns one of those strings.
-            chose one !negotiated by client (rfc 2066).
+        * CHARSET: for clients, receiving iterable of strings of character
+          sets requested by server, callback must return one of those
+          strings given, :rfc:`2066`.
         """
         assert cmd in (SNDLOC, NAWS, TSPEED, TTYPE, XDISPLOC,
                        NEW_ENVIRON, CHARSET), cmd
@@ -1022,108 +1001,99 @@ class TelnetWriter(asyncio.StreamWriter):
 
     def set_ext_callback(self, cmd, func):
         """
-
         Register ``func`` as callback for receipt of ``cmd`` negotiation.
 
         :param bytes cmd: One of the following listed bytes:
 
-          * :obj:`LOGOUT`: for servers and clients, receiving one argument.
-            Server end may receive DO or DONT as argument ``cmd``, indicating
-            client's wish to disconnect, or a response to WILL, LOGOUT,
-            indicating it's wish not to be automatically disconnected.
-            Client end may receive WILL or WONT, indicating server's wish
-            to disconnect, or acknowledgement that the client will not be
-            disconnected.
+        * :obj:`LOGOUT`: for servers and clients, receiving one argument.
+          Server end may receive DO or DONT as argument ``cmd``, indicating
+          client's wish to disconnect, or a response to WILL, LOGOUT,
+          indicating it's wish not to be automatically disconnected.
+          Client end may receive WILL or WONT, indicating server's wish
+          to disconnect, or acknowledgment that the client will not be
+          disconnected.
 
-          * obj:`SNDLOC`: for servers, receiving one argument: the string
-            describing the client location, such as ``'ROOM 641-A'``
-            rfc-779_.
+        * obj:`SNDLOC`: for servers, receiving one argument: the string
+          describing the client location, such as ``'ROOM 641-A'``,
+          :rfc:`779`.
 
-          * obj:`NAWS`: for servers, receiving two integer arguments (width,
-            height), such as (80, 24). rfc-1073_.
+        * obj:`NAWS`: for servers, receiving two integer arguments (width,
+          height), such as (80, 24), :rfc:`1073`.
 
-          * obj:`TSPEED`: for servers, receiving two integer arguments (rx, tx)
-            such as (57600, 57600). rfc-1079_.
+        * obj:`TSPEED`: for servers, receiving two integer arguments (rx, tx)
+          such as (57600, 57600), :rfc:`1079`.
 
-          * obj:`TTYPE`: for servers, receiving one string, usually the
-            terminfo(5) database capability name, such as 'xterm'. rfc-1091_.
+        * obj:`TTYPE`: for servers, receiving one string, usually the
+          terminfo(5) database capability name, such as 'xterm', :rfc:`1091`.
 
-          * obj:`XDISPLOC`: for servers, receiving one string, the DISPLAY host
-            value, in form of ``<host>:<dispnum>[.<screennum>]``. rfc-1096_.
+        * obj:`XDISPLOC`: for servers, receiving one string, the DISPLAY host
+          value, in form of ``<host>:<dispnum>[.<screennum>]``, :rfc:`1096`.
 
-          * obj:`NEW_ENVIRON`: for servers, receiving a dictionary of
-            ``(key, val)`` pairs of remote client environment item values.
-            rfc-1408_.
+        * obj:`NEW_ENVIRON`: for servers, receiving a dictionary of
+          ``(key, val)`` pairs of remote client environment item values,
+          :rfc:`1408`.
 
-          * obj:`CHARSET`: for servers, receiving one string, the character set
-            negotiated by client. rfc-2066_.
+        * obj:`CHARSET`: for servers, receiving one string, the character set
+          negotiated by client. :rfc:`2066`.
         """
         assert cmd in (LOGOUT, SNDLOC, NAWS, TSPEED, TTYPE,
-                       XDISPLOC, NEW_ENVIRON, CHARSET), cmd
+                     XDISPLOC, NEW_ENVIRON, CHARSET), cmd
         assert callable(func), ('Argument func must be callable')
         self._ext_callback[cmd] = func
 
     def handle_xdisploc(self, xdisploc):
-        """ XXX Receive XDISPLAY value ``xdisploc``, rfc1096.
-        """
+        """ Receive XDISPLAY value ``xdisploc``, :rfc:`1096`. """
         #   xdisploc string format is '<host>:<dispnum>[.<screennum>]'.
         self.log.debug('X Display is {}'.format(xdisploc))
 
     def handle_send_xdisploc(self):
-        """ XXX Send XDISPLAY value ``xdisploc``, rfc1096.
-        """
+        """ Send XDISPLAY value ``xdisploc``, :rfc:`1096`. """
         #   xdisploc string format is '<host>:<dispnum>[.<screennum>]'.
         self.log.warn('X Display requested, sending empty string.')
         return ''
 
     def handle_sndloc(self, location):
-        """ XXX Receive LOCATION value ``location``, rfc779.
-        """
+        """ Receive LOCATION value ``location``, :rfc:`779`. """
         self.log.debug('Location is {}'.format(location))
 
     def handle_send_sndloc(self):
-        """ XXX Send LOCATION value ``location``, rfc779.
+        """ Send LOCATION value ``location``, :rfc:`779`.
         """
         self.log.warn('Location requested, sending empty response.')
         return ''
 
     def handle_ttype(self, ttype):
-        """ XXX Receive TTYPE value ``ttype``, rfc1091.
         """
-        #   Often value of TERM, or analogous to client's emulation capability,
-        #   common values for non-posix client replies are 'VT100', 'VT102',
-        #   'ANSI', 'ANSI-BBS', or even a mud client identifier. RFC allows
-        #   subsequent requests, the server may solicit multiple times, and
-        #   the client indicates 'end of list' by cycling the return value.
-        #
-        #   Some example values: VT220, VT100, IBM-3278-(2 through 5),
-        #       ANSITERM, ANSI, TTY, and 5250.
+        Receive TTYPE value ``ttype``, :rfc:`1091`.
+
+        A string value that represents client's emulation capability.
+
+        Some example values: VT220, VT100, ANSITERM, ANSI, TTY, and 5250.
+        """
         self.log.debug('Terminal type is {!r}'.format(ttype))
 
     def handle_send_ttype(self):
-        """ XXX Send TTYPE value ``ttype``, rfc1091.
-        """
+        """ Send TTYPE value ``ttype``, :rfc:`1091`. """
         self.log.warn('Terminal type requested, sending empty string.')
         return ''
 
     def handle_naws(self, width, height):
-        """ XXX Receive window size ``width`` and ``height``, rfc1073.
-        """
+        """ Receive window size ``width`` and ``height``, :rfc:`1073`. """
         self.log.debug('Terminal cols={}, rows={}'.format(width, height))
 
     def handle_send_naws(self):
-        """ XXX Send window size ``width`` and ``height``, rfc1073.
-        """
+        """ Send window size ``width`` and ``height``, :rfc:`1073`. """
         self.log.warn('Terminal size requested, sending 80x24.')
         return 80, 24
 
     def handle_environ(self, env):
-        """ XXX Receive environment variables as dict, rfc1572.
-        """
+        """ Receive environment variables as dict, :rfc:`1572`. """
         self.log.debug('Environment values are {!r}'.format(env))
 
     def handle_send_client_environ(self, keys):
-        """ XXX Send environment variables as dict, rfc-1572_.
+        """
+        Send environment variables as dict, :rfc:`1572`.
+
         If argument ``keys`` is empty, then all available values should be
         sent. Otherwise, ``keys`` is a set of environment keys explicitly
         requested.
@@ -1132,30 +1102,26 @@ class TelnetWriter(asyncio.StreamWriter):
         return dict()
 
     def handle_send_server_environ(self):
-        """ XXX Server requests environment variables as list, rfc-1572_.
-        """
+        """ Server requests environment variables as list, :rfc:`1572`. """
         self.log.debug('Environment values offered, requesting [].')
         return []
 
     def handle_tspeed(self, rx, tx):
-        """ XXX Receive terminal speed from TSPEED as int, rfc1079.
-        """
+        """ Receive terminal speed from TSPEED as int, :rfc:`1079`. """
         self.log.debug('Terminal Speed rx:{}, tx:{}'.format(rx, tx))
 
     def handle_send_tspeed(self):
-        """ XXX Send terminal speed from TSPEED as int, rfc1079.
-        """
+        """ Send terminal speed from TSPEED as int, :rfc:`1079`. """
         self.log.debug('Terminal Speed requested, sending 9600,9600.')
         return 9600, 9600
 
     def handle_charset(self, charset):
-        """ XXX Receive character set as string, rfc2066.
-        """
+        """ Receive character set as string, :rfc:`2066`. """
         self.log.debug('Character set: {}'.format(charset))
 
     def handle_send_client_charset(self, charsets):
         """
-        XXX Send character set selection as string, rfc-2066_.
+        Send character set selection as string, :rfc:`2066`.
 
         Given the available encodings presented by the server, select and
         return only one.  Returning an empty string indicates that no
@@ -1166,18 +1132,18 @@ class TelnetWriter(asyncio.StreamWriter):
         return ''
 
     def handle_send_server_charset(self, charsets):
-        """
-        XXX Send character set (encodings) offered to client, rfc-2066_.
+        """ Send character set (encodings) offered to client, :rfc:`2066`.
         """
         assert self.server
         return ['UTF-8']
 
     def handle_logout(self, cmd):
-        """ XXX Handle (IAC, (DO | DONT | WILL | WONT), LOGOUT), RFC 727.
+        """
+        Handle (IAC, (DO | DONT | WILL | WONT), LOGOUT), :rfc:`727`.
 
-            Only the server end may receive (DO, DONT).
-            Only the client end may receive (WILL, WONT).
-            """
+        Only the server end may receive (DO, DONT).
+        Only the client end may receive (WILL, WONT).
+        """
         # Close the transport on receipt of DO, Reply DONT on receipt
         # of WILL.  Nothing is done on receipt of DONT or WONT LOGOFF.
         if cmd == DO:
@@ -1199,20 +1165,22 @@ class TelnetWriter(asyncio.StreamWriter):
 # public derivable methods DO, DONT, WILL, and WONT negotiation
 #
     def handle_do(self, opt):
-        """ XXX Process byte 3 of series (IAC, DO, opt) received by remote end.
+        """
+        Process byte 3 of series (IAC, DO, opt) received by remote end.
 
         This method can be derived to change or extend protocol capabilities,
         for most cases, simply returning True if supported, False otherwise.
 
         In special cases of various RFC statutes, state is stored and
         answered in willing affirmative, with the exception of:
-            - DO TM is *always* answered WILL TM, even if it was already
-              replied to.  No state is stored ("Timing Mark"), and the IAC
-              callback registered by ``set_ext_callback`` for cmd TM
-              is called with argument byte ``DO``.
-            - DO LOGOUT executes extended callback registered by cmd LOGOUT
-              with argument DO (indicating a request for voluntary logoff).
-            - DO STATUS sends state of all local, remote, and pending options.
+
+        - DO TM is *always* answered WILL TM, even if it was already
+          replied to.  No state is stored ("Timing Mark"), and the IAC
+          callback registered by ``set_ext_callback`` for cmd TM
+          is called with argument byte ``DO``.
+        - DO LOGOUT executes extended callback registered by cmd LOGOUT
+          with argument DO (indicating a request for voluntary logoff).
+        - DO STATUS sends state of all local, remote, and pending options.
         """
         # For unsupported capabilities, RFC specifies a response of
         # (IAC, WONT, opt).  Similarly, set ``self.local_option[opt]``
@@ -1276,7 +1244,8 @@ class TelnetWriter(asyncio.StreamWriter):
             return False
 
     def handle_dont(self, opt):
-        """ Process byte 3 of series (IAC, DONT, opt) received by remote end.
+        """
+        Process byte 3 of series (IAC, DONT, opt) received by remote end.
 
         This only results in ``self.local_option[opt]`` set to ``False``, with
         the exception of (IAC, DONT, LOGOUT), which only signals a callback
@@ -1292,15 +1261,16 @@ class TelnetWriter(asyncio.StreamWriter):
         # affirm in the negative.
 
     def handle_will(self, opt):
-        """ Process byte 3 of series (IAC, DONT, opt) received by remote end.
+        """
+        Process byte 3 of series (IAC, DONT, opt) received by remote end.
 
         The remote end requests we perform any number of capabilities. Most
         implementations require an answer in the affirmative with DO, unless
         DO has meaning specific for only client or server end, and
         dissenting with DONT.
 
-        WILL ECHO is only legally received _for clients_, answered with DO.
-        WILL NAWS is only legally received _for servers_, answered with DO.
+        WILL ECHO may only be received *for clients*, answered with DO.
+        WILL NAWS may only be received *for servers*, answered with DO.
         BINARY and SGA are answered with DO.  STATUS, NEW_ENVIRON, XDISPLOC,
         and TTYPE is answered with sub-negotiation SEND. The env variables
         requested in response to WILL NEW_ENVIRON is "SEND ANY".
@@ -1386,7 +1356,8 @@ class TelnetWriter(asyncio.StreamWriter):
                 self.pending_option[DO + opt] = False
 
     def handle_wont(self, opt):
-        """ Process byte 3 of series (IAC, WONT, opt) received by remote end.
+        """
+        Process byte 3 of series (IAC, WONT, opt) received by remote end.
 
         (IAC, WONT, opt) is a negative acknowledgment of (IAC, DO, opt) sent.
 
@@ -1413,7 +1384,8 @@ class TelnetWriter(asyncio.StreamWriter):
 # public derivable Sub-Negotation parsing
 #
     def handle_subnegotiation(self, buf):
-        """ Callback for end of sub-negotiation buffer.
+        """
+        Callback for end of sub-negotiation buffer.
 
             SB options handled here are TTYPE, XDISPLOC, NEW_ENVIRON,
             NAWS, and STATUS, and are delegated to their ``handle_``
@@ -1532,7 +1504,8 @@ class TelnetWriter(asyncio.StreamWriter):
                              .format(opt))
 
     def _handle_sb_tspeed(self, buf):
-        """ Callback handles IAC-SB-TSPEED-<buf>-SE.
+        """
+        Callback handles IAC-SB-TSPEED-<buf>-SE.
         """
         cmd = buf.popleft()
         opt = buf.popleft()
@@ -1576,7 +1549,8 @@ class TelnetWriter(asyncio.StreamWriter):
                 self.pending_option[WILL + TSPEED] = False
 
     def _handle_sb_xdisploc(self, buf):
-        """ Callback handles IAC-SB-XIDISPLOC-<buf>-SE.
+        """
+        Callback handles IAC-SB-XIDISPLOC-<buf>-SE.
         """
         cmd = buf.popleft()
         opt = buf.popleft()
@@ -1602,7 +1576,8 @@ class TelnetWriter(asyncio.StreamWriter):
                 self.pending_option[WILL + XDISPLOC] = False
 
     def _handle_sb_ttype(self, buf):
-        """ Callback handles IAC-SB-TTYPE-<buf>-SE.
+        """
+        Callback handles IAC-SB-TTYPE-<buf>-SE.
         """
         cmd = buf.popleft()
         opt = buf.popleft()
@@ -1628,17 +1603,18 @@ class TelnetWriter(asyncio.StreamWriter):
                 self.pending_option[WILL + TTYPE] = False
 
     def _handle_sb_environ(self, buf):
-        """ Callback handles (IAC, SB, NEW_ENVIRON, <buf>, SE), rfc1572.
+        """
+        Callback handles (IAC, SB, NEW_ENVIRON, <buf>, SE), :rfc:`1572`.
 
-            For requests beginning with IS, or subsequent requests beginning
-            with INFO, any callback registered by ``set_ext_callback`` of
-            cmd NEW_ENVIRON is passed a dictionary of (key, value) replied-to
-            by client.
+        For requests beginning with IS, or subsequent requests beginning
+        with INFO, any callback registered by ``set_ext_callback`` of
+        cmd NEW_ENVIRON is passed a dictionary of (key, value) replied-to
+        by client.
 
-            For requests beginning with SEND, the callback registered by
-            ``set_ext_send_callback`` is provided with a list of keys
-            requested from the server; or None if only VAR and/or USERVAR
-            is requested, indicating to "send them all".
+        For requests beginning with SEND, the callback registered by
+        ``set_ext_send_callback`` is provided with a list of keys
+        requested from the server; or None if only VAR and/or USERVAR
+        is requested, indicating to "send them all".
         """
         cmd = buf.popleft()
         opt = buf.popleft()
@@ -1682,8 +1658,7 @@ class TelnetWriter(asyncio.StreamWriter):
                 self.pending_option[WILL + TTYPE] = False
 
     def _handle_sb_sndloc(self, buf):
-        """ Fire callback for IAC-SB-SNDLOC-<buf>-SE (rfc779).
-        """
+        """ Fire callback for IAC-SB-SNDLOC-<buf>-SE (rfc779). """
         assert buf.popleft() == SNDLOC
         location_str = b''.join(buf).decode('ascii')
         self._ext_callback[SNDLOC](location_str)
@@ -1712,8 +1687,7 @@ class TelnetWriter(asyncio.StreamWriter):
         self.send_iac(b''.join(response))
 
     def _handle_sb_naws(self, buf):
-        """ Fire callback for IAC-SB-NAWS-<cols_rows[4]>-SE (rfc1073).
-        """
+        """ Fire callback for IAC-SB-NAWS-<cols_rows[4]>-SE (rfc1073).  """
         cmd = buf.popleft()
         assert cmd == NAWS, name_command(cmd)
         assert len(buf) is 4, (
@@ -1737,8 +1711,7 @@ class TelnetWriter(asyncio.StreamWriter):
 
     def _handle_sb_lflow(self, buf):
         """
-        Callback responds to IAC SB LFLOW, rfc- XXX
-        Fire callback for IAC-SB-LFLOW-<buf>
+        Callback responds to IAC SB LFLOW, :rfc:`1372`.
         """
         buf.popleft()  # LFLOW
         if not self.local_option.enabled(LFLOW):
@@ -1761,7 +1734,7 @@ class TelnetWriter(asyncio.StreamWriter):
 
     def _handle_sb_status(self, buf):
         """
-        Callback responds to IAC SB STATUS, rfc-859_.
+        Callback responds to IAC SB STATUS, :rfc:`859`.
 
         This method simply delegates to either of :meth:`_receive_status`
         or :meth:`_send_status`.
@@ -1778,7 +1751,7 @@ class TelnetWriter(asyncio.StreamWriter):
 
     def _receive_status(self, buf):
         """
-        Callback responds to IAC SB STATUS IS, rfc-859_.
+        Callback responds to IAC SB STATUS IS, :rfc:`859`.
 
         :param bytes buf: sub-negotiation byte buffer containing status data.
 
@@ -1832,7 +1805,7 @@ class TelnetWriter(asyncio.StreamWriter):
                                                            name_command(opt)))
 
     def _send_status(self):
-        """Callback responds to IAC SB STATUS SEND, rfc-859_."""
+        """Callback responds to IAC SB STATUS SEND, :rfc:`859`."""
         if not (self.pending_option.enabled(WILL + STATUS) or
                 self.local_option.enabled(STATUS)):
             raise ValueError('Only sender of IAC WILL STATUS '
@@ -1953,8 +1926,9 @@ class TelnetWriter(asyncio.StreamWriter):
         Processes SLC command function triplets found in ``buf`` and replies
         accordingly.
         """
-        if not len(buf) % 3:
-            raise ValueError('SLC buffer wrong size: expect multiple of 3')
+        if not len(buf) - 2 % 3:
+            raise ValueError('SLC buffer wrong size: expect multiple of 3: {}'
+                             .format(len(buf) - 2))
         self._slc_start()
         while len(buf):
             func = buf.popleft()
@@ -2181,7 +2155,7 @@ class TelnetWriter(asyncio.StreamWriter):
         Callback handles request for LINEMODE DO FORWARDMASK.
 
         :param bytes buf: bytes following IAC SB LINEMODE DO FORWARDMASK.
-        :raises: NotImplementedError
+        :raises NotImplementedError
         """
         raise NotImplementedError
 
@@ -2192,8 +2166,8 @@ class TelnetWriterUnicode(TelnetWriter):
     arguments, ``outgoing=True`` to determine what encoding should be used to
     decode the value in the direction specified.
 
-    The encoding may be conditionally negotiated by CHARSET, rfc-2066_, or
-    discovered by ``LANG`` environment variables by NEW_ENVIRON, rfc-1572_.
+    The encoding may be conditionally negotiated by CHARSET, :rfc:`2066`, or
+    discovered by ``LANG`` environment variables by NEW_ENVIRON, :rfc:`1572`.
     """
     def __init__(self, transport, protocol, fn_encoding, *,
                  encoding_errors='strict', **kwds):
@@ -2327,7 +2301,7 @@ def _unescape_environ(buf):
 
 def _encode_env_buf(env):
     """
-    Encode dictionary for transmission as environment variables, rfc-1572_.
+    Encode dictionary for transmission as environment variables, :rfc:`1572`.
 
     :param bytes buf: dictionary of environment values.
     :returns: bytes buffer meant to follow sequence IAC SB NEW_ENVIRON IS.
@@ -2335,7 +2309,7 @@ def _encode_env_buf(env):
     :rtype: bytes
 
     Returns bytes array ``buf`` for use in sequence (IAC, SB,
-    NEW_ENVIRON, IS, <buf>, IAC, SE) as set forth in rfc-1572_.
+    NEW_ENVIRON, IS, <buf>, IAC, SE) as set forth in :rfc:`1572`.
     """
     buf = collections.deque()
     for key, value in env.items():
@@ -2348,7 +2322,7 @@ def _encode_env_buf(env):
 
 def _decode_env_buf(buf):
     """
-    Decode environment values to dictionary, rfc-1572_.
+    Decode environment values to dictionary, :rfc:`1572`.
 
     :param bytes buf: bytes array following sequence IAC SB NEW_ENVIRON
         SEND or IS up to IAC SE.

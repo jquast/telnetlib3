@@ -7,11 +7,10 @@ Python 3 asyncio Telnet server and client Protocol library.
 Contents:
 
 .. toctree::
-   :maxdepth: 3
+   :maxdepth: 2
    :glob:
 
    intro
-   overview
    api
    rfcs
    contributing

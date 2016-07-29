@@ -1,3 +1,10 @@
+History
+=======
+1.0.0
+  * First general release for standard API: Instead of encouraging twisted-like
+    override of protocol methods, we provide a shell callback interface,
+    receiving argument pairs (reader, writer).
+
 0.5.0
   * bugfix: linemode MODE is now acknowledged.
   * bugfix: default stream handler sends 80 x 24 in cols x rows, not 24 x 80.
