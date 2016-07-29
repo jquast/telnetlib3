@@ -11,6 +11,21 @@ outer telnetlib3-server and telnetlib3-client and examples should connect
 as exit(main(\*\*parse_args(sys.argv))), the _transform_args() function is
 rather shoe-horned, main() should declare keywords
 
+
+wait_for?
+---------
+
+We need a way to wish to wait for a state. For example, our shell might await
+until local_echo is False, or remote_option[ECHO] is True. A function wait_for,
+receiving a function that returns True when state is met, will be called back
+continuously after each block of data received containing an IAC command byte,
+but the boiler code simply returns the waiter.
+
+This should allow us to spray the client with feature requests, and await the
+completion of their negotiation, especially for things like LINEMODE that might
+have many state changes, this allows asyncio to solve the complex "awaiting
+many future states in parallel" event loop easily
+
 BaseTelnetProtocol
 ------------------
 
