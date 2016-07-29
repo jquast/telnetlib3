@@ -1,15 +1,14 @@
-Design/TODO
-===========
-
-Design items
-
+Design
+======
 
 reduce
 ------
 
 outer telnetlib3-server and telnetlib3-client and examples should connect
 as exit(main(\*\*parse_args(sys.argv))), the _transform_args() function is
-rather shoe-horned, main() should declare keywords
+rather shoe-horned, main() should declare keywords.
+
+**this is completed for server, copy to client**
 
 
 wait_for?
@@ -452,3 +451,58 @@ If anybody can locate these documents, please forward them along.
 It is hosted on github_.  Currently in development stage, feedback is
 encouraged. Feel free to make use of fork, pull and Issues services to
 report any bugs, grievances, or enhancements.
+
+TODO
+====
+
+- xon/xoff is unimplemented, see
+  telnetlib3.stream_writer.TelnetWriter.handle_xon and handle_xoff.
+
+- After long-running (~2mo) job of telnetlib3 server on public IP, we ran
+  out of memory ! write test verifying garbage collects!
+
+- TelnetReader has no need for declaring server/client=True, it behaves the
+  same either way.
+
+- readline(), wow, what a bear of the RFC to provide either CR LF, CR NUL,
+  that LF can happen any time in stream (LF CR is possible/equal), and that
+  CR should never appear alone. What a rule for a bytestream, we wish not
+  to have any stream lookahead beyond the first CR/LF, as this is the end
+  line marker, we would be amiss to do any blocking for subsequent bytes,
+  we most definitely may not receive any.  Our implementation so far simply
+  returns up to any first CR/LF discovered, and, if the next call to readline
+  would return a line BEGINNING with either LF or NUL when the previous line
+  ended with CR, we simply discard that byte.
+ 
+- base_client.py and base_server.py actually share the same ABC
+  base_protocol.py, they are almost mirror images of one another,
+  which is pretty great, actually.  just reduce.
+
+- ValueError is used for many places where, the error is indicating that
+  a negotiation state that was attempted by the remote end is invalid,
+  for example: "received IAC SB LFLOW without first receiving IAC DO LFLOW."
+
+- SLC flushin/flushout attributes are not honored.  Not entirely sure
+  how to handle these two values with asyncio yet.
+
+- LINEMODE compliance needs a lot of work.
+  - possibly, we remove LINEMODE support entirely. I only know of one client,
+    BSD telnet, that is capable of negotiating -- this is the C code from which
+    our implementation was derived!
+  - callbacks on TelnetServer needed for requesting/replying to mode settings
+  - the SLC abstractions and 'slc_simul' mode is difficult for the API.
+  - There are many edge cases of SLC negotiation outlined in the RFC, how
+    comprehensive are our tests, and how well is our SLC working?
+  - IAC-SB-LINEMODE-DO-FORWARDMASK is unhandled, raises NotImplementedError
+
+    
+- _receive_status(self, buf) response to STATUS does not *honor* given state
+   values. only a non-compliant distant end would cause such a condition. so
+   it is decided to leave it as "conflict report only, no action always"
+
+- outer telnetlib3-server and telnetlib3-client and examples should connect
+  as exit(main(**parse_args(sys.argv))), the _transform_args() function is
+  rather shoe-horned, main() should declare keywords
+
+- also allow --exec instead of --shell parameter, which uses a pty to allow
+  piping say, /bin/bash to a telnet port.
