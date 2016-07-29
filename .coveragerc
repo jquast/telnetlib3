@@ -8,6 +8,4 @@ exclude_lines = pragma: no cover
 precision = 1
 
 [paths]
-source =
-    telnetlib3/
-    /opt/TeamCity/*/telnetlib3/*.py
+source = */telnetlib3/*.py
