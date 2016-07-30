@@ -186,8 +186,29 @@ class TelnetClient(client_base.BaseClient):
         return 'US-ASCII'
 
 class TelnetTerminalClient(TelnetClient):
+    """
+    Telnet client for sessions of network virtual terminal (NVT).
+    """
+
     def send_naws(self):
+        """
+        Callback replies to request for window size, NAWS :rfc:`1073`.
+
+        :rtype: (int, int)
+        :returns: window dimensions by lines and columns
+        """
         return self._winsize()
+
+    def send_env(self, keys):
+        """
+        Callback replies to request for env values, NEW_ENVIRON :rfc:`1572`.
+
+        :rtype: dict
+        :returns: super class value updated with window LINES and COLUMNS.
+        """
+        env = super().send_env(keys)
+        env['LINES'], env['COLUMNS'] = self._winsize()
+        return env
 
     @staticmethod
     def _winsize():
@@ -203,12 +224,6 @@ class TelnetTerminalClient(TelnetClient):
             # TODO: mock import error, or test on windows or other non-posix.
             return (int(os.environ.get('LINES', 25)),
                     int(os.environ.get('COLUMNS', 80)))
-
-    def send_env(self, keys):
-        env = super().send_env(keys)
-        env['LINES'], env['COLUMNS'] = self._winsize()
-        return env
-
 
 @asyncio.coroutine
 def open_connection(host=None, port=23, *, client_factory=None, loop=None,

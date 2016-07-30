@@ -20,6 +20,11 @@ github_project_url = "https://github.com/jquast/telnetlib3"
 
 suppress_warnings = ['image.nonlocal_uri']
 
+autodoc_default_flags = ['members',
+                         'inherited-members',
+                         'show-inheritance']
+
+
 # -- General configuration ----------------------------------------------------
 
 # If your documentation needs a minimal Sphinx version, state it here.
