@@ -1,12 +1,17 @@
 """Accessory functions."""
 # std imports
+import pkg_resources
 import importlib
 import platform
 import logging
 import asyncio
 
-__all__ = ('name_unicode', 'eightbits', 'make_logger', 'get_encoding')
+__all__ = ('encoding_from_lang', 'name_unicode', 'eightbits', 'make_logger',
+           'repr_mapping', 'function_lookup', 'make_reader_task')
 
+
+def get_version():
+    return pkg_resources.get_distribution("telnetlib3").version
 
 def encoding_from_lang(lang):
     """
@@ -89,3 +94,5 @@ def make_reader_task(reader, size=2**12):
     else:
         task = asyncio.ensure_future
     return task(reader.read(size))
+
+

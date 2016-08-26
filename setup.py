@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-"""Distutils setup script."""
 import os
 import platform
 from setuptools import setup
@@ -13,10 +12,10 @@ def _get_long_description(fname, encoding='utf8'):
     return open(fname, 'r', encoding=encoding).read()
 
 
-def _get_install_requires(fname):
-    return [req_line.strip()
-           for req_line in open(fname, 'r')
-           if req_line.strip() and not req_line.startswith('#')]
+def _get_install_requires():
+    if platform.python_version_tuple() < ('3', '4'):
+        return ['asyncio']
+    return []
 
 def _get_version(fname):
     import json
@@ -30,7 +29,7 @@ setup(name='telnetlib3',
       author='Jeff Quast',
       description="Python 3 asyncio Telnet server and client Protocol library",
       long_description=_get_long_description(fname=_get_here('README.rst')),
-      packages=['telnetlib3', 'telnetlib3.example'],
+      packages=['telnetlib3'],
       package_data={'': ['README.rst', 'requirements.txt'], },
       entry_points={
          'console_scripts': [
@@ -52,8 +51,5 @@ setup(name='telnetlib3',
                    'Topic :: System :: Shells',
                    'Topic :: Internet',
                    ],
-      install_requires=(
-          _get_install_requires(_get_here('requirements.txt'))
-          if platform.python_version_tuple() > ('3', '3') else
-          _get_install_requires(_get_here('requirements33.txt')))
+      install_requires=_get_install_requires(),
       )

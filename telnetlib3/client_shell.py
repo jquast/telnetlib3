@@ -99,6 +99,8 @@ else:
         key-at-a-time input processing, but ``Ctrl - C`` and other
         signal-generating characters may be used to quickly abort the
         connection.
+
+        This function is a :func:`~asyncio.coroutine`.
         """
 
         loop = asyncio.get_event_loop()

@@ -63,10 +63,60 @@ class Lander(object):
         for client in self.clients:
             client.notify_queue.put_nowait(event_msg)
 
-    @asyncio.coroutine
-    def repl(self, client):
+    def repl_readline(self, client):
         """
-        Lander REPL providing command processing with attention interrupt.
+        Lander REPL, provides no process, local echo.
+        """
+        from telnetlib3 import WONT, ECHO, SGA
+        client.writer.iac(WONT, ECHO)
+        client.writer.iac(WONT, SGA)
+        readline = asyncio.ensure_future(client.reader.readline())
+        recv_msg = asyncio.ensure_future(client.notify_queue.get())
+        client.writer.write('КОСМОС/300: READY\r\n')
+        wait_for = set([readline, recv_msg])
+        try:
+            while True:
+                client.writer.write('? ')
+
+                # await (1) client input or (2) system notification
+                done, pending = yield from asyncio.wait(
+                    wait_for, return_when=asyncio.FIRST_COMPLETED)
+
+                task = done.pop()
+                wait_for.remove(task)
+                if task == readline:
+                    # (1) client input
+                    cmd = (task.result()
+                           .rstrip()
+                           .upper())
+
+                    client.writer.echo(cmd)
+                    self.process_command(client, cmd)
+
+                    # await next,
+                    readline = asyncio.ensure_future(client.reader.readline())
+                    wait_for.add(readline)
+
+                else:
+                    # (2) system notification
+                    msg = task.result()
+
+                    # await next,
+                    recv_msg = asyncio.ensure_future(client.notify_queue.get())
+                    wait_for.add(recv_msg)
+
+                    # show and display prompt,
+                    client.writer.write('\r\x1b[K{}\r\n'.format(msg))
+
+        finally:
+            for task in wait_for:
+                task.cancel()
+
+
+    @asyncio.coroutine
+    def repl_catime(self, client):
+        """
+        Lander REPL providing character-at-a-time processing.
         """
         read_one = asyncio.ensure_future(client.reader.read(1))
         recv_msg = asyncio.ensure_future(client.notify_queue.get())
@@ -198,4 +248,4 @@ lander = Lander()
 def shell(reader, writer):
     global lander
     with lander.register_link(reader, writer) as client:
-        yield from lander.repl(client)
+        yield from lander.repl_readline(client)

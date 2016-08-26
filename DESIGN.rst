@@ -1,15 +1,29 @@
-Design/TODO
-===========
-
-Design items
-
+Design
+======
 
 reduce
 ------
 
 outer telnetlib3-server and telnetlib3-client and examples should connect
 as exit(main(\*\*parse_args(sys.argv))), the _transform_args() function is
-rather shoe-horned, main() should declare keywords
+rather shoe-horned, main() should declare keywords.
+
+**this is completed for server, copy to client**
+
+
+wait_for?
+---------
+
+We need a way to wish to wait for a state. For example, our shell might await
+until local_echo is False, or remote_option[ECHO] is True. A function wait_for,
+receiving a function that returns True when state is met, will be called back
+continuously after each block of data received containing an IAC command byte,
+but the boiler code simply returns the waiter.
+
+This should allow us to spray the client with feature requests, and await the
+completion of their negotiation, especially for things like LINEMODE that might
+have many state changes, this allows asyncio to solve the complex "awaiting
+many future states in parallel" event loop easily
 
 BaseTelnetProtocol
 ------------------
@@ -88,7 +102,7 @@ CHARSET, toggling in and outbinary, thereby enabling UTF8 input/output, etc.
 UTF8
 ====
 
-CHARSET (`RFC 2066`_) specifies a codepage, not an encoding. At the time, this
+CHARSET (`rfc-2066`_) specifies a codepage, not an encoding. At the time, this
 was more or less limited to specifying the codepage used to display bytes of the
 range 127 through 255.  Unimplemented in BSD client, and generally found
 implemented only in recent MUD client (Atlantis_) and servers. Most common
@@ -141,7 +155,7 @@ This implementation aims to implement only those capabilities "found in the
 wild", and includes, or does not include, mechanisms that are suitable only
 for legacy or vendor-implemented options. It even makes one of its own: the
 encoding' used in binary mode is the value replied by the CHARSET negotation
-(`RFC 2066`_).
+(`rfc-2066`_).
 
 
 
@@ -149,7 +163,7 @@ Remote LineMode
 ---------------
 
 This project is the only known Server-side implementation of *Special Linemode
-Character* (SLC) negotiation and *Remote line editing* (`RFC 1184`_), other than
+Character* (SLC) negotiation and *Remote line editing* (`rfc-1184`_), other than
 BSD telnet, which was used as a guide for the bulk of this python implementation.
 
 Remote line editing is a comprehensive approach to providing responsive,
@@ -237,7 +251,7 @@ received on the transport.
 A user could then instruct "Abort Output" (``IAC-AO``), "Interrupt Process"
 (``IAC-IP``), or others, and then presumably return to normal processing.
 
-Consider the description of a PDP-10 session in `RFC 139`_ (May 1971), presented
+Consider the description of a PDP-10 session in `rfc-139`_ (May 1971), presented
 here as a simple unix session:
 
     1. Teletype sends command input::
@@ -259,7 +273,7 @@ blocking the half-duplex transmission with output (having not yet received
 keyboard.  This is the ``BREAK`` or ``ATTN`` key.
 
 The terminal driver may then signal the 'supervisor', which then sends ``INS``
-(`RFC 139`_). Although the teletype is capable of "flushing" its input buffer,
+(`rfc-139`_). Although the teletype is capable of "flushing" its input buffer,
 it does not flush control codes. Remaining control codes from the teletype
 (``^t^t^c``) continues to the remote end, but is discarded by that end, until
 the Data-Mark (``IAC-DM``) is sent by the supervisor.
@@ -290,7 +304,7 @@ continue sending ``socket.MSG_OOB`` (presumably, along with the remaining
 All input is discarded by the ``IAC`` interpreter until ``IAC-DM`` is received;
 including IAC or 8-bit commands. This was used to some abuse to "piggyback"
 telnet by breaking out of IAC and into another "protocol" all together, and is
-grieved about in `RFC 529`_::
+grieved about in `rfc-529`_::
 
       The Telnet SYNCH mechanism is being misused by attempting to give
       it meaning at two different levels of protocol.
@@ -341,7 +355,7 @@ editing or 'character-at-a-time' capabilities.
   ``CR LF`` to mean "end-of-line".  The default implementation strips *CL LF*,
   and fires ``line_received`` on receipt of ``CR`` byte.
 
-* ``CR NUL`` (Carriage Return, Null): An interpretation of `RFC 854`_ may be that
+* ``CR NUL`` (Carriage Return, Null): An interpretation of `rfc-854`_ may be that
   ``CR NUL`` should be sent when only a single ``CR`` is intended on a client and
   server host capable of distinguishing between ``CR`` and ``CR LF`` (return key
   vs enter key).  The default implementation strips ``CL NUL``, and fires
@@ -377,7 +391,7 @@ only known client to support both modes.
 Finding RFC 495
 ---------------
 
-`RFC 495`_, NIC #15371 "TELNET Protocol Specification." 1 May 1973,
+`rfc-495`_, NIC #15371 "TELNET Protocol Specification." 1 May 1973,
 A. McKenzie, lists the following attached documents, which are not available::
 
     [...] specifications for TELNET options which allow negotiation of:
@@ -438,5 +452,57 @@ It is hosted on github_.  Currently in development stage, feedback is
 encouraged. Feel free to make use of fork, pull and Issues services to
 report any bugs, grievances, or enhancements.
 
+TODO
+====
 
-.. _x/84: http://pypi.python.org/pypi/x84 
+- xon/xoff is unimplemented, see
+  telnetlib3.stream_writer.TelnetWriter.handle_xon and handle_xoff.
+
+- After long-running (~2mo) job of telnetlib3 server on public IP, we ran
+  out of memory ! write test verifying garbage collects!
+
+- TelnetReader has no need for declaring server/client=True, it behaves the
+  same either way.
+
+- readline(), wow, what a bear of the RFC to provide either CR LF, CR NUL,
+  that LF can happen any time in stream (LF CR is possible/equal), and that
+  CR should never appear alone. What a rule for a bytestream, we wish not
+  to have any stream lookahead beyond the first CR/LF, as this is the end
+  line marker, we would be amiss to do any blocking for subsequent bytes,
+  we most definitely may not receive any.  Our implementation so far simply
+  returns up to any first CR/LF discovered, and, if the next call to readline
+  would return a line BEGINNING with either LF or NUL when the previous line
+  ended with CR, we simply discard that byte.
+ 
+- base_client.py and base_server.py actually share the same ABC
+  base_protocol.py, they are almost mirror images of one another,
+  which is pretty great, actually.  just reduce.
+
+- ValueError is used for many places where, the error is indicating that
+  a negotiation state that was attempted by the remote end is invalid,
+  for example: "received IAC SB LFLOW without first receiving IAC DO LFLOW."
+
+- SLC flushin/flushout attributes are not honored.  Not entirely sure
+  how to handle these two values with asyncio yet.
+
+- LINEMODE compliance needs a lot of work.
+  - possibly, we remove LINEMODE support entirely. I only know of one client,
+    BSD telnet, that is capable of negotiating -- this is the C code from which
+    our implementation was derived!
+  - callbacks on TelnetServer needed for requesting/replying to mode settings
+  - the SLC abstractions and 'slc_simul' mode is difficult for the API.
+  - There are many edge cases of SLC negotiation outlined in the RFC, how
+    comprehensive are our tests, and how well is our SLC working?
+  - IAC-SB-LINEMODE-DO-FORWARDMASK is unhandled, raises NotImplementedError
+
+    
+- _receive_status(self, buf) response to STATUS does not *honor* given state
+   values. only a non-compliant distant end would cause such a condition. so
+   it is decided to leave it as "conflict report only, no action always"
+
+- outer telnetlib3-server and telnetlib3-client and examples should connect
+  as exit(main(**parse_args(sys.argv))), the _transform_args() function is
+  rather shoe-horned, main() should declare keywords
+
+- also allow --exec instead of --shell parameter, which uses a pty to allow
+  piping say, /bin/bash to a telnet port.

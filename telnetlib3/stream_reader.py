@@ -17,12 +17,12 @@ class TelnetReader(asyncio.StreamReader):
 
         Where "line" is a sequence of characters ending with CR LF, LF,
         or CR NUL. This readline function is a strict interpretation of
-        Telnet Protocol RFC 854,
+        Telnet Protocol :rfc:`854`.
 
-        > The sequence "CR LF" must be treated as a single "new line" character
-        > and used whenever their combined action is intended; The sequence "CR
-        > NUL" must be used where a carriage return alone is actually desired;
-        > and the CR character must be avoided in other contexts.
+          The sequence "CR LF" must be treated as a single "new line" character
+          and used whenever their combined action is intended; The sequence "CR
+          NUL" must be used where a carriage return alone is actually desired;
+          and the CR character must be avoided in other contexts.
 
         And therefor, a line does not yield for a stream containing a
         CR if it is not succeeded by NUL or LF.
@@ -39,7 +39,7 @@ class TelnetReader(asyncio.StreamReader):
         If EOF is received before the termination of a line, the method will
         yield the partially read string.
 
-        This method is a :func:`asyncio.coroutine`.
+        This method is a :func:`~asyncio.coroutine`.
         """
         if self._exception is not None:
             raise self._exception
@@ -71,6 +71,7 @@ class TelnetReader(asyncio.StreamReader):
                 # position is nearest match,
                 pos, _, kind = min(matches)
                 if kind == b'\r\x00':
+                    # trim out '\x00'
                     begin, end = pos + 1, pos + 2
                 elif kind == b'\r\n':
                     begin = end = pos + 2
@@ -148,7 +149,7 @@ class TelnetReaderUnicode(TelnetReader):
             and return all characters as one large string.
         :rtype: str
 
-        This method is a :func:`asyncio.coroutine`.
+        This method is a :func:`~asyncio.coroutine`.
         """
         if self._exception is not None:
             raise self._exception
@@ -191,13 +192,13 @@ class TelnetReaderUnicode(TelnetReader):
         """
         Read exactly *n* unicode characters.
 
-        :raises: asyncio.IncompleteReadError: if the end of the stream is
+        :raises asyncio.IncompleteReadError: if the end of the stream is
             reached before *n* can be read. the
             :attr:`asyncio.IncompleteReadError.partial` attribute of the
             exception contains the partial read characters.
         :rtype: str
 
-        This method is a :func:`asyncio.coroutine`.
+        This method is a :func:`~asyncio.coroutine`.
         """
         if self._exception is not None:
             raise self._exception

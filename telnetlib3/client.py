@@ -153,7 +153,7 @@ class TelnetClient(client_base.BaseClient):
         :raises TypeError: when a direction argument, either ``outgoing``
             or ``incoming``, was not set ``True``.
         :returns: ``'US-ASCII'`` for the directions indicated, unless
-            ``BINARY`` rfc-856_ has been negotiated for the direction
+        ``BINARY`` :rfc:`856` has been negotiated for the direction
             indicated or :attr`force_binary` is set ``True``.
         :rtype: str
 
@@ -186,8 +186,29 @@ class TelnetClient(client_base.BaseClient):
         return 'US-ASCII'
 
 class TelnetTerminalClient(TelnetClient):
+    """
+    Telnet client for sessions of network virtual terminal (NVT).
+    """
+
     def send_naws(self):
+        """
+        Callback replies to request for window size, NAWS :rfc:`1073`.
+
+        :rtype: (int, int)
+        :returns: window dimensions by lines and columns
+        """
         return self._winsize()
+
+    def send_env(self, keys):
+        """
+        Callback replies to request for env values, NEW_ENVIRON :rfc:`1572`.
+
+        :rtype: dict
+        :returns: super class value updated with window LINES and COLUMNS.
+        """
+        env = super().send_env(keys)
+        env['LINES'], env['COLUMNS'] = self._winsize()
+        return env
 
     @staticmethod
     def _winsize():
@@ -203,12 +224,6 @@ class TelnetTerminalClient(TelnetClient):
             # TODO: mock import error, or test on windows or other non-posix.
             return (int(os.environ.get('LINES', 25)),
                     int(os.environ.get('COLUMNS', 80)))
-
-    def send_env(self, keys):
-        env = super().send_env(keys)
-        env['LINES'], env['COLUMNS'] = self._winsize()
-        return env
-
 
 @asyncio.coroutine
 def open_connection(host=None, port=23, *, client_factory=None, loop=None,
@@ -240,24 +255,24 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
     :param str encoding: The default assumed encoding, or ``False`` to disable
         unicode support.  This value is used for decoding bytes received by and
         encoding bytes transmitted to the Server.  These values are preferred
-        in response to NEW_ENVIRON rfc-1572_ as environment value ``LANG``, and
-        by CHARSET rfc-2066_ negotiation.
+        in response to NEW_ENVIRON :rfc:`1572` as environment value ``LANG``, and
+        by CHARSET :rfc:`2066` negotiation.
 
         The server's attached ``reader, writer`` streams accept and return
         unicode, unless this value explicitly set ``False``.  In that case, the
         attached streams interfaces are bytes-only.
 
-    :param str term: Terminal type sent for requests of TTYPE, rfc-930_ or as
-        Environment value TERM by NEW_ENVIRON negotiation, rfc-1672_.
+    :param str term: Terminal type sent for requests of TTYPE, :rfc:`930` or as
+        Environment value TERM by NEW_ENVIRON negotiation, :rfc:`1672`.
     :param int cols: Client window dimension sent as Environment value COLUMNS
-        by NEW_ENVIRON negotiation, rfc-1672_ or NAWS rfc-1073_.
+        by NEW_ENVIRON negotiation, :rfc:`1672` or NAWS :rfc:`1073`.
     :param int rows: Client window dimension sent as Environment value LINES by
-        NEW_ENVIRON negotiation, rfc-1672_ or NAWS rfc-1073_.
+        NEW_ENVIRON negotiation, :rfc:`1672` or NAWS :rfc:`1073`.
     :param tuple tspeed: Tuple of client BPS line speed in form ``(rx, tx``)
         for receive and transmit, respectively.  Sent when requested by TSPEED,
-        rfc-1079_.
+        :rfc:`1079`.
     :param str xdisploc: String transmitted in response for request of
-        XDISPLOC, rfc-1086_ by server (X11).
+        XDISPLOC, :rfc:`1086` by server (X11).
     :param asyncio.coroutine shell: A coroutine that is called after
         negotiation completes, receiving arguments ``(reader, writer)``.
         The reader is a :class:`TelnetStreamReader` instance, the writer is
@@ -275,12 +290,10 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
         negotiations, the shell continues anyway after the greater of this
         value or ``connect_minwait`` elapsed.
     :param bool force_binary: When ``True``, the encoding specified is used for
-        both directions even when failing ``BINARY`` negotiation, rfc-856_. 
+        both directions even when failing ``BINARY`` negotiation, :rfc:`856`. 
         This parameter has no effect when ``encoding=False``.
     :param str encoding_errors: Same meaning as :class:`codecs.Codec`.
-    :param int timeout: Causes clients to disconnect if idle for this duration,
-        ensuring resources are freed on busy servers.  When explicitly set to
-        ``False``, clients will not be disconnected for timeout.
+    :param float connect_minwait: XXX
     :param float connect_maxwait: If the remote end is not complaint, or
         otherwise confused by our demands, the shell continues anyway after the
         greater of this value has elapsed.  A client that is not answering
@@ -290,7 +303,7 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
     :return (reader, writer): The reader is a :class:`TelnetStreamReader`
         instance, the writer is a :class:`TelnetStreamWriter` instance.
 
-    This method is a coroutine
+    This function is a :func:`~asyncio.coroutine`.
     """
     log = log or logging.getLogger(__name__)
     loop = loop or asyncio.get_event_loop()
