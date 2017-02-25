@@ -2,7 +2,7 @@ History
 =======
 1.0.0
   * First general release for standard API: Instead of encouraging twisted-like
-    override of protocol methods, we provide a shell callback interface,
+    override of protocol methods, we provide a "shell" callback interface,
     receiving argument pairs (reader, writer).
 
 0.5.0

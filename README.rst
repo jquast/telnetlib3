@@ -82,14 +82,17 @@ Authoring a Telnet Client that plays the war game with this server:
 Command-line
 ------------
 
-Two command-line scripts are distributed with this package.  These should be
-suitable for conn
+Two command-line scripts are distributed with this package.
 
 ``telnetlib3-client``
 
   Small demonstrating terminal telnet client.  This opens *stdin* and *stdout*
   for asynchronous I/O, forwarding input to the writer interface, and printing
   output received from the reader interface.
+
+  To connect to a "Mystic BBS" with CP437 encoding::
+
+    telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
 
 ``telnetlib3-server``
 

@@ -364,12 +364,12 @@ class TelnetWriter(asyncio.StreamWriter):
 
     @property
     def inbinary(self):
-        """ Whether binary data may be received on this stream, :rfc:`856`."""
+        """ Whether binary data is expected to be received on reader, :rfc:`856`."""
         return self.remote_option.enabled(BINARY)
 
     @property
     def outbinary(self):
-        """Whether BINARY data may be sent on this stream, :rfc:`856`."""
+        """Whether binary data may be written to the writer, :rfc:`856`."""
         return self.local_option.enabled(BINARY)
 
     def echo(self, data):

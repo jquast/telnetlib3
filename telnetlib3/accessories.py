@@ -94,5 +94,3 @@ def make_reader_task(reader, size=2**12):
     else:
         task = asyncio.ensure_future
     return task(reader.read(size))
-
-
