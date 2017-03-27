@@ -535,10 +535,14 @@ def test_telnet_client_cmdline(bind_host, unused_tcp_port, event_loop):
         stdout=asyncio.subprocess.PIPE)
 
     line = yield from asyncio.wait_for(proc.stdout.readline(), 1.5)
+    assert line.strip() == b"Escape character is '^]'."
+
+    line = yield from asyncio.wait_for(proc.stdout.readline(), 1.5)
     assert line.strip() == b'hello, space cadet.'
 
     # message received, expect the client to gracefully quit.
-    yield from asyncio.wait_for(proc.communicate(), 1)
+    out, err = yield from asyncio.wait_for(proc.communicate(), 1)
+    assert out == b'\x1b[m\nConnection closed by foreign host.\n'
 
 
 @pytest.mark.asyncio
@@ -562,8 +566,11 @@ def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port,
                                         bind_host, unused_tcp_port)
     proc = pexpect.spawn(prog, args)
     yield from proc.expect(pexpect.EOF, async=True, timeout=5)
-    assert proc.before.splitlines()[0] == b'hello, space cadet.'
-
+    # our 'space cadet' has \r\n hardcoded, so \r\r\n happens, ignore it
+    assert proc.before == (b"Escape character is '^]'.\r\n"
+                           b"hello, space cadet.\r\r\n"
+                           b"\x1b[m\r\n"
+                           b"Connection closed by foreign host.\r\n")
 
 @pytest.mark.asyncio
 def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port,
@@ -576,16 +583,16 @@ def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port,
     os.close(fd)
 
     args = [prog, bind_host, str(unused_tcp_port), '--loglevel=info',
-            '--connect-minwait=0.05', '--connect-maxwait=0.05',
+            '--connect-minwait=0.15', '--connect-maxwait=0.15',
             '--logfile={0}'.format(logfile)]
 
     @asyncio.coroutine
     def shell(reader, writer):
-        writer.write('hello ')
-        inp = yield from reader.read(1)
+        writer.write('Press Return to continue:')
+        inp = yield from reader.readline()
         if inp:
             writer.echo(inp)
-            writer.write('\r\ngoodbye.\r\n')
+            writer.write('\ngoodbye.\n')
         yield from writer.drain()
         writer.close()
 
@@ -599,17 +606,22 @@ def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port,
     proc = yield from asyncio.create_subprocess_exec(
         *args, loop=event_loop,
         stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE)
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE)
+
+    #line = yield from asyncio.wait_for(proc.stdout.readline(), 1.5)
+    #assert line.strip() == b"Escape character is '^]'."
 
     # message received, expect the client to gracefully quit.
-    output = yield from asyncio.wait_for(proc.communicate(b'X'), 1)
-    assert output[0] == b'hello X\r\ngoodbye.\r\n'
+    stdout, stderr = yield from asyncio.wait_for(proc.communicate(b'\r'), 2)
 
     # And finally, analyze the contents of the logfile,
     # - 2016-03-18 20:19:25,227 INFO client_base.py:113 Connected to <Peer 127.0.0.1 51237>
     # - 2016-03-18 20:19:25,286 INFO client_base.py:67 Connection closed to <Peer 127.0.0.1 51237>
     logfile_output = open(logfile).read().splitlines()
     os.unlink(logfile)
+    assert stdout == (b"Escape character is '^]'.\n"
+                      b"Press Return to continue:\r\ngoodbye.\n")
 
     # verify,
     assert len(logfile_output) == 2

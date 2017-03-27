@@ -155,7 +155,7 @@ class TelnetReaderUnicode(TelnetReader):
             raise self._exception
 
         if not n:
-            return ''
+            return u''
 
         if n < 0:
             # This used to just loop creating a new waiter hoping to

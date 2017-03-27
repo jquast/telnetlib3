@@ -509,3 +509,7 @@ TODO
 
 resources?
 https://github.com/Stichting-MINIX-Research-Foundation/netbsd/blob/master/usr.bin/telnet
+
+isatty test in client_shell.py is os.path.sameopenfile(0, 1), we usually prefer
+self._istty = sys.stdin.isatty() ?
+

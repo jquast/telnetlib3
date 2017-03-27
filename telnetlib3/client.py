@@ -228,10 +228,10 @@ class TelnetTerminalClient(TelnetClient):
 @asyncio.coroutine
 def open_connection(host=None, port=23, *, client_factory=None, loop=None,
                     family=0, flags=0, local_addr=None, log=None,
-                    encoding='utf8', encoding_errors='strict',
+                    encoding='utf8', encoding_errors='replace',
                     force_binary=False, term='unknown', cols=80, rows=25,
                     tspeed=(38400, 38400), xdisploc='', shell=None,
-                    connect_minwait=1.0, connect_maxwait=4.0,
+                    connect_minwait=2.0, connect_maxwait=3.0,
                     waiter_closed=None, _waiter_connected=None,
                     limit=None):
     """
@@ -377,8 +377,12 @@ def _get_argument_parser():
                         help='module.function_name')
     parser.add_argument('--encoding', default='utf8',
                         help='encoding name')
+    parser.add_argument('--encoding-errors', default='replace',
+                        help='handler for encoding errors',
+                        choices=('replace', 'ignore', 'strict'))
+
     parser.add_argument('--force-binary', action='store_true',
-                        help='force encoding')
+                        help='force encoding', default=True)
     parser.add_argument('--connect-minwait', default=1.0, type=float,
                         help='shell delay for negotiation')
     parser.add_argument('--connect-maxwait', default=4.0, type=float,
@@ -397,6 +401,7 @@ def _transform_args(args):
         'shell': accessories.function_lookup(args.shell),
         'term': args.term,
         'force_binary': args.force_binary,
+        'encoding_errors': args.encoding_errors,
         'connect_minwait': args.connect_minwait,
     }
 

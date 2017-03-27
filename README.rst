@@ -64,6 +64,7 @@ Authoring a Telnet Client that plays the war game with this server:
         while True:
             outp = yield from reader.read(1024)
             if not outp:
+                # EOF
                 return
 
             print(outp, end='', flush=True)
@@ -73,7 +74,7 @@ Authoring a Telnet Client that plays the war game with this server:
                 writer.write('y')
 
         print()
-              
+
     loop = asyncio.get_event_loop()
     coro = telnetlib3.open_connection('localhost', 6023, shell=shell)
     reader, _ = loop.run_until_complete(coro)
@@ -86,13 +87,12 @@ Two command-line scripts are distributed with this package.
 
 ``telnetlib3-client``
 
-  Small demonstrating terminal telnet client.  This opens *stdin* and *stdout*
-  for asynchronous I/O, forwarding input to the writer interface, and printing
-  output received from the reader interface.
+  Small terminal telnet client.  Some example destinations and options::
 
-  To connect to a "Mystic BBS" with CP437 encoding::
-
+    telnetlib3-client rainmaker.wunderground.com
     telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
+    telnetlib3-client htc.zapto.org
+
 
 ``telnetlib3-server``
 

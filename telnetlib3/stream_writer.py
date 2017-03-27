@@ -1194,8 +1194,10 @@ class TelnetWriter(asyncio.StreamWriter):
         if opt == ECHO and self.client:
             # What do we have here? A Telnet Server attempting to
             # fingerprint us as a broken 4.4BSD Telnet Client, which
-            # would respond 'WILL ECHO'.
-            raise ValueError('cannot recv DO ECHO on client end.')
+            # would respond 'WILL ECHO'.  Let us just reply WONT, some
+            # servers, such as dgamelaunch (nethack.alt.org) freeze up
+            # unless we answer IAC-WONT-ECHO.
+            self.iac(WONT, ECHO)
         elif self.server and opt in (LINEMODE, TTYPE, NAWS,
                                      NEW_ENVIRON, XDISPLOC, LFLOW):
             raise ValueError('cannot recv DO {0} on server end (ignored).'
