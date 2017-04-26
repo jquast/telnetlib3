@@ -579,7 +579,7 @@ def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port,
     # this code may be reduced when pexpect asyncio is bugfixed ..
     # we especially need pexpect to pass sys.stdin.isatty() test.
     prog = pexpect.which('telnetlib3-client')
-    fd, logfile = tempfile.mkstemp()
+    fd, logfile = tempfile.mkstemp(prefix='telnetlib3', suffix='.log')
     os.close(fd)
 
     args = [prog, bind_host, str(unused_tcp_port), '--loglevel=info',
@@ -619,11 +619,12 @@ def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port,
     # - 2016-03-18 20:19:25,227 INFO client_base.py:113 Connected to <Peer 127.0.0.1 51237>
     # - 2016-03-18 20:19:25,286 INFO client_base.py:67 Connection closed to <Peer 127.0.0.1 51237>
     logfile_output = open(logfile).read().splitlines()
-    os.unlink(logfile)
     assert stdout == (b"Escape character is '^]'.\n"
-                      b"Press Return to continue:\r\ngoodbye.\n")
+                      b"Press Return to continue:\r\ngoodbye.\n"
+                      b"\x1b[m\nConnection closed by foreign host.\n")
 
     # verify,
-    assert len(logfile_output) == 2
-    assert 'Connected to <Peer' in logfile_output[0]
-    assert 'Connection closed to <Peer' in logfile_output[1]
+    assert len(logfile_output) == 2, logfile
+    assert 'Connected to <Peer' in logfile_output[0], logfile
+    assert 'Connection closed to <Peer' in logfile_output[1], logfile
+    os.unlink(logfile)

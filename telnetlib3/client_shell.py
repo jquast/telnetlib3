@@ -1,6 +1,7 @@
 # std imports
 import collections
 import contextlib
+import logging
 import asyncio
 import sys
 
@@ -191,8 +192,8 @@ else:
 
                 task = done.pop()
                 wait_for.remove(task)
-                telnet_writer.log.info('task={}, wait_for={}'.format(
-                    task, wait_for))
+
+                telnet_writer.log.debug('task=%s, wait_for=%s', task, wait_for)
 
                 # client input
                 if task == stdin_task:
