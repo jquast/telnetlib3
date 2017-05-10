@@ -4,7 +4,6 @@
 from __future__ import print_function
 
 # local
-import subprocess
 import tempfile
 import shutil
 import glob
@@ -17,27 +16,28 @@ import six
 PROJ_ROOT = os.path.join(os.path.dirname(__file__), os.pardir)
 COVERAGERC = os.path.join(PROJ_ROOT, '.coveragerc')
 
+
 def main():
     """Program entry point."""
     cov = coverage.Coverage(config_file=COVERAGERC)
     cov.combine()
 
-    # we must duplicate these files, coverage.py unconditionally
-    # deletes them on .combine().
-    _data_paths = glob.glob(os.path.join(PROJ_ROOT, '._coverage.*'))
-    dst_folder = tempfile.mkdtemp()
-    data_paths = []
-    for src in _data_paths:
-        dst = os.path.join(dst_folder, os.path.basename(src))
-        shutil.copy(src, dst)
-        data_paths.append(dst)
+    # Duplicate coverage files, coverage.py unconditionally deletes them
+    # on .combine(), we wish to keep each file in perpetuity.
+    with tempfile.mkdtemp() as dst_folder:
+        data_paths = []
+        for src in glob.glob(os.path.join(PROJ_ROOT, '._coverage.*')):
+            dst = os.path.join(dst_folder, os.path.basename(src))
+#                src.replace('._coverage', '.coverage')))
+            shutil.copy(src, dst)
+            data_paths.append(dst)
 
-    print("combining coverage: {0}".format(data_paths))
-    cov.combine(data_paths=data_paths)
-    cov.load()
-    cov.html_report(ignore_errors=True)
-    print("--> open {0}/htmlcov/index.html for review."
-          .format(os.path.relpath(PROJ_ROOT)))
+    cov.combine(data_paths=data_paths, strict=True)
+    cov.save()
+    cov.html_report(ignore_errors=False)
+    print("--> {magenta}open {proj_root}/htmlcov/index.html{normal}"
+          " for review.".format(magenta='\x1b[1;35m', normal='\x1b[0m',
+                                proj_root=os.path.relpath(PROJ_ROOT)))
 
     fout = six.StringIO()
     cov.report(file=fout, ignore_errors=True)

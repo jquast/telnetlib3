@@ -5,6 +5,7 @@ ignore-patterns:
     - (^|/)\..+
     - ^docs/
     - ^build/
+    - ^telnetlib3/tests/
 
 test-warnings: true
 
@@ -16,16 +17,11 @@ dodgy:
     run: true
 
 pyflakes:
-    # preferring 'frosted' instead (a fork of)
-    run: false
-
-frosted:
-    # static analysis, pyflakes improved?
-    #
     run: true
-#    disable:
-#        # Terminal imported but unused (false)
-#        - 'E101'
+    disable:
+        # conflicts with py.test fixtures,
+        # redefinition of unused 'log' from line 9 (col 1)
+        - F811
 
 mccabe:
     run: true
@@ -34,6 +30,14 @@ pep257:
     # docstring checking
     run: true
 
+    disable:
+        # 1 blank line required before class docstring (found 0)
+        # this deprecated since 0.7.0
+        - D203
+        # Do not require docstrings in public classes, we will
+        # document their class initializer, __init__.
+        - D101
+
 pep8:
     # style checking
     run: true
@@ -41,23 +45,28 @@ pep8:
 pylint:
     # static analysis and then some
     run: true
+
     options:
         # pytest module has dynamically assigned functions,
         # raising errors such as: E1101: Module 'pytest' has
         # no 'mark' member
         ignored-classes: pytest
+
         # List of builtins function names that should not be used,
         # separated by a comma
         # bad-functions=map,filter,input
         bad-functions: input
         persistent: no
-        # 'ks' is often-cited variable representing Keystroke instance.
+
         # 'fd' is a common shorthand term for file descriptor (as int).
-        good-names: _,ks,fd
+        good-names: _,fd
 
     disable:
         # Access to a protected member _sugar of a client class
         - protected-access
+        # conflicts with py.test test fixtures
+        - redefined-outer-name
+        - too-many-instance-attributes
 
 pyroma:
     # checks setup.py
@@ -71,9 +80,5 @@ pyroma:
         #
         # we agree.
         - 'PYR15'
-
-vulture:
-    # this tool does a good job of finding unused code.
-    run: false
 
 # vim: noai:ts=4:sw=4

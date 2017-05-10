@@ -1,15 +1,18 @@
-====================================
-Welcome to telnetlib3 documentation!
-====================================
+==========
+telnetlib3
+==========
+
+Python 3 asyncio Telnet server and client Protocol library.
 
 Contents:
 
 .. toctree::
-   :maxdepth: 3
+   :maxdepth: 2
    :glob:
 
    intro
    api
+   rfcs
    contributing
    history
 
