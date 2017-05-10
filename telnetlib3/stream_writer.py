@@ -1,30 +1,27 @@
+"""Module provides :class:`TelnetWriter` and :class:`TelnetWriterUnicode`."""
+# std imports
 import asyncio
 import collections
 import logging
 import struct
 
+# local imports
 from . import slc
-from .telopt import *  # noqa
+from .telopt import (ABORT, ACCEPTED, AO, AYT, BINARY, BRK, CHARSET, CMD_EOR,
+                     DM, DO, DONT, EC, ECHO, EL, EOF, EOR, ESC, GA, IAC, INFO,
+                     IP, IS, LFLOW, LFLOW_OFF, LFLOW_ON, LFLOW_RESTART_ANY,
+                     LFLOW_RESTART_XON, LINEMODE, LOGOUT, NAWS, NEW_ENVIRON,
+                     NOP, REJECTED, REQUEST, SB, SE, SEND, SGA, SNDLOC, STATUS,
+                     SUSP, TM, TSPEED, TTABLE_ACK, TTABLE_NAK, TTABLE_IS,
+                     TTABLE_REJECTED, TTYPE, USERVAR, VALUE, VAR, WILL, WONT,
+                     XDISPLOC, name_command, name_commands, theNULL)
+
 
 __all__ = ('TelnetWriter', 'TelnetWriterUnicode', )
 
 
 class TelnetWriter(asyncio.StreamWriter):
-    """
-    Telnet IAC Interpreter.
-
-    This class implements a :meth:`feed_byte` acts as a Telnet
-    *Is-A-Command* (IAC) interpreter.
-
-    The significance of the last byte passed to this method is tested
-    by instance attributes following the call to :meth:`feed_byte`.
-
-    A minimal Telnet Service :meth:`asyncio.Protocol.data_received`
-    method should forward each byte to ``feed_byte``, returning True
-    to indicate the given byte should be forwarded to a Protocol reader
-    method :meth:`asyncio.StreamReader.feed_data`.
-    """
-    #: Total bytes sent to ``feed_byte()``
+    #: Total bytes sent to :meth:`feed_byte`
     byte_count = 0
 
     #: Whether flow control is enabled.
@@ -62,10 +59,35 @@ class TelnetWriter(asyncio.StreamWriter):
     def __init__(self, transport, protocol, *, client=False, server=False,
                  reader=None, loop=None, log=None):
         """
+        A writer interface for the telnet protocol.
+
+        Telnet IAC Interpreter.
+
+        Almost all negotiation actions are performed through the writer
+        interface, as any action requires writing bytes to the underling
+        stream.  This class implements :meth:`feed_byte`, which acts as a
+        Telnet *Is-A-Command* (IAC) interpreter.
+
+        The significance of the last byte passed to this method is tested
+        by instance attribute :attr:`is_oob`, following the call to
+        :meth:`feed_byte` to determine whether the given byte is in or out
+        of band.
+
+        A minimal Telnet Protocol method,
+        :meth:`asyncio.Protocol.data_received`, should forward each byte to
+        ``feed_byte``, which returns True to indicate the given byte should be
+        forwarded to a Protocol reader method
+        :meth:`asyncio.StreamReader.feed_data`.
+
         :param bool client: Whether the IAC interpreter should react from
             the client point of view.
         :param bool server: Whether the IAC interpreter should react from
             the server point of view.
+        :param logging.Logger log: target logger, if None is given, one is
+            created using the namespace ``'telnetlib3.stream_writer'``.
+        :param asyncio.base_events.BaseEventLoop loop: set the event loop to
+            use.  The return value of :func:`asyncio.get_event_loop` is used
+            when unset.
         """
         asyncio.StreamWriter.__init__(self, transport, protocol, reader, loop)
 
@@ -112,11 +134,13 @@ class TelnetWriter(asyncio.StreamWriter):
         # wishing not to wire any callbacks at all may simply allow our stream
         # to gracefully log and do nothing about in most cases.
         self._iac_callback = {}
-        for iac_cmd, key in (
-                (BRK, 'brk'), (IP, 'ip'), (AO, 'ao'), (AYT, 'ayt'), (EC, 'ec'),
-                (EL, 'el'), (EOF, 'eof'), (SUSP, 'susp'), (ABORT, 'abort'),
-                (NOP, 'nop'), (DM, 'dm'), (GA, 'ga'), (CMD_EOR, 'eor'),
-                (TM, 'tm'), ):
+        for iac_cmd, key in ((BRK, 'brk'), (IP, 'ip'),
+                             (AO, 'ao'), (AYT, 'ayt'),
+                             (EC, 'ec'), (EL, 'el'),
+                             (EOF, 'eof'), (SUSP, 'susp'),
+                             (ABORT, 'abort'), (NOP, 'nop'),
+                             (DM, 'dm'), (GA, 'ga'),
+                             (CMD_EOR, 'eor'), (TM, 'tm')):
             self.set_iac_callback(
                 cmd=iac_cmd, func=getattr(self, 'handle_{}'.format(key)))
 
@@ -135,10 +159,10 @@ class TelnetWriter(asyncio.StreamWriter):
 
         self._ext_callback = {}
         for ext_cmd, key in (
-                (LOGOUT, 'logout'), (SNDLOC, 'sndloc'), (NAWS, 'naws'),
-                (TSPEED, 'tspeed'), (TTYPE, 'ttype'), (XDISPLOC, 'xdisploc'),
-                (NEW_ENVIRON, 'environ'), (CHARSET, 'charset'),
-                ):
+            (LOGOUT, 'logout'), (SNDLOC, 'sndloc'), (NAWS, 'naws'),
+            (TSPEED, 'tspeed'), (TTYPE, 'ttype'), (XDISPLOC, 'xdisploc'),
+            (NEW_ENVIRON, 'environ'), (CHARSET, 'charset'),
+        ):
             self.set_ext_callback(
                 cmd=ext_cmd, func=getattr(self, 'handle_{}'.format(key)))
 
@@ -152,7 +176,7 @@ class TelnetWriter(asyncio.StreamWriter):
         for ext_cmd, key in (
                 (CHARSET, 'charset'), (NEW_ENVIRON, 'environ')):
             _cbname = ('handle_send_server_' if self.server else
-                      'handle_send_client_')
+                       'handle_send_client_')
             self.set_ext_send_callback(
                 cmd=ext_cmd, func=getattr(self, _cbname + key))
 
@@ -364,7 +388,9 @@ class TelnetWriter(asyncio.StreamWriter):
 
     @property
     def inbinary(self):
-        """ Whether binary data is expected to be received on reader, :rfc:`856`."""
+        """
+        Whether binary data is expected to be received on reader, :rfc:`856`.
+        """
         return self.remote_option.enabled(BINARY)
 
     @property
@@ -405,18 +431,20 @@ class TelnetWriter(asyncio.StreamWriter):
     @property
     def mode(self):
         """
-        String describing NVT mode, one of:
+        String describing NVT mode.
 
-        ``kludge``: Client acknowledges WILL-ECHO, WILL-SGA. character-at-
-            a-time and remote line editing may be provided.
+        :rtype str: One of:
 
-        ``local``: Default NVT half-duplex mode, client performs line
-            editing and transmits only after pressing send (usually CR)
+            ``kludge``: Client acknowledges WILL-ECHO, WILL-SGA. character-at-
+                a-time and remote line editing may be provided.
 
-        ``remote``: Client supports advanced remote line editing, using
-            mixed-mode local line buffering (optionally, echoing) until
-            send, but also transmits buffer up to and including special
-            line characters (SLCs).
+            ``local``: Default NVT half-duplex mode, client performs line
+                editing and transmits only after pressing send (usually CR)
+
+            ``remote``: Client supports advanced remote line editing, using
+                mixed-mode local line buffering (optionally, echoing) until
+                send, but also transmits buffer up to and including special
+                line characters (SLCs).
         """
         if self.remote_option.enabled(LINEMODE):
             if self._linemode.local:
@@ -434,7 +462,7 @@ class TelnetWriter(asyncio.StreamWriter):
 
     @property
     def is_oob(self):
-        """ The previous byte should not be received by the API stream."""
+        """The previous byte should not be received by the API stream."""
         return (self.iac_received or self.cmd_received)
 
     @property
@@ -452,13 +480,15 @@ class TelnetWriter(asyncio.StreamWriter):
         return self._linemode
 
     def send_iac(self, buf):
-        """ .. method: send_iac(self, buf : bytes)
+        """
+        Send a command starting with IAC (base 10 byte value 255).
 
-            no transformations of bytes are performed, only complete
-            iac commands are legal (unless ``partial`` is set ``false``).
+        No transformations of bytes are performed.  Normally, if the
+        byte value 255 is sent, it is escaped as ``IAC + IAC``.  This
+        method ensures it is not escaped,.
         """
         assert isinstance(buf, (bytes, bytearray)), buf
-        assert buf and buf.startswith(IAC)
+        assert buf and buf.startswith(IAC), buf
         self._transport.write(buf)
 
     def iac(self, cmd, opt=b''):
@@ -548,11 +578,11 @@ class TelnetWriter(asyncio.StreamWriter):
     #
 
     def request_status(self):
-        """ .. method:: request_status() -> bool
+        """
+        Send ``IAC-SB-STATUS-SEND`` sub-negotiation (:rfc:`859`).
 
-            Send IAC-SB-STATUS-SEND sub-negotiation (rfc859) only if
-            IAC-WILL-STATUS has been received. Returns True if status
-            request was sent.
+        This method may only be called after ``IAC-WILL-STATUS`` has been
+        received. Returns True if status request was sent.
         """
         if not self.remote_option.enabled(STATUS):
             self.log.debug('cannot send SB STATUS SEND '
@@ -564,15 +594,15 @@ class TelnetWriter(asyncio.StreamWriter):
             self.pending_option[SB + STATUS] = True
             return True
         else:
-            self.log.debug('cannot send SB STATUS SEND, request pending.')
+            self.log.info('cannot send SB STATUS SEND, request pending.')
         return False
 
     def request_tspeed(self):
-        """ .. method:: request_tspeed() -> bool
+        """
+        Send IAC-SB-TSPEED-SEND sub-negotiation, :rfc:`1079`.
 
-            Send IAC-SB-TSPEED-SEND sub-negotiation, :rfc:`1079` only if
-            IAC-WILL-TSPEED has been received. Returns True if tspeed
-            request was sent.
+        This method may only be called after ``IAC-WILL-TSPEED`` has been
+        received. Returns True if TSPEED request was sent.
         """
         if not self.remote_option.enabled(TSPEED):
             self.log.debug('cannot send SB TSPEED SEND '
@@ -589,15 +619,16 @@ class TelnetWriter(asyncio.StreamWriter):
         return False
 
     def request_charset(self):
-        """ .. method:: request_charset(codepages : list, sep : string) -> bool
-
-            Request sub-negotiation CHARSET, :rfc:`2066`. Returns True if request
-            is valid for telnet state, and was sent.
-
-            The sender requests that all text sent to and by it be encoded in
-            one of character sets specified by string list ``codepages``.
         """
+        Request sub-negotiation CHARSET, :rfc:`2066`.
 
+        Returns True if request is valid for telnet state, and was sent.
+
+        The sender requests that all text sent to and by it be encoded in
+        one of character sets specified by string list ``codepages``, which
+        is determined by function value returned by callback registered using
+        :meth:`set_ext_send_callback` with value ``CHARSET``.
+        """
         if not self.remote_option.enabled(CHARSET):
             self.log.debug('cannot send SB CHARSET REQUEST '
                            'without receipt of WILL CHARSET')
@@ -665,10 +696,10 @@ class TelnetWriter(asyncio.StreamWriter):
         return True
 
     def request_xdisploc(self):
-        """ .. method:: request_xdisploc() -> bool
+        """
+        Send XDISPLOC, SEND sub-negotiation, :rfc:`1086`.
 
-            Send XDISPLOC, SEND sub-negotiation, :rfc:`1086`.
-            Returns True if request is valid for telnet state, and was sent.
+        Returns True if request is valid for telnet state, and was sent.
         """
         assert self.server, (
             'SB XDISPLOC SEND may only be sent by server end')
@@ -681,15 +712,15 @@ class TelnetWriter(asyncio.StreamWriter):
             self.pending_option[SB + XDISPLOC] = True
             self.send_iac(b''.join(response))
             return True
-        else:
-            self.log.debug('cannot send SB XDISPLOC SEND, request pending.')
+
+        self.log.debug('cannot send SB XDISPLOC SEND, request pending.')
         return False
 
     def request_ttype(self):
-        """ .. method:: request_ttype() -> bool
+        """
+        Send TTYPE SEND sub-negotiation, :rfc:`930`.
 
-            Send TTYPE SEND sub-negotiation, rfc930.
-            Returns True if request is valid for telnet state, and was sent.
+        Returns True if request is valid for telnet state, and was sent.
         """
         assert self.server, (
             'SB TTYPE SEND may only be sent by server end')
@@ -708,10 +739,11 @@ class TelnetWriter(asyncio.StreamWriter):
 
     def request_forwardmask(self, fmask=None):
         """
-        Request the client forward the control characters indicated
-        in the Forwardmask class instance ``fmask``. When fmask is
-        None, a forwardmask is generated for the SLC characters
-        registered by ``slctab``.
+        Request the client forward their terminal control characters.
+
+        Characters are indicated in the :class:`~.Forwardmask` instance
+        ``fmask``.  When fmask is None, a forwardmask is generated for the SLC
+        characters registered by :attr:`~.slctab`.
         """
         assert self.server, (
             'DO FORWARDMASK may only be sent by server end')
@@ -743,10 +775,9 @@ class TelnetWriter(asyncio.StreamWriter):
         return False
 
     def send_lineflow_mode(self):
-        """
-        .. method send_lineflow_mode() -> bool
+        """Send LFLOW mode sub-negotiation, :rfc:`1372`.
 
-        Send LFLOW mode sub-negotiation, rfc1372.
+        Returns True if request is valid for telnet state, and was sent.
         """
         if self.client:
             self.log.error('only server may send IAC SB LINEFLOW <MODE>')
@@ -769,7 +800,6 @@ class TelnetWriter(asyncio.StreamWriter):
 
         An instance of the Linemode class, or self.linemode when unset.
         """
-
         if not (self.local_option.enabled(LINEMODE) or
                 self.remote_option.enabled(LINEMODE)):
             assert False, ('Cannot send LINEMODE-MODE without first '
@@ -803,15 +833,15 @@ class TelnetWriter(asyncio.StreamWriter):
         self._iac_callback[cmd] = func
 
     def handle_nop(self, cmd):
-        """ Handle IAC No-Operation (NOP).  """
+        """Handle IAC No-Operation (NOP)."""
         self.log.debug('IAC NOP: Null Operation (unhandled).')
 
     def handle_ga(self, cmd):
-        """ Handle IAC Go-Ahead (GA).  """
+        """Handle IAC Go-Ahead (GA)."""
         self.log.debug('IAC GA: Go-Ahead (unhandled).')
 
     def handle_dm(self, cmd):
-        """ Handle IAC Data-Mark (DM) """
+        """Handle IAC Data-Mark (DM)."""
         self.log.debug('IAC DM: Data-Mark (unhandled).')
 
 # Public mixed-mode SLC and IAC callbacks
@@ -826,7 +856,7 @@ class TelnetWriter(asyncio.StreamWriter):
         self.log.debug('IAC EL: Erase Line (unhandled).')
 
     def handle_eor(self, byte):
-        """ Handle IAC End of Record (CMD_EOR, SLC_EOR).  """
+        """Handle IAC End of Record (CMD_EOR, SLC_EOR)."""
         self.log.debug('IAC EOR: End of Record (unhandled).')
 
     def handle_abort(self, byte):
@@ -839,9 +869,7 @@ class TelnetWriter(asyncio.StreamWriter):
         self.log.debug('IAC ABORT: Abort (unhandled).')
 
     def handle_eof(self, byte):
-        """
-        Handle IAC End of Record (EOF, SLC_EOF).
-        """
+        """Handle IAC End of Record (EOF, SLC_EOF)."""
         self.log.debug('IAC EOF: End of File (unhandled).')
 
     def handle_susp(self, byte):
@@ -877,9 +905,7 @@ class TelnetWriter(asyncio.StreamWriter):
         self.log.debug('IAC AYT: Are You There? (unhandled).')
 
     def handle_ip(self, byte):
-        """
-        Handle IAC Interrupt Process (IP, SLC_IP).
-        """
+        """Handle IAC Interrupt Process (IP, SLC_IP)."""
         self.log.debug('IAC IP: Interrupt Process (unhandled).')
 
     def handle_ao(self, byte):
@@ -918,18 +944,15 @@ class TelnetWriter(asyncio.StreamWriter):
 #
     def set_slc_callback(self, slc_byte, func):
         """
-        Register ``func`` as callbable for receipt of SLC character
-        negotiated for the SLC command ``slc`` in  ``_slc_callback``,
-        keyed by ``slc`` and valued by its handling function.
+        Register ``func`` as callable for receipt of ``slc_byte``.
 
-        SLC_SYNCH, SLC_BRK, SLC_IP, SLC_AO, SLC_AYT, SLC_EOR, SLC_ABORT,
-        SLC_EOF, SLC_SUSP, SLC_EC, SLC_EL, SLC_EW, SLC_RP, SLC_XON,
-        SLC_XOFF, (...)
-
-        These callbacks receive a single argument: the SLC function
-        byte that fired it. Some SLC and IAC functions are intermixed;
-        which signaling mechanism used by client can be tested by
-        evaluating this argument.
+        :param bytes slc_byte: any of SLC_SYNCH, SLC_BRK, SLC_IP, SLC_AO,
+            SLC_AYT, SLC_EOR, SLC_ABORT, SLC_EOF, SLC_SUSP, SLC_EC, SLC_EL,
+            SLC_EW, SLC_RP, SLC_XON, SLC_XOFF ...
+        :param callable func: These callbacks receive a single argument: the
+            SLC function byte that fired it. Some SLC and IAC functions are
+            intermixed; which signaling mechanism used by client can be tested
+            by evaluating this argument.
         """
         assert callable(func), ('Argument func must be callable')
         assert (type(slc_byte) == bytes and
@@ -948,51 +971,54 @@ class TelnetWriter(asyncio.StreamWriter):
         self.log.debug('SLC EC: Erase Word (unhandled).')
 
     def handle_rp(self, slc):
-        """ Handle SLC Repaint. """
+        """Handle SLC Repaint (RP)."""
         self.log.debug('SLC RP: Repaint (unhandled).')
 
     def handle_lnext(self, slc):
-        """ Handle SLC Literal Next (Next character(s) received raw)
-        """
+        """Handle SLC Literal Next (LNEXT) (Next character is received raw)."""
         self.log.debug('SLC LNEXT: Literal Next (unhandled)')
 
     def handle_xon(self, byte):
-        """ Handle SLC XON (Transmit-On).  """
+        """Handle SLC Transmit-On (XON)."""
         self.log.debug('SLC XON: Transmit On (unhandled).')
 
     def handle_xoff(self, byte):
-        """ Handle SLC XOFF (Transmit-Off). """
+        """Handle SLC Transmit-Off (XOFF)."""
         self.log.debug('SLC XOFF: Transmit Off.')
 
 # public Telnet extension callbacks
 #
     def set_ext_send_callback(self, cmd, func):
         """
-        Register ``func`` as a callback for inquires of sub-negotiation
-        response values of ``cmd``. These callbacks must return any number
-        of arguments:
+        Register callback for inquires of sub-negotiation of ``cmd``.
 
-        * SNDLOC: for clients, returning one argument: the string
-          describing client location, such as ``b'ROOM 641-A'``, :rfc:`779`.
+        :param callable func: A callable function for the given ``cmd`` byte.
+            Note that the return type must match those documented.
+        :param bytes cmd: These callbacks must return any number of arguments,
+            for each registered ``cmd`` byte, respectively:
 
-        * NAWS: for clients, returning two integer arguments (width,
-          height), such as (80, 24), :rfc:`1073`.
+            * SNDLOC: for clients, returning one argument: the string
+              describing client location, such as ``b'ROOM 641-A'``,
+              :rfc:`779`.
 
-        * TSPEED: for clients, returning two integer arguments (rx, tx)
-          such as (57600, 57600), :rfc:`1079`.
+            * NAWS: for clients, returning two integer arguments (width,
+              height), such as (80, 24), :rfc:`1073`.
 
-        * TTYPE: for clients, returning one string, usually the terminfo(5)
-          database capability name, such as 'xterm', :rfc:`1091`.
+            * TSPEED: for clients, returning two integer arguments (rx, tx)
+              such as (57600, 57600), :rfc:`1079`.
 
-        * XDISPLOC: for clients, returning one string, the DISPLAY host
-          value, in form of <host>:<dispnum>[.<screennum>], :rfc:`1096`.
+            * TTYPE: for clients, returning one string, usually the terminfo(5)
+              database capability name, such as 'xterm', :rfc:`1091`.
 
-        * NEW_ENVIRON: for clients, returning a dictionary of (key, val)
-          pairs of environment item values, :rfc:`1408`.
+            * XDISPLOC: for clients, returning one string, the DISPLAY host
+              value, in form of <host>:<dispnum>[.<screennum>], :rfc:`1096`.
 
-        * CHARSET: for clients, receiving iterable of strings of character
-          sets requested by server, callback must return one of those
-          strings given, :rfc:`2066`.
+            * NEW_ENVIRON: for clients, returning a dictionary of (key, val)
+              pairs of environment item values, :rfc:`1408`.
+
+            * CHARSET: for clients, receiving iterable of strings of character
+              sets requested by server, callback must return one of those
+              strings given, :rfc:`2066`.
         """
         assert cmd in (SNDLOC, NAWS, TSPEED, TTYPE, XDISPLOC,
                        NEW_ENVIRON, CHARSET), cmd
@@ -1005,60 +1031,58 @@ class TelnetWriter(asyncio.StreamWriter):
 
         :param bytes cmd: One of the following listed bytes:
 
-        * :obj:`LOGOUT`: for servers and clients, receiving one argument.
+        * ``LOGOUT``: for servers and clients, receiving one argument.
           Server end may receive DO or DONT as argument ``cmd``, indicating
           client's wish to disconnect, or a response to WILL, LOGOUT,
-          indicating it's wish not to be automatically disconnected.
-          Client end may receive WILL or WONT, indicating server's wish
-          to disconnect, or acknowledgment that the client will not be
-          disconnected.
+          indicating it's wish not to be automatically disconnected.  Client
+          end may receive WILL or WONT, indicating server's wish to disconnect,
+          or acknowledgment that the client will not be disconnected.
 
-        * obj:`SNDLOC`: for servers, receiving one argument: the string
-          describing the client location, such as ``'ROOM 641-A'``,
-          :rfc:`779`.
+        * ``SNDLOC``: for servers, receiving one argument: the string
+          describing the client location, such as ``'ROOM 641-A'``, :rfc:`779`.
 
-        * obj:`NAWS`: for servers, receiving two integer arguments (width,
+        * ``NAWS``: for servers, receiving two integer arguments (width,
           height), such as (80, 24), :rfc:`1073`.
 
-        * obj:`TSPEED`: for servers, receiving two integer arguments (rx, tx)
+        * ``TSPEED``: for servers, receiving two integer arguments (rx, tx)
           such as (57600, 57600), :rfc:`1079`.
 
-        * obj:`TTYPE`: for servers, receiving one string, usually the
+        * ``TTYPE``: for servers, receiving one string, usually the
           terminfo(5) database capability name, such as 'xterm', :rfc:`1091`.
 
-        * obj:`XDISPLOC`: for servers, receiving one string, the DISPLAY host
-          value, in form of ``<host>:<dispnum>[.<screennum>]``, :rfc:`1096`.
+        * ``XDISPLOC``: for servers, receiving one string, the DISPLAY
+          host value, in form of ``<host>:<dispnum>[.<screennum>]``,
+          :rfc:`1096`.
 
-        * obj:`NEW_ENVIRON`: for servers, receiving a dictionary of
+        * ``NEW_ENVIRON``: for servers, receiving a dictionary of
           ``(key, val)`` pairs of remote client environment item values,
           :rfc:`1408`.
 
-        * obj:`CHARSET`: for servers, receiving one string, the character set
+        * ``CHARSET``: for servers, receiving one string, the character set
           negotiated by client. :rfc:`2066`.
         """
         assert cmd in (LOGOUT, SNDLOC, NAWS, TSPEED, TTYPE,
-                     XDISPLOC, NEW_ENVIRON, CHARSET), cmd
+                       XDISPLOC, NEW_ENVIRON, CHARSET), cmd
         assert callable(func), ('Argument func must be callable')
         self._ext_callback[cmd] = func
 
     def handle_xdisploc(self, xdisploc):
-        """ Receive XDISPLAY value ``xdisploc``, :rfc:`1096`. """
+        """Receive XDISPLAY value ``xdisploc``, :rfc:`1096`."""
         #   xdisploc string format is '<host>:<dispnum>[.<screennum>]'.
         self.log.debug('X Display is {}'.format(xdisploc))
 
     def handle_send_xdisploc(self):
-        """ Send XDISPLAY value ``xdisploc``, :rfc:`1096`. """
+        """Send XDISPLAY value ``xdisploc``, :rfc:`1096`."""
         #   xdisploc string format is '<host>:<dispnum>[.<screennum>]'.
         self.log.warn('X Display requested, sending empty string.')
         return ''
 
     def handle_sndloc(self, location):
-        """ Receive LOCATION value ``location``, :rfc:`779`. """
+        """Receive LOCATION value ``location``, :rfc:`779`."""
         self.log.debug('Location is {}'.format(location))
 
     def handle_send_sndloc(self):
-        """ Send LOCATION value ``location``, :rfc:`779`.
-        """
+        """Send LOCATION value ``location``, :rfc:`779`."""
         self.log.warn('Location requested, sending empty response.')
         return ''
 
@@ -1073,21 +1097,21 @@ class TelnetWriter(asyncio.StreamWriter):
         self.log.debug('Terminal type is {!r}'.format(ttype))
 
     def handle_send_ttype(self):
-        """ Send TTYPE value ``ttype``, :rfc:`1091`. """
+        """Send TTYPE value ``ttype``, :rfc:`1091`."""
         self.log.warn('Terminal type requested, sending empty string.')
         return ''
 
     def handle_naws(self, width, height):
-        """ Receive window size ``width`` and ``height``, :rfc:`1073`. """
+        """Receive window size ``width`` and ``height``, :rfc:`1073`."""
         self.log.debug('Terminal cols={}, rows={}'.format(width, height))
 
     def handle_send_naws(self):
-        """ Send window size ``width`` and ``height``, :rfc:`1073`. """
+        """Send window size ``width`` and ``height``, :rfc:`1073`."""
         self.log.warn('Terminal size requested, sending 80x24.')
         return 80, 24
 
     def handle_environ(self, env):
-        """ Receive environment variables as dict, :rfc:`1572`. """
+        """Receive environment variables as dict, :rfc:`1572`."""
         self.log.debug('Environment values are {!r}'.format(env))
 
     def handle_send_client_environ(self, keys):
@@ -1102,21 +1126,21 @@ class TelnetWriter(asyncio.StreamWriter):
         return dict()
 
     def handle_send_server_environ(self):
-        """ Server requests environment variables as list, :rfc:`1572`. """
+        """Server requests environment variables as list, :rfc:`1572`."""
         self.log.debug('Environment values offered, requesting [].')
         return []
 
     def handle_tspeed(self, rx, tx):
-        """ Receive terminal speed from TSPEED as int, :rfc:`1079`. """
+        """Receive terminal speed from TSPEED as int, :rfc:`1079`."""
         self.log.debug('Terminal Speed rx:{}, tx:{}'.format(rx, tx))
 
     def handle_send_tspeed(self):
-        """ Send terminal speed from TSPEED as int, :rfc:`1079`. """
+        """Send terminal speed from TSPEED as int, :rfc:`1079`."""
         self.log.debug('Terminal Speed requested, sending 9600,9600.')
         return 9600, 9600
 
     def handle_charset(self, charset):
-        """ Receive character set as string, :rfc:`2066`. """
+        """Receive character set as string, :rfc:`2066`."""
         self.log.debug('Character set: {}'.format(charset))
 
     def handle_send_client_charset(self, charsets):
@@ -1132,8 +1156,7 @@ class TelnetWriter(asyncio.StreamWriter):
         return ''
 
     def handle_send_server_charset(self, charsets):
-        """ Send character set (encodings) offered to client, :rfc:`2066`.
-        """
+        """Send character set (encodings) offered to client, :rfc:`2066`."""
         assert self.server
         return ['UTF-8']
 
@@ -1176,7 +1199,7 @@ class TelnetWriter(asyncio.StreamWriter):
 
         - DO TM is *always* answered WILL TM, even if it was already
           replied to.  No state is stored ("Timing Mark"), and the IAC
-          callback registered by ``set_ext_callback`` for cmd TM
+          callback registered by :meth:`set_ext_callback` for cmd TM
           is called with argument byte ``DO``.
         - DO LOGOUT executes extended callback registered by cmd LOGOUT
           with argument DO (indicating a request for voluntary logoff).
@@ -1194,7 +1217,7 @@ class TelnetWriter(asyncio.StreamWriter):
         if opt == ECHO and self.client:
             # What do we have here? A Telnet Server attempting to
             # fingerprint us as a broken 4.4BSD Telnet Client, which
-            # would respond 'WILL ECHO'.  Let us just reply WONT, some
+            # would respond 'WILL ECHO'.  Let us just reply WONT--some
             # servers, such as dgamelaunch (nethack.alt.org) freeze up
             # unless we answer IAC-WONT-ECHO.
             self.iac(WONT, ECHO)
@@ -1210,15 +1233,13 @@ class TelnetWriter(asyncio.StreamWriter):
             # is accomplished ('will' or 'wont' is non-consequential):
             # the distant end is able to "time" our response. More
             # importantly, ensure that the IAC interpreter is, in fact,
-            # interpreting, and, that all iac commands up to this point
+            # interpreting, and, that all IAC commands up to this point
             # have been processed.
             self.iac(WILL, TM)
             self._iac_callback[TM](DO)
-            return True
 
         elif opt == LOGOUT:
             self._ext_callback[LOGOUT](DO)
-            return True
 
         elif opt in (ECHO, LINEMODE, BINARY, SGA, LFLOW, EOR, TTYPE,
                      NEW_ENVIRON, XDISPLOC, TSPEED, CHARSET, NAWS, STATUS):
@@ -1237,13 +1258,13 @@ class TelnetWriter(asyncio.StreamWriter):
             elif opt in (LFLOW, TTYPE, NEW_ENVIRON, XDISPLOC,
                          TSPEED, CHARSET, LINEMODE):
                 self.pending_option[SB + opt] = True
-            return True
 
         else:
             self.log.debug('DO {0} not supported.'.format(name_command(opt)))
             if self.local_option.get(opt, None) is None:
                 self.iac(WONT, opt)
             return False
+        return True
 
     def handle_dont(self, opt):
         """
@@ -1281,7 +1302,8 @@ class TelnetWriter(asyncio.StreamWriter):
         The result of a supported capability is a response of (IAC, DO, opt)
         and the setting of ``self.remote_option[opt]`` of ``True``. For
         unsupported capabilities, RFC specifies a response of (IAC, DONT, opt).
-        Similarly, set ``self.remote_option[opt]`` to ``False``.  """
+        Similarly, set ``self.remote_option[opt]`` to ``False``.
+        """
         self.log.debug('handle_will({})'.format(name_command(opt)))
 
         if opt in (BINARY, SGA, ECHO, NAWS, LINEMODE, EOR, SNDLOC):
@@ -1305,49 +1327,42 @@ class TelnetWriter(asyncio.StreamWriter):
                 raise ValueError('cannot recv WILL TM, must first send DO TM.')
             self._iac_callback[TM](WILL)
             self.remote_option[opt] = True
+
         elif opt == LOGOUT:
             if self.client:
                 raise ValueError('cannot recv WILL LOGOUT on server end')
             self._ext_callback[LOGOUT](WILL)
+
         elif opt == STATUS:
+            # Though unnecessary, if the other end claims support for STATUS,
+            # we put them to the test by requesting their status.
             self.remote_option[opt] = True
-            # This isn't really necessary, but if the server says they support
-            # it, we'd like to test them on that, so go ahead, prove it ... !
             self.request_status()
-        elif opt == LFLOW:
-            if self.client:
-                raise ValueError('cannot recv WILL LFLOW on client end')
-            self.remote_option[opt] = True
-            self.send_lineflow_mode()
-        elif opt == NEW_ENVIRON:
-            if not self.server:
-                raise ValueError('cannot recv WILL NEW_ENVIRON on client end.')
-            self.remote_option[opt] = True
-            self.request_environ()
-        elif opt == CHARSET:
-            # charset is bi-directional: "WILL CHARSET indicates the sender
+
+        elif opt in (XDISPLOC, TTYPE, TSPEED, NEW_ENVIRON, LFLOW, CHARSET):
+            # CHARSET is bi-directional: "WILL CHARSET indicates the sender
             # REQUESTS permission to, or AGREES to, use CHARSET option
-            # subnegotiation to choose a character set."; however, the selected
-            # encoding is, regarding SB CHARSET REQUEST, "The sender requests
-            # that all text sent to and by it be encoded in one of the
+            # sub-negotiation to choose a character set."; however, the
+            # selected encoding is, regarding SB CHARSET REQUEST, "The sender
+            # requests that all text sent to and by it be encoded in one of the
             # specified character sets. "
+            #
+            # Though Others -- XDISPLOC, TTYPE, TSPEED, are 1-directional.
+            if not self.server and opt not in (CHARSET,):
+                raise ValueError('cannot recv WILL {} on client end.'
+                                 .format(name_command(opt)))
             self.remote_option[opt] = True
-            self.request_charset()
-        elif opt == XDISPLOC:
-            if not self.server:
-                raise ValueError('cannot recv WILL XDISPLOC on client end.')
-            self.remote_option[opt] = True
-            self.request_xdisploc()
-        elif opt == TTYPE:
-            if not self.server:
-                raise ValueError('cannot recv WILL TTYPE on client end.')
-            self.remote_option[opt] = True
-            self.request_ttype()
-        elif opt == TSPEED:
-            if not self.server:
-                raise ValueError('cannot recv WILL TSPEED on client end.')
-            self.remote_option[opt] = True
-            self.request_tspeed()
+
+            # call one of the following callbacks.
+            {
+                XDISPLOC: self.request_xdisploc,
+                TTYPE: self.request_ttype,
+                TSPEED: self.request_tspeed,
+                CHARSET: self.request_charset,
+                NEW_ENVIRON: self.request_environ,
+                LFLOW: self.send_lineflow_mode,
+            }[opt]()
+
         else:
             # option value of -1 toggles opt.unsupported()
             self.iac(DONT, opt)
@@ -1406,29 +1421,23 @@ class TelnetWriter(asyncio.StreamWriter):
             self.pending_option[SB + cmd] = False
         else:
             self.log.debug('[SB + {}] unsolicited'.format(name_command(cmd)))
-        if cmd == LINEMODE:
-            self._handle_sb_linemode(buf)
-        elif cmd == LFLOW:
-            self._handle_sb_lflow(buf)
-        elif cmd == NAWS:
-            self._handle_sb_naws(buf)
-        elif cmd == SNDLOC:
-            self._handle_sb_sndloc(buf)
-        elif cmd == NEW_ENVIRON:
-            self._handle_sb_environ(buf)
-        elif cmd == CHARSET:
-            self._handle_sb_charset(buf)
-        elif cmd == TTYPE:
-            self._handle_sb_ttype(buf)
-        elif cmd == TSPEED:
-            self._handle_sb_tspeed(buf)
-        elif cmd == XDISPLOC:
-            self._handle_sb_xdisploc(buf)
-        elif cmd == STATUS:
-            self._handle_sb_status(buf)
-        else:
+
+        fn_call = {LINEMODE: self._handle_sb_linemode,
+                   LFLOW: self._handle_sb_lflow,
+                   NAWS: self._handle_sb_naws,
+                   SNDLOC: self._handle_sb_sndloc,
+                   NEW_ENVIRON: self._handle_sb_environ,
+                   CHARSET: self._handle_sb_charset,
+                   TTYPE: self._handle_sb_ttype,
+                   TSPEED: self._handle_sb_tspeed,
+                   XDISPLOC: self._handle_sb_xdisploc,
+                   STATUS: self._handle_sb_status
+                   }.get(cmd)
+        if fn_call is None:
             raise ValueError('SB unhandled: cmd={}, buf={!r}'
                              .format(name_command(cmd), buf))
+
+        fn_call(buf)
 
     # Our Private API methods
 
@@ -1470,6 +1479,7 @@ class TelnetWriter(asyncio.StreamWriter):
 
     def _handle_sb_charset(self, buf):
         cmd = buf.popleft()
+        assert cmd == CHARSET
         opt = buf.popleft()
         if opt == REQUEST:
             # "<Sep>  is a separator octet, the value of which is chosen by the
@@ -1506,14 +1516,15 @@ class TelnetWriter(asyncio.StreamWriter):
                              .format(opt))
 
     def _handle_sb_tspeed(self, buf):
-        """
-        Callback handles IAC-SB-TSPEED-<buf>-SE.
-        """
+        """Callback handles IAC-SB-TSPEED-<buf>-SE."""
         cmd = buf.popleft()
         opt = buf.popleft()
-        assert cmd == TSPEED, name_command(cmd)
+        assert cmd == TSPEED, (cmd, name_command(cmd))
         assert opt in (IS, SEND), opt
-        opt_kind = 'IS' if opt == IS else 'INFO' if opt == INFO else 'SEND'
+        opt_kind = {IS: 'IS', SEND: 'SEND'}.get(opt)
+        self.log.debug('recv {} {}: {!r}'.format(
+            name_command(cmd), opt_kind, b''.join(buf),))
+
         if opt == IS:
             assert self.server, ('SE: cannot recv from server: {} {}'
                                  .format(name_command(cmd), opt_kind,))
@@ -1551,14 +1562,16 @@ class TelnetWriter(asyncio.StreamWriter):
                 self.pending_option[WILL + TSPEED] = False
 
     def _handle_sb_xdisploc(self, buf):
-        """
-        Callback handles IAC-SB-XIDISPLOC-<buf>-SE.
-        """
+        """Callback handles IAC-SB-XIDISPLOC-<buf>-SE."""
         cmd = buf.popleft()
         opt = buf.popleft()
-        opt_kind = 'IS' if opt == IS else 'INFO' if opt == INFO else 'SEND'
-        assert cmd == XDISPLOC, name_command(cmd)
+
+        assert cmd == XDISPLOC, (cmd, name_command(cmd))
         assert opt in (IS, SEND), opt
+        opt_kind = {IS: 'IS', SEND: 'SEND'}.get(opt)
+        self.log.debug('recv {} {}: {!r}'.format(
+            name_command(cmd), opt_kind, b''.join(buf),))
+
         if opt == IS:
             assert self.server, ('SE: cannot recv from server: {} {}'
                                  .format(name_command(cmd), opt,))
@@ -1578,14 +1591,16 @@ class TelnetWriter(asyncio.StreamWriter):
                 self.pending_option[WILL + XDISPLOC] = False
 
     def _handle_sb_ttype(self, buf):
-        """
-        Callback handles IAC-SB-TTYPE-<buf>-SE.
-        """
+        """Callback handles IAC-SB-TTYPE-<buf>-SE."""
         cmd = buf.popleft()
         opt = buf.popleft()
-        opt_kind = 'IS' if opt == IS else 'INFO' if opt == INFO else 'SEND'
+
         assert cmd == TTYPE, name_command(cmd)
         assert opt in (IS, SEND), opt
+        opt_kind = {IS: 'IS', SEND: 'SEND'}.get(opt)
+        self.log.debug('recv {} {}: {!r}'.format(
+            name_command(cmd), opt_kind, b''.join(buf),))
+
         if opt == IS:
             assert self.server, ('SE: cannot recv from server: {} {}'
                                  .format(name_command(cmd), opt,))
@@ -1609,7 +1624,7 @@ class TelnetWriter(asyncio.StreamWriter):
         Callback handles (IAC, SB, NEW_ENVIRON, <buf>, SE), :rfc:`1572`.
 
         For requests beginning with IS, or subsequent requests beginning
-        with INFO, any callback registered by ``set_ext_callback`` of
+        with INFO, any callback registered by :meth:`set_ext_callback` of
         cmd NEW_ENVIRON is passed a dictionary of (key, value) replied-to
         by client.
 
@@ -1620,14 +1635,14 @@ class TelnetWriter(asyncio.StreamWriter):
         """
         cmd = buf.popleft()
         opt = buf.popleft()
-        assert cmd == NEW_ENVIRON, name_command(cmd)
+
+        assert cmd == NEW_ENVIRON, (cmd, name_command(cmd))
         assert opt in (IS, SEND, INFO), opt
-
-        env = _decode_env_buf(b''.join(buf))
-        opt_kind = 'IS' if opt == IS else 'INFO' if opt == INFO else 'SEND'
-
+        opt_kind = {IS: 'IS', INFO: 'INFO', SEND: 'SEND'}.get(opt)
         self.log.debug('recv {} {}: {!r}'.format(
             name_command(cmd), opt_kind, b''.join(buf),))
+
+        env = _decode_env_buf(b''.join(buf))
 
         if opt in (IS, INFO):
             assert self.server, ('SE: cannot recv from server: {} {}'
@@ -1660,7 +1675,7 @@ class TelnetWriter(asyncio.StreamWriter):
                 self.pending_option[WILL + TTYPE] = False
 
     def _handle_sb_sndloc(self, buf):
-        """ Fire callback for IAC-SB-SNDLOC-<buf>-SE (rfc779). """
+        """Fire callback for IAC-SB-SNDLOC-<buf>-SE (:rfc:`779`)."""
         assert buf.popleft() == SNDLOC
         location_str = b''.join(buf).decode('ascii')
         self._ext_callback[SNDLOC](location_str)
@@ -1689,7 +1704,7 @@ class TelnetWriter(asyncio.StreamWriter):
         self.send_iac(b''.join(response))
 
     def _handle_sb_naws(self, buf):
-        """ Fire callback for IAC-SB-NAWS-<cols_rows[4]>-SE (rfc1073).  """
+        """Fire callback for IAC-SB-NAWS-<cols_rows[4]>-SE (:rfc:`1073`)."""
         cmd = buf.popleft()
         assert cmd == NAWS, name_command(cmd)
         assert len(buf) is 4, (
@@ -1712,9 +1727,7 @@ class TelnetWriter(asyncio.StreamWriter):
         self._ext_callback[NAWS](rows, cols)
 
     def _handle_sb_lflow(self, buf):
-        """
-        Callback responds to IAC SB LFLOW, :rfc:`1372`.
-        """
+        """Callback responds to IAC SB LFLOW, :rfc:`1372`."""
         buf.popleft()  # LFLOW
         if not self.local_option.enabled(LFLOW):
             raise ValueError('received IAC SB LFLOW without '
@@ -2164,13 +2177,18 @@ class TelnetWriter(asyncio.StreamWriter):
 
 class TelnetWriterUnicode(TelnetWriter):
     """
-    Requires the ``fn_encoding`` callback, receiving mutually exclusive boolean
-    arguments, ``outgoing=True`` to determine what encoding should be used to
+    A Unicode StreamWriter interface for Telnet protocol.
+
+    See ancestor class, :class:`TelnetWriter` for details.
+
+    Requires the ``fn_encoding`` callback, receiving mutually boolean keyword
+    argument ``outgoing=True`` to determine what encoding should be used to
     decode the value in the direction specified.
 
     The encoding may be conditionally negotiated by CHARSET, :rfc:`2066`, or
     discovered by ``LANG`` environment variables by NEW_ENVIRON, :rfc:`1572`.
     """
+
     def __init__(self, transport, protocol, fn_encoding, *,
                  encoding_errors='strict', **kwds):
         self.fn_encoding = fn_encoding
@@ -2227,13 +2245,11 @@ class TelnetWriterUnicode(TelnetWriter):
 
         :param str string: string received as input, conditionally written.
         :param str errors: same as meaning in :class:`codecs.Codec`.
-        :rtype: None
 
-        The default implementation depends on telnet negotiation willingness
-        for local echo, only an RFC-compliant telnet client will correctly
-        set or unset echo accordingly by demand.
-
-        This option may be toggled using shell command, ``toggle echo``.
+        This method may only be called from the server perspective.  The
+        default implementation depends on telnet negotiation willingness for
+        local echo: only an RFC-compliant telnet client will correctly set or
+        unset echo accordingly by demand.
         """
         assert self.server, ('Client never performs echo of input received.')
         if self.will_echo:

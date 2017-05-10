@@ -78,6 +78,12 @@ The RFC is not very clear.
    values. only a non-compliant distant end would cause such a condition. so
    it is decided to leave it as "conflict report only, no action always"
 
+Also, when the other end says they are capable of STATUS, we unconditionally
+request them to go ahead and assert their status. We have no need to do this.
+We should probably make it a toggle option or strictly option of the callback
+to act on it..
+
+
 SLC flush
 ---------
 

@@ -22,7 +22,6 @@ if sys.platform == 'win32':
 
 else:
     import termios
-    import tty
     import os
 
     @contextlib.contextmanager
@@ -89,8 +88,8 @@ else:
             #
             iflag = mode.iflag & ~(
                 termios.BRKINT |  # Do not send INTR signal on break
-                termios.ICRNL |   # Do not map CR to NL on input
-                termios.INPCK |   # Disable input parity checking
+                termios.ICRNL  |  # Do not map CR to NL on input
+                termios.INPCK  |  # Disable input parity checking
                 termios.ISTRIP |  # Do not strip input characters to 7 bits
                 termios.IXON)     # Disable START/STOP output control
 

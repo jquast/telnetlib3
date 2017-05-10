@@ -36,6 +36,8 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._encoding_errors = encoding_errors
         self.force_binary = force_binary
         self._extra = dict()
+
+        #: test
         self._waiter_connected = _waiter_connected or asyncio.Future()
         self._waiter_closed = _waiter_closed or asyncio.Future()
         self._tasks = [self._waiter_connected]
@@ -249,7 +251,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         Method is called on each new command byte processed until negotiation
         is considered final, or after :attr:`connect_maxwait` has elapsed,
-        setting :attr:`_waiter_connected` to value ``self`` when complete.
+        setting :attr:`~._waiter_connected` to value ``self`` when complete.
 
         Ensure ``super().check_negotiation()`` is called and conditionally
         combined when derived.

@@ -50,12 +50,12 @@ Not Implemented
   of the screen.
 * :rfc:`946`, "Telnet Terminal Location Number Option", only known to be
   implemented at Carnegie Mellon University in the mid-1980's, this was a
-  mechanism to identify a Terminal by ID, which would then be read and forwarded
-  by gatewaying hosts. So that user traveling from host A -> B -> C appears as
-  though his "from" address is host A in the system "who" and "finger" services.
-  There exists more appropriate solutions, such as the "Report Terminal ID"
-  sequences ``CSI + c`` and ``CSI + 0c`` for vt102, and ``ESC + z`` (vt52),
-  which sends a terminal ID in-band as ASCII.
+  mechanism to identify a Terminal by ID, which would then be read and
+  forwarded by gatewaying hosts. So that user traveling from host A -> B -> C
+  appears as though his "from" address is host A in the system "who" and
+  "finger" services.  There exists more appropriate solutions, such as the
+  "Report Terminal ID" sequences ``CSI + c`` and ``CSI + 0c`` for vt102, and
+  ``ESC + z`` (vt52), which sends a terminal ID in-band as ASCII.
 * :rfc:`1041`, "Telnet 3270 Regime Option", Jan 1988
 * :rfc:`1043`, "Telnet Data Entry Terminal Option", Feb 1988
 * :rfc:`1097`, "Telnet Subliminal-Message Option", Apr 1989
@@ -105,7 +105,8 @@ study of the telnet protocol.
 * :rfc:`728` A Minor Pitfall in the Telnet Protocol.
 * :rfc:`732` Telnet Data Entry Terminal Option (Obsoletes: :rfc:`731`)
 * :rfc:`734` SUPDUP Protocol.
-* :rfc:`735` Revised Telnet Byte Macro Option (Obsoletes: :rfc:`729`, :rfc:`736`)
+* :rfc:`735` Revised Telnet Byte Macro Option (Obsoletes: :rfc:`729`,
+  :rfc:`736`)
 * :rfc:`749` Telnet SUPDUP-Output Option.
 * :rfc:`818` The Remote User Telnet Service.
 

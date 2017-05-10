@@ -1,5 +1,5 @@
 """
-Special Line Character support for Telnet Linemode Option (rfc1184)
+Special Line Character support for Telnet Linemode Option (:rfc:`1184`).
 """
 from .accessories import eightbits, name_unicode
 from .telopt import theNULL
@@ -36,11 +36,11 @@ NSLC = 30
 
 class SLC(object):
     def __init__(self, mask=SLC_DEFAULT, value=theNULL):
-        """ .. class:SLC(mask : byte, value: byte)
+        """
+        Defines the willingness to support a Special Linemode Character.
 
-            Defines the willingness to support a Special Linemode Character,
-            defined by its SLC support level, ``mask`` and default keyboard
-            ASCII byte ``value`` (may be negotiated by client).
+        Defined by its SLC support level, ``mask`` and default keyboard
+        ASCII byte ``value`` (may be negotiated by client).
         """
         #   The default byte mask ``SLC_DEFAULT`` and value ``b'\x00'`` infer
         #   our willingness to support the option, but with no default value.
@@ -121,11 +121,8 @@ class SLC(object):
 
 class SLC_nosupport(SLC):
     def __init__(self):
-        """ .. class:SLC_nosupport()
-
-            Returns SLC definition with byte mask ``SLC_NOSUPPORT`` and value
-            ``_POSIX_VDISABLE``, infering our unwillingness to support the
-            option.
+        """
+        SLC definition inferring our unwillingness to support the option.
         """
         SLC.__init__(self, SLC_NOSUPPORT, _POSIX_VDISABLE)
 
@@ -288,11 +285,11 @@ class Linemode(object):
 
 class Forwardmask(object):
     def __init__(self, value, ack=False):
-        """ .. class:: ForwardMask(value : bytes, ack: bool)
+        """
+        ForwardMask object using the bytemask value received by server.
 
-        Initialize a ForwardMask object using the bytemask value
-        received by server with IAC SB LINEMODE DO FORWARDMASK. It
-        must be a full 32-bit bytearray.
+        bytemask ``value`` received by server after ``IAC SB LINEMODE DO
+        FORWARDMASK``. It must be a bytearray of length 16 or 32.
         """
         assert isinstance(value, (bytes, bytearray)), value
         assert len(value) in (16, 32), len(value)
@@ -330,18 +327,12 @@ class Forwardmask(object):
         return result
 
     def __str__(self):
-        """ .. method:: __str__ -> type(str)
-
-            Returns single string of binary 0 and 1 describing obj.
-        """
+        """Returns single string of binary 0 and 1 describing obj."""
         return '0b%s' % (''.join([value for (prefix, value) in [
             eightbits(byte).split('b') for byte in self.value]]),)
 
     def __contains__(self, number):
-        """ .. method:: __contains__(number : int) -> type(bool)
-
-            ``True`` if forwardmask has keycode ``number``, else ``False``.
-        """
+        """Whether forwardmask contains keycode ``number``."""
         mask, flag = number // 8, 2 ** (7 - (number % 8))
         return bool(self.value[mask] & flag)
 

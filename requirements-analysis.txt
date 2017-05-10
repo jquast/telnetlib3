@@ -1,4 +1,6 @@
-prospector[with_frosted,with_pyroma]
-pydocstyle
+prospector[with_pyroma]
 restructuredtext_lint
+pygments
 doc8
+pylint==1.6.5
+astroid==1.4.8

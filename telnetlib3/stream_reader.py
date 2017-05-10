@@ -1,3 +1,4 @@
+"""Module provides class TelnetReader and TelnetReaderUnicode."""
 # std imports
 import codecs
 import asyncio
@@ -6,9 +7,7 @@ __all__ = ('TelnetReader', 'TelnetReaderUnicode', )
 
 
 class TelnetReader(asyncio.StreamReader):
-    """
-    A reader interface for the telnet protocol.
-    """
+    """A reader interface for the telnet protocol."""
 
     @asyncio.coroutine
     def readline(self):
@@ -99,13 +98,6 @@ class TelnetReader(asyncio.StreamReader):
 
 
 class TelnetReaderUnicode(TelnetReader):
-    """
-    A Unicode StreamReader interface for Telnet protocol.
-
-    Requires the ``fn_encoding`` callback, receiving mutually exclusive boolean
-    arguments, ``incoming=True`` to determine what encoding should be used to
-    decode the value in the direction specified.
-    """
     #: Late-binding instance of :class:`codecs.IncrementalDecoder`, some
     #: bytes may be lost if the protocol's encoding is changed after
     #: previously receiving a partial multibyte.  This isn't common in
@@ -114,6 +106,14 @@ class TelnetReaderUnicode(TelnetReader):
 
     def __init__(self, fn_encoding, *, limit=asyncio.streams._DEFAULT_LIMIT,
                  loop=None, encoding_errors='replace'):
+        """
+        A Unicode StreamReader interface for Telnet protocol.
+
+        :param callable fn_encoding: function callback, receiving boolean
+            keyword argument, ``incoming=True``, which is used by the callback
+            to determine what encoding should be used to decode the value in
+            the direction specified.
+        """
         loop = loop or asyncio.get_event_loop()
         super().__init__(limit=limit, loop=loop)
 
@@ -134,6 +134,13 @@ class TelnetReaderUnicode(TelnetReader):
 
     @asyncio.coroutine
     def readline(self):
+        """
+        Read one line.
+
+        See ancestor method, :func:`~TelnetReader.readline` for details.
+
+        This method is a :func:`~asyncio.coroutine`.
+        """
         buf = yield from super().readline()
         return self.decode(buf)
 

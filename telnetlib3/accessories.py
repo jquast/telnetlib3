@@ -13,6 +13,7 @@ __all__ = ('encoding_from_lang', 'name_unicode', 'eightbits', 'make_logger',
 def get_version():
     return pkg_resources.get_distribution("telnetlib3").version
 
+
 def encoding_from_lang(lang):
     """
     Parse encoding from LANG environment value.
@@ -31,7 +32,7 @@ def encoding_from_lang(lang):
 
 
 def name_unicode(ucs):
-    """ Return 7-bit ascii printable of any string. """
+    """Return 7-bit ascii printable of any string. """
     # more or less the same as curses.ascii.unctrl -- but curses
     # module is conditionally excluded from many python distributions!
     bits = ord(ucs)
@@ -65,7 +66,7 @@ _DEFAULT_LOGFMT = ' '.join(('%(asctime)s',
                             '%(filename)s:%(lineno)d',
                             '%(message)s'))
 def make_logger(name, loglevel='info', logfile=None, logfmt=_DEFAULT_LOGFMT):
-    """ Create and return simple logger for given arguments. """
+    """Create and return simple logger for given arguments."""
     lvl = getattr(logging, loglevel.upper())
     logging.getLogger().setLevel(lvl)
 
@@ -76,11 +77,11 @@ def make_logger(name, loglevel='info', logfile=None, logfmt=_DEFAULT_LOGFMT):
     return logging.getLogger(name)
 
 def repr_mapping(mapping):
-    """ Return printable string, 'key=value [key=value ...]' for mapping. """
+    """Return printable string, 'key=value [key=value ...]' for mapping."""
     return ' '.join('='.join(map(str, kv)) for kv in mapping.items())
 
 def function_lookup(pymod_path):
-    """ Return callable function target from standard module.function path. """
+    """Return callable function target from standard module.function path."""
     module_name, func_name = pymod_path.rsplit('.', 1)
     module = importlib.import_module(module_name)
     shell_function = getattr(module, func_name)
@@ -88,7 +89,7 @@ def function_lookup(pymod_path):
     return shell_function
 
 def make_reader_task(reader, size=2**12):
-    """ Return asyncio task wrapping coroutine of reader.read(size). """
+    """Return asyncio task wrapping coroutine of reader.read(size)."""
     if platform.python_version_tuple() <= ('3', '4', '4'):
         task = asyncio.async
     else:

@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+"""Setuptools distribution file."""
 import os
 import platform
 from setuptools import setup

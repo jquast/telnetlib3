@@ -19,6 +19,13 @@ __all__ = ('TelnetClient', 'open_connection')
 
 
 class TelnetClient(client_base.BaseClient):
+    """
+    Telnet client that supports all common options.
+
+    This class is useful for automation, it appears to be a virtual terminal to
+    the remote end, but does not require an interactive terminal to run.
+    """
+
     #: On :meth:`send_env`, the value of 'LANG' will be 'C' for binary
     #: transmission.  When encoding is specified (utf8 by default), the LANG
     #: variable must also contain a locale, this value is used, providing a
@@ -50,6 +57,7 @@ class TelnetClient(client_base.BaseClient):
 
 
     def connection_made(self, transport):
+        """Callback for connection made to server."""
         from telnetlib3.telopt import TTYPE, TSPEED, XDISPLOC, NEW_ENVIRON
         from telnetlib3.telopt import CHARSET, NAWS
         super().connection_made(transport)
@@ -79,9 +87,10 @@ class TelnetClient(client_base.BaseClient):
         return self._extra['xdisploc']
 
     def send_env(self, keys):
-        """ Callback for responding to NEW_ENVIRON requests.
+        """
+        Callback for responding to NEW_ENVIRON requests.
 
-        :param keys: Values are requested for the keys specified. When empty,
+        :param dict keys: Values are requested for the keys specified. When empty,
            all environment values that wish to be volunteered should be
            returned.
         :returns: dictionary of environment values requested, or an
@@ -99,7 +108,8 @@ class TelnetClient(client_base.BaseClient):
         return {key: env.get(key, '') for key in keys} or env
 
     def send_charset(self, offered):
-        """ Callback for responding to CHARSET requests.
+        """
+        Callback for responding to CHARSET requests.
 
         Receives a list of character encodings offered by the server
         as ``offered`` such as ``('LATIN-1', 'UTF-8')``, for which the
@@ -111,7 +121,7 @@ class TelnetClient(client_base.BaseClient):
         python is capable of using, preferring any that matches
         :py:attr:`self.encoding` if matched in the offered list.
 
-        :param offered: list of CHARSET options offered by server.
+        :param list offered: list of CHARSET options offered by server.
         :returns: character encoding agreed to be used.
         :rtype: str or None.
         """
@@ -135,7 +145,8 @@ class TelnetClient(client_base.BaseClient):
         return selected
 
     def send_naws(self):
-        """ Callback for responding to NAWS requests.
+        """
+        Callback for responding to NAWS requests.
 
         :rtype: (int, int)
         :returns: client window size as (rows, columns).
@@ -153,7 +164,7 @@ class TelnetClient(client_base.BaseClient):
         :raises TypeError: when a direction argument, either ``outgoing``
             or ``incoming``, was not set ``True``.
         :returns: ``'US-ASCII'`` for the directions indicated, unless
-        ``BINARY`` :rfc:`856` has been negotiated for the direction
+            ``BINARY`` :rfc:`856` has been negotiated for the direction
             indicated or :attr`force_binary` is set ``True``.
         :rtype: str
 
@@ -185,10 +196,9 @@ class TelnetClient(client_base.BaseClient):
             return self._extra['charset']
         return 'US-ASCII'
 
+
 class TelnetTerminalClient(TelnetClient):
-    """
-    Telnet client for sessions of network virtual terminal (NVT).
-    """
+    """Telnet client for sessions with a network virtual terminal (NVT)."""
 
     def send_naws(self):
         """
@@ -225,6 +235,7 @@ class TelnetTerminalClient(TelnetClient):
             return (int(os.environ.get('LINES', 25)),
                     int(os.environ.get('COLUMNS', 80)))
 
+
 @asyncio.coroutine
 def open_connection(host=None, port=23, *, client_factory=None, loop=None,
                     family=0, flags=0, local_addr=None, log=None,
@@ -255,8 +266,8 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
     :param str encoding: The default assumed encoding, or ``False`` to disable
         unicode support.  This value is used for decoding bytes received by and
         encoding bytes transmitted to the Server.  These values are preferred
-        in response to NEW_ENVIRON :rfc:`1572` as environment value ``LANG``, and
-        by CHARSET :rfc:`2066` negotiation.
+        in response to NEW_ENVIRON :rfc:`1572` as environment value ``LANG``,
+        and by CHARSET :rfc:`2066` negotiation.
 
         The server's attached ``reader, writer`` streams accept and return
         unicode, unless this value explicitly set ``False``.  In that case, the
@@ -290,7 +301,7 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
         negotiations, the shell continues anyway after the greater of this
         value or ``connect_minwait`` elapsed.
     :param bool force_binary: When ``True``, the encoding specified is used for
-        both directions even when failing ``BINARY`` negotiation, :rfc:`856`. 
+        both directions even when failing ``BINARY`` negotiation, :rfc:`856`.
         This parameter has no effect when ``encoding=False``.
     :param str encoding_errors: Same meaning as :class:`codecs.Codec`.
     :param float connect_minwait: XXX
@@ -332,7 +343,7 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
 
 
 def main():
-    """ Command-line 'telnetlib3-client' entry point, via setuptools."""
+    """Command-line 'telnetlib3-client' entry point, via setuptools."""
     kwargs = _transform_args(_get_argument_parser().parse_args())
     config_msg = (
         'Client configuration: {key_values}'
@@ -388,6 +399,7 @@ def _get_argument_parser():
     parser.add_argument('--connect-maxwait', default=4.0, type=float,
                         help='timeout for pending negotiation')
     return parser
+
 
 def _transform_args(args):
     # TODO: Connect as exit(main(**parse_args(sys.argv)))
