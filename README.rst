@@ -38,7 +38,7 @@ Authoring a Telnet Server using Streams interface that offers a basic war game:
 
     @asyncio.coroutine
     def shell(reader, writer):
-        writer.write('Would you like to play a game? ')
+        writer.write('\r\nWould you like to play a game? ')
         inp = yield from reader.read(1)
         if inp:
             writer.echo(inp)
@@ -60,25 +60,26 @@ Authoring a Telnet Client that plays the war game with this server:
 
     @asyncio.coroutine
     def shell(reader, writer):
-        buf = ''
         while True:
+            # read stream until '?' mark is found
             outp = yield from reader.read(1024)
             if not outp:
-                # EOF
-                return
-
-            print(outp, end='', flush=True)
-
-            if '?' in outp:
+                # End of File
+                break
+            elif '?' in outp:
                 # reply all questions with 'y'.
                 writer.write('y')
-
+ 
+            # display all server output
+            print(outp, flush=True)
+ 
+        # EOF
         print()
 
     loop = asyncio.get_event_loop()
     coro = telnetlib3.open_connection('localhost', 6023, shell=shell)
-    reader, _ = loop.run_until_complete(coro)
-    loop.run_until_complete(reader.protocol.waiter_closed)
+    reader, writer = loop.run_until_complete(coro)
+    loop.run_until_complete(writer.protocol.waiter_closed)
 
 Command-line
 ------------
@@ -89,7 +90,7 @@ Two command-line scripts are distributed with this package.
 
   Small terminal telnet client.  Some example destinations and options::
 
-    telnetlib3-client rainmaker.wunderground.com
+    telnetlib3-client nethack.alt.org
     telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
     telnetlib3-client htc.zapto.org
 
@@ -97,11 +98,35 @@ Two command-line scripts are distributed with this package.
 ``telnetlib3-server``
 
   Telnet server providing the default debugging shell.  This provides a simple
-  shell server that allows introspection of the session's values.
+  shell server that allows introspection of the session's values, for example::
+
+     tel:sh> help
+     quit, writer, slc, toggle [option|all], reader, proto
+
+     tel:sh> writer
+     <TelnetWriter server mode:kludge +lineflow -xon_any +slc_sim server-will:BINARY,ECHO,SGA client-will:BINARY,NAWS,NEW_ENVIRON,TTYPE>
+
+     tel:sh> reader
+     <TelnetReaderUnicode encoding='utf8' limit=65536 buflen=0 eof=False>
+
+     tel:sh> toggle all
+     wont echo.
+     wont suppress go-ahead.
+     wont outbinary.
+     dont inbinary.
+     xon-any enabled.
+     lineflow disabled.
+
+     tel:sh> reader
+     <TelnetReaderUnicode encoding='US-ASCII' limit=65536 buflen=1 eof=False>
+
+     tel:sh> writer
+     <TelnetWriter server mode:local -lineflow +xon_any +slc_sim client-will:NAWS,NEW_ENVIRON,TTYPE>
+
 
 Both command-line scripts accept argument ``--shell=my_module.fn_shell``
 describing a python module path to a coroutine of signature
-``shell(reader, writer)``.
+``shell(reader, writer)``, just as the above examples.
 
 Features
 --------
