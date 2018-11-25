@@ -99,7 +99,7 @@ def test_telnet_client_send_tty_naws(event_loop, bind_host,
         loop=event_loop, connect_maxwait=0.05)
 
     proc = pexpect.spawn(prog, args, dimensions=(given_rows, given_cols))
-    yield from proc.expect(pexpect.EOF, async=True, timeout=5)
+    yield from proc.expect(pexpect.EOF, async_=True, timeout=5)
     assert proc.match == pexpect.EOF
 
     recv_cols, recv_rows = yield from asyncio.wait_for(_waiter, 0.5)

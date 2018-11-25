@@ -2,7 +2,6 @@
 # std imports
 import pkg_resources
 import importlib
-import platform
 import logging
 import asyncio
 
@@ -90,8 +89,4 @@ def function_lookup(pymod_path):
 
 def make_reader_task(reader, size=2**12):
     """Return asyncio task wrapping coroutine of reader.read(size)."""
-    if platform.python_version_tuple() <= ('3', '4', '4'):
-        task = asyncio.async
-    else:
-        task = asyncio.ensure_future
-    return task(reader.read(size))
+    return asyncio.ensure_future(reader.read(size))

@@ -505,7 +505,7 @@ def run_server(host=CONFIG.host, port=CONFIG.port, loglevel=CONFIG.loglevel,
                       connect_maxwait=connect_maxwait))
 
     # SIGTERM cases server to gracefully stop
-    loop.add_signal_handler(signal.SIGTERM, asyncio.async,
+    loop.add_signal_handler(signal.SIGTERM, asyncio.ensure_future,
                             _sigterm_handler(server, log))
 
     log.info('Server ready on {0}:{1}'.format(host, port))

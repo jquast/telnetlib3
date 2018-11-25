@@ -565,7 +565,7 @@ def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port,
     yield from event_loop.create_server(HelloServer,
                                         bind_host, unused_tcp_port)
     proc = pexpect.spawn(prog, args)
-    yield from proc.expect(pexpect.EOF, async=True, timeout=5)
+    yield from proc.expect(pexpect.EOF, async_=True, timeout=5)
     # our 'space cadet' has \r\n hardcoded, so \r\r\n happens, ignore it
     assert proc.before == (b"Escape character is '^]'.\r\n"
                            b"hello, space cadet.\r\r\n"
