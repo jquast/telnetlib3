@@ -16,7 +16,7 @@ import pytest
 
 
 @pytest.mark.asyncio
-def test_server_demands_remote_linemode_client_agrees(
+async def test_server_demands_remote_linemode_client_agrees(
         event_loop, bind_host, unused_tcp_port):
     from telnetlib3.telopt import IAC, DO, WILL, LINEMODE, SB, SE
     from telnetlib3.slc import (LMODE_MODE, LMODE_MODE_ACK)
@@ -29,12 +29,12 @@ def test_server_demands_remote_linemode_client_agrees(
             self.writer.iac(DO, LINEMODE)
             self._loop.call_later(0.1, self.connection_lost, None)
 
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         protocol_factory=ServerTestLinemode,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop, _waiter_connected=_waiter)
 
-    client_reader, client_writer = yield from asyncio.open_connection(
+    client_reader, client_writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
     expect_mode = telnetlib3.stream_writer.TelnetWriter.default_linemode.mask
@@ -45,18 +45,18 @@ def test_server_demands_remote_linemode_client_agrees(
     reply_stage1 = IAC + WILL + LINEMODE
     reply_stage2 = IAC + SB + LINEMODE + LMODE_MODE + reply_mode + IAC + SE
 
-    result = yield from client_reader.read(len(expect_stage1))
+    result = await client_reader.read(len(expect_stage1))
     assert result == expect_stage1
     client_writer.write(reply_stage1)
 
-    result = yield from client_reader.read(len(expect_stage2))
+    result = await client_reader.read(len(expect_stage2))
     assert result == expect_stage2
     client_writer.write(reply_stage2)
 
-    srv_instance = yield from asyncio.wait_for(_waiter, 0.1)
+    srv_instance = await asyncio.wait_for(_waiter, 0.1)
     assert not any(srv_instance.writer.pending_option.values())
 
-    result = yield from client_reader.read()
+    result = await client_reader.read()
     assert result == b''
 
     assert srv_instance.writer.mode == 'remote'
@@ -70,7 +70,7 @@ def test_server_demands_remote_linemode_client_agrees(
 
 
 @pytest.mark.asyncio
-def test_server_demands_remote_linemode_client_demands_local(
+async def test_server_demands_remote_linemode_client_demands_local(
         event_loop, bind_host, unused_tcp_port):
     from telnetlib3.telopt import IAC, DO, WILL, LINEMODE, SB, SE
     from telnetlib3.slc import (LMODE_MODE, LMODE_MODE_LOCAL, LMODE_MODE_ACK)
@@ -83,12 +83,12 @@ def test_server_demands_remote_linemode_client_demands_local(
             self.writer.iac(DO, LINEMODE)
             self._loop.call_later(0.1, self.connection_lost, None)
 
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         protocol_factory=ServerTestLinemode,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop, _waiter_connected=_waiter)
 
-    client_reader, client_writer = yield from asyncio.open_connection(
+    client_reader, client_writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
     expect_mode = telnetlib3.stream_writer.TelnetWriter.default_linemode.mask
@@ -100,18 +100,18 @@ def test_server_demands_remote_linemode_client_demands_local(
     reply_stage1 = IAC + WILL + LINEMODE
     reply_stage2 = IAC + SB + LINEMODE + LMODE_MODE + reply_mode + IAC + SE
 
-    result = yield from client_reader.read(len(expect_stage1))
+    result = await client_reader.read(len(expect_stage1))
     assert result == expect_stage1
     client_writer.write(reply_stage1)
 
-    result = yield from client_reader.read(len(expect_stage2))
+    result = await client_reader.read(len(expect_stage2))
     assert result == expect_stage2
     client_writer.write(reply_stage2)
 
-    srv_instance = yield from asyncio.wait_for(_waiter, 0.1)
+    srv_instance = await asyncio.wait_for(_waiter, 0.1)
     assert not any(srv_instance.writer.pending_option.values())
 
-    result = yield from client_reader.read()
+    result = await client_reader.read()
     assert result == b''
 
     assert srv_instance.writer.mode == 'local'

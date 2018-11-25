@@ -16,7 +16,7 @@ import pytest
 
 
 @pytest.mark.asyncio
-def test_telnet_server_on_ttype(event_loop, bind_host, unused_tcp_port):
+async def test_telnet_server_on_ttype(event_loop, bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype()."""
     # given
     from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TTYPE
@@ -27,12 +27,12 @@ def test_telnet_server_on_ttype(event_loop, bind_host, unused_tcp_port):
             super().on_ttype(ttype)
             _waiter.set_result(self)
 
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         protocol_factory=ServerTestTtype,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop)
 
-    reader, writer = yield from asyncio.open_connection(
+    reader, writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
     # exercise,
@@ -41,14 +41,14 @@ def test_telnet_server_on_ttype(event_loop, bind_host, unused_tcp_port):
     writer.write(IAC + SB + TTYPE + IS + b'ALPHA' + IAC + SE)
 
     # verify,
-    srv_instance = yield from asyncio.wait_for(_waiter, 0.5)
+    srv_instance = await asyncio.wait_for(_waiter, 0.5)
     assert 'ALPHA' == srv_instance.get_extra_info('ttype1')
     assert 'ALPHA' == srv_instance.get_extra_info('ttype2')
     assert 'ALPHA' == srv_instance.get_extra_info('TERM')
 
 
 @pytest.mark.asyncio
-def test_telnet_server_on_ttype_beyond_max(
+async def test_telnet_server_on_ttype_beyond_max(
         event_loop, bind_host, unused_tcp_port):
     """
     Test Server's callback method on_ttype() with long list.
@@ -71,12 +71,12 @@ def test_telnet_server_on_ttype_beyond_max(
             if ttype == given_ttypes[-1]:
                 _waiter.set_result(self)
 
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         protocol_factory=ServerTestTtype,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop)
 
-    reader, writer = yield from asyncio.open_connection(
+    reader, writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
     # exercise,
@@ -87,7 +87,7 @@ def test_telnet_server_on_ttype_beyond_max(
                      IAC + SE)
 
     # verify,
-    srv_instance = yield from asyncio.wait_for(_waiter, 0.5)
+    srv_instance = await asyncio.wait_for(_waiter, 0.5)
     for idx in range(telnetlib3.TelnetServer.TTYPE_LOOPMAX):
         key = 'ttype{0}'.format(idx + 1)
         expected = given_ttypes[idx]
@@ -102,7 +102,7 @@ def test_telnet_server_on_ttype_beyond_max(
 
 
 @pytest.mark.asyncio
-def test_telnet_server_on_ttype_empty(
+async def test_telnet_server_on_ttype_empty(
         event_loop, bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype(): empty value is ignored. """
     # given
@@ -116,12 +116,12 @@ def test_telnet_server_on_ttype_empty(
             if ttype == given_ttypes[-1]:
                 _waiter.set_result(self)
 
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         protocol_factory=ServerTestTtype,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop)
 
-    reader, writer = yield from asyncio.open_connection(
+    reader, writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
     # exercise,
@@ -132,14 +132,14 @@ def test_telnet_server_on_ttype_empty(
                      IAC + SE)
 
     # verify,
-    srv_instance = yield from asyncio.wait_for(_waiter, 0.5)
+    srv_instance = await asyncio.wait_for(_waiter, 0.5)
     assert srv_instance.get_extra_info('ttype1') == 'ALPHA'
     assert srv_instance.get_extra_info('ttype2') == 'BETA'
     assert srv_instance.get_extra_info('TERM') == 'BETA'
 
 
 @pytest.mark.asyncio
-def test_telnet_server_on_ttype_looped(
+async def test_telnet_server_on_ttype_looped(
         event_loop, bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype() when value looped. """
     # given
@@ -156,12 +156,12 @@ def test_telnet_server_on_ttype_looped(
                 _waiter.set_result(self)
             self.count += 1
 
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         protocol_factory=ServerTestTtype,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop)
 
-    reader, writer = yield from asyncio.open_connection(
+    reader, writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
     # exercise,
@@ -172,7 +172,7 @@ def test_telnet_server_on_ttype_looped(
                      IAC + SE)
 
     # verify,
-    srv_instance = yield from asyncio.wait_for(_waiter, 0.5)
+    srv_instance = await asyncio.wait_for(_waiter, 0.5)
     assert srv_instance.get_extra_info('ttype1') == 'ALPHA'
     assert srv_instance.get_extra_info('ttype2') == 'BETA'
     assert srv_instance.get_extra_info('ttype3') == 'GAMMA'
@@ -181,7 +181,7 @@ def test_telnet_server_on_ttype_looped(
 
 
 @pytest.mark.asyncio
-def test_telnet_server_on_ttype_repeated(
+async def test_telnet_server_on_ttype_repeated(
         event_loop, bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype() when value repeats. """
     # given
@@ -198,12 +198,12 @@ def test_telnet_server_on_ttype_repeated(
                 _waiter.set_result(self)
             self.count += 1
 
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         protocol_factory=ServerTestTtype,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop)
 
-    reader, writer = yield from asyncio.open_connection(
+    reader, writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
     # exercise,
@@ -214,7 +214,7 @@ def test_telnet_server_on_ttype_repeated(
                      IAC + SE)
 
     # verify,
-    srv_instance = yield from asyncio.wait_for(_waiter, 0.5)
+    srv_instance = await asyncio.wait_for(_waiter, 0.5)
     assert srv_instance.get_extra_info('ttype1') == 'ALPHA'
     assert srv_instance.get_extra_info('ttype2') == 'BETA'
     assert srv_instance.get_extra_info('ttype3') == 'GAMMA'
@@ -223,7 +223,7 @@ def test_telnet_server_on_ttype_repeated(
 
 
 @pytest.mark.asyncio
-def test_telnet_server_on_ttype_mud(
+async def test_telnet_server_on_ttype_mud(
         event_loop, bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype() for MUD clients (MTTS). """
     # given
@@ -240,12 +240,12 @@ def test_telnet_server_on_ttype_mud(
                 _waiter.set_result(self)
             self.count += 1
 
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         protocol_factory=ServerTestTtype,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop)
 
-    reader, writer = yield from asyncio.open_connection(
+    reader, writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
     # exercise,
@@ -256,7 +256,7 @@ def test_telnet_server_on_ttype_mud(
                      IAC + SE)
 
     # verify,
-    srv_instance = yield from asyncio.wait_for(_waiter, 0.5)
+    srv_instance = await asyncio.wait_for(_waiter, 0.5)
     assert srv_instance.get_extra_info('ttype1') == 'ALPHA'
     assert srv_instance.get_extra_info('ttype2') == 'BETA'
     assert srv_instance.get_extra_info('ttype3') == 'MTTS 137'

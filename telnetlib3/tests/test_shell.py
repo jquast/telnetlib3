@@ -16,7 +16,7 @@ import pytest
 
 
 @pytest.mark.asyncio
-def test_telnet_server_shell_as_coroutine(event_loop, bind_host,
+async def test_telnet_server_shell_as_coroutine(event_loop, bind_host,
                                           unused_tcp_port):
     """Test callback shell(reader, writer) as coroutine of create_server()."""
     from telnetlib3.telopt import IAC, DO, WONT, TTYPE
@@ -35,15 +35,15 @@ def test_telnet_server_shell_as_coroutine(event_loop, bind_host,
         writer.write(expect_output)
 
     # exercise,
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
         shell=shell, loop=event_loop)
 
-    reader, writer = yield from asyncio.open_connection(
+    reader, writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
     # given, verify IAC DO TTYPE
-    hello = yield from asyncio.wait_for(
+    hello = await asyncio.wait_for(
         reader.readexactly(len(expect_hello)), 0.5)
     assert hello == expect_hello
 
@@ -52,11 +52,11 @@ def test_telnet_server_shell_as_coroutine(event_loop, bind_host,
     writer.write(hello_reply)
 
     # await for the shell callback
-    yield from asyncio.wait_for(_waiter, 0.5)
+    await asyncio.wait_for(_waiter, 0.5)
 
     # client sends input, reads shell output response
     writer.write(send_input.encode('ascii'))
-    server_output = yield from asyncio.wait_for(
+    server_output = await asyncio.wait_for(
         reader.readexactly(len(expect_output)), 0.5)
 
     # verify,
@@ -64,7 +64,7 @@ def test_telnet_server_shell_as_coroutine(event_loop, bind_host,
 
 
 @pytest.mark.asyncio
-def test_telnet_client_shell_as_coroutine(event_loop, bind_host,
+async def test_telnet_client_shell_as_coroutine(event_loop, bind_host,
                                           unused_tcp_port):
     """Test callback shell(reader, writer) as coroutine of create_server()."""
     _waiter = asyncio.Future()
@@ -74,18 +74,18 @@ def test_telnet_client_shell_as_coroutine(event_loop, bind_host,
         _waiter.set_result(True)
 
     # a server that doesn't care
-    yield from event_loop.create_server(asyncio.Protocol,
+    await event_loop.create_server(asyncio.Protocol,
                                         bind_host, unused_tcp_port)
 
-    reader, writer = yield from telnetlib3.open_connection(
+    reader, writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
         shell=shell, connect_minwait=0.05)
 
-    yield from asyncio.wait_for(_waiter, 0.5)
+    await asyncio.wait_for(_waiter, 0.5)
 
 
 @pytest.mark.asyncio
-def test_telnet_server_shell_make_coro_by_function(event_loop, bind_host,
+async def test_telnet_server_shell_make_coro_by_function(event_loop, bind_host,
                                                    unused_tcp_port):
     """Test callback shell(reader, writer) as function, for create_server()."""
     from telnetlib3.telopt import IAC, DO, WONT, TTYPE
@@ -96,76 +96,76 @@ def test_telnet_server_shell_make_coro_by_function(event_loop, bind_host,
         _waiter.set_result(True)
 
     # exercise,
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
         shell=shell, loop=event_loop)
 
-    reader, writer = yield from asyncio.open_connection(
+    reader, writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
     # exercise, cancel negotiation and await for the shell callback
     writer.write(IAC + WONT + TTYPE)
 
     # verify,
-    yield from asyncio.wait_for(_waiter, 0.5)
+    await asyncio.wait_for(_waiter, 0.5)
 
 
 @pytest.mark.asyncio
-def test_telnet_server_no_shell(event_loop, bind_host, unused_tcp_port):
+async def test_telnet_server_no_shell(event_loop, bind_host, unused_tcp_port):
     """Test telnetlib3.TelnetServer() instantiation and connection_made()."""
     from telnetlib3.telopt import IAC, DO, WONT, TTYPE
     _waiter = asyncio.Future()
     client_expected = IAC + DO + TTYPE + b'beta'
     server_expected = IAC + WONT + TTYPE + b'alpha'
     # given,
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         _waiter_connected=_waiter,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop)
 
     # exercise,
-    client_reader, client_writer = yield from asyncio.open_connection(
+    client_reader, client_writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
     client_writer.write(IAC + WONT + TTYPE + b'alpha')
 
-    server = yield from asyncio.wait_for(_waiter, 0.5)
+    server = await asyncio.wait_for(_waiter, 0.5)
     server.writer.write('beta')
     server.writer.close()
-    client_recv = yield from client_reader.read()
+    client_recv = await client_reader.read()
     assert client_recv == client_expected
 
 
 @pytest.mark.asyncio
-def test_telnet_server_given_shell(
+async def test_telnet_server_given_shell(
         event_loop, bind_host, unused_tcp_port):
     """Iterate all state-reading commands of default telnet_server_shell."""
     from telnetlib3.telopt import IAC, WILL, DO, WONT, ECHO, SGA, BINARY, TTYPE
     from telnetlib3 import telnet_server_shell
     # given
     _waiter = asyncio.Future()
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
         shell=telnet_server_shell,
         _waiter_connected=_waiter, connect_maxwait=0.05,
         timeout=0.25, loop=event_loop, limit=1337)
 
-    reader, writer = yield from asyncio.open_connection(
+    reader, writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
     expected = IAC + DO + TTYPE
-    result = yield from asyncio.wait_for(
+    result = await asyncio.wait_for(
         reader.readexactly(len(expected)), 0.5)
     assert result == expected
 
     writer.write(IAC + WONT + TTYPE)
 
     expected = b'Ready.\r\ntel:sh> '
-    result = yield from asyncio.wait_for(
+    result = await asyncio.wait_for(
         reader.readexactly(len(expected)), 0.5)
     assert result == expected
 
-    server = yield from asyncio.wait_for(_waiter, 0.5)
+    server = await asyncio.wait_for(_waiter, 0.5)
     server_port = str(server._transport.get_extra_info('peername')[1])
 
     cmd_output_table = (
@@ -266,19 +266,19 @@ def test_telnet_server_given_shell(
     for (cmd, output_expected) in cmd_output_table:
         writer.write(cmd)
         try:
-            result = yield from asyncio.wait_for(
+            result = await asyncio.wait_for(
                 reader.readexactly(len(output_expected)), 0.5)
         except asyncio.streams.IncompleteReadError as err:
             result = err.partial
         assert result == output_expected
 
     # nothing more to read.
-    result = yield from reader.read()
+    result = await reader.read()
     assert result == b''
 
 
 @pytest.mark.asyncio
-def test_telnet_server_shell_eof(event_loop, bind_host, unused_tcp_port):
+async def test_telnet_server_shell_eof(event_loop, bind_host, unused_tcp_port):
     """Test EOF in telnet_server_shell()."""
     from telnetlib3.telopt import IAC, WONT, TTYPE
     from telnetlib3 import telnet_server_shell
@@ -286,17 +286,17 @@ def test_telnet_server_shell_eof(event_loop, bind_host, unused_tcp_port):
     _waiter_connected = asyncio.Future()
     _waiter_closed = asyncio.Future()
 
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
         _waiter_connected=_waiter_connected,
         _waiter_closed=_waiter_closed,
         shell=telnet_server_shell,
         timeout=0.25, loop=event_loop)
 
-    reader, writer = yield from asyncio.open_connection(
+    reader, writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
     writer.write(IAC + WONT + TTYPE)
 
-    yield from asyncio.wait_for(_waiter_connected, 0.5)
+    await asyncio.wait_for(_waiter_connected, 0.5)
     writer.close()
-    yield from asyncio.wait_for(_waiter_closed, 0.5)
+    await asyncio.wait_for(_waiter_closed, 0.5)

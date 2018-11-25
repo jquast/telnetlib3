@@ -16,7 +16,7 @@ import pytest
 
 
 @pytest.mark.asyncio
-def test_telnet_server_on_tspeed(event_loop, bind_host, unused_tcp_port):
+async def test_telnet_server_on_tspeed(event_loop, bind_host, unused_tcp_port):
     """Test Server's callback method on_tspeed()."""
     # given
     from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TSPEED
@@ -27,12 +27,12 @@ def test_telnet_server_on_tspeed(event_loop, bind_host, unused_tcp_port):
             super().on_tspeed(rx, tx)
             _waiter.set_result(self)
 
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         protocol_factory=ServerTestTspeed,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop)
 
-    reader, writer = yield from asyncio.open_connection(
+    reader, writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
     # exercise,
@@ -40,12 +40,12 @@ def test_telnet_server_on_tspeed(event_loop, bind_host, unused_tcp_port):
     writer.write(IAC + SB + TSPEED + IS + b'123,456' + IAC + SE)
 
     # verify,
-    srv_instance = yield from asyncio.wait_for(_waiter, 0.5)
+    srv_instance = await asyncio.wait_for(_waiter, 0.5)
     assert srv_instance.get_extra_info('tspeed') == '123,456'
 
 
 @pytest.mark.asyncio
-def test_telnet_client_send_tspeed(event_loop, bind_host, unused_tcp_port):
+async def test_telnet_client_send_tspeed(event_loop, bind_host, unused_tcp_port):
     """Test Client's callback method send_tspeed()."""
     # given
     _waiter = asyncio.Future()
@@ -61,15 +61,15 @@ def test_telnet_client_send_tspeed(event_loop, bind_host, unused_tcp_port):
             super().begin_advanced_negotiation()
             self.writer.iac(DO, TSPEED)
 
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         protocol_factory=ServerTestTspeed,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop)
 
-    reader, writer = yield from telnetlib3.open_connection(
+    reader, writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
         tspeed=(given_rx, given_tx), connect_minwait=0.05)
 
-    recv_rx, recv_tx = yield from asyncio.wait_for(_waiter, 0.5)
+    recv_rx, recv_tx = await asyncio.wait_for(_waiter, 0.5)
     assert recv_rx == given_rx
     assert recv_tx == given_tx
