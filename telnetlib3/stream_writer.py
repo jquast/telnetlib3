@@ -1074,7 +1074,7 @@ class TelnetWriter(asyncio.StreamWriter):
     def handle_send_xdisploc(self):
         """Send XDISPLAY value ``xdisploc``, :rfc:`1096`."""
         #   xdisploc string format is '<host>:<dispnum>[.<screennum>]'.
-        self.log.warn('X Display requested, sending empty string.')
+        self.log.warning('X Display requested, sending empty string.')
         return ''
 
     def handle_sndloc(self, location):
@@ -1083,7 +1083,7 @@ class TelnetWriter(asyncio.StreamWriter):
 
     def handle_send_sndloc(self):
         """Send LOCATION value ``location``, :rfc:`779`."""
-        self.log.warn('Location requested, sending empty response.')
+        self.log.warning('Location requested, sending empty response.')
         return ''
 
     def handle_ttype(self, ttype):
@@ -1098,7 +1098,7 @@ class TelnetWriter(asyncio.StreamWriter):
 
     def handle_send_ttype(self):
         """Send TTYPE value ``ttype``, :rfc:`1091`."""
-        self.log.warn('Terminal type requested, sending empty string.')
+        self.log.warning('Terminal type requested, sending empty string.')
         return ''
 
     def handle_naws(self, width, height):
@@ -1107,7 +1107,7 @@ class TelnetWriter(asyncio.StreamWriter):
 
     def handle_send_naws(self):
         """Send window size ``width`` and ``height``, :rfc:`1073`."""
-        self.log.warn('Terminal size requested, sending 80x24.')
+        self.log.warning('Terminal size requested, sending 80x24.')
         return 80, 24
 
     def handle_environ(self, env):
@@ -1367,7 +1367,7 @@ class TelnetWriter(asyncio.StreamWriter):
             # option value of -1 toggles opt.unsupported()
             self.iac(DONT, opt)
             self.remote_option[opt] = -1
-            self.log.warn('Unhandled: WILL {}.'.format(name_command(opt),))
+            self.log.warning('Unhandled: WILL {}.'.format(name_command(opt),))
             self.local_option[opt] = -1
             if self.pending_option.enabled(DO + opt):
                 self.pending_option[DO + opt] = False
@@ -1393,7 +1393,7 @@ class TelnetWriter(asyncio.StreamWriter):
             assert not (self.server), (
                 'cannot recv WONT LOGOUT on server end')
             if not self.pending_option.enabled(DO + LOGOUT):
-                self.log.warn('Server sent WONT LOGOUT unsolicited')
+                self.log.warning('Server sent WONT LOGOUT unsolicited')
             self._ext_callback[LOGOUT](WONT)
         else:
             self.remote_option[opt] = False
@@ -1507,7 +1507,7 @@ class TelnetWriter(asyncio.StreamWriter):
                            .format(charset))
             self._ext_callback[CHARSET](charset)
         elif opt == REJECTED:
-            self.log.warn('recv IAC SB CHARSET REJECTED IAC SE')
+            self.log.warning('recv IAC SB CHARSET REJECTED IAC SE')
         elif opt in (TTABLE_IS, TTABLE_ACK, TTABLE_NAK, TTABLE_REJECTED):
             raise NotImplementedError('Translation table command received '
                                       'but not supported: {!r}'.format(opt))
@@ -1657,8 +1657,8 @@ class TelnetWriter(asyncio.StreamWriter):
                 # a pending option of value of 'False' means it was previously
                 # completed, subsequent environment values *should* have been
                 # sent as command INFO ...
-                self.log.warn('{} IS already recv; expected INFO.'
-                              .format(name_command(cmd)))
+                self.log.warning('{} IS already recv; expected INFO.'
+                                 .format(name_command(cmd)))
             if env:
                 self._ext_callback[cmd](env)
         elif opt == SEND:
@@ -1910,11 +1910,11 @@ class TelnetWriter(asyncio.StreamWriter):
                 #   and the mode is different that what the current mode is,
                 #   the client will ignore the new mode"
                 #
-                self.log.warn('server mode differs from local mode, '
-                              'though ACK bit is set. Local mode will '
-                              'remain.')
-                self.log.warn('!remote: {0!r}'.format(suggest_mode))
-                self.log.warn('  local: {0!r}'.format(self._linemode))
+                self.log.warning('server mode differs from local mode, '
+                                 'though ACK bit is set. Local mode will '
+                                 'remain.')
+                self.log.warning('!remote: {0!r}'.format(suggest_mode))
+                self.log.warning('  local: {0!r}'.format(self._linemode))
                 return
 
             self.log.debug('Linemode matches, acknowledged by server.')
@@ -2024,8 +2024,8 @@ class TelnetWriter(asyncio.StreamWriter):
         """
         # out of bounds checking
         if ord(func) > slc.NSLC:
-            self.log.warn('SLC not supported (out of range): ({!r})'
-                          .format(func))
+            self.log.warning('SLC not supported (out of range): ({!r})'
+                             .format(func))
             self._slc_add(func, slc.SLC_nosupport())
             return
 
@@ -2040,7 +2040,7 @@ class TelnetWriter(asyncio.StreamWriter):
                 self.log.debug('_slc_process: client request SLC_VARIABLE')
                 self._slc_send()
             else:
-                self.log.warn('func(0) flag expected, got {}.'.format(slc_def))
+                self.log.warning('func(0) flag expected, got {}.'.format(slc_def))
             return
 
         self.log.debug('_slc_process {:<9} mine={}, his={}'.format(

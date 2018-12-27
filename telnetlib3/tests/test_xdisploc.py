@@ -16,7 +16,7 @@ import pytest
 
 
 @pytest.mark.asyncio
-def test_telnet_server_on_xdisploc(
+async def test_telnet_server_on_xdisploc(
         event_loop, bind_host, unused_tcp_port):
     """Test Server's callback method on_xdisploc()."""
     # given
@@ -31,12 +31,12 @@ def test_telnet_server_on_xdisploc(
             super().on_xdisploc(xdisploc)
             _waiter.set_result(self)
 
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         protocol_factory=ServerTestXdisploc,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop)
 
-    reader, writer = yield from asyncio.open_connection(
+    reader, writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
     # exercise,
@@ -46,12 +46,12 @@ def test_telnet_server_on_xdisploc(
                  IAC + SE)
 
     # verify,
-    srv_instance = yield from asyncio.wait_for(_waiter, 0.5)
+    srv_instance = await asyncio.wait_for(_waiter, 0.5)
     assert srv_instance.get_extra_info('xdisploc') == 'alpha:0'
 
 
 @pytest.mark.asyncio
-def test_telnet_client_send_xdisploc(event_loop, bind_host, unused_tcp_port):
+async def test_telnet_client_send_xdisploc(event_loop, bind_host, unused_tcp_port):
     """Test Client's callback method send_xdisploc()."""
     # given
     _waiter = asyncio.Future()
@@ -67,14 +67,14 @@ def test_telnet_client_send_xdisploc(event_loop, bind_host, unused_tcp_port):
             super().begin_advanced_negotiation()
             self.writer.iac(DO, XDISPLOC)
 
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         protocol_factory=ServerTestXdisploc,
         host=bind_host, port=unused_tcp_port,
         loop=event_loop)
 
-    reader, writer = yield from telnetlib3.open_connection(
+    reader, writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
         xdisploc=given_xdisploc, connect_minwait=0.05)
 
-    recv_xdisploc = yield from asyncio.wait_for(_waiter, 0.5)
+    recv_xdisploc = await asyncio.wait_for(_waiter, 0.5)
     assert recv_xdisploc == given_xdisploc

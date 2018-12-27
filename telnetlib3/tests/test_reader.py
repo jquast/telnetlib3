@@ -39,7 +39,7 @@ def test_reader_instantiation_safety():
 
 
 @pytest.mark.asyncio
-def test_telnet_reader_using_readline_unicode(
+async def test_telnet_reader_using_readline_unicode(
         event_loop, bind_host, unused_tcp_port):
     """Ensure strict RFC interpretation of newlines in readline method."""
     # given
@@ -61,30 +61,30 @@ def test_telnet_reader_using_readline_unicode(
             writer.write(item)
         writer.close()
 
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
         connect_maxwait=0.05, shell=shell)
 
-    client_reader, client_writer = yield from telnetlib3.open_connection(
+    client_reader, client_writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
         connect_minwait=0.05)
 
     # exercise,
     for given, expected in sorted(given_expected.items()):
-        result = yield from asyncio.wait_for(client_reader.readline(), 0.5)
+        result = await asyncio.wait_for(client_reader.readline(), 0.5)
 
         # verify.
         assert result == expected
 
     # exercise,
-    eof = yield from asyncio.wait_for(client_reader.read(), 0.5)
+    eof = await asyncio.wait_for(client_reader.read(), 0.5)
 
     # verify.
     assert eof == ''
 
 
 @pytest.mark.asyncio
-def test_telnet_reader_using_readline_bytes(
+async def test_telnet_reader_using_readline_bytes(
         event_loop, bind_host, unused_tcp_port):
     """Ensure strict RFC interpretation of newlines in readline method."""
     # given
@@ -106,30 +106,30 @@ def test_telnet_reader_using_readline_bytes(
             writer.write(item)
         writer.close()
 
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
         connect_maxwait=0.05, shell=shell, encoding=False)
 
-    client_reader, client_writer = yield from telnetlib3.open_connection(
+    client_reader, client_writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
         connect_minwait=0.05, encoding=False)
 
     # exercise,
     for given, expected in sorted(given_expected.items()):
-        result = yield from asyncio.wait_for(client_reader.readline(), 0.5)
+        result = await asyncio.wait_for(client_reader.readline(), 0.5)
 
         # verify.
         assert result == expected
 
     # exercise,
-    eof = yield from asyncio.wait_for(client_reader.read(), 0.5)
+    eof = await asyncio.wait_for(client_reader.read(), 0.5)
 
     # verify.
     assert eof == b''
 
 
 @pytest.mark.asyncio
-def test_telnet_reader_read_exactly_unicode(
+async def test_telnet_reader_read_exactly_unicode(
         event_loop, bind_host, unused_tcp_port):
     """Ensure TelnetReader.readexactly, especially IncompleteReadError."""
     # given
@@ -142,16 +142,16 @@ def test_telnet_reader_read_exactly_unicode(
         writer.write(given_partial)
         writer.close()
 
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
         connect_maxwait=0.05, shell=shell)
 
-    client_reader, client_writer = yield from telnetlib3.open_connection(
+    client_reader, client_writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
         connect_minwait=0.05)
 
     # exercise, readexactly # bytes of given
-    result = yield from asyncio.wait_for(
+    result = await asyncio.wait_for(
         client_reader.readexactly(len(given)), 0.5)
 
     # verify,
@@ -160,7 +160,7 @@ def test_telnet_reader_read_exactly_unicode(
     # exercise, read 1 byte beyond given_partial
     given_readsize = len(given_partial) + 1
     with pytest.raises(asyncio.IncompleteReadError) as exc_info:
-        result = yield from asyncio.wait_for(
+        result = await asyncio.wait_for(
             client_reader.readexactly(given_readsize), 0.5)
 
     assert exc_info.value.partial == given_partial
@@ -168,7 +168,7 @@ def test_telnet_reader_read_exactly_unicode(
 
 
 @pytest.mark.asyncio
-def test_telnet_reader_read_exactly_bytes(
+async def test_telnet_reader_read_exactly_bytes(
         event_loop, bind_host, unused_tcp_port):
     """Ensure TelnetReader.readexactly, especially IncompleteReadError."""
     # given
@@ -180,16 +180,16 @@ def test_telnet_reader_read_exactly_bytes(
         writer.write(given + given_partial)
         writer.close()
 
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
         connect_maxwait=0.05, shell=shell, encoding=False)
 
-    client_reader, client_writer = yield from telnetlib3.open_connection(
+    client_reader, client_writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
         connect_minwait=0.05, encoding=False)
 
     # exercise, readexactly # bytes of given
-    result = yield from asyncio.wait_for(
+    result = await asyncio.wait_for(
         client_reader.readexactly(len(given)), 0.5)
 
     # verify,
@@ -198,7 +198,7 @@ def test_telnet_reader_read_exactly_bytes(
     # exercise, read 1 byte beyond given_partial
     given_readsize = len(given_partial) + 1
     with pytest.raises(asyncio.IncompleteReadError) as exc_info:
-        result = yield from asyncio.wait_for(
+        result = await asyncio.wait_for(
             client_reader.readexactly(given_readsize), 0.5)
 
     assert exc_info.value.partial == given_partial
@@ -206,7 +206,7 @@ def test_telnet_reader_read_exactly_bytes(
 
 
 @pytest.mark.asyncio
-def test_telnet_reader_read_0(
+async def test_telnet_reader_read_0(
         event_loop, bind_host, unused_tcp_port):
     """Ensure TelnetReader.read(0) returns nothing."""
     # given
@@ -215,13 +215,13 @@ def test_telnet_reader_read_0(
     reader = telnetlib3.TelnetReaderUnicode(fn_encoding=fn_encoding)
 
     # exercise
-    value = yield from reader.read(0)
+    value = await reader.read(0)
 
     # verify
     assert value == ''
 
 @pytest.mark.asyncio
-def test_telnet_reader_read_beyond_limit_unicode(
+async def test_telnet_reader_read_beyond_limit_unicode(
         event_loop, bind_host, unused_tcp_port):
     """Ensure ability to read(-1) beyond segment sizes of reader._limit."""
     # given
@@ -235,21 +235,21 @@ def test_telnet_reader_read_beyond_limit_unicode(
         writer.write(given)
         writer.close()
 
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
         connect_maxwait=0.05, shell=shell, limit=limit)
 
-    client_reader, client_writer = yield from telnetlib3.open_connection(
+    client_reader, client_writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
         connect_minwait=0.05, limit=limit)
 
     assert client_reader._limit == limit
-    value = yield from asyncio.wait_for(client_reader.read(), 0.5)
+    value = await asyncio.wait_for(client_reader.read(), 0.5)
     assert value == 'x' * (limit + 1)
 
 
 @pytest.mark.asyncio
-def test_telnet_reader_read_beyond_limit_bytes(
+async def test_telnet_reader_read_beyond_limit_bytes(
         event_loop, bind_host, unused_tcp_port):
     """Ensure ability to read(-1) beyond segment sizes of reader._limit."""
     # given
@@ -263,14 +263,14 @@ def test_telnet_reader_read_beyond_limit_bytes(
         writer.write(given)
         writer.close()
 
-    yield from telnetlib3.create_server(
+    await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
         connect_maxwait=0.05, shell=shell, encoding=False, limit=limit)
 
-    client_reader, client_writer = yield from telnetlib3.open_connection(
+    client_reader, client_writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
         connect_minwait=0.05, encoding=False, limit=limit)
 
     assert client_reader._limit == limit
-    value = yield from asyncio.wait_for(client_reader.read(), 0.5)
+    value = await asyncio.wait_for(client_reader.read(), 0.5)
     assert value == b'x' * (limit + 1)

@@ -2,18 +2,15 @@ language: python
 matrix:
   fast_finish: true
   include:
-    - python: 3.3
-      env: TOXENV=py33 COVERAGE_ID=travis-ci
-    - python: 3.4
-      env: TOXENV=py34 COVERAGE_ID=travis-ci
-    - python: 3.5
-      env: TOXENV=sa
-    - python: 3.5
-      env: TOXENV=py35,coveralls COVERAGE_ID=travis-ci
     # some errors only present themselves when using with ASYNCIODEBUG,
     # especially exceptions in tasks and so on.
     - python: 3.5
       env: ASYNCIODEBUG=1 TOXENV=py35 COVERAGE_ID=travis-ci
+    - python: 3.6
+      env: ASYNCIODEBUG=1 TOXENV=py36 COVERAGE_ID=travis-ci
+    - python: 3.7
+      env: ASYNCIODEBUG=1 TOXENV=py37 COVERAGE_ID=travis-ci
+
 install:
   - pip install tox
 script:

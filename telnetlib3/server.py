@@ -334,7 +334,7 @@ class TelnetServer(server_base.BaseServer):
 
         elif (not ttype or self._ttype_count > self.TTYPE_LOOPMAX):
             # empty reply string or too many responses!
-            self.log.warn('ttype cycle stop at {0}: {1}.'.format(key, ttype))
+            self.log.warning('ttype cycle stop at {0}: {1}.'.format(key, ttype))
 
         elif (self._ttype_count == 3 and ttype.upper().startswith('MTTS ')):
             val = self.get_extra_info('ttype2')
@@ -505,7 +505,7 @@ def run_server(host=CONFIG.host, port=CONFIG.port, loglevel=CONFIG.loglevel,
                       connect_maxwait=connect_maxwait))
 
     # SIGTERM cases server to gracefully stop
-    loop.add_signal_handler(signal.SIGTERM, asyncio.async,
+    loop.add_signal_handler(signal.SIGTERM, asyncio.ensure_future,
                             _sigterm_handler(server, log))
 
     log.info('Server ready on {0}:{1}'.format(host, port))

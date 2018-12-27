@@ -13,18 +13,9 @@ def _get_long_description(fname, encoding='utf8'):
     return open(fname, 'r', encoding=encoding).read()
 
 
-def _get_install_requires():
-    if platform.python_version_tuple() < ('3', '4'):
-        return ['asyncio']
-    return []
-
-def _get_version(fname):
-    import json
-    return json.load(open(fname, 'r'))['version']
-
-
 setup(name='telnetlib3',
-      version=_get_version(fname=_get_here('version.json')),
+      # keep in sync w/docs/conf.py manually for now, please!
+      version='1.0.1',
       url='http://telnetlib3.rtfd.org/',
       license='ISC',
       author='Jeff Quast',
@@ -52,5 +43,4 @@ setup(name='telnetlib3',
                    'Topic :: System :: Shells',
                    'Topic :: Internet',
                    ],
-      install_requires=_get_install_requires(),
       )

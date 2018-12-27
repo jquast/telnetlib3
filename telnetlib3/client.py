@@ -140,8 +140,8 @@ class TelnetClient(client_base.BaseClient):
         if selected:
             self.log.debug('encoding negotiated: {0}'.format(selected))
         else:
-            self.log.warn('No suitable encoding offered by server: {!r}.'
-                          .format(offered))
+            self.log.warning('No suitable encoding offered by server: {!r}.'
+                             .format(offered))
         return selected
 
     def send_naws(self):
