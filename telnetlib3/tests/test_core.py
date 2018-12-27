@@ -391,7 +391,7 @@ async def test_telnet_server_negotiation_fail(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
     # exercise,
-    reader.readexactly(3)  # IAC DO TTYPE, we ignore it!
+    await reader.readexactly(3)  # IAC DO TTYPE, we ignore it!
 
     # negotiation then times out, deferring to waiter_connected.
     server = await asyncio.wait_for(_waiter_connected, 1.0)
@@ -552,7 +552,7 @@ async def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port,
     # this code may be reduced when pexpect asyncio is bugfixed ..
     # we especially need pexpect to pass sys.stdin.isatty() test.
     prog, args = 'telnetlib3-client', [
-        bind_host, str(unused_tcp_port), '--loglevel=warn',
+        bind_host, str(unused_tcp_port), '--loglevel=warning',
         '--connect-minwait=0.05', '--connect-maxwait=0.05']
 
     class HelloServer(asyncio.Protocol):

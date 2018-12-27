@@ -150,7 +150,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             try:
                 recv_inband = self.writer.feed_byte(bytes([byte]))
             except:
-                self._log_exception(self.log.warn, *sys.exc_info())
+                self._log_exception(self.log.warning, *sys.exc_info())
             else:
                 if recv_inband:
                     # forward to reader (shell).

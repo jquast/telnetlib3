@@ -83,7 +83,7 @@ async def test_telnet_client_send_tty_naws(event_loop, bind_host,
     _waiter = asyncio.Future()
     given_cols, given_rows = 40, 20
     prog, args = 'telnetlib3-client', [
-        bind_host, str(unused_tcp_port), '--loglevel=warn',
+        bind_host, str(unused_tcp_port), '--loglevel=warning',
         '--connect-minwait=0.005', '--connect-maxwait=0.010']
 
     # a server,

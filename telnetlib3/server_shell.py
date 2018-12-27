@@ -49,7 +49,7 @@ def telnet_server_shell(reader, writer):
         elif command == 'proto':
             writer.write(repr(writer.protocol))
         elif command == 'version':
-            writer.write(accessories.get_version()['shell'])
+            writer.write(accessories.get_version())
         elif command == 'slc':
             writer.write(get_slcdata(writer))
         elif command.startswith('toggle'):

@@ -334,7 +334,7 @@ class TelnetServer(server_base.BaseServer):
 
         elif (not ttype or self._ttype_count > self.TTYPE_LOOPMAX):
             # empty reply string or too many responses!
-            self.log.warn('ttype cycle stop at {0}: {1}.'.format(key, ttype))
+            self.log.warning('ttype cycle stop at {0}: {1}.'.format(key, ttype))
 
         elif (self._ttype_count == 3 and ttype.upper().startswith('MTTS ')):
             val = self.get_extra_info('ttype2')
