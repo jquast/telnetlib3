@@ -1,5 +1,9 @@
 History
 =======
+1.0.1
+  * add python3.7 support, drop python 3.4 and earlier, :ghissue:`33` by
+    :ghuser:`AndrewNelis`.
+
 1.0.0
   * First general release for standard API: Instead of encouraging twisted-like
     override of protocol methods, we provide a "shell" callback interface,
