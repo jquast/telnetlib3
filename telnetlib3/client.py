@@ -388,6 +388,8 @@ def _get_argument_parser():
                         help='module.function_name')
     parser.add_argument('--encoding', default='utf8',
                         help='encoding name')
+    parser.add_argument('--speed', default=38400, type=int,
+                        help='connection speed')
     parser.add_argument('--encoding-errors', default='replace',
                         help='handler for encoding errors',
                         choices=('replace', 'ignore', 'strict'))
@@ -410,12 +412,14 @@ def _transform_args(args):
         'logfile': args.logfile,
         'logfmt': args.logfmt,
         'encoding': args.encoding,
+        'tspeed': (args.speed, args.speed),
         'shell': accessories.function_lookup(args.shell),
         'term': args.term,
         'force_binary': args.force_binary,
         'encoding_errors': args.encoding_errors,
         'connect_minwait': args.connect_minwait,
     }
+
 
 if __name__ == '__main__':
     exit(main())
