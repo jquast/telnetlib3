@@ -225,7 +225,7 @@ async def test_telnet_server_binary_mode(
         # our reader and writer should provide binary output
         writer.write(b'server_output')
 
-        val = yield from reader.read(1)
+        val = yield from reader.readexactly(1)
         assert val == b'c'
         val = yield from reader.readexactly(len(b'lient '))
         assert val == b'lient '
@@ -242,7 +242,7 @@ async def test_telnet_server_binary_mode(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
 
     # exercise, server will binary
-    val = await reader.read(len(IAC + DO + TTYPE))
+    val = await reader.readexactly(len(IAC + DO + TTYPE))
     assert val == IAC + DO + TTYPE
 
     writer.write(IAC + WONT + TTYPE)
@@ -274,7 +274,7 @@ async def test_telnet_client_and_server_escape_iac_encoding(
     server = await asyncio.wait_for(_waiter, 0.5)
 
     server.writer.write(given_string)
-    result = await client_reader.read(len(given_string))
+    result = await client_reader.readexactly(len(given_string))
     assert result == given_string
     server.writer.close()
     eof = await asyncio.wait_for(client_reader.read(), 0.5)
@@ -300,7 +300,7 @@ async def test_telnet_client_and_server_escape_iac_binary(
     server = await asyncio.wait_for(_waiter, 0.5)
 
     server.writer.write(given_string)
-    result = await client_reader.read(len(given_string))
+    result = await client_reader.readexactly(len(given_string))
     assert result == given_string
     server.writer.close()
     eof = await asyncio.wait_for(client_reader.read(), 0.5)

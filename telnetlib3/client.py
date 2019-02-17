@@ -55,7 +55,6 @@ class TelnetClient(client_base.BaseClient):
             'xdisploc': xdisploc,
         })
 
-
     def connection_made(self, transport):
         """Callback for connection made to server."""
         from telnetlib3.telopt import TTYPE, TSPEED, XDISPLOC, NEW_ENVIRON
@@ -90,9 +89,9 @@ class TelnetClient(client_base.BaseClient):
         """
         Callback for responding to NEW_ENVIRON requests.
 
-        :param dict keys: Values are requested for the keys specified. When empty,
-           all environment values that wish to be volunteered should be
-           returned.
+        :param dict keys: Values are requested for the keys specified.
+           When empty, all environment values that wish to be volunteered
+           should be returned.
         :returns: dictionary of environment values requested, or an
             empty string for keys not available. A return value must be
             given for each key requested.
@@ -127,16 +126,16 @@ class TelnetClient(client_base.BaseClient):
         """
         selected = ''
         for offer in offered:
-                try:
-                    codec = codecs.lookup(offer)
-                except LookupError as err:
-                    self.log.info('LookupError: {}'.format(err))
-                else:
-                    if (codec.name == self.default_encoding or not selected):
-                        self._extra['charset'] = codec.name
-                        self._extra['lang'] = (
-                            self.DEFAULT_LOCALE + '.' + codec.name)
-                        selected = offer
+            try:
+                codec = codecs.lookup(offer)
+            except LookupError as err:
+                self.log.info('LookupError: {}'.format(err))
+            else:
+                if (codec.name == self.default_encoding or not selected):
+                    self._extra['charset'] = codec.name
+                    self._extra['lang'] = (
+                        self.DEFAULT_LOCALE + '.' + codec.name)
+                    selected = offer
         if selected:
             self.log.debug('encoding negotiated: {0}'.format(selected))
         else:
