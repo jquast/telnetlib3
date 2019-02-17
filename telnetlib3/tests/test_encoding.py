@@ -26,7 +26,7 @@ async def test_telnet_server_encoding_default(
     await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
         _waiter_connected=_waiter,
-        loop=event_loop, connect_maxwait=0.05)
+        loop=event_loop, connect_maxwait=0.15)
 
     reader, writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -57,7 +57,7 @@ async def test_telnet_client_encoding_default(
 
     reader, writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        connect_minwait=0.05)
+        connect_minwait=0.15)
 
 
     # after MIN_CONNECT elapsed, client is in US-ASCII state.
@@ -134,7 +134,7 @@ async def test_telnet_server_encoding_bidirectional(
     await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
         _waiter_connected=_waiter,
-        loop=event_loop, connect_maxwait=0.05)
+        loop=event_loop, connect_maxwait=0.15)
 
     reader, writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -160,11 +160,11 @@ async def test_telnet_client_and_server_encoding_bidirectional(
 
     await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port, _waiter_connected=_waiter,
-        loop=event_loop, encoding='latin1', connect_maxwait=0.05)
+        loop=event_loop, encoding='latin1', connect_maxwait=0.15)
 
     reader, writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        encoding='cp437', connect_minwait=0.05)
+        encoding='cp437', connect_minwait=0.15)
 
     srv_instance = await asyncio.wait_for(_waiter, 0.5)
 
@@ -265,11 +265,11 @@ async def test_telnet_client_and_server_escape_iac_encoding(
 
     await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port, _waiter_connected=_waiter,
-        loop=event_loop, encoding='iso8859-1', connect_maxwait=0.05)
+        loop=event_loop, encoding='iso8859-1', connect_maxwait=0.15)
 
     client_reader, client_writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        encoding='iso8859-1', connect_minwait=0.05)
+        encoding='iso8859-1', connect_minwait=0.15)
 
     server = await asyncio.wait_for(_waiter, 0.5)
 
@@ -291,11 +291,11 @@ async def test_telnet_client_and_server_escape_iac_binary(
 
     await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port, _waiter_connected=_waiter,
-        loop=event_loop, encoding=False, connect_maxwait=0.05)
+        loop=event_loop, encoding=False, connect_maxwait=0.15)
 
     client_reader, client_writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        encoding=False, connect_minwait=0.05)
+        encoding=False, connect_minwait=0.15)
 
     server = await asyncio.wait_for(_waiter, 0.5)
 

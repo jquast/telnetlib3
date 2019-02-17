@@ -79,7 +79,7 @@ async def test_telnet_client_shell_as_coroutine(event_loop, bind_host,
 
     reader, writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        shell=shell, connect_minwait=0.05)
+        shell=shell, connect_minwait=0.15)
 
     await asyncio.wait_for(_waiter, 0.5)
 
@@ -147,7 +147,7 @@ async def test_telnet_server_given_shell(
     await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
         shell=telnet_server_shell,
-        _waiter_connected=_waiter, connect_maxwait=0.05,
+        _waiter_connected=_waiter, connect_maxwait=0.15,
         timeout=0.25, loop=event_loop, limit=1337)
 
     reader, writer = await asyncio.open_connection(
@@ -201,7 +201,7 @@ async def test_telnet_server_given_shell(
             b'\r\n        SLC_XON: (^Q, variable)'
             b'\r\n       SLC_SUSP: (^Z, variable|flushin)'
             b'\r\n       SLC_XOFF: (^S, variable)'
-            b'\r\n      SLC_ABORT: (^\, variable|flushin|flushout)'
+            b'\r\n      SLC_ABORT: (^\\, variable|flushin|flushout)'
             b'\r\n      SLC_LNEXT: (^V, variable)'
             b'\r\nUnset by client: SLC_BRK, SLC_EOR, SLC_SYNCH'
             b'\r\nNot supported by server: SLC_EBOL, SLC_ECR, SLC_EEOL, '

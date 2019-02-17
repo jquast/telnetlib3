@@ -84,7 +84,7 @@ async def test_telnet_server_waitfor_timeout(
 
     await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
-        timeout=0.050, loop=event_loop)
+        timeout=0.250, loop=event_loop)
 
     reader, writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -94,5 +94,5 @@ async def test_telnet_server_waitfor_timeout(
     stime = time.time()
     output = await asyncio.wait_for(reader.read(), 0.5)
     elapsed = time.time() - stime
-    assert 0.050 <= round(elapsed, 3) <= 0.100
+    assert 0.250 <= round(elapsed, 3) <= 0.300
     assert output == expected_output

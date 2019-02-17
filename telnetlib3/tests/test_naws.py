@@ -33,7 +33,7 @@ async def test_telnet_server_on_naws(
     await telnetlib3.create_server(
         protocol_factory=ServerTestNaws,
         host=bind_host, port=unused_tcp_port,
-        loop=event_loop, connect_maxwait=0.05)
+        loop=event_loop, connect_maxwait=0.15)
 
     reader, writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -64,11 +64,11 @@ async def test_telnet_client_send_naws(event_loop, bind_host, unused_tcp_port):
     await telnetlib3.create_server(
         protocol_factory=ServerTestNaws,
         host=bind_host, port=unused_tcp_port,
-        loop=event_loop, connect_maxwait=0.05)
+        loop=event_loop, connect_maxwait=0.15)
 
     reader, writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        cols=given_cols, rows=given_rows, connect_minwait=0.05)
+        cols=given_cols, rows=given_rows, connect_minwait=0.15)
 
     recv_cols, recv_rows = await asyncio.wait_for(_waiter, 0.5)
     assert recv_cols == given_cols
@@ -96,7 +96,7 @@ async def test_telnet_client_send_tty_naws(event_loop, bind_host,
     await telnetlib3.create_server(
         protocol_factory=ServerTestNaws,
         host=bind_host, port=unused_tcp_port,
-        loop=event_loop, connect_maxwait=0.05)
+        loop=event_loop, connect_maxwait=0.15)
 
     proc = pexpect.spawn(prog, args, dimensions=(given_rows, given_cols))
     await proc.expect(pexpect.EOF, async_=True, timeout=5)
@@ -123,11 +123,11 @@ async def test_telnet_client_send_naws_65534(event_loop, bind_host, unused_tcp_p
     await telnetlib3.create_server(
         protocol_factory=ServerTestNaws,
         host=bind_host, port=unused_tcp_port,
-        loop=event_loop, connect_maxwait=0.05)
+        loop=event_loop, connect_maxwait=0.15)
 
     reader, writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        cols=given_cols, rows=given_rows, connect_minwait=0.05)
+        cols=given_cols, rows=given_rows, connect_minwait=0.15)
 
     recv_cols, recv_rows = await asyncio.wait_for(_waiter, 0.5)
     assert recv_cols == expect_cols

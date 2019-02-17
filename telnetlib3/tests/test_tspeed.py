@@ -68,7 +68,7 @@ async def test_telnet_client_send_tspeed(event_loop, bind_host, unused_tcp_port)
 
     reader, writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        tspeed=(given_rx, given_tx), connect_minwait=0.05)
+        tspeed=(given_rx, given_tx), connect_minwait=0.15)
 
     recv_rx, recv_tx = await asyncio.wait_for(_waiter, 0.5)
     assert recv_rx == given_rx

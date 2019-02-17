@@ -74,7 +74,7 @@ async def test_telnet_client_send_xdisploc(event_loop, bind_host, unused_tcp_por
 
     reader, writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        xdisploc=given_xdisploc, connect_minwait=0.05)
+        xdisploc=given_xdisploc, connect_minwait=0.15)
 
     recv_xdisploc = await asyncio.wait_for(_waiter, 0.5)
     assert recv_xdisploc == given_xdisploc

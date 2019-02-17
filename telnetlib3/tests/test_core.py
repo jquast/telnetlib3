@@ -33,9 +33,9 @@ async def test_open_connection(bind_host, unused_tcp_port):
     _waiter = asyncio.Future()
     await telnetlib3.create_server(bind_host, unused_tcp_port,
                                         _waiter_connected=_waiter,
-                                        connect_maxwait=0.05)
+                                        connect_maxwait=0.15)
     client_reader, client_writer = await telnetlib3.open_connection(
-        bind_host, unused_tcp_port, connect_minwait=0.05)
+        bind_host, unused_tcp_port, connect_minwait=0.15)
     server = await asyncio.wait_for(_waiter, 0.5)
     assert repr(server.writer) == (
         '<TelnetWriter server mode:kludge +lineflow -xon_any +slc_sim '
@@ -108,7 +108,7 @@ async def test_telnet_client_open_close_by_write(
 
     reader, writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port,
-        connect_minwait=0.05)
+        connect_minwait=0.15)
     writer.close()
     assert (await reader.read()) == ''
 
@@ -127,7 +127,7 @@ async def test_telnet_client_open_closed_by_peer(
 
     reader, writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port,
-        connect_minwait=0.05)
+        connect_minwait=0.15)
 
     # read until EOF, no data received.
     data_received = await reader.read()
@@ -367,7 +367,7 @@ async def test_telnet_client_open_close_by_error(
         pass
 
     reader, writer = await telnetlib3.open_connection(
-        host=bind_host, port=unused_tcp_port, connect_minwait=0.05)
+        host=bind_host, port=unused_tcp_port, connect_minwait=0.15)
 
     writer.protocol.connection_lost(GivenException("candy corn 4 everyone"))
     with pytest.raises(GivenException):
@@ -385,7 +385,7 @@ async def test_telnet_server_negotiation_fail(
     await telnetlib3.create_server(
         _waiter_connected=_waiter_connected,
         host=bind_host, port=unused_tcp_port,
-        loop=event_loop, connect_maxwait=0.05)
+        loop=event_loop, connect_maxwait=0.15)
 
     reader, writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -457,7 +457,7 @@ async def test_telnet_server_cmdline(bind_host, unused_tcp_port, event_loop):
     # this code may be reduced when pexpect asyncio is bugfixed ..
     prog = pexpect.which('telnetlib3-server')
     args = [prog, bind_host, str(unused_tcp_port), '--loglevel=info',
-            '--connect-maxwait=0.05']
+            '--connect-maxwait=0.15']
     proc = await asyncio.create_subprocess_exec(
         *args, loop=event_loop, stderr=asyncio.subprocess.PIPE)
 
@@ -516,7 +516,7 @@ async def test_telnet_client_cmdline(bind_host, unused_tcp_port, event_loop):
     # we especially need pexpect to pass sys.stdin.isatty() test.
     prog = pexpect.which('telnetlib3-client')
     args = [prog, bind_host, str(unused_tcp_port), '--loglevel=info',
-            '--connect-minwait=0.05', '--connect-maxwait=0.05']
+            '--connect-minwait=0.15', '--connect-maxwait=0.05']
 
     class HelloServer(asyncio.Protocol):
         def connection_made(self, transport):
@@ -553,7 +553,7 @@ async def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port,
     # we especially need pexpect to pass sys.stdin.isatty() test.
     prog, args = 'telnetlib3-client', [
         bind_host, str(unused_tcp_port), '--loglevel=warning',
-        '--connect-minwait=0.05', '--connect-maxwait=0.05']
+        '--connect-minwait=0.15', '--connect-maxwait=0.05']
 
     class HelloServer(asyncio.Protocol):
         def connection_made(self, transport):
@@ -600,7 +600,7 @@ async def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port,
     await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port,
         shell=shell, loop=event_loop,
-        connect_maxwait=0.05)
+        connect_maxwait=0.15)
 
     # start client by way of pipe
     proc = await asyncio.create_subprocess_exec(

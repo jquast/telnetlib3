@@ -131,7 +131,7 @@ async def test_iac_do_twice_replies_once(event_loop, bind_host, unused_tcp_port)
 
     await telnetlib3.create_server(
         protocol_factory=telnetlib3.BaseServer, host=bind_host, shell=shell,
-        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.05)
+        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.15)
 
     client_reader, client_writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -160,7 +160,7 @@ async def test_iac_dont_dont(event_loop, bind_host, unused_tcp_port):
 
     await telnetlib3.create_server(
         protocol_factory=telnetlib3.BaseServer, host=bind_host, shell=shell,
-        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.05)
+        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.15)
 
     client_reader, client_writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -183,12 +183,12 @@ async def test_send_iac_dont_dont(event_loop, bind_host, unused_tcp_port):
 
     await telnetlib3.create_server(
         protocol_factory=telnetlib3.BaseServer, host=bind_host,
-        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.05,
+        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.15,
         _waiter_connected=_waiter)
 
     _, client_writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        connect_minwait=0.05)
+        connect_minwait=0.15)
 
     # say it once,
     result = client_writer.iac(DONT, ECHO)
@@ -248,7 +248,7 @@ async def test_slc_simul(event_loop, bind_host, unused_tcp_port):
 
     await telnetlib3.create_server(
         protocol_factory=SimulSLCServer, host=bind_host, shell=shell,
-        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.05,
+        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.15,
         encoding=False)
 
     client_reader, client_writer = await asyncio.open_connection(
@@ -279,7 +279,7 @@ async def test_unhandled_do_sends_wont(event_loop, bind_host, unused_tcp_port):
     await telnetlib3.create_server(
         protocol_factory=telnetlib3.BaseServer,
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        connect_maxwait=0.05, encoding=False)
+        connect_maxwait=0.15, encoding=False)
 
     client_reader, client_writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -304,7 +304,7 @@ async def test_writelines_bytes(event_loop, bind_host, unused_tcp_port):
 
     await telnetlib3.create_server(
         protocol_factory=telnetlib3.BaseServer, host=bind_host, shell=shell,
-        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.05,
+        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.15,
         encoding=False)
 
     client_reader, client_writer = await asyncio.open_connection(
@@ -329,7 +329,7 @@ async def test_writelines_unicode(event_loop, bind_host, unused_tcp_port):
 
     await telnetlib3.create_server(
         protocol_factory=telnetlib3.BaseServer, host=bind_host, shell=shell,
-        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.05,
+        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.15,
         encoding='ascii')
 
     client_reader, client_writer = await asyncio.open_connection(
@@ -365,7 +365,7 @@ async def test_send_ga(event_loop, bind_host, unused_tcp_port):
 
     await telnetlib3.create_server(
         protocol_factory=telnetlib3.BaseServer, host=bind_host, shell=shell,
-        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.05)
+        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.15)
 
     client_reader, client_writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -394,7 +394,7 @@ async def test_not_send_ga(event_loop, bind_host, unused_tcp_port):
 
     await telnetlib3.create_server(
         protocol_factory=telnetlib3.BaseServer, host=bind_host, shell=shell,
-        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.05)
+        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.15)
 
     client_reader, client_writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -419,7 +419,7 @@ async def test_not_send_eor(event_loop, bind_host, unused_tcp_port):
 
     await telnetlib3.create_server(
         protocol_factory=telnetlib3.BaseServer, host=bind_host, shell=shell,
-        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.05)
+        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.15)
 
     client_reader, client_writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)
@@ -451,7 +451,7 @@ async def test_send_eor(event_loop, bind_host, unused_tcp_port):
 
     await telnetlib3.create_server(
         protocol_factory=telnetlib3.BaseServer, host=bind_host, shell=shell,
-        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.05)
+        port=unused_tcp_port, loop=event_loop, connect_maxwait=0.15)
 
     client_reader, client_writer = await asyncio.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop)

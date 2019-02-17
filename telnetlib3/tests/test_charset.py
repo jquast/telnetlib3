@@ -111,7 +111,7 @@ async def test_telnet_client_no_charset(event_loop, bind_host, unused_tcp_port):
     reader, writer = await telnetlib3.open_connection(
         client_factory=ClientTestCharset,
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        encoding='latin1', connect_minwait=0.05)
+        encoding='latin1', connect_minwait=0.15)
 
     # charset remains latin1
     val = await asyncio.wait_for(_waiter, 0.5)

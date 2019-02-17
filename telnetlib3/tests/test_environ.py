@@ -80,7 +80,7 @@ async def test_telnet_client_send_environ(event_loop, bind_host,
     reader, writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
         cols=given_cols, rows=given_rows, encoding=given_encoding,
-        term=given_term, connect_minwait=0.05)
+        term=given_term, connect_minwait=0.15)
 
     mapping = await asyncio.wait_for(_waiter, 0.5)
     assert mapping == {
@@ -119,7 +119,7 @@ async def test_telnet_client_send_var_uservar_environ(event_loop, bind_host,
     reader, writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
         cols=given_cols, rows=given_rows, encoding=given_encoding,
-        term=given_term, connect_minwait=0.05, connect_maxwait=0.05)
+        term=given_term, connect_minwait=0.15, connect_maxwait=0.05)
 
     mapping = await asyncio.wait_for(_waiter, 0.5)
     # although nothing was demanded by server,
@@ -159,7 +159,7 @@ async def test_telnet_server_reject_environ(event_loop, bind_host,
     reader, writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
         cols=given_cols, rows=given_rows, encoding=given_encoding,
-        term=given_term, connect_minwait=0.05, connect_maxwait=0.05)
+        term=given_term, connect_minwait=0.15, connect_maxwait=0.05)
 
     # this causes the client to expect the server to have demanded environment
     # values, since it did, of course demand DO NEW_ENVIRON! However, our API

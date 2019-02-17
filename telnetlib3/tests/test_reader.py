@@ -63,11 +63,11 @@ async def test_telnet_reader_using_readline_unicode(
 
     await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        connect_maxwait=0.05, shell=shell)
+        connect_maxwait=0.15, shell=shell)
 
     client_reader, client_writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        connect_minwait=0.05)
+        connect_minwait=0.15)
 
     # exercise,
     for given, expected in sorted(given_expected.items()):
@@ -108,11 +108,11 @@ async def test_telnet_reader_using_readline_bytes(
 
     await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        connect_maxwait=0.05, shell=shell, encoding=False)
+        connect_maxwait=0.15, shell=shell, encoding=False)
 
     client_reader, client_writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        connect_minwait=0.05, encoding=False)
+        connect_minwait=0.15, encoding=False)
 
     # exercise,
     for given, expected in sorted(given_expected.items()):
@@ -144,11 +144,11 @@ async def test_telnet_reader_read_exactly_unicode(
 
     await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        connect_maxwait=0.05, shell=shell)
+        connect_maxwait=0.15, shell=shell)
 
     client_reader, client_writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        connect_minwait=0.05)
+        connect_minwait=0.15)
 
     # exercise, readexactly # bytes of given
     result = await asyncio.wait_for(
@@ -182,11 +182,11 @@ async def test_telnet_reader_read_exactly_bytes(
 
     await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        connect_maxwait=0.05, shell=shell, encoding=False)
+        connect_maxwait=0.15, shell=shell, encoding=False)
 
     client_reader, client_writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        connect_minwait=0.05, encoding=False)
+        connect_minwait=0.15, encoding=False)
 
     # exercise, readexactly # bytes of given
     result = await asyncio.wait_for(
@@ -237,11 +237,11 @@ async def test_telnet_reader_read_beyond_limit_unicode(
 
     await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        connect_maxwait=0.05, shell=shell, limit=limit)
+        connect_maxwait=0.15, shell=shell, limit=limit)
 
     client_reader, client_writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        connect_minwait=0.05, limit=limit)
+        connect_minwait=0.15, limit=limit)
 
     assert client_reader._limit == limit
     value = await asyncio.wait_for(client_reader.read(), 0.5)
@@ -265,11 +265,11 @@ async def test_telnet_reader_read_beyond_limit_bytes(
 
     await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        connect_maxwait=0.05, shell=shell, encoding=False, limit=limit)
+        connect_maxwait=0.15, shell=shell, encoding=False, limit=limit)
 
     client_reader, client_writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        connect_minwait=0.05, encoding=False, limit=limit)
+        connect_minwait=0.15, encoding=False, limit=limit)
 
     assert client_reader._limit == limit
     value = await asyncio.wait_for(client_reader.read(), 0.5)
