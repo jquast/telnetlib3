@@ -160,13 +160,13 @@ async def test_telnet_client_and_server_encoding_bidirectional(
 
     await telnetlib3.create_server(
         host=bind_host, port=unused_tcp_port, _waiter_connected=_waiter,
-        loop=event_loop, encoding='latin1', connect_maxwait=0.05)
+        loop=event_loop, encoding='latin1', connect_maxwait=1.0)
 
     reader, writer = await telnetlib3.open_connection(
         host=bind_host, port=unused_tcp_port, loop=event_loop,
-        encoding='cp437', connect_minwait=0.05)
+        encoding='cp437', connect_minwait=1.0)
 
-    srv_instance = await asyncio.wait_for(_waiter, 0.5)
+    srv_instance = await asyncio.wait_for(_waiter, 1.5)
 
     assert srv_instance.encoding(incoming=True) == 'cp437'
     assert srv_instance.encoding(outgoing=True) == 'cp437'

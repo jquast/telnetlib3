@@ -100,11 +100,11 @@ async def test_server_demands_remote_linemode_client_demands_local(
     reply_stage1 = IAC + WILL + LINEMODE
     reply_stage2 = IAC + SB + LINEMODE + LMODE_MODE + reply_mode + IAC + SE
 
-    result = await client_reader.read(len(expect_stage1))
+    result = await client_reader.readexactly(len(expect_stage1))
     assert result == expect_stage1
     client_writer.write(reply_stage1)
 
-    result = await client_reader.read(len(expect_stage2))
+    result = await client_reader.readexactly(len(expect_stage2))
     assert result == expect_stage2
     client_writer.write(reply_stage2)
 
