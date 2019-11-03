@@ -96,10 +96,9 @@ def test_sb_interrupted():
     assert b''.join(writer._sb_buffer) == sb_expected
 
     writer.feed_byte(IAC)
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(ValueError, match ='SB unhandled'):
         # [SB + b's'] unsolicited,
         writer.feed_byte(SE)
-    assert ('SB unhandled') in str(exc_info)
 
     # the 'IAC TM' interrupts and ends the SB buffer
     given = IAC + SB + b'sbdata-' + IAC + TM + b'-sbdata'
@@ -111,9 +110,8 @@ def test_sb_interrupted():
     # legal for this state.
     writer.feed_byte(b'x')
     writer.feed_byte(IAC)
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(ValueError, match='not a legal 2-byte cmd'):
         writer.feed_byte(SE)
-    assert 'not a legal 2-byte cmd' in str(exc_info)
 
 
 @pytest.mark.asyncio
