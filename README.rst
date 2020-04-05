@@ -14,10 +14,6 @@
     :alt: Downloads
     :target: https://pypi.python.org/pypi/telnetlib3
 
-.. image:: https://badges.gitter.im/Join%20Chat.svg
-    :alt: Join Chat
-    :target: https://gitter.im/jquast/telnetlib3
-
 
 Introduction
 ============
