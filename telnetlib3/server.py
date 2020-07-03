@@ -245,10 +245,12 @@ class TelnetServer(server_base.BaseServer):
 
         The default return value is::
 
-            ['LANG', 'TERM', 'COLUMNS', 'LINES', 'DISPLAY', VAR, USERVAR]
+            ['LANG', 'TERM', 'COLUMNS', 'LINES', 'DISPLAY', 'COLORTERM',
+             VAR, USERVAR, 'COLORTERM']
         """
         from .telopt import VAR, USERVAR
-        return ['LANG', 'TERM', 'COLUMNS', 'LINES', 'DISPLAY', VAR, USERVAR]
+        return ['LANG', 'TERM', 'COLUMNS', 'LINES', 'DISPLAY', 'COLORTERM',
+                VAR, USERVAR]
 
     def on_environ(self, mapping):
         """Callback receives NEW_ENVIRON response, :rfc:`1572`."""

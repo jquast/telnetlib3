@@ -30,6 +30,9 @@ completion of their negotiation, especially for things like LINEMODE that might
 have many state changes, this allows asyncio to solve the complex "awaiting
 many future states in parallel" event loop easily
 
+-- just accept a future, and on each state change, call an internal function
+that checks for equality for the parameters given, and when true, set .done()
+
 BaseTelnetProtocol
 ------------------
 

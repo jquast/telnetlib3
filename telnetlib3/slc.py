@@ -308,7 +308,7 @@ class Forwardmask(object):
             len(result) and result[-1].endswith(row.split()[-1]))
 
         for mask, byte in enumerate(self.value):
-            if byte is 0:
+            if byte == 0:
                 if continuing() and not is_last(mask):
                     continue
                 row = '[%2d] %s' % (mask, eightbits(0),)

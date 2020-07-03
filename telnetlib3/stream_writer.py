@@ -1707,7 +1707,7 @@ class TelnetWriter(asyncio.StreamWriter):
         """Fire callback for IAC-SB-NAWS-<cols_rows[4]>-SE (:rfc:`1073`)."""
         cmd = buf.popleft()
         assert cmd == NAWS, name_command(cmd)
-        assert len(buf) is 4, (
+        assert len(buf) == 4, (
             'bad NAWS length {}: {!r}'.format(len(buf), buf)
         )
         assert self.remote_option.enabled(NAWS), (
@@ -1981,7 +1981,7 @@ class TelnetWriter(asyncio.StreamWriter):
         send_count = 0
         slctab = slctab or self.slctab
         for func in range(slc.NSLC + 1):
-            if func is 0 and self.client:
+            if func == 0 and self.client:
                 # only the server may send an octet with the first
                 # byte (func) set as 0 (SLC_NOSUPPORT).
                 continue

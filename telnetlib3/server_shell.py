@@ -13,7 +13,7 @@ def telnet_server_shell(reader, writer):
     """
     A default telnet shell, appropriate for use with telnetlib3.create_server.
 
-    This shell provides very simple REPL, allowing introspection and state
+    This shell provides a very simple REPL, allowing introspection and state
     toggling of the connected client session.
 
     This function is a :func:`~asyncio.coroutine`.
