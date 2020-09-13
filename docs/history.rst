@@ -1,5 +1,12 @@
 History
 =======
+1.0.3
+  * bugfix circular reference between transport and protocol, :ghissue:`43` by
+    :ghuser:`fried`.
+
+1.0.2
+  * add --speed argument to telnet client :ghissue:`35` by :ghuser:`hughpyle`.
+
 1.0.1
   * add python3.7 support, drop python 3.4 and earlier, :ghissue:`33` by
     :ghuser:`AndrewNelis`.
