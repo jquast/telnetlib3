@@ -1,6 +1,7 @@
 """Test the server's shell(reader, writer) callback."""
 # std imports
 import asyncio
+import weakref
 
 # local imports
 import telnetlib3
@@ -22,6 +23,7 @@ async def test_telnet_server_shell_as_coroutine(event_loop, bind_host,
     from telnetlib3.telopt import IAC, DO, WONT, TTYPE
     # given,
     _waiter = asyncio.Future()
+    _saved = weakref.WeakSet()
     send_input = 'Alpha'
     expect_output = 'Beta'
     expect_hello = IAC + DO + TTYPE
@@ -33,6 +35,10 @@ async def test_telnet_server_shell_as_coroutine(event_loop, bind_host,
         inp = yield from reader.readexactly(len(send_input))
         assert inp == send_input
         writer.write(expect_output)
+        _saved.add(writer)
+        _saved.add(writer._protocol)
+        yield from writer.drain()
+        writer.close()
 
     # exercise,
     await telnetlib3.create_server(
@@ -61,6 +67,9 @@ async def test_telnet_server_shell_as_coroutine(event_loop, bind_host,
 
     # verify,
     assert server_output.decode('ascii') == expect_output
+    
+    # no leaks
+    assert len(_saved) == 0
 
 
 @pytest.mark.asyncio

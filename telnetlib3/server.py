@@ -14,6 +14,7 @@ import argparse
 import asyncio
 import logging
 import signal
+from weakref import proxy
 
 # local
 from . import server_base
@@ -111,7 +112,7 @@ class TelnetServer(server_base.BaseServer):
         encoding = self.encoding(outgoing=True, incoming=True)
         if not self.waiter_encoding.done() and result:
             self.log.debug('encoding complete: {0!r}'.format(encoding))
-            self.waiter_encoding.set_result(True)
+            self.waiter_encoding.set_result(proxy(self))
 
         elif (not self.waiter_encoding.done() and
               self.writer.remote_option.get(TTYPE) is False):
@@ -120,13 +121,13 @@ class TelnetServer(server_base.BaseServer):
             # the distant end would not support it, declaring encoding failed.
             self.log.debug('encoding failed after {0:1.2f}s: {1}'
                            .format(self.duration, encoding))
-            self.waiter_encoding.set_result(True)
+            self.waiter_encoding.set_result(proxy(self))
             return parent
 
         elif not self.waiter_encoding.done() and final:
             self.log.debug('encoding failed after {0:1.2f}s: {1}'
                            .format(self.duration, encoding))
-            self.waiter_encoding.set_result(True)
+            self.waiter_encoding.set_result(proxy(self))
             return parent
 
         return parent and result

@@ -4,6 +4,7 @@ import asyncio
 import logging
 import datetime
 import sys
+from weakref import proxy
 
 from .stream_writer import (TelnetWriter, TelnetWriterUnicode)
 from .stream_reader import (TelnetReader, TelnetReaderUnicode)
@@ -85,7 +86,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._transport.close()
         self._waiter_connected.cancel()
         if self.shell is None:
-            self._waiter_closed.set_result(True)
+            self._waiter_closed.set_result(proxy(self))
 
         # break circular refrences.
         self._transport = None
@@ -138,7 +139,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             if asyncio.iscoroutine(coro):
                 fut = self._loop.create_task(coro)
                 fut.add_done_callback(
-                    lambda fut_obj: self._waiter_closed.set_result(True))
+                    lambda fut_obj: self._waiter_closed.set_result(proxy(self)))
 
     def data_received(self, data):
         """Process bytes received by transport."""
@@ -281,11 +282,11 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         if self.check_negotiation(final=final):
             self.log.debug('negotiation complete after {:1.2f}s.'
                            .format(self.duration))
-            self._waiter_connected.set_result(True)
+            self._waiter_connected.set_result(proxy(self))
         elif final:
             self.log.debug('negotiation failed after {:1.2f}s.'
                            .format(self.duration))
-            self._waiter_connected.set_result(True)
+            self._waiter_connected.set_result(proxy(self))
         else:
             # keep re-queuing until complete
             self._check_later = self._loop.call_later(
