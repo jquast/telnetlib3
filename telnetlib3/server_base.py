@@ -85,7 +85,11 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._transport.close()
         self._waiter_connected.cancel()
         if self.shell is None:
-            self._waiter_closed.set_result(self)
+            self._waiter_closed.set_result(True)
+
+        # break circular refrences.
+        self._transport = None
+        self.reader.fn_encoding = None
 
     def connection_made(self, transport):
         """
@@ -134,7 +138,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             if asyncio.iscoroutine(coro):
                 fut = self._loop.create_task(coro)
                 fut.add_done_callback(
-                    lambda fut_obj: self._waiter_closed.set_result(self))
+                    lambda fut_obj: self._waiter_closed.set_result(True))
 
     def data_received(self, data):
         """Process bytes received by transport."""
@@ -277,11 +281,11 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         if self.check_negotiation(final=final):
             self.log.debug('negotiation complete after {:1.2f}s.'
                            .format(self.duration))
-            self._waiter_connected.set_result(self)
+            self._waiter_connected.set_result(True)
         elif final:
             self.log.debug('negotiation failed after {:1.2f}s.'
                            .format(self.duration))
-            self._waiter_connected.set_result(self)
+            self._waiter_connected.set_result(True)
         else:
             # keep re-queuing until complete
             self._check_later = self._loop.call_later(

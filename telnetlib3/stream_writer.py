@@ -182,6 +182,17 @@ class TelnetWriter(asyncio.StreamWriter):
 
     # Base protocol methods
 
+    def close(self):
+        super().close()
+        # break circular refs
+        self._ext_callback.clear()
+        self._ext_send_callback.clear()
+        self._slc_callback.clear()
+        self._iac_callback.clear()
+        self.fn_encoding = None
+        self._protocol = None
+        self._transport = None
+
     def __repr__(self):
         """Description of stream encoding state."""
         info = ['TelnetWriter']
