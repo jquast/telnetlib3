@@ -146,7 +146,7 @@ def setup(app):
     
     :param app: Sphinx application context.
     """
-    app.info('Initializing GitHub plugin')
+    #app.info('Initializing GitHub plugin')
     app.add_role('ghissue', ghissue_role)
     app.add_role('ghpull', ghissue_role)
     app.add_role('ghuser', ghuser_role)
