@@ -210,7 +210,7 @@ async def test_telnet_server_given_shell(
             b'\r\n        SLC_XON: (^Q, variable)'
             b'\r\n       SLC_SUSP: (^Z, variable|flushin)'
             b'\r\n       SLC_XOFF: (^S, variable)'
-            b'\r\n      SLC_ABORT: (^\, variable|flushin|flushout)'
+            b'\r\n      SLC_ABORT: (^\\, variable|flushin|flushout)'
             b'\r\n      SLC_LNEXT: (^V, variable)'
             b'\r\nUnset by client: SLC_BRK, SLC_EOR, SLC_SYNCH'
             b'\r\nNot supported by server: SLC_EBOL, SLC_ECR, SLC_EEOL, '
