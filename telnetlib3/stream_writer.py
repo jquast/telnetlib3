@@ -22,7 +22,7 @@ __all__ = ('TelnetWriter', 'TelnetWriterUnicode', )
 
 
 class TelnetWriter(asyncio.StreamWriter):
-    #: Total bytes sent to :meth:`feed_byte`
+    #: Total bytes sent to :meth:`~.feed_byte`
     byte_count = 0
 
     #: Whether flow control is enabled.
@@ -33,15 +33,15 @@ class TelnetWriter(asyncio.StreamWriter):
     #: False, any keypress from client re-enables transmission.
     xon_any = False
 
-    #: Whether the last byte received by :meth:`feed_byte` is the beginning
+    #: Whether the last byte received by :meth:`~.feed_byte` is the beginning
     #: of an IAC command.
     iac_received = None
 
-    #: Whether the last byte received by :meth:`feed_byte` begins an IAC
+    #: Whether the last byte received by :meth:`~.feed_byte` begins an IAC
     #: command sequence.
     cmd_received = None
 
-    #: Whether the last byte received by :meth:`feed_byte` is a matching
+    #: Whether the last byte received by :meth:`~.feed_byte` is a matching
     #: special line character value, if negotiated.
     slc_received = None
 
@@ -66,19 +66,18 @@ class TelnetWriter(asyncio.StreamWriter):
 
         Almost all negotiation actions are performed through the writer
         interface, as any action requires writing bytes to the underling
-        stream.  This class implements :meth:`feed_byte`, which acts as a
+        stream.  This class implements :meth:`~.feed_byte`, which acts as a
         Telnet *Is-A-Command* (IAC) interpreter.
 
         The significance of the last byte passed to this method is tested
-        by instance attribute :attr:`is_oob`, following the call to
-        :meth:`feed_byte` to determine whether the given byte is in or out
+        by instance attribute :attr:`~.is_oob`, following the call to
+        :meth:`~.feed_byte` to determine whether the given byte is in or out
         of band.
 
         A minimal Telnet Protocol method,
         :meth:`asyncio.Protocol.data_received`, should forward each byte to
-        ``feed_byte``, which returns True to indicate the given byte should be
-        forwarded to a Protocol reader method
-        :meth:`asyncio.StreamReader.feed_data`.
+        :meth:`~.feed_byte`, which returns True to indicate the given byte should be
+        forwarded to a Protocol reader method.
 
         :param bool client: Whether the IAC interpreter should react from
             the client point of view.
@@ -86,7 +85,7 @@ class TelnetWriter(asyncio.StreamWriter):
             the server point of view.
         :param logging.Logger log: target logger, if None is given, one is
             created using the namespace ``'telnetlib3.stream_writer'``.
-        :param asyncio.base_events.BaseEventLoop loop: set the event loop to
+        :param asyncio.AbstractEventLoop loop: set the event loop to
             use.  The return value of :func:`asyncio.get_event_loop` is used
             when unset.
         """
@@ -129,11 +128,6 @@ class TelnetWriter(asyncio.StreamWriter):
         #: Represents LINEMODE MODE negotiated or requested by client.
         #: attribute ``ack`` returns True if it is in use.
         self._linemode = slc.Linemode()
-
-#        #: Bool implementing Flow Control, False when XOFF received,
-#        #: pending data buffered into self._write_buffer
-#        self.writing = True
-#        self._write_buffer = collections.deque()
 
         # Set default callback handlers to local methods.  A base protocol
         # wishing not to wire any callbacks at all may simply allow our stream
@@ -965,7 +959,7 @@ class TelnetWriter(asyncio.StreamWriter):
         :param bytes slc_byte: any of SLC_SYNCH, SLC_BRK, SLC_IP, SLC_AO,
             SLC_AYT, SLC_EOR, SLC_ABORT, SLC_EOF, SLC_SUSP, SLC_EC, SLC_EL,
             SLC_EW, SLC_RP, SLC_XON, SLC_XOFF ...
-        :param callable func: These callbacks receive a single argument: the
+        :param Callable func: These callbacks receive a single argument: the
             SLC function byte that fired it. Some SLC and IAC functions are
             intermixed; which signaling mechanism used by client can be tested
             by evaluating this argument.
@@ -1008,7 +1002,7 @@ class TelnetWriter(asyncio.StreamWriter):
         """
         Register callback for inquires of sub-negotiation of ``cmd``.
 
-        :param callable func: A callable function for the given ``cmd`` byte.
+        :param Callable func: A callable function for the given ``cmd`` byte.
             Note that the return type must match those documented.
         :param bytes cmd: These callbacks must return any number of arguments,
             for each registered ``cmd`` byte, respectively:
@@ -2215,9 +2209,9 @@ class TelnetWriterUnicode(TelnetWriter):
         """
         Encode ``string`` using protocol-preferred encoding.
 
-        :param str errors: same as meaning in :class:`codecs.Codec`.
-            When None, value of :attr:`errors_encoding` is used.
-        :param str errors: same as meaning in :class:`codecs.Codec`, when
+        :param str errors: same as meaning in :meth:`codecs.Codec.encode`.  When None,
+            value of ``encoding_errors`` given to class initializer is used.
+        :param str errors: same as meaning in :meth:`codecs.Codec.encode`, when
             ``None`` (default), value of class initializer keyword argument,
             ``encoding_errors``.
 
@@ -2237,7 +2231,7 @@ class TelnetWriterUnicode(TelnetWriter):
             protocol's preferred encoding.  When the protocol ``encoding``
             keyword is explicitly set to ``False``, the given string should be
             only raw ``b'bytes'``.
-        :param str errors: same as meaning in :class:`codecs.Codec`, when
+        :param str errors: same as meaning in :meth:`codecs.Codec.encode`, when
             ``None`` (default), value of class initializer keyword argument,
             ``encoding_errors``.
         :rtype: None
@@ -2260,7 +2254,7 @@ class TelnetWriterUnicode(TelnetWriter):
         Conditionally write ``string`` to transport when "remote echo" enabled.
 
         :param str string: string received as input, conditionally written.
-        :param str errors: same as meaning in :class:`codecs.Codec`.
+        :param str errors: same as meaning in :meth:`codecs.Codec.encode`.
 
         This method may only be called from the server perspective.  The
         default implementation depends on telnet negotiation willingness for

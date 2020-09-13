@@ -3,8 +3,8 @@ import traceback
 import asyncio
 import logging
 import datetime
+import weakref
 import sys
-from weakref import proxy
 
 from .stream_writer import (TelnetWriter, TelnetWriterUnicode)
 from .stream_reader import (TelnetReader, TelnetReaderUnicode)
@@ -38,13 +38,15 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self.force_binary = force_binary
         self._extra = dict()
 
-        #: test
+        #: a future used for testing
         self._waiter_connected = _waiter_connected or asyncio.Future()
+        #: a future used for testing
         self._waiter_closed = _waiter_closed or asyncio.Future()
         self._tasks = [self._waiter_connected]
         self.shell = shell
         self.reader = None
         self.writer = None
+        #: maximum duration for :meth:`check_negotiation`.
         self.connect_maxwait = connect_maxwait
         self._limit = limit
 
@@ -86,9 +88,9 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._transport.close()
         self._waiter_connected.cancel()
         if self.shell is None:
-            self._waiter_closed.set_result(proxy(self))
+            self._waiter_closed.set_result(weakref.proxy(self))
 
-        # break circular refrences.
+        # break circular references.
         self._transport = None
         self.reader.fn_encoding = None
 
@@ -96,8 +98,8 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         """
         Called when a connection is made.
 
-        Sets attributes :attr:`_transport`, :attr:`_when_connected`,
-        :attr:`_last_received`, :attr:`reader` and :attr:`writer`.
+        Sets attributes ``_transport``, ``_when_connected``, ``_last_received``,
+        ``reader`` and ``writer``.
 
         Ensure ``super().connection_made(transport)`` is called when derived.
         """
@@ -139,7 +141,8 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             if asyncio.iscoroutine(coro):
                 fut = self._loop.create_task(coro)
                 fut.add_done_callback(
-                    lambda fut_obj: self._waiter_closed.set_result(proxy(self)))
+                    lambda fut_obj: self._waiter_closed.set_result(
+                        weakref.proxy(self)))
 
     def data_received(self, data):
         """Process bytes received by transport."""
@@ -220,8 +223,8 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         """
         Encoding that should be used for the direction indicated.
 
-        The base implementation **always** returns :attr:`default_encoding`
-        or, when unspecified, ``US-ASCII``.
+        The base implementation **always** returns the encoding given to class
+        initializer, or, when unset (None), ``US-ASCII``.
         """
         # pylint: disable=unused-argument
         return self.default_encoding or 'US-ASCII'
@@ -254,9 +257,9 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         :returns: Whether negotiation is over (server end is satisfied).
         :rtype: bool
 
-        Method is called on each new command byte processed until negotiation
-        is considered final, or after :attr:`connect_maxwait` has elapsed,
-        setting :attr:`~._waiter_connected` to value ``self`` when complete.
+        Method is called on each new command byte processed until negotiation is
+        considered final, or after ``connect_maxwait`` has elapsed, setting
+        attribute ``_waiter_connected`` to value ``self`` when complete.
 
         Ensure ``super().check_negotiation()`` is called and conditionally
         combined when derived.
@@ -282,11 +285,11 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         if self.check_negotiation(final=final):
             self.log.debug('negotiation complete after {:1.2f}s.'
                            .format(self.duration))
-            self._waiter_connected.set_result(proxy(self))
+            self._waiter_connected.set_result(weakref.proxy(self))
         elif final:
             self.log.debug('negotiation failed after {:1.2f}s.'
                            .format(self.duration))
-            self._waiter_connected.set_result(proxy(self))
+            self._waiter_connected.set_result(weakref.proxy(self))
         else:
             # keep re-queuing until complete
             self._check_later = self._loop.call_later(

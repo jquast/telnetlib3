@@ -1,7 +1,7 @@
 """
-The :func:`main` function here is wired to the command line tool by name
-telnetlib3-server.  If this server's PID receives the SIGTERM signal,
-it attempts to shutdown gracefully.
+The ``main`` function here is wired to the command line tool by name
+telnetlib3-server.  If this server's PID receives the SIGTERM signal, it
+attempts to shutdown gracefully.
 
 The :class:`TelnetServer` class negotiates a character-at-a-time (WILL-SGA,
 WILL-ECHO) session with support for negotiation about window size, environment
@@ -148,13 +148,6 @@ class TelnetServer(server_base.BaseServer):
             ``BINARY`` :rfc:`856` has been negotiated for the direction
             indicated or :attr`force_binary` is set ``True``.
         :rtype: str
-
-        Value resolution order (first-matching):
-
-        - value set by :meth:`set_encoding`.
-        - value of :meth:`get_extra_info` using key argument, ``LANG``.
-        - value of :attr:`default_encoding`.
-        - ``US-ASCII`` when binary transmission not allowed.
         """
         if not (outgoing or incoming):
             raise TypeError("encoding arguments 'outgoing' and 'incoming' "
@@ -187,10 +180,9 @@ class TelnetServer(server_base.BaseServer):
         Restart or unset timeout for client.
 
         :param int duration: When specified as a positive integer,
-            schedules Future :attr:`self.waiter_timeout` with attached
-            instance callback :meth:`timeout`.  When ``-1``, the value
-            of :meth:`get_extra_info` for keyword ``timeout`` is used.
-            When non-True, :attr:`waiter_timeout` is cancelled.
+            schedules Future for callback of :meth:`on_timeout`.  When ``-1``,
+            the value of ``self.get_extra_info('timeout')`` is used.  When
+            non-True, it is canceled.
         """
         if duration == -1:
             duration = self.get_extra_info('timeout')
@@ -232,7 +224,7 @@ class TelnetServer(server_base.BaseServer):
         """
         Definition for NEW_ENVIRON request of client, :rfc:`1572`.
 
-        This method is a callback from :meth:`TelnetWriter.request_environ`,
+        This method is a callback from :meth:`~.TelnetWriter.request_environ`,
         first entered on receipt of (WILL, NEW_ENVIRON) by server.  The return
         value *defines the request made to the client* for environment values.
 
@@ -277,7 +269,7 @@ class TelnetServer(server_base.BaseServer):
         """
         Definition for CHARSET request by client, :rfc:`2066`.
 
-        This method is a callback from :meth:`TelnetWriter.request_charset`,
+        This method is a callback from :meth:`~.TelnetWriter.request_charset`,
         first entered on receipt of (WILL, CHARSET) by server.  The return
         value *defines the request made to the client* for encodings.
 
@@ -388,10 +380,10 @@ def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwds):
     :param server_base.BaseServer protocol_factory: An alternate protocol
         factory for the server, when unspecified, :class:`TelnetServer` is
         used.
-    :param asyncio.coroutine shell: A coroutine that is called after
+    :param Callable shell: A :func:`asyncio.coroutine` that is called after
         negotiation completes, receiving arguments ``(reader, writer)``.
-        The reader is a :class:`TelnetStreamReader` instance, the writer is
-        a :class:`TelnetStreamWriter` instance.
+        The reader is a :class:`~.TelnetReader` instance, the writer is
+        a :class:`~.TelnetWriter` instance.
     :param logging.Logger log: target logger, if None is given, one is created
         using the namespace ``'telnetlib3.server'``.
     :param str encoding: The default assumed encoding, or ``False`` to disable
@@ -402,8 +394,8 @@ def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwds):
         The server's attached ``reader, writer`` streams accept and return
         unicode, unless this value explicitly set ``False``.  In that case, the
         attached streams interfaces are bytes-only.
-    :param str encoding_errors: Same meaning as :class:`codecs.Codec`.  Default
-        value is ``strict``.
+    :param str encoding_errors: Same meaning as :meth:`codecs.Codec.encode`.
+        Default value is ``strict``.
     :param bool force_binary: When ``True``, the encoding specified is
         used for both directions even when BINARY mode, :rfc:`856`, is not
         negotiated for the direction specified.  This parameter has no effect
@@ -426,8 +418,8 @@ def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwds):
     :param int limit: The buffer limit for the reader stream.
 
     :return asyncio.Server: The return value is the same as
-        :func:`loop.create_server`, An object which can be used to stop the
-        service.
+        :meth:`asyncio.loop.create_server`, An object which can be used
+        to stop the service.
 
     This function is a :func:`~asyncio.coroutine`.
     """

@@ -175,14 +175,14 @@ def generate_slctab(tabset=BSD_SLC_TAB):
 
 
 def generate_forwardmask(binary_mode, tabset, ack=False):
-    """ Generate a 32-byte (``binary_mode`` is True) or 16-byte (False)
-        Forwardmask class instance appropriate for the specified
-        ``slctab``.
+    """
+    Generate a :class:`~.Forwardmask` instance.
 
-        Forwardmask is formed by a bitmask of all 256 possible 8-bit
-        keyboard ascii input, or, when not 'outbinary', a 16-byte
-        7-bit representation of each value, and whether or not they
-        should be "forwarded" by the client on the transport stream
+    Generate a 32-byte (``binary_mode`` is True) or 16-byte (False) Forwardmask
+    instance appropriate for the specified ``slctab``.  A Forwardmask is formed
+    by a bitmask of all 256 possible 8-bit keyboard ascii input, or, when not
+    'outbinary', a 16-byte 7-bit representation of each value, and whether or
+    not they should be "forwarded" by the client on the transport stream
     """
     num_bytes, msb = (32, 256) if binary_mode else (16, 127)
     mask32 = [theNULL] * num_bytes
@@ -284,12 +284,14 @@ class Linemode(object):
 
 
 class Forwardmask(object):
+    """ """
+
     def __init__(self, value, ack=False):
         """
-        ForwardMask object using the bytemask value received by server.
+        Forwardmask object using the bytemask value received by server.
 
-        bytemask ``value`` received by server after ``IAC SB LINEMODE DO
-        FORWARDMASK``. It must be a bytearray of length 16 or 32.
+        :param bytes value: bytemask ``value`` received by server after ``IAC SB
+            LINEMODE DO FORWARDMASK``. It must be a bytearray of length 16 or 32.
         """
         assert isinstance(value, (bytes, bytearray)), value
         assert len(value) in (16, 32), len(value)

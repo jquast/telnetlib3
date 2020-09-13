@@ -15,7 +15,7 @@ import os
 from . import accessories
 from . import client_base
 
-__all__ = ('TelnetClient', 'open_connection')
+__all__ = ('TelnetClient', 'TelnetTerminalClient', 'open_connection')
 
 
 class TelnetClient(client_base.BaseClient):
@@ -95,7 +95,7 @@ class TelnetClient(client_base.BaseClient):
         :returns: dictionary of environment values requested, or an
             empty string for keys not available. A return value must be
             given for each key requested.
-        :rtype: dict[(key, value), ..]
+        :rtype: dict
         """
         env = {
             'LANG': self._extra['lang'],
@@ -118,11 +118,11 @@ class TelnetClient(client_base.BaseClient):
 
         The default implementation selects any matching encoding that
         python is capable of using, preferring any that matches
-        :py:attr:`self.encoding` if matched in the offered list.
+        :py:attr:`encoding` if matched in the offered list.
 
         :param list offered: list of CHARSET options offered by server.
         :returns: character encoding agreed to be used.
-        :rtype: str or None.
+        :rtype: Union[str, None]
         """
         selected = ''
         for offer in offered:
@@ -166,13 +166,6 @@ class TelnetClient(client_base.BaseClient):
             ``BINARY`` :rfc:`856` has been negotiated for the direction
             indicated or :attr`force_binary` is set ``True``.
         :rtype: str
-
-        Value resolution order (first-matching):
-
-        - value set by :meth:`set_encoding`.
-        - value of :meth:`get_extra_info` using key argument, ``lang``.
-        - value of :attr:`default_encoding`.
-        - ``US-ASCII`` when binary transmission not allowed.
         """
         if not (outgoing or incoming):
             raise TypeError("encoding arguments 'outgoing' and 'incoming' "
@@ -252,14 +245,14 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
     :param client_base.BaseClient client_factory: Client connection class
         factory.  When ``None``, :class:`TelnetTerminalClient` is used when
         *stdin* is attached to a terminal, :class:`TelnetClient` otherwise.
-    :param asyncio.base_events.BaseEventLoop loop: set the event loop to use.
+    :param asyncio.AbstractEventLoop loop: set the event loop to use.
         The return value of :func:`asyncio.get_event_loop` is used when unset.
     :param int family: Same meaning as
-        :meth:`asyncio.BaseEventLoop.create_connection`.
+        :meth:`asyncio.loop.create_connection`.
     :param int flags: Same meaning as
-        :meth:`asyncio.BaseEventLoop.create_connection`.
+        :meth:`asyncio.loop.create_connection`.
     :param tuple local_addr: Same meaning as
-        :meth:`asyncio.BaseEventLoop.create_connection`.
+        :meth:`asyncio.loop.create_connection`.
     :param logging.Logger log: target logger, if None is given, one is created
         using the namespace ``'telnetlib3.server'``.
     :param str encoding: The default assumed encoding, or ``False`` to disable
@@ -283,10 +276,10 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
         :rfc:`1079`.
     :param str xdisploc: String transmitted in response for request of
         XDISPLOC, :rfc:`1086` by server (X11).
-    :param asyncio.coroutine shell: A coroutine that is called after
+    :param Callable shell: A :func:`asyncio.coroutine` that is called after
         negotiation completes, receiving arguments ``(reader, writer)``.
-        The reader is a :class:`TelnetStreamReader` instance, the writer is
-        a :class:`TelnetStreamWriter` instance.
+        The reader is a :class:`~.TelnetReader` instance, the writer is
+        a :class:`~.TelnetWriter` instance.
     :param float connect_minwait: The client allows any additional telnet
         negotiations to be demanded by the server within this period of time
         before launching the shell.  Servers should assert desired negotiation
@@ -302,7 +295,7 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
     :param bool force_binary: When ``True``, the encoding specified is used for
         both directions even when failing ``BINARY`` negotiation, :rfc:`856`.
         This parameter has no effect when ``encoding=False``.
-    :param str encoding_errors: Same meaning as :class:`codecs.Codec`.
+    :param str encoding_errors: Same meaning as :meth:`codecs.Codec.encode`.
     :param float connect_minwait: XXX
     :param float connect_maxwait: If the remote end is not complaint, or
         otherwise confused by our demands, the shell continues anyway after the
@@ -310,8 +303,8 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
         option negotiation will delay the start of the shell by this amount.
 
     :param int limit: The buffer limit for reader stream.
-    :return (reader, writer): The reader is a :class:`TelnetStreamReader`
-        instance, the writer is a :class:`TelnetStreamWriter` instance.
+    :return (reader, writer): The reader is a :class:`~.TelnetReader`
+        instance, the writer is a :class:`~.TelnetWriter` instance.
 
     This function is a :func:`~asyncio.coroutine`.
     """

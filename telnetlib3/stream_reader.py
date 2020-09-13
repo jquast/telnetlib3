@@ -109,7 +109,7 @@ class TelnetReaderUnicode(TelnetReader):
         """
         A Unicode StreamReader interface for Telnet protocol.
 
-        :param callable fn_encoding: function callback, receiving boolean
+        :param Callable fn_encoding: function callback, receiving boolean
             keyword argument, ``incoming=True``, which is used by the callback
             to determine what encoding should be used to decode the value in
             the direction specified.

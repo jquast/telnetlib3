@@ -3,6 +3,7 @@ import logging
 import datetime
 import traceback
 import asyncio
+import weakref
 import sys
 
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
@@ -17,7 +18,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     _when_connected = None
     _last_received = None
     _transport = None
-    _advanced = False
     _closing = False
     _reader_factory = TelnetReader
     _reader_factory_encoding = TelnetReaderUnicode
@@ -33,15 +33,19 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         super().__init__(loop=loop)
         self.log = log or logging.getLogger('telnetlib3.client')
         self._loop = loop or asyncio.get_event_loop()
+        #: encoding for new connections
         self.default_encoding = encoding
         self._encoding_errors = encoding_errors
         self.force_binary = force_binary
         self._extra = dict()
         self.waiter_closed = waiter_closed or asyncio.Future()
+        #: a future used for testing
         self._waiter_connected = _waiter_connected or asyncio.Future()
         self._tasks = []
         self.shell = shell
+        #: minimum duration for :meth:`check_negotiation`.
         self.connect_minwait = connect_minwait
+        #: maximum duration for :meth:`check_negotiation`.
         self.connect_maxwait = connect_maxwait
         self.reader = None
         self.writer = None
@@ -85,19 +89,20 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             # we are disconnected before negotiation may be considered
             # complete.  We set waiter_closed, and any function consuming
             # the StreamReader will receive eof.
-            self._waiter_connected.set_result(self)
+            self._waiter_connected.set_result(weakref.proxy(self))
 
         if self.shell is None:
             # when a shell is defined, we allow the completion of the coroutine
             # to set the result of waiter_closed.
-            self.waiter_closed.set_result(self)
+            self.waiter_closed.set_result(weakref.proxy(self))
+
+        # break circular references.
+        self._transport = None
+        self.reader.fn_encoding = None
 
     def connection_made(self, transport):
         """
         Called when a connection is made.
-
-        Sets attributes :attr:`_transport`, :attr:`_when_connected`,
-        :attr:`_last_received`, :attr:`reader` and :attr:`writer`.
 
         Ensure ``super().connection_made(transport)`` is called when derived.
         """
@@ -150,7 +155,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 # future.
                 fut = self._loop.create_task(coro)
                 fut.add_done_callback(
-                    lambda fut_obj: self.waiter_closed.set_result(self))
+                    lambda fut_obj: self.waiter_closed.set_result(weakref.proxy(self)))
 
     def data_received(self, data):
         """Process bytes received by transport."""
@@ -220,8 +225,8 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         """
         Encoding that should be used for the direction indicated.
 
-        The base implementation **always** returns :attr:`default_encoding`
-        or, when unspecified, ``US-ASCII``.
+        The base implementation **always** returns ``encoding`` argument
+        given to class initializer or, when unset (``None``), ``US-ASCII``.
         """
         # pylint: disable=unused-argument
         return self.default_encoding or 'US-ASCII'  # pragma: no cover
@@ -235,9 +240,9 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         :returns: Whether negotiation is over (client end is satisfied).
         :rtype: bool
 
-        Method is called on each new command byte processed until negotiation
-        is considered final, or after :attr:`connect_maxwait` has elapsed,
-        setting :attr:`_waiter_connected` to value ``self`` when complete.
+        Method is called on each new command byte processed until negotiation is
+        considered final, or after :attr:`connect_maxwait` has elapsed, setting
+        the ``_waiter_connected`` attribute to value ``self`` when complete.
 
         This method returns False until :attr:`connect_minwait` has elapsed,
         ensuring the server may batch telnet negotiation demands without
@@ -269,7 +274,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         if self.check_negotiation(final=final):
             self.log.debug('negotiation complete after {:1.2f}s.'
                            .format(self.duration))
-            self._waiter_connected.set_result(self)
+            self._waiter_connected.set_result(weakref.proxy(self))
         elif final:
             self.log.debug('negotiation failed after {:1.2f}s.'
                            .format(self.duration))
@@ -278,7 +283,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                        self.writer.pending_option.items()
                        if pending]
             self.log.debug('failed-reply: {0!r}'.format(', '.join(_failed)))
-            self._waiter_connected.set_result(self)
+            self._waiter_connected.set_result(weakref.proxy(self))
         else:
             # keep re-queuing until complete.  Aggressively re-queue until
             # connect_minwait, or connect_maxwait, whichever occurs next
