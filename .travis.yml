@@ -10,6 +10,8 @@ matrix:
       env: ASYNCIODEBUG=1 TOXENV=py36 COVERAGE_ID=travis-ci
     - python: 3.7
       env: ASYNCIODEBUG=1 TOXENV=py37 COVERAGE_ID=travis-ci
+    - python: 3.8
+      env: ASYNCIODEBUG=1 TOXENV=py38 COVERAGE_ID=travis-ci
 
 install:
   - pip install tox
