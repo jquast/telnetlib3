@@ -4,6 +4,7 @@ import asyncio
 import collections
 import logging
 import struct
+import sys
 
 # local imports
 from . import slc
@@ -89,6 +90,10 @@ class TelnetWriter(asyncio.StreamWriter):
             use.  The return value of :func:`asyncio.get_event_loop` is used
             when unset.
         """
+        # fix tests in 3.8
+        if loop is None and sys.version_info[:2] >= (3, 8):
+            loop = asyncio.get_event_loop()
+
         asyncio.StreamWriter.__init__(self, transport, protocol, reader, loop)
 
         if not any((client, server)) or all((client, server)):
