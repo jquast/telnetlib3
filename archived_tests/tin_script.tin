@@ -1,3 +1,0 @@
-#session pytest localhost 6023
-#send
-#delay {3} {#send quit}
