@@ -98,7 +98,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         # break circular references.
         self._transport = None
-        self.reader.fn_encoding = None
 
     def connection_made(self, transport):
         """
