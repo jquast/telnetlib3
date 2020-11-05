@@ -35,6 +35,17 @@ class TelnetClient(client_base.BaseClient):
     def __init__(self, term='unknown', cols=80, rows=25,
                  tspeed=(38400, 38400), xdisploc='',
                  *args, **kwargs):
+        """
+        Initialize the table.
+
+        Args:
+            self: (todo): write your description
+            term: (list): write your description
+            cols: (int): write your description
+            rows: (int): write your description
+            tspeed: (todo): write your description
+            xdisploc: (todo): write your description
+        """
         super().__init__(*args, **kwargs)
         self._extra.update({
             'charset': kwargs['encoding'] or '',
@@ -214,6 +225,11 @@ class TelnetTerminalClient(TelnetClient):
 
     @staticmethod
     def _winsize():
+        """
+        Return the number of rows in the terminal.
+
+        Args:
+        """
         try:
             import fcntl
             import termios
@@ -317,6 +333,11 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
             client_factory = TelnetTerminalClient
 
     def connection_factory():
+        """
+        Return a redis client.
+
+        Args:
+        """
         return client_factory(
             log=log, encoding=encoding, encoding_errors=encoding_errors,
             force_binary=force_binary, term=term, cols=cols, rows=rows,
@@ -361,6 +382,11 @@ def main():
 
 
 def _get_argument_parser():
+    """
+    Parse argument parser.
+
+    Args:
+    """
     parser = argparse.ArgumentParser(
         description="Telnet protocol client",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -396,6 +422,11 @@ def _get_argument_parser():
 
 
 def _transform_args(args):
+    """
+    Transform arguments to args
+
+    Args:
+    """
     # TODO: Connect as exit(main(**parse_args(sys.argv)))
     return {
         'host': args.host,

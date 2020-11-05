@@ -6,10 +6,23 @@ from setuptools import setup
 
 
 def _get_here(fname):
+    """
+    Return the path to the file.
+
+    Args:
+        fname: (str): write your description
+    """
     return os.path.join(os.path.dirname(__file__), fname)
 
 
 def _get_long_description(fname, encoding='utf8'):
+    """
+    Get the long description from file.
+
+    Args:
+        fname: (str): write your description
+        encoding: (str): write your description
+    """
     return open(fname, 'r', encoding=encoding).read()
 
 

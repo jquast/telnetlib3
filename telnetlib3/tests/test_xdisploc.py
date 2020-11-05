@@ -28,6 +28,13 @@ async def test_telnet_server_on_xdisploc(
 
     class ServerTestXdisploc(telnetlib3.TelnetServer):
         def on_xdisploc(self, xdisploc):
+            """
+            Displococities.
+
+            Args:
+                self: (todo): write your description
+                xdisploc: (bool): write your description
+            """
             super().on_xdisploc(xdisploc)
             _waiter.set_result(self)
 
@@ -59,10 +66,23 @@ async def test_telnet_client_send_xdisploc(event_loop, bind_host, unused_tcp_por
 
     class ServerTestXdisploc(telnetlib3.TelnetServer):
         def on_xdisploc(self, xdisploc):
+            """
+            Displocococococococor.
+
+            Args:
+                self: (todo): write your description
+                xdisploc: (bool): write your description
+            """
             super().on_xdisploc(xdisploc)
             _waiter.set_result(xdisploc)
 
         def begin_advanced_negotiation(self):
+            """
+            Initializes_negnet connection.
+
+            Args:
+                self: (todo): write your description
+            """
             from telnetlib3.telopt import DO, XDISPLOC
             super().begin_advanced_negotiation()
             self.writer.iac(DO, XDISPLOC)

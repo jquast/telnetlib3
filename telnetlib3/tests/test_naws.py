@@ -27,6 +27,14 @@ async def test_telnet_server_on_naws(
 
     class ServerTestNaws(telnetlib3.TelnetServer):
         def on_naws(self, width, height):
+            """
+            Toggle the width and height has changed.
+
+            Args:
+                self: (todo): write your description
+                width: (int): write your description
+                height: (int): write your description
+            """
             super().on_naws(width, height)
             _waiter.set_result(self)
 
@@ -58,6 +66,14 @@ async def test_telnet_client_send_naws(event_loop, bind_host, unused_tcp_port):
 
     class ServerTestNaws(telnetlib3.TelnetServer):
         def on_naws(self, width, height):
+            """
+            Called when the widget.
+
+            Args:
+                self: (todo): write your description
+                width: (int): write your description
+                height: (int): write your description
+            """
             super().on_naws(width, height)
             _waiter.set_result((height, width))
 
@@ -89,6 +105,14 @@ async def test_telnet_client_send_tty_naws(event_loop, bind_host,
     # a server,
     class ServerTestNaws(telnetlib3.TelnetServer):
         def on_naws(self, width, height):
+            """
+            Called when the client is connected.
+
+            Args:
+                self: (todo): write your description
+                width: (int): write your description
+                height: (int): write your description
+            """
             super().on_naws(width, height)
             _waiter.set_result((height, width))
             event_loop.call_soon(self.connection_lost, None)
@@ -117,6 +141,14 @@ async def test_telnet_client_send_naws_65534(event_loop, bind_host, unused_tcp_p
 
     class ServerTestNaws(telnetlib3.TelnetServer):
         def on_naws(self, width, height):
+            """
+            Called when the widget.
+
+            Args:
+                self: (todo): write your description
+                width: (int): write your description
+                height: (int): write your description
+            """
             super().on_naws(width, height)
             _waiter.set_result((height, width))
 

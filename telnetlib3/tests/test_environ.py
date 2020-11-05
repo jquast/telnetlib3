@@ -27,6 +27,13 @@ async def test_telnet_server_on_environ(
 
     class ServerTestEnviron(telnetlib3.TelnetServer):
         def on_environ(self, mapping):
+            """
+            Called when a handler.
+
+            Args:
+                self: (todo): write your description
+                mapping: (dict): write your description
+            """
             super().on_environ(mapping)
             _waiter.set_result(self)
 
@@ -69,6 +76,13 @@ async def test_telnet_client_send_environ(event_loop, bind_host,
 
     class ServerTestEnviron(telnetlib3.TelnetServer):
         def on_environ(self, mapping):
+            """
+            Called when the given mapping.
+
+            Args:
+                self: (todo): write your description
+                mapping: (dict): write your description
+            """
             super().on_environ(mapping)
             _waiter.set_result(mapping)
 
@@ -104,10 +118,23 @@ async def test_telnet_client_send_var_uservar_environ(event_loop, bind_host,
 
     class ServerTestEnviron(telnetlib3.TelnetServer):
         def on_environ(self, mapping):
+            """
+            Called when the given mapping.
+
+            Args:
+                self: (todo): write your description
+                mapping: (dict): write your description
+            """
             super().on_environ(mapping)
             _waiter.set_result(mapping)
 
         def on_request_environ(self):
+            """
+            Return a list of wsgi environment variables.
+
+            Args:
+                self: (todo): write your description
+            """
             from telnetlib3.telopt import VAR, USERVAR
             return [VAR, USERVAR]
 
@@ -149,6 +176,12 @@ async def test_telnet_server_reject_environ(event_loop, bind_host,
 
     class ServerTestEnviron(telnetlib3.TelnetServer):
         def on_request_environ(self):
+            """
+            The wsgi environ.
+
+            Args:
+                self: (todo): write your description
+            """
             return None
 
     await telnetlib3.create_server(

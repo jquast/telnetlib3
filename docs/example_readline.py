@@ -21,6 +21,12 @@ class Client(collections.namedtuple(
     'Client', ['reader', 'writer', 'notify_queue'])):
 
     def __str__(self):
+        """
+        Return a string representation of the writer.
+
+        Args:
+            self: (todo): write your description
+        """
         return '#{1}'.format(*self.writer.get_extra_info('peername'))
 
 class Lander(object):
@@ -33,11 +39,23 @@ class Lander(object):
     capsule_launching = False
 
     def __init__(self):
+        """
+        Initialize the event loop.
+
+        Args:
+            self: (todo): write your description
+        """
         self.log = logging.getLogger('lunar.lander')
         self.clients = []
         self._loop = asyncio.get_event_loop()
 
     def __str__(self):
+        """
+        Return human readable string representation.
+
+        Args:
+            self: (todo): write your description
+        """
         collector = 'RUNNING' if self.collecting else 'READY'
         capsule = ('LAUNCH IN-PROGRESS' if self.capsule_launching else
                    'LAUNCHED' if self.capsule_launched else
@@ -48,6 +66,14 @@ class Lander(object):
 
     @contextlib.contextmanager
     def register_link(self, reader, writer):
+        """
+        Register a link on - chain.
+
+        Args:
+            self: (todo): write your description
+            reader: (todo): write your description
+            writer: (bool): write your description
+        """
         client = Client(reader, writer, notify_queue=asyncio.Queue())
         self.clients.append(client)
         try:
@@ -59,6 +85,13 @@ class Lander(object):
             self.notify_event('LOST CONNECTION TO {}'.format(client))
 
     def notify_event(self, event_msg):
+        """
+        Notify an event.
+
+        Args:
+            self: (todo): write your description
+            event_msg: (str): write your description
+        """
         self.log.info(event_msg)
         for client in self.clients:
             client.notify_queue.put_nowait(event_msg)
@@ -179,6 +212,14 @@ class Lander(object):
             self.process_command(client, cmd)
 
     def process_command(self, client, cmd):
+        """
+        Process command
+
+        Args:
+            self: (todo): write your description
+            client: (todo): write your description
+            cmd: (str): write your description
+        """
         result = '\r\n'
         if cmd == 'HELP':
             result += ('COLLECT  COLLECT ROCK SAMPLE\r\n'
@@ -203,6 +244,13 @@ class Lander(object):
         client.writer.write(result + '\r\n')
 
     def launch_capsule(self, client):
+        """
+        Launch the client.
+
+        Args:
+            self: (todo): write your description
+            client: (todo): write your description
+        """
         if self.capsule_launched:
             return 'ERROR: NO CAPSULE'
         elif self.capsule_launching:
@@ -218,6 +266,13 @@ class Lander(object):
         return 'OK'
 
     def collect_sample(self, client):
+        """
+        Collect sample sample.
+
+        Args:
+            self: (todo): write your description
+            client: (todo): write your description
+        """
         if self.collecting:
             return 'ERROR: COLLECTION ALREADY IN PROGRESS'
         elif self.capsule_launched:
@@ -232,11 +287,23 @@ class Lander(object):
         return 'OK'
 
     def collected_sample(self):
+        """
+        Sample the next sample
+
+        Args:
+            self: (todo): write your description
+        """
         self.notify_event('SAMPLE COLLECTED')
         self.capsule_amount += 1
         self.collecting = False
 
     def after_launch(self):
+        """
+        Called when the application.
+
+        Args:
+            self: (todo): write your description
+        """
         self.capsule_launching = False
         self.capsule_launched = True
         self.notify_event('CAPSULE LAUNCHED SUCCESSFULLY')
@@ -246,6 +313,13 @@ class Lander(object):
 lander = Lander()
 
 def shell(reader, writer):
+    """
+    A context manager that shell.
+
+    Args:
+        reader: (todo): write your description
+        writer: (bool): write your description
+    """
     global lander
     with lander.register_link(reader, writer) as client:
         yield from lander.repl_readline(client)

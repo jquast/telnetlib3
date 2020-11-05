@@ -17,6 +17,13 @@ __all__ = ('telnet_client_shell', )
 if sys.platform == 'win32':
     @asyncio.coroutine
     def telnet_client_shell(telnet_reader, telnet_writer):
+        """
+        Execute a shell shell shell.
+
+        Args:
+            telnet_reader: (todo): write your description
+            telnet_writer: (todo): write your description
+        """
         raise NotImplementedError(
             'win32 not yet supported as telnet client. Please contribute!')
 
@@ -45,27 +52,61 @@ else:
                      'ispeed', 'ospeed', 'cc'])
 
         def __init__(self, telnet_writer, loop=None):
+            """
+            Initialize the telnet.
+
+            Args:
+                self: (todo): write your description
+                telnet_writer: (todo): write your description
+                loop: (str): write your description
+            """
             self.telnet_writer = telnet_writer
             self.loop = loop or asyncio.get_event_loop()
             self._fileno = sys.stdin.fileno()
             self._istty = os.path.sameopenfile(0, 1)
 
         def __enter__(self):
+            """
+            Enter the mode.
+
+            Args:
+                self: (todo): write your description
+            """
             self._save_mode = self.get_mode()
             if self._istty:
                 self.set_mode(self.determine_mode(self._save_mode))
             return self
 
         def __exit__(self, *_):
+            """
+            Exit the exit
+
+            Args:
+                self: (todo): write your description
+                _: (todo): write your description
+            """
             if self._istty:
                 termios.tcsetattr(
                     self._fileno, termios.TCSAFLUSH, list(self._save_mode))
 
         def get_mode(self):
+            """
+            Return the mode of this query.
+
+            Args:
+                self: (todo): write your description
+            """
             if self._istty:
                 return self.ModeDef(*termios.tcgetattr(self._fileno))
 
         def set_mode(self, mode):
+            """
+            Set the terminal mode.
+
+            Args:
+                self: (todo): write your description
+                mode: (str): write your description
+            """
             termios.tcsetattr(
                 sys.stdin.fileno(), termios.TCSAFLUSH, list(mode))
 

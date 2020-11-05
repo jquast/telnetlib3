@@ -10,6 +10,11 @@ __all__ = ('encoding_from_lang', 'name_unicode', 'eightbits', 'make_logger',
 
 
 def get_version():
+    """
+    Returns the version of the installed package.
+
+    Args:
+    """
     return pkg_resources.get_distribution("telnetlib3").version
 
 

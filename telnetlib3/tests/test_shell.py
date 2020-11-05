@@ -31,6 +31,13 @@ async def test_telnet_server_shell_as_coroutine(event_loop, bind_host,
 
     @asyncio.coroutine
     def shell(reader, writer):
+        """
+        Sends a shell.
+
+        Args:
+            reader: (todo): write your description
+            writer: (todo): write your description
+        """
         _waiter.set_result(True)
         inp = yield from reader.readexactly(len(send_input))
         assert inp == send_input
@@ -80,6 +87,13 @@ async def test_telnet_client_shell_as_coroutine(event_loop, bind_host,
 
     @asyncio.coroutine
     def shell(reader, writer):
+        """
+        Sets the shell.
+
+        Args:
+            reader: (todo): write your description
+            writer: (bool): write your description
+        """
         _waiter.set_result(True)
 
     # a server that doesn't care
@@ -102,6 +116,13 @@ async def test_telnet_server_shell_make_coro_by_function(event_loop, bind_host,
     _waiter = asyncio.Future()
 
     def shell(reader, writer):
+        """
+        Sets the shell.
+
+        Args:
+            reader: (todo): write your description
+            writer: (bool): write your description
+        """
         _waiter.set_result(True)
 
     # exercise,

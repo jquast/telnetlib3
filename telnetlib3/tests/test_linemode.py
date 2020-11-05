@@ -18,6 +18,14 @@ import pytest
 @pytest.mark.asyncio
 async def test_server_demands_remote_linemode_client_agrees(
         event_loop, bind_host, unused_tcp_port):
+      """
+      Test for local tunnel tunnel tunnel client.
+
+      Args:
+          event_loop: (todo): write your description
+          bind_host: (todo): write your description
+          unused_tcp_port: (todo): write your description
+      """
     from telnetlib3.telopt import IAC, DO, WILL, LINEMODE, SB, SE
     from telnetlib3.slc import (LMODE_MODE, LMODE_MODE_ACK)
 
@@ -25,6 +33,12 @@ async def test_server_demands_remote_linemode_client_agrees(
 
     class ServerTestLinemode(telnetlib3.BaseServer):
         def begin_negotiation(self):
+            """
+            Initialize connection.
+
+            Args:
+                self: (todo): write your description
+            """
             super().begin_negotiation()
             self.writer.iac(DO, LINEMODE)
             self._loop.call_later(0.1, self.connection_lost, None)
@@ -72,6 +86,14 @@ async def test_server_demands_remote_linemode_client_agrees(
 @pytest.mark.asyncio
 async def test_server_demands_remote_linemode_client_demands_local(
         event_loop, bind_host, unused_tcp_port):
+      """
+      Test if you to make a remote server.
+
+      Args:
+          event_loop: (todo): write your description
+          bind_host: (todo): write your description
+          unused_tcp_port: (todo): write your description
+      """
     from telnetlib3.telopt import IAC, DO, WILL, LINEMODE, SB, SE
     from telnetlib3.slc import (LMODE_MODE, LMODE_MODE_LOCAL, LMODE_MODE_ACK)
 
@@ -79,6 +101,12 @@ async def test_server_demands_remote_linemode_client_demands_local(
 
     class ServerTestLinemode(telnetlib3.BaseServer):
         def begin_negotiation(self):
+            """
+            Initialize connection.
+
+            Args:
+                self: (todo): write your description
+            """
             super().begin_negotiation()
             self.writer.iac(DO, LINEMODE)
             self._loop.call_later(0.1, self.connection_lost, None)

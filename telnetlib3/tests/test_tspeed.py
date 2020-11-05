@@ -24,6 +24,14 @@ async def test_telnet_server_on_tspeed(event_loop, bind_host, unused_tcp_port):
 
     class ServerTestTspeed(telnetlib3.TelnetServer):
         def on_tspeed(self, rx, tx):
+            """
+            Called when a packet.
+
+            Args:
+                self: (todo): write your description
+                rx: (todo): write your description
+                tx: (todo): write your description
+            """
             super().on_tspeed(rx, tx)
             _waiter.set_result(self)
 
@@ -53,10 +61,24 @@ async def test_telnet_client_send_tspeed(event_loop, bind_host, unused_tcp_port)
 
     class ServerTestTspeed(telnetlib3.TelnetServer):
         def on_tspeed(self, rx, tx):
+            """
+            Called when a signal.
+
+            Args:
+                self: (todo): write your description
+                rx: (todo): write your description
+                tx: (todo): write your description
+            """
             super().on_tspeed(rx, tx)
             _waiter.set_result((rx, tx))
 
         def begin_advanced_negotiation(self):
+            """
+            Initialize tunnel.
+
+            Args:
+                self: (todo): write your description
+            """
             from telnetlib3.telopt import DO, TSPEED
             super().begin_advanced_negotiation()
             self.writer.iac(DO, TSPEED)
