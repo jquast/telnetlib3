@@ -122,6 +122,13 @@ async def test_telnet_client_open_closed_by_peer(
     """Exercise BaseClient.connection_lost()."""
     class DisconnecterProtocol(asyncio.Protocol):
         def connection_made(self, transport):
+            """
+            Closes the connection.
+
+            Args:
+                self: (todo): write your description
+                transport: (todo): write your description
+            """
             # disconnect on connect
             transport.close()
 
@@ -149,6 +156,12 @@ async def test_telnet_server_advanced_negotiation(
 
     class ServerTestAdvanced(telnetlib3.TelnetServer):
         def begin_advanced_negotiation(self):
+            """
+            Sets up - down the coroutine.
+
+            Args:
+                self: (todo): write your description
+            """
             super().begin_advanced_negotiation()
             _waiter.set_result(self)
 
@@ -414,6 +427,13 @@ async def test_telnet_client_negotiation_fail(
 
     class ClientNegotiationFail(telnetlib3.TelnetClient):
         def connection_made(self, transport):
+            """
+            Called when the connection is established.
+
+            Args:
+                self: (todo): write your description
+                transport: (todo): write your description
+            """
             from telnetlib3.telopt import WILL, TTYPE
             super().connection_made(transport)
             # this creates a pending negotiation demand from the client-side.
@@ -523,6 +543,13 @@ async def test_telnet_client_cmdline(bind_host, unused_tcp_port, event_loop):
 
     class HelloServer(asyncio.Protocol):
         def connection_made(self, transport):
+            """
+            Called when the transport is closed.
+
+            Args:
+                self: (todo): write your description
+                transport: (todo): write your description
+            """
             super().connection_made(transport)
             transport.write(b'hello, space cadet.\r\n')
             # hangup
@@ -560,6 +587,13 @@ async def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port,
 
     class HelloServer(asyncio.Protocol):
         def connection_made(self, transport):
+            """
+            Called when the transport is closed.
+
+            Args:
+                self: (todo): write your description
+                transport: (todo): write your description
+            """
             super().connection_made(transport)
             transport.write(b'hello, space cadet.\r\n')
             event_loop.call_soon(transport.close)
@@ -591,6 +625,13 @@ async def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port,
 
     @asyncio.coroutine
     def shell(reader, writer):
+        """
+        A context manager to a shell.
+
+        Args:
+            reader: (todo): write your description
+            writer: (todo): write your description
+        """
         writer.write('Press Return to continue:')
         inp = yield from reader.readline()
         if inp:

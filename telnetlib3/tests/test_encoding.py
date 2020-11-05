@@ -222,6 +222,13 @@ async def test_telnet_server_binary_mode(
 
     @asyncio.coroutine
     def binary_shell(reader, writer):
+        """
+        Writes a shell. shell.
+
+        Args:
+            reader: (todo): write your description
+            writer: (todo): write your description
+        """
         # our reader and writer should provide binary output
         writer.write(b'server_output')
 

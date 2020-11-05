@@ -55,6 +55,12 @@ def test_legal_2byte_iac():
     called = threading.Event()
 
     def callback(cmd):
+        """
+        Callback for the command.
+
+        Args:
+            cmd: (str): write your description
+        """
         assert cmd == NOP
         called.set()
 
@@ -121,6 +127,13 @@ async def test_iac_do_twice_replies_once(event_loop, bind_host, unused_tcp_port)
 
     @asyncio.coroutine
     def shell(reader, writer):
+        """
+        Called when a command.
+
+        Args:
+            reader: (todo): write your description
+            writer: (bool): write your description
+        """
         writer.close()
 
     # given,
@@ -150,6 +163,13 @@ async def test_iac_dont_dont(event_loop, bind_host, unused_tcp_port):
 
     @asyncio.coroutine
     def shell(reader, writer):
+        """
+        Called when a command.
+
+        Args:
+            reader: (todo): write your description
+            writer: (bool): write your description
+        """
         writer.close()
 
     # given,
@@ -219,6 +239,13 @@ async def test_slc_simul(event_loop, bind_host, unused_tcp_port):
 
     @asyncio.coroutine
     def shell(reader, writer):
+        """
+        Run a shell.
+
+        Args:
+            reader: (todo): write your description
+            writer: (bool): write your description
+        """
         # read everything from client until they hang up.
         result = yield from reader.read()
 
@@ -235,6 +262,13 @@ async def test_slc_simul(event_loop, bind_host, unused_tcp_port):
                                      'EW', 'RP', 'LNEXT', 'XON', 'XOFF')]
 
         def connection_made(self, transport):
+            """
+            Called when a connection is closed.
+
+            Args:
+                self: (todo): write your description
+                transport: (todo): write your description
+            """
             super().connection_made(transport)
             self.waiters = {slc_cmd: asyncio.Future()
                             for slc_cmd in self.slc_callbacks}
@@ -297,6 +331,13 @@ async def test_writelines_bytes(event_loop, bind_host, unused_tcp_port):
 
     @asyncio.coroutine
     def shell(reader, writer):
+        """
+        Writes a shell.
+
+        Args:
+            reader: (todo): write your description
+            writer: (todo): write your description
+        """
         writer.writelines(given)
         writer.close()
 
@@ -322,6 +363,13 @@ async def test_writelines_unicode(event_loop, bind_host, unused_tcp_port):
 
     @asyncio.coroutine
     def shell(reader, writer):
+        """
+        Writes a shell.
+
+        Args:
+            reader: (todo): write your description
+            writer: (todo): write your description
+        """
         writer.writelines(given)
         writer.close()
 
@@ -357,6 +405,13 @@ async def test_send_ga(event_loop, bind_host, unused_tcp_port):
 
     @asyncio.coroutine
     def shell(reader, writer):
+        """
+        Sends a shell command.
+
+        Args:
+            reader: (todo): write your description
+            writer: (todo): write your description
+        """
         result = writer.send_ga()
         assert result is True
         writer.close()
@@ -386,6 +441,13 @@ async def test_not_send_ga(event_loop, bind_host, unused_tcp_port):
 
     @asyncio.coroutine
     def shell(reader, writer):
+        """
+        Sends a shell.
+
+        Args:
+            reader: (todo): write your description
+            writer: (todo): write your description
+        """
         result = writer.send_ga()
         assert result is False
         writer.close()
@@ -411,6 +473,13 @@ async def test_not_send_eor(event_loop, bind_host, unused_tcp_port):
 
     @asyncio.coroutine
     def shell(reader, writer):
+        """
+        Sends a shell command is received.
+
+        Args:
+            reader: (todo): write your description
+            writer: (todo): write your description
+        """
         result = writer.send_eor()
         assert result is False
         writer.close()
@@ -441,6 +510,13 @@ async def test_send_eor(event_loop, bind_host, unused_tcp_port):
 
     @asyncio.coroutine
     def shell(reader, writer):
+        """
+        Sends a shell command.
+
+        Args:
+            reader: (todo): write your description
+            writer: (todo): write your description
+        """
         writer.write('<')
         result = writer.send_eor()
         assert result is True

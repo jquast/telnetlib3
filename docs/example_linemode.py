@@ -12,6 +12,13 @@ import telnetlib3
 
 @asyncio.coroutine
 def shell(reader, writer):
+    """
+    A context manager that write lines of lines.
+
+    Args:
+        reader: (todo): write your description
+        writer: (todo): write your description
+    """
     from telnetlib3 import WONT, ECHO
     writer.iac(WONT, ECHO)
 

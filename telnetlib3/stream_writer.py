@@ -182,6 +182,12 @@ class TelnetWriter(asyncio.StreamWriter):
     # Base protocol methods
 
     def close(self):
+        """
+        Close the transport.
+
+        Args:
+            self: (todo): write your description
+        """
         super().close()
         # break circular refs
         self._ext_callback.clear()
@@ -1488,6 +1494,13 @@ class TelnetWriter(asyncio.StreamWriter):
     # Private sub-negotiation (SB) routines
 
     def _handle_sb_charset(self, buf):
+        """
+        Handles a command.
+
+        Args:
+            self: (todo): write your description
+            buf: (todo): write your description
+        """
         cmd = buf.popleft()
         assert cmd == CHARSET
         opt = buf.popleft()
@@ -2201,6 +2214,17 @@ class TelnetWriterUnicode(TelnetWriter):
 
     def __init__(self, transport, protocol, fn_encoding, *,
                  encoding_errors='strict', **kwds):
+        """
+        Initialize the transport.
+
+        Args:
+            self: (todo): write your description
+            transport: (str): write your description
+            protocol: (todo): write your description
+            fn_encoding: (str): write your description
+            encoding_errors: (str): write your description
+            kwds: (todo): write your description
+        """
         self.fn_encoding = fn_encoding
         self.encoding_errors = encoding_errors
         super().__init__(transport, protocol, **kwds)
@@ -2296,6 +2320,14 @@ class Option(dict):
         return bool(self.get(key, None) is True)
 
     def __setitem__(self, key, value):
+        """
+        Sets the value of a key.
+
+        Args:
+            self: (todo): write your description
+            key: (str): write your description
+            value: (str): write your description
+        """
         # the real purpose of this class, tracking state negotiation.
         if value != dict.get(self, key, None):
             descr = ' + '.join([name_command(bytes([byte]))

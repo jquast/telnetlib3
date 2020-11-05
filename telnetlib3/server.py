@@ -42,6 +42,16 @@ class TelnetServer(server_base.BaseServer):
 
     def __init__(self, term='unknown', cols=80, rows=25, timeout=300,
                  *args, **kwargs):
+        """
+        Initialize the table.
+
+        Args:
+            self: (todo): write your description
+            term: (list): write your description
+            cols: (int): write your description
+            rows: (int): write your description
+            timeout: (int): write your description
+        """
         super().__init__(*args, **kwargs)
         self.waiter_encoding = asyncio.Future()
         self._tasks.append(self.waiter_encoding)
@@ -56,6 +66,13 @@ class TelnetServer(server_base.BaseServer):
         })
 
     def connection_made(self, transport):
+        """
+        Called when the connection is established.
+
+        Args:
+            self: (todo): write your description
+            transport: (todo): write your description
+        """
         from .telopt import NAWS, NEW_ENVIRON, TSPEED, TTYPE, XDISPLOC, CHARSET
         super().connection_made(transport)
 
@@ -82,15 +99,34 @@ class TelnetServer(server_base.BaseServer):
             self.writer.set_ext_send_callback(tel_opt, callback_fn)
 
     def data_received(self, data):
+        """
+        Called when data is received.
+
+        Args:
+            self: (todo): write your description
+            data: (todo): write your description
+        """
         self.set_timeout()
         super().data_received(data)
 
     def begin_negotiation(self):
+        """
+        Initialize the socket.
+
+        Args:
+            self: (todo): write your description
+        """
         from .telopt import DO, TTYPE
         super().begin_negotiation()
         self.writer.iac(DO, TTYPE)
 
     def begin_advanced_negotiation(self):
+        """
+        Initialize the writer.
+
+        Args:
+            self: (todo): write your description
+        """
         from .telopt import (DO, WILL, SGA, ECHO, BINARY,
                              NEW_ENVIRON, NAWS, CHARSET)
         super().begin_advanced_negotiation()
@@ -103,6 +139,13 @@ class TelnetServer(server_base.BaseServer):
             self.writer.iac(DO, CHARSET)
 
     def check_negotiation(self, final=False):
+        """
+        Checks if the socket is alive.
+
+        Args:
+            self: (todo): write your description
+            final: (bool): write your description
+        """
         from .telopt import TTYPE
         parent = super().check_negotiation()
 
@@ -355,6 +398,12 @@ class TelnetServer(server_base.BaseServer):
     # private methods
 
     def _check_encoding(self):
+        """
+        Check encoding of the encoding.
+
+        Args:
+            self: (todo): write your description
+        """
         # Periodically check for completion of ``waiter_encoding``.
         from .telopt import DO, BINARY
         if (self.writer.outbinary and not self.writer.inbinary and
@@ -432,6 +481,13 @@ def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwds):
 
 @asyncio.coroutine
 def _sigterm_handler(server, log):
+    """
+    Handle a sigterm server.
+
+    Args:
+        server: (str): write your description
+        log: (todo): write your description
+    """
     log.info('SIGTERM received, closing server.')
 
     # This signals the completion of the server.wait_closed() Future,
@@ -440,6 +496,11 @@ def _sigterm_handler(server, log):
 
 
 def parse_server_args():
+    """
+    Parse command line arguments.
+
+    Args:
+    """
     parser = argparse.ArgumentParser(
         description="Telnet protocol server",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)

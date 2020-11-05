@@ -136,6 +136,13 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._loop.call_soon(self.begin_negotiation)
 
     def begin_shell(self, result):
+        """
+        Begin the coroutine.
+
+        Args:
+            self: (todo): write your description
+            result: (todo): write your description
+        """
         if self.shell is not None:
             coro = self.shell(self.reader, self.writer)
             if asyncio.iscoroutine(coro):
@@ -187,6 +194,12 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     # public protocol methods
 
     def __repr__(self):
+        """
+        Return a repr representation of - repr repr.
+
+        Args:
+            self: (todo): write your description
+        """
         hostport = self.get_extra_info('peername')[:2]
         return '<Peer {0} {1}>'.format(*hostport)
 
@@ -276,6 +289,12 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     # private methods
 
     def _check_negotiation_timer(self):
+        """
+        Check if the server is alive.
+
+        Args:
+            self: (todo): write your description
+        """
         self._check_later.cancel()
         self._tasks.remove(self._check_later)
 
@@ -298,6 +317,15 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     @staticmethod
     def _log_exception(logger, e_type, e_value, e_tb):
+        """
+        Log an exception ascii.
+
+        Args:
+            logger: (todo): write your description
+            e_type: (str): write your description
+            e_value: (todo): write your description
+            e_tb: (todo): write your description
+        """
         rows_tbk = [line for line in
                     '\n'.join(traceback.format_tb(e_tb)).split('\n')
                     if line]

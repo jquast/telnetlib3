@@ -18,6 +18,12 @@ def test_reader_instantiation_safety():
     """On instantiation, one of server or client must be specified."""
     # given,
     def fn_encoding(incoming):
+        """
+        Return the encoding of a byte string.
+
+        Args:
+            incoming: (float): write your description
+        """
         return 'def-ENC'
 
     reader = telnetlib3.TelnetReader(limit=1999)
@@ -57,6 +63,13 @@ async def test_telnet_reader_using_readline_unicode(
     }
 
     def shell(reader, writer):
+        """
+        Writes a shell to the given writer.
+
+        Args:
+            reader: (todo): write your description
+            writer: (todo): write your description
+        """
         for item in sorted(given_expected):
             writer.write(item)
         writer.close()
@@ -102,6 +115,13 @@ async def test_telnet_reader_using_readline_bytes(
     }
 
     def shell(reader, writer):
+        """
+        Writes a shell to the given writer.
+
+        Args:
+            reader: (todo): write your description
+            writer: (todo): write your description
+        """
         for item in sorted(given_expected):
             writer.write(item)
         writer.close()
@@ -138,6 +158,13 @@ async def test_telnet_reader_read_exactly_unicode(
     given_partial = '💉-'
 
     def shell(reader, writer):
+        """
+        Writes a shell to the given writer.
+
+        Args:
+            reader: (todo): write your description
+            writer: (todo): write your description
+        """
         writer.write(given)
         writer.write(given_partial)
         writer.close()
@@ -177,6 +204,13 @@ async def test_telnet_reader_read_exactly_bytes(
     given_partial = b'zzz'
 
     def shell(reader, writer):
+        """
+        Writes a shell to the given writer.
+
+        Args:
+            reader: (todo): write your description
+            writer: (todo): write your description
+        """
         writer.write(given + given_partial)
         writer.close()
 
@@ -211,6 +245,12 @@ async def test_telnet_reader_read_0(
     """Ensure TelnetReader.read(0) returns nothing."""
     # given
     def fn_encoding(incoming):
+        """
+        Return the encoding of a byte string.
+
+        Args:
+            incoming: (float): write your description
+        """
         return 'def-ENC'
     reader = telnetlib3.TelnetReaderUnicode(fn_encoding=fn_encoding)
 
@@ -230,6 +270,13 @@ async def test_telnet_reader_read_beyond_limit_unicode(
     limit = 10
 
     def shell(reader, writer):
+        """
+        Run a shell command.
+
+        Args:
+            reader: (todo): write your description
+            writer: (todo): write your description
+        """
         assert reader._limit == limit
         given = 'x' * (limit + 1)
         writer.write(given)
@@ -258,6 +305,13 @@ async def test_telnet_reader_read_beyond_limit_bytes(
     limit = 10
 
     def shell(reader, writer):
+        """
+        Run a shell command.
+
+        Args:
+            reader: (todo): write your description
+            writer: (todo): write your description
+        """
         assert reader._limit == limit
         given = b'x' * (limit + 1)
         writer.write(given)

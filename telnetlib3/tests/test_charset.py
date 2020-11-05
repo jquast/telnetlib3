@@ -28,6 +28,13 @@ async def test_telnet_server_on_charset(
 
     class ServerTestCharset(telnetlib3.TelnetServer):
         def on_charset(self, charset):
+            """
+            Sets the result.
+
+            Args:
+                self: (todo): write your description
+                charset: (todo): write your description
+            """
             super().on_charset(charset)
             _waiter.set_result(self)
 
@@ -60,10 +67,23 @@ async def test_telnet_client_send_charset(event_loop, bind_host, unused_tcp_port
 
     class ServerTestCharset(telnetlib3.TelnetServer):
         def on_request_charset(self):
+            """
+            : return : return :
+
+            Args:
+                self: (todo): write your description
+            """
             return ['illegal', 'cp437']
 
     class ClientTestCharset(telnetlib3.TelnetClient):
         def send_charset(self, offered):
+            """
+            Parameters ---------- off of the selected * off * off *.
+
+            Args:
+                self: (todo): write your description
+                offered: (bool): write your description
+            """
             selected = super().send_charset(offered)
             _waiter.set_result(selected)
             return selected
@@ -95,10 +115,23 @@ async def test_telnet_client_no_charset(event_loop, bind_host, unused_tcp_port):
 
     class ServerTestCharset(telnetlib3.TelnetServer):
         def on_request_charset(self):
+            """
+            : return : return :
+
+            Args:
+                self: (todo): write your description
+            """
             return ['illegal', 'this-is-no-good-either']
 
     class ClientTestCharset(telnetlib3.TelnetClient):
         def send_charset(self, offered):
+            """
+            Parameters ---------- off of the selected * off * off *.
+
+            Args:
+                self: (todo): write your description
+                offered: (bool): write your description
+            """
             selected = super().send_charset(offered)
             _waiter.set_result(selected)
             return selected

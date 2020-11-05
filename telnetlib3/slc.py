@@ -275,6 +275,12 @@ class Linemode(object):
         return 'remote' if self.remote else 'local'
 
     def __repr__(self):
+        """
+        Return a repr representation of this instruction.
+
+        Args:
+            self: (todo): write your description
+        """
         return '<{0!r}: {1}>'.format(
             self.mask, ', '.join([
                 '{0}:{1}'.format(prop, getattr(self, prop))

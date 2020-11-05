@@ -24,6 +24,13 @@ async def test_telnet_server_on_ttype(event_loop, bind_host, unused_tcp_port):
 
     class ServerTestTtype(telnetlib3.TelnetServer):
         def on_ttype(self, ttype):
+            """
+            Set the callback.
+
+            Args:
+                self: (todo): write your description
+                ttype: (str): write your description
+            """
             super().on_ttype(ttype)
             _waiter.set_result(self)
 
@@ -67,6 +74,13 @@ async def test_telnet_server_on_ttype_beyond_max(
 
     class ServerTestTtype(telnetlib3.TelnetServer):
         def on_ttype(self, ttype):
+            """
+            Handle a callback.
+
+            Args:
+                self: (todo): write your description
+                ttype: (str): write your description
+            """
             super().on_ttype(ttype)
             if ttype == given_ttypes[-1]:
                 _waiter.set_result(self)
@@ -112,6 +126,13 @@ async def test_telnet_server_on_ttype_empty(
 
     class ServerTestTtype(telnetlib3.TelnetServer):
         def on_ttype(self, ttype):
+            """
+            Handle a callback.
+
+            Args:
+                self: (todo): write your description
+                ttype: (str): write your description
+            """
             super().on_ttype(ttype)
             if ttype == given_ttypes[-1]:
                 _waiter.set_result(self)
@@ -151,6 +172,13 @@ async def test_telnet_server_on_ttype_looped(
         count = 1
 
         def on_ttype(self, ttype):
+            """
+            Handle ttype.
+
+            Args:
+                self: (todo): write your description
+                ttype: (str): write your description
+            """
             super().on_ttype(ttype)
             if self.count == len(given_ttypes):
                 _waiter.set_result(self)
@@ -193,6 +221,13 @@ async def test_telnet_server_on_ttype_repeated(
         count = 1
 
         def on_ttype(self, ttype):
+            """
+            Handle ttype.
+
+            Args:
+                self: (todo): write your description
+                ttype: (str): write your description
+            """
             super().on_ttype(ttype)
             if self.count == len(given_ttypes):
                 _waiter.set_result(self)
@@ -235,6 +270,13 @@ async def test_telnet_server_on_ttype_mud(
         count = 1
 
         def on_ttype(self, ttype):
+            """
+            Handle ttype.
+
+            Args:
+                self: (todo): write your description
+                ttype: (str): write your description
+            """
             super().on_ttype(ttype)
             if self.count == len(given_ttypes):
                 _waiter.set_result(self)
