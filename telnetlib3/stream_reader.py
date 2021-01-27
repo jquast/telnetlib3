@@ -2,12 +2,36 @@
 # std imports
 import codecs
 import asyncio
+import logging
 
 __all__ = ('TelnetReader', 'TelnetReaderUnicode', )
 
 
 class TelnetReader(asyncio.StreamReader):
     """A reader interface for the telnet protocol."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._connection_closed = False
+        self.log = logging.getLogger(__name__)
+
+    @property
+    def connection_closed(self):
+        return self._connection_closed
+
+    def _cancel_task(self):
+        if self._waiter is None:
+            return
+        try:
+            # cancel the ongoing task when connection is closed
+            # raises asyncio.CancelledError
+            self._waiter.cancel()
+        except asyncio.CancelledError:
+            self.log.debug('Connection closed, _waiter cancelled.')
+
+    def close(self):
+        self._connection_closed = True
+        self._cancel_task()
 
     @asyncio.coroutine
     def readline(self):

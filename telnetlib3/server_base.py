@@ -50,6 +50,10 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self.connect_maxwait = connect_maxwait
         self._limit = limit
 
+    def timeout_connection(self):
+        self.reader.close()
+        self.writer.close()
+
     # Base protocol methods
 
     def eof_received(self):
