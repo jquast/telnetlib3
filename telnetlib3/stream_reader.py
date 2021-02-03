@@ -141,11 +141,15 @@ class TelnetReaderUnicode(TelnetReader):
         loop = loop or asyncio.get_event_loop()
         super().__init__(limit=limit, loop=loop)
 
+        assert callable(fn_encoding), fn_encoding
         self.fn_encoding = fn_encoding
         self.encoding_errors = encoding_errors
 
     def decode(self, buf, final=False):
         """Decode bytes ``buf`` using preferred encoding."""
+        if buf == b'':
+            return ''  # EOF
+
         encoding = self.fn_encoding(incoming=True)
 
         # late-binding,
@@ -247,7 +251,8 @@ class TelnetReaderUnicode(TelnetReader):
 
     def __repr__(self):
         """Description of stream encoding state."""
-        encoding = self.fn_encoding(incoming=True)
+        if callable(self.fn_encoding):
+            encoding = self.fn_encoding(incoming=True)
         return ('<TelnetReaderUnicode encoding={0!r} limit={self._limit} '
                 'buflen={1} eof={self._eof}>'.format(
                     encoding, len(self._buffer), self=self))
