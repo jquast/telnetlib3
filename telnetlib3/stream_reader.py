@@ -147,6 +147,9 @@ class TelnetReaderUnicode(TelnetReader):
 
     def decode(self, buf, final=False):
         """Decode bytes ``buf`` using preferred encoding."""
+        if buf == b'':
+            return ''  # EOF
+
         encoding = self.fn_encoding(incoming=True)
 
         # late-binding,
