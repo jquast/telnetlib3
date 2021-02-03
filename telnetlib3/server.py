@@ -209,7 +209,7 @@ class TelnetServer(server_base.BaseServer):
         """
         self.log.debug('Timeout after {self.idle:1.2f}s'.format(self=self))
         self.writer.write('\r\nTimeout.\r\n')
-        self.writer.close()
+        self.timeout_connection()
 
     def on_naws(self, rows, cols):
         """

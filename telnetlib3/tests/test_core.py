@@ -466,7 +466,7 @@ async def test_telnet_server_cmdline(bind_host, unused_tcp_port, event_loop):
 
     seen = b''
     while True:
-        line = await asyncio.wait_for(proc.stderr.readline(), 0.5)
+        line = await asyncio.wait_for(proc.stderr.readline(), 1.5)
         if b'Server ready' in line:
             break
         seen += line
@@ -482,7 +482,7 @@ async def test_telnet_server_cmdline(bind_host, unused_tcp_port, event_loop):
 
     seen = b''
     while True:
-        line = await asyncio.wait_for(proc.stderr.readline(), 0.5)
+        line = await asyncio.wait_for(proc.stderr.readline(), 1.5)
         if b'Connection closed' in line:
             break
         seen += line

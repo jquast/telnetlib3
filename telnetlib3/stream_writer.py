@@ -129,6 +129,8 @@ class TelnetWriter(asyncio.StreamWriter):
         #: attribute ``ack`` returns True if it is in use.
         self._linemode = slc.Linemode()
 
+        self._connection_closed = False
+
         # Set default callback handlers to local methods.  A base protocol
         # wishing not to wire any callbacks at all may simply allow our stream
         # to gracefully log and do nothing about in most cases.
@@ -179,9 +181,15 @@ class TelnetWriter(asyncio.StreamWriter):
             self.set_ext_send_callback(
                 cmd=ext_cmd, func=getattr(self, _cbname + key))
 
+    @property
+    def connection_closed(self):
+        return self._connection_closed
+
     # Base protocol methods
 
     def close(self):
+        if self.connection_closed:
+            return
         super().close()
         # break circular refs
         self._ext_callback.clear()
@@ -191,6 +199,7 @@ class TelnetWriter(asyncio.StreamWriter):
         self.fn_encoding = None
         self._protocol = None
         self._transport = None
+        self._connection_closed = True
 
     def __repr__(self):
         """Description of stream encoding state."""
