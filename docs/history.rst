@@ -1,5 +1,9 @@
 History
 =======
+1.0.4
+ * bugfix a NoneType error on EOF/Timeout, introduced in previous
+   version 1.0.3, :ghissue:`51` by :ghuser:`zofy`.
+
 1.0.3
   * bugfix circular reference between transport and protocol, :ghissue:`43` by
     :ghuser:`fried`.
