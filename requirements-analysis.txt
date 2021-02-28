@@ -4,3 +4,4 @@ pygments
 doc8
 pylint==1.6.5
 astroid==1.4.8
+black
