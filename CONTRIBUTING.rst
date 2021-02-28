@@ -29,10 +29,31 @@ Install and run tox
     tox
 
 `Py.test <https://pytest.org>` is the test runner. tox commands pass through
-positional arguments, so you may for example use `looponfailing <https://pytest.org/latest/xdist.html#running-tests-in-looponfailing-mode>`
+positional arguments, so you may for example use `looponfailing <https://pytest.org/latest/xdist.html#running-tests-in-looponfailing-mode>`_
 with python 3.5, stopping at the first failing test case::
 
     tox -epy35 -- -fx
+
+Code Formatting
+---------------
+
+To make code formatting easy on developers, and to simplify the conversation
+around pull request reviews, this project has adopted the `black <https://github.com/psf/black/>`_
+code formatter. This formatter must be run against any new code written for this
+project. The advantage is, you no longer have to think about how your code is
+styled; it's all handled for you!
+
+To make this even easier on you, you can set up most editors to auto-run
+``black`` for you. We have also set up a `pre-commit <https://pre-commit.com/>`_
+hook to run automatically on every commit, with just a small bit of extra setup:
+
+::
+
+    pip install pre-commit
+    pre-commit install --install-hooks
+
+Now, before each git commit is accepted, this hook will run to ensure the code
+has been properly formatted by ``black``.
 
 
 Style and Static Analysis
