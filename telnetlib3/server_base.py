@@ -6,14 +6,15 @@ import datetime
 import weakref
 import sys
 
-from .stream_writer import (TelnetWriter, TelnetWriterUnicode)
-from .stream_reader import (TelnetReader, TelnetReaderUnicode)
+from .stream_writer import TelnetWriter, TelnetWriterUnicode
+from .stream_reader import TelnetReader, TelnetReaderUnicode
 
-__all__ = ('BaseServer',)
+__all__ = ("BaseServer",)
 
 
 class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     """Base Telnet Server Protocol."""
+
     _when_connected = None
     _last_received = None
     _transport = None
@@ -24,14 +25,22 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     _writer_factory = TelnetWriter
     _writer_factory_encoding = TelnetWriterUnicode
 
-    def __init__(self, shell=None, log=None, loop=None,
-                 _waiter_connected=None, _waiter_closed=None,
-                 encoding='utf8', encoding_errors='strict',
-                 force_binary=False, connect_maxwait=4.0,
-                 limit=None):
+    def __init__(
+        self,
+        shell=None,
+        log=None,
+        loop=None,
+        _waiter_connected=None,
+        _waiter_closed=None,
+        encoding="utf8",
+        encoding_errors="strict",
+        force_binary=False,
+        connect_maxwait=4.0,
+        limit=None,
+    ):
         """Class initializer."""
         super().__init__(loop=loop)
-        self.log = log or logging.getLogger('telnetlib3.server')
+        self.log = log or logging.getLogger("telnetlib3.server")
         self._loop = loop or asyncio.get_event_loop()
         self.default_encoding = encoding
         self._encoding_errors = encoding_errors
@@ -62,7 +71,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         This callback may be exercised by the nc(1) client argument ``-z``.
         """
-        self.log.debug('EOF from client, closing.')
+        self.log.debug("EOF from client, closing.")
         self.connection_lost(None)
 
     def connection_lost(self, exc):
@@ -77,10 +86,10 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         # inform yielding readers about closed connection
         if exc is None:
-            self.log.info('Connection closed for %s', self)
+            self.log.info("Connection closed for %s", self)
             self.reader.feed_eof()
         else:
-            self.log.info('Connection lost for %s: %s', self, exc)
+            self.log.info("Connection lost for %s: %s", self, exc)
             self.reader.set_exception(exc)
 
         # cancel protocol tasks, namely on-connect negotiations
@@ -113,28 +122,32 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         reader_factory = self._reader_factory
         writer_factory = self._writer_factory
-        reader_kwds = {'loop': self._loop}
-        writer_kwds = {'loop': self._loop}
+        reader_kwds = {"loop": self._loop}
+        writer_kwds = {"loop": self._loop}
 
         if self.default_encoding:
-            reader_kwds['fn_encoding'] = self.encoding
-            writer_kwds['fn_encoding'] = self.encoding
-            reader_kwds['encoding_errors'] = self._encoding_errors
-            writer_kwds['encoding_errors'] = self._encoding_errors
+            reader_kwds["fn_encoding"] = self.encoding
+            writer_kwds["fn_encoding"] = self.encoding
+            reader_kwds["encoding_errors"] = self._encoding_errors
+            writer_kwds["encoding_errors"] = self._encoding_errors
             reader_factory = self._reader_factory_encoding
             writer_factory = self._writer_factory_encoding
 
         if self._limit:
-            reader_kwds['limit'] = self._limit
+            reader_kwds["limit"] = self._limit
 
         self.reader = reader_factory(**reader_kwds)
 
         self.writer = writer_factory(
-            transport=transport, protocol=self,
-            reader=self.reader, server=True,
-            log=self.log, **writer_kwds)
+            transport=transport,
+            protocol=self,
+            reader=self.reader,
+            server=True,
+            log=self.log,
+            **writer_kwds
+        )
 
-        self.log.info('Connection from %s', self)
+        self.log.info("Connection from %s", self)
 
         self._waiter_connected.add_done_callback(self.begin_shell)
         self._loop.call_soon(self.begin_negotiation)
@@ -145,8 +158,8 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             if asyncio.iscoroutine(coro):
                 fut = self._loop.create_task(coro)
                 fut.add_done_callback(
-                    lambda fut_obj: self._waiter_closed.set_result(
-                        weakref.proxy(self)))
+                    lambda fut_obj: self._waiter_closed.set_result(weakref.proxy(self))
+                )
 
     def data_received(self, data):
         """Process bytes received by transport."""
@@ -191,8 +204,8 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     # public protocol methods
 
     def __repr__(self):
-        hostport = self.get_extra_info('peername')[:2]
-        return '<Peer {0} {1}>'.format(*hostport)
+        hostport = self.get_extra_info("peername")[:2]
+        return "<Peer {0} {1}>".format(*hostport)
 
     def get_extra_info(self, name, default=None):
         """Get optional server protocol or transport information."""
@@ -231,7 +244,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         initializer, or, when unset (None), ``US-ASCII``.
         """
         # pylint: disable=unused-argument
-        return self.default_encoding or 'US-ASCII'
+        return self.default_encoding or "US-ASCII"
 
     def negotiation_should_advance(self):
         """
@@ -246,10 +259,8 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         """
         # Generally, this separates a bare TCP connect() from a True
         # RFC-compliant telnet client with responding IAC interpreter.
-        server_do = sum(enabled for _, enabled in
-                        self.writer.remote_option.items())
-        client_will = sum(enabled for _, enabled in
-                          self.writer.local_option.items())
+        server_do = sum(enabled for _, enabled in self.writer.remote_option.items())
+        client_will = sum(enabled for _, enabled in self.writer.local_option.items())
         return bool(server_do or client_will)
 
     def check_negotiation(self, final=False):
@@ -270,7 +281,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         """
         if not self._advanced and self.negotiation_should_advance():
             self._advanced = True
-            self.log.debug('begin advanced negotiation')
+            self.log.debug("begin advanced negotiation")
             self._loop.call_soon(self.begin_advanced_negotiation)
 
         # negotiation is complete (returns True) when all negotiation options
@@ -287,26 +298,26 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         final = bool(later < 0)
 
         if self.check_negotiation(final=final):
-            self.log.debug('negotiation complete after {:1.2f}s.'
-                           .format(self.duration))
+            self.log.debug("negotiation complete after {:1.2f}s.".format(self.duration))
             self._waiter_connected.set_result(weakref.proxy(self))
         elif final:
-            self.log.debug('negotiation failed after {:1.2f}s.'
-                           .format(self.duration))
+            self.log.debug("negotiation failed after {:1.2f}s.".format(self.duration))
             self._waiter_connected.set_result(weakref.proxy(self))
         else:
             # keep re-queuing until complete
             self._check_later = self._loop.call_later(
-                later, self._check_negotiation_timer)
+                later, self._check_negotiation_timer
+            )
             self._tasks.append(self._check_later)
 
     @staticmethod
     def _log_exception(logger, e_type, e_value, e_tb):
-        rows_tbk = [line for line in
-                    '\n'.join(traceback.format_tb(e_tb)).split('\n')
-                    if line]
-        rows_exc = [line.rstrip() for line in
-                    traceback.format_exception_only(e_type, e_value)]
+        rows_tbk = [
+            line for line in "\n".join(traceback.format_tb(e_tb)).split("\n") if line
+        ]
+        rows_exc = [
+            line.rstrip() for line in traceback.format_exception_only(e_type, e_value)
+        ]
 
         for line in rows_tbk + rows_exc:
             logger(line)

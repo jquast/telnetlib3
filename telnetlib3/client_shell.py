@@ -8,17 +8,20 @@ import sys
 # local
 from . import accessories
 
-__all__ = ('telnet_client_shell', )
+__all__ = ("telnet_client_shell",)
 
 
 # TODO: needs 'wait_for' implementation (see DESIGN.rst)
 # task = telnet_writer.wait_for(lambda: telnet_writer.local_mode[ECHO] == True)
 
-if sys.platform == 'win32':
+if sys.platform == "win32":
+
     @asyncio.coroutine
     def telnet_client_shell(telnet_reader, telnet_writer):
         raise NotImplementedError(
-            'win32 not yet supported as telnet client. Please contribute!')
+            "win32 not yet supported as telnet client. Please contribute!"
+        )
+
 
 else:
     import termios
@@ -40,9 +43,10 @@ else:
         When sys.stdin is a attached to a terminal, it is configured for
         the matching telnet modes negotiated for the given telnet_writer.
         """
+
         ModeDef = collections.namedtuple(
-            'mode', ['iflag', 'oflag', 'cflag', 'lflag',
-                     'ispeed', 'ospeed', 'cc'])
+            "mode", ["iflag", "oflag", "cflag", "lflag", "ispeed", "ospeed", "cc"]
+        )
 
         def __init__(self, telnet_writer, loop=None):
             self.telnet_writer = telnet_writer
@@ -59,15 +63,15 @@ else:
         def __exit__(self, *_):
             if self._istty:
                 termios.tcsetattr(
-                    self._fileno, termios.TCSAFLUSH, list(self._save_mode))
+                    self._fileno, termios.TCSAFLUSH, list(self._save_mode)
+                )
 
         def get_mode(self):
             if self._istty:
                 return self.ModeDef(*termios.tcgetattr(self._fileno))
 
         def set_mode(self, mode):
-            termios.tcsetattr(
-                sys.stdin.fileno(), termios.TCSAFLUSH, list(mode))
+            termios.tcsetattr(sys.stdin.fileno(), termios.TCSAFLUSH, list(mode))
 
         def determine_mode(self, mode):
             """
@@ -77,9 +81,9 @@ else:
 
             if not self.telnet_writer.will_echo:
                 # return mode as-is
-                self.telnet_writer.log.debug('local echo, linemode')
+                self.telnet_writer.log.debug("local echo, linemode")
                 return mode
-            self.telnet_writer.log.debug('server echo, kludge mode')
+            self.telnet_writer.log.debug("server echo, kludge mode")
 
             # "Raw mode", see tty.py function setraw.  This allows sending
             # of ^J, ^C, ^S, ^\, and others, which might otherwise
@@ -87,11 +91,12 @@ else:
             # trust the remote server to manage CR/LF without mapping.
             #
             iflag = mode.iflag & ~(
-                termios.BRKINT |  # Do not send INTR signal on break
-                termios.ICRNL  |  # Do not map CR to NL on input
-                termios.INPCK  |  # Disable input parity checking
-                termios.ISTRIP |  # Do not strip input characters to 7 bits
-                termios.IXON)     # Disable START/STOP output control
+                termios.BRKINT
+                | termios.ICRNL  # Do not send INTR signal on break
+                | termios.INPCK  # Do not map CR to NL on input
+                | termios.ISTRIP  # Disable input parity checking
+                | termios.IXON  # Do not strip input characters to 7 bits
+            )  # Disable START/STOP output control
 
             # Disable parity generation and detection,
             # Select eight bits per byte character size.
@@ -102,7 +107,8 @@ else:
             # disable any other special control characters,
             # disable checking for INTR, QUIT, and SUSP input.
             lflag = mode.lflag & ~(
-                termios.ICANON | termios.IEXTEN | termios.ISIG | termios.ECHO)
+                termios.ICANON | termios.IEXTEN | termios.ISIG | termios.ECHO
+            )
 
             # Disable post-output processing,
             # such as mapping LF('\n') to CRLF('\r\n') in output.
@@ -118,8 +124,14 @@ else:
             cc[termios.VTIME] = 0
 
             return self.ModeDef(
-                iflag=iflag, oflag=oflag, cflag=cflag, lflag=lflag,
-                ispeed=mode.ispeed, ospeed=mode.ospeed, cc=cc)
+                iflag=iflag,
+                oflag=oflag,
+                cflag=cflag,
+                lflag=lflag,
+                ispeed=mode.ispeed,
+                ospeed=mode.ospeed,
+                cc=cc,
+            )
 
         @asyncio.coroutine
         def make_stdio(self):
@@ -146,13 +158,15 @@ else:
 
             writer_transport, writer_protocol = yield from (
                 self.loop.connect_write_pipe(
-                    asyncio.streams.FlowControlMixin, write_fobj))
+                    asyncio.streams.FlowControlMixin, write_fobj
+                )
+            )
 
             writer = asyncio.StreamWriter(
-                writer_transport, writer_protocol, None, self.loop)
+                writer_transport, writer_protocol, None, self.loop
+            )
 
-            yield from self.loop.connect_read_pipe(
-                lambda: reader_protocol, sys.stdin)
+            yield from self.loop.connect_read_pipe(lambda: reader_protocol, sys.stdin)
 
             return reader, writer
 
@@ -171,28 +185,31 @@ else:
         This function is a :func:`~asyncio.coroutine`.
         """
         loop = asyncio.get_event_loop()
-        keyboard_escape = '\x1d'
+        keyboard_escape = "\x1d"
 
         with Terminal(telnet_writer=telnet_writer, loop=loop) as term:
-            linesep = '\n'
+            linesep = "\n"
             if term._istty and telnet_writer.will_echo:
-                linesep = '\r\n'
+                linesep = "\r\n"
             stdin, stdout = yield from term.make_stdio()
-            stdout.write("Escape character is '{escape}'.{linesep}".format(
-                escape=accessories.name_unicode(keyboard_escape),
-                linesep=linesep).encode())
+            stdout.write(
+                "Escape character is '{escape}'.{linesep}".format(
+                    escape=accessories.name_unicode(keyboard_escape), linesep=linesep
+                ).encode()
+            )
 
             stdin_task = accessories.make_reader_task(stdin)
             telnet_task = accessories.make_reader_task(telnet_reader)
             wait_for = set([stdin_task, telnet_task])
             while wait_for:
                 done, pending = yield from asyncio.wait(
-                    wait_for, return_when=asyncio.FIRST_COMPLETED)
+                    wait_for, return_when=asyncio.FIRST_COMPLETED
+                )
 
                 task = done.pop()
                 wait_for.remove(task)
 
-                telnet_writer.log.debug('task=%s, wait_for=%s', task, wait_for)
+                telnet_writer.log.debug("task=%s, wait_for=%s", task, wait_for)
 
                 # client input
                 if task == stdin_task:
@@ -203,14 +220,16 @@ else:
                             telnet_task.cancel()
                             wait_for.remove(telnet_task)
                             stdout.write(
-                                "\033[m{linesep}Connection closed.{linesep}"
-                                .format(linesep=linesep).encode())
+                                "\033[m{linesep}Connection closed.{linesep}".format(
+                                    linesep=linesep
+                                ).encode()
+                            )
                         else:
                             telnet_writer.write(inp.decode())
                             stdin_task = accessories.make_reader_task(stdin)
                             wait_for.add(stdin_task)
                     else:
-                        telnet_writer.log.debug('EOF from client stdin')
+                        telnet_writer.log.debug("EOF from client stdin")
 
                 # server output
                 if task == telnet_task:
@@ -223,11 +242,15 @@ else:
                         if stdin_task in wait_for:
                             stdin_task.cancel()
                             wait_for.remove(stdin_task)
-                        stdout.write(("\033[m{linesep}Connection closed "
-                                      "by foreign host.{linesep}").format(
-                                          linesep=linesep).encode())
+                        stdout.write(
+                            (
+                                "\033[m{linesep}Connection closed "
+                                "by foreign host.{linesep}"
+                            )
+                            .format(linesep=linesep)
+                            .encode()
+                        )
                     else:
-                        stdout.write(out.encode() or b':?!?:')
-                        telnet_task = accessories.make_reader_task(
-                            telnet_reader)
+                        stdout.write(out.encode() or b":?!?:")
+                        telnet_task = accessories.make_reader_task(telnet_reader)
                         wait_for.add(telnet_task)
