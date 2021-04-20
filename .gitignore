@@ -16,3 +16,5 @@ htmlcov
 .DS_Store
 .*.sw?
 .python-version
+.venv/
+.vscode/

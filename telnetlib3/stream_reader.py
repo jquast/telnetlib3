@@ -4,7 +4,10 @@ import codecs
 import asyncio
 import logging
 
-__all__ = ('TelnetReader', 'TelnetReaderUnicode', )
+__all__ = (
+    "TelnetReader",
+    "TelnetReaderUnicode",
+)
 
 
 class TelnetReader(asyncio.StreamReader):
@@ -27,7 +30,7 @@ class TelnetReader(asyncio.StreamReader):
             # raises asyncio.CancelledError
             self._waiter.cancel()
         except asyncio.CancelledError:
-            self.log.debug('Connection closed, _waiter cancelled.')
+            self.log.debug("Connection closed, _waiter cancelled.")
 
     def close(self):
         self._connection_closed = True
@@ -73,18 +76,20 @@ class TelnetReader(asyncio.StreamReader):
         while not_enough:
             while self._buffer and not_enough:
                 search = [
-                    (self._buffer.find(b'\r\n'), b'\r\n'),
-                    (self._buffer.find(b'\r\x00'), b'\r\x00'),
-                    (self._buffer.find(b'\r'), b'\r'),
-                    (self._buffer.find(b'\n'), b'\n'),
+                    (self._buffer.find(b"\r\n"), b"\r\n"),
+                    (self._buffer.find(b"\r\x00"), b"\r\x00"),
+                    (self._buffer.find(b"\r"), b"\r"),
+                    (self._buffer.find(b"\n"), b"\n"),
                 ]
 
                 # sort by (position, length * -1), so that the
                 # smallest sorted value is the longest-match,
                 # preferring '\r\n' over '\r', for example.
-                matches = [(_pos, len(_kind) * -1, _kind)
-                           for _pos, _kind in search
-                           if _pos != -1]
+                matches = [
+                    (_pos, len(_kind) * -1, _kind)
+                    for _pos, _kind in search
+                    if _pos != -1
+                ]
 
                 if not matches:
                     line.extend(self._buffer)
@@ -93,10 +98,10 @@ class TelnetReader(asyncio.StreamReader):
 
                 # position is nearest match,
                 pos, _, kind = min(matches)
-                if kind == b'\r\x00':
+                if kind == b"\r\x00":
                     # trim out '\x00'
                     begin, end = pos + 1, pos + 2
-                elif kind == b'\r\n':
+                elif kind == b"\r\n":
                     begin = end = pos + 2
                 else:
                     # '\r' or '\n'
@@ -109,7 +114,7 @@ class TelnetReader(asyncio.StreamReader):
                 break
 
             if not_enough:
-                yield from self._wait_for_data('readline')
+                yield from self._wait_for_data("readline")
 
         self._maybe_resume_transport()
         buf = bytes(line)
@@ -117,8 +122,10 @@ class TelnetReader(asyncio.StreamReader):
 
     def __repr__(self):
         """Description of stream encoding state."""
-        return ('<TelnetReader encoding=False limit={self._limit} buflen={0} '
-                'eof={self._eof}>'.format(len(self._buffer), self=self))
+        return (
+            "<TelnetReader encoding=False limit={self._limit} buflen={0} "
+            "eof={self._eof}>".format(len(self._buffer), self=self)
+        )
 
 
 class TelnetReaderUnicode(TelnetReader):
@@ -128,8 +135,14 @@ class TelnetReaderUnicode(TelnetReader):
     #: practice, however.
     _decoder = None
 
-    def __init__(self, fn_encoding, *, limit=asyncio.streams._DEFAULT_LIMIT,
-                 loop=None, encoding_errors='replace'):
+    def __init__(
+        self,
+        fn_encoding,
+        *,
+        limit=asyncio.streams._DEFAULT_LIMIT,
+        loop=None,
+        encoding_errors="replace"
+    ):
         """
         A Unicode StreamReader interface for Telnet protocol.
 
@@ -147,15 +160,16 @@ class TelnetReaderUnicode(TelnetReader):
 
     def decode(self, buf, final=False):
         """Decode bytes ``buf`` using preferred encoding."""
-        if buf == b'':
-            return ''  # EOF
+        if buf == b"":
+            return ""  # EOF
 
         encoding = self.fn_encoding(incoming=True)
 
         # late-binding,
-        if (self._decoder is None or encoding != self._decoder._encoding):
+        if self._decoder is None or encoding != self._decoder._encoding:
             self._decoder = codecs.getincrementaldecoder(encoding)(
-                errors=self.encoding_errors)
+                errors=self.encoding_errors
+            )
             self._decoder._encoding = encoding
 
         return self._decoder.decode(buf, final)
@@ -190,7 +204,7 @@ class TelnetReaderUnicode(TelnetReader):
             raise self._exception
 
         if not n:
-            return u''
+            return u""
 
         if n < 0:
             # This used to just loop creating a new waiter hoping to
@@ -204,18 +218,18 @@ class TelnetReaderUnicode(TelnetReader):
                     # eof
                     break
                 blocks.append(block)
-            return u''.join(blocks)
+            return u"".join(blocks)
 
         else:
             if not self._buffer and not self._eof:
-                yield from self._wait_for_data('read')
+                yield from self._wait_for_data("read")
 
         buf = self.decode(bytes(self._buffer))
         if n < 0 or len(buf) <= n:
             u_data = buf
             self._buffer.clear()
         else:
-            u_data = u''
+            u_data = u""
             while n > len(u_data):
                 u_data += self.decode(bytes([self._buffer.pop(0)]))
 
@@ -242,17 +256,18 @@ class TelnetReaderUnicode(TelnetReader):
         while n > 0:
             block = yield from self.read(n)
             if not block:
-                partial = u''.join(blocks)
+                partial = u"".join(blocks)
                 raise asyncio.IncompleteReadError(partial, len(partial) + n)
             blocks.append(block)
             n -= len(block)
 
-        return u''.join(blocks)
+        return u"".join(blocks)
 
     def __repr__(self):
         """Description of stream encoding state."""
         if callable(self.fn_encoding):
             encoding = self.fn_encoding(incoming=True)
-        return ('<TelnetReaderUnicode encoding={0!r} limit={self._limit} '
-                'buflen={1} eof={self._eof}>'.format(
-                    encoding, len(self._buffer), self=self))
+        return (
+            "<TelnetReaderUnicode encoding={0!r} limit={self._limit} "
+            "buflen={1} eof={self._eof}>".format(encoding, len(self._buffer), self=self)
+        )

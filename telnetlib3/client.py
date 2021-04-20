@@ -15,7 +15,7 @@ import os
 from . import accessories
 from . import client_base
 
-__all__ = ('TelnetClient', 'TelnetTerminalClient', 'open_connection')
+__all__ = ("TelnetClient", "TelnetTerminalClient", "open_connection")
 
 
 class TelnetClient(client_base.BaseClient):
@@ -30,60 +30,73 @@ class TelnetClient(client_base.BaseClient):
     #: transmission.  When encoding is specified (utf8 by default), the LANG
     #: variable must also contain a locale, this value is used, providing a
     #: full default LANG value of 'en_US.utf8'
-    DEFAULT_LOCALE = 'en_US'
+    DEFAULT_LOCALE = "en_US"
 
-    def __init__(self, term='unknown', cols=80, rows=25,
-                 tspeed=(38400, 38400), xdisploc='',
-                 *args, **kwargs):
+    def __init__(
+        self,
+        term="unknown",
+        cols=80,
+        rows=25,
+        tspeed=(38400, 38400),
+        xdisploc="",
+        *args,
+        **kwargs
+    ):
         super().__init__(*args, **kwargs)
-        self._extra.update({
-            'charset': kwargs['encoding'] or '',
-            # for our purposes, we only send the second part (encoding) of our
-            # 'lang' variable, CHARSET negotiation does not provide locale
-            # negotiation; this is better left to the real LANG variable
-            # negotiated as-is by send_env().
-            #
-            # So which locale should we represent? Rather than using the
-            # locale.getpreferredencoding() method, we provide a deterministic
-            # class value DEFAULT_LOCALE (en_US), derive and modify as needed.
-            'lang': ('C' if not kwargs['encoding'] else
-                     self.DEFAULT_LOCALE + '.' + kwargs['encoding']),
-            'cols': cols,
-            'rows': rows,
-            'term': term,
-            'tspeed': '{},{}'.format(*tspeed),
-            'xdisploc': xdisploc,
-        })
+        self._extra.update(
+            {
+                "charset": kwargs["encoding"] or "",
+                # for our purposes, we only send the second part (encoding) of our
+                # 'lang' variable, CHARSET negotiation does not provide locale
+                # negotiation; this is better left to the real LANG variable
+                # negotiated as-is by send_env().
+                #
+                # So which locale should we represent? Rather than using the
+                # locale.getpreferredencoding() method, we provide a deterministic
+                # class value DEFAULT_LOCALE (en_US), derive and modify as needed.
+                "lang": (
+                    "C"
+                    if not kwargs["encoding"]
+                    else self.DEFAULT_LOCALE + "." + kwargs["encoding"]
+                ),
+                "cols": cols,
+                "rows": rows,
+                "term": term,
+                "tspeed": "{},{}".format(*tspeed),
+                "xdisploc": xdisploc,
+            }
+        )
 
     def connection_made(self, transport):
         """Callback for connection made to server."""
         from telnetlib3.telopt import TTYPE, TSPEED, XDISPLOC, NEW_ENVIRON
         from telnetlib3.telopt import CHARSET, NAWS
+
         super().connection_made(transport)
 
         # Wire extended rfc callbacks for requests of
         # terminal attributes, environment values, etc.
         for (opt, func) in (
-                (TTYPE, self.send_ttype),
-                (TSPEED, self.send_tspeed),
-                (XDISPLOC, self.send_xdisploc),
-                (NEW_ENVIRON, self.send_env),
-                (NAWS, self.send_naws),
-                (CHARSET, self.send_charset),
-                ):
+            (TTYPE, self.send_ttype),
+            (TSPEED, self.send_tspeed),
+            (XDISPLOC, self.send_xdisploc),
+            (NEW_ENVIRON, self.send_env),
+            (NAWS, self.send_naws),
+            (CHARSET, self.send_charset),
+        ):
             self.writer.set_ext_send_callback(opt, func)
 
     def send_ttype(self):
         """Callback for responding to TTYPE requests."""
-        return self._extra['term']
+        return self._extra["term"]
 
     def send_tspeed(self):
         """Callback for responding to TSPEED requests."""
-        return tuple(map(int, self._extra['tspeed'].split(',')))
+        return tuple(map(int, self._extra["tspeed"].split(",")))
 
     def send_xdisploc(self):
         """Callback for responding to XDISPLOC requests."""
-        return self._extra['xdisploc']
+        return self._extra["xdisploc"]
 
     def send_env(self, keys):
         """
@@ -98,13 +111,13 @@ class TelnetClient(client_base.BaseClient):
         :rtype: dict
         """
         env = {
-            'LANG': self._extra['lang'],
-            'TERM': self._extra['term'],
-            'DISPLAY': self._extra['xdisploc'],
-            'LINES': self._extra['rows'],
-            'COLUMNS': self._extra['cols'],
+            "LANG": self._extra["lang"],
+            "TERM": self._extra["term"],
+            "DISPLAY": self._extra["xdisploc"],
+            "LINES": self._extra["rows"],
+            "COLUMNS": self._extra["cols"],
         }
-        return {key: env.get(key, '') for key in keys} or env
+        return {key: env.get(key, "") for key in keys} or env
 
     def send_charset(self, offered):
         """
@@ -124,23 +137,23 @@ class TelnetClient(client_base.BaseClient):
         :returns: character encoding agreed to be used.
         :rtype: Union[str, None]
         """
-        selected = ''
+        selected = ""
         for offer in offered:
             try:
                 codec = codecs.lookup(offer)
             except LookupError as err:
-                self.log.info('LookupError: {}'.format(err))
+                self.log.info("LookupError: {}".format(err))
             else:
-                if (codec.name == self.default_encoding or not selected):
-                    self._extra['charset'] = codec.name
-                    self._extra['lang'] = (
-                        self.DEFAULT_LOCALE + '.' + codec.name)
+                if codec.name == self.default_encoding or not selected:
+                    self._extra["charset"] = codec.name
+                    self._extra["lang"] = self.DEFAULT_LOCALE + "." + codec.name
                     selected = offer
         if selected:
-            self.log.debug('encoding negotiated: {0}'.format(selected))
+            self.log.debug("encoding negotiated: {0}".format(selected))
         else:
-            self.log.warning('No suitable encoding offered by server: {!r}.'
-                             .format(offered))
+            self.log.warning(
+                "No suitable encoding offered by server: {!r}.".format(offered)
+            )
         return selected
 
     def send_naws(self):
@@ -150,7 +163,7 @@ class TelnetClient(client_base.BaseClient):
         :rtype: (int, int)
         :returns: client window size as (rows, columns).
         """
-        return (self._extra['rows'], self._extra['cols'])
+        return (self._extra["rows"], self._extra["cols"])
 
     def encoding(self, outgoing=None, incoming=None):
         """
@@ -168,25 +181,28 @@ class TelnetClient(client_base.BaseClient):
         :rtype: str
         """
         if not (outgoing or incoming):
-            raise TypeError("encoding arguments 'outgoing' and 'incoming' "
-                            "are required: toggle at least one.")
+            raise TypeError(
+                "encoding arguments 'outgoing' and 'incoming' "
+                "are required: toggle at least one."
+            )
 
         # may we encode in the direction indicated?
         _outgoing_only = outgoing and not incoming
         _incoming_only = not outgoing and incoming
         _bidirectional = outgoing and incoming
-        may_encode = ((_outgoing_only and self.writer.outbinary) or
-                      (_incoming_only and self.writer.inbinary) or
-                      (_bidirectional and
-                       self.writer.outbinary and self.writer.inbinary))
+        may_encode = (
+            (_outgoing_only and self.writer.outbinary)
+            or (_incoming_only and self.writer.inbinary)
+            or (_bidirectional and self.writer.outbinary and self.writer.inbinary)
+        )
 
         if self.force_binary or may_encode:
             # The 'charset' value, initialized using keyword argument
             # default_encoding, may be re-negotiated later.  Only the CHARSET
             # negotiation method allows the server to select an encoding, so
             # this value is reflected here by a single return statement.
-            return self._extra['charset']
-        return 'US-ASCII'
+            return self._extra["charset"]
+        return "US-ASCII"
 
 
 class TelnetTerminalClient(TelnetClient):
@@ -209,7 +225,7 @@ class TelnetTerminalClient(TelnetClient):
         :returns: super class value updated with window LINES and COLUMNS.
         """
         env = super().send_env(keys)
-        env['LINES'], env['COLUMNS'] = self._winsize()
+        env["LINES"], env["COLUMNS"] = self._winsize()
         return env
 
     @staticmethod
@@ -217,26 +233,46 @@ class TelnetTerminalClient(TelnetClient):
         try:
             import fcntl
             import termios
-            fmt = 'hhhh'
-            buf = '\x00' * struct.calcsize(fmt)
+
+            fmt = "hhhh"
+            buf = "\x00" * struct.calcsize(fmt)
             val = fcntl.ioctl(sys.stdin.fileno(), termios.TIOCGWINSZ, buf)
             rows, cols, _, _ = struct.unpack(fmt, val)
             return rows, cols
         except (ImportError, IOError):
             # TODO: mock import error, or test on windows or other non-posix.
-            return (int(os.environ.get('LINES', 25)),
-                    int(os.environ.get('COLUMNS', 80)))
+            return (
+                int(os.environ.get("LINES", 25)),
+                int(os.environ.get("COLUMNS", 80)),
+            )
 
 
 @asyncio.coroutine
-def open_connection(host=None, port=23, *, client_factory=None, loop=None,
-                    family=0, flags=0, local_addr=None, log=None,
-                    encoding='utf8', encoding_errors='replace',
-                    force_binary=False, term='unknown', cols=80, rows=25,
-                    tspeed=(38400, 38400), xdisploc='', shell=None,
-                    connect_minwait=2.0, connect_maxwait=3.0,
-                    waiter_closed=None, _waiter_connected=None,
-                    limit=None):
+def open_connection(
+    host=None,
+    port=23,
+    *,
+    client_factory=None,
+    loop=None,
+    family=0,
+    flags=0,
+    local_addr=None,
+    log=None,
+    encoding="utf8",
+    encoding_errors="replace",
+    force_binary=False,
+    term="unknown",
+    cols=80,
+    rows=25,
+    tspeed=(38400, 38400),
+    xdisploc="",
+    shell=None,
+    connect_minwait=2.0,
+    connect_maxwait=3.0,
+    waiter_closed=None,
+    _waiter_connected=None,
+    limit=None
+):
     """
     Connect to a TCP Telnet server as a Telnet client.
 
@@ -313,21 +349,36 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
 
     if client_factory is None:
         client_factory = TelnetClient
-        if sys.platform != 'win32' and sys.stdin.isatty():
+        if sys.platform != "win32" and sys.stdin.isatty():
             client_factory = TelnetTerminalClient
 
     def connection_factory():
         return client_factory(
-            log=log, encoding=encoding, encoding_errors=encoding_errors,
-            force_binary=force_binary, term=term, cols=cols, rows=rows,
-            tspeed=tspeed, xdisploc=xdisploc, shell=shell,
-            connect_minwait=connect_minwait, connect_maxwait=connect_maxwait,
-            waiter_closed=waiter_closed, _waiter_connected=_waiter_connected,
-            limit=limit)
+            log=log,
+            encoding=encoding,
+            encoding_errors=encoding_errors,
+            force_binary=force_binary,
+            term=term,
+            cols=cols,
+            rows=rows,
+            tspeed=tspeed,
+            xdisploc=xdisploc,
+            shell=shell,
+            connect_minwait=connect_minwait,
+            connect_maxwait=connect_maxwait,
+            waiter_closed=waiter_closed,
+            _waiter_connected=_waiter_connected,
+            limit=limit,
+        )
 
     transport, protocol = yield from loop.create_connection(
-        connection_factory, host, port,
-        family=family, flags=flags, local_addr=local_addr)
+        connection_factory,
+        host,
+        port,
+        family=family,
+        flags=flags,
+        local_addr=local_addr,
+    )
 
     yield from protocol._waiter_connected
 
@@ -337,24 +388,24 @@ def open_connection(host=None, port=23, *, client_factory=None, loop=None,
 def main():
     """Command-line 'telnetlib3-client' entry point, via setuptools."""
     kwargs = _transform_args(_get_argument_parser().parse_args())
-    config_msg = (
-        'Client configuration: {key_values}'
-        .format(key_values=accessories.repr_mapping(kwargs)))
-    host = kwargs.pop('host')
-    port = kwargs.pop('port')
+    config_msg = "Client configuration: {key_values}".format(
+        key_values=accessories.repr_mapping(kwargs)
+    )
+    host = kwargs.pop("host")
+    port = kwargs.pop("port")
 
-    log = kwargs['log'] = accessories.make_logger(
+    log = kwargs["log"] = accessories.make_logger(
         name=__name__,
-        loglevel=kwargs.pop('loglevel'),
-        logfile=kwargs.pop('logfile'),
-        logfmt=kwargs.pop('logfmt'))
+        loglevel=kwargs.pop("loglevel"),
+        logfile=kwargs.pop("logfile"),
+        logfmt=kwargs.pop("logfmt"),
+    )
     log.debug(config_msg)
 
     loop = asyncio.get_event_loop()
 
     # connect
-    reader, writer = loop.run_until_complete(
-        open_connection(host, port, **kwargs))
+    reader, writer = loop.run_until_complete(open_connection(host, port, **kwargs))
 
     # repl loop
     loop.run_until_complete(writer.protocol.waiter_closed)
@@ -363,55 +414,62 @@ def main():
 def _get_argument_parser():
     parser = argparse.ArgumentParser(
         description="Telnet protocol client",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('host', action='store',
-                        help='hostname')
-    parser.add_argument('port', nargs='?', default=23, type=int,
-                        help='port number')
-    parser.add_argument('--term', default=os.environ.get('TERM', 'unknown'),
-                        help='terminal type')
-    parser.add_argument('--loglevel', default='warn',
-                        help='log level')
-    parser.add_argument('--logfmt', default=accessories._DEFAULT_LOGFMT,
-                        help='log format')
-    parser.add_argument('--logfile',
-                        help='filepath')
-    parser.add_argument('--shell', default='telnetlib3.telnet_client_shell',
-                        help='module.function_name')
-    parser.add_argument('--encoding', default='utf8',
-                        help='encoding name')
-    parser.add_argument('--speed', default=38400, type=int,
-                        help='connection speed')
-    parser.add_argument('--encoding-errors', default='replace',
-                        help='handler for encoding errors',
-                        choices=('replace', 'ignore', 'strict'))
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("host", action="store", help="hostname")
+    parser.add_argument("port", nargs="?", default=23, type=int, help="port number")
+    parser.add_argument(
+        "--term", default=os.environ.get("TERM", "unknown"), help="terminal type"
+    )
+    parser.add_argument("--loglevel", default="warn", help="log level")
+    parser.add_argument(
+        "--logfmt", default=accessories._DEFAULT_LOGFMT, help="log format"
+    )
+    parser.add_argument("--logfile", help="filepath")
+    parser.add_argument(
+        "--shell", default="telnetlib3.telnet_client_shell", help="module.function_name"
+    )
+    parser.add_argument("--encoding", default="utf8", help="encoding name")
+    parser.add_argument("--speed", default=38400, type=int, help="connection speed")
+    parser.add_argument(
+        "--encoding-errors",
+        default="replace",
+        help="handler for encoding errors",
+        choices=("replace", "ignore", "strict"),
+    )
 
-    parser.add_argument('--force-binary', action='store_true',
-                        help='force encoding', default=True)
-    parser.add_argument('--connect-minwait', default=1.0, type=float,
-                        help='shell delay for negotiation')
-    parser.add_argument('--connect-maxwait', default=4.0, type=float,
-                        help='timeout for pending negotiation')
+    parser.add_argument(
+        "--force-binary", action="store_true", help="force encoding", default=True
+    )
+    parser.add_argument(
+        "--connect-minwait", default=1.0, type=float, help="shell delay for negotiation"
+    )
+    parser.add_argument(
+        "--connect-maxwait",
+        default=4.0,
+        type=float,
+        help="timeout for pending negotiation",
+    )
     return parser
 
 
 def _transform_args(args):
     # TODO: Connect as exit(main(**parse_args(sys.argv)))
     return {
-        'host': args.host,
-        'port': args.port,
-        'loglevel': args.loglevel,
-        'logfile': args.logfile,
-        'logfmt': args.logfmt,
-        'encoding': args.encoding,
-        'tspeed': (args.speed, args.speed),
-        'shell': accessories.function_lookup(args.shell),
-        'term': args.term,
-        'force_binary': args.force_binary,
-        'encoding_errors': args.encoding_errors,
-        'connect_minwait': args.connect_minwait,
+        "host": args.host,
+        "port": args.port,
+        "loglevel": args.loglevel,
+        "logfile": args.logfile,
+        "logfmt": args.logfmt,
+        "encoding": args.encoding,
+        "tspeed": (args.speed, args.speed),
+        "shell": accessories.function_lookup(args.shell),
+        "term": args.term,
+        "force_binary": args.force_binary,
+        "encoding_errors": args.encoding_errors,
+        "connect_minwait": args.connect_minwait,
     }
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     exit(main())

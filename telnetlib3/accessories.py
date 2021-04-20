@@ -5,8 +5,15 @@ import importlib
 import logging
 import asyncio
 
-__all__ = ('encoding_from_lang', 'name_unicode', 'eightbits', 'make_logger',
-           'repr_mapping', 'function_lookup', 'make_reader_task')
+__all__ = (
+    "encoding_from_lang",
+    "name_unicode",
+    "eightbits",
+    "make_logger",
+    "repr_mapping",
+    "function_lookup",
+    "make_reader_task",
+)
 
 
 def get_version():
@@ -23,10 +30,10 @@ def encoding_from_lang(lang):
         'UTF-8'
     """
     encoding = lang
-    if '.' in lang:
-        _, encoding = lang.split('.', 1)
-    if '@' in encoding:
-        encoding, _ = encoding.split('@', 1)
+    if "." in lang:
+        _, encoding = lang.split(".", 1)
+    if "@" in encoding:
+        encoding, _ = encoding.split("@", 1)
     return encoding
 
 
@@ -41,9 +48,9 @@ def name_unicode(ucs):
     elif bits == 127:
         rep = "^?"
     elif bits < 32:
-        rep = "^" + chr(((bits & 0x7f) | 0x20) + 0x20)
+        rep = "^" + chr(((bits & 0x7F) | 0x20) + 0x20)
     else:
-        rep = r'\x{:02x}'.format(bits)
+        rep = r"\x{:02x}".format(bits)
     return rep
 
 
@@ -57,36 +64,41 @@ def eightbits(number):
         '0b01100001'
     """
     # useful only so far in context of a forwardmask or any bitmask.
-    prefix, value = bin(number).split('b')
-    return '0b%0.8i' % (int(value),)
+    prefix, value = bin(number).split("b")
+    return "0b%0.8i" % (int(value),)
 
-_DEFAULT_LOGFMT = ' '.join(('%(asctime)s',
-                            '%(levelname)s',
-                            '%(filename)s:%(lineno)d',
-                            '%(message)s'))
-def make_logger(name, loglevel='info', logfile=None, logfmt=_DEFAULT_LOGFMT):
+
+_DEFAULT_LOGFMT = " ".join(
+    ("%(asctime)s", "%(levelname)s", "%(filename)s:%(lineno)d", "%(message)s")
+)
+
+
+def make_logger(name, loglevel="info", logfile=None, logfmt=_DEFAULT_LOGFMT):
     """Create and return simple logger for given arguments."""
     lvl = getattr(logging, loglevel.upper())
     logging.getLogger().setLevel(lvl)
 
-    _cfg = {'format': logfmt}
+    _cfg = {"format": logfmt}
     if logfile:
-        _cfg['filename'] = logfile
+        _cfg["filename"] = logfile
     logging.basicConfig(**_cfg)
     return logging.getLogger(name)
 
+
 def repr_mapping(mapping):
     """Return printable string, 'key=value [key=value ...]' for mapping."""
-    return ' '.join('='.join(map(str, kv)) for kv in mapping.items())
+    return " ".join("=".join(map(str, kv)) for kv in mapping.items())
+
 
 def function_lookup(pymod_path):
     """Return callable function target from standard module.function path."""
-    module_name, func_name = pymod_path.rsplit('.', 1)
+    module_name, func_name = pymod_path.rsplit(".", 1)
     module = importlib.import_module(module_name)
     shell_function = getattr(module, func_name)
     assert callable(shell_function), shell_function
     return shell_function
 
-def make_reader_task(reader, size=2**12):
+
+def make_reader_task(reader, size=2 ** 12):
     """Return asyncio task wrapping coroutine of reader.read(size)."""
     return asyncio.ensure_future(reader.read(size))

@@ -20,19 +20,39 @@ from weakref import proxy
 from . import server_base
 from . import accessories
 
-__all__ = ('TelnetServer', 'create_server', 'run_server', 'parse_server_args')
+__all__ = ("TelnetServer", "create_server", "run_server", "parse_server_args")
 
-CONFIG = collections.namedtuple('CONFIG', [
-    'host', 'port', 'loglevel', 'logfile', 'logfmt', 'shell', 'encoding',
-    'force_binary', 'timeout', 'connect_maxwait'])(
-        host='localhost', port=6023, loglevel='info',
-        logfile=None, logfmt=accessories._DEFAULT_LOGFMT ,
-        shell=accessories.function_lookup('telnetlib3.telnet_server_shell'),
-        encoding='utf8', force_binary=False, timeout=300, connect_maxwait=4.0)
+CONFIG = collections.namedtuple(
+    "CONFIG",
+    [
+        "host",
+        "port",
+        "loglevel",
+        "logfile",
+        "logfmt",
+        "shell",
+        "encoding",
+        "force_binary",
+        "timeout",
+        "connect_maxwait",
+    ],
+)(
+    host="localhost",
+    port=6023,
+    loglevel="info",
+    logfile=None,
+    logfmt=accessories._DEFAULT_LOGFMT,
+    shell=accessories.function_lookup("telnetlib3.telnet_server_shell"),
+    encoding="utf8",
+    force_binary=False,
+    timeout=300,
+    connect_maxwait=4.0,
+)
 
 
 class TelnetServer(server_base.BaseServer):
     """Telnet Server protocol performing common negotiation."""
+
     #: Maximum number of cycles to seek for all terminal types.  We are seeking
     #: the repeat or cycle of a terminal table, choosing the first -- but when
     #: negotiated by MUD clients, we chose the must Unix TERM appropriate,
@@ -40,23 +60,25 @@ class TelnetServer(server_base.BaseServer):
 
     # Derived methods from base class
 
-    def __init__(self, term='unknown', cols=80, rows=25, timeout=300,
-                 *args, **kwargs):
+    def __init__(self, term="unknown", cols=80, rows=25, timeout=300, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.waiter_encoding = asyncio.Future()
         self._tasks.append(self.waiter_encoding)
         self._ttype_count = 1
         self._timer = None
-        self._extra.update({
-            'term': term,
-            'charset': kwargs.get('encoding', ''),
-            'cols': cols,
-            'rows': rows,
-            'timeout': timeout
-        })
+        self._extra.update(
+            {
+                "term": term,
+                "charset": kwargs.get("encoding", ""),
+                "cols": cols,
+                "rows": rows,
+                "timeout": timeout,
+            }
+        )
 
     def connection_made(self, transport):
         from .telopt import NAWS, NEW_ENVIRON, TSPEED, TTYPE, XDISPLOC, CHARSET
+
         super().connection_made(transport)
 
         # begin timeout timer
@@ -87,12 +109,13 @@ class TelnetServer(server_base.BaseServer):
 
     def begin_negotiation(self):
         from .telopt import DO, TTYPE
+
         super().begin_negotiation()
         self.writer.iac(DO, TTYPE)
 
     def begin_advanced_negotiation(self):
-        from .telopt import (DO, WILL, SGA, ECHO, BINARY,
-                             NEW_ENVIRON, NAWS, CHARSET)
+        from .telopt import DO, WILL, SGA, ECHO, BINARY, NEW_ENVIRON, NAWS, CHARSET
+
         super().begin_advanced_negotiation()
         self.writer.iac(WILL, SGA)
         self.writer.iac(WILL, ECHO)
@@ -104,6 +127,7 @@ class TelnetServer(server_base.BaseServer):
 
     def check_negotiation(self, final=False):
         from .telopt import TTYPE
+
         parent = super().check_negotiation()
 
         # in addition to the base class negotiation check, periodically check
@@ -111,22 +135,26 @@ class TelnetServer(server_base.BaseServer):
         result = self._check_encoding()
         encoding = self.encoding(outgoing=True, incoming=True)
         if not self.waiter_encoding.done() and result:
-            self.log.debug('encoding complete: {0!r}'.format(encoding))
+            self.log.debug("encoding complete: {0!r}".format(encoding))
             self.waiter_encoding.set_result(proxy(self))
 
-        elif (not self.waiter_encoding.done() and
-              self.writer.remote_option.get(TTYPE) is False):
+        elif (
+            not self.waiter_encoding.done()
+            and self.writer.remote_option.get(TTYPE) is False
+        ):
             # if the remote end doesn't support TTYPE, which is agreed upon
             # to continue towards advanced negotiation of CHARSET, we assume
             # the distant end would not support it, declaring encoding failed.
-            self.log.debug('encoding failed after {0:1.2f}s: {1}'
-                           .format(self.duration, encoding))
+            self.log.debug(
+                "encoding failed after {0:1.2f}s: {1}".format(self.duration, encoding)
+            )
             self.waiter_encoding.set_result(proxy(self))
             return parent
 
         elif not self.waiter_encoding.done() and final:
-            self.log.debug('encoding failed after {0:1.2f}s: {1}'
-                           .format(self.duration, encoding))
+            self.log.debug(
+                "encoding failed after {0:1.2f}s: {1}".format(self.duration, encoding)
+            )
             self.waiter_encoding.set_result(proxy(self))
             return parent
 
@@ -150,30 +178,33 @@ class TelnetServer(server_base.BaseServer):
         :rtype: str
         """
         if not (outgoing or incoming):
-            raise TypeError("encoding arguments 'outgoing' and 'incoming' "
-                            "are required: toggle at least one.")
+            raise TypeError(
+                "encoding arguments 'outgoing' and 'incoming' "
+                "are required: toggle at least one."
+            )
 
         # may we encode in the direction indicated?
         _outgoing_only = outgoing and not incoming
         _incoming_only = not outgoing and incoming
         _bidirectional = outgoing and incoming
-        may_encode = ((_outgoing_only and self.writer.outbinary) or
-                      (_incoming_only and self.writer.inbinary) or
-                      (_bidirectional and
-                       self.writer.outbinary and self.writer.inbinary))
+        may_encode = (
+            (_outgoing_only and self.writer.outbinary)
+            or (_incoming_only and self.writer.inbinary)
+            or (_bidirectional and self.writer.outbinary and self.writer.inbinary)
+        )
 
         if self.force_binary or may_encode:
             # prefer 'LANG' environment variable forwarded by client, if any.
             # for modern systems, this is the preferred method of encoding
             # negotiation.
-            _lang = self.get_extra_info('LANG', '')
-            if _lang and _lang != 'C':
+            _lang = self.get_extra_info("LANG", "")
+            if _lang and _lang != "C":
                 return accessories.encoding_from_lang(_lang)
 
             # otherwise, the less CHARSET negotiation may be found in many
             # East-Asia BBS and Western MUD systems.
-            return self.get_extra_info('charset') or self.default_encoding
-        return 'US-ASCII'
+            return self.get_extra_info("charset") or self.default_encoding
+        return "US-ASCII"
 
     def set_timeout(self, duration=-1):
         """
@@ -185,7 +216,7 @@ class TelnetServer(server_base.BaseServer):
             non-True, it is canceled.
         """
         if duration == -1:
-            duration = self.get_extra_info('timeout')
+            duration = self.get_extra_info("timeout")
         if self._timer is not None:
             if self._timer in self._tasks:
                 self._tasks.remove(self._timer)
@@ -193,7 +224,7 @@ class TelnetServer(server_base.BaseServer):
         if duration:
             self._timer = self._loop.call_later(duration, self.on_timeout)
             self._tasks.append(self._timer)
-        self._extra['timeout'] = duration
+        self._extra["timeout"] = duration
 
     # Callback methods
 
@@ -207,8 +238,8 @@ class TelnetServer(server_base.BaseServer):
         :paramref:`~.set_timeout.duration` value of ``0`` or value of
         the same for keyword argument ``timeout``.
         """
-        self.log.debug('Timeout after {self.idle:1.2f}s'.format(self=self))
-        self.writer.write('\r\nTimeout.\r\n')
+        self.log.debug("Timeout after {self.idle:1.2f}s".format(self=self))
+        self.writer.write("\r\nTimeout.\r\n")
         self.timeout_connection()
 
     def on_naws(self, rows, cols):
@@ -218,7 +249,7 @@ class TelnetServer(server_base.BaseServer):
         :param int rows: screen size, by number of cells in height.
         :param int cols: screen size, by number of cells in width.
         """
-        self._extra.update({'rows': rows, 'cols': cols})
+        self._extra.update({"rows": rows, "cols": cols})
 
     def on_request_environ(self):
         """
@@ -242,8 +273,17 @@ class TelnetServer(server_base.BaseServer):
              VAR, USERVAR, 'COLORTERM']
         """
         from .telopt import VAR, USERVAR
-        return ['LANG', 'TERM', 'COLUMNS', 'LINES', 'DISPLAY', 'COLORTERM',
-                VAR, USERVAR]
+
+        return [
+            "LANG",
+            "TERM",
+            "COLUMNS",
+            "LINES",
+            "DISPLAY",
+            "COLORTERM",
+            VAR,
+            USERVAR,
+        ]
 
     def on_environ(self, mapping):
         """Callback receives NEW_ENVIRON response, :rfc:`1572`."""
@@ -251,9 +291,9 @@ class TelnetServer(server_base.BaseServer):
         # mean "no value".  They might have it, they just may not wish to
         # divulge that information.  We pop these keys as a side effect in
         # the result statement of the following list comprehension.
-        no_value = [mapping.pop(key) or key
-                    for key, val in list(mapping.items())
-                    if not val]
+        no_value = [
+            mapping.pop(key) or key for key, val in list(mapping.items()) if not val
+        ]
 
         # because we are working with "untrusted input", we make one fair
         # distinction: all keys received by NEW_ENVIRON are in uppercase.
@@ -261,7 +301,7 @@ class TelnetServer(server_base.BaseServer):
         # 'peer'.
         u_mapping = {key.upper(): val for key, val in list(mapping.items())}
 
-        self.log.debug('on_environ received: {0!r}'.format(u_mapping))
+        self.log.debug("on_environ received: {0!r}".format(u_mapping))
 
         self._extra.update(u_mapping)
 
@@ -283,27 +323,76 @@ class TelnetServer(server_base.BaseServer):
 
             ['UTF-8', 'UTF-16', 'LATIN1', 'US-ASCII', 'BIG5', 'GBK', ...]
         """
-        return ['UTF-8', 'UTF-16', 'LATIN1', 'US-ASCII', 'BIG5',
-                'GBK', 'SHIFTJIS', 'GB18030', 'KOI8-R', 'KOI8-U',
-                ] + [
-                    # "Part 12 was slated for Latin/Devanagari,
-                    # but abandoned in 1997"
-                    'ISO8859-{}'.format(iso) for iso in range(1, 16)
-                    if iso != 12
-                ] + ['CP{}'.format(cp) for cp in (
-                    154, 437, 500, 737, 775, 850, 852, 855, 856, 857,
-                    860, 861, 862, 863, 864, 865, 866, 869, 874, 875,
-                    932, 949, 950, 1006, 1026, 1140, 1250, 1251, 1252,
-                    1253, 1254, 1255, 1257, 1257, 1258, 1361,
-                )]
+        return (
+            [
+                "UTF-8",
+                "UTF-16",
+                "LATIN1",
+                "US-ASCII",
+                "BIG5",
+                "GBK",
+                "SHIFTJIS",
+                "GB18030",
+                "KOI8-R",
+                "KOI8-U",
+            ]
+            + [
+                # "Part 12 was slated for Latin/Devanagari,
+                # but abandoned in 1997"
+                "ISO8859-{}".format(iso)
+                for iso in range(1, 16)
+                if iso != 12
+            ]
+            + [
+                "CP{}".format(cp)
+                for cp in (
+                    154,
+                    437,
+                    500,
+                    737,
+                    775,
+                    850,
+                    852,
+                    855,
+                    856,
+                    857,
+                    860,
+                    861,
+                    862,
+                    863,
+                    864,
+                    865,
+                    866,
+                    869,
+                    874,
+                    875,
+                    932,
+                    949,
+                    950,
+                    1006,
+                    1026,
+                    1140,
+                    1250,
+                    1251,
+                    1252,
+                    1253,
+                    1254,
+                    1255,
+                    1257,
+                    1257,
+                    1258,
+                    1361,
+                )
+            ]
+        )
 
     def on_charset(self, charset):
         """Callback for CHARSET response, :rfc:`2066`."""
-        self._extra['charset'] = charset
+        self._extra["charset"] = charset
 
     def on_tspeed(self, rx, tx):
         """Callback for TSPEED response, :rfc:`1079`."""
-        self._extra['tspeed'] = '{0},{1}'.format(rx, tx)
+        self._extra["tspeed"] = "{0},{1}".format(rx, tx)
 
     def on_ttype(self, ttype):
         """Callback for TTYPE response, :rfc:`930`."""
@@ -314,52 +403,54 @@ class TelnetServer(server_base.BaseServer):
         #
         # The most recently received terminal type by the server is
         # assumed TERM by this implementation, even when unsolicited.
-        key = 'ttype{}'.format(self._ttype_count)
+        key = "ttype{}".format(self._ttype_count)
         self._extra[key] = ttype
         if ttype:
-            self._extra['TERM'] = ttype
+            self._extra["TERM"] = ttype
 
-        _lastval = self.get_extra_info('ttype{0}'.format(
-            self._ttype_count - 1))
+        _lastval = self.get_extra_info("ttype{0}".format(self._ttype_count - 1))
 
-        if key != 'ttype1' and ttype == self.get_extra_info('ttype1', None):
+        if key != "ttype1" and ttype == self.get_extra_info("ttype1", None):
             # cycle has looped, stop
-            self.log.debug('ttype cycle stop at {0}: {1}, looped.'
-                           .format(key, ttype))
+            self.log.debug("ttype cycle stop at {0}: {1}, looped.".format(key, ttype))
 
-        elif (not ttype or self._ttype_count > self.TTYPE_LOOPMAX):
+        elif not ttype or self._ttype_count > self.TTYPE_LOOPMAX:
             # empty reply string or too many responses!
-            self.log.warning('ttype cycle stop at {0}: {1}.'.format(key, ttype))
+            self.log.warning("ttype cycle stop at {0}: {1}.".format(key, ttype))
 
-        elif (self._ttype_count == 3 and ttype.upper().startswith('MTTS ')):
-            val = self.get_extra_info('ttype2')
+        elif self._ttype_count == 3 and ttype.upper().startswith("MTTS "):
+            val = self.get_extra_info("ttype2")
             self.log.debug(
-                'ttype cycle stop at {0}: {1}, using {2} from ttype2.'
-                .format(key, ttype, val))
-            self._extra['TERM'] = val
+                "ttype cycle stop at {0}: {1}, using {2} from ttype2.".format(
+                    key, ttype, val
+                )
+            )
+            self._extra["TERM"] = val
 
-        elif (ttype == _lastval):
-            self.log.debug('ttype cycle stop at {0}: {1}, repeated.'
-                           .format(key, ttype))
+        elif ttype == _lastval:
+            self.log.debug("ttype cycle stop at {0}: {1}, repeated.".format(key, ttype))
 
         else:
-            self.log.debug('ttype cycle cont at {0}: {1}.'
-                           .format(key, ttype))
+            self.log.debug("ttype cycle cont at {0}: {1}.".format(key, ttype))
             self._ttype_count += 1
             self.writer.request_ttype()
 
     def on_xdisploc(self, xdisploc):
         """Callback for XDISPLOC response, :rfc:`1096`."""
-        self._extra['xdisploc'] = xdisploc
+        self._extra["xdisploc"] = xdisploc
 
     # private methods
 
     def _check_encoding(self):
         # Periodically check for completion of ``waiter_encoding``.
         from .telopt import DO, BINARY
-        if (self.writer.outbinary and not self.writer.inbinary and
-                not DO + BINARY in self.writer.pending_option):
-            self.log.debug('BINARY in: direction request.')
+
+        if (
+            self.writer.outbinary
+            and not self.writer.inbinary
+            and not DO + BINARY in self.writer.pending_option
+        ):
+            self.log.debug("BINARY in: direction request.")
             self.writer.iac(DO, BINARY)
             return False
 
@@ -424,15 +515,14 @@ def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwds):
     This function is a :func:`~asyncio.coroutine`.
     """
     protocol_factory = protocol_factory or TelnetServer
-    loop = kwds.get('loop', asyncio.get_event_loop())
+    loop = kwds.get("loop", asyncio.get_event_loop())
 
-    return (yield from loop.create_server(
-        lambda: protocol_factory(**kwds), host, port))
+    return (yield from loop.create_server(lambda: protocol_factory(**kwds), host, port))
 
 
 @asyncio.coroutine
 def _sigterm_handler(server, log):
-    log.info('SIGTERM received, closing server.')
+    log.info("SIGTERM received, closing server.")
 
     # This signals the completion of the server.wait_closed() Future,
     # allowing the main() function to complete.
@@ -442,38 +532,52 @@ def _sigterm_handler(server, log):
 def parse_server_args():
     parser = argparse.ArgumentParser(
         description="Telnet protocol server",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('host', nargs='?', default=CONFIG.host,
-                        help='bind address')
-    parser.add_argument('port', nargs='?', type=int, default=CONFIG.port,
-                        help='bind port')
-    parser.add_argument('--loglevel', default=CONFIG.loglevel,
-                        help='level name')
-    parser.add_argument('--logfile', default=CONFIG.logfile,
-                        help='filepath')
-    parser.add_argument('--logfmt', default=CONFIG.logfmt,
-                        help='log format')
-    parser.add_argument('--shell', default=CONFIG.shell,
-                        type=accessories.function_lookup,
-                        help='module.function_name')
-    parser.add_argument('--encoding', default=CONFIG.encoding,
-                        help='encoding name')
-    parser.add_argument('--force-binary', action='store_true',
-                        default=CONFIG.force_binary,
-                        help='force binary transmission')
-    parser.add_argument('--timeout', default=CONFIG.timeout,
-                        help='idle disconnect (0 disables)')
-    parser.add_argument('--connect-maxwait', type=float,
-                        default=CONFIG.connect_maxwait,
-                        help='timeout for pending negotiation')
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("host", nargs="?", default=CONFIG.host, help="bind address")
+    parser.add_argument(
+        "port", nargs="?", type=int, default=CONFIG.port, help="bind port"
+    )
+    parser.add_argument("--loglevel", default=CONFIG.loglevel, help="level name")
+    parser.add_argument("--logfile", default=CONFIG.logfile, help="filepath")
+    parser.add_argument("--logfmt", default=CONFIG.logfmt, help="log format")
+    parser.add_argument(
+        "--shell",
+        default=CONFIG.shell,
+        type=accessories.function_lookup,
+        help="module.function_name",
+    )
+    parser.add_argument("--encoding", default=CONFIG.encoding, help="encoding name")
+    parser.add_argument(
+        "--force-binary",
+        action="store_true",
+        default=CONFIG.force_binary,
+        help="force binary transmission",
+    )
+    parser.add_argument(
+        "--timeout", default=CONFIG.timeout, help="idle disconnect (0 disables)"
+    )
+    parser.add_argument(
+        "--connect-maxwait",
+        type=float,
+        default=CONFIG.connect_maxwait,
+        help="timeout for pending negotiation",
+    )
     return vars(parser.parse_args())
 
 
-def run_server(host=CONFIG.host, port=CONFIG.port, loglevel=CONFIG.loglevel,
-               logfile=CONFIG.logfile, logfmt=CONFIG.logfmt,
-               shell=CONFIG.shell, encoding=CONFIG.encoding,
-               force_binary=CONFIG.force_binary, timeout=CONFIG.timeout,
-               connect_maxwait=CONFIG.connect_maxwait):
+def run_server(
+    host=CONFIG.host,
+    port=CONFIG.port,
+    loglevel=CONFIG.loglevel,
+    logfile=CONFIG.logfile,
+    logfmt=CONFIG.logfmt,
+    shell=CONFIG.shell,
+    encoding=CONFIG.encoding,
+    force_binary=CONFIG.force_binary,
+    timeout=CONFIG.timeout,
+    connect_maxwait=CONFIG.connect_maxwait,
+):
     """
     Program entry point for server daemon.
 
@@ -482,28 +586,37 @@ def run_server(host=CONFIG.host, port=CONFIG.port, loglevel=CONFIG.loglevel,
     SIGTERM.
     """
     log = accessories.make_logger(
-        name='telnetlib3.server', loglevel=loglevel,
-        logfile=logfile, logfmt=logfmt)
+        name="telnetlib3.server", loglevel=loglevel, logfile=logfile, logfmt=logfmt
+    )
 
     # log all function arguments.
     _locals = locals()
-    _cfg_mapping = ', '.join(('{0}={{{0}}}'.format(field)
-                              for field in CONFIG._fields)).format(**_locals)
-    log.debug('Server configuration: {}'.format(_cfg_mapping))
+    _cfg_mapping = ", ".join(
+        ("{0}={{{0}}}".format(field) for field in CONFIG._fields)
+    ).format(**_locals)
+    log.debug("Server configuration: {}".format(_cfg_mapping))
 
     loop = asyncio.get_event_loop()
 
     # bind
     server = loop.run_until_complete(
-        create_server(host, port, shell=shell, encoding=encoding,
-                      force_binary=force_binary, timeout=timeout,
-                      connect_maxwait=connect_maxwait))
+        create_server(
+            host,
+            port,
+            shell=shell,
+            encoding=encoding,
+            force_binary=force_binary,
+            timeout=timeout,
+            connect_maxwait=connect_maxwait,
+        )
+    )
 
     # SIGTERM cases server to gracefully stop
-    loop.add_signal_handler(signal.SIGTERM, asyncio.ensure_future,
-                            _sigterm_handler(server, log))
+    loop.add_signal_handler(
+        signal.SIGTERM, asyncio.ensure_future, _sigterm_handler(server, log)
+    )
 
-    log.info('Server ready on {0}:{1}'.format(host, port))
+    log.info("Server ready on {0}:{1}".format(host, port))
 
     # await completion of server stop
     try:
@@ -512,7 +625,7 @@ def run_server(host=CONFIG.host, port=CONFIG.port, loglevel=CONFIG.loglevel,
         # remove signal handler on stop
         loop.remove_signal_handler(signal.SIGTERM)
 
-    log.info('Server stop.')
+    log.info("Server stop.")
 
 
 def main():
@@ -520,5 +633,5 @@ def main():
     return run_server(**parse_server_args())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     exit(main())
