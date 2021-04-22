@@ -17,6 +17,7 @@ from .telopt import (
     BRK,
     CHARSET,
     CMD_EOR,
+    COM_PORT_OPTION,
     DM,
     DO,
     DONT,
@@ -1640,6 +1641,7 @@ class TelnetWriter(asyncio.StreamWriter):
             TSPEED: self._handle_sb_tspeed,
             XDISPLOC: self._handle_sb_xdisploc,
             STATUS: self._handle_sb_status,
+            COM_PORT_OPTION: self._handle_sb_comport,
         }.get(cmd)
         if fn_call is None:
             raise ValueError(
@@ -2465,6 +2467,21 @@ class TelnetWriter(asyncio.StreamWriter):
             self.local_option[opt] = bool(cmd is DO)
             if cmd == DO:
                 self._handle_do_forwardmask(buf)
+
+    def _handle_sb_comport(self, buf):
+        """
+        Callback handles IAC-SB-COM-PORT-OPTION.
+
+        This callback simply logs the subnegotiation but does not perform any action.
+
+        :param bytes buf: bytes following IAC SB LINEMODE DO FORWARDMASK.
+        """
+
+        self.log.debug(
+            "SB unhandled: cmd={}, buf={!r}".format(name_command(COM_PORT_OPTION), buf)
+        )
+
+        return
 
     def _handle_do_forwardmask(self, buf):
         """
