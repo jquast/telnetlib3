@@ -37,7 +37,6 @@ def test_reader_instantiation_safety():
     )
 
 
-@pytest.mark.asyncio
 async def test_telnet_reader_using_readline_unicode(bind_host, unused_tcp_port):
     """Ensure strict RFC interpretation of newlines in readline method."""
     # given
@@ -81,7 +80,6 @@ async def test_telnet_reader_using_readline_unicode(bind_host, unused_tcp_port):
     assert eof == ""
 
 
-@pytest.mark.asyncio
 async def test_telnet_reader_using_readline_bytes(bind_host, unused_tcp_port):
     """Ensure strict RFC interpretation of newlines in readline method."""
     # given
@@ -129,7 +127,6 @@ async def test_telnet_reader_using_readline_bytes(bind_host, unused_tcp_port):
     assert eof == b""
 
 
-@pytest.mark.asyncio
 async def test_telnet_reader_read_exactly_unicode(bind_host, unused_tcp_port):
     """Ensure TelnetReader.readexactly, especially IncompleteReadError."""
     # given
@@ -165,7 +162,6 @@ async def test_telnet_reader_read_exactly_unicode(bind_host, unused_tcp_port):
     assert exc_info.value.expected == given_readsize
 
 
-@pytest.mark.asyncio
 async def test_telnet_reader_read_exactly_bytes(bind_host, unused_tcp_port):
     """Ensure TelnetReader.readexactly, especially IncompleteReadError."""
     # given
@@ -204,7 +200,6 @@ async def test_telnet_reader_read_exactly_bytes(bind_host, unused_tcp_port):
     assert exc_info.value.expected == given_readsize
 
 
-@pytest.mark.asyncio
 async def test_telnet_reader_read_0(bind_host, unused_tcp_port):
     """Ensure TelnetReader.read(0) returns nothing."""
     # given
@@ -220,7 +215,6 @@ async def test_telnet_reader_read_0(bind_host, unused_tcp_port):
     assert value == ""
 
 
-@pytest.mark.asyncio
 async def test_telnet_reader_read_beyond_limit_unicode(bind_host, unused_tcp_port):
     """Ensure ability to read(-1) beyond segment sizes of reader._limit."""
     # given
@@ -251,7 +245,6 @@ async def test_telnet_reader_read_beyond_limit_unicode(bind_host, unused_tcp_por
     assert value == "x" * (limit + 1)
 
 
-@pytest.mark.asyncio
 async def test_telnet_reader_read_beyond_limit_bytes(bind_host, unused_tcp_port):
     """Ensure ability to read(-1) beyond segment sizes of reader._limit."""
     # given

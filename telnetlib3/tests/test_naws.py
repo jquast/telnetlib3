@@ -12,7 +12,6 @@ from telnetlib3.tests.accessories import unused_tcp_port, bind_host
 import pytest
 
 
-@pytest.mark.asyncio
 async def test_telnet_server_on_naws(bind_host, unused_tcp_port):
     """Test Server's Negotiate about window size (NAWS)."""
     # given
@@ -49,7 +48,6 @@ async def test_telnet_server_on_naws(bind_host, unused_tcp_port):
     assert srv_instance.get_extra_info("rows") == given_rows
 
 
-@pytest.mark.asyncio
 async def test_telnet_client_send_naws(bind_host, unused_tcp_port):
     """Test Client's NAWS of callback method send_naws()."""
     # given a server
@@ -81,7 +79,6 @@ async def test_telnet_client_send_naws(bind_host, unused_tcp_port):
     assert recv_rows == given_rows
 
 
-@pytest.mark.asyncio
 async def test_telnet_client_send_tty_naws(bind_host, unused_tcp_port):
     """Test Client's NAWS of callback method send_naws()."""
     # given a client,
@@ -118,7 +115,6 @@ async def test_telnet_client_send_tty_naws(bind_host, unused_tcp_port):
     assert recv_rows == given_rows
 
 
-@pytest.mark.asyncio
 async def test_telnet_client_send_naws_65534(bind_host, unused_tcp_port):
     """Test Client's NAWS boundary values."""
     # given a server

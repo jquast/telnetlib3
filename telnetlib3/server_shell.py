@@ -8,8 +8,7 @@ from . import accessories
 __all__ = ("telnet_server_shell",)
 
 
-@asyncio.coroutine
-def telnet_server_shell(reader, writer):
+async def telnet_server_shell(reader, writer):
     """
     A default telnet shell, appropriate for use with telnetlib3.create_server.
 
@@ -31,7 +30,7 @@ def telnet_server_shell(reader, writer):
         command = None
         while command is None:
             # TODO: use reader.readline()
-            inp = yield from reader.read(1)
+            inp = await reader.read(1)
             if not inp:
                 return
             command = linereader.send(inp)
@@ -59,8 +58,7 @@ def telnet_server_shell(reader, writer):
     writer.close()
 
 
-@asyncio.coroutine
-def readline(reader, writer):
+async def readline(reader, writer):
     """
     A very crude readline coroutine interface.
 

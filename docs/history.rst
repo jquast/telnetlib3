@@ -2,6 +2,7 @@ History
 =======
 2.0.0
  * Do not accept custom abstract 'loop' or 'event_loop'.
+ * Support python 3.9, 3.10, (drop Python 3.5?)
 
 1.0.4
  * bugfix a NoneType error on EOF/Timeout, introduced in previous

@@ -11,7 +11,6 @@ from telnetlib3.tests.accessories import unused_tcp_port, bind_host
 import pytest
 
 
-@pytest.mark.asyncio
 async def test_telnet_server_on_ttype(bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype()."""
     # given
@@ -42,7 +41,6 @@ async def test_telnet_server_on_ttype(bind_host, unused_tcp_port):
     assert "ALPHA" == srv_instance.get_extra_info("TERM")
 
 
-@pytest.mark.asyncio
 async def test_telnet_server_on_ttype_beyond_max(bind_host, unused_tcp_port):
     """
     Test Server's callback method on_ttype() with long list.
@@ -103,7 +101,6 @@ async def test_telnet_server_on_ttype_beyond_max(bind_host, unused_tcp_port):
     assert srv_instance.get_extra_info("TERM") == given_ttypes[-1]
 
 
-@pytest.mark.asyncio
 async def test_telnet_server_on_ttype_empty(bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype(): empty value is ignored. """
     # given
@@ -136,7 +133,6 @@ async def test_telnet_server_on_ttype_empty(bind_host, unused_tcp_port):
     assert srv_instance.get_extra_info("TERM") == "BETA"
 
 
-@pytest.mark.asyncio
 async def test_telnet_server_on_ttype_looped(bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype() when value looped. """
     # given
@@ -174,7 +170,6 @@ async def test_telnet_server_on_ttype_looped(bind_host, unused_tcp_port):
     assert srv_instance.get_extra_info("TERM") == "ALPHA"
 
 
-@pytest.mark.asyncio
 async def test_telnet_server_on_ttype_repeated(bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype() when value repeats. """
     # given
@@ -212,7 +207,6 @@ async def test_telnet_server_on_ttype_repeated(bind_host, unused_tcp_port):
     assert srv_instance.get_extra_info("TERM") == "GAMMA"
 
 
-@pytest.mark.asyncio
 async def test_telnet_server_on_ttype_mud(bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype() for MUD clients (MTTS). """
     # given

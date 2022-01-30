@@ -11,7 +11,6 @@ from telnetlib3.tests.accessories import unused_tcp_port, bind_host
 import pytest
 
 
-@pytest.mark.asyncio
 async def test_telnet_server_on_tspeed(bind_host, unused_tcp_port):
     """Test Server's callback method on_tspeed()."""
     # given
@@ -39,7 +38,6 @@ async def test_telnet_server_on_tspeed(bind_host, unused_tcp_port):
     assert srv_instance.get_extra_info("tspeed") == "123,456"
 
 
-@pytest.mark.asyncio
 async def test_telnet_client_send_tspeed(bind_host, unused_tcp_port):
     """Test Client's callback method send_tspeed()."""
     # given

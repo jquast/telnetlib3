@@ -32,15 +32,14 @@ Authoring a Telnet Server using Streams interface that offers a basic war game:
 
     import asyncio, telnetlib3
 
-    @asyncio.coroutine
-    def shell(reader, writer):
+    async def shell(reader, writer):
         writer.write('\r\nWould you like to play a game? ')
-        inp = yield from reader.read(1)
+        inp = await reader.read(1)
         if inp:
             writer.echo(inp)
             writer.write('\r\nThey say the only way to win '
                          'is to not play at all.\r\n')
-            yield from writer.drain()
+            await writer.drain()
         writer.close()
 
     loop = asyncio.get_event_loop()
@@ -54,11 +53,10 @@ Authoring a Telnet Client that plays the war game with this server:
 
     import asyncio, telnetlib3
 
-    @asyncio.coroutine
-    def shell(reader, writer):
+    async def shell(reader, writer):
         while True:
             # read stream until '?' mark is found
-            outp = yield from reader.read(1024)
+            outp = await reader.read(1024)
             if not outp:
                 # End of File
                 break

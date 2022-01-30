@@ -16,8 +16,7 @@ __all__ = ("telnet_client_shell",)
 
 if sys.platform == "win32":
 
-    @asyncio.coroutine
-    def telnet_client_shell(telnet_reader, telnet_writer):
+    async def telnet_client_shell(telnet_reader, telnet_writer):
         raise NotImplementedError(
             "win32 not yet supported as telnet client. Please contribute!"
         )
@@ -133,8 +132,7 @@ else:
                 cc=cc,
             )
 
-        @asyncio.coroutine
-        def make_stdio(self):
+        async def make_stdio(self):
             """
             Return (reader, writer) pair for sys.stdin, sys.stdout.
 
@@ -156,22 +154,19 @@ else:
             if self._istty:
                 write_fobj = sys.stdin
 
-            writer_transport, writer_protocol = yield from (
-                self.loop.connect_write_pipe(
-                    asyncio.streams.FlowControlMixin, write_fobj
-                )
+            writer_transport, writer_protocol = await self.loop.connect_write_pipe(
+                asyncio.streams.FlowControlMixin, write_fobj
             )
 
             writer = asyncio.StreamWriter(
                 writer_transport, writer_protocol, None, self.loop
             )
 
-            yield from self.loop.connect_read_pipe(lambda: reader_protocol, sys.stdin)
+            await self.loop.connect_read_pipe(lambda: reader_protocol, sys.stdin)
 
             return reader, writer
 
-    @asyncio.coroutine
-    def telnet_client_shell(telnet_reader, telnet_writer):
+    async def telnet_client_shell(telnet_reader, telnet_writer):
         """
         Minimal telnet client shell for POSIX terminals.
 
@@ -191,7 +186,7 @@ else:
             linesep = "\n"
             if term._istty and telnet_writer.will_echo:
                 linesep = "\r\n"
-            stdin, stdout = yield from term.make_stdio()
+            stdin, stdout = await term.make_stdio()
             stdout.write(
                 "Escape character is '{escape}'.{linesep}".format(
                     escape=accessories.name_unicode(keyboard_escape), linesep=linesep
@@ -202,7 +197,7 @@ else:
             telnet_task = accessories.make_reader_task(telnet_reader)
             wait_for = set([stdin_task, telnet_task])
             while wait_for:
-                done, pending = yield from asyncio.wait(
+                done, pending = await asyncio.wait(
                     wait_for, return_when=asyncio.FIRST_COMPLETED
                 )
 

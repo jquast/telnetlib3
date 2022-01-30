@@ -11,7 +11,6 @@ from telnetlib3.tests.accessories import unused_tcp_port, bind_host
 import pytest
 
 
-@pytest.mark.asyncio
 async def test_telnet_server_on_charset(bind_host, unused_tcp_port):
     """Test Server's callback method on_charset()."""
     # given
@@ -44,7 +43,6 @@ async def test_telnet_server_on_charset(bind_host, unused_tcp_port):
     assert srv_instance.get_extra_info("charset") == given_charset
 
 
-@pytest.mark.asyncio
 async def test_telnet_client_send_charset(bind_host, unused_tcp_port):
     """Test Client's callback method send_charset() selection for illegals."""
     # given
@@ -83,7 +81,6 @@ async def test_telnet_client_send_charset(bind_host, unused_tcp_port):
     assert writer.get_extra_info("charset") == "cp437"
 
 
-@pytest.mark.asyncio
 async def test_telnet_client_no_charset(bind_host, unused_tcp_port):
     """Test Client's callback method send_charset() does not select."""
     # given

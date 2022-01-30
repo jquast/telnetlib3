@@ -11,7 +11,6 @@ from telnetlib3.tests.accessories import unused_tcp_port, bind_host
 import pytest
 
 
-@pytest.mark.asyncio
 async def test_telnet_server_on_xdisploc(bind_host, unused_tcp_port):
     """Test Server's callback method on_xdisploc()."""
     # given
@@ -40,7 +39,6 @@ async def test_telnet_server_on_xdisploc(bind_host, unused_tcp_port):
     assert srv_instance.get_extra_info("xdisploc") == "alpha:0"
 
 
-@pytest.mark.asyncio
 async def test_telnet_client_send_xdisploc(bind_host, unused_tcp_port):
     """Test Client's callback method send_xdisploc()."""
     # given

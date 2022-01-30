@@ -11,7 +11,6 @@ from telnetlib3.tests.accessories import unused_tcp_port, bind_host
 import pytest
 
 
-@pytest.mark.asyncio
 async def test_server_demands_remote_linemode_client_agrees(bind_host, unused_tcp_port):
     from telnetlib3.telopt import IAC, DO, WILL, LINEMODE, SB, SE
     from telnetlib3.slc import LMODE_MODE, LMODE_MODE_ACK
@@ -67,7 +66,6 @@ async def test_server_demands_remote_linemode_client_agrees(bind_host, unused_tc
     assert srv_instance.writer.remote_option.enabled(LINEMODE)
 
 
-@pytest.mark.asyncio
 async def test_server_demands_remote_linemode_client_demands_local(
     bind_host, unused_tcp_port
 ):

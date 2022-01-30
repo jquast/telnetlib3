@@ -143,7 +143,8 @@ class TelnetWriter(asyncio.StreamWriter):
         :param logging.Logger log: target logger, if None is given, one is
             created using the namespace ``'telnetlib3.stream_writer'``.
         """
-        asyncio.StreamWriter.__init__(self, transport, protocol, reader)
+        loop = asyncio.get_event_loop()
+        asyncio.StreamWriter.__init__(self, transport, protocol, reader, loop)
 
         if not any((client, server)) or all((client, server)):
             raise TypeError(

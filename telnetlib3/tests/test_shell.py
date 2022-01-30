@@ -12,7 +12,6 @@ from telnetlib3.tests.accessories import unused_tcp_port, event_loop, bind_host
 import pytest
 
 
-@pytest.mark.asyncio
 async def test_telnet_server_shell_as_coroutine(event_loop, bind_host, unused_tcp_port):
     """Test callback shell(reader, writer) as coroutine of create_server()."""
     from telnetlib3.telopt import IAC, DO, WONT, TTYPE
@@ -25,15 +24,14 @@ async def test_telnet_server_shell_as_coroutine(event_loop, bind_host, unused_tc
     expect_hello = IAC + DO + TTYPE
     hello_reply = IAC + WONT + TTYPE
 
-    @asyncio.coroutine
-    def shell(reader, writer):
+    async def shell(reader, writer):
         _waiter.set_result(True)
-        inp = yield from reader.readexactly(len(send_input))
+        inp = await reader.readexactly(len(send_input))
         assert inp == send_input
         writer.write(expect_output)
         _saved.add(writer)
         _saved.add(writer._protocol)
-        yield from writer.drain()
+        await writer.drain()
         writer.close()
 
     # exercise,
@@ -67,13 +65,11 @@ async def test_telnet_server_shell_as_coroutine(event_loop, bind_host, unused_tc
     assert len(_saved) == 0
 
 
-@pytest.mark.asyncio
 async def test_telnet_client_shell_as_coroutine(event_loop, bind_host, unused_tcp_port):
     """Test callback shell(reader, writer) as coroutine of create_server()."""
     _waiter = asyncio.Future()
 
-    @asyncio.coroutine
-    def shell(reader, writer):
+    async def shell(reader, writer):
         _waiter.set_result(True)
 
     # a server that doesn't care
@@ -90,7 +86,6 @@ async def test_telnet_client_shell_as_coroutine(event_loop, bind_host, unused_tc
     await asyncio.wait_for(_waiter, 0.5)
 
 
-@pytest.mark.asyncio
 async def test_telnet_server_shell_make_coro_by_function(
     event_loop, bind_host, unused_tcp_port
 ):
@@ -119,7 +114,6 @@ async def test_telnet_server_shell_make_coro_by_function(
     await asyncio.wait_for(_waiter, 0.5)
 
 
-@pytest.mark.asyncio
 async def test_telnet_server_no_shell(event_loop, bind_host, unused_tcp_port):
     """Test telnetlib3.TelnetServer() instantiation and connection_made()."""
     from telnetlib3.telopt import IAC, DO, WONT, TTYPE
@@ -146,7 +140,6 @@ async def test_telnet_server_no_shell(event_loop, bind_host, unused_tcp_port):
     assert client_recv == client_expected
 
 
-@pytest.mark.asyncio
 async def test_telnet_server_given_shell(event_loop, bind_host, unused_tcp_port):
     """Iterate all state-reading commands of default telnet_server_shell."""
     from telnetlib3.telopt import IAC, WILL, DO, WONT, ECHO, SGA, BINARY, TTYPE
@@ -318,7 +311,6 @@ async def test_telnet_server_given_shell(event_loop, bind_host, unused_tcp_port)
     assert result == b""
 
 
-@pytest.mark.asyncio
 async def test_telnet_server_shell_eof(event_loop, bind_host, unused_tcp_port):
     """Test EOF in telnet_server_shell()."""
     from telnetlib3.telopt import IAC, WONT, TTYPE

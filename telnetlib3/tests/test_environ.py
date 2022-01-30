@@ -11,7 +11,6 @@ from telnetlib3.tests.accessories import unused_tcp_port, event_loop, bind_host
 import pytest
 
 
-@pytest.mark.asyncio
 async def test_telnet_server_on_environ(event_loop, bind_host, unused_tcp_port):
     """Test Server's callback method on_environ()."""
     # given
@@ -63,7 +62,6 @@ async def test_telnet_server_on_environ(event_loop, bind_host, unused_tcp_port):
     )
 
 
-@pytest.mark.asyncio
 async def test_telnet_client_send_environ(event_loop, bind_host, unused_tcp_port):
     """Test Client's callback method send_environ() for specific requests."""
     # given
@@ -105,7 +103,6 @@ async def test_telnet_client_send_environ(event_loop, bind_host, unused_tcp_port
     }
 
 
-@pytest.mark.asyncio
 async def test_telnet_client_send_var_uservar_environ(
     event_loop, bind_host, unused_tcp_port
 ):
@@ -161,7 +158,6 @@ async def test_telnet_client_send_var_uservar_environ(
         assert writer.get_extra_info(key) == val
 
 
-@pytest.mark.asyncio
 async def test_telnet_server_reject_environ(event_loop, bind_host, unused_tcp_port):
     """Test Client's callback method send_environ() for specific requests."""
     from telnetlib3.telopt import SB, NEW_ENVIRON

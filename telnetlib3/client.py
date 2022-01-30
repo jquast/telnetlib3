@@ -247,8 +247,7 @@ class TelnetTerminalClient(TelnetClient):
             )
 
 
-@asyncio.coroutine
-def open_connection(
+async def open_connection(
     host=None,
     port=23,
     *,
@@ -367,7 +366,7 @@ def open_connection(
             limit=limit,
         )
 
-    transport, protocol = yield from asyncio.get_event_loop().create_connection(
+    transport, protocol = await asyncio.get_event_loop().create_connection(
         connection_factory,
         host,
         port,
@@ -376,7 +375,7 @@ def open_connection(
         local_addr=local_addr,
     )
 
-    yield from protocol._waiter_connected
+    await protocol._waiter_connected
 
     return protocol.reader, protocol.writer
 
