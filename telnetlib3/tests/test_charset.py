@@ -5,14 +5,14 @@ import asyncio
 # local imports
 import telnetlib3
 import telnetlib3.stream_writer
-from telnetlib3.tests.accessories import unused_tcp_port, event_loop, bind_host
+from telnetlib3.tests.accessories import unused_tcp_port, bind_host
 
 # 3rd party
 import pytest
 
 
 @pytest.mark.asyncio
-async def test_telnet_server_on_charset(event_loop, bind_host, unused_tcp_port):
+async def test_telnet_server_on_charset(bind_host, unused_tcp_port):
     """Test Server's callback method on_charset()."""
     # given
     from telnetlib3.telopt import IAC, WILL, WONT, SB, SE, TTYPE, CHARSET, ACCEPTED
@@ -45,7 +45,7 @@ async def test_telnet_server_on_charset(event_loop, bind_host, unused_tcp_port):
 
 
 @pytest.mark.asyncio
-async def test_telnet_client_send_charset(event_loop, bind_host, unused_tcp_port):
+async def test_telnet_client_send_charset(bind_host, unused_tcp_port):
     """Test Client's callback method send_charset() selection for illegals."""
     # given
     _waiter = asyncio.Future()
@@ -62,10 +62,7 @@ async def test_telnet_client_send_charset(event_loop, bind_host, unused_tcp_port
 
     await asyncio.wait_for(
         telnetlib3.create_server(
-            protocol_factory=ServerTestCharset,
-            host=bind_host,
-            port=unused_tcp_port,
-            loop=event_loop,
+            protocol_factory=ServerTestCharset, host=bind_host, port=unused_tcp_port
         ),
         0.15,
     )
@@ -75,7 +72,6 @@ async def test_telnet_client_send_charset(event_loop, bind_host, unused_tcp_port
             client_factory=ClientTestCharset,
             host=bind_host,
             port=unused_tcp_port,
-            loop=event_loop,
             encoding="latin1",
             connect_minwait=0.05,
         ),
@@ -88,7 +84,7 @@ async def test_telnet_client_send_charset(event_loop, bind_host, unused_tcp_port
 
 
 @pytest.mark.asyncio
-async def test_telnet_client_no_charset(event_loop, bind_host, unused_tcp_port):
+async def test_telnet_client_no_charset(bind_host, unused_tcp_port):
     """Test Client's callback method send_charset() does not select."""
     # given
     _waiter = asyncio.Future()
@@ -107,14 +103,12 @@ async def test_telnet_client_no_charset(event_loop, bind_host, unused_tcp_port):
         protocol_factory=ServerTestCharset,
         host=bind_host,
         port=unused_tcp_port,
-        loop=event_loop,
     )
 
     reader, writer = await telnetlib3.open_connection(
         client_factory=ClientTestCharset,
         host=bind_host,
         port=unused_tcp_port,
-        loop=event_loop,
         encoding="latin1",
         connect_minwait=0.05,
     )
