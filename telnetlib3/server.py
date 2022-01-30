@@ -515,8 +515,7 @@ def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwds):
     This function is a :func:`~asyncio.coroutine`.
     """
     protocol_factory = protocol_factory or TelnetServer
-    loop = kwds.get("loop", asyncio.get_event_loop())
-
+    loop = asyncio.get_event_loop()
     return (yield from loop.create_server(lambda: protocol_factory(**kwds), host, port))
 
 

@@ -1,5 +1,8 @@
 History
 =======
+2.0.0
+ * Do not accept custom abstract 'loop' or 'event_loop'.
+
 1.0.4
  * bugfix a NoneType error on EOF/Timeout, introduced in previous
    version 1.0.3, :ghissue:`51` by :ghuser:`zofy`.

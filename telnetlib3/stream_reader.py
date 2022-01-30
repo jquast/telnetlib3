@@ -140,7 +140,6 @@ class TelnetReaderUnicode(TelnetReader):
         fn_encoding,
         *,
         limit=asyncio.streams._DEFAULT_LIMIT,
-        loop=None,
         encoding_errors="replace"
     ):
         """
@@ -151,8 +150,7 @@ class TelnetReaderUnicode(TelnetReader):
             to determine what encoding should be used to decode the value in
             the direction specified.
         """
-        loop = loop or asyncio.get_event_loop()
-        super().__init__(limit=limit, loop=loop)
+        super().__init__(limit=limit)
 
         assert callable(fn_encoding), fn_encoding
         self.fn_encoding = fn_encoding

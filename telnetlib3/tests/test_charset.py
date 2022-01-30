@@ -26,15 +26,10 @@ async def test_telnet_server_on_charset(event_loop, bind_host, unused_tcp_port):
             _waiter.set_result(self)
 
     await telnetlib3.create_server(
-        protocol_factory=ServerTestCharset,
-        host=bind_host,
-        port=unused_tcp_port,
-        loop=event_loop,
+        protocol_factory=ServerTestCharset, host=bind_host, port=unused_tcp_port
     )
 
-    reader, writer = await asyncio.open_connection(
-        host=bind_host, port=unused_tcp_port, loop=event_loop
-    )
+    reader, writer = await asyncio.open_connection(host=bind_host, port=unused_tcp_port)
 
     val = await asyncio.wait_for(reader.readexactly(3), 0.5)
     # exercise,

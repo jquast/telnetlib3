@@ -47,29 +47,26 @@ async def test_create_server(bind_host, unused_tcp_port):
 
 
 @pytest.mark.asyncio
-async def test_create_server_conditionals(event_loop, bind_host, unused_tcp_port):
+async def test_create_server_conditionals(bind_host, unused_tcp_port):
     """Test telnetlib3.create_server conditionals."""
     # exercise,
     await telnetlib3.create_server(
         protocol_factory=lambda: telnetlib3.TelnetServer,
         host=bind_host,
         port=unused_tcp_port,
-        loop=event_loop,
     )
 
 
 @pytest.mark.asyncio
-async def test_create_server_on_connect(event_loop, bind_host, unused_tcp_port):
+async def test_create_server_on_connect(bind_host, unused_tcp_port):
     """Test on_connect() anonymous function callback of create_server."""
     # given,
     given_pf = unittest.mock.MagicMock()
     await telnetlib3.create_server(
-        protocol_factory=given_pf, host=bind_host, port=unused_tcp_port, loop=event_loop
+        protocol_factory=given_pf, host=bind_host, port=unused_tcp_port
     )
 
-    reader, writer = await asyncio.open_connection(
-        host=bind_host, port=unused_tcp_port, loop=event_loop
-    )
+    reader, writer = await asyncio.open_connection(host=bind_host, port=unused_tcp_port)
 
     # verify
     assert given_pf.called

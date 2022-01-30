@@ -7,7 +7,7 @@ import pytest
 
 # local
 import telnetlib3
-from telnetlib3.tests.accessories import unused_tcp_port, event_loop, bind_host
+from telnetlib3.tests.accessories import unused_tcp_port, bind_host
 
 
 def test_reader_instantiation_safety():
@@ -38,9 +38,7 @@ def test_reader_instantiation_safety():
 
 
 @pytest.mark.asyncio
-async def test_telnet_reader_using_readline_unicode(
-    event_loop, bind_host, unused_tcp_port
-):
+async def test_telnet_reader_using_readline_unicode(bind_host, unused_tcp_port):
     """Ensure strict RFC interpretation of newlines in readline method."""
     # given
     _waiter = asyncio.Future()
@@ -62,15 +60,11 @@ async def test_telnet_reader_using_readline_unicode(
         writer.close()
 
     await telnetlib3.create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-        loop=event_loop,
-        connect_maxwait=0.05,
-        shell=shell,
+        host=bind_host, port=unused_tcp_port, connect_maxwait=0.05, shell=shell
     )
 
     client_reader, client_writer = await telnetlib3.open_connection(
-        host=bind_host, port=unused_tcp_port, loop=event_loop, connect_minwait=0.05
+        host=bind_host, port=unused_tcp_port, connect_minwait=0.05
     )
 
     # exercise,
@@ -88,9 +82,7 @@ async def test_telnet_reader_using_readline_unicode(
 
 
 @pytest.mark.asyncio
-async def test_telnet_reader_using_readline_bytes(
-    event_loop, bind_host, unused_tcp_port
-):
+async def test_telnet_reader_using_readline_bytes(bind_host, unused_tcp_port):
     """Ensure strict RFC interpretation of newlines in readline method."""
     # given
     _waiter = asyncio.Future()
@@ -114,18 +106,13 @@ async def test_telnet_reader_using_readline_bytes(
     await telnetlib3.create_server(
         host=bind_host,
         port=unused_tcp_port,
-        loop=event_loop,
         connect_maxwait=0.05,
         shell=shell,
         encoding=False,
     )
 
     client_reader, client_writer = await telnetlib3.open_connection(
-        host=bind_host,
-        port=unused_tcp_port,
-        loop=event_loop,
-        connect_minwait=0.05,
-        encoding=False,
+        host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False
     )
 
     # exercise,
@@ -143,9 +130,7 @@ async def test_telnet_reader_using_readline_bytes(
 
 
 @pytest.mark.asyncio
-async def test_telnet_reader_read_exactly_unicode(
-    event_loop, bind_host, unused_tcp_port
-):
+async def test_telnet_reader_read_exactly_unicode(bind_host, unused_tcp_port):
     """Ensure TelnetReader.readexactly, especially IncompleteReadError."""
     # given
     _waiter = asyncio.Future()
@@ -158,15 +143,11 @@ async def test_telnet_reader_read_exactly_unicode(
         writer.close()
 
     await telnetlib3.create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-        loop=event_loop,
-        connect_maxwait=0.05,
-        shell=shell,
+        host=bind_host, port=unused_tcp_port, connect_maxwait=0.05, shell=shell
     )
 
     client_reader, client_writer = await telnetlib3.open_connection(
-        host=bind_host, port=unused_tcp_port, loop=event_loop, connect_minwait=0.05
+        host=bind_host, port=unused_tcp_port, connect_minwait=0.05
     )
 
     # exercise, readexactly # bytes of given
@@ -185,7 +166,7 @@ async def test_telnet_reader_read_exactly_unicode(
 
 
 @pytest.mark.asyncio
-async def test_telnet_reader_read_exactly_bytes(event_loop, bind_host, unused_tcp_port):
+async def test_telnet_reader_read_exactly_bytes(bind_host, unused_tcp_port):
     """Ensure TelnetReader.readexactly, especially IncompleteReadError."""
     # given
     _waiter = asyncio.Future()
@@ -199,18 +180,13 @@ async def test_telnet_reader_read_exactly_bytes(event_loop, bind_host, unused_tc
     await telnetlib3.create_server(
         host=bind_host,
         port=unused_tcp_port,
-        loop=event_loop,
         connect_maxwait=0.05,
         shell=shell,
         encoding=False,
     )
 
     client_reader, client_writer = await telnetlib3.open_connection(
-        host=bind_host,
-        port=unused_tcp_port,
-        loop=event_loop,
-        connect_minwait=0.05,
-        encoding=False,
+        host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False
     )
 
     # exercise, readexactly # bytes of given
@@ -229,7 +205,7 @@ async def test_telnet_reader_read_exactly_bytes(event_loop, bind_host, unused_tc
 
 
 @pytest.mark.asyncio
-async def test_telnet_reader_read_0(event_loop, bind_host, unused_tcp_port):
+async def test_telnet_reader_read_0(bind_host, unused_tcp_port):
     """Ensure TelnetReader.read(0) returns nothing."""
     # given
     def fn_encoding(incoming):
@@ -245,9 +221,7 @@ async def test_telnet_reader_read_0(event_loop, bind_host, unused_tcp_port):
 
 
 @pytest.mark.asyncio
-async def test_telnet_reader_read_beyond_limit_unicode(
-    event_loop, bind_host, unused_tcp_port
-):
+async def test_telnet_reader_read_beyond_limit_unicode(bind_host, unused_tcp_port):
     """Ensure ability to read(-1) beyond segment sizes of reader._limit."""
     # given
     _waiter = asyncio.Future()
@@ -263,18 +237,13 @@ async def test_telnet_reader_read_beyond_limit_unicode(
     await telnetlib3.create_server(
         host=bind_host,
         port=unused_tcp_port,
-        loop=event_loop,
         connect_maxwait=0.05,
         shell=shell,
         limit=limit,
     )
 
     client_reader, client_writer = await telnetlib3.open_connection(
-        host=bind_host,
-        port=unused_tcp_port,
-        loop=event_loop,
-        connect_minwait=0.05,
-        limit=limit,
+        host=bind_host, port=unused_tcp_port, connect_minwait=0.05, limit=limit
     )
 
     assert client_reader._limit == limit
@@ -283,9 +252,7 @@ async def test_telnet_reader_read_beyond_limit_unicode(
 
 
 @pytest.mark.asyncio
-async def test_telnet_reader_read_beyond_limit_bytes(
-    event_loop, bind_host, unused_tcp_port
-):
+async def test_telnet_reader_read_beyond_limit_bytes(bind_host, unused_tcp_port):
     """Ensure ability to read(-1) beyond segment sizes of reader._limit."""
     # given
     _waiter = asyncio.Future()
@@ -301,7 +268,6 @@ async def test_telnet_reader_read_beyond_limit_bytes(
     await telnetlib3.create_server(
         host=bind_host,
         port=unused_tcp_port,
-        loop=event_loop,
         connect_maxwait=0.05,
         shell=shell,
         encoding=False,
@@ -311,7 +277,6 @@ async def test_telnet_reader_read_beyond_limit_bytes(
     client_reader, client_writer = await telnetlib3.open_connection(
         host=bind_host,
         port=unused_tcp_port,
-        loop=event_loop,
         connect_minwait=0.05,
         encoding=False,
         limit=limit,

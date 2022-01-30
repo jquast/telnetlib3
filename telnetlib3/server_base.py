@@ -29,7 +29,6 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self,
         shell=None,
         log=None,
-        loop=None,
         _waiter_connected=None,
         _waiter_closed=None,
         encoding="utf8",
@@ -39,9 +38,8 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         limit=None,
     ):
         """Class initializer."""
-        super().__init__(loop=loop)
+        super().__init__()
         self.log = log or logging.getLogger("telnetlib3.server")
-        self._loop = loop or asyncio.get_event_loop()
         self.default_encoding = encoding
         self._encoding_errors = encoding_errors
         self.force_binary = force_binary
@@ -122,8 +120,8 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         reader_factory = self._reader_factory
         writer_factory = self._writer_factory
-        reader_kwds = {"loop": self._loop}
-        writer_kwds = {"loop": self._loop}
+        reader_kwds = {}
+        writer_kwds = {}
 
         if self.default_encoding:
             reader_kwds["fn_encoding"] = self.encoding
@@ -150,13 +148,13 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self.log.info("Connection from %s", self)
 
         self._waiter_connected.add_done_callback(self.begin_shell)
-        self._loop.call_soon(self.begin_negotiation)
+        asyncio.get_event_loop().call_soon(self.begin_negotiation)
 
     def begin_shell(self, result):
         if self.shell is not None:
             coro = self.shell(self.reader, self.writer)
             if asyncio.iscoroutine(coro):
-                fut = self._loop.create_task(coro)
+                fut = asyncio.get_event_loop().create_task(coro)
                 fut.add_done_callback(
                     lambda fut_obj: self._waiter_closed.set_result(weakref.proxy(self))
                 )
@@ -219,7 +217,9 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         immediately after connection.  Deriving implementations should always
         call ``super().begin_negotiation()``.
         """
-        self._check_later = self._loop.call_soon(self._check_negotiation_timer)
+        self._check_later = asyncio.get_event_loop().call_soon(
+            self._check_negotiation_timer
+        )
         self._tasks.append(self._check_later)
 
     def begin_advanced_negotiation(self):
@@ -282,7 +282,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         if not self._advanced and self.negotiation_should_advance():
             self._advanced = True
             self.log.debug("begin advanced negotiation")
-            self._loop.call_soon(self.begin_advanced_negotiation)
+            asyncio.get_event_loop().call_soon(self.begin_advanced_negotiation)
 
         # negotiation is complete (returns True) when all negotiation options
         # that have been requested have been acknowledged.
@@ -305,7 +305,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             self._waiter_connected.set_result(weakref.proxy(self))
         else:
             # keep re-queuing until complete
-            self._check_later = self._loop.call_later(
+            self._check_later = asyncio.get_event_loop().call_later(
                 later, self._check_negotiation_timer
             )
             self._tasks.append(self._check_later)
