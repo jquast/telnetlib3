@@ -178,14 +178,16 @@ async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
     """Try a DONT and ensure it cannot be sent twice."""
     from telnetlib3.telopt import DONT, ECHO
 
-    _waiter = asyncio.Future()
+    _waiter_connected = asyncio.Future()
+    _waiter_closed = asyncio.Future()
 
     await telnetlib3.create_server(
         protocol_factory=telnetlib3.BaseServer,
         host=bind_host,
         port=unused_tcp_port,
         connect_maxwait=0.05,
-        _waiter_connected=_waiter,
+        _waiter_connected=_waiter_connected,
+        _waiter_closed=_waiter_closed,
     )
 
     _, client_writer = await telnetlib3.open_connection(
@@ -196,14 +198,16 @@ async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
     result = client_writer.iac(DONT, ECHO)
     assert result == True
 
-    # say it again, suppressed
+    # say it again (this call is suppressed)
     result = client_writer.iac(DONT, ECHO)
     assert result == False
 
-    server_writer = (await asyncio.wait_for(_waiter, 0.5)).writer
+    server_writer = (await asyncio.wait_for(_waiter_connected, 0.5)).writer
+    client_writer.close()
+    await asyncio.wait_for(_waiter_closed, 0.5)
 
-    assert client_writer.remote_option[ECHO] is False
-    assert server_writer.local_option[ECHO] is False
+    assert client_writer.remote_option[ECHO] is False, client_writer.remote_option
+    assert server_writer.local_option[ECHO] is False, server_writer.local_option
 
 
 async def test_slc_simul(bind_host, unused_tcp_port):

@@ -1,4 +1,5 @@
 import asyncio
+import types
 
 CR, LF, NUL = "\r\n\x00"
 from . import slc
@@ -58,7 +59,8 @@ async def telnet_server_shell(reader, writer):
     writer.close()
 
 
-async def readline(reader, writer):
+@types.coroutine
+def readline(reader, writer):
     """
     A very crude readline coroutine interface.
 

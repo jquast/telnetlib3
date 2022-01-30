@@ -14,7 +14,8 @@ class TelnetReader(asyncio.StreamReader):
     """A reader interface for the telnet protocol."""
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        loop = asyncio.get_event_loop_policy().get_event_loop()
+        super().__init__(*args, loop=loop, **kwargs)
         self._connection_closed = False
         self.log = logging.getLogger(__name__)
 

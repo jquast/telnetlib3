@@ -29,7 +29,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self,
         shell=None,
         log=None,
-        loop=None,
         encoding="utf8",
         encoding_errors="strict",
         force_binary=False,
@@ -40,7 +39,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         _waiter_connected=None,
     ):
         """Class initializer."""
-        super().__init__(loop=loop)
+        super().__init__()
         self.log = log or logging.getLogger("telnetlib3.client")
 
         #: encoding for new connections

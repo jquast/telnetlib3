@@ -47,9 +47,8 @@ else:
             "mode", ["iflag", "oflag", "cflag", "lflag", "ispeed", "ospeed", "cc"]
         )
 
-        def __init__(self, telnet_writer, loop=None):
+        def __init__(self, telnet_writer):
             self.telnet_writer = telnet_writer
-            self.loop = loop or asyncio.get_event_loop()
             self._fileno = sys.stdin.fileno()
             self._istty = os.path.sameopenfile(0, 1)
 
@@ -153,16 +152,14 @@ else:
             write_fobj = sys.stdout
             if self._istty:
                 write_fobj = sys.stdin
-
-            writer_transport, writer_protocol = await self.loop.connect_write_pipe(
+            loop = asyncio.get_event_loop_policy().get_event_loop()
+            writer_transport, writer_protocol = await loop.connect_write_pipe(
                 asyncio.streams.FlowControlMixin, write_fobj
             )
 
-            writer = asyncio.StreamWriter(
-                writer_transport, writer_protocol, None, self.loop
-            )
+            writer = asyncio.StreamWriter(writer_transport, writer_protocol, None, loop)
 
-            await self.loop.connect_read_pipe(lambda: reader_protocol, sys.stdin)
+            await loop.connect_read_pipe(lambda: reader_protocol, sys.stdin)
 
             return reader, writer
 
@@ -179,10 +176,9 @@ else:
 
         This function is a :func:`~asyncio.coroutine`.
         """
-        loop = asyncio.get_event_loop()
         keyboard_escape = "\x1d"
 
-        with Terminal(telnet_writer=telnet_writer, loop=loop) as term:
+        with Terminal(telnet_writer=telnet_writer) as term:
             linesep = "\n"
             if term._istty and telnet_writer.will_echo:
                 linesep = "\r\n"
