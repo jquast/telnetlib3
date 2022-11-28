@@ -1,5 +1,6 @@
 """Negotiate About Window Size, *NAWS*. rfc-1073_."""
 # std imports
+import platform
 import asyncio
 import pexpect
 import struct
@@ -79,6 +80,10 @@ async def test_telnet_client_send_naws(bind_host, unused_tcp_port):
     assert recv_rows == given_rows
 
 
+@pytest.mark.skipif(
+    tuple(map(int, platform.python_version_tuple())) > (3, 10),
+    reason="those shabby pexpect maintainers still use @asyncio.coroutine",
+)
 async def test_telnet_client_send_tty_naws(bind_host, unused_tcp_port):
     """Test Client's NAWS of callback method send_naws()."""
     # given a client,

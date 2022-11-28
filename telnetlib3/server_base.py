@@ -12,6 +12,9 @@ from .stream_reader import TelnetReader, TelnetReaderUnicode
 __all__ = ("BaseServer",)
 
 
+logger = logging.getLogger("telnetlib3.server_base")
+
+
 class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     """Base Telnet Server Protocol."""
 
@@ -28,7 +31,6 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     def __init__(
         self,
         shell=None,
-        log=None,
         _waiter_connected=None,
         _waiter_closed=None,
         encoding="utf8",
@@ -39,7 +41,6 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     ):
         """Class initializer."""
         super().__init__()
-        self.log = log or logging.getLogger("telnetlib3.server")
         self.default_encoding = encoding
         self._encoding_errors = encoding_errors
         self.force_binary = force_binary
@@ -69,7 +70,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         This callback may be exercised by the nc(1) client argument ``-z``.
         """
-        self.log.debug("EOF from client, closing.")
+        logger.debug("EOF from client, closing.")
         self.connection_lost(None)
 
     def connection_lost(self, exc):
@@ -84,10 +85,10 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         # inform yielding readers about closed connection
         if exc is None:
-            self.log.info("Connection closed for %s", self)
+            logger.info("Connection closed for %s", self)
             self.reader.feed_eof()
         else:
-            self.log.info("Connection lost for %s: %s", self, exc)
+            logger.info("Connection lost for %s: %s", self, exc)
             self.reader.set_exception(exc)
 
         # cancel protocol tasks, namely on-connect negotiations
@@ -98,7 +99,8 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         # cancel Future _waiter_connected.
         self._transport.close()
         self._waiter_connected.cancel()
-        if self.shell is None:
+        if self.shell is None and self._waiter_closed is not None:
+            # raise deprecation warning, _waiter_closed should not be used!
             self._waiter_closed.set_result(weakref.proxy(self))
 
         # break circular references.
@@ -141,11 +143,10 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             protocol=self,
             reader=self.reader,
             server=True,
-            log=self.log,
             **writer_kwds
         )
 
-        self.log.info("Connection from %s", self)
+        logger.info("Connection from %s", self)
 
         self._waiter_connected.add_done_callback(self.begin_shell)
         asyncio.get_event_loop().call_soon(self.begin_negotiation)
@@ -156,7 +157,11 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             if asyncio.iscoroutine(coro):
                 fut = asyncio.get_event_loop().create_task(coro)
                 fut.add_done_callback(
-                    lambda fut_obj: self._waiter_closed.set_result(weakref.proxy(self))
+                    lambda fut_obj: (
+                        self._waiter_closed.set_result(weakref.proxy(self))
+                        if self._waiter_closed is not None
+                        else None
+                    )
                 )
 
     def data_received(self, data):
@@ -173,7 +178,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             try:
                 recv_inband = self.writer.feed_byte(bytes([byte]))
             except:
-                self._log_exception(self.log.warning, *sys.exc_info())
+                self._log_exception(logger.warning, *sys.exc_info())
             else:
                 if recv_inband:
                     # forward to reader (shell).
@@ -202,12 +207,14 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     # public protocol methods
 
     def __repr__(self):
-        hostport = self.get_extra_info("peername")[:2]
+        hostport = self.get_extra_info("peername", ["-", "closing"])[:2]
         return "<Peer {0} {1}>".format(*hostport)
 
     def get_extra_info(self, name, default=None):
         """Get optional server protocol or transport information."""
-        return self._extra.get(name, self._transport._extra.get(name, default))
+        if self._transport:
+            default = self._transport._extra.get(name, default)
+        return self._extra.get(name, default)
 
     def begin_negotiation(self):
         """
@@ -281,7 +288,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         """
         if not self._advanced and self.negotiation_should_advance():
             self._advanced = True
-            self.log.debug("begin advanced negotiation")
+            logger.debug("begin advanced negotiation")
             asyncio.get_event_loop().call_soon(self.begin_advanced_negotiation)
 
         # negotiation is complete (returns True) when all negotiation options
@@ -298,10 +305,10 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         final = bool(later < 0)
 
         if self.check_negotiation(final=final):
-            self.log.debug("negotiation complete after {:1.2f}s.".format(self.duration))
+            logger.debug("negotiation complete after {:1.2f}s.".format(self.duration))
             self._waiter_connected.set_result(weakref.proxy(self))
         elif final:
-            self.log.debug("negotiation failed after {:1.2f}s.".format(self.duration))
+            logger.debug("negotiation failed after {:1.2f}s.".format(self.duration))
             self._waiter_connected.set_result(weakref.proxy(self))
         else:
             # keep re-queuing until complete

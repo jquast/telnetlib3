@@ -77,12 +77,11 @@ def test_sb_interrupted():
     # out, we just clear what we have received so far within this so called
     # 'SB', and exit the sb buffering state.
     from telnetlib3.telopt import IAC, SB, TM, SE
-    import logging
 
-    log = logging.getLogger(__name__)
-    log.setLevel(logging.DEBUG)
     writer = telnetlib3.TelnetWriter(
-        transport=None, protocol=None, server=True, log=log
+        transport=None,
+        protocol=None,
+        server=True,
     )
 
     given = IAC + SB + b"sbdata-\xff\xff-sbdata"

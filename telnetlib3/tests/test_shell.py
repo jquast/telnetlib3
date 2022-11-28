@@ -12,6 +12,9 @@ from telnetlib3.tests.accessories import unused_tcp_port, bind_host
 import pytest
 
 
+@pytest.mark.xfail(
+    reason="https://github.com/jquast/telnetlib3/pull/58#issuecomment-1329497313"
+)
 async def test_telnet_server_shell_as_coroutine(bind_host, unused_tcp_port):
     """Test callback shell(reader, writer) as coroutine of create_server()."""
     from telnetlib3.telopt import IAC, DO, WONT, TTYPE
@@ -47,7 +50,7 @@ async def test_telnet_server_shell_as_coroutine(bind_host, unused_tcp_port):
     # respond 'WONT TTYPE' to quickly complete negotiation as failed.
     writer.write(hello_reply)
 
-    # await for the shell callback
+    # await for the shell callback to be ready,
     await asyncio.wait_for(_waiter, 0.5)
 
     # client sends input, reads shell output response
@@ -56,8 +59,6 @@ async def test_telnet_server_shell_as_coroutine(bind_host, unused_tcp_port):
 
     # verify,
     assert server_output.decode("ascii") == expect_output
-
-    # no leaks
     assert len(_saved) == 0
 
 
@@ -66,6 +67,7 @@ async def test_telnet_client_shell_as_coroutine(bind_host, unused_tcp_port):
     _waiter = asyncio.Future()
 
     async def shell(reader, writer):
+        # just hang up
         _waiter.set_result(True)
 
     # a server that doesn't care

@@ -48,6 +48,7 @@ CONFIG = collections.namedtuple(
     timeout=300,
     connect_maxwait=4.0,
 )
+logger = logging.getLogger("telnetlib3.server")
 
 
 class TelnetServer(server_base.BaseServer):
@@ -135,8 +136,8 @@ class TelnetServer(server_base.BaseServer):
         result = self._check_encoding()
         encoding = self.encoding(outgoing=True, incoming=True)
         if not self.waiter_encoding.done() and result:
-            self.log.debug("encoding complete: {0!r}".format(encoding))
-            self.waiter_encoding.set_result(proxy(self))
+            logger.debug("encoding complete: {0!r}".format(encoding))
+            self.waiter_encoding.set_result(result)
 
         elif (
             not self.waiter_encoding.done()
@@ -145,17 +146,17 @@ class TelnetServer(server_base.BaseServer):
             # if the remote end doesn't support TTYPE, which is agreed upon
             # to continue towards advanced negotiation of CHARSET, we assume
             # the distant end would not support it, declaring encoding failed.
-            self.log.debug(
+            logger.debug(
                 "encoding failed after {0:1.2f}s: {1}".format(self.duration, encoding)
             )
-            self.waiter_encoding.set_result(proxy(self))
+            self.waiter_encoding.set_result(result)  # False
             return parent
 
         elif not self.waiter_encoding.done() and final:
-            self.log.debug(
+            logger.debug(
                 "encoding failed after {0:1.2f}s: {1}".format(self.duration, encoding)
             )
-            self.waiter_encoding.set_result(proxy(self))
+            self.waiter_encoding.set_result(result)  # False
             return parent
 
         return parent and result
@@ -222,7 +223,8 @@ class TelnetServer(server_base.BaseServer):
                 self._tasks.remove(self._timer)
             self._timer.cancel()
         if duration:
-            self._timer = self._loop.call_later(duration, self.on_timeout)
+            loop = asyncio.get_event_loop()
+            self._timer = loop.call_later(duration, self.on_timeout)
             self._tasks.append(self._timer)
         self._extra["timeout"] = duration
 
@@ -238,7 +240,7 @@ class TelnetServer(server_base.BaseServer):
         :paramref:`~.set_timeout.duration` value of ``0`` or value of
         the same for keyword argument ``timeout``.
         """
-        self.log.debug("Timeout after {self.idle:1.2f}s".format(self=self))
+        logger.debug("Timeout after {self.idle:1.2f}s".format(self=self))
         self.writer.write("\r\nTimeout.\r\n")
         self.timeout_connection()
 
@@ -301,7 +303,7 @@ class TelnetServer(server_base.BaseServer):
         # 'peer'.
         u_mapping = {key.upper(): val for key, val in list(mapping.items())}
 
-        self.log.debug("on_environ received: {0!r}".format(u_mapping))
+        logger.debug("on_environ received: {0!r}".format(u_mapping))
 
         self._extra.update(u_mapping)
 
@@ -412,15 +414,15 @@ class TelnetServer(server_base.BaseServer):
 
         if key != "ttype1" and ttype == self.get_extra_info("ttype1", None):
             # cycle has looped, stop
-            self.log.debug("ttype cycle stop at {0}: {1}, looped.".format(key, ttype))
+            logger.debug("ttype cycle stop at {0}: {1}, looped.".format(key, ttype))
 
         elif not ttype or self._ttype_count > self.TTYPE_LOOPMAX:
             # empty reply string or too many responses!
-            self.log.warning("ttype cycle stop at {0}: {1}.".format(key, ttype))
+            logger.warning("ttype cycle stop at {0}: {1}.".format(key, ttype))
 
         elif self._ttype_count == 3 and ttype.upper().startswith("MTTS "):
             val = self.get_extra_info("ttype2")
-            self.log.debug(
+            logger.debug(
                 "ttype cycle stop at {0}: {1}, using {2} from ttype2.".format(
                     key, ttype, val
                 )
@@ -428,10 +430,10 @@ class TelnetServer(server_base.BaseServer):
             self._extra["TERM"] = val
 
         elif ttype == _lastval:
-            self.log.debug("ttype cycle stop at {0}: {1}, repeated.".format(key, ttype))
+            logger.debug("ttype cycle stop at {0}: {1}, repeated.".format(key, ttype))
 
         else:
-            self.log.debug("ttype cycle cont at {0}: {1}.".format(key, ttype))
+            logger.debug("ttype cycle cont at {0}: {1}.".format(key, ttype))
             self._ttype_count += 1
             self.writer.request_ttype()
 
@@ -450,11 +452,11 @@ class TelnetServer(server_base.BaseServer):
             and not self.writer.inbinary
             and not DO + BINARY in self.writer.pending_option
         ):
-            self.log.debug("BINARY in: direction request.")
+            logger.debug("BINARY in: direction request.")
             self.writer.iac(DO, BINARY)
             return False
 
-        # are we able to negotiation BINARY bidirectionally?
+        # are we able to negotiate BINARY bidirectionally?
         return self.writer.outbinary and self.writer.inbinary
 
 
@@ -474,8 +476,6 @@ async def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwd
         negotiation completes, receiving arguments ``(reader, writer)``.
         The reader is a :class:`~.TelnetReader` instance, the writer is
         a :class:`~.TelnetWriter` instance.
-    :param logging.Logger log: target logger, if None is given, one is created
-        using the namespace ``'telnetlib3.server'``.
     :param str encoding: The default assumed encoding, or ``False`` to disable
         unicode support.  Encoding may be negotiation to another value by
         the client through NEW_ENVIRON :rfc:`1572` by sending environment value
@@ -519,7 +519,7 @@ async def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwd
 
 
 async def _sigterm_handler(server, log):
-    log.info("SIGTERM received, closing server.")
+    logger.info("SIGTERM received, closing server.")
 
     # This signals the completion of the server.wait_closed() Future,
     # allowing the main() function to complete.
@@ -563,7 +563,7 @@ def parse_server_args():
     return vars(parser.parse_args())
 
 
-def run_server(
+async def run_server(
     host=CONFIG.host,
     port=CONFIG.port,
     loglevel=CONFIG.loglevel,
@@ -591,21 +591,19 @@ def run_server(
     _cfg_mapping = ", ".join(
         ("{0}={{{0}}}".format(field) for field in CONFIG._fields)
     ).format(**_locals)
-    log.debug("Server configuration: {}".format(_cfg_mapping))
+    logger.debug("Server configuration: {}".format(_cfg_mapping))
 
     loop = asyncio.get_event_loop()
 
     # bind
-    server = loop.run_until_complete(
-        create_server(
-            host,
-            port,
-            shell=shell,
-            encoding=encoding,
-            force_binary=force_binary,
-            timeout=timeout,
-            connect_maxwait=connect_maxwait,
-        )
+    server = await create_server(
+        host,
+        port,
+        shell=shell,
+        encoding=encoding,
+        force_binary=force_binary,
+        timeout=timeout,
+        connect_maxwait=connect_maxwait,
     )
 
     # SIGTERM cases server to gracefully stop
@@ -613,22 +611,21 @@ def run_server(
         signal.SIGTERM, asyncio.ensure_future, _sigterm_handler(server, log)
     )
 
-    log.info("Server ready on {0}:{1}".format(host, port))
+    logger.info("Server ready on {0}:{1}".format(host, port))
 
     # await completion of server stop
     try:
-        loop.run_until_complete(server.wait_closed())
+        await server.wait_closed()
     finally:
         # remove signal handler on stop
         loop.remove_signal_handler(signal.SIGTERM)
 
-    log.info("Server stop.")
+    logger.info("Server stop.")
 
 
 def main():
-    """Command-line 'telnetlib3-server' entry point, via setuptools."""
-    return run_server(**parse_server_args())
+    asyncio.run(run_server(**parse_server_args()))
 
 
 if __name__ == "__main__":
-    exit(main())
+    main()

@@ -1,10 +1,11 @@
 """Test instantiation of basic server and client forms."""
 # std imports
-import asyncio
 import os
 import sys
-import tempfile
 import time
+import asyncio
+import tempfile
+import platform
 import unittest.mock
 
 # local imports
@@ -542,6 +543,10 @@ async def test_telnet_client_cmdline(bind_host, unused_tcp_port):
     assert out == b"\x1b[m\nConnection closed by foreign host.\n"
 
 
+@pytest.mark.skipif(
+    tuple(map(int, platform.python_version_tuple())) > (3, 10),
+    reason="those shabby pexpect maintainers still use @asyncio.coroutine",
+)
 async def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port):
     """Test executing telnetlib3/client.py as client using a tty (pexpect)"""
     # this code may be reduced when pexpect asyncio is bugfixed ..

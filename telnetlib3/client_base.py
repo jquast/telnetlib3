@@ -28,7 +28,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     def __init__(
         self,
         shell=None,
-        log=None,
         encoding="utf8",
         encoding_errors="strict",
         force_binary=False,
@@ -40,7 +39,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     ):
         """Class initializer."""
         super().__init__()
-        self.log = log or logging.getLogger("telnetlib3.client")
+        self.log = logging.getLogger("telnetlib3.client")
 
         #: encoding for new connections
         self.default_encoding = encoding
@@ -142,7 +141,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             protocol=self,
             reader=self.reader,
             client=True,
-            log=self.log,
             **writer_kwds
         )
 
@@ -168,6 +166,8 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 fut = asyncio.get_event_loop().create_task(coro)
                 fut.add_done_callback(
                     lambda fut_obj: self.waiter_closed.set_result(weakref.proxy(self))
+                    if self.waiter_closed is not None
+                    else None
                 )
 
     def data_received(self, data):
@@ -213,12 +213,14 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     # public protocol methods
 
     def __repr__(self):
-        hostport = self.get_extra_info("peername")[:2]
+        hostport = self.get_extra_info("peername", ["-", "closing"])[:2]
         return "<Peer {0} {1}>".format(*hostport)
 
     def get_extra_info(self, name, default=None):
         """Get optional client protocol or transport information."""
-        return self._extra.get(name, self._transport._extra.get(name, default))
+        if self._transport:
+            default = self._transport._extra.get(name, default)
+        return self._extra.get(name, default)
 
     def begin_negotiation(self):
         """

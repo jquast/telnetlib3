@@ -1,8 +1,14 @@
 History
 =======
 2.0.0
- * Do not accept custom abstract 'loop' or 'event_loop'.
- * Support python 3.9, 3.10, (drop Python 3.5?)
+ * Support Python 3.9, 3.10, 3.11. Drop Python 3.6 and earlier, All code
+   and examples have been updated to the new-style PEP-492 syntax.
+ * the ``loop``, ``event_loop``, and ``log`` arguments are no longer accepted to
+   any class initializers.
+ * This release has a known memory leak when using the ``_waiter_connected`` and
+   ``_waiter_closed`` arguments to Client or Shell class initializers, please do
+   not use them A replacement "wait_for_negotiation" awaitable will be provided
+   in a future release.
 
 1.0.4
  * bugfix a NoneType error on EOF/Timeout, introduced in previous

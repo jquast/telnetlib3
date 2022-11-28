@@ -4,7 +4,6 @@ import asyncio
 import collections
 import logging
 import struct
-import sys
 
 # local imports
 from . import slc
@@ -114,7 +113,13 @@ class TelnetWriter(asyncio.StreamWriter):
     )
 
     def __init__(
-        self, transport, protocol, *, client=False, server=False, reader=None, log=None
+        self,
+        transport,
+        protocol,
+        *,
+        client=False,
+        server=False,
+        reader=None,
     ):
         """
         A writer interface for the telnet protocol.
@@ -148,10 +153,10 @@ class TelnetWriter(asyncio.StreamWriter):
 
         if not any((client, server)) or all((client, server)):
             raise TypeError(
-                "keyword arguments `client', and `server' " "are mutually exclusive."
+                "keyword arguments `client', and `server' are mutually exclusive."
             )
         self._server = server
-        self.log = log or logging.getLogger(__name__)
+        self.log = logging.getLogger(__name__)
 
         #: Dictionary of telnet option byte(s) that follow an
         #: IAC-DO or IAC-DONT command, and contains a value of ``True``
@@ -2542,7 +2547,7 @@ class TelnetWriterUnicode(TelnetWriter):
         object producing strings. This is equivalent to calling write() for
         each string.
         """
-        self.write(string=u"".join(lines), errors=errors)
+        self.write(string="".join(lines), errors=errors)
 
     def echo(self, string, errors=None):
         """
@@ -2575,8 +2580,6 @@ class Option(dict):
 
         :param str name: decorated name representing option class, such as
             'local', 'remote', or 'pending'.
-        :param logging.Logger log: logging instance where debug information
-            of state changes is recorded (as DEBUG).
         """
         self.name, self.log = name, log
         dict.__init__(self)
