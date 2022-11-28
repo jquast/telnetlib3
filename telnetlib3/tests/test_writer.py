@@ -6,7 +6,7 @@ import pytest
 
 # local
 import telnetlib3
-from telnetlib3.tests.accessories import unused_tcp_port, event_loop, bind_host
+from telnetlib3.tests.accessories import unused_tcp_port, bind_host
 
 
 def test_writer_instantiation_safety():
@@ -77,12 +77,11 @@ def test_sb_interrupted():
     # out, we just clear what we have received so far within this so called
     # 'SB', and exit the sb buffering state.
     from telnetlib3.telopt import IAC, SB, TM, SE
-    import logging
 
-    log = logging.getLogger(__name__)
-    log.setLevel(logging.DEBUG)
     writer = telnetlib3.TelnetWriter(
-        transport=None, protocol=None, server=True, log=log
+        transport=None,
+        protocol=None,
+        server=True,
     )
 
     given = IAC + SB + b"sbdata-\xff\xff-sbdata"
@@ -110,13 +109,11 @@ def test_sb_interrupted():
         writer.feed_byte(SE)
 
 
-@pytest.mark.asyncio
-async def test_iac_do_twice_replies_once(event_loop, bind_host, unused_tcp_port):
+async def test_iac_do_twice_replies_once(bind_host, unused_tcp_port):
     """WILL/WONT replied only once for repeated DO."""
     from telnetlib3.telopt import IAC, DO, WILL, ECHO
 
-    @asyncio.coroutine
-    def shell(reader, writer):
+    async def shell(reader, writer):
         writer.close()
 
     # given,
@@ -128,12 +125,11 @@ async def test_iac_do_twice_replies_once(event_loop, bind_host, unused_tcp_port)
         host=bind_host,
         shell=shell,
         port=unused_tcp_port,
-        loop=event_loop,
         connect_maxwait=0.05,
     )
 
     client_reader, client_writer = await asyncio.open_connection(
-        host=bind_host, port=unused_tcp_port, loop=event_loop
+        host=bind_host, port=unused_tcp_port
     )
 
     # exercise,
@@ -145,13 +141,11 @@ async def test_iac_do_twice_replies_once(event_loop, bind_host, unused_tcp_port)
     assert result_from_server == expect_from_server
 
 
-@pytest.mark.asyncio
-async def test_iac_dont_dont(event_loop, bind_host, unused_tcp_port):
+async def test_iac_dont_dont(bind_host, unused_tcp_port):
     """WILL/WONT replied only once for repeated DO."""
     from telnetlib3.telopt import IAC, DONT, ECHO
 
-    @asyncio.coroutine
-    def shell(reader, writer):
+    async def shell(reader, writer):
         writer.close()
 
     # given,
@@ -163,12 +157,11 @@ async def test_iac_dont_dont(event_loop, bind_host, unused_tcp_port):
         host=bind_host,
         shell=shell,
         port=unused_tcp_port,
-        loop=event_loop,
         connect_maxwait=0.05,
     )
 
     client_reader, client_writer = await asyncio.open_connection(
-        host=bind_host, port=unused_tcp_port, loop=event_loop
+        host=bind_host, port=unused_tcp_port
     )
 
     # exercise,
@@ -180,42 +173,43 @@ async def test_iac_dont_dont(event_loop, bind_host, unused_tcp_port):
     assert result_from_server == expect_from_server
 
 
-@pytest.mark.asyncio
-async def test_send_iac_dont_dont(event_loop, bind_host, unused_tcp_port):
+async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
     """Try a DONT and ensure it cannot be sent twice."""
     from telnetlib3.telopt import DONT, ECHO
 
-    _waiter = asyncio.Future()
+    _waiter_connected = asyncio.Future()
+    _waiter_closed = asyncio.Future()
 
     await telnetlib3.create_server(
         protocol_factory=telnetlib3.BaseServer,
         host=bind_host,
         port=unused_tcp_port,
-        loop=event_loop,
         connect_maxwait=0.05,
-        _waiter_connected=_waiter,
+        _waiter_connected=_waiter_connected,
+        _waiter_closed=_waiter_closed,
     )
 
     _, client_writer = await telnetlib3.open_connection(
-        host=bind_host, port=unused_tcp_port, loop=event_loop, connect_minwait=0.05
+        host=bind_host, port=unused_tcp_port, connect_minwait=0.05
     )
 
     # say it once,
     result = client_writer.iac(DONT, ECHO)
     assert result == True
 
-    # say it again, suppressed
+    # say it again (this call is suppressed)
     result = client_writer.iac(DONT, ECHO)
     assert result == False
 
-    server_writer = (await asyncio.wait_for(_waiter, 0.5)).writer
+    server_writer = (await asyncio.wait_for(_waiter_connected, 0.5)).writer
+    client_writer.close()
+    await asyncio.wait_for(_waiter_closed, 0.5)
 
-    assert client_writer.remote_option[ECHO] is False
-    assert server_writer.local_option[ECHO] is False
+    assert client_writer.remote_option[ECHO] is False, client_writer.remote_option
+    assert server_writer.local_option[ECHO] is False, server_writer.local_option
 
 
-@pytest.mark.asyncio
-async def test_slc_simul(event_loop, bind_host, unused_tcp_port):
+async def test_slc_simul(bind_host, unused_tcp_port):
     """Test SLC control characters are simulated in kludge mode."""
     # For example, ^C is simulated as IP (Interrupt Process) callback.
     from telnetlib3.telopt import IAC, DO, WILL, ECHO, SGA
@@ -229,10 +223,9 @@ async def test_slc_simul(event_loop, bind_host, unused_tcp_port):
     expected_from_server = IAC + WILL + ECHO + IAC + WILL + SGA
     _waiter_input = asyncio.Future()
 
-    @asyncio.coroutine
-    def shell(reader, writer):
+    async def shell(reader, writer):
         # read everything from client until they hang up.
-        result = yield from reader.read()
+        result = await reader.read()
 
         # then report what was received and hangup on client
         _waiter_input.set_result((writer.protocol.waiters, result))
@@ -275,13 +268,13 @@ async def test_slc_simul(event_loop, bind_host, unused_tcp_port):
         host=bind_host,
         shell=shell,
         port=unused_tcp_port,
-        loop=event_loop,
         connect_maxwait=0.05,
         encoding=False,
     )
 
     client_reader, client_writer = await asyncio.open_connection(
-        host=bind_host, port=unused_tcp_port, loop=event_loop
+        host=bind_host,
+        port=unused_tcp_port,
     )
 
     # exercise,
@@ -299,8 +292,7 @@ async def test_slc_simul(event_loop, bind_host, unused_tcp_port):
     assert data_received == given_input_inband
 
 
-@pytest.mark.asyncio
-async def test_unhandled_do_sends_wont(event_loop, bind_host, unused_tcp_port):
+async def test_unhandled_do_sends_wont(bind_host, unused_tcp_port):
     """An unhandled DO is denied by WONT."""
     from telnetlib3.telopt import IAC, DO, NOP, WONT
 
@@ -311,13 +303,13 @@ async def test_unhandled_do_sends_wont(event_loop, bind_host, unused_tcp_port):
         protocol_factory=telnetlib3.BaseServer,
         host=bind_host,
         port=unused_tcp_port,
-        loop=event_loop,
         connect_maxwait=0.05,
         encoding=False,
     )
 
     client_reader, client_writer = await asyncio.open_connection(
-        host=bind_host, port=unused_tcp_port, loop=event_loop
+        host=bind_host,
+        port=unused_tcp_port,
     )
 
     # exercise,
@@ -328,14 +320,12 @@ async def test_unhandled_do_sends_wont(event_loop, bind_host, unused_tcp_port):
     assert result == expected_output
 
 
-@pytest.mark.asyncio
-async def test_writelines_bytes(event_loop, bind_host, unused_tcp_port):
+async def test_writelines_bytes(bind_host, unused_tcp_port):
     """Exercise bytes-only interface of writer.writelines() function."""
     given = (b"a", b"b", b"c", b"d")
     expected = b"abcd"
 
-    @asyncio.coroutine
-    def shell(reader, writer):
+    async def shell(reader, writer):
         writer.writelines(given)
         writer.close()
 
@@ -344,13 +334,13 @@ async def test_writelines_bytes(event_loop, bind_host, unused_tcp_port):
         host=bind_host,
         shell=shell,
         port=unused_tcp_port,
-        loop=event_loop,
         connect_maxwait=0.05,
         encoding=False,
     )
 
     client_reader, client_writer = await asyncio.open_connection(
-        host=bind_host, port=unused_tcp_port, loop=event_loop
+        host=bind_host,
+        port=unused_tcp_port,
     )
 
     # verify,
@@ -359,14 +349,12 @@ async def test_writelines_bytes(event_loop, bind_host, unused_tcp_port):
     assert result == expected
 
 
-@pytest.mark.asyncio
-async def test_writelines_unicode(event_loop, bind_host, unused_tcp_port):
+async def test_writelines_unicode(bind_host, unused_tcp_port):
     """Exercise unicode interface of writer.writelines() function."""
     given = ("a", "b", "c", "d")
     expected = b"abcd"
 
-    @asyncio.coroutine
-    def shell(reader, writer):
+    async def shell(reader, writer):
         writer.writelines(given)
         writer.close()
 
@@ -375,13 +363,13 @@ async def test_writelines_unicode(event_loop, bind_host, unused_tcp_port):
         host=bind_host,
         shell=shell,
         port=unused_tcp_port,
-        loop=event_loop,
         connect_maxwait=0.05,
         encoding="ascii",
     )
 
     client_reader, client_writer = await asyncio.open_connection(
-        host=bind_host, port=unused_tcp_port, loop=event_loop
+        host=bind_host,
+        port=unused_tcp_port,
     )
 
     # verify,
@@ -399,15 +387,13 @@ def test_bad_iac():
         writer.iac(NOP)
 
 
-@pytest.mark.asyncio
-async def test_send_ga(event_loop, bind_host, unused_tcp_port):
+async def test_send_ga(bind_host, unused_tcp_port):
     """Writer sends IAC + GA when SGA is not negotiated."""
     from telnetlib3.telopt import IAC, GA
 
     expected = IAC + GA
 
-    @asyncio.coroutine
-    def shell(reader, writer):
+    async def shell(reader, writer):
         result = writer.send_ga()
         assert result is True
         writer.close()
@@ -417,12 +403,11 @@ async def test_send_ga(event_loop, bind_host, unused_tcp_port):
         host=bind_host,
         shell=shell,
         port=unused_tcp_port,
-        loop=event_loop,
         connect_maxwait=0.05,
     )
 
     client_reader, client_writer = await asyncio.open_connection(
-        host=bind_host, port=unused_tcp_port, loop=event_loop
+        host=bind_host, port=unused_tcp_port
     )
 
     # verify,
@@ -431,8 +416,7 @@ async def test_send_ga(event_loop, bind_host, unused_tcp_port):
     assert result == expected
 
 
-@pytest.mark.asyncio
-async def test_not_send_ga(event_loop, bind_host, unused_tcp_port):
+async def test_not_send_ga(bind_host, unused_tcp_port):
     """Writer does not send IAC + GA when SGA is negotiated."""
     from telnetlib3.telopt import IAC, DO, WILL, SGA
 
@@ -441,8 +425,7 @@ async def test_not_send_ga(event_loop, bind_host, unused_tcp_port):
     # (not sent).  The reader never receives an IAC + GA.
     expected = IAC + WILL + SGA
 
-    @asyncio.coroutine
-    def shell(reader, writer):
+    async def shell(reader, writer):
         result = writer.send_ga()
         assert result is False
         writer.close()
@@ -452,12 +435,11 @@ async def test_not_send_ga(event_loop, bind_host, unused_tcp_port):
         host=bind_host,
         shell=shell,
         port=unused_tcp_port,
-        loop=event_loop,
         connect_maxwait=0.05,
     )
 
     client_reader, client_writer = await asyncio.open_connection(
-        host=bind_host, port=unused_tcp_port, loop=event_loop
+        host=bind_host, port=unused_tcp_port
     )
 
     client_writer.write(IAC + DO + SGA)
@@ -467,13 +449,11 @@ async def test_not_send_ga(event_loop, bind_host, unused_tcp_port):
     assert result == expected
 
 
-@pytest.mark.asyncio
-async def test_not_send_eor(event_loop, bind_host, unused_tcp_port):
+async def test_not_send_eor(bind_host, unused_tcp_port):
     """Writer does not send IAC + EOR when un-negotiated."""
     expected = b""
 
-    @asyncio.coroutine
-    def shell(reader, writer):
+    async def shell(reader, writer):
         result = writer.send_eor()
         assert result is False
         writer.close()
@@ -483,12 +463,11 @@ async def test_not_send_eor(event_loop, bind_host, unused_tcp_port):
         host=bind_host,
         shell=shell,
         port=unused_tcp_port,
-        loop=event_loop,
         connect_maxwait=0.05,
     )
 
     client_reader, client_writer = await asyncio.open_connection(
-        host=bind_host, port=unused_tcp_port, loop=event_loop
+        host=bind_host, port=unused_tcp_port
     )
 
     # verify,
@@ -497,8 +476,7 @@ async def test_not_send_eor(event_loop, bind_host, unused_tcp_port):
     assert result == expected
 
 
-@pytest.mark.asyncio
-async def test_send_eor(event_loop, bind_host, unused_tcp_port):
+async def test_send_eor(bind_host, unused_tcp_port):
     """Writer sends IAC + EOR if client requests by DO."""
     from telnetlib3.telopt import IAC, DO, WILL, CMD_EOR, EOR
 
@@ -509,8 +487,7 @@ async def test_send_eor(event_loop, bind_host, unused_tcp_port):
     assert EOR == bytes([25])
     assert CMD_EOR == bytes([239])
 
-    @asyncio.coroutine
-    def shell(reader, writer):
+    async def shell(reader, writer):
         writer.write("<")
         result = writer.send_eor()
         assert result is True
@@ -522,12 +499,11 @@ async def test_send_eor(event_loop, bind_host, unused_tcp_port):
         host=bind_host,
         shell=shell,
         port=unused_tcp_port,
-        loop=event_loop,
         connect_maxwait=0.05,
     )
 
     client_reader, client_writer = await asyncio.open_connection(
-        host=bind_host, port=unused_tcp_port, loop=event_loop
+        host=bind_host, port=unused_tcp_port
     )
 
     # verify,

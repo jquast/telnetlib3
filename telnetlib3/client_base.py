@@ -28,8 +28,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     def __init__(
         self,
         shell=None,
-        log=None,
-        loop=None,
         encoding="utf8",
         encoding_errors="strict",
         force_binary=False,
@@ -40,9 +38,9 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         _waiter_connected=None,
     ):
         """Class initializer."""
-        super().__init__(loop=loop)
-        self.log = log or logging.getLogger("telnetlib3.client")
-        self._loop = loop or asyncio.get_event_loop()
+        super().__init__()
+        self.log = logging.getLogger("telnetlib3.client")
+
         #: encoding for new connections
         self.default_encoding = encoding
         self._encoding_errors = encoding_errors
@@ -122,8 +120,8 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         reader_factory = self._reader_factory
         writer_factory = self._writer_factory
 
-        reader_kwds = {"loop": self._loop}
-        writer_kwds = {"loop": self._loop}
+        reader_kwds = {}
+        writer_kwds = {}
 
         if self.default_encoding:
             reader_kwds["fn_encoding"] = self.encoding
@@ -143,14 +141,13 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             protocol=self,
             reader=self.reader,
             client=True,
-            log=self.log,
             **writer_kwds
         )
 
         self.log.info("Connected to %s", self)
 
         self._waiter_connected.add_done_callback(self.begin_shell)
-        self._loop.call_soon(self.begin_negotiation)
+        asyncio.get_event_loop().call_soon(self.begin_negotiation)
 
     def begin_shell(self, result):
         if self.shell is not None:
@@ -166,9 +163,11 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 # We accomplish this by chaining the completion of the
                 # shell future to set the result of the waiter_closed
                 # future.
-                fut = self._loop.create_task(coro)
+                fut = asyncio.get_event_loop().create_task(coro)
                 fut.add_done_callback(
                     lambda fut_obj: self.waiter_closed.set_result(weakref.proxy(self))
+                    if self.waiter_closed is not None
+                    else None
                 )
 
     def data_received(self, data):
@@ -214,12 +213,14 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     # public protocol methods
 
     def __repr__(self):
-        hostport = self.get_extra_info("peername")[:2]
+        hostport = self.get_extra_info("peername", ["-", "closing"])[:2]
         return "<Peer {0} {1}>".format(*hostport)
 
     def get_extra_info(self, name, default=None):
         """Get optional client protocol or transport information."""
-        return self._extra.get(name, self._transport._extra.get(name, default))
+        if self._transport:
+            default = self._transport._extra.get(name, default)
+        return self._extra.get(name, default)
 
     def begin_negotiation(self):
         """
@@ -232,7 +233,9 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         Deriving implementations should always call
         ``super().begin_negotiation()``.
         """
-        self._check_later = self._loop.call_soon(self._check_negotiation_timer)
+        self._check_later = asyncio.get_event_loop().call_soon(
+            self._check_negotiation_timer
+        )
         self._tasks.append(self._check_later)
 
     def encoding(self, outgoing=False, incoming=False):
@@ -307,7 +310,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             sooner = self.connect_minwait - self.duration
             if sooner > 0:
                 later = sooner
-            self._check_later = self._loop.call_later(
+            self._check_later = asyncio.get_event_loop().call_later(
                 later, self._check_negotiation_timer
             )
             self._tasks.append(self._check_later)

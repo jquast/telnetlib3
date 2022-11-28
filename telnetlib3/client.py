@@ -5,7 +5,6 @@ Telnet Client API for the 'telnetlib3' python package.
 # std imports
 import argparse
 import asyncio
-import logging
 import codecs
 import struct
 import sys
@@ -247,17 +246,14 @@ class TelnetTerminalClient(TelnetClient):
             )
 
 
-@asyncio.coroutine
-def open_connection(
+async def open_connection(
     host=None,
     port=23,
     *,
     client_factory=None,
-    loop=None,
     family=0,
     flags=0,
     local_addr=None,
-    log=None,
     encoding="utf8",
     encoding_errors="replace",
     force_binary=False,
@@ -281,16 +277,12 @@ def open_connection(
     :param client_base.BaseClient client_factory: Client connection class
         factory.  When ``None``, :class:`TelnetTerminalClient` is used when
         *stdin* is attached to a terminal, :class:`TelnetClient` otherwise.
-    :param asyncio.AbstractEventLoop loop: set the event loop to use.
-        The return value of :func:`asyncio.get_event_loop` is used when unset.
     :param int family: Same meaning as
         :meth:`asyncio.loop.create_connection`.
     :param int flags: Same meaning as
         :meth:`asyncio.loop.create_connection`.
     :param tuple local_addr: Same meaning as
         :meth:`asyncio.loop.create_connection`.
-    :param logging.Logger log: target logger, if None is given, one is created
-        using the namespace ``'telnetlib3.server'``.
     :param str encoding: The default assumed encoding, or ``False`` to disable
         unicode support.  This value is used for decoding bytes received by and
         encoding bytes transmitted to the Server.  These values are preferred
@@ -300,6 +292,7 @@ def open_connection(
         The server's attached ``reader, writer`` streams accept and return
         unicode, unless this value explicitly set ``False``.  In that case, the
         attached streams interfaces are bytes-only.
+    :param str encoding_errors: Same meaning as :meth:`codecs.Codec.encode`.
 
     :param str term: Terminal type sent for requests of TTYPE, :rfc:`930` or as
         Environment value TERM by NEW_ENVIRON negotiation, :rfc:`1672`.
@@ -312,7 +305,7 @@ def open_connection(
         :rfc:`1079`.
     :param str xdisploc: String transmitted in response for request of
         XDISPLOC, :rfc:`1086` by server (X11).
-    :param Callable shell: A :func:`asyncio.coroutine` that is called after
+    :param Callable shell: A async function that is called after
         negotiation completes, receiving arguments ``(reader, writer)``.
         The reader is a :class:`~.TelnetReader` instance, the writer is
         a :class:`~.TelnetWriter` instance.
@@ -325,15 +318,6 @@ def open_connection(
         that is not a telnet server will delay the execution of ``shell`` for
         exactly this amount of time.
     :param float connect_maxwait: If the remote end is not complaint, or
-        otherwise confused by our demands and failing to reply to pending
-        negotiations, the shell continues anyway after the greater of this
-        value or ``connect_minwait`` elapsed.
-    :param bool force_binary: When ``True``, the encoding specified is used for
-        both directions even when failing ``BINARY`` negotiation, :rfc:`856`.
-        This parameter has no effect when ``encoding=False``.
-    :param str encoding_errors: Same meaning as :meth:`codecs.Codec.encode`.
-    :param float connect_minwait: XXX
-    :param float connect_maxwait: If the remote end is not complaint, or
         otherwise confused by our demands, the shell continues anyway after the
         greater of this value has elapsed.  A client that is not answering
         option negotiation will delay the start of the shell by this amount.
@@ -341,12 +325,7 @@ def open_connection(
     :param int limit: The buffer limit for reader stream.
     :return (reader, writer): The reader is a :class:`~.TelnetReader`
         instance, the writer is a :class:`~.TelnetWriter` instance.
-
-    This function is a :func:`~asyncio.coroutine`.
     """
-    log = log or logging.getLogger(__name__)
-    loop = loop or asyncio.get_event_loop()
-
     if client_factory is None:
         client_factory = TelnetClient
         if sys.platform != "win32" and sys.stdin.isatty():
@@ -354,7 +333,6 @@ def open_connection(
 
     def connection_factory():
         return client_factory(
-            log=log,
             encoding=encoding,
             encoding_errors=encoding_errors,
             force_binary=force_binary,
@@ -371,7 +349,7 @@ def open_connection(
             limit=limit,
         )
 
-    transport, protocol = yield from loop.create_connection(
+    transport, protocol = await asyncio.get_event_loop().create_connection(
         connection_factory,
         host,
         port,
@@ -380,12 +358,12 @@ def open_connection(
         local_addr=local_addr,
     )
 
-    yield from protocol._waiter_connected
+    await protocol._waiter_connected
 
     return protocol.reader, protocol.writer
 
 
-def main():
+async def run_client():
     """Command-line 'telnetlib3-client' entry point, via setuptools."""
     kwargs = _transform_args(_get_argument_parser().parse_args())
     config_msg = "Client configuration: {key_values}".format(
@@ -394,7 +372,7 @@ def main():
     host = kwargs.pop("host")
     port = kwargs.pop("port")
 
-    log = kwargs["log"] = accessories.make_logger(
+    log = accessories.make_logger(
         name=__name__,
         loglevel=kwargs.pop("loglevel"),
         logfile=kwargs.pop("logfile"),
@@ -402,13 +380,11 @@ def main():
     )
     log.debug(config_msg)
 
-    loop = asyncio.get_event_loop()
-
     # connect
-    reader, writer = loop.run_until_complete(open_connection(host, port, **kwargs))
+    reader, writer = await open_connection(host, port, **kwargs)
 
     # repl loop
-    loop.run_until_complete(writer.protocol.waiter_closed)
+    await writer.protocol.waiter_closed
 
 
 def _get_argument_parser():
@@ -454,7 +430,6 @@ def _get_argument_parser():
 
 
 def _transform_args(args):
-    # TODO: Connect as exit(main(**parse_args(sys.argv)))
     return {
         "host": args.host,
         "port": args.port,
@@ -471,5 +446,9 @@ def _transform_args(args):
     }
 
 
+def main():
+    asyncio.run(run_client())
+
+
 if __name__ == "__main__":
-    exit(main())
+    main()

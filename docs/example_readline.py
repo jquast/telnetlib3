@@ -86,7 +86,7 @@ class Lander(object):
                 client.writer.write("? ")
 
                 # await (1) client input or (2) system notification
-                done, pending = yield from asyncio.wait(
+                done, pending = await asyncio.wait(
                     wait_for, return_when=asyncio.FIRST_COMPLETED
                 )
 
@@ -118,8 +118,7 @@ class Lander(object):
             for task in wait_for:
                 task.cancel()
 
-    @asyncio.coroutine
-    def repl_catime(self, client):
+    async def repl_catime(self, client):
         """
         Lander REPL providing character-at-a-time processing.
         """
@@ -137,7 +136,7 @@ class Lander(object):
             while True:
 
                 # await (1) client input (2) system notification
-                done, pending = yield from asyncio.wait(
+                done, pending = await asyncio.wait(
                     wait_for, return_when=asyncio.FIRST_COMPLETED
                 )
 
@@ -256,4 +255,4 @@ lander = Lander()
 def shell(reader, writer):
     global lander
     with lander.register_link(reader, writer) as client:
-        yield from lander.repl_readline(client)
+        await lander.repl_readline(client)

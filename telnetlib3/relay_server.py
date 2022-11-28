@@ -14,8 +14,6 @@ async def relay_shell(client_reader, client_writer):
 
         telnetlib3 --shell telnetlib3.relay_server.relay_shell
 
-    This function is a :func:`~asyncio.coroutine`.
-
     This relay service is very basic, it still needs to somehow forward the TERM
     type and environment variable of value COLORTERM
     """
@@ -52,7 +50,6 @@ async def relay_shell(client_reader, client_writer):
         return
 
     # connect to another telnet server (next_host, next_port)
-    loop = asyncio.get_event_loop()
     client_writer.write("Connecting to {}:{} ... ".format(next_host, next_port))
     server_reader, server_writer = await open_connection(
         next_host,

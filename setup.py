@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 """Setuptools distribution file."""
 import os
-import platform
 from setuptools import setup
 
 
@@ -16,7 +15,7 @@ def _get_long_description(fname, encoding="utf8"):
 setup(
     name="telnetlib3",
     # keep in sync w/docs/conf.py manually for now, please!
-    version="1.0.4",
+    version="2.0.0",
     url="http://telnetlib3.rtfd.org/",
     license="ISC",
     author="Jeff Quast",
@@ -52,8 +51,11 @@ setup(
     ),
     classifiers=[
         "License :: OSI Approved :: ISC License (ISCL)",
-        "Programming Language :: Python :: 3.3",
-        "Programming Language :: Python :: 3.4",
+        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
         "Intended Audience :: Developers",
         "Development Status :: 4 - Beta",
         "Topic :: System :: Networking",

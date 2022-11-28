@@ -14,7 +14,8 @@ class TelnetReader(asyncio.StreamReader):
     """A reader interface for the telnet protocol."""
 
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        loop = asyncio.get_event_loop_policy().get_event_loop()
+        super().__init__(*args, loop=loop, **kwargs)
         self._connection_closed = False
         self.log = logging.getLogger(__name__)
 
@@ -36,8 +37,7 @@ class TelnetReader(asyncio.StreamReader):
         self._connection_closed = True
         self._cancel_task()
 
-    @asyncio.coroutine
-    def readline(self):
+    async def readline(self):
         r"""
         Read one line.
 
@@ -64,8 +64,6 @@ class TelnetReader(asyncio.StreamReader):
 
         If EOF is received before the termination of a line, the method will
         yield the partially read string.
-
-        This method is a :func:`~asyncio.coroutine`.
         """
         if self._exception is not None:
             raise self._exception
@@ -114,7 +112,7 @@ class TelnetReader(asyncio.StreamReader):
                 break
 
             if not_enough:
-                yield from self._wait_for_data("readline")
+                await self._wait_for_data("readline")
 
         self._maybe_resume_transport()
         buf = bytes(line)
@@ -140,7 +138,6 @@ class TelnetReaderUnicode(TelnetReader):
         fn_encoding,
         *,
         limit=asyncio.streams._DEFAULT_LIMIT,
-        loop=None,
         encoding_errors="replace"
     ):
         """
@@ -151,8 +148,7 @@ class TelnetReaderUnicode(TelnetReader):
             to determine what encoding should be used to decode the value in
             the direction specified.
         """
-        loop = loop or asyncio.get_event_loop()
-        super().__init__(limit=limit, loop=loop)
+        super().__init__(limit=limit)
 
         assert callable(fn_encoding), fn_encoding
         self.fn_encoding = fn_encoding
@@ -174,20 +170,16 @@ class TelnetReaderUnicode(TelnetReader):
 
         return self._decoder.decode(buf, final)
 
-    @asyncio.coroutine
-    def readline(self):
+    async def readline(self):
         """
         Read one line.
 
         See ancestor method, :func:`~TelnetReader.readline` for details.
-
-        This method is a :func:`~asyncio.coroutine`.
         """
-        buf = yield from super().readline()
+        buf = await super().readline()
         return self.decode(buf)
 
-    @asyncio.coroutine
-    def read(self, n=-1):
+    async def read(self, n=-1):
         """
         Read up to *n* bytes.
 
@@ -197,8 +189,6 @@ class TelnetReaderUnicode(TelnetReader):
         :param int n:  If *n* is not provided, or set to -1, read until EOF
             and return all characters as one large string.
         :rtype: str
-
-        This method is a :func:`~asyncio.coroutine`.
         """
         if self._exception is not None:
             raise self._exception
@@ -213,7 +203,7 @@ class TelnetReaderUnicode(TelnetReader):
             # bytes.  So just call self.read(self._limit) until EOF.
             blocks = []
             while True:
-                block = yield from self.read(self._limit)
+                block = await self.read(self._limit)
                 if not block:
                     # eof
                     break
@@ -222,7 +212,7 @@ class TelnetReaderUnicode(TelnetReader):
 
         else:
             if not self._buffer and not self._eof:
-                yield from self._wait_for_data("read")
+                await self._wait_for_data("read")
 
         buf = self.decode(bytes(self._buffer))
         if n < 0 or len(buf) <= n:
@@ -236,8 +226,7 @@ class TelnetReaderUnicode(TelnetReader):
         self._maybe_resume_transport()
         return u_data
 
-    @asyncio.coroutine
-    def readexactly(self, n):
+    async def readexactly(self, n):
         """
         Read exactly *n* unicode characters.
 
@@ -246,15 +235,13 @@ class TelnetReaderUnicode(TelnetReader):
             :attr:`asyncio.IncompleteReadError.partial` attribute of the
             exception contains the partial read characters.
         :rtype: str
-
-        This method is a :func:`~asyncio.coroutine`.
         """
         if self._exception is not None:
             raise self._exception
 
         blocks = []
         while n > 0:
-            block = yield from self.read(n)
+            block = await self.read(n)
             if not block:
                 partial = u"".join(blocks)
                 raise asyncio.IncompleteReadError(partial, len(partial) + n)

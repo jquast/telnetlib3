@@ -1,0 +1,18 @@
+# testing
+pytest
+pytest-asyncio
+pytest-xdist
+pytest-cov
+pexpect
+
+# static analysis
+restructuredtext_lint
+pygments
+doc8
+pylint
+black
+
+# docs
+Sphinx<4
+sphinx-paramlinks<1
+sphinx-rtd-theme<1

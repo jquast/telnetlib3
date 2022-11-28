@@ -1,74 +1,73 @@
-from telnetlib import (  # noqa
-    LINEMODE,
-    NAWS,
-    NEW_ENVIRON,
-    BINARY,
-    SGA,
-    ECHO,
-    STATUS,
-    TTYPE,
-    TSPEED,
-    LFLOW,
-    XDISPLOC,
-    IAC,
-    DONT,
-    DO,
-    WONT,
-    WILL,
-    SE,
-    NOP,
-    TM,
-    DM,
-    BRK,
-    IP,
-    AO,
-    AYT,
-    EC,
-    EL,
-    EOR,
-    GA,
-    SB,
-    LOGOUT,
-    CHARSET,
-    SNDLOC,
-    theNULL,
-    # not supported or used, feel free to contribute support !
-    ENCRYPT,
-    AUTHENTICATION,
-    TN3270E,
-    XAUTH,
-    RSP,
-    COM_PORT_OPTION,
-    SUPPRESS_LOCAL_ECHO,
-    TLS,
-    KERMIT,
-    SEND_URL,
-    FORWARD_X,
-    PRAGMA_LOGON,
-    SSPI_LOGON,
-    PRAGMA_HEARTBEAT,
-    EXOPL,
-    X3PAD,
-    VT3270REGIME,
-    TTYLOC,
-    SUPDUPOUTPUT,
-    SUPDUP,
-    DET,
-    BM,
-    XASCII,
-    RCP,
-    NAMS,
-    RCTE,
-    NAOL,
-    NAOP,
-    NAOCRD,
-    NAOHTS,
-    NAOHTD,
-    NAOFFD,
-    NAOVTS,
-    NAOVTD,
-    NAOLFD,
-)
+# Exported from the telnetlib module, which is marked for deprecation in version
+# 3.11 and removal in 3.13
+LINEMODE = b'"'
+NAWS = b"\x1f"
+NEW_ENVIRON = b"'"
+BINARY = b"\x00"
+SGA = b"\x03"
+ECHO = b"\x01"
+STATUS = b"\x05"
+TTYPE = b"\x18"
+TSPEED = b" "
+LFLOW = b"!"
+XDISPLOC = b"#"
+IAC = b"\xff"
+DONT = b"\xfe"
+DO = b"\xfd"
+WONT = b"\xfc"
+WILL = b"\xfb"
+SE = b"\xf0"
+NOP = b"\xf1"
+TM = b"\x06"
+DM = b"\xf2"
+BRK = b"\xf3"
+IP = b"\xf4"
+AO = b"\xf5"
+AYT = b"\xf6"
+EC = b"\xf7"
+EL = b"\xf8"
+EOR = b"\x19"
+GA = b"\xf9"
+SB = b"\xfa"
+LOGOUT = b"\x12"
+CHARSET = b"*"
+SNDLOC = b"\x17"
+theNULL = b"\x00"
+ENCRYPT = b"&"
+AUTHENTICATION = b"%"
+TN3270E = b"("
+XAUTH = b")"
+RSP = b"+"
+COM_PORT_OPTION = b","
+SUPPRESS_LOCAL_ECHO = b"-"
+TLS = b"."
+KERMIT = b"/"
+SEND_URL = b"0"
+FORWARD_X = b"1"
+PRAGMA_LOGON = b"\x8a"
+SSPI_LOGON = b"\x8b"
+PRAGMA_HEARTBEAT = b"\x8c"
+EXOPL = b"\xff"
+X3PAD = b"\x1e"
+VT3270REGIME = b"\x1d"
+TTYLOC = b"\x1c"
+SUPDUPOUTPUT = b"\x16"
+SUPDUP = b"\x15"
+DET = b"\x14"
+BM = b"\x13"
+XASCII = b"\x11"
+RCP = b"\x02"
+NAMS = b"\x04"
+RCTE = b"\x07"
+NAOL = b"\x08"
+NAOP = b"\t"
+NAOCRD = b"\n"
+NAOHTS = b"\x0b"
+NAOHTD = b"\x0c"
+NAOFFD = b"\r"
+NAOVTS = b"\x0e"
+NAOVTD = b"\x0f"
+NAOLFD = b"\x10"
 
 __all__ = (
     "ABORT",

@@ -4,7 +4,6 @@ import asyncio
 import collections
 import logging
 import struct
-import sys
 
 # local imports
 from . import slc
@@ -121,8 +120,6 @@ class TelnetWriter(asyncio.StreamWriter):
         client=False,
         server=False,
         reader=None,
-        loop=None,
-        log=None
     ):
         """
         A writer interface for the telnet protocol.
@@ -150,22 +147,16 @@ class TelnetWriter(asyncio.StreamWriter):
             the server point of view.
         :param logging.Logger log: target logger, if None is given, one is
             created using the namespace ``'telnetlib3.stream_writer'``.
-        :param asyncio.AbstractEventLoop loop: set the event loop to
-            use.  The return value of :func:`asyncio.get_event_loop` is used
-            when unset.
         """
-        # fix tests in 3.8
-        if loop is None and sys.version_info[:2] >= (3, 8):
-            loop = asyncio.get_event_loop()
-
+        loop = asyncio.get_event_loop_policy().get_event_loop()
         asyncio.StreamWriter.__init__(self, transport, protocol, reader, loop)
 
         if not any((client, server)) or all((client, server)):
             raise TypeError(
-                "keyword arguments `client', and `server' " "are mutually exclusive."
+                "keyword arguments `client', and `server' are mutually exclusive."
             )
         self._server = server
-        self.log = log or logging.getLogger(__name__)
+        self.log = logging.getLogger(__name__)
 
         #: Dictionary of telnet option byte(s) that follow an
         #: IAC-DO or IAC-DONT command, and contains a value of ``True``
@@ -2556,7 +2547,7 @@ class TelnetWriterUnicode(TelnetWriter):
         object producing strings. This is equivalent to calling write() for
         each string.
         """
-        self.write(string=u"".join(lines), errors=errors)
+        self.write(string="".join(lines), errors=errors)
 
     def echo(self, string, errors=None):
         """
@@ -2589,8 +2580,6 @@ class Option(dict):
 
         :param str name: decorated name representing option class, such as
             'local', 'remote', or 'pending'.
-        :param logging.Logger log: logging instance where debug information
-            of state changes is recorded (as DEBUG).
         """
         self.name, self.log = name, log
         dict.__init__(self)
