@@ -306,7 +306,7 @@ async def open_connection(
         :rfc:`1079`.
     :param str xdisploc: String transmitted in response for request of
         XDISPLOC, :rfc:`1086` by server (X11).
-    :param Callable shell: A :func:`asyncio.coroutine` that is called after
+    :param Callable shell: A async function that is called after
         negotiation completes, receiving arguments ``(reader, writer)``.
         The reader is a :class:`~.TelnetReader` instance, the writer is
         a :class:`~.TelnetWriter` instance.
@@ -326,11 +326,7 @@ async def open_connection(
     :param int limit: The buffer limit for reader stream.
     :return (reader, writer): The reader is a :class:`~.TelnetReader`
         instance, the writer is a :class:`~.TelnetWriter` instance.
-
-    This function is a :func:`~asyncio.coroutine`.
     """
-    log = logging.getLogger(__name__)
-
     if client_factory is None:
         client_factory = TelnetClient
         if sys.platform != "win32" and sys.stdin.isatty():

@@ -88,7 +88,9 @@ def make_logger(name, loglevel="info", logfile=None, logfmt=_DEFAULT_LOGFMT):
 
 def repr_mapping(mapping):
     """Return printable string, 'key=value [key=value ...]' for mapping."""
-    return " ".join("=".join(f"{key}={value}" for key, value in mapping.items()))
+    return " ".join(
+        "=".join(f"{key}={shlex.quote(value)}" for key, value in mapping.items())
+    )
 
 
 def function_lookup(pymod_path):

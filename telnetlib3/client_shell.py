@@ -173,8 +173,6 @@ else:
         escape character, ^].
 
         stdin or stdout may also be a pipe or file, behaving much like nc(1).
-
-        This function is a :func:`~asyncio.coroutine`.
         """
         keyboard_escape = "\x1d"
 

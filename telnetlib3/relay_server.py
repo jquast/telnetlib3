@@ -14,8 +14,6 @@ async def relay_shell(client_reader, client_writer):
 
         telnetlib3 --shell telnetlib3.relay_server.relay_shell
 
-    This function is a :func:`~asyncio.coroutine`.
-
     This relay service is very basic, it still needs to somehow forward the TERM
     type and environment variable of value COLORTERM
     """

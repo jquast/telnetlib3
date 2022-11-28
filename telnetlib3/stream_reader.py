@@ -64,8 +64,6 @@ class TelnetReader(asyncio.StreamReader):
 
         If EOF is received before the termination of a line, the method will
         yield the partially read string.
-
-        This method is a :func:`~asyncio.coroutine`.
         """
         if self._exception is not None:
             raise self._exception
@@ -177,8 +175,6 @@ class TelnetReaderUnicode(TelnetReader):
         Read one line.
 
         See ancestor method, :func:`~TelnetReader.readline` for details.
-
-        This method is a :func:`~asyncio.coroutine`.
         """
         buf = await super().readline()
         return self.decode(buf)
@@ -193,8 +189,6 @@ class TelnetReaderUnicode(TelnetReader):
         :param int n:  If *n* is not provided, or set to -1, read until EOF
             and return all characters as one large string.
         :rtype: str
-
-        This method is a :func:`~asyncio.coroutine`.
         """
         if self._exception is not None:
             raise self._exception
@@ -241,8 +235,6 @@ class TelnetReaderUnicode(TelnetReader):
             :attr:`asyncio.IncompleteReadError.partial` attribute of the
             exception contains the partial read characters.
         :rtype: str
-
-        This method is a :func:`~asyncio.coroutine`.
         """
         if self._exception is not None:
             raise self._exception

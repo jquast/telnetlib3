@@ -1,4 +1,3 @@
-import asyncio
 import types
 
 CR, LF, NUL = "\r\n\x00"
@@ -15,8 +14,6 @@ async def telnet_server_shell(reader, writer):
 
     This shell provides a very simple REPL, allowing introspection and state
     toggling of the connected client session.
-
-    This function is a :func:`~asyncio.coroutine`.
     """
     writer.write("Ready." + CR + LF)
 
@@ -63,8 +60,6 @@ async def telnet_server_shell(reader, writer):
 def readline(reader, writer):
     """
     A very crude readline coroutine interface.
-
-    This function is a :func:`~asyncio.coroutine`.
     """
     command, inp, last_inp = "", "", ""
     inp = yield None
