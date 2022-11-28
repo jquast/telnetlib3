@@ -21,6 +21,8 @@ setup(
     author="Jeff Quast",
     description="Python 3 asyncio Telnet server and client Protocol library",
     long_description=_get_long_description(fname=_get_here("README.rst")),
+    # requires python 3.7 and greater beginning with 2.0.0 release
+    python_requires=">=3.7",
     packages=["telnetlib3"],
     package_data={
         "": ["README.rst", "requirements.txt"],
