@@ -1,7 +1,3 @@
-.. image:: https://img.shields.io/travis/jquast/telnetlib3.svg
-    :alt: Travis Continuous Integration
-    :target: https://travis-ci.org/jquast/telnetlib3/
-
 .. image:: https://coveralls.io/repos/jquast/telnetlib3/badge.svg?branch=master&service=github
     :alt: Coveralls Code Coverage
     :target: https://coveralls.io/github/jquast/telnetlib3?branch=master
