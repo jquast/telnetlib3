@@ -236,7 +236,7 @@ class TelnetServer(server_base.BaseServer):
         Default implementation writes "Timeout." bound by CRLF and closes.
 
         This can be disabled by calling :meth:`set_timeout` with
-        :paramref:`~.set_timeout.duration` value of ``0`` or value of
+        :meth:`set_timeout` parameter `duration` value of ``0``, or, value of
         the same for keyword argument ``timeout``.
         """
         logger.debug("Timeout after {self.idle:1.2f}s".format(self=self))

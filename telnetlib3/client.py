@@ -134,7 +134,7 @@ class TelnetClient(client_base.BaseClient):
 
         :param list offered: list of CHARSET options offered by server.
         :returns: character encoding agreed to be used.
-        :rtype: Union[str, None]
+        :rtype: str or None
         """
         selected = ""
         for offer in offered:
@@ -305,10 +305,10 @@ async def open_connection(
         :rfc:`1079`.
     :param str xdisploc: String transmitted in response for request of
         XDISPLOC, :rfc:`1086` by server (X11).
-    :param Callable shell: A async function that is called after
-        negotiation completes, receiving arguments ``(reader, writer)``.
-        The reader is a :class:`~.TelnetReader` instance, the writer is
-        a :class:`~.TelnetWriter` instance.
+    :param shell: A async function that is called after negotiation completes,
+        receiving arguments ``(reader, writer)``.  The reader is a
+        :class:`~.TelnetReader` instance, the writer is a
+        :class:`~.TelnetWriter` instance.
     :param float connect_minwait: The client allows any additional telnet
         negotiations to be demanded by the server within this period of time
         before launching the shell.  Servers should assert desired negotiation
