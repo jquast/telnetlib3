@@ -5,7 +5,6 @@ Telnet Client API for the 'telnetlib3' python package.
 # std imports
 import argparse
 import asyncio
-import logging
 import codecs
 import struct
 import sys
