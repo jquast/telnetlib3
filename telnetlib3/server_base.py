@@ -23,10 +23,6 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     _transport = None
     _advanced = False
     _closing = False
-    _reader_factory = TelnetReader
-    _reader_factory_encoding = TelnetReaderUnicode
-    _writer_factory = TelnetWriter
-    _writer_factory_encoding = TelnetWriterUnicode
 
     def __init__(
         self,
@@ -38,6 +34,10 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         force_binary=False,
         connect_maxwait=4.0,
         limit=None,
+        reader_factory=TelnetReader,
+        reader_factory_encoding=TelnetReaderUnicode,
+        writer_factory=TelnetWriter,
+        writer_factory_encoding=TelnetWriterUnicode,
     ):
         """Class initializer."""
         super().__init__()
@@ -45,6 +45,11 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._encoding_errors = encoding_errors
         self.force_binary = force_binary
         self._extra = dict()
+
+        self._reader_factory = reader_factory
+        self._reader_factory_encoding = reader_factory_encoding
+        self._writer_factory = writer_factory
+        self._writer_factory_encoding = writer_factory_encoding
 
         #: a future used for testing
         self._waiter_connected = _waiter_connected or asyncio.Future()

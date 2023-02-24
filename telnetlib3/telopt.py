@@ -109,6 +109,7 @@ __all__ = (
     "LOGOUT",
     "MCCP2_COMPRESS",
     "MCCP_COMPRESS",
+    "GMCP",
     "NAMS",
     "NAOCRD",
     "NAOFFD",
@@ -176,6 +177,7 @@ __all__ = (
     bytes([const]) for const in range(1, 8)
 )
 (MCCP_COMPRESS, MCCP2_COMPRESS) = (bytes([85]), bytes([86]))
+GMCP = bytes([201])
 
 #: List of globals that may match an iac command option bytes
 _DEBUG_OPTS = dict(
@@ -226,6 +228,7 @@ _DEBUG_OPTS = dict(
             "SNDLOC",
             "MCCP_COMPRESS",
             "MCCP2_COMPRESS",
+            "GMCP",
             "ENCRYPT",
             "AUTHENTICATION",
             "TN3270E",

@@ -27,6 +27,7 @@ from .telopt import (
     EOR,
     ESC,
     GA,
+    GMCP,
     IAC,
     INFO,
     IP,
@@ -1430,6 +1431,7 @@ class TelnetWriter(asyncio.StreamWriter):
             CHARSET,
             NAWS,
             STATUS,
+            GMCP,
         ):
 
             # first time we've agreed, respond accordingly.
@@ -1636,6 +1638,7 @@ class TelnetWriter(asyncio.StreamWriter):
             XDISPLOC: self._handle_sb_xdisploc,
             STATUS: self._handle_sb_status,
             COM_PORT_OPTION: self._handle_sb_comport,
+            GMCP: self._handle_sb_gmcp,
         }.get(cmd)
         if fn_call is None:
             raise ValueError(
@@ -2473,6 +2476,21 @@ class TelnetWriter(asyncio.StreamWriter):
 
         self.log.debug(
             "SB unhandled: cmd={}, buf={!r}".format(name_command(COM_PORT_OPTION), buf)
+        )
+
+        return
+
+    def _handle_sb_gmcp(self, buf):
+        """
+        Callback handles request for Generic Mud Communication Protocol (GMCP).
+
+        This callback simply logs the subnegotiation but does not perform any action.
+
+        :param bytes buf: bytes following IAC SB GMCP.
+        """
+
+        self.log.debug(
+            "SB unhandled: cmd={}, buf={!r}".format(name_command(GMCP), b"".join(buf))
         )
 
         return
