@@ -15,9 +15,9 @@ Introduction
 ============
 
 telnetlib3 is a Telnet Client and Server library for python.  This project
-requires python 3.3 and later, using the asyncio_ module.
+requires python 3.6 and later, using the asyncio_ module.
 
-.. _asyncio: http://docs.python.org/3.4/library/asyncio.html
+.. _asyncio: http://docs.python.org/3.11/library/asyncio.html
 
 Quick Example
 -------------
@@ -59,10 +59,10 @@ Authoring a Telnet Client that plays the war game with this server:
             elif '?' in outp:
                 # reply all questions with 'y'.
                 writer.write('y')
- 
+
             # display all server output
             print(outp, flush=True)
- 
+
         # EOF
         print()
 
