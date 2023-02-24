@@ -4,4 +4,3 @@ pytest-xdist
 pytest-cov
 # objgraph
 pexpect
-six
