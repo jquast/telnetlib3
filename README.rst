@@ -15,7 +15,7 @@ Introduction
 ============
 
 telnetlib3 is a Telnet Client and Server library for python.  This project
-requires python 3.6 and later, using the asyncio_ module.
+requires python 3.7 and later, using the asyncio_ module.
 
 .. _asyncio: http://docs.python.org/3.11/library/asyncio.html
 
