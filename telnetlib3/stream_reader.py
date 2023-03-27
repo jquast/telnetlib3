@@ -252,9 +252,12 @@ class TelnetReaderUnicode(TelnetReader):
 
     def __repr__(self):
         """Description of stream encoding state."""
+        encoding = None
         if callable(self.fn_encoding):
             encoding = self.fn_encoding(incoming=True)
         return (
-            "<TelnetReaderUnicode encoding={0!r} limit={self._limit} "
-            "buflen={1} eof={self._eof}>".format(encoding, len(self._buffer), self=self)
+            "<TelnetReaderUnicode encoding={encoding!r} limit={self._limit!r} "
+            "buflen={buflen} eof={self._eof} closed={self._connection_closed}>".format(
+                encoding=encoding, buflen=len(self._buffer), self=self
+            )
         )
