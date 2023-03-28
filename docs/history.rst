@@ -1,5 +1,13 @@
 History
 =======
+2.0.1
+ * bugfix "write after close" is disregarded, caused many errors logged in socket.send()
+ * bugfix in accessories.repr_mapping() about using shlex.quote on non-str,
+   `TypeError: expected string or bytes-like object, got 'int'`
+ * bugfix about fn_encoding using repr() on TelnetReaderUnicode
+ * Add Generic Mud Communication Protocol support :ghissue:`63` by
+   :ghuser:`gtaylor`!
+
 2.0.0
  * Support Python 3.9, 3.10, 3.11. Drop Python 3.6 and earlier, All code
    and examples have been updated to the new-style PEP-492 syntax.
@@ -9,6 +17,8 @@ History
    ``_waiter_closed`` arguments to Client or Shell class initializers, please do
    not use them A replacement "wait_for_negotiation" awaitable will be provided
    in a future release.
+ * Add COM-PORT-OPTION subnegotiation support :ghissue:`57` by
+   :ghuser:`albireox`
 
 1.0.4
  * bugfix a NoneType error on EOF/Timeout, introduced in previous

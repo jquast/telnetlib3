@@ -89,7 +89,7 @@ def make_logger(name, loglevel="info", logfile=None, logfmt=_DEFAULT_LOGFMT):
 def repr_mapping(mapping):
     """Return printable string, 'key=value [key=value ...]' for mapping."""
     return " ".join(
-        "=".join(f"{key}={shlex.quote(str(value))}" for key, value in mapping.items())
+        f"{key}={shlex.quote(str(value))}" for key, value in mapping.items()
     )
 
 

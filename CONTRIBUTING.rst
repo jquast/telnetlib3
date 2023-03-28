@@ -21,18 +21,17 @@ directory.
 Running Tests
 -------------
 
-Install and run tox
+`Py.test <https://pytest.org>` is the test runner. Install and run tox
 
 ::
 
     pip install --upgrade tox
     tox
 
-`Py.test <https://pytest.org>` is the test runner. tox commands pass through
-positional arguments, so you may for example use `looponfailing <https://pytest.org/latest/xdist.html#running-tests-in-looponfailing-mode>`_
-with python 3.5, stopping at the first failing test case::
+A convenience target, 'develop' is provided, which adds `-vv` and `--looponfail`
+arguments, where the tests automatically re-trigger on any file change::
 
-    tox -epy35 -- -fx
+    tox -e develop
 
 Code Formatting
 ---------------

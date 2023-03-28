@@ -33,7 +33,7 @@ def test_reader_instantiation_safety():
     # verify.
     assert (
         result
-        == "<TelnetReaderUnicode encoding='def-ENC' limit=1999 buflen=0 eof=False>"
+        == "<TelnetReaderUnicode encoding='def-ENC' limit=1999 buflen=0 eof=False closed=False>"
     )
 
 
