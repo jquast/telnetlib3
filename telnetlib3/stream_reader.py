@@ -4,9 +4,9 @@ import codecs
 import asyncio
 import logging
 import warnings
+import exceptions
 
 from asyncio import events
-from asyncio import exceptions
 from asyncio import format_helpers
 
 __all__ = (
