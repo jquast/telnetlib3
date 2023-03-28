@@ -42,7 +42,7 @@ async def test_telnet_server_on_environ(bind_host, unused_tcp_port):
                 # all environment keys.
                 "aLpHa": "oMeGa",
                 "beta": "b",
-                "gamma": u"".join(chr(n) for n in range(0, 128)),
+                "gamma": "".join(chr(n) for n in range(0, 128)),
             }
         )
         + IAC
@@ -53,7 +53,7 @@ async def test_telnet_server_on_environ(bind_host, unused_tcp_port):
     assert srv_instance.get_extra_info("ALPHA") == "oMeGa"
     assert srv_instance.get_extra_info("BETA") == "b"
     assert srv_instance.get_extra_info("GAMMA") == (
-        u"".join(chr(n) for n in range(0, 128))
+        "".join(chr(n) for n in range(0, 128))
     )
 
 

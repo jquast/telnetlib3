@@ -184,7 +184,7 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
         (
             b"reader\r\n",
             (
-                b"\r\n<TelnetReaderUnicode encoding='US-ASCII' limit=1337 buflen=1 eof=False closed=False>"
+                b"\r\n<TelnetReaderUnicode encoding='US-ASCII' limit=1337 buflen=1 eof=False>"
                 b"\r\ntel:sh> "
             ),
         ),
@@ -292,7 +292,7 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
             result = await asyncio.wait_for(
                 reader.readexactly(len(output_expected)), 0.5
             )
-        except asyncio.streams.IncompleteReadError as err:
+        except asyncio.IncompleteReadError as err:
             result = err.partial
         assert result == output_expected
 

@@ -79,14 +79,17 @@ async def test_telnet_server_open_close(bind_host, unused_tcp_port):
         _waiter_connected=_waiter, host=bind_host, port=unused_tcp_port
     )
 
-    # exercise,
-    reader, writer = await asyncio.open_connection(host=bind_host, port=unused_tcp_port)
+    # exercise using a basic tcp client (StreamReader, StreamWriter),
+    stream_reader, stream_writer = await asyncio.open_connection(
+        host=bind_host, port=unused_tcp_port
+    )
 
-    writer.write(IAC + WONT + TTYPE + b"bye\r")
+    stream_writer.write(IAC + WONT + TTYPE + b"bye\r")
     server = await asyncio.wait_for(_waiter, 0.5)
     server.writer.write("Goodbye!")
     server.writer.close()
-    result = await reader.read()
+    assert server.writer.is_closing()
+    result = await stream_reader.read()
     assert result == b"\xff\xfd\x18Goodbye!"
 
 
@@ -101,6 +104,7 @@ async def test_telnet_client_open_close_by_write(bind_host, unused_tcp_port):
     )
     writer.close()
     assert (await reader.read()) == ""
+    assert writer.is_closing()
 
 
 async def test_telnet_client_open_closed_by_peer(bind_host, unused_tcp_port):
