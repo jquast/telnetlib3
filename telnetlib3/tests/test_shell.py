@@ -170,7 +170,7 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
         (
             (b"\bhel\blp\r"),
             (
-                b"\r\nquit, writer, slc, toggle [option|all], reader, proto"
+                b"\r\nquit, writer, slc, toggle [option|all], reader, proto, dump"
                 b"\r\ntel:sh> "
             ),
         ),
@@ -184,7 +184,7 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
         (
             b"reader\r\n",
             (
-                b"\r\n<TelnetReaderUnicode encoding='US-ASCII' limit=1337 buflen=1 eof=False>"
+                b"\r\n<TelnetReaderUnicode encoding='US-ASCII' limit=1337 buflen=1 eof=False closed=False>"
                 b"\r\ntel:sh> "
             ),
         ),
