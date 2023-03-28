@@ -343,7 +343,7 @@ class TelnetWriter(asyncio.StreamWriter):
 
         :rtype: None
         """
-        if _connection_closed:
+        if self._connection_closed:
             self.log.debug("write after close, ignored %s bytes", len(data))
             return
 
