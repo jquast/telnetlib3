@@ -148,8 +148,19 @@ class TelnetWriter:
         :param bool server: Whether the IAC interpreter should react from
             the server point of view.
         """
-        loop = asyncio.get_event_loop_policy().get_event_loop()
-        asyncio.StreamWriter.__init__(self, transport, protocol, reader, loop)
+        self._transport = transport
+        self._protocol = protocol
+        # drain() expects that the reader has an exception() method
+        if reader is not None and not callable(getattr(reader, "exception")):
+            raise TypeError(
+                "reader must provide 'exception' method, like "
+                "asyncio.StreamReader.exception, got",
+                reader,
+            )
+        self._reader = reader
+        self._loop = asyncio.get_event_loop_policy().get_event_loop()
+        self._complete_fut = self._loop.create_future()
+        self._complete_fut.set_result(None)
 
         if not any((client, server)) or all((client, server)):
             raise TypeError(
