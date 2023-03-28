@@ -28,16 +28,8 @@ class TelnetReader:
 
     _connection_closed = False
 
-    def __init__(self, limit=_DEFAULT_LIMIT, **kwargs):
+    def __init__(self, limit=_DEFAULT_LIMIT):
         self.log = logging.getLogger(__name__)
-        if "loop" in kwargs:
-            warnings.warn(
-                "loop keyword argument deprecated and unused", DeprecationWarning
-            )
-            kwargs.pop("loop")
-        if kwargs:
-            raise TypeError(f"Unknown argument(s), kwargs={kwargs!r}")
-
         # The line length limit is  a security feature;
         # it also doubles as half the buffer limit.
 

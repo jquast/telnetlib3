@@ -8,6 +8,7 @@ History
  * bugfix: TelnetReader.is_closing() raises AttributeError
  * deprecation: `TelnetReader.close` and `TelnetReader.connection_closed` emit
    warning, use `at_eof()` and `feed_eof()` instead.
+ * deprecation: the ``loop`` argument are is no longer accepted by TelnetReader.
  * enhancement: Add Generic Mud Communication Protocol support :ghissue:`63` by
    :ghuser:`gtaylor`!
  * change: TelnetReader and TelnetWriter no longer derive from
