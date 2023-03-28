@@ -5,6 +5,9 @@ History
  * bugfix in accessories.repr_mapping() about using shlex.quote on non-str,
    `TypeError: expected string or bytes-like object, got 'int'`
  * bugfix about fn_encoding using repr() on TelnetReaderUnicode
+ * Add Generic Mud Communication Protocol support :ghissue:`63` by
+   :ghuser:`gtaylor`!
+
 2.0.0
  * Support Python 3.9, 3.10, 3.11. Drop Python 3.6 and earlier, All code
    and examples have been updated to the new-style PEP-492 syntax.
