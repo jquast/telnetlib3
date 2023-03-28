@@ -26,7 +26,7 @@ __all__ = (
 )  # noqa
 
 __author__ = "Jeff Quast"
-__url__ = u"https://github.com/jquast/telnetlib3/"
+__url__ = "https://github.com/jquast/telnetlib3/"
 __copyright__ = "Copyright 2013"
 __credits__ = ["Jim Storch", "Wijnand Modderman-Lenstra"]
 __license__ = "ISC"

@@ -54,8 +54,8 @@ source_suffix = ".rst"
 master_doc = "index"
 
 # General information about the project.
-project = u"telnetlib3"
-copyright = u"2013 Jeff Quast"
+project = "telnetlib3"
+copyright = "2013 Jeff Quast"
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -195,7 +195,7 @@ htmlhelp_basename = "telnetlib3_doc"
 # (source start file, target name, title, author, documentclass
 # [howto/manual]).
 latex_documents = [
-    ("index", "telnetlib3.tex", u"Telnetlib3 Documentation", u"Jeff Quast", "manual"),
+    ("index", "telnetlib3.tex", "Telnetlib3 Documentation", "Jeff Quast", "manual"),
 ]
 
 # The name of an image file (relative to this directory) to place at the top of
@@ -226,7 +226,7 @@ latex_documents = [
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [("index", "telnetlib3", u"Telnetlib3 Documentation", [u"Jeff Quast"], 1)]
+man_pages = [("index", "telnetlib3", "Telnetlib3 Documentation", ["Jeff Quast"], 1)]
 
 # sort order of API documentation is by their appearance in source code
 autodoc_member_order = "bysource"
