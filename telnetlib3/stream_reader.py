@@ -4,7 +4,7 @@ import codecs
 import asyncio
 import logging
 import warnings
-import exceptions
+import asyncio
 
 from asyncio import events
 from asyncio import format_helpers
@@ -28,8 +28,15 @@ class TelnetReader:
 
     _connection_closed = False
 
-    def __init__(self, limit=_DEFAULT_LIMIT, loop=None):
+    def __init__(self, limit=_DEFAULT_LIMIT, **kwargs):
         self.log = logging.getLogger(__name__)
+        if "loop" in kwargs:
+            warnings.warn(
+                "loop keyword argument deprecated and unused", DeprecationWarning
+            )
+            kwargs.pop("loop")
+        if kwargs:
+            raise TypeError(f"Unknown argument(s), kwargs={kwargs!r}")
 
         # The line length limit is  a security feature;
         # it also doubles as half the buffer limit.
@@ -38,10 +45,7 @@ class TelnetReader:
             raise ValueError("Limit cannot be <= 0")
 
         self._limit = limit
-        if loop is None:
-            self._loop = events._get_event_loop()
-        else:
-            self._loop = loop
+        self._loop = asyncio.get_event_loop_policy().get_event_loop()
         self._buffer = bytearray()
         self._eof = False  # Whether we're done.
         self._waiter = None  # A future used by _wait_for_data()
@@ -181,9 +185,9 @@ class TelnetReader:
         seplen = len(sep)
         try:
             line = await self.readuntil(sep)
-        except exceptions.IncompleteReadError as e:
+        except asyncio.IncompleteReadError as e:
             return e.partial
-        except exceptions.LimitOverrunError as e:
+        except asyncio.LimitOverrunError as e:
             if self._buffer.startswith(sep, e.consumed):
                 del self._buffer[: e.consumed + seplen]
             else:
@@ -258,7 +262,7 @@ class TelnetReader:
                 # see upper comment for explanation.
                 offset = buflen + 1 - seplen
                 if offset > self._limit:
-                    raise exceptions.LimitOverrunError(
+                    raise asyncio.LimitOverrunError(
                         "Separator is not found, and chunk exceed the limit", offset
                     )
 
@@ -269,13 +273,13 @@ class TelnetReader:
             if self._eof:
                 chunk = bytes(self._buffer)
                 self._buffer.clear()
-                raise exceptions.IncompleteReadError(chunk, None)
+                raise asyncio.IncompleteReadError(chunk, None)
 
             # _wait_for_data() will resume reading if stream was paused.
             await self._wait_for_data("readuntil")
 
         if isep > self._limit:
-            raise exceptions.LimitOverrunError(
+            raise asyncio.LimitOverrunError(
                 "Separator is found, but chunk is longer than limit", isep
             )
 
@@ -362,7 +366,7 @@ class TelnetReader:
             if self._eof:
                 incomplete = bytes(self._buffer)
                 self._buffer.clear()
-                raise exceptions.IncompleteReadError(incomplete, n)
+                raise asyncio.IncompleteReadError(incomplete, n)
 
             await self._wait_for_data("readexactly")
 
