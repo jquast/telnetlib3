@@ -76,7 +76,12 @@ __all__ = (
 )
 
 
-class TelnetWriter(asyncio.StreamWriter):
+class TelnetWriter:
+    """
+    This is a copy of :class:`asyncio.StreamWriter`, except that
+    it is a Telnet IAC Interpreter implementing the telnet protocol.
+    """
+
     #: Total bytes sent to :meth:`~.feed_byte`
     byte_count = 0
 
@@ -123,10 +128,6 @@ class TelnetWriter(asyncio.StreamWriter):
         reader=None,
     ):
         """
-        A writer interface for the telnet protocol.
-
-        Telnet IAC Interpreter.
-
         Almost all negotiation actions are performed through the writer
         interface, as any action requires writing bytes to the underling
         stream.  This class implements :meth:`~.feed_byte`, which acts as a
@@ -146,8 +147,6 @@ class TelnetWriter(asyncio.StreamWriter):
             the client point of view.
         :param bool server: Whether the IAC interpreter should react from
             the server point of view.
-        :param logging.Logger log: target logger, if None is given, one is
-            created using the namespace ``'telnetlib3.stream_writer'``.
         """
         loop = asyncio.get_event_loop_policy().get_event_loop()
         asyncio.StreamWriter.__init__(self, transport, protocol, reader, loop)
@@ -273,10 +272,15 @@ class TelnetWriter(asyncio.StreamWriter):
 
     # Base protocol methods
 
+    @property
+    def transport(self):
+        return self._transport
+
     def close(self):
         if self.connection_closed:
             return
-        super().close()
+        if self._transport is not None:
+            self._transport.close()
         # break circular refs
         self._ext_callback.clear()
         self._ext_send_callback.clear()
@@ -285,6 +289,14 @@ class TelnetWriter(asyncio.StreamWriter):
         self._protocol = None
         self._transport = None
         self._connection_closed = True
+
+    def is_closing(self):
+        if self._transport is not None:
+            if self._transport.is_closing():
+                return True
+        if self.connection_closed:
+            return True
+        return False
 
     def __repr__(self):
         """Description of stream encoding state."""
@@ -343,10 +355,9 @@ class TelnetWriter(asyncio.StreamWriter):
 
         :rtype: None
         """
-        if self._connection_closed:
+        if self.connection_closed:
             self.log.debug("write after close, ignored %s bytes", len(data))
             return
-
         self._write(data)
 
     def writelines(self, lines):
@@ -358,6 +369,39 @@ class TelnetWriter(asyncio.StreamWriter):
         each string.
         """
         self.write(b"".join(lines))
+
+    def write_eof(self):
+        return self._transport.write_eof()
+
+    def can_write_eof(self):
+        return self._transport.can_write_eof()
+
+    async def drain(self):
+        """Flush the write buffer.
+
+        The intended use is to write
+
+          w.write(data)
+          await w.drain()
+        """
+        if self._reader is not None:
+            exc = self._reader.exception()
+            if exc is not None:
+                raise exc
+        if self._transport.is_closing():
+            # Wait for protocol.connection_lost() call
+            # Raise connection closing error if any,
+            # ConnectionResetError otherwise
+            # Yield to the event loop so connection_lost() may be
+            # called.  Without this, _drain_helper() would return
+            # immediately, and code that calls
+            #     write(...); await drain()
+            # in a loop would never call connection_lost(), so it
+            # would not see an error when the socket is closed.
+            await sleep(0)
+        await self._protocol._drain_helper()
+
+    # proprietary write helper
 
     def feed_byte(self, byte):
         """
@@ -495,11 +539,15 @@ class TelnetWriter(asyncio.StreamWriter):
 
     def get_extra_info(self, name, default=None):
         """Get optional server protocol information."""
-        return self._protocol.get_extra_info(name, default)
+        # StreamWriter uses self._transport.get_extra_info, so we mix it in
+        # here, but _protocol has all of the interesting telnet effects
+        return self._protocol.get_extra_info(
+            name, default
+        ) or self._transport.get_extra_info(name, default)
 
     @property
     def protocol(self):
-        """The protocol attached to this stream."""
+        """The (Telnet) protocol attached to this stream."""
         return self._protocol
 
     @property
@@ -1668,19 +1716,9 @@ class TelnetWriter(asyncio.StreamWriter):
 
         if escape_iac:
             # when escape_iac is True, we may safely assume downstream
-            # application has provided an encoded string.  If force_binary
-            # is unset, we enforce strict adherence of BINARY protocol
-            # negotiation.
-            if not self._protocol.force_binary and not self.outbinary:
-                # check each byte position by index to report location
-                for position, byte in enumerate(buf):
-                    if byte >= 128:
-                        raise TypeError(
-                            "Byte value {0!r} at index {1} not valid, "
-                            "send IAC WILL BINARY first: buf={2!r}".format(
-                                byte, position, buf
-                            )
-                        )
+            # application has provided an encoded string. Prior to 2.0.1, `buf`
+            # was inspected to raise TypeError for any bytes of ordinal value
+            # greater than 127, but it was removed for performance.
             buf = self._escape_iac(buf)
 
         self._transport.write(buf)
