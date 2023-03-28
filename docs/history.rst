@@ -1,5 +1,10 @@
 History
 =======
+2.0.1
+ * bugfix "write after close" is disregarded, caused many errors logged in socket.send()
+ * bugfix in accessories.repr_mapping() about using shlex.quote on non-str,
+   `TypeError: expected string or bytes-like object, got 'int'`
+ * bugfix about fn_encoding using repr() on TelnetReaderUnicode
 2.0.0
  * Support Python 3.9, 3.10, 3.11. Drop Python 3.6 and earlier, All code
    and examples have been updated to the new-style PEP-492 syntax.
