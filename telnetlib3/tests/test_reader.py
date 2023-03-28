@@ -22,9 +22,14 @@ def test_reader_instantiation_safety():
     result = repr(reader)
 
     # verify.
-    assert result == "<TelnetReader encoding=False limit=1999 buflen=0 eof=False>"
+    assert result == "<TelnetReader limit=1999 encoding=False>"
 
+
+def test_reader_with_encoding_instantiation_safety():
     # given,
+    def fn_encoding(incoming):
+        return "def-ENC"
+
     reader = telnetlib3.TelnetReaderUnicode(fn_encoding=fn_encoding, limit=1999)
 
     # exercise,
@@ -34,6 +39,37 @@ def test_reader_instantiation_safety():
     assert (
         result
         == "<TelnetReaderUnicode encoding='def-ENC' limit=1999 buflen=0 eof=False closed=False>"
+    )
+
+
+def test_reader_eof_safety():
+    """Check side-effects of feed_eof."""
+    # given,
+    reader = telnetlib3.TelnetReader(limit=1999)
+    reader.feed_eof()
+
+    # exercise,
+    result = repr(reader)
+
+    # verify.
+    assert result == "<TelnetReader eof limit=1999 encoding=False>"
+
+
+def test_reader_unicode_eof_safety():
+    # given,
+    def fn_encoding(incoming):
+        return "def-ENC"
+
+    reader = telnetlib3.TelnetReaderUnicode(fn_encoding=fn_encoding)
+    reader.feed_eof()
+
+    # exercise,
+    result = repr(reader)
+
+    # verify.
+    assert (
+        result
+        == "<TelnetReaderUnicode encoding='def-ENC' limit=65536 buflen=0 eof=True closed=False>"
     )
 
 

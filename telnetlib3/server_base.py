@@ -64,7 +64,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._limit = limit
 
     def timeout_connection(self):
-        self.reader.close()
+        self.reader.feed_eof()
         self.writer.close()
 
     # Base protocol methods
