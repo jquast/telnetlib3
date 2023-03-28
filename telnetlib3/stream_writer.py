@@ -282,7 +282,6 @@ class TelnetWriter(asyncio.StreamWriter):
         self._ext_send_callback.clear()
         self._slc_callback.clear()
         self._iac_callback.clear()
-        self.fn_encoding = None
         self._protocol = None
         self._transport = None
         self._connection_closed = True
@@ -344,6 +343,10 @@ class TelnetWriter(asyncio.StreamWriter):
 
         :rtype: None
         """
+        if _connection_closed:
+            self.log.debug("write after close, ignored %s bytes", len(data))
+            return
+
         self._write(data)
 
     def writelines(self, lines):
@@ -1657,7 +1660,7 @@ class TelnetWriter(asyncio.StreamWriter):
 
         :param bytes buf: bytes to write to transport.
         :param bool escape_iac: whether bytes in buffer ``buf`` should be
-            escape bytes ``IAC``.  This should be set ``False`` for direct
+            escaped of byte ``IAC``.  This should be set ``False`` for direct
             writes of ``IAC`` commands.
         """
         if not isinstance(buf, (bytes, bytearray)):
@@ -2545,6 +2548,8 @@ class TelnetWriterUnicode(TelnetWriter):
         """
         Write unicode string to transport, using protocol-preferred encoding.
 
+        If the connection is closed, nothing is done.
+
         :param str string: unicode string text to write to endpoint using the
             protocol's preferred encoding.  When the protocol ``encoding``
             keyword is explicitly set to ``False``, the given string should be
@@ -2554,6 +2559,8 @@ class TelnetWriterUnicode(TelnetWriter):
             ``encoding_errors``.
         :rtype: None
         """
+        if self.connection_closed:
+            return
         errors = errors or self.encoding_errors
         self._write(self.encode(string, errors))
 

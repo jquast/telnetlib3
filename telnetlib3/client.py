@@ -11,8 +11,8 @@ import sys
 import os
 
 # local imports
-from . import accessories
-from . import client_base
+from telnetlib3 import accessories
+from telnetlib3 import client_base
 
 __all__ = ("TelnetClient", "TelnetTerminalClient", "open_connection")
 

@@ -236,7 +236,7 @@ class TelnetServer(server_base.BaseServer):
         Default implementation writes "Timeout." bound by CRLF and closes.
 
         This can be disabled by calling :meth:`set_timeout` with
-        :meth:`set_timeout` parameter `duration` value of ``0``, or, value of
+        :paramref:`~.set_timeout.duration` value of ``0`` or value of
         the same for keyword argument ``timeout``.
         """
         logger.debug("Timeout after {self.idle:1.2f}s".format(self=self))
@@ -471,7 +471,7 @@ async def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwd
     :param server_base.BaseServer protocol_factory: An alternate protocol
         factory for the server, when unspecified, :class:`TelnetServer` is
         used.
-    :param Callable shell: An async function that is called after
+    :param Callable shell: A :func:`asyncio.coroutine` that is called after
         negotiation completes, receiving arguments ``(reader, writer)``.
         The reader is a :class:`~.TelnetReader` instance, the writer is
         a :class:`~.TelnetWriter` instance.
@@ -509,6 +509,8 @@ async def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwd
     :return asyncio.Server: The return value is the same as
         :meth:`asyncio.loop.create_server`, An object which can be used
         to stop the service.
+
+    This function is a :func:`~asyncio.coroutine`.
     """
     protocol_factory = protocol_factory or TelnetServer
     loop = asyncio.get_event_loop()

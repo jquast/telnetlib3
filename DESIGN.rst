@@ -1,10 +1,21 @@
 Project Status
 ==============
 
-Retired by author, looking for new owner :)
+Retired by author, looking for new owner :) or some help!
 
 Design
 ======
+
+performance
+-----------
+
+The client appears to be very poor-performing under load. I wrote a basic server
+that is capable of sending a very large stream of data, "max headroom" demo at
+telnet 1984.ws, and it totally kills the client. Maybe the client is so busy
+processing incoming data that it is not allowing for tasks to read it from the
+other end?
+
+Maybe this is async "backpressure"
 
 reduce
 ------
@@ -16,8 +27,8 @@ rather shoe-horned, main() should declare keywords.
 **this is completed for server, copy to client**
 
 
-wait_for?
----------
+wait_for_negotiation
+--------------------
 
 We need a way to wish to wait for a state. For example, our client shell might await
 until local_echo is False, or remote_option[ECHO] is True to change terminal state
@@ -32,6 +43,11 @@ many future states in parallel" event loop easily
 
 -- just accept a future, and on each state change, call an internal function
 that checks for equality for the parameters given, and when true, set .done()
+
+after some thought, we should hardcode common ones, such as await
+negotiate_kludge() -> bool, wait_for_naws() -> bool, and,
+maybe a common wait_for_slc() that just returns some description
+of the state change that has occurred with maybe values
 
 BaseTelnetProtocol
 ------------------
@@ -231,6 +247,9 @@ clients wishing to make use of the ``IAC-GA`` signal must explicitly request
 The ``IAC-GA`` signal has been recently restored for character-at-a-time servers,
 such as the competition nethack server alt.nethack.org, targeted at client
 scripts that play using AI decision-making routines.
+
+Later note: actually this seems to be common with MUD's, will require some
+experimentation with 'mudlet' client.
 
 Local Line Mode
 ---------------
