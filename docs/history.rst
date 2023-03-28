@@ -1,31 +1,37 @@
 History
 =======
 2.0.1
- * bugfix "write after close" is disregarded, caused many errors logged in socket.send()
- * bugfix in accessories.repr_mapping() about using shlex.quote on non-str,
+ * bugfix: "write after close" is disregarded, caused many errors logged in socket.send()
+ * bugfix: in accessories.repr_mapping() about using shlex.quote on non-str,
    `TypeError: expected string or bytes-like object, got 'int'`
- * bugfix about fn_encoding using repr() on TelnetReaderUnicode
- * Add Generic Mud Communication Protocol support :ghissue:`63` by
+ * bugfix: about fn_encoding using repr() on TelnetReaderUnicode
+ * bugfix: TelnetReader.is_closing() raises AttributeError
+ * deprecation: `TelnetReader.close` and `TelnetReader.connection_closed` emit
+   warning, use `at_eof()` and `feed_eof()` instead.
+ * enhancement: Add Generic Mud Communication Protocol support :ghissue:`63` by
    :ghuser:`gtaylor`!
+ * change: TelnetReader and TelnetWriter no longer derive from
+   `asyncio.StreamReader` and `asyncio.StreamWriter`, this fixes some TypeError
+   in signatures and runtime
 
 2.0.0
- * Support Python 3.9, 3.10, 3.11. Drop Python 3.6 and earlier, All code
+ * change: Support Python 3.9, 3.10, 3.11. Drop Python 3.6 and earlier, All code
    and examples have been updated to the new-style PEP-492 syntax.
- * the ``loop``, ``event_loop``, and ``log`` arguments are no longer accepted to
+ * change: the ``loop``, ``event_loop``, and ``log`` arguments are no longer accepted to
    any class initializers.
- * This release has a known memory leak when using the ``_waiter_connected`` and
+ * note: This release has a known memory leak when using the ``_waiter_connected`` and
    ``_waiter_closed`` arguments to Client or Shell class initializers, please do
    not use them A replacement "wait_for_negotiation" awaitable will be provided
    in a future release.
- * Add COM-PORT-OPTION subnegotiation support :ghissue:`57` by
+ * enhancement: Add COM-PORT-OPTION subnegotiation support :ghissue:`57` by
    :ghuser:`albireox`
 
 1.0.4
- * bugfix a NoneType error on EOF/Timeout, introduced in previous
+ * bugfix: NoneType error on EOF/Timeout, introduced in previous
    version 1.0.3, :ghissue:`51` by :ghuser:`zofy`.
 
 1.0.3
-  * bugfix circular reference between transport and protocol, :ghissue:`43` by
+  * bugfix: circular reference between transport and protocol, :ghissue:`43` by
     :ghuser:`fried`.
 
 1.0.2
