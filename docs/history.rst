@@ -17,6 +17,8 @@ History
    ``_waiter_closed`` arguments to Client or Shell class initializers, please do
    not use them A replacement "wait_for_negotiation" awaitable will be provided
    in a future release.
+ * Add COM-PORT-OPTION subnegotiation support :ghissue:`57` by
+   :ghuser:`albireox`
 
 1.0.4
  * bugfix a NoneType error on EOF/Timeout, introduced in previous
