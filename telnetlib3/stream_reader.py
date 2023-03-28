@@ -26,8 +26,6 @@ class TelnetReader:
 
     _source_traceback = None
 
-    _connection_closed = False
-
     def __init__(self, limit=_DEFAULT_LIMIT):
         self.log = logging.getLogger(__name__)
         # The line length limit is  a security feature;
@@ -604,7 +602,7 @@ class TelnetReaderUnicode(TelnetReader):
             encoding = self.fn_encoding(incoming=True)
         return (
             "<TelnetReaderUnicode encoding={encoding!r} limit={self._limit!r} "
-            "buflen={buflen} eof={self._eof} closed={self._connection_closed}>".format(
+            "buflen={buflen} eof={self._eof}>".format(
                 encoding=encoding, buflen=len(self._buffer), self=self
             )
         )

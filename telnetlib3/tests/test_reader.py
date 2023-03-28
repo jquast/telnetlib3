@@ -31,8 +31,7 @@ def test_reader_with_encoding_instantiation_safety():
         return "def-ENC"
 
     expected_result = (
-        "<TelnetReaderUnicode encoding='def-ENC' "
-        "limit=1999 buflen=0 eof=True closed=False>"
+        "<TelnetReaderUnicode encoding='def-ENC' " "limit=1999 buflen=0 eof=False>"
     )
 
     reader = telnetlib3.TelnetReaderUnicode(fn_encoding=fn_encoding, limit=1999)
@@ -63,8 +62,7 @@ def test_reader_unicode_eof_safety():
         return "def-ENC"
 
     expected_result = (
-        "<TelnetReaderUnicode encoding='def-ENC' "
-        "limit=65536 buflen=0 eof=True closed=False>"
+        "<TelnetReaderUnicode encoding='def-ENC' " "limit=65536 buflen=0 eof=True>"
     )
 
     reader = telnetlib3.TelnetReaderUnicode(fn_encoding=fn_encoding)
