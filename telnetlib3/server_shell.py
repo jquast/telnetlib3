@@ -27,7 +27,7 @@ async def telnet_server_shell(reader, writer):
         writer.write("tel:sh> ")
         command = None
         while command is None:
-            # TODO: use reader.readline()
+            await writer.drain()
             inp = await reader.read(1)
             if not inp:
                 return
@@ -37,7 +37,7 @@ async def telnet_server_shell(reader, writer):
             writer.write("Goodbye." + CR + LF)
             break
         elif command == "help":
-            writer.write("quit, writer, slc, toggle [option|all], " "reader, proto")
+            writer.write("quit, writer, slc, toggle [option|all], reader, proto, dump")
         elif command == "writer":
             writer.write(repr(writer))
         elif command == "reader":
@@ -51,9 +51,39 @@ async def telnet_server_shell(reader, writer):
         elif command.startswith("toggle"):
             option = command[len("toggle ") :] or None
             writer.write(do_toggle(writer, option))
+        elif command.startswith("dump"):
+            # dump [kb] [ms_delay] [drain|nodrain]
+            try:
+                kb_limit = int(command.split()[1])
+            except (ValueError, IndexError):
+                kb_limit = 1000
+            try:
+                ms_delay = int(command.split()[2]) * 1000
+            except (ValueError, IndexError):
+                ms_delay = 0
+            try:
+                drain = command.split()[3] == "drain"
+            except IndexError:
+                drain = False
+            for lineout in character_dump(kb_limit):
+                writer.write(lineout)
+                if ms_delay:
+                    await asyncio.sleep(ms_delay)
+                if drain:
+                    await writer.drain()
         elif command:
             writer.write("no such command.")
     writer.close()
+
+
+def character_dump(kb_limit):
+    num_bytes = 0
+    while (num_bytes) < (kb_limit * 1024):
+        for char in ("/", "\\"):
+            lineout = (char * 80) + "\033[1G"
+            yield lineout
+            num_bytes += len(lineout)
+    yield ("\033[1G" + "wrote " + str(num_bytes) + " bytes")
 
 
 @types.coroutine
