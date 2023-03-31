@@ -1,5 +1,8 @@
 History
 =======
+2.0.2
+ * bugfix: NameError: name 'sleep' is not defined in stream_writer.py
+
 2.0.1
  * bugfix: "write after close" is disregarded, caused many errors logged in socket.send()
  * bugfix: in accessories.repr_mapping() about using shlex.quote on non-str,
