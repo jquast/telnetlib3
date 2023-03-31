@@ -409,7 +409,7 @@ class TelnetWriter:
             #     write(...); await drain()
             # in a loop would never call connection_lost(), so it
             # would not see an error when the socket is closed.
-            await sleep(0)
+            await asyncio.sleep(0)
         await self._protocol._drain_helper()
 
     # proprietary write helper
