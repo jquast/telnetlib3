@@ -234,10 +234,12 @@ BSD_SLC_TAB = {
 }
 
 
-def generate_slctab(tabset=BSD_SLC_TAB):
+def generate_slctab(tabset=None):
     """Returns full 'SLC Tab' for definitions found using ``tabset``.
     Functions not listed in ``tabset`` are set as SLC_NOSUPPORT.
     """
+    if tabset is None:
+        tabset = BSD_SLC_TAB
     #   ``slctab`` is a dictionary of SLC functions, such as SLC_IP,
     #   to a tuple of the handling character and support level.
     _slctab = {}
@@ -253,8 +255,8 @@ def generate_forwardmask(binary_mode, tabset, ack=False):
     Generate a 32-byte (``binary_mode`` is True) or 16-byte (False) Forwardmask
     instance appropriate for the specified ``slctab``.  A Forwardmask is formed
     by a bitmask of all 256 possible 8-bit keyboard ascii input, or, when not
-    'outbinary', a 16-byte 7-bit representation of each value, and whether or
-    not they should be "forwarded" by the client on the transport stream
+    'outbinary', a 16-byte 7-bit representation of each value, and whether
+    they should be "forwarded" by the client on the transport stream
     """
     num_bytes, msb = (32, 256) if binary_mode else (16, 127)
     mask32 = [theNULL] * num_bytes
