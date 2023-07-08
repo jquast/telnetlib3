@@ -1,5 +1,8 @@
 History
 =======
+2.0.3
+ * bugfix: NameError: when debug=True is with asyncio.run, :ghissue:`75`
+
 2.0.2
  * bugfix: NameError: name 'sleep' is not defined in stream_writer.py
 
