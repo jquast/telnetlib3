@@ -1,6 +1,5 @@
 """Accessory functions."""
 # std imports
-import pkg_resources
 import importlib
 import logging
 import asyncio
@@ -18,7 +17,7 @@ __all__ = (
 
 
 def get_version():
-    return pkg_resources.get_distribution("telnetlib3").version
+    return "2.0.4"  # keep in sync with setup.py and docs/conf.py !!
 
 
 def encoding_from_lang(lang):

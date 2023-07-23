@@ -1,5 +1,8 @@
 History
 =======
+2.0.4
+ * change: stop using setuptools library to get current software version
+
 2.0.3
  * bugfix: NameError: when debug=True is used with asyncio.run, :ghissue:`75`
 
