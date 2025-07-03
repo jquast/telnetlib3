@@ -17,9 +17,6 @@ async def telnet_server_shell(reader, writer):
     """
     writer.write("Ready." + CR + LF)
 
-    # linereader = readline(reader, writer)
-    # linereader.send(None)
-
     command = None
     while True:
         if command:
@@ -111,6 +108,7 @@ async def readline(reader, writer):
             return None
 
         else:
+            print(f"got character {ord(next_char)}")
             command += next_char
             writer.echo(next_char)
 
