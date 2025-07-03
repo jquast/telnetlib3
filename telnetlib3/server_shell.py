@@ -125,7 +125,6 @@ async def readline(reader, writer):
             return None
 
         else:
-            print(f"got character {ord(next_char)}")
             command += next_char
             writer.echo(next_char)
 
