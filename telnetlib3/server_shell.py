@@ -83,6 +83,23 @@ def character_dump(kb_limit):
     yield ("\033[1G" + "wrote " + str(num_bytes) + " bytes")
 
 
+async def filter_ansi(reader, writer):
+    """
+    A coroutine that accepts the next character from `reader` that is not a 
+    part of an ANSI escape sequence.
+    """
+    escape_sequence = False
+    while True:
+        next_char = await reader.read(1)
+        if next_char == "\x1b":
+            escape_sequence = True
+        elif escape_sequence:
+            if 61 <= ord(next_char) <= 90 or 97 <= ord(next_char) <= 122:
+                escape_sequence = False
+        else:
+            return next_char
+
+
 async def readline(reader, writer):
     """
     A very crude readline coroutine interface.
@@ -90,7 +107,7 @@ async def readline(reader, writer):
     """
     command = ""
     while True:
-        next_char = await reader.read(1)
+        next_char = await filter_ansi(reader, writer)
         
         if next_char == CR:
             return command
