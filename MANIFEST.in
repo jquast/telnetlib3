@@ -1,1 +1,1 @@
-include docs/*.rst version.json *.txt
+include docs/*.rst *.txt

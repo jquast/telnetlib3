@@ -1,5 +1,8 @@
 History
 =======
+2.0.5
+ * pending
+
 2.0.4
  * change: stop using setuptools library to get current software version
 
