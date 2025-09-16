@@ -1,3 +1,4 @@
-Sphinx<2  # match version constraint of readthedocs.org
-sphinx-rtd-theme<1
-Jinja2<3.1
+Sphinx
+sphinx-rtd-theme
+Jinja2
+sphinx-paramlinks
