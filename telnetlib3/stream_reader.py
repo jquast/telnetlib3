@@ -15,7 +15,7 @@ __all__ = (
     "TelnetReaderUnicode",
 )
 
-_DEFAULT_LIMIT = 2 ** 16  # 64 KiB
+_DEFAULT_LIMIT = 2**16  # 64 KiB
 
 
 class TelnetReader:
@@ -36,7 +36,7 @@ class TelnetReader:
             raise ValueError("Limit cannot be <= 0")
 
         self._limit = limit
-        self._loop = asyncio.get_event_loop_policy().get_event_loop()
+        self._loop = asyncio.get_event_loop()
         self._buffer = bytearray()
         self._eof = False  # Whether we're done.
         self._waiter = None  # A future used by _wait_for_data()

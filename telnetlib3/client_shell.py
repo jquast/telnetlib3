@@ -21,7 +21,6 @@ if sys.platform == "win32":
             "win32 not yet supported as telnet client. Please contribute!"
         )
 
-
 else:
     import termios
     import os
@@ -152,7 +151,7 @@ else:
             write_fobj = sys.stdout
             if self._istty:
                 write_fobj = sys.stdin
-            loop = asyncio.get_event_loop_policy().get_event_loop()
+            loop = asyncio.get_event_loop()
             writer_transport, writer_protocol = await loop.connect_write_pipe(
                 asyncio.streams.FlowControlMixin, write_fobj
             )

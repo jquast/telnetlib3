@@ -158,7 +158,7 @@ class TelnetWriter:
                 reader,
             )
         self._reader = reader
-        self._loop = asyncio.get_event_loop_policy().get_event_loop()
+        self._loop = asyncio.get_event_loop()
         self._complete_fut = self._loop.create_future()
         self._complete_fut.set_result(None)
 
