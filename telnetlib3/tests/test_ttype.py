@@ -1,4 +1,5 @@
 """Test TTYPE, rfc-930_."""
+
 # std imports
 import asyncio
 

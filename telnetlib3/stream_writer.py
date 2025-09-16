@@ -1,4 +1,5 @@
 """Module provides :class:`TelnetWriter` and :class:`TelnetWriterUnicode`."""
+
 # std imports
 import asyncio
 import collections

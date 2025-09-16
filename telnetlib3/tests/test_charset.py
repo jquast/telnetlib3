@@ -1,4 +1,5 @@
 """Test XDISPLOC, rfc-1096_."""
+
 # std imports
 import asyncio
 

@@ -226,7 +226,6 @@ else:
 
 
 class Telnet:
-
     """Telnet interface class.
 
     An instance of this class represents a connection to a telnet

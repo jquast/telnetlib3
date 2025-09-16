@@ -1,6 +1,7 @@
 """
 Special Line Character support for Telnet Linemode Option (:rfc:`1184`).
 """
+
 from .accessories import eightbits, name_unicode
 from .telopt import theNULL
 

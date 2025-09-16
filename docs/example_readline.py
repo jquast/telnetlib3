@@ -11,6 +11,7 @@ All input and output is forced uppercase, but unicode is otherwise supported.
 
 A simple character-at-a-time repl is provided, supporting backspace.
 """
+
 # std imports
 import collections
 import contextlib
@@ -43,9 +44,11 @@ class Lander(object):
         capsule = (
             "LAUNCH IN-PROGRESS"
             if self.capsule_launching
-            else "LAUNCHED"
-            if self.capsule_launched
-            else "{}/4".format(self.capsule_amount)
+            else (
+                "LAUNCHED"
+                if self.capsule_launched
+                else "{}/4".format(self.capsule_amount)
+            )
         )
         clients = ", ".join(map(str, self.clients))
         return "COLLECTOR {}\r\nCAPSULE {}\r\nUPLINKS: {}".format(

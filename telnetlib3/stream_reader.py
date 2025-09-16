@@ -1,4 +1,5 @@
 """Module provides class TelnetReader and TelnetReaderUnicode."""
+
 # std imports
 import re
 import sys

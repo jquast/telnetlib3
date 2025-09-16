@@ -1,4 +1,5 @@
 """Test the server's shell(reader, writer) callback."""
+
 # std imports
 import asyncio
 import weakref
