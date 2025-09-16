@@ -7,9 +7,34 @@ import re
 import pytest
 
 from test import support
-from test.support import socket_helper, warnings_helper  # noqa: F401
 
-support.requires_working_socket(module=True)
+import sys
+
+# Handle imports for different Python versions
+if sys.version_info >= (3, 12):
+    from test.support import socket_helper, warnings_helper  # noqa: F401
+    from test.support.socket_helper import requires_working_socket
+elif sys.version_info >= (3, 9):
+    # Python 3.9-3.11: requires_working_socket is in test.support
+    from test.support import requires_working_socket
+else:
+    # Python 3.8: requires_working_socket might not exist; create a fallback
+    try:
+        from test.support import requires_working_socket
+    except ImportError:
+        # Fallback for very old versions (if needed)
+        def requires_working_socket(module=False):
+            """Minimal fallback if requires_working_socket is missing"""
+            import socket
+
+            try:
+                socket.socket()
+            except OSError:
+                raise unittest.SkipTest("Working socket required")
+
+
+# Use the function
+requires_working_socket(module=True)
 
 import telnetlib3.telnetlib as telnetlib  # noqa: E402
 
