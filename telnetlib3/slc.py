@@ -250,7 +250,7 @@ def generate_slctab(tabset=None):
 
 def generate_forwardmask(binary_mode, tabset, ack=False):
     """
-    Generate a :class:`telnetlib3.slc.Forwardmask` instance.
+    Generate a Forwardmask instance.
 
     Generate a 32-byte (``binary_mode`` is True) or 16-byte (False) Forwardmask
     instance appropriate for the specified ``slctab``.  A Forwardmask is formed

@@ -941,7 +941,7 @@ class TelnetWriter:
         """
         Request the client forward their terminal control characters.
 
-        Characters are indicated in the :class:`~.Forwardmask` instance
+        Characters are indicated in the Forwardmask instance
         ``fmask``.  When fmask is None, a forwardmask is generated for the SLC
         characters registered by :attr:`~.slctab`.
         """
@@ -1492,7 +1492,6 @@ class TelnetWriter:
             STATUS,
             GMCP,
         ):
-
             # first time we've agreed, respond accordingly.
             if not self.local_option.enabled(opt):
                 self.iac(WILL, opt)
@@ -1823,7 +1822,10 @@ class TelnetWriter:
                 opt_kind,
             )
             (rx, tx) = self._ext_send_callback[TSPEED]()
-            assert (type(rx), type(tx),) == (
+            assert (
+                type(rx),
+                type(tx),
+            ) == (
                 int,
                 int,
             ), (rx, tx)
@@ -2470,11 +2472,12 @@ class TelnetWriter:
         # set and report about pending options by 2-byte opt,
         # not well tested, no known implementations exist !
         if self.server:
-            assert self.remote_option.enabled(
-                LINEMODE
-            ), "cannot recv LMODE_FORWARDMASK {} ({!r}) " "without first sending DO LINEMODE.".format(
-                cmd,
-                buf,
+            assert self.remote_option.enabled(LINEMODE), (
+                "cannot recv LMODE_FORWARDMASK {} ({!r}) "
+                "without first sending DO LINEMODE.".format(
+                    cmd,
+                    buf,
+                )
             )
             assert cmd not in (
                 DO,
