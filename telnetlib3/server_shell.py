@@ -23,7 +23,7 @@ async def telnet_server_shell(reader, writer):
             writer.write(CR + LF)
         writer.write("tel:sh> ")
 
-        command = await readline(reader, writer)
+        command = await readline_async(reader, writer)
         if command is None:
             writer.write("Read stream EOF")
             break
@@ -83,10 +83,11 @@ def character_dump(kb_limit):
     yield ("\033[1G" + "wrote " + str(num_bytes) + " bytes")
 
 
-async def filter_ansi(reader, writer):
+async def filter_ansi_async(reader, writer):
     """
     A coroutine that accepts the next character from `reader` that is not a 
-    part of an ANSI escape sequence.
+    part of an ANSI escape sequence. Use this to filter cursor motions from 
+    the reader.
     """
     escape_sequence = False
     while True:
@@ -100,14 +101,14 @@ async def filter_ansi(reader, writer):
             return next_char
 
 
-async def readline(reader, writer):
+async def readline_async(reader, writer):
     """
     A very crude readline coroutine interface.
     Returns None on EOF.
     """
     command = ""
     while True:
-        next_char = await filter_ansi(reader, writer)
+        next_char = await filter_ansi_async(reader, writer)
         
         if next_char == CR:
             return command
