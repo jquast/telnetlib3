@@ -14,9 +14,13 @@ from docutils.utils import get_source_line
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
-HERE = os.path.dirname(__file__)
 sys.path.insert(0, os.path.abspath("sphinxext"))  # for github.py
 github_project_url = "https://github.com/jquast/telnetlib3"
+
+# not sure why, but there is 'ModuleNotFoundError: No module named 'telnetlib3'
+# only on RTD after migrating sphinx and python several major releases, ..
+HERE = os.path.dirname(__file__)
+sys.path.insert(0, os.path.abspath(os.path.join(HERE, os.path.pardir)))
 
 suppress_warnings = ["image.nonlocal_uri"]
 
