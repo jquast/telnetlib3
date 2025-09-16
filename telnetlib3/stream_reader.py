@@ -1,5 +1,6 @@
 """Module provides class TelnetReader and TelnetReaderUnicode."""
 # std imports
+import re
 import sys
 import codecs
 import asyncio
@@ -278,6 +279,76 @@ class TelnetReader:
         del self._buffer[: isep + seplen]
         self._maybe_resume_transport()
         return bytes(chunk)
+
+    async def readuntil_pattern(self, pattern: re.Pattern) -> bytes:
+        """Read data from the stream until ``pattern`` is found.
+
+        On success, the data and pattern will be removed from the
+        internal buffer (consumed). Returned data will include the
+        pattern at the end.
+
+        Configured stream limit is used to check result. Limit sets the
+        maximal length of data that can be returned, not counting the
+        pattern.
+
+        If an EOF occurs and the complete pattern is still not found,
+        an IncompleteReadError exception will be raised, and the internal
+        buffer will be reset. The IncompleteReadError.partial attribute
+        may contain the pattern partially.
+
+        If the data cannot be read because of over limit, a
+        LimitOverrunError exception will be raised, and the data
+        will be left in the internal buffer, so it can be read again.
+        """
+
+        if pattern is None or not isinstance(pattern, re.Pattern):
+            raise ValueError("pattern should be a re.Pattern object")
+
+        if not isinstance(pattern.pattern, bytes):
+            raise ValueError("Only bytes patterns are supported")
+
+        if self._exception is not None:
+            raise self._exception
+
+        while True:
+            # Search for the pattern in the buffer.
+            match = pattern.search(self._buffer)
+
+            if match:
+                # Pattern was found.
+                match_end = match.end()
+
+                # Check if the return data exceeds the limit.
+                if match_end > self._limit:
+                    raise asyncio.LimitOverrunError(
+                        "Pattern is found, but chunk is longer than limit", match_end
+                    )
+
+                # Consume and return the data including the pattern.
+                chunk = self._buffer[:match_end]
+                del self._buffer[:match_end]
+                self._maybe_resume_transport()
+                return bytes(chunk)
+
+            # If we're here, the pattern wasn't found in the current buffer.
+
+            # Check if the buffer has grown beyond the limit without a match.
+            if len(self._buffer) > self._limit:
+                raise asyncio.LimitOverrunError(
+                    "Pattern not found, and buffer exceed the limit", len(self._buffer)
+                )
+
+            # If the stream is at EOF, and we still haven't found the pattern,
+            # raise an exception with the partial data. This is checked after
+            # searching the buffer, as the last received chunk might complete the pattern.
+            if self._eof:
+                chunk = bytes(self._buffer)
+                self._buffer.clear()
+                raise asyncio.IncompleteReadError(chunk, None)
+
+            # Wait for more data to arrive since the pattern was not found and
+            # we are not at EOF.
+            await self._wait_for_data("readuntil_pattern")
 
     async def read(self, n=-1):
         """Read up to `n` bytes from the stream.
