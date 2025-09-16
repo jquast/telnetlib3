@@ -47,7 +47,7 @@ __all__ = (
     bytes([const]) for const in range(4)
 )  # 0, 1, 2, 3
 (SLC_FLUSHOUT, SLC_FLUSHIN, SLC_ACK) = (
-    bytes([2 ** const]) for const in range(5, 8)
+    bytes([2**const]) for const in range(5, 8)
 )  # 32, 64, 128
 
 SLC_LEVELBITS = 0x03
@@ -114,61 +114,61 @@ class SLC(object):
 
     @property
     def level(self):
-        """ Returns SLC level of support.  """
+        """Returns SLC level of support."""
         return bytes([ord(self.mask) & SLC_LEVELBITS])
 
     @property
     def nosupport(self):
-        """ Returns True if SLC level is SLC_NOSUPPORT. """
+        """Returns True if SLC level is SLC_NOSUPPORT."""
         return self.level == SLC_NOSUPPORT
 
     @property
     def cantchange(self):
-        """ Returns True if SLC level is SLC_CANTCHANGE. """
+        """Returns True if SLC level is SLC_CANTCHANGE."""
         return self.level == SLC_CANTCHANGE
 
     @property
     def variable(self):
-        """ Returns True if SLC level is SLC_VARIABLE. """
+        """Returns True if SLC level is SLC_VARIABLE."""
         return self.level == SLC_VARIABLE
 
     @property
     def default(self):
-        """ Returns True if SLC level is SLC_DEFAULT. """
+        """Returns True if SLC level is SLC_DEFAULT."""
         return self.level == SLC_DEFAULT
 
     @property
     def ack(self):
-        """ Returns True if SLC_ACK bit is set. """
+        """Returns True if SLC_ACK bit is set."""
         return ord(self.mask) & ord(SLC_ACK)
 
     @property
     def flushin(self):
-        """ Returns True if SLC_FLUSHIN bit is set. """
+        """Returns True if SLC_FLUSHIN bit is set."""
         return ord(self.mask) & ord(SLC_FLUSHIN)
 
     @property
     def flushout(self):
-        """ Returns True if SLC_FLUSHIN bit is set.  """
+        """Returns True if SLC_FLUSHIN bit is set."""
         return ord(self.mask) & ord(SLC_FLUSHOUT)
 
     def set_value(self, value):
-        """ Set SLC keyboard ascii value to ``byte``.  """
+        """Set SLC keyboard ascii value to ``byte``."""
         assert type(value) is bytes and len(value) == 1, value
         self.val = value
 
     def set_mask(self, mask):
-        """ Set SLC option mask, ``mask``.  """
+        """Set SLC option mask, ``mask``."""
         assert type(mask) is bytes and len(mask) == 1
         self.mask = mask
 
     def set_flag(self, flag):
-        """ Set SLC option flag, ``flag``.  """
+        """Set SLC option flag, ``flag``."""
         assert type(flag) is bytes and len(flag) == 1
         self.mask = bytes([ord(self.mask) | ord(flag)])
 
     def __str__(self):
-        """ SLC definition as string '(value, flag(|s))'. """
+        """SLC definition as string '(value, flag(|s))'."""
         flags = list()
         for flag in (
             "nosupport",
@@ -250,7 +250,7 @@ def generate_slctab(tabset=None):
 
 def generate_forwardmask(binary_mode, tabset, ack=False):
     """
-    Generate a :class:`~.Forwardmask` instance.
+    Generate a :class:`telnetlib3.slc.Forwardmask` instance.
 
     Generate a 32-byte (``binary_mode`` is True) or 16-byte (False) Forwardmask
     instance appropriate for the specified ``slctab``.  A Forwardmask is formed
@@ -291,8 +291,6 @@ def snoop(byte, slctab, slc_callbacks):
 
 
 class Linemode(object):
-    """ """
-
     def __init__(self, mask=b"\x00"):
         """A mask of ``LMODE_MODE_LOCAL`` means that all line editing is
         performed on the client side (default). A mask of theNULL (\x00)
@@ -315,36 +313,36 @@ class Linemode(object):
 
     @property
     def local(self):
-        """ True if linemode is local. """
+        """True if linemode is local."""
         return bool(ord(self.mask) & ord(LMODE_MODE_LOCAL))
 
     @property
     def remote(self):
-        """ True if linemode is remote. """
+        """True if linemode is remote."""
         return not self.local
 
     @property
     def trapsig(self):
-        """ True if signals are trapped by client. """
+        """True if signals are trapped by client."""
         return bool(ord(self.mask) & ord(LMODE_MODE_TRAPSIG))
 
     @property
     def ack(self):
-        """ Returns True if mode has been acknowledged. """
+        """Returns True if mode has been acknowledged."""
         return bool(ord(self.mask) & ord(LMODE_MODE_ACK))
 
     @property
     def soft_tab(self):
-        """ Returns True if client will expand horizontal tab (\x09). """
+        """Returns True if client will expand horizontal tab (\x09)."""
         return bool(ord(self.mask) & ord(LMODE_MODE_SOFT_TAB))
 
     @property
     def lit_echo(self):
-        """ Returns True if non-printable characters are displayed as-is. """
+        """Returns True if non-printable characters are displayed as-is."""
         return bool(ord(self.mask) & ord(LMODE_MODE_LIT_ECHO))
 
     def __str__(self):
-        """ Returns string representation of line mode, for debugging """
+        """Returns string representation of line mode, for debugging"""
         return "remote" if self.remote else "local"
 
     def __repr__(self):
@@ -367,8 +365,6 @@ class Linemode(object):
 
 
 class Forwardmask(object):
-    """ """
-
     def __init__(self, value, ack=False):
         """
         Forwardmask object using the bytemask value received by server.
@@ -487,5 +483,5 @@ _DEBUG_SLC_OPTS = dict(
 
 
 def name_slc_command(byte):
-    """ Given an SLC ``byte``, return global mnemonic as string. """
+    """Given an SLC ``byte``, return global mnemonic as string."""
     return repr(byte) if byte not in _DEBUG_SLC_OPTS else _DEBUG_SLC_OPTS[byte]
