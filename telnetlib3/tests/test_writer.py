@@ -511,3 +511,59 @@ async def test_send_eor(bind_host, unused_tcp_port):
     result = await asyncio.wait_for(client_reader.read(), 0.5)
 
     assert result == expected
+
+
+async def test_wait_closed():
+    """Test TelnetWriter.wait_closed() method waits for connection to close."""
+
+    class MockTransport:
+        def __init__(self):
+            self._closing = False
+
+        def close(self):
+            self._closing = True
+
+        def is_closing(self):
+            return self._closing
+
+        def write(self, data):
+            pass
+
+        def get_extra_info(self, name, default=None):
+            return default
+
+    class MockProtocol:
+        def get_extra_info(self, name, default=None):
+            return default
+
+        async def _drain_helper(self):
+            pass
+
+    # Create a TelnetWriter instance with mock transport and protocol
+    transport = MockTransport()
+    protocol = MockProtocol()
+    writer = telnetlib3.TelnetWriter(transport, protocol, server=True)
+
+    # Test that wait_closed() doesn't complete immediately
+    wait_task = asyncio.create_task(writer.wait_closed())
+
+    # Give it a moment to start
+    await asyncio.sleep(0.01)
+
+    # Should not be done yet
+    assert not wait_task.done(), "wait_closed() should not complete before close()"
+
+    # Now close the writer
+    writer.close()
+
+    # Give it a moment to complete
+    await asyncio.sleep(0.01)
+
+    # Now wait_closed() should complete
+    assert wait_task.done(), "wait_closed() should complete after close()"
+
+    # Wait for the task to complete (should not raise)
+    await wait_task
+
+    # Test calling wait_closed() after close() - should complete immediately
+    await writer.wait_closed()  # Should complete immediately

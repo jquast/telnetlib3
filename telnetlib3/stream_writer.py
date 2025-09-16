@@ -161,6 +161,7 @@ class TelnetWriter:
         self._loop = asyncio.get_event_loop()
         self._complete_fut = self._loop.create_future()
         self._complete_fut.set_result(None)
+        self._closed_fut = self._loop.create_future()
 
         if not any((client, server)) or all((client, server)):
             raise TypeError(
@@ -300,6 +301,9 @@ class TelnetWriter:
         self._protocol = None
         self._transport = None
         self._connection_closed = True
+        # Signal that the connection is closed
+        if not self._closed_fut.done():
+            self._closed_fut.set_result(None)
 
     def is_closing(self):
         if self._transport is not None:
@@ -308,6 +312,18 @@ class TelnetWriter:
         if self.connection_closed:
             return True
         return False
+
+    async def wait_closed(self):
+        """
+        Wait until the underlying connection has completed closing.
+
+        This method returns when the underlying connection has been closed.
+        It can be used to wait for the connection to be fully closed after
+        calling close().
+
+        :rtype: None
+        """
+        await self._closed_fut
 
     def __repr__(self):
         """Description of stream encoding state."""
