@@ -1,4 +1,5 @@
 """Module provides class BaseClient."""
+
 import logging
 import datetime
 import traceback
@@ -165,9 +166,11 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 # future.
                 fut = asyncio.get_event_loop().create_task(coro)
                 fut.add_done_callback(
-                    lambda fut_obj: self.waiter_closed.set_result(weakref.proxy(self))
-                    if self.waiter_closed is not None
-                    else None
+                    lambda fut_obj: (
+                        self.waiter_closed.set_result(weakref.proxy(self))
+                        if self.waiter_closed is not None
+                        else None
+                    )
                 )
 
     def data_received(self, data):

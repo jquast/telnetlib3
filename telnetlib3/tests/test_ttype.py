@@ -1,4 +1,5 @@
 """Test TTYPE, rfc-930_."""
+
 # std imports
 import asyncio
 
@@ -102,7 +103,7 @@ async def test_telnet_server_on_ttype_beyond_max(bind_host, unused_tcp_port):
 
 
 async def test_telnet_server_on_ttype_empty(bind_host, unused_tcp_port):
-    """Test Server's callback method on_ttype(): empty value is ignored. """
+    """Test Server's callback method on_ttype(): empty value is ignored."""
     # given
     from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TTYPE
 
@@ -134,7 +135,7 @@ async def test_telnet_server_on_ttype_empty(bind_host, unused_tcp_port):
 
 
 async def test_telnet_server_on_ttype_looped(bind_host, unused_tcp_port):
-    """Test Server's callback method on_ttype() when value looped. """
+    """Test Server's callback method on_ttype() when value looped."""
     # given
     from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TTYPE
 
@@ -171,7 +172,7 @@ async def test_telnet_server_on_ttype_looped(bind_host, unused_tcp_port):
 
 
 async def test_telnet_server_on_ttype_repeated(bind_host, unused_tcp_port):
-    """Test Server's callback method on_ttype() when value repeats. """
+    """Test Server's callback method on_ttype() when value repeats."""
     # given
     from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TTYPE
 
@@ -208,7 +209,7 @@ async def test_telnet_server_on_ttype_repeated(bind_host, unused_tcp_port):
 
 
 async def test_telnet_server_on_ttype_mud(bind_host, unused_tcp_port):
-    """Test Server's callback method on_ttype() for MUD clients (MTTS). """
+    """Test Server's callback method on_ttype() for MUD clients (MTTS)."""
     # given
     from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TTYPE
 

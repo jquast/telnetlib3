@@ -1,4 +1,5 @@
 """Accessory functions."""
+
 # std imports
 import importlib
 import logging
@@ -17,7 +18,7 @@ __all__ = (
 
 
 def get_version():
-    return "2.0.4"  # keep in sync with setup.py and docs/conf.py !!
+    return "2.0.5"  # keep in sync with setup.py and docs/conf.py !!
 
 
 def encoding_from_lang(lang):
@@ -38,7 +39,7 @@ def encoding_from_lang(lang):
 
 
 def name_unicode(ucs):
-    """Return 7-bit ascii printable of any string. """
+    """Return 7-bit ascii printable of any string."""
     # more or less the same as curses.ascii.unctrl -- but curses
     # module is conditionally excluded from many python distributions!
     bits = ord(ucs)
@@ -76,12 +77,13 @@ _DEFAULT_LOGFMT = " ".join(
 def make_logger(name, loglevel="info", logfile=None, logfmt=_DEFAULT_LOGFMT):
     """Create and return simple logger for given arguments."""
     lvl = getattr(logging, loglevel.upper())
-    logging.getLogger().setLevel(lvl)
 
     _cfg = {"format": logfmt}
     if logfile:
         _cfg["filename"] = logfile
     logging.basicConfig(**_cfg)
+    logging.getLogger().setLevel(lvl)
+    logging.getLogger(name).setLevel(lvl)
     return logging.getLogger(name)
 
 
@@ -101,6 +103,6 @@ def function_lookup(pymod_path):
     return shell_function
 
 
-def make_reader_task(reader, size=2 ** 12):
+def make_reader_task(reader, size=2**12):
     """Return asyncio task wrapping coroutine of reader.read(size)."""
     return asyncio.ensure_future(reader.read(size))

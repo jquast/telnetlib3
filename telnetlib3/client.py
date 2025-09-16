@@ -75,7 +75,7 @@ class TelnetClient(client_base.BaseClient):
 
         # Wire extended rfc callbacks for requests of
         # terminal attributes, environment values, etc.
-        for (opt, func) in (
+        for opt, func in (
             (TTYPE, self.send_ttype),
             (TSPEED, self.send_tspeed),
             (XDISPLOC, self.send_xdisploc),

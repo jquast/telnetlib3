@@ -1,5 +1,20 @@
 History
 =======
+
+2.0.5
+ * feature: Add `TelnetReader.readuntil_pattern` :ghissue:`92` by
+   :ghuser:`agicy`
+ * feature: Add `TelnetWriter.wait_closed` async method in response to
+   :ghissue:`82`.
+ * bugfix: README Examples do not work :ghissue:`81`
+ * bugfix: `TypeError: buf expected bytes, got <class 'str'>` on client timeout
+   in `TelnetServer`, :ghissue:`87`
+ * bugfix: annoying `socket.send() raised exception` repeating warning,
+   :ghissue:`89`.
+ * bugfix: legacy use of get_event_loop, :ghissue:`85`.
+ * document: about encoding and force_binary in response to :ghissue:`90`
+ * feature: add tests to source distribution, :ghissue:`37`
+
 2.0.4
  * change: stop using setuptools library to get current software version
 
@@ -31,8 +46,8 @@ History
    any class initializers.
  * note: This release has a known memory leak when using the ``_waiter_connected`` and
    ``_waiter_closed`` arguments to Client or Shell class initializers, please do
-   not use them A replacement "wait_for_negotiation" awaitable will be provided
-   in a future release.
+   not use them, A replacement "wait_for_negotiation" awaitable is planned for a
+   future release.
  * enhancement: Add COM-PORT-OPTION subnegotiation support :ghissue:`57` by
    :ghuser:`albireox`
 

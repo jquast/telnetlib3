@@ -1,4 +1,5 @@
 """Test the server's shell(reader, writer) callback."""
+
 # std imports
 import asyncio
 import time
@@ -84,4 +85,26 @@ async def test_telnet_server_waitfor_timeout(bind_host, unused_tcp_port):
     output = await asyncio.wait_for(reader.read(), 0.5)
     elapsed = time.time() - stime
     assert 0.050 <= round(elapsed, 3) <= 0.100
+    assert output == expected_output
+
+
+async def test_telnet_server_binary_mode(bind_host, unused_tcp_port):
+    """Test callback on_timeout() in BINARY mode when encoding=False is used"""
+    from telnetlib3.telopt import IAC, WONT, DO, TTYPE, BINARY
+
+    # given
+    expected_output = IAC + DO + TTYPE + b"\r\nTimeout.\r\n"
+
+    await telnetlib3.create_server(
+        host=bind_host, port=unused_tcp_port, timeout=0.150, encoding=False
+    )
+
+    reader, writer = await asyncio.open_connection(host=bind_host, port=unused_tcp_port)
+
+    writer.write(IAC + WONT + TTYPE)
+
+    stime = time.time()
+    output = await asyncio.wait_for(reader.read(), 0.5)
+    elapsed = time.time() - stime
+    assert 0.050 <= round(elapsed, 3) <= 0.200
     assert output == expected_output

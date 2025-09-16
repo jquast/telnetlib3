@@ -19,6 +19,36 @@ requires python 3.7 and later, using the asyncio_ module.
 
 .. _asyncio: http://docs.python.org/3.11/library/asyncio.html
 
+Legacy 'telnetlib'
+==================
+
+This library contains a lightly modified copy of telnetlib.py_ from the standard
+library of Python 3.12. telnetlib.py_ was removed in Python 3.13.
+
+You can migrate most code statements by changing `telnetlib` to `telnetlib3`, in
+'from' statements:
+
+.. code-block:: python
+
+    # OLD:
+    from telnetlib import Telnet, ECHO, BINARY
+
+    # NEW:
+    from telnetlib3 import Telnet, NAWS, STATUS, ECHO, BINARY
+
+Or, by adjusting any 'import' statements:
+
+.. code-block:: python
+
+    # OLD:
+    import telnetlib
+
+    # NEW:
+    import telnetlib3.telnetlib as telnetlib
+
+.. _telnetlib.py: https://docs.python.org/3.12/library/telnetlib.html
+
+
 Quick Example
 -------------
 
@@ -38,10 +68,12 @@ Authoring a Telnet Server using Streams interface that offers a basic war game:
             await writer.drain()
         writer.close()
 
-    loop = asyncio.get_event_loop()
-    coro = telnetlib3.create_server(port=6023, shell=shell)
-    server = loop.run_until_complete(coro)
-    loop.run_until_complete(server.wait_closed())
+    async def main():
+        loop = asyncio.get_event_loop()
+        server = await telnetlib3.create_server('127.0.0.1', 6023, shell=shell)
+        await server.wait_closed()
+
+    asyncio.run(main())
 
 Authoring a Telnet Client that plays the war game with this server:
 
@@ -66,10 +98,12 @@ Authoring a Telnet Client that plays the war game with this server:
         # EOF
         print()
 
-    loop = asyncio.get_event_loop()
-    coro = telnetlib3.open_connection('localhost', 6023, shell=shell)
-    reader, writer = loop.run_until_complete(coro)
-    loop.run_until_complete(writer.protocol.waiter_closed)
+    async def main():
+        loop = asyncio.get_event_loop()
+        reader, writer = await telnetlib3.open_connection('localhost', 6023, shell=shell)
+        await writer.protocol.waiter_closed
+
+    asyncio.run(main())
 
 Command-line
 ------------
@@ -80,10 +114,12 @@ Two command-line scripts are distributed with this package.
 
   Small terminal telnet client.  Some example destinations and options::
 
-    telnetlib3-client nethack.alt.org
+    telnetlib3-client nethack.alt.org --logfile logfile.txt --loglevel warn
     telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
     telnetlib3-client htc.zapto.org
 
+Note the use of `--encoding=cp437` and `--force-binary`, see section Encoding_
+below for details.
 
 ``telnetlib3-server``
 
@@ -113,10 +149,38 @@ Two command-line scripts are distributed with this package.
      tel:sh> writer
      <TelnetWriter server mode:local -lineflow +xon_any +slc_sim client-will:NAWS,NEW_ENVIRON,TTYPE>
 
-
 Both command-line scripts accept argument ``--shell=my_module.fn_shell``
-describing a python module path to a coroutine of signature
-``shell(reader, writer)``, just as the above examples.
+describing a python module path to an async function of signature
+``async def shell(reader, writer)``, just as the above examples.
+
+Encoding
+--------
+
+In this client connection example::
+
+    telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
+
+Note the use of `--encoding=cp437` to force the use of an American English IBM
+PC DOS encoding, to an otherwise unaware bulletin board system. See also
+`--force-binary`, which may also sometimes be required. This library strictly
+enforces that BINARY protocol negotiation must be successful to send non-ASCII
+data, as it is an old fashioned Telnet protocol requirement.
+
+When unspecified, this client will use your environment 'LANG' variable to
+negotiate for character encoding on your behalf (usually utf8). Similarly, you
+can create a Telnet Server that prefers the specified encoding, and, transmits it
+even in the case of failed BINARY negotiation, such as a simple telnet client like
+netcat, `nc -t localhost 6023`::
+
+    telnetlib3-server --encoding=utf8 --force-binary
+
+This is suggested as a "default" encoding for clients that are assumed to
+support it, but are without the ability to negotiate about it.
+
+It is still possible for a telnet client capable of negotiation of environment
+variables to transmit `LANG` (such as 'en_US.latin1'), or more rarely, negotiate
+CHARSET, and the client will receive data in their preferred encoding, latin1
+instead of utf8 in that example.
 
 Features
 --------

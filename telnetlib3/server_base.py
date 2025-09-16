@@ -1,4 +1,5 @@
 """Module provides class BaseServer."""
+
 import traceback
 import asyncio
 import logging
