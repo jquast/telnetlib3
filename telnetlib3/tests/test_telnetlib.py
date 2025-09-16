@@ -3,42 +3,20 @@ import selectors
 import threading
 import contextlib
 import re
+import io
 
 import pytest
 
-from test import support
-
-import sys
-
-# Handle imports for different Python versions
-if sys.version_info >= (3, 12):
-    from test.support import socket_helper, warnings_helper  # noqa: F401
-    from test.support.socket_helper import requires_working_socket
-elif sys.version_info >= (3, 9):
-    # Python 3.9-3.11: requires_working_socket is in test.support
-    from test.support import requires_working_socket
-else:
-    # Python 3.8: requires_working_socket might not exist; create a fallback
-    try:
-        from test.support import requires_working_socket
-    except ImportError:
-        # Fallback for very old versions (if needed)
-        def requires_working_socket(module=False):
-            """Minimal fallback if requires_working_socket is missing"""
-            import socket
-
-            try:
-                socket.socket()
-            except OSError:
-                raise unittest.SkipTest("Working socket required")
-
-
-# Use the function
-requires_working_socket(module=True)
+# Skip the whole module if a working socket is not available
+try:
+    _s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    _s.close()
+except OSError:
+    pytest.skip("Working socket required", allow_module_level=True)
 
 import telnetlib3.telnetlib as telnetlib  # noqa: E402
 
-HOST = socket_helper.HOST
+HOST = "127.0.0.1"
 
 
 def server(evt, serv):
@@ -62,7 +40,9 @@ def server_port():
     evt = threading.Event()
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(60)  # Safety net. Look issue 11812
-    port = socket_helper.bind_port(sock)
+    # Bind to an ephemeral port on localhost
+    sock.bind((HOST, 0))
+    port = sock.getsockname()[1]
     thread = threading.Thread(target=server, args=(evt, sock), daemon=True)
     thread.start()
     evt.wait()
@@ -70,6 +50,16 @@ def server_port():
         yield port
     finally:
         thread.join()
+
+
+@contextlib.contextmanager
+def captured_stdout():
+    """
+    Local replacement for test.support.captured_stdout()
+    """
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        yield buf
 
 
 class SocketStub(object):
@@ -134,7 +124,7 @@ class TelnetAlike(telnetlib.Telnet):
         return not self.sock.block
 
     def msg(self, msg, *args):
-        with support.captured_stdout() as out:
+        with captured_stdout() as out:
             telnetlib.Telnet.msg(self, msg, *args)
         self._messages += out.getvalue()
         return
