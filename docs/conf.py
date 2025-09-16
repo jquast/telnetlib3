@@ -19,7 +19,17 @@ github_project_url = "https://github.com/jquast/telnetlib3"
 
 # not sure why, but there is 'ModuleNotFoundError: No module named 'telnetlib3'
 # only on RTD after migrating sphinx and python several major releases, ..
-sys.path.insert(0, os.path.abspath(os.path.pardir))
+sys.path.insert(
+    0, os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
+)
+print("*" * 100)
+print("*" * 100)
+print("*" * 100)
+print("PATH=" + repr(sys.path))
+print("*" * 100)
+print("*" * 100)
+print("*" * 100)
+
 
 suppress_warnings = ["image.nonlocal_uri"]
 
