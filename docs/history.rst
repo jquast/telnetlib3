@@ -1,5 +1,6 @@
 History
 =======
+
 2.0.5
  * feature: Add `TelnetReader.readuntil_pattern` :ghissue:`92` by
    :ghuser:`agicy`
