@@ -19,8 +19,7 @@ github_project_url = "https://github.com/jquast/telnetlib3"
 
 # not sure why, but there is 'ModuleNotFoundError: No module named 'telnetlib3'
 # only on RTD after migrating sphinx and python several major releases, ..
-HERE = os.path.dirname(__file__)
-sys.path.insert(0, os.path.abspath(os.path.join(HERE, os.path.pardir)))
+sys.path.insert(0, os.path.abspath(os.path.pardir))
 
 suppress_warnings = ["image.nonlocal_uri"]
 
@@ -119,7 +118,7 @@ html_theme = "sphinx_rtd_theme"
 # html_theme_options = {}
 
 # Add any paths that contain custom themes here, relative to this directory.
-html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
+# html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
 
 # The name for this set of Sphinx documents.  If None, it defaults to
 # "<project> v<release> documentation".
