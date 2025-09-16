@@ -1,4 +1,5 @@
 """Negotiate About Window Size, *NAWS*. rfc-1073_."""
+
 # std imports
 import platform
 import asyncio

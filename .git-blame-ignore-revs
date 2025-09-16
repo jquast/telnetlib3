@@ -1,0 +1,5 @@
+# black reformat, use command to ignore in git blame:
+#
+#  git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+5ab38df575ef812b62211fc70a0eb8904f6b0f9d

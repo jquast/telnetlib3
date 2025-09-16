@@ -6,7 +6,7 @@ from telnetlib3.accessories import (
 
 
 def test_name_unicode():
-    """ Test mapping of ascii table to name_unicode result. """
+    """Test mapping of ascii table to name_unicode result."""
     given_expected = {
         chr(0): r"^@",
         chr(1): r"^A",
@@ -29,7 +29,7 @@ def test_name_unicode():
 
 
 def test_eightbits():
-    """ Test mapping of bit values to binary appearance string. """
+    """Test mapping of bit values to binary appearance string."""
     given_expected = {
         0: "0b00000000",
         127: "0b01111111",
@@ -45,7 +45,7 @@ def test_eightbits():
 
 
 def test_encoding_from_lang():
-    """ Test inference of encoding from LANG value. """
+    """Test inference of encoding from LANG value."""
     given_expected = {
         "en_US.UTF-8@misc": "UTF-8",
         "en_US.UTF-8": "UTF-8",

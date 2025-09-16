@@ -1,4 +1,5 @@
 """Test Server encoding mixin."""
+
 # std imports
 import asyncio
 
