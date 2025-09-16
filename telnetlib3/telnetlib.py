@@ -1,3 +1,8 @@
+# jdq(2025): This file is only very lightly modified from cpython 3.12
+# telnetlib.py, to make it compatible with pytest (renaming 'test' to 'main'),
+# and, to be incorporated into telnetlib3 module's namespace, by expanding
+# '__all__' to include a majority of items, see 'Legacy' note in README.rst
+# for details.
 r"""TELNET client class.
 
 Based on RFC 854: TELNET Protocol Specification, by J. Postel and
