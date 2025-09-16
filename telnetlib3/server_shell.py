@@ -22,7 +22,7 @@ async def telnet_server_shell(reader, writer):
     linereader.send(None)
 
     command = None
-    while True:
+    while not writer.is_closing():
         if command:
             writer.write(CR + LF)
         writer.write("tel:sh> ")
@@ -31,29 +31,40 @@ async def telnet_server_shell(reader, writer):
             await writer.drain()
             inp = await reader.read(1)
             if not inp:
+                # close/eof by client at prompt
                 return
             command = linereader.send(inp)
         writer.write(CR + LF)
         if command == "quit":
+            # server hangs up on client
             writer.write("Goodbye." + CR + LF)
             break
         elif command == "help":
             writer.write("quit, writer, slc, toggle [option|all], reader, proto, dump")
         elif command == "writer":
+            # show 'writer' status
             writer.write(repr(writer))
         elif command == "reader":
+            # show 'reader' status
             writer.write(repr(reader))
         elif command == "proto":
+            # show 'proto' details of writer
             writer.write(repr(writer.protocol))
         elif command == "version":
             writer.write(accessories.get_version())
         elif command == "slc":
+            # show 'slc' support and data tables
             writer.write(get_slcdata(writer))
         elif command.startswith("toggle"):
+            # toggle specified options
             option = command[len("toggle ") :] or None
             writer.write(do_toggle(writer, option))
         elif command.startswith("dump"):
-            # dump [kb] [ms_delay] [drain|nodrain] [quit]
+            # dump [kb] [ms_delay] [drain|nodrain] [close|noclose]
+            #
+            # this allows you to experiment with the effects of 'drain', and,
+            # some longer-running programs that check for early break through
+            # writer.is_closing().
             try:
                 kb_limit = int(command.split()[1])
             except (ValueError, IndexError):
@@ -62,27 +73,33 @@ async def telnet_server_shell(reader, writer):
                 delay = int(float(command.split()[2]) / 1000)
             except (ValueError, IndexError):
                 delay = 0
+            # experiment with large sizes and 'nodrain', the server pretty much
+            # locks up and stops talking to new clients.
             try:
-                drain = command.split()[3] == "drain"
+                drain = command.split()[3].lower() == "nodrain"
             except IndexError:
-                drain = False
+                drain = True
             try:
-                do_quit = command.split()[4] == "close"
+                do_close = command.split()[4].lower() == "close"
             except IndexError:
-                do_quit = False
+                do_close = False
             writer.write(
-                "kb_limit={}, delay={}, drain={}, close={}:\r\n".format(
-                    kb_limit, delay, drain, close
+                "kb_limit={}, delay={}, drain={}, do_close={}:\r\n".format(
+                    kb_limit, delay, drain, do_close
                 )
             )
             for lineout in character_dump(kb_limit):
+                if writer.is_closing():
+                    break
                 writer.write(lineout)
-                if delay:
-                    await asyncio.sleep(delay)
                 if drain:
                     await writer.drain()
-            writer.write("\r\n{kb_limit} OK".format(kb_limit))
-            if do_quit:
+                if delay:
+                    await asyncio.sleep(delay)
+
+            if not writer.is_closing():
+                writer.write("\r\n{} OK".format(kb_limit))
+            if do_close:
                 break
         elif command:
             writer.write("no such command.")

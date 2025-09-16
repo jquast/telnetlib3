@@ -689,7 +689,8 @@ class TelnetWriter:
         """
         assert isinstance(buf, (bytes, bytearray)), buf
         assert buf and buf.startswith(IAC), buf
-        self._transport.write(buf)
+        if self._transport is not None:
+            self._transport.write(buf)
 
     def iac(self, cmd, opt=b""):
         """
@@ -1739,15 +1740,15 @@ class TelnetWriter:
         """
         if not isinstance(buf, (bytes, bytearray)):
             raise TypeError("buf expected bytes, got {0}".format(type(buf)))
+        if not self.is_closing():
+            if escape_iac:
+                # when escape_iac is True, we may safely assume downstream
+                # application has provided an encoded string. Prior to 2.0.1, `buf`
+                # was inspected to raise TypeError for any bytes of ordinal value
+                # greater than 127, but it was removed for performance.
+                buf = self._escape_iac(buf)
 
-        if escape_iac:
-            # when escape_iac is True, we may safely assume downstream
-            # application has provided an encoded string. Prior to 2.0.1, `buf`
-            # was inspected to raise TypeError for any bytes of ordinal value
-            # greater than 127, but it was removed for performance.
-            buf = self._escape_iac(buf)
-
-        self._transport.write(buf)
+            self._transport.write(buf)
 
     # Private sub-negotiation (SB) routines
 
