@@ -9,6 +9,7 @@ from .client_base import *  # noqa
 from .client_shell import *  # noqa
 from .client import *  # noqa
 from .telopt import *  # noqa
+from .telnetlib import *  # noqa
 from .slc import *  # noqa
 from .accessories import get_version as __get_version
 
@@ -23,6 +24,7 @@ __all__ = (
     + stream_reader.__all__
     + telopt.__all__
     + slc.__all__
+    + telnetlib.__all__
 )  # noqa
 
 __author__ = "Jeff Quast"

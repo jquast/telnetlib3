@@ -76,13 +76,13 @@ _DEFAULT_LOGFMT = " ".join(
 def make_logger(name, loglevel="info", logfile=None, logfmt=_DEFAULT_LOGFMT):
     """Create and return simple logger for given arguments."""
     lvl = getattr(logging, loglevel.upper())
-    logging.getLogger().setLevel(lvl)
-    logging.getLogger(name).setLevel(lvl)
 
     _cfg = {"format": logfmt}
     if logfile:
         _cfg["filename"] = logfile
     logging.basicConfig(**_cfg)
+    logging.getLogger().setLevel(lvl)
+    logging.getLogger(name).setLevel(lvl)
     return logging.getLogger(name)
 
 

@@ -133,8 +133,6 @@ else:
         async def make_stdio(self):
             """
             Return (reader, writer) pair for sys.stdin, sys.stdout.
-
-            This method is a coroutine.
             """
             reader = asyncio.StreamReader()
             reader_protocol = asyncio.StreamReaderProtocol(reader)
