@@ -239,7 +239,12 @@ class TelnetServer(server_base.BaseServer):
         ``duration` value of ``0``.
         """
         logger.debug("Timeout after {self.idle:1.2f}s".format(self=self))
-        self.writer.write("\r\nTimeout.\r\n")
+        # try to write timeout using encoding,
+        try:
+            self.writer.write("\r\nTimeout.\r\n")
+        except TypeError:
+            # unless server was started with encoding=False, we must send as binary!
+            self.writer.write(b"\r\nTimeout.\r\n")
         self.timeout_connection()
 
     def on_naws(self, rows, cols):

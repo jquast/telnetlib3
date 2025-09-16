@@ -1,4 +1,5 @@
 import types
+import asyncio
 
 CR, LF, NUL = "\r\n\x00"
 from . import slc
@@ -52,25 +53,37 @@ async def telnet_server_shell(reader, writer):
             option = command[len("toggle ") :] or None
             writer.write(do_toggle(writer, option))
         elif command.startswith("dump"):
-            # dump [kb] [ms_delay] [drain|nodrain]
+            # dump [kb] [ms_delay] [drain|nodrain] [quit]
             try:
                 kb_limit = int(command.split()[1])
             except (ValueError, IndexError):
                 kb_limit = 1000
             try:
-                ms_delay = int(command.split()[2]) * 1000
+                delay = int(float(command.split()[2]) / 1000)
             except (ValueError, IndexError):
-                ms_delay = 0
+                delay = 0
             try:
                 drain = command.split()[3] == "drain"
             except IndexError:
                 drain = False
+            try:
+                do_quit = command.split()[4] == "close"
+            except IndexError:
+                do_quit = False
+            writer.write(
+                "kb_limit={}, delay={}, drain={}, close={}:\r\n".format(
+                    kb_limit, delay, drain, close
+                )
+            )
             for lineout in character_dump(kb_limit):
                 writer.write(lineout)
-                if ms_delay:
-                    await asyncio.sleep(ms_delay)
+                if delay:
+                    await asyncio.sleep(delay)
                 if drain:
                     await writer.drain()
+            writer.write("\r\n{kb_limit} OK".format(kb_limit))
+            if do_quit:
+                break
         elif command:
             writer.write("no such command.")
     writer.close()
