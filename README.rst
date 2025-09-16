@@ -39,6 +39,7 @@ You can migrate most code statements by changing `telnetlib` to `telnetlib3`, in
 Or, by adjusting any 'import' statements:
 
 .. code-block:: python
+
     # OLD:
     import telnetlib
 
