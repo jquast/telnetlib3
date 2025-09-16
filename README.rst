@@ -114,10 +114,12 @@ Two command-line scripts are distributed with this package.
 
   Small terminal telnet client.  Some example destinations and options::
 
-    telnetlib3-client nethack.alt.org
+    telnetlib3-client nethack.alt.org --logfile logfile.txt --loglevel warn
     telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
     telnetlib3-client htc.zapto.org
 
+Note the use of `--encoding=cp437` to connect to encoding-unaware systems,
+in this case, one that presumes IBM PC DOS encoding
 
 ``telnetlib3-server``
 
@@ -150,6 +152,34 @@ Two command-line scripts are distributed with this package.
 Both command-line scripts accept argument ``--shell=my_module.fn_shell``
 describing a python module path to an async function of signature
 ``async def shell(reader, writer)``, just as the above examples.
+
+Encoding
+--------
+
+In this client connection example::
+
+    telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
+
+Note the use of `--encoding=cp437` to force the use of an American English IBM
+PC DOS encoding, to an otherwise unaware bulletin board system. See also
+`--force-binary`, which may also sometimes be required. This library strictly
+enforces that BINARY protocol negotiation must be successful to send non-ASCII
+data, as it is an old fashioned Telnet protocol requirement. 
+
+When unspecified, this client will use your environment 'LANG' variable to
+negotiate for character encoding on your behalf (usually utf8). Similarly, you
+can create a Telnet Server that prefers the specified encoding, and, transmits it
+even in the case of failed BINARY negotiation, such as a simple telnet client like
+netcat, `nc -t localhost 6023`::
+
+    telnetlib3-server --encoding=latin1 --force-binary
+
+This is suggested as a "default" for clients that are assumed to support the
+encoding without the ability to negotiate about it.
+
+It is still possible for a telnet client capable of negotiationg environment
+variables to transmit `LANG` (such as 'en_US.UTF-8'), and that client will
+receive data in their preferred encoding, instead of `latin1` in that case.
 
 Features
 --------
