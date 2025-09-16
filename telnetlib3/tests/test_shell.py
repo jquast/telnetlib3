@@ -286,7 +286,7 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
         (b"quit\r", b"\r\nGoodbye.\r\n"),
     )
 
-    for (cmd, output_expected) in cmd_output_table:
+    for cmd, output_expected in cmd_output_table:
         writer.write(cmd)
         try:
             result = await asyncio.wait_for(

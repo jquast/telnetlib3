@@ -13,6 +13,7 @@ from telnetlib3.tests.accessories import unused_tcp_port, bind_host
 
 def test_reader_instantiation_safety():
     """On instantiation, one of server or client must be specified."""
+
     # given,
     def fn_encoding(incoming):
         return "def-ENC"
@@ -241,6 +242,7 @@ async def test_telnet_reader_read_exactly_bytes(bind_host, unused_tcp_port):
 
 async def test_telnet_reader_read_0(bind_host, unused_tcp_port):
     """Ensure TelnetReader.read(0) returns nothing."""
+
     # given
     def fn_encoding(incoming):
         return "def-ENC"

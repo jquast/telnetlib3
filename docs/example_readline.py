@@ -134,7 +134,6 @@ class Lander(object):
             # prompt
             client.writer.write("? ")
             while True:
-
                 # await (1) client input (2) system notification
                 done, pending = await asyncio.wait(
                     wait_for, return_when=asyncio.FIRST_COMPLETED
