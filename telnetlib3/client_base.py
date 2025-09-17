@@ -4,14 +4,18 @@ import logging
 import datetime
 import traceback
 import asyncio
+import collections
 import weakref
 import sys
 
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 from .stream_reader import TelnetReader, TelnetReaderUnicode
-from .telopt import name_commands
+from .telopt import name_commands, theNULL
 
 __all__ = ("BaseClient",)
+
+# Pre-allocated single-byte cache to avoid per-byte bytes() allocations
+_ONE_BYTE = [bytes([i]) for i in range(256)]
 
 
 class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
@@ -59,6 +63,15 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self.reader = None
         self.writer = None
         self._limit = limit
+
+        # High-throughput receive pipeline
+        self._rx_queue = collections.deque()
+        self._rx_bytes = 0
+        self._rx_task = None
+        self._reading_paused = False
+        # Apply backpressure to transport when our queue grows too large
+        self._read_high = 512 * 1024  # pause_reading() above this many buffered bytes
+        self._read_low = 256 * 1024  # resume_reading() below this many buffered bytes
 
     # Base protocol methods
 
@@ -136,6 +149,12 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             reader_kwds["limit"] = self._limit
 
         self.reader = reader_factory(**reader_kwds)
+        # Attach transport so TelnetReader can apply pause_reading/resume_reading
+        try:
+            self.reader.set_transport(transport)
+        except Exception:
+            # Reader may not support transport coupling; ignore.
+            pass
 
         self.writer = writer_factory(
             transport=transport,
@@ -175,31 +194,27 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     def data_received(self, data):
         """Process bytes received by transport."""
-        # This may seem strange; feeding all bytes received to the **writer**,
-        # and, only if they test positive, duplicating to the **reader**.
-        #
-        # The writer receives a copy of all raw bytes because, as an IAC
-        # interpreter, it may likely **write** a responding reply.
+        # Buffer incoming data and schedule async processing to keep the event loop responsive.
+        # Apply read-side backpressure using transport.pause_reading()/resume_reading().
         self._last_received = datetime.datetime.now()
 
-        cmd_received = False
-        for byte in data:
+        # Enqueue and account for buffered size
+        self._rx_queue.append(data)
+        self._rx_bytes += len(data)
+
+        # Start processor task if not running
+        if self._rx_task is None or self._rx_task.done():
+            loop = asyncio.get_event_loop()
+            self._rx_task = loop.create_task(self._process_rx())
+
+        # Pause reading if buffered bytes exceed high watermark
+        if not self._reading_paused and self._rx_bytes >= self._read_high:
             try:
-                recv_inband = self.writer.feed_byte(bytes([byte]))
-            except:
-                self._log_exception(self.log.warning, *sys.exc_info())
-            else:
-                if recv_inband:
-                    # forward to reader (shell).
-                    self.reader.feed_data(bytes([byte]))
-
-                # becomes True if any out of band data is received.
-                cmd_received = cmd_received or not recv_inband
-
-        # until negotiation is complete, re-check negotiation aggressively
-        # upon receipt of any command byte.
-        if not self._waiter_connected.done() and cmd_received:
-            self._check_negotiation_timer()
+                self._transport.pause_reading()
+                self._reading_paused = True
+            except Exception:
+                # Some transports may not support pause_reading; ignore.
+                pass
 
     # public properties
 
@@ -286,6 +301,103 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         )
 
     # private methods
+
+    def _process_chunk(self, data):
+        """Process a chunk of received bytes; return True if any IAC/SB cmd observed."""
+        # This mirrors the previous optimized logic, but is called from an async task.
+        self._last_received = datetime.datetime.now()
+
+        writer = self.writer
+        reader = self.reader
+
+        # Snapshot whether SLC snooping is required for this chunk
+        try:
+            mode = writer.mode  # property
+        except Exception:
+            mode = "local"
+        slc_needed = (mode == "remote") or (mode == "kludge" and writer.slc_simulated)
+
+        cmd_received = False
+
+        # Precompute SLC trigger set if needed
+        slc_vals = None
+        if slc_needed:
+            slc_vals = {
+                defn.val[0] for defn in writer.slctab.values() if defn.val != theNULL
+            }
+
+        n = len(data)
+        i = 0
+        out_start = 0
+        feeding_oob = False
+
+        def is_special(b):
+            return b == 255 or (slc_needed and slc_vals and b in slc_vals)
+
+        while i < n:
+            if not feeding_oob:
+                # Scan forward until next special byte (IAC or SLC trigger)
+                while i < n and not is_special(data[i]):
+                    i += 1
+                # Flush non-special run
+                if i > out_start:
+                    reader.feed_data(data[out_start:i])
+                if i >= n:
+                    out_start = i
+                    break
+            # At a special byte or in the middle of an IAC sequence
+            b = data[i]
+            try:
+                recv_inband = writer.feed_byte(_ONE_BYTE[b])
+            except Exception:
+                self._log_exception(self.log.warning, *sys.exc_info())
+            else:
+                if recv_inband:
+                    # Only forward the single-byte SLC or in-band special
+                    reader.feed_data(data[i : i + 1])
+                else:
+                    cmd_received = True
+            i += 1
+            out_start = i
+            # Continue per-byte feeding while writer indicates out-of-band processing
+            feeding_oob = bool(writer.is_oob)
+
+        # Any trailing non-special bytes
+        if out_start < n:
+            reader.feed_data(data[out_start:])
+
+        return cmd_received
+
+    async def _process_rx(self):
+        """Async processor for receive queue that yields control and applies backpressure."""
+        processed = 0
+        any_cmd = False
+        try:
+            while self._rx_queue:
+                chunk = self._rx_queue.popleft()
+                self._rx_bytes -= len(chunk)
+
+                cmd = self._process_chunk(chunk)
+                any_cmd = any_cmd or cmd
+                processed += len(chunk)
+
+                # Resume reading when we've drained below low watermark
+                if self._reading_paused and self._rx_bytes <= self._read_low:
+                    try:
+                        self._transport.resume_reading()
+                        self._reading_paused = False
+                    except Exception:
+                        pass
+
+                # Yield periodically to keep loop responsive without excessive context switching
+                if processed >= 128 * 1024:
+                    await asyncio.sleep(0)
+                    processed = 0
+        finally:
+            self._rx_task = None
+            # Aggressively re-check negotiation if any command was seen and not yet connected
+            if any_cmd and not self._waiter_connected.done():
+                self._check_negotiation_timer()
 
     def _check_negotiation_timer(self):
         self._check_later.cancel()

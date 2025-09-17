@@ -292,6 +292,14 @@ class TelnetWriter:
     def close(self):
         if self.connection_closed:
             return
+        # Proactively notify the protocol so it can release references immediately.
+        # Transport will also call connection_lost(), but doing it here ensures
+        # cleanup happens deterministically and is idempotent due to _closing guard.
+        if self._protocol is not None:
+            try:
+                self._protocol.connection_lost(None)
+            except Exception:
+                pass
         if self._transport is not None:
             self._transport.close()
         # break circular refs
@@ -926,6 +934,7 @@ class TelnetWriter:
             self.log.debug(
                 "cannot send SB XDISPLOC SEND" "without receipt of WILL XDISPLOC"
             )
+            return False
         if not self.pending_option.enabled(SB + XDISPLOC):
             response = [IAC, SB, XDISPLOC, SEND, IAC, SE]
             self.log.debug("send IAC SB XDISPLOC SEND IAC SE")
@@ -945,6 +954,7 @@ class TelnetWriter:
         assert self.server, "SB TTYPE SEND may only be sent by server end"
         if not self.remote_option.enabled(TTYPE):
             self.log.debug("cannot send SB TTYPE SEND" "without receipt of WILL TTYPE")
+            return False
         if not self.pending_option.enabled(SB + TTYPE):
             response = [IAC, SB, TTYPE, SEND, IAC, SE]
             self.log.debug("send IAC SB TTYPE SEND IAC SE")
@@ -1827,7 +1837,7 @@ class TelnetWriter:
                 rx, tx = int(rx), int(tx)
             except ValueError as err:
                 self.log.error(
-                    "illegal TSPEED values received " "(rx={!r}, tx={!r}: {}",
+                    "illegal TSPEED values received (rx=%r, tx=%r): %s",
                     rx,
                     tx,
                     err,

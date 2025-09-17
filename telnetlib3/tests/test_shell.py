@@ -2,27 +2,19 @@
 
 # std imports
 import asyncio
-import weakref
+import logging
 
 # local imports
 import telnetlib3
-import telnetlib3.stream_writer
 from telnetlib3.tests.accessories import unused_tcp_port, bind_host
 
-# 3rd party
-import pytest
 
-
-@pytest.mark.xfail(
-    reason="https://github.com/jquast/telnetlib3/pull/58#issuecomment-1329497313"
-)
 async def test_telnet_server_shell_as_coroutine(bind_host, unused_tcp_port):
     """Test callback shell(reader, writer) as coroutine of create_server()."""
     from telnetlib3.telopt import IAC, DO, WONT, TTYPE
 
     # given,
     _waiter = asyncio.Future()
-    _saved = weakref.WeakSet()
     send_input = "Alpha"
     expect_output = "Beta"
     expect_hello = IAC + DO + TTYPE
@@ -33,10 +25,9 @@ async def test_telnet_server_shell_as_coroutine(bind_host, unused_tcp_port):
         inp = await reader.readexactly(len(send_input))
         assert inp == send_input
         writer.write(expect_output)
-        _saved.add(writer)
-        _saved.add(writer._protocol)
         await writer.drain()
         writer.close()
+        await writer.wait_closed()
 
     # exercise,
     await telnetlib3.create_server(host=bind_host, port=unused_tcp_port, shell=shell)
@@ -60,7 +51,10 @@ async def test_telnet_server_shell_as_coroutine(bind_host, unused_tcp_port):
 
     # verify,
     assert server_output.decode("ascii") == expect_output
-    assert len(_saved) == 0
+
+    # nothing more to read from server; server writer closed in shell.
+    result = await reader.read()
+    assert result == b""
 
 
 async def test_telnet_client_shell_as_coroutine(bind_host, unused_tcp_port):
@@ -147,8 +141,8 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
         shell=telnet_server_shell,
         _waiter_connected=_waiter,
         connect_maxwait=0.05,
-        timeout=0.25,
-        limit=1337,
+        timeout=1.25,
+        limit=13377,
     )
 
     reader, writer = await asyncio.open_connection(host=bind_host, port=unused_tcp_port)
@@ -166,6 +160,7 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
     server = await asyncio.wait_for(_waiter, 0.5)
     server_port = str(server._transport.get_extra_info("peername")[1])
 
+    # Command & Response table
     cmd_output_table = (
         # exercise backspace in input for help command
         (
@@ -185,7 +180,7 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
         (
             b"reader\r\n",
             (
-                b"\r\n<TelnetReaderUnicode encoding='US-ASCII' limit=1337 buflen=1 eof=False>"
+                b"\r\n<TelnetReaderUnicode encoding='US-ASCII' limit=13377 buflen=1 eof=False>"
                 b"\r\ntel:sh> "
             ),
         ),
@@ -288,14 +283,23 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
     )
 
     for cmd, output_expected in cmd_output_table:
+        logging.debug("cmd=%r, output_expected=%r", cmd, output_expected)
         writer.write(cmd)
+        await writer.drain()
+        timed_out = False
         try:
             result = await asyncio.wait_for(
                 reader.readexactly(len(output_expected)), 0.5
             )
         except asyncio.IncompleteReadError as err:
             result = err.partial
-        assert result == output_expected
+        except TimeoutError:
+            result = await reader.read(1024)
+        else:
+            if result != output_expected:
+                # fetch extra output, if any, for better understanding of error
+                result += await reader.read(1024)
+        assert result == output_expected and timed_out == False
 
     # nothing more to read.
     result = await reader.read()

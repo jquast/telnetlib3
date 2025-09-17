@@ -9,6 +9,8 @@ History
  * bugfix: README Examples do not work :ghissue:`81`
  * bugfix: `TypeError: buf expected bytes, got <class 'str'>` on client timeout
    in `TelnetServer`, :ghissue:`87`
+ * bugfix: Performance issues with client protocol under heavy load,
+   demonstrating server telnet://1984.ws now documented in README.
  * bugfix: annoying `socket.send() raised exception` repeating warning,
    :ghissue:`89`.
  * bugfix: legacy use of get_event_loop, :ghissue:`85`.

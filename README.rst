@@ -22,29 +22,23 @@ requires python 3.7 and later, using the asyncio_ module.
 Legacy 'telnetlib'
 ==================
 
-This library contains a lightly modified copy of telnetlib.py_ from the standard
-library of Python 3.12. telnetlib.py_ was removed in Python 3.13.
+This library contains a copy of telnetlib.py_ from the standard library of
+Python 3.12 before it was removed in Python 3.13.
 
-You can migrate most code statements by changing `telnetlib` to `telnetlib3`, in
+To migrate code, by changing `telnetlib` to `telnetlib3`, in
 'from' statements:
 
 .. code-block:: python
 
     # OLD:
+    import telnetlib
+    # - or -
     from telnetlib import Telnet, ECHO, BINARY
 
     # NEW:
-    from telnetlib3 import Telnet, NAWS, STATUS, ECHO, BINARY
-
-Or, by adjusting any 'import' statements:
-
-.. code-block:: python
-
-    # OLD:
-    import telnetlib
-
-    # NEW:
     import telnetlib3.telnetlib as telnetlib
+    # - or - 
+    from telnetlib3 import Telnet, ECHO, BINARY
 
 .. _telnetlib.py: https://docs.python.org/3.12/library/telnetlib.html
 
@@ -114,9 +108,9 @@ Two command-line scripts are distributed with this package.
 
   Small terminal telnet client.  Some example destinations and options::
 
-    telnetlib3-client nethack.alt.org --logfile logfile.txt --loglevel warn
+    telnetlib3-client --loglevel warn 1984.ws
+    telnetlib3-client --loglevel debug --logfile logfile.txt nethack.alt.org 
     telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
-    telnetlib3-client htc.zapto.org
 
 Note the use of `--encoding=cp437` and `--force-binary`, see section Encoding_
 below for details.
@@ -150,8 +144,8 @@ below for details.
      <TelnetWriter server mode:local -lineflow +xon_any +slc_sim client-will:NAWS,NEW_ENVIRON,TTYPE>
 
 Both command-line scripts accept argument ``--shell=my_module.fn_shell``
-describing a python module path to an async function of signature
-``async def shell(reader, writer)``, just as the above examples.
+describing a python module path to an function of signature ``async def
+shell(reader, writer)``, as in the above examples.
 
 Encoding
 --------
