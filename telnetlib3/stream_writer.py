@@ -853,9 +853,15 @@ class TelnetWriter:
         is determined by function value returned by callback registered using
         :meth:`set_ext_send_callback` with value ``CHARSET``.
         """
-        if not self.remote_option.enabled(CHARSET):
+        # RFC 2066 Section 5: once either side has sent WILL and received DO, it may initiate.
+        # Permit initiating REQUEST if either:
+        # - peer has sent WILL (remote_option True), or
+        # - we have sent WILL and received DO (local_option True).
+        if not (
+            self.remote_option.enabled(CHARSET) or self.local_option.enabled(CHARSET)
+        ):
             self.log.debug(
-                "cannot send SB CHARSET REQUEST " "without receipt of WILL CHARSET"
+                "cannot send SB CHARSET REQUEST without CHARSET being active (no WILL/DO on either side)"
             )
             return False
 
@@ -1538,9 +1544,10 @@ class TelnetWriter:
                 NEW_ENVIRON,
                 XDISPLOC,
                 TSPEED,
-                CHARSET,
                 LINEMODE,
             ):
+                # Note that CHARSET is not included -- either side that has sent
+                # WILL and received DO may initiate SB at any time.
                 self.pending_option[SB + opt] = True
 
         else:

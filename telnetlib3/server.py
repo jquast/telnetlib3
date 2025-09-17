@@ -124,6 +124,7 @@ class TelnetServer(server_base.BaseServer):
         self.writer.iac(DO, NEW_ENVIRON)
         self.writer.iac(DO, NAWS)
         if self.default_encoding:
+            # Request client capability to negotiate character set
             self.writer.iac(DO, CHARSET)
 
     def check_negotiation(self, final=False):

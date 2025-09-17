@@ -574,8 +574,8 @@ def test_request_tspeed_and_charset_pending_branches():
     assert w.request_tspeed() is True
     assert w.request_tspeed() is False
 
-    # CHARSET: pending suppresses second send
-    w.remote_option[CHARSET] = True
+    # CHARSET: requires active WILL/DO (local_option True); pending suppresses second send
+    w.local_option[CHARSET] = True
     w.set_ext_send_callback(CHARSET, lambda: ["UTF-8"])
     assert w.request_charset() is True
     assert w.request_charset() is False
