@@ -1,11 +1,19 @@
 name: Run telnetlib3 tests
 
-on: [push]
+on:
+  push:
+  pull_request:
+  release:
+  schedule:
+    # Every Thursday at 1 AM
+    - cron: '0 1 * * 4'
+
 
 jobs:
   build:
     runs-on: ${{ matrix.runs-on }}
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13"]
         runs-on: [ubuntu-latest]
@@ -26,3 +34,25 @@ jobs:
       - name: Run tests
         run: |
           tox
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          verbose: true
+          name: ${{ matrix.label || matrix.python-version }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
+          os: linux
+          env_vars: TOXENV
+
+      # Work around for https://github.com/codecov/codecov-action/issues/1277
+      - name: Upload to Codecov Workaround
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage.${{ matrix.python-version }}.xml
+          path: coverage.xml
+          retention-days: 1
+
+
+
+
+
