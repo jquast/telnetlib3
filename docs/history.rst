@@ -2,6 +2,8 @@ History
 =======
 
 2.0.5
+ * feature: legacy `telnetlib.py` from Python 3.11 now redistributed,
+   note change to project `LICENSE.txt` file.
  * feature: Add `TelnetReader.readuntil_pattern` :ghissue:`92` by
    :ghuser:`agicy`
  * feature: Add `TelnetWriter.wait_closed` async method in response to
@@ -10,12 +12,13 @@ History
  * bugfix: `TypeError: buf expected bytes, got <class 'str'>` on client timeout
    in `TelnetServer`, :ghissue:`87`
  * bugfix: Performance issues with client protocol under heavy load,
-   demonstrating server telnet://1984.ws now documented in README.
+   demonstrating server `telnet://1984.ws` now documented in README.
  * bugfix: annoying `socket.send() raised exception` repeating warning,
    :ghissue:`89`.
  * bugfix: legacy use of get_event_loop, :ghissue:`85`.
  * document: about encoding and force_binary in response to :ghissue:`90`
  * feature: add tests to source distribution, :ghissue:`37`
+ * test coverage increased by ~20%
 
 2.0.4
  * change: stop using setuptools library to get current software version
