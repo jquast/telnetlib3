@@ -114,9 +114,9 @@ Two command-line scripts are distributed with this package.
 
   Small terminal telnet client.  Some example destinations and options::
 
-    telnetlib3-client nethack.alt.org --logfile logfile.txt --loglevel warn
+    telnetlib3-client --loglevel warn 1984.ws
+    telnetlib3-client --loglevel debug --logfile logfile.txt nethack.alt.org 
     telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
-    telnetlib3-client htc.zapto.org
 
 Note the use of `--encoding=cp437` and `--force-binary`, see section Encoding_
 below for details.
@@ -150,8 +150,8 @@ below for details.
      <TelnetWriter server mode:local -lineflow +xon_any +slc_sim client-will:NAWS,NEW_ENVIRON,TTYPE>
 
 Both command-line scripts accept argument ``--shell=my_module.fn_shell``
-describing a python module path to an async function of signature
-``async def shell(reader, writer)``, just as the above examples.
+describing a python module path to an function of signature ``async def
+shell(reader, writer)``, as in the above examples.
 
 Encoding
 --------
