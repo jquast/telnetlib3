@@ -1837,7 +1837,7 @@ class TelnetWriter:
                 rx, tx = int(rx), int(tx)
             except ValueError as err:
                 self.log.error(
-                    "illegal TSPEED values received " "(rx={!r}, tx={!r}: {}",
+                    "illegal TSPEED values received (rx=%r, tx=%r): %s",
                     rx,
                     tx,
                     err,
