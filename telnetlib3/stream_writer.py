@@ -424,7 +424,7 @@ class TelnetWriter:
             exc = self._reader.exception()
             if exc is not None:
                 raise exc
-        if self._transport.is_closing():
+        if self._transport is not None and self._transport.is_closing():
             # Wait for protocol.connection_lost() call
             # Raise connection closing error if any,
             # ConnectionResetError otherwise
@@ -435,7 +435,8 @@ class TelnetWriter:
             # in a loop would never call connection_lost(), so it
             # would not see an error when the socket is closed.
             await asyncio.sleep(0)
-        await self._protocol._drain_helper()
+        if self._protocol is not None:
+            await self._protocol._drain_helper()
 
     # proprietary write helper
 
