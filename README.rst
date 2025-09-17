@@ -1,15 +1,14 @@
-.. image:: https://coveralls.io/repos/jquast/telnetlib3/badge.svg?branch=master&service=github
-    :alt: Coveralls Code Coverage
-    :target: https://coveralls.io/github/jquast/telnetlib3?branch=master
-
 .. image:: https://img.shields.io/pypi/v/telnetlib3.svg
     :alt: Latest Version
     :target: https://pypi.python.org/pypi/telnetlib3
 
-.. image:: https://img.shields.io/pypi/dm/telnetlib3.svg
+.. image:: https://img.shields.io/pypi/dm/telnetlib3.svg?logo=pypi
     :alt: Downloads
     :target: https://pypi.python.org/pypi/telnetlib3
 
+.. image:: https://codecov.io/gh/jquast/telnetlib3/branch/master/graph/badge.svg
+    :alt: codecov.io Code Coverage
+    :target: https://codecov.io/gh/jquast/telnetlib3/
 
 Introduction
 ============
@@ -22,8 +21,8 @@ requires python 3.7 and later, using the asyncio_ module.
 Legacy 'telnetlib'
 ==================
 
-This library contains a copy of telnetlib.py_ from the standard library of
-Python 3.12 before it was removed in Python 3.13.
+This library *also* contains a copy of telnetlib.py_ from the standard library of
+Python 3.12 before it was removed in Python 3.13. asyncio_ is not required.
 
 To migrate code, by changing `telnetlib` to `telnetlib3`, in
 'from' statements:
