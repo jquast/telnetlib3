@@ -1,14 +1,15 @@
 History
 =======
 2.0.6
- * bugfix: allow `--force-binary` and `--encoding` to be combined to prevent
-   long `encoding failed after 4.00s` connection delay.
+ * bugfix: correcteded CHARSET protocol client/server role behavior
+ * bugfix: allow ``--force-binary`` and ``--encoding`` to be combined to prevent
+   long ``encoding failed after 4.00s`` connection delay, see Encoding_.
  * bugfix: remove `'NoneType' object has no attribute 'is_closing'` exception
    message on some types of closed connections
  * bugfix: further improve ``telnetlib3-client`` performance, capable of
    11.2 Mbit/s or more.
- * feature: ``telnetlib3-client`` now notifies servers using NAWS on window
-   resize events.
+ * bugfix: more gracefully handle unsupported SB STATUS codes.
+ * feature: ``telnetlib3-client`` now negotiates terminal resize vents.
 
 2.0.5
  * feature: legacy `telnetlib.py` from Python 3.11 now redistributed,
