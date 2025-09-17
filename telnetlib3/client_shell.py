@@ -185,7 +185,7 @@ else:
             )
 
             stdin_task = accessories.make_reader_task(stdin)
-            telnet_task = accessories.make_reader_task(telnet_reader, size=2**16)
+            telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
             wait_for = set([stdin_task, telnet_task])
             while wait_for:
                 done, pending = await asyncio.wait(
@@ -250,6 +250,6 @@ else:
                     else:
                         stdout.write(out.encode() or b":?!?:")
                         telnet_task = accessories.make_reader_task(
-                            telnet_reader, size=2**16
+                            telnet_reader, size=2**24
                         )
                         wait_for.add(telnet_task)
