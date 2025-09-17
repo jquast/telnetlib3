@@ -532,8 +532,17 @@ class TelnetWriter:
                         self.pending_option[WILL + opt] = False
                         self.local_option[opt] = False
                 elif cmd == WILL:
-                    if not self.pending_option.enabled(DO + opt) and opt != TM:
+                    if not self.pending_option.enabled(DO + opt) and opt not in (
+                        TM,
+                        CHARSET,
+                    ):
                         self.log.debug("WILL {} unsolicited".format(name_command(opt)))
+                    elif opt == CHARSET and not self.pending_option.enabled(DO + opt):
+                        self.log.debug(
+                            "WILL {} (bi-directional capability exchange)".format(
+                                name_command(opt)
+                            )
+                        )
                     try:
                         self.handle_will(opt)
                     finally:
@@ -1417,7 +1426,7 @@ class TelnetWriter:
         self.log.debug("Character Set requested")
         return ""
 
-    def handle_send_server_charset(self, charsets):
+    def handle_send_server_charset(self):
         """Send character set (encodings) offered to client, :rfc:`2066`."""
         assert self.server
         return ["UTF-8"]
@@ -1648,15 +1657,26 @@ class TelnetWriter:
                 )
             self.remote_option[opt] = True
 
+            # Special handling for CHARSET: server should declare its own capability
+            # by sending WILL CHARSET after receiving WILL CHARSET from client
+            if opt == CHARSET and self.server:
+                if not self.local_option.enabled(CHARSET):
+                    self.iac(WILL, CHARSET)
+
             # call one of the following callbacks.
-            {
-                XDISPLOC: self.request_xdisploc,
-                TTYPE: self.request_ttype,
-                TSPEED: self.request_tspeed,
-                CHARSET: self.request_charset,
-                NEW_ENVIRON: self.request_environ,
-                LFLOW: self.send_lineflow_mode,
-            }[opt]()
+            # For CHARSET, only server should automatically initiate REQUEST
+            if opt == CHARSET and self.client:
+                # Client received WILL CHARSET from server, but doesn't auto-request
+                pass
+            else:
+                {
+                    XDISPLOC: self.request_xdisploc,
+                    TTYPE: self.request_ttype,
+                    TSPEED: self.request_tspeed,
+                    CHARSET: self.request_charset,
+                    NEW_ENVIRON: self.request_environ,
+                    LFLOW: self.send_lineflow_mode,
+                }[opt]()
 
         else:
             # option value of -1 toggles opt.unsupported()

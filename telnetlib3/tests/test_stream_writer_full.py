@@ -848,7 +848,7 @@ def test_mode_client_kludge_and_server_kludge_and_remote_local():
 
 def test_handle_send_server_and_client_charset_returns():
     ws, ts, ps = new_writer(server=True)
-    assert ws.handle_send_server_charset(["UTF-8"]) == ["UTF-8"]
+    assert ws.handle_send_server_charset() == ["UTF-8"]
     wc, tc, pc = new_writer(server=False, client=True)
     assert wc.handle_send_client_charset(["UTF-8", "ASCII"]) == ""
 

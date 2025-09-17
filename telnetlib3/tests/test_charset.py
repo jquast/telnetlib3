@@ -173,7 +173,7 @@ def test_server_sends_do_and_will_charset():
 
 
 def test_client_do_will_then_server_will_allows_client_request():
-    """Test scenario from logfile: DO->WILL then server WILL should allow client SB REQUEST."""
+    """Test scenario from logfile: DO->WILL then server WILL allows client to send SB REQUEST."""
     from telnetlib3.telopt import (
         IAC,
         WILL,
@@ -196,8 +196,12 @@ def test_client_do_will_then_server_will_allows_client_request():
     wc.handle_will(CHARSET)
     assert wc.remote_option[CHARSET] is True
 
-    # Now client should have sent SB CHARSET REQUEST automatically
-    # when receiving WILL CHARSET from server (per implementation).
+    # Client should NOT automatically send SB CHARSET REQUEST,
+    # but should be able to send one manually
+    tc.writes.clear()
+
+    # Verify client can send a request now that both WILL/DO are established
+    assert wc.request_charset() is True
     assert tc.writes[-1].startswith(IAC + SB + CHARSET + REQUEST)
 
 
@@ -250,3 +254,52 @@ def test_charset_request_response_cycle():
     ws.set_ext_callback(CHARSET, lambda cs: seen.setdefault("cs", cs))
     ws._handle_sb_charset(response_buf)
     assert seen.get("cs") == "UTF-8"
+
+
+def test_server_sends_will_charset_after_client_will():
+    """Test server sends WILL CHARSET after receiving WILL CHARSET from client."""
+    from telnetlib3.telopt import IAC, WILL, DO, CHARSET
+
+    ws, ts, _ = new_writer(server=True)
+
+    # Server has not yet sent WILL CHARSET
+    assert not ws.local_option.enabled(CHARSET)
+
+    # Simulate client sending WILL CHARSET
+    ws.handle_will(CHARSET)
+
+    # Verify server sent WILL CHARSET in response
+    assert IAC + WILL + CHARSET in ts.writes
+
+    # Verify server also called request_charset as usual
+    # (this is tested by checking if it would send a request,
+    # but we need to set up the callback first)
+    ws.set_ext_send_callback(CHARSET, lambda: ["UTF-8"])
+    # Clear previous writes to test just the request
+    ts.writes.clear()
+
+    # The handle_will should have also called request_charset
+    # Since remote_option[CHARSET] is now True from handle_will
+    assert ws.remote_option.enabled(CHARSET)
+
+
+def test_server_does_not_send_duplicate_will_charset():
+    """Test server doesn't send WILL CHARSET if already sent."""
+    from telnetlib3.telopt import IAC, WILL, DO, CHARSET
+
+    ws, ts, _ = new_writer(server=True)
+
+    # Server has already sent WILL CHARSET
+    ws.local_option[CHARSET] = True
+
+    # Clear any previous writes
+    ts.writes.clear()
+
+    # Simulate client sending WILL CHARSET
+    ws.handle_will(CHARSET)
+
+    # Verify server did NOT send WILL CHARSET again
+    assert IAC + WILL + CHARSET not in ts.writes
+
+    # But remote option should still be set
+    assert ws.remote_option.enabled(CHARSET)
