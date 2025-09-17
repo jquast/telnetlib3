@@ -5,7 +5,8 @@ History
    long `encoding failed after 4.00s` connection delay.
  * bugfix: remove `'NoneType' object has no attribute 'is_closing'` exception
    message on some types of closed connections
- * bugfix: improve ``telnetlib3-client`` performance with larger buffer sizes
+ * bugfix: further improve ``telnetlib3-client`` performance, capable of
+   11.2 Mbit/s or more.
  * feature: ``telnetlib3-client`` now notifies servers using NAWS on window
    resize events.
 
