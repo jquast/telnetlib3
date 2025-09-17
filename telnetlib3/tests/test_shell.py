@@ -2,27 +2,18 @@
 
 # std imports
 import asyncio
-import weakref
 
 # local imports
 import telnetlib3
-import telnetlib3.stream_writer
 from telnetlib3.tests.accessories import unused_tcp_port, bind_host
 
-# 3rd party
-import pytest
 
-
-@pytest.mark.xfail(
-    reason="https://github.com/jquast/telnetlib3/pull/58#issuecomment-1329497313"
-)
 async def test_telnet_server_shell_as_coroutine(bind_host, unused_tcp_port):
     """Test callback shell(reader, writer) as coroutine of create_server()."""
     from telnetlib3.telopt import IAC, DO, WONT, TTYPE
 
     # given,
     _waiter = asyncio.Future()
-    _saved = weakref.WeakSet()
     send_input = "Alpha"
     expect_output = "Beta"
     expect_hello = IAC + DO + TTYPE
@@ -33,10 +24,9 @@ async def test_telnet_server_shell_as_coroutine(bind_host, unused_tcp_port):
         inp = await reader.readexactly(len(send_input))
         assert inp == send_input
         writer.write(expect_output)
-        _saved.add(writer)
-        _saved.add(writer._protocol)
         await writer.drain()
         writer.close()
+        await writer.wait_closed()
 
     # exercise,
     await telnetlib3.create_server(host=bind_host, port=unused_tcp_port, shell=shell)
@@ -60,7 +50,10 @@ async def test_telnet_server_shell_as_coroutine(bind_host, unused_tcp_port):
 
     # verify,
     assert server_output.decode("ascii") == expect_output
-    assert len(_saved) == 0
+
+    # nothing more to read from server; server writer closed in shell.
+    result = await reader.read()
+    assert result == b""
 
 
 async def test_telnet_client_shell_as_coroutine(bind_host, unused_tcp_port):
@@ -166,6 +159,7 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
     server = await asyncio.wait_for(_waiter, 0.5)
     server_port = str(server._transport.get_extra_info("peername")[1])
 
+    # Command & Response table
     cmd_output_table = (
         # exercise backspace in input for help command
         (

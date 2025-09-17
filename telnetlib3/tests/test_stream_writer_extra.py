@@ -350,19 +350,21 @@ def test_request_charset_and_xdisploc_and_ttype():
     assert ws.request_charset() is True
     assert ts.writes[-1].startswith(IAC + SB + CHARSET + b"\x01")  # REQUEST = 1
 
-    # xdisploc path in current implementation sends even without WILL XDISPLOC,
-    # setting the pending flag and returning True.
-    assert ws.request_xdisploc() is True
-    # enabling WILL XDISPLOC after a pending request causes subsequent calls to be suppressed
-    ws.remote_option[XDISPLOC] = True
+    # xdisploc requires WILL XDISPLOC, then sends and sets pending
     assert ws.request_xdisploc() is False
+    ws.remote_option[XDISPLOC] = True
+    assert ws.request_xdisploc() is True
     assert ts.writes[-1] == IAC + SB + XDISPLOC + SEND + IAC + SE
+    # subsequent call suppressed while pending
+    assert ws.request_xdisploc() is False
 
-    # ttype path: initial call sends even without WILL, then suppressed when pending already set
-    assert ws.request_ttype() is True
-    ws.remote_option[TTYPE] = True
+    # ttype requires WILL TTYPE, then sends and sets pending
     assert ws.request_ttype() is False
+    ws.remote_option[TTYPE] = True
+    assert ws.request_ttype() is True
     assert ts.writes[-1] == IAC + SB + TTYPE + SEND + IAC + SE
+    # subsequent call suppressed while pending
+    assert ws.request_ttype() is False
 
 
 def test_send_lineflow_mode_server_only_and_modes():

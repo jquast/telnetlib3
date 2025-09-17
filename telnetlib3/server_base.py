@@ -99,17 +99,35 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         # cancel protocol tasks, namely on-connect negotiations
         for task in self._tasks:
-            task.cancel()
+            try:
+                task.cancel()
+            except Exception:
+                pass
+        # drop references to scheduled tasks/callbacks
+        self._tasks.clear()
+        try:
+            self._waiter_connected.remove_done_callback(self.begin_shell)
+        except Exception:
+            pass
 
         # close transport (may already be closed), set _waiter_closed and
         # cancel Future _waiter_connected.
-        self._transport.close()
-        self._waiter_connected.cancel()
+        if self._transport is not None:
+            # Detach protocol from transport to drop strong reference immediately.
+            try:
+                if hasattr(self._transport, "set_protocol"):
+                    self._transport.set_protocol(asyncio.Protocol())
+            except Exception:
+                pass
+            self._transport.close()
+        if not self._waiter_connected.cancelled() and not self._waiter_connected.done():
+            self._waiter_connected.cancel()
         if self.shell is None and self._waiter_closed is not None:
             # raise deprecation warning, _waiter_closed should not be used!
             self._waiter_closed.set_result(weakref.proxy(self))
 
-        # break circular references.
+        # break circular references for transport; keep reader/writer available
+        # for inspection by tests after close.
         self._transport = None
 
     def connection_made(self, transport):
@@ -160,14 +178,23 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         if self.shell is not None:
             coro = self.shell(self.reader, self.writer)
             if asyncio.iscoroutine(coro):
-                fut = asyncio.get_event_loop().create_task(coro)
-                fut.add_done_callback(
-                    lambda fut_obj: (
-                        self._waiter_closed.set_result(weakref.proxy(self))
-                        if self._waiter_closed is not None
-                        else None
-                    )
-                )
+                loop = asyncio.get_event_loop()
+                fut = loop.create_task(coro)
+                # Avoid capturing self strongly in the callback to prevent
+                # keeping the protocol instance alive after close. Although I
+                # hope folks aren't using the 'waiter_closed' argument, we use
+                # it in automatic tests, and, because it returns "self", we have
+                # to ensure it is a "weak" reference -- in the future we should
+                # migrate to more dynamic "await connection and/or negotiation
+                # state"
+                ref_self = weakref.ref(self)
+
+                def _on_shell_done(_fut):
+                    self_ = ref_self()
+                    if self_ is not None and self_._waiter_closed is not None:
+                        self_._waiter_closed.set_result(weakref.proxy(self_))
+
+                fut.add_done_callback(_on_shell_done)
 
     def data_received(self, data):
         """Process bytes received by transport."""
