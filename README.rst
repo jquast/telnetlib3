@@ -24,17 +24,17 @@ Legacy 'telnetlib'
 This library *also* contains a copy of telnetlib.py_ from the standard library of
 Python 3.12 before it was removed in Python 3.13. asyncio_ is not required.
 
-To migrate code, by changing `telnetlib` to `telnetlib3`, in
-'from' statements:
+To migrate code from Python 3.11 and earlier, install this library and change
+instances of `telnetlib` to `telnetlib3`:
 
 .. code-block:: python
 
-    # OLD:
+    # OLD imports:
     import telnetlib
     # - or -
     from telnetlib import Telnet, ECHO, BINARY
 
-    # NEW:
+    # NEW imports:
     import telnetlib3.telnetlib as telnetlib
     # - or - 
     from telnetlib3 import Telnet, ECHO, BINARY
