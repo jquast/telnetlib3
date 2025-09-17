@@ -167,23 +167,26 @@ In this client connection example::
 
     telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
 
-Note the use of `--encoding=cp437` to translate input and output characters of
+Note the use of ``--encoding=cp437`` to translate input and output characters of
 the remote end. CP437 is an American English IBM PC DOS encoding, and many such
 legacy BBS programs are unable to negotiate about or present characters in any
 other encoding. Because this BBS does not negotiate encoding, the default is
 assumed to be US-ASCII, the ``--encoding`` parameter changes this.
 
-See also `--force-binary`, which may also sometimes be required with
+See also ``--force-binary``, which may also sometimes be required with
 telnetlib3-client and telnetlib3-server. In the original Telnet protocol
 specifications, the Network Virtual Terminal (NVT) is defined as 7-bit US-ASCII,
 and this is the default state for both ends until negotiated otherwise.
-
 RFC-856_ (BINARY TRANSMISSION) is the option that allows you to break out of the
 7-bit ASCII constraint. However, **many common telnet clients and servers fail
 to negotiate for BINARY** -- it may be rejected (DONT, WONT), unanswered, or
 only negotiated for a single direction. To support such clients and servers, use
 ``--force-binary``, which forces bi-direction binary transmission no matter the
 state of BINARY negotiation.
+
+Combined with server's preferred default ``--encoding``, this can enforce a
+specific encoding for a client or server session when the other end is unable to
+for it.
 
 A Telnet Server that prefers "utf8" encoding, and, transmits it even in the case
 of failed BINARY negotiation, to support a "dumb" telnet client like netcat::
