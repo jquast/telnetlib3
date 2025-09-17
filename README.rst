@@ -19,7 +19,7 @@ requires python 3.7 and later, using the asyncio_ module.
 .. _asyncio: http://docs.python.org/3.11/library/asyncio.html
 
 Legacy 'telnetlib'
-==================
+------------------
 
 This library *also* contains a copy of telnetlib.py_ from the standard library of
 Python 3.12 before it was removed in Python 3.13. asyncio_ is not required.
