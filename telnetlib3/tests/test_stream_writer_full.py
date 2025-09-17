@@ -415,11 +415,12 @@ def test_handle_sb_status_invalid_opt_and_receive_status_errors():
     # invalid option after STATUS
     with pytest.raises(ValueError):
         w._handle_sb_status(collections.deque([STATUS, b"\x99"]))
-    # _receive_status invalid cmd
-    with pytest.raises(ValueError, match="invalid cmd"):
-        w._receive_status(collections.deque([NOP, BINARY]))
-    # odd-length payload leaves remainder; implementation ignores trailing byte
-    w._receive_status(collections.deque([DO]))
+    # _receive_status now gracefully handles invalid cmd by logging warning
+    # instead of raising exception, this was changed to handle probably some
+    # unsupported "MUD" when testing with telnet://unitopia.de
+    w._receive_status(collections.deque([NOP, BINARY]))  # should not raise
+    # odd-length payload leaves remainder; implementation logs warning and continues
+    w._receive_status(collections.deque([DO]))  # should not raise
 
 
 def test_handle_sb_lflow_requires_do_lflow():

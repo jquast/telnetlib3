@@ -2134,26 +2134,46 @@ class TelnetWriter:
         This implementation does its best to analyze our perspective's state
         to the state options given.  Any discrepancies are reported to the
         error log, but no action is taken.
+
+        This implementation handles malformed STATUS data gracefully by skipping
+        invalid command bytes and continuing to process the remaining data.
         """
-        for pos in range(len(buf) // 2):
-            cmd = buf.popleft()
-            try:
-                opt = buf.popleft()
-            except IndexError:
-                # a remainder in division step-by-two, presumed nonsense.
-                raise ValueError(
-                    "STATUS incomplete at pos {}, cmd: {}".format(
-                        pos, name_command(cmd)
+        # Convert deque to bytes and unescape embedded IAC bytes
+        # In telnet protocol, IAC IAC in subnegotiation data represents a single IAC byte
+        raw_buf = b"".join(buf)
+
+        # Unescape IAC sequences: IAC IAC -> IAC
+        unescaped_buf = raw_buf.replace(IAC + IAC, IAC)
+
+        # Convert back to list for processing
+        buf_list = [bytes([b]) for b in unescaped_buf]
+
+        # Process command-option pairs, handling malformed data gracefully
+        i = 0
+        while i < len(buf_list):
+            if i + 1 >= len(buf_list):
+                # Odd number of bytes remaining, log and skip
+                self.log.warning(
+                    "STATUS: incomplete pair at end, skipping byte: {}".format(
+                        buf_list[i]
                     )
                 )
+                break
+
+            cmd = buf_list[i]
+            opt = buf_list[i + 1]
+
+            # Skip invalid command bytes with a warning
+            if cmd not in (DO, DONT, WILL, WONT):
+                self.log.warning(
+                    "STATUS: invalid cmd at pos {}: {}, skipping. "
+                    "Expected DO DONT WILL WONT.".format(i, cmd)
+                )
+                # Try to resync by looking for the next valid command
+                i += 1
+                continue
 
             matching = False
-            if cmd not in (DO, DONT, WILL, WONT):
-                raise ValueError(
-                    "STATUS invalid cmd at pos {}: {}, "
-                    "expected DO DONT WILL WONT.".format(pos, cmd)
-                )
-
             if cmd in (DO, DONT):
                 _side = "local"
                 enabled = self.local_option.enabled(opt)
@@ -2192,10 +2212,15 @@ class TelnetWriter:
                         self.local_option.enabled(opt),
                     )
                 )
-                continue
-            self.log.debug(
-                "STATUS {} {} (agreed).".format(name_command(cmd), name_command(opt))
-            )
+            else:
+                self.log.debug(
+                    "STATUS {} {} (agreed).".format(
+                        name_command(cmd), name_command(opt)
+                    )
+                )
+
+            # Move to next pair
+            i += 2
 
     def _send_status(self):
         """Callback responds to IAC SB STATUS SEND, :rfc:`859`."""
