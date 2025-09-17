@@ -21,8 +21,8 @@ requires python 3.7 and later, using the asyncio_ module.
 Legacy 'telnetlib'
 ==================
 
-This library contains a copy of telnetlib.py_ from the standard library of
-Python 3.12 before it was removed in Python 3.13.
+This library *also* contains a copy of telnetlib.py_ from the standard library of
+Python 3.12 before it was removed in Python 3.13. asyncio_ is not required.
 
 To migrate code, by changing `telnetlib` to `telnetlib3`, in
 'from' statements:

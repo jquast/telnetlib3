@@ -28,14 +28,7 @@ even if there was data on the socket, because the protocol negotiation may have
 eaten the data.  This is why EOFError is needed in some cases to distinguish
 between "no data" and "connection closed" (since the socket also appears ready
 for reading when it is closed).
-
-To do:
-- option negotiation
-- timeout should be intrinsic to the connection object instead of an
-  option on one of the read calls only
-
 """
-
 
 # Imported modules
 import sys
@@ -272,10 +265,9 @@ class Telnet:
 
     set_option_negotiation_callback(callback)
         Each time a telnet option is read on the input flow, this callback
-        (if set) is called with the following parameters :
-        callback(telnet socket, command, option)
-            option will be chr(0) when there is no option.
-        No other action is done afterwards by telnetlib.
+        (if set) is called with the following parameters:
+        `callback(telnet socket, command, option)`. option will be chr(0) when
+        there is no option.  No other action is done afterwards by telnetlib.
 
     """
 
