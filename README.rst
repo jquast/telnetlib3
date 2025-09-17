@@ -22,29 +22,23 @@ requires python 3.7 and later, using the asyncio_ module.
 Legacy 'telnetlib'
 ==================
 
-This library contains a lightly modified copy of telnetlib.py_ from the standard
-library of Python 3.12. telnetlib.py_ was removed in Python 3.13.
+This library contains a copy of telnetlib.py_ from the standard library of
+Python 3.12 before it was removed in Python 3.13.
 
-You can migrate most code statements by changing `telnetlib` to `telnetlib3`, in
+To migrate code, by changing `telnetlib` to `telnetlib3`, in
 'from' statements:
 
 .. code-block:: python
 
     # OLD:
+    import telnetlib
+    # - or -
     from telnetlib import Telnet, ECHO, BINARY
 
     # NEW:
-    from telnetlib3 import Telnet, NAWS, STATUS, ECHO, BINARY
-
-Or, by adjusting any 'import' statements:
-
-.. code-block:: python
-
-    # OLD:
-    import telnetlib
-
-    # NEW:
     import telnetlib3.telnetlib as telnetlib
+    # - or - 
+    from telnetlib3 import Telnet, ECHO, BINARY
 
 .. _telnetlib.py: https://docs.python.org/3.12/library/telnetlib.html
 
