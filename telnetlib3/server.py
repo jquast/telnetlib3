@@ -147,7 +147,12 @@ class TelnetServer(server_base.BaseServer):
             # to continue towards advanced negotiation of CHARSET, we assume
             # the distant end would not support it, declaring encoding failed.
             logger.debug(
-                "encoding failed after {0:1.2f}s: {1}".format(self.duration, encoding)
+                "encoding failed after {0:1.2f}s: {1}, remote_option[TTYPE]={2}, result={3}".format(
+                    self.duration,
+                    encoding,
+                    self.writer.remote_option.get(TTYPE),
+                    result,
+                )
             )
             self.waiter_encoding.set_result(result)  # False
             return parent
@@ -188,13 +193,13 @@ class TelnetServer(server_base.BaseServer):
         _outgoing_only = outgoing and not incoming
         _incoming_only = not outgoing and incoming
         _bidirectional = outgoing and incoming
-        may_encode = (
+        may_encode = self.force_binary or (
             (_outgoing_only and self.writer.outbinary)
             or (_incoming_only and self.writer.inbinary)
             or (_bidirectional and self.writer.outbinary and self.writer.inbinary)
         )
 
-        if self.force_binary or may_encode:
+        if may_encode:
             # prefer 'LANG' environment variable forwarded by client, if any.
             # for modern systems, this is the preferred method of encoding
             # negotiation.
@@ -202,7 +207,7 @@ class TelnetServer(server_base.BaseServer):
             if _lang and _lang != "C":
                 return accessories.encoding_from_lang(_lang)
 
-            # otherwise, the less CHARSET negotiation may be found in many
+            # otherwise, less common CHARSET negotiation may be found in many
             # East-Asia BBS and Western MUD systems.
             return self.get_extra_info("charset") or self.default_encoding
         return "US-ASCII"
@@ -461,7 +466,8 @@ class TelnetServer(server_base.BaseServer):
             return False
 
         # are we able to negotiate BINARY bidirectionally?
-        return self.writer.outbinary and self.writer.inbinary
+        # or, is force_binary=True ?
+        return (self.writer.outbinary and self.writer.inbinary) or self.force_binary
 
 
 async def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwds):
@@ -487,14 +493,25 @@ async def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwd
         of ``LANG``, or by any legal value for CHARSET :rfc:`2066` negotiation.
 
         The server's attached ``reader, writer`` streams accept and return
-        unicode, unless this value explicitly set ``False``.  In that case, the
-        attached streams interfaces are bytes-only.
+        unicode, or natural strings, "hello world", unless this value explicitly
+        set ``False``.  In that case, the attached streams interfaces are
+        bytes-only, b"hello world".
     :param str encoding_errors: Same meaning as :meth:`codecs.Codec.encode`.
         Default value is ``strict``.
     :param bool force_binary: When ``True``, the encoding specified is
         used for both directions even when BINARY mode, :rfc:`856`, is not
         negotiated for the direction specified.  This parameter has no effect
         when ``encoding=False``.
+
+        Note that when combined with a default ``encoding``, use of this option
+        may prematurely cause data transmitted in the default encoding immediately
+        on-connect, before a "smart" telnet client or server can negotiate a
+        different one.
+
+        In most cases, so long as the initial login banner/etc is US-ASCII, this
+        may be no problem at all. If an encoding is assumed, as in many MUD and
+        BBS systems, the combination of ``force_binary`` with a default
+        ``encoding`` is often preferred.
     :param str term: Value returned for ``writer.get_extra_info('term')``
         until negotiated by TTYPE :rfc:`930`, or NAWS :rfc:`1572`.  Default value
         is ``'unknown'``.

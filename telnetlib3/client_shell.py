@@ -24,6 +24,7 @@ if sys.platform == "win32":
 else:
     import termios
     import os
+    import signal
 
     @contextlib.contextmanager
     def _set_tty(fobj, tty_func):
@@ -184,6 +185,44 @@ else:
                 ).encode()
             )
 
+            # Setup SIGWINCH handler to send NAWS on terminal resize (POSIX only).
+            # We debounce to avoid flooding on continuous resizes.
+            loop = asyncio.get_event_loop()
+            winch_pending = {"h": None}
+            remove_winch = False
+            if term._istty:
+                try:
+
+                    def _send_naws():
+                        from .telopt import NAWS
+
+                        try:
+                            if (
+                                telnet_writer.local_option.enabled(NAWS)
+                                and not telnet_writer.is_closing()
+                            ):
+                                telnet_writer._send_naws()
+                        except Exception:
+                            # Avoid surfacing errors from signal context
+                            pass
+
+                    def _on_winch():
+                        h = winch_pending.get("h")
+                        if h is not None and not h.cancelled():
+                            try:
+                                h.cancel()
+                            except Exception:
+                                pass
+                        # small delay to debounce rapid resize events
+                        winch_pending["h"] = loop.call_later(0.05, _send_naws)
+
+                    if hasattr(signal, "SIGWINCH"):
+                        loop.add_signal_handler(signal.SIGWINCH, _on_winch)
+                        remove_winch = True
+                except Exception:
+                    # add_signal_handler may be unsupported in some environments
+                    remove_winch = False
+
             stdin_task = accessories.make_reader_task(stdin)
             telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
             wait_for = set([stdin_task, telnet_task])
@@ -220,6 +259,18 @@ else:
                                     linesep=linesep
                                 ).encode()
                             )
+                            # Cleanup resize handler on local escape close
+                            if term._istty and remove_winch:
+                                try:
+                                    loop.remove_signal_handler(signal.SIGWINCH)
+                                except Exception:
+                                    pass
+                            h = winch_pending.get("h")
+                            if h is not None:
+                                try:
+                                    h.cancel()
+                                except Exception:
+                                    pass
                             break
                         else:
                             telnet_writer.write(inp.decode())
@@ -247,6 +298,18 @@ else:
                             .format(linesep=linesep)
                             .encode()
                         )
+                        # Cleanup resize handler on remote close
+                        if term._istty and remove_winch:
+                            try:
+                                loop.remove_signal_handler(signal.SIGWINCH)
+                            except Exception:
+                                pass
+                        h = winch_pending.get("h")
+                        if h is not None:
+                            try:
+                                h.cancel()
+                            except Exception:
+                                pass
                     else:
                         stdout.write(out.encode() or b":?!?:")
                         telnet_task = accessories.make_reader_task(

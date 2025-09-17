@@ -1,5 +1,13 @@
 History
 =======
+2.0.6
+ * bugfix: allow `--force-binary` and `--encoding` to be combined to prevent
+   long `encoding failed after 4.00s` connection delay.
+ * bugfix: remove `'NoneType' object has no attribute 'is_closing'` exception
+   message on some types of closed connections
+ * bugfix: improve ``telnetlib3-client`` performance with larger buffer sizes
+ * feature: ``telnetlib3-client`` now notifies servers using NAWS on window
+   resize events.
 
 2.0.5
  * feature: legacy `telnetlib.py` from Python 3.11 now redistributed,

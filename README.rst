@@ -167,27 +167,32 @@ In this client connection example::
 
     telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
 
-Note the use of `--encoding=cp437` to force the use of an American English IBM
-PC DOS encoding, to an otherwise unaware bulletin board system. See also
-`--force-binary`, which may also sometimes be required. This library strictly
-enforces that BINARY protocol negotiation must be successful to send non-ASCII
-data, as it is an old fashioned Telnet protocol requirement.
+Note the use of `--encoding=cp437` to translate input and output characters of
+the remote end. CP437 is an American English IBM PC DOS encoding, and many such
+legacy BBS programs are unable to negotiate about or present characters in any
+other encoding. Because this BBS does not negotiate encoding, the default is
+assumed to be US-ASCII, the ``--encoding`` parameter changes this.
 
-When unspecified, this client will use your environment 'LANG' variable to
-negotiate for character encoding on your behalf (usually utf8). Similarly, you
-can create a Telnet Server that prefers the specified encoding, and, transmits it
-even in the case of failed BINARY negotiation, such as a simple telnet client like
-netcat, `nc -t localhost 6023`::
+See also `--force-binary`, which may also sometimes be required with
+telnetlib3-client and telnetlib3-server. In the original Telnet protocol
+specifications, the Network Virtual Terminal (NVT) is defined as 7-bit US-ASCII,
+and this is the default state for both ends until negotiated otherwise.
+
+RFC-856_ (BINARY TRANSMISSION) is the option that allows you to break out of the
+7-bit ASCII constraint. However, **many common telnet clients and servers fail
+to negotiate for BINARY** -- it may be rejected (DONT, WONT), unanswered, or
+only negotiated for a single direction. To support such clients and servers, use
+``--force-binary``, which forces bi-direction binary transmission no matter the
+state of BINARY negotiation.
+
+A Telnet Server that prefers "utf8" encoding, and, transmits it even in the case
+of failed BINARY negotiation, to support a "dumb" telnet client like netcat::
 
     telnetlib3-server --encoding=utf8 --force-binary
 
-This is suggested as a "default" encoding for clients that are assumed to
-support it, but are without the ability to negotiate about it.
+Connecting with "dumb" client::
 
-It is still possible for a telnet client capable of negotiation of environment
-variables to transmit `LANG` (such as 'en_US.latin1'), or more rarely, negotiate
-CHARSET, and the client will receive data in their preferred encoding, latin1
-instead of utf8 in that example.
+    nc -t localhost 6023
 
 Features
 --------
