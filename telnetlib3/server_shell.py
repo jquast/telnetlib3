@@ -18,23 +18,19 @@ async def telnet_server_shell(reader, writer):
     """
     writer.write("Ready." + CR + LF)
 
-    linereader = readline(reader, writer)
-    linereader.send(None)
-
     command = None
     while not writer.is_closing():
         if command:
             writer.write(CR + LF)
         writer.write("tel:sh> ")
-        command = None
-        while command is None:
-            await writer.drain()
-            inp = await reader.read(1)
-            if not inp:
-                # close/eof by client at prompt
-                return
-            command = linereader.send(inp)
+
+        command = await readline2(reader, writer)
+        if command is None:
+            writer.write("Read stream EOF")
+            break
+
         writer.write(CR + LF)
+
         if command == "quit":
             # server hangs up on client
             writer.write("Goodbye." + CR + LF)
@@ -116,38 +112,51 @@ def character_dump(kb_limit):
     yield ("\033[1G" + "wrote " + str(num_bytes) + " bytes")
 
 
-@types.coroutine
-def readline(reader, writer):
+async def filter_ansi(reader, writer):
+    """
+    A coroutine that accepts the next character from `reader` that is not a 
+    part of an ANSI escape sequence.
+    """
+    escape_sequence = False
+    while True:
+        next_char = await reader.read(1)
+        if next_char == "\x1b":
+            escape_sequence = True
+        elif escape_sequence:
+            if 61 <= ord(next_char) <= 90 or 97 <= ord(next_char) <= 122:
+                escape_sequence = False
+        else:
+            return next_char
+
+
+async def readline2(reader, writer):
     """
     A very crude readline coroutine interface.
+    Returns None on EOF.
     """
-    command, inp, last_inp = "", "", ""
-    inp = yield None
-    while True:
-        if inp in (LF, NUL) and last_inp == CR:
-            last_inp = inp
-            inp = yield None
+    command = ""
+    while not writer.is_closing():
+        next_char = await filter_ansi(reader, writer)
+        
+        if next_char == CR:
+            return command
+        
+        elif next_char in (LF, NUL) and len(command) == 0:
+            continue
 
-        elif inp in (CR, LF):
-            # first CR or LF yields command
-            last_inp = inp
-            inp = yield command
-            command = ""
-
-        elif inp in ("\b", "\x7f"):
+        elif next_char in ("\b", "\x7f"):
             # backspace over input
-            if command:
+            if len(command) > 0:
                 command = command[:-1]
                 writer.echo("\b \b")
-            last_inp = inp
-            inp = yield None
+
+        elif next_char == "":
+            return None
 
         else:
-            # buffer and echo input
-            command += inp
-            writer.echo(inp)
-            last_inp = inp
-            inp = yield None
+            command += next_char
+            writer.echo(next_char)
+        await writer.drain()
 
 
 def get_slcdata(writer):
