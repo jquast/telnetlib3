@@ -331,72 +331,18 @@ class TelnetServer(server_base.BaseServer):
 
             Any empty return value indicates that no encodings are offered.
 
-        The default return value begins::
+        The default return value includes the most common modern encodings::
 
-            ['UTF-8', 'UTF-16', 'LATIN1', 'US-ASCII', 'BIG5', 'GBK', ...]
+            ['UTF-8', 'UTF-16', 'LATIN1', 'US-ASCII', 'CP1252', 'ISO-8859-15']
         """
-        return (
-            [
-                "UTF-8",
-                "UTF-16",
-                "LATIN1",
-                "US-ASCII",
-                "BIG5",
-                "GBK",
-                "SHIFTJIS",
-                "GB18030",
-                "KOI8-R",
-                "KOI8-U",
-            ]
-            + [
-                # "Part 12 was slated for Latin/Devanagari,
-                # but abandoned in 1997"
-                "ISO8859-{}".format(iso)
-                for iso in range(1, 16)
-                if iso != 12
-            ]
-            + [
-                "CP{}".format(cp)
-                for cp in (
-                    154,
-                    437,
-                    500,
-                    737,
-                    775,
-                    850,
-                    852,
-                    855,
-                    856,
-                    857,
-                    860,
-                    861,
-                    862,
-                    863,
-                    864,
-                    865,
-                    866,
-                    869,
-                    874,
-                    875,
-                    932,
-                    949,
-                    950,
-                    1006,
-                    1026,
-                    1140,
-                    1250,
-                    1251,
-                    1252,
-                    1253,
-                    1254,
-                    1255,
-                    1257,
-                    1257,
-                    1258,
-                    1361,
-                )
-            ]
-        )
+        return [
+            "UTF-8",  # Most common modern encoding
+            "UTF-16",  # Common Unicode encoding
+            "LATIN1",  # ISO-8859-1, Western European
+            "CP1252",  # Windows Western European
+            "ISO-8859-15",  # Updated Western European (includes Euro symbol)
+            "US-ASCII",  # Basic ASCII
+        ]
 
     def on_charset(self, charset):
         """Callback for CHARSET response, :rfc:`2066`."""
