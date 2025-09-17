@@ -98,6 +98,15 @@ Authoring a Telnet Client that plays the war game with this server:
 
     asyncio.run(main())
 
+More advanced servers and client examples are provided at the python module
+paths `telnetlib3.server` and `telnetlib3.client`.  Find their filepaths using
+command::
+
+     python -c 'import telnetlib3.server;print(telnetlib3.server.__file__, telnetlib3.client.__file__)'
+
+You may also reuse them with the ``--shell`` argument, more
+details at end of section Command-line_.
+
 Command-line
 ------------
 
@@ -111,8 +120,10 @@ Two command-line scripts are distributed with this package.
     telnetlib3-client --loglevel debug --logfile logfile.txt nethack.alt.org 
     telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
 
-Note the use of `--encoding=cp437` and `--force-binary`, see section Encoding_
-below for details.
+  This is an entry point for command `python -m telnetlib3.client`
+
+  Note the use of `--encoding=cp437` and `--force-binary`, see section Encoding_
+  below for details.
 
 ``telnetlib3-server``
 
@@ -141,6 +152,9 @@ below for details.
 
      tel:sh> writer
      <TelnetWriter server mode:local -lineflow +xon_any +slc_sim client-will:NAWS,NEW_ENVIRON,TTYPE>
+
+  This is an entry point for command `python -m telnetlib3.server`
+
 
 Both command-line scripts accept argument ``--shell=my_module.fn_shell``
 describing a python module path to an function of signature ``async def
