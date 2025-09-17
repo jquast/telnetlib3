@@ -185,15 +185,20 @@ else:
             )
 
             stdin_task = accessories.make_reader_task(stdin)
-            telnet_task = accessories.make_reader_task(telnet_reader)
+            telnet_task = accessories.make_reader_task(telnet_reader, size=2**16)
             wait_for = set([stdin_task, telnet_task])
             while wait_for:
                 done, pending = await asyncio.wait(
                     wait_for, return_when=asyncio.FIRST_COMPLETED
                 )
 
-                task = done.pop()
-                wait_for.remove(task)
+                # Prefer handling stdin events first to avoid starvation under heavy output
+                if stdin_task in done:
+                    task = stdin_task
+                    done.discard(task)
+                else:
+                    task = done.pop()
+                wait_for.discard(task)
 
                 telnet_writer.log.debug("task=%s, wait_for=%s", task, wait_for)
 
@@ -203,13 +208,19 @@ else:
                     if inp:
                         if keyboard_escape in inp.decode():
                             # on ^], close connection to remote host
-                            telnet_task.cancel()
-                            wait_for.remove(telnet_task)
+                            try:
+                                telnet_writer.close()
+                            except Exception:
+                                pass
+                            if telnet_task in wait_for:
+                                telnet_task.cancel()
+                                wait_for.remove(telnet_task)
                             stdout.write(
                                 "\033[m{linesep}Connection closed.{linesep}".format(
                                     linesep=linesep
                                 ).encode()
                             )
+                            break
                         else:
                             telnet_writer.write(inp.decode())
                             stdin_task = accessories.make_reader_task(stdin)
@@ -238,5 +249,7 @@ else:
                         )
                     else:
                         stdout.write(out.encode() or b":?!?:")
-                        telnet_task = accessories.make_reader_task(telnet_reader)
+                        telnet_task = accessories.make_reader_task(
+                            telnet_reader, size=2**16
+                        )
                         wait_for.add(telnet_task)
