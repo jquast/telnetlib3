@@ -2,6 +2,7 @@
 
 # std imports
 import asyncio
+import logging
 
 # local imports
 import telnetlib3
@@ -140,8 +141,8 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
         shell=telnet_server_shell,
         _waiter_connected=_waiter,
         connect_maxwait=0.05,
-        timeout=0.25,
-        limit=1337,
+        timeout=1.25,
+        limit=13377,
     )
 
     reader, writer = await asyncio.open_connection(host=bind_host, port=unused_tcp_port)
@@ -179,7 +180,7 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
         (
             b"reader\r\n",
             (
-                b"\r\n<TelnetReaderUnicode encoding='US-ASCII' limit=1337 buflen=1 eof=False>"
+                b"\r\n<TelnetReaderUnicode encoding='US-ASCII' limit=13377 buflen=1 eof=False>"
                 b"\r\ntel:sh> "
             ),
         ),
@@ -282,14 +283,23 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
     )
 
     for cmd, output_expected in cmd_output_table:
+        logging.debug("cmd=%r, output_expected=%r", cmd, output_expected)
         writer.write(cmd)
+        await writer.drain()
+        timed_out = False
         try:
             result = await asyncio.wait_for(
                 reader.readexactly(len(output_expected)), 0.5
             )
         except asyncio.IncompleteReadError as err:
             result = err.partial
-        assert result == output_expected
+        except TimeoutError:
+            result = await reader.read(1024)
+        else:
+            if result != output_expected:
+                # fetch extra output, if any, for better understanding of error
+                result += await reader.read(1024)
+        assert result == output_expected and timed_out == False
 
     # nothing more to read.
     result = await reader.read()

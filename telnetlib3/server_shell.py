@@ -16,6 +16,9 @@ async def telnet_server_shell(reader, writer):
     This shell provides a very simple REPL, allowing introspection and state
     toggling of the connected client session.
     """
+    linereader = readline(reader, writer)
+    linereader.send(None)
+
     writer.write("Ready." + CR + LF)
 
     command = None
@@ -23,12 +26,16 @@ async def telnet_server_shell(reader, writer):
         if command:
             writer.write(CR + LF)
         writer.write("tel:sh> ")
+        await writer.drain()
 
-        command = await readline2(reader, writer)
-        if command is None:
-            writer.write("Read stream EOF")
-            break
-
+        command = None
+        while command is None:
+            await writer.drain()
+            inp = await reader.read(1)
+            if not inp:
+                # close/eof by client at prompt
+                return
+            command = linereader.send(inp)
         writer.write(CR + LF)
 
         if command == "quit":
@@ -112,13 +119,13 @@ def character_dump(kb_limit):
     yield ("\033[1G" + "wrote " + str(num_bytes) + " bytes")
 
 
-async def filter_ansi(reader, writer):
+async def get_next_ascii(reader, writer):
     """
-    A coroutine that accepts the next character from `reader` that is not a 
+    A coroutine that accepts the next character from `reader` that is not a
     part of an ANSI escape sequence.
     """
     escape_sequence = False
-    while True:
+    while not writer.is_closing():
         next_char = await reader.read(1)
         if next_char == "\x1b":
             escape_sequence = True
@@ -127,20 +134,63 @@ async def filter_ansi(reader, writer):
                 escape_sequence = False
         else:
             return next_char
+    return None
+
+
+@types.coroutine
+def readline(reader, writer):
+    """
+    A very crude readline coroutine interface. This is a legacy function
+    designed for Python 3.4 and remains here for compatibility, superseded by
+    :func:`~.readline2`
+    """
+    command, inp, last_inp = "", "", ""
+    inp = yield None
+    while True:
+        if inp in (LF, NUL) and last_inp == CR:
+            last_inp = inp
+            inp = yield None
+
+        elif inp in (CR, LF):
+            # first CR or LF yields command
+            last_inp = inp
+            inp = yield command
+            command = ""
+
+        elif inp in ("\b", "\x7f"):
+            # backspace over input
+            if command:
+                command = command[:-1]
+                writer.echo("\b \b")
+            last_inp = inp
+            inp = yield None
+
+        else:
+            # buffer and echo input
+            command += inp
+            writer.echo(inp)
+            last_inp = inp
+            inp = yield None
 
 
 async def readline2(reader, writer):
     """
-    A very crude readline coroutine interface.
-    Returns None on EOF.
+    Another crude readline interface as a more amiable asynchronous function
+    than :func:`readline` supplied with the earliest version of this library.
+
+    This version attempts to filter away escape sequences, such as when a user
+    presses an arrow or function key. Delete key is backspace.
+
+    However, this function does not handle all possible types of carriage
+    returns and so it is not used by default shell, :func:`telnet_server_shell`.
     """
     command = ""
-    while not writer.is_closing():
+    while True:
         next_char = await filter_ansi(reader, writer)
-        
+
         if next_char == CR:
             return command
-        
+
         elif next_char in (LF, NUL) and len(command) == 0:
             continue
 
@@ -156,7 +206,6 @@ async def readline2(reader, writer):
         else:
             command += next_char
             writer.echo(next_char)
-        await writer.drain()
 
 
 def get_slcdata(writer):
