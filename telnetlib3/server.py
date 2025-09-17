@@ -391,7 +391,6 @@ class TelnetServer(server_base.BaseServer):
                     1254,
                     1255,
                     1257,
-                    1257,
                     1258,
                     1361,
                 )
