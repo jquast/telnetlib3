@@ -124,14 +124,52 @@ Small terminal telnet client.  Some example destinations and options::
     telnetlib3-client --loglevel debug --logfile logfile.txt nethack.alt.org 
     telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
 
-See section Encoding_ for explanation of `--encoding=cp437` and `--force-binary`.
+See section Encoding_ about arguments, ``--encoding=cp437`` and ``--force-binary``.
+
+```
+usage: telnetlib3-client [-h] [--term TERM] [--loglevel LOGLEVEL]
+                         [--logfmt LOGFMT] [--logfile LOGFILE] [--shell SHELL]
+                         [--encoding ENCODING] [--speed SPEED]
+                         [--encoding-errors {replace,ignore,strict}]
+                         [--force-binary] [--connect-minwait CONNECT_MINWAIT]
+                         [--connect-maxwait CONNECT_MAXWAIT]
+                         host [port]
+
+Telnet protocol client
+
+positional arguments:
+  host                  hostname
+  port                  port number (default: 23)
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --term TERM           terminal type (default: xterm-256color)
+  --loglevel LOGLEVEL   log level (default: warn)
+  --logfmt LOGFMT       log format (default: %(asctime)s %(levelname)s
+                        %(filename)s:%(lineno)d %(message)s)
+  --logfile LOGFILE     filepath (default: None)
+  --shell SHELL         module.function_name (default:
+                        telnetlib3.telnet_client_shell)
+  --encoding ENCODING   encoding name (default: utf8)
+  --speed SPEED         connection speed (default: 38400)
+  --encoding-errors {replace,ignore,strict}
+                        handler for encoding errors (default: replace)
+  --force-binary        force encoding (default: True)
+  --connect-minwait CONNECT_MINWAIT
+                        shell delay for negotiation (default: 1.0)
+  --connect-maxwait CONNECT_MAXWAIT
+                        timeout for pending negotiation (default: 4.0)
+```
 
 ``telnetlib3-server``
 
 This is an entry point for command `python -m telnetlib3.server`
 
 Telnet server providing the default debugging shell.  This provides a simple
-shell server that allows introspection of the session's values, for example::
+shell server that allows introspection of the session's values.
+
+
+Example session::
 
      tel:sh> help
      quit, writer, slc, toggle [option|all], reader, proto
@@ -155,6 +193,34 @@ shell server that allows introspection of the session's values, for example::
 
      tel:sh> writer
      <TelnetWriter server mode:local -lineflow +xon_any +slc_sim client-will:NAWS,NEW_ENVIRON,TTYPE>
+
+```
+usage: telnetlib3-server [-h] [--loglevel LOGLEVEL] [--logfile LOGFILE]
+                         [--logfmt LOGFMT] [--shell SHELL]
+                         [--encoding ENCODING] [--force-binary]
+                         [--timeout TIMEOUT]
+                         [--connect-maxwait CONNECT_MAXWAIT]
+                         [host] [port]
+
+Telnet protocol server
+
+positional arguments:
+  host                  bind address (default: localhost)
+  port                  bind port (default: 6023)
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --loglevel LOGLEVEL   level name (default: info)
+  --logfile LOGFILE     filepath (default: None)
+  --logfmt LOGFMT       log format (default: %(asctime)s %(levelname)s
+                        %(filename)s:%(lineno)d %(message)s)
+  --shell SHELL         module.function_name (default: telnet_server_shell)
+  --encoding ENCODING   encoding name (default: utf8)
+  --force-binary        force binary transmission (default: False)
+  --timeout TIMEOUT     idle disconnect (0 disables) (default: 300)
+  --connect-maxwait CONNECT_MAXWAIT
+                        timeout for pending negotiation (default: 4.0)
+```
 
 Encoding
 --------
