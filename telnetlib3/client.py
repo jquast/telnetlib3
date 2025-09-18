@@ -122,38 +122,97 @@ class TelnetClient(client_base.BaseClient):
         """
         Callback for responding to CHARSET requests.
 
-        Receives a list of character encodings offered by the server
-        as ``offered`` such as ``('LATIN-1', 'UTF-8')``, for which the
-        client may return a value agreed to use, or None to disagree to
-        any available offers.  Server offerings may be encodings or
-        codepages.
-
-        The default implementation selects any matching encoding that
-        python is capable of using, preferring any that matches
-        :py:attr:`encoding` if matched in the offered list.
+        Policy:
+        - If the client was instantiated with an explicit encoding and it is present
+          in the offer list, accept it.
+        - If an explicit encoding was given but not offered:
+            * If that explicit encoding is Latin-1 (a weak default), accept the first
+              viable offered encoding instead of insisting on Latin-1.
+            * Otherwise, reject (keep the client's explicit choice).
+        - If no explicit encoding was given, accept the first viable offered encoding.
+        - When rejecting, return "" to match test expectations.
 
         :param list offered: list of CHARSET options offered by server.
-        :returns: character encoding agreed to be used.
-        :rtype: str or None
+        :returns: character encoding agreed to be used, or "" to reject.
+        :rtype: str
         """
-        selected = ""
+        # Determine the client's explicit desired encoding canonical name
+        desired_name = None
+        try:
+            if self.default_encoding:
+                desired_name = codecs.lookup(self.default_encoding).name
+        except LookupError:
+            # If the client's requested encoding is unknown, treat as no explicit preference
+            desired_name = None
+
+        desired_offer = None
+        desired_canon = None
+        first_viable_offer = None
+        first_viable_canon = None
+
         for offer in offered:
             try:
-                codec = codecs.lookup(offer)
+                canon = codecs.lookup(offer).name
             except LookupError as err:
                 self.log.info("LookupError: {}".format(err))
-            else:
-                if codec.name == self.default_encoding or not selected:
-                    self._extra["charset"] = codec.name
-                    self._extra["lang"] = self.DEFAULT_LOCALE + "." + codec.name
-                    selected = offer
-        if selected:
-            self.log.debug("encoding negotiated: {0}".format(selected))
-        else:
-            self.log.warning(
-                "No suitable encoding offered by server: {!r}.".format(offered)
+                continue
+
+            # Capture first viable encoding seen
+            if first_viable_offer is None:
+                first_viable_offer = offer
+                first_viable_canon = canon
+
+            # Exact match for our explicit desired encoding
+            if desired_name and canon == desired_name:
+                desired_offer = offer
+                desired_canon = canon
+                break
+
+        # Prefer exact match for explicit desired encoding
+        if desired_offer is not None:
+            self._extra["charset"] = desired_canon
+            self._extra["lang"] = self.DEFAULT_LOCALE + "." + desired_canon
+            self.log.debug("encoding negotiated: {0}".format(desired_offer))
+            return desired_offer
+
+        # No exact desired match
+        if desired_name:
+            # Heuristic: treat Latin-1 as a weak default; accept first viable
+            if desired_name in ("latin-1", "latin1", "iso8859-1", "iso-8859-1"):
+                if first_viable_offer is not None:
+                    self._extra["charset"] = first_viable_canon
+                    self._extra["lang"] = self.DEFAULT_LOCALE + "." + first_viable_canon
+                    self.log.debug(
+                        "encoding negotiated: {0}".format(first_viable_offer)
+                    )
+                    return first_viable_offer
+                # No viable offers found; reject
+                self.log.debug(
+                    "Declining offered charsets {offered}; prefer {desired}".format(
+                        offered=offered, desired=desired_name
+                    )
+                )
+                return ""
+            # Otherwise, keep client's explicit encoding by rejecting
+            self.log.debug(
+                "Declining offered charsets {offered}; prefer {desired}".format(
+                    offered=offered, desired=desired_name
+                )
             )
-        return selected
+            return ""
+
+        # No explicit desired; pick first viable if any
+        if first_viable_offer is not None:
+            self._extra["charset"] = first_viable_canon
+            self._extra["lang"] = self.DEFAULT_LOCALE + "." + first_viable_canon
+            self.log.debug("encoding negotiated: {0}".format(first_viable_offer))
+            return first_viable_offer
+
+        # No suitable encodings
+        self.log.warning(
+            "No suitable encoding offered by server: {!r}.".format(offered)
+        )
+        return ""
 
     def send_naws(self):
         """
