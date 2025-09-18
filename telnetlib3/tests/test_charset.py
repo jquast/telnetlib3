@@ -1,24 +1,103 @@
 """Test CHARSET, rfc-2066_."""
+"""Test CHARSET, rfc-2066_."""
 
 # std imports
 import asyncio
 import collections
+import pytest
+import codecs
 
 # local imports
 import telnetlib3
 import telnetlib3.stream_writer
 from telnetlib3.tests.accessories import unused_tcp_port, bind_host
 from telnetlib3.stream_writer import TelnetWriter
+from telnetlib3.telopt import (
+    IAC,
+    WILL,
+    WONT,
+    DO,
+    DONT,
+    SB,
+    SE,
+    TTYPE,
+    CHARSET,
+    REQUEST,
+    ACCEPTED,
+    REJECTED,
+)
 
-# 3rd party
-import pytest
+
+# --- Common Mock Classes ---
+
+
+class MockTransport:
+    def __init__(self):
+        self.writes = []
+        self._closing = False
+
+    def write(self, data):
+        self.writes.append(bytes(data))
+
+    def is_closing(self):
+        return self._closing
+
+    def close(self):
+        self._closing = True
+
+    def get_extra_info(self, name, default=None):
+        return default
+
+
+class MockProtocol:
+    def get_extra_info(self, name, default=None):
+        return default
+
+    async def _drain_helper(self):
+        pass
+
+
+def new_writer(server=True, client=False):
+    t = MockTransport()
+    p = MockProtocol()
+    w = TelnetWriter(t, p, server=server, client=client)
+    return w, t, p
+
+
+class CustomTelnetClient(telnetlib3.TelnetClient):
+    """Test client with controlled send_charset() behavior."""
+
+    def __init__(self, *args, **kwargs):
+        self.charset_behavior = kwargs.pop("charset_behavior", None)
+        self.charset_response = kwargs.pop("charset_response", None)
+        super().__init__(*args, **kwargs)
+
+    def send_charset(self, offered):
+        """Override to allow testing specific behavior branches."""
+        if self.charset_behavior == "unknown_encoding":
+            # Test LookupError handling with explicit encoding
+            self.default_encoding = "unknown-encoding-xyz"
+            return super().send_charset(offered)
+        elif self.charset_behavior == "no_viable_offers":
+            # Return empty offers list to test no viable offers path
+            return super().send_charset([])
+        elif self.charset_behavior == "explicit_non_latin1":
+            # Test rejection when explicit encoding isn't offered
+            self.default_encoding = "utf-16"
+            return super().send_charset(["utf-8", "ascii"])
+        elif self.charset_response is not None:
+            # Return a predetermined response
+            return self.charset_response
+        else:
+            return super().send_charset(offered)
+
+
+# --- Basic CHARSET Tests ---
 
 
 async def test_telnet_server_on_charset(bind_host, unused_tcp_port):
     """Test Server's callback method on_charset()."""
     # given
-    from telnetlib3.telopt import IAC, WILL, WONT, SB, SE, TTYPE, CHARSET, ACCEPTED
-
     _waiter = asyncio.Future()
     given_charset = "KOI8-U"
 
@@ -119,48 +198,11 @@ async def test_telnet_client_no_charset(bind_host, unused_tcp_port):
     assert writer.get_extra_info("charset") == "latin1"
 
 
-class MockTransport:
-    def __init__(self):
-        self.writes = []
-        self._closing = False
-
-    def write(self, data):
-        self.writes.append(bytes(data))
-
-    def is_closing(self):
-        return self._closing
-
-    def close(self):
-        self._closing = True
-
-    def get_extra_info(self, name, default=None):
-        return default
-
-
-class MockProtocol:
-    def get_extra_info(self, name, default=None):
-        return default
-
-    async def _drain_helper(self):
-        pass
-
-
-def new_writer(server=True, client=False):
-    t = MockTransport()
-    p = MockProtocol()
-    w = TelnetWriter(t, p, server=server, client=client)
-    return w, t, p
+# --- Negotiation Protocol Tests ---
 
 
 def test_server_sends_do_and_will_charset():
     """Test server can send both DO CHARSET and WILL CHARSET per RFC 2066."""
-    from telnetlib3.telopt import (
-        IAC,
-        DO,
-        WILL,
-        CHARSET,
-    )
-
     ws, ts, _ = new_writer(server=True)
 
     # Server sends DO CHARSET (requesting client capability)
@@ -174,14 +216,6 @@ def test_server_sends_do_and_will_charset():
 
 def test_client_do_will_then_server_will_allows_client_request():
     """Test scenario from logfile: DO->WILL then server WILL allows client to send SB REQUEST."""
-    from telnetlib3.telopt import (
-        IAC,
-        WILL,
-        SB,
-        CHARSET,
-        REQUEST,
-    )
-
     wc, tc, _ = new_writer(server=False, client=True)
     wc.set_ext_send_callback(CHARSET, lambda: ["UTF-8"])
 
@@ -207,8 +241,6 @@ def test_client_do_will_then_server_will_allows_client_request():
 
 def test_bidirectional_charset_both_sides_can_request():
     """Test that both server and client can initiate CHARSET REQUEST when both have WILL/DO."""
-    from telnetlib3.telopt import IAC, SB, CHARSET, REQUEST
-
     # Server side
     ws, ts, _ = new_writer(server=True)
     ws.set_ext_send_callback(CHARSET, lambda: ["UTF-8", "ASCII"])
@@ -234,8 +266,6 @@ def test_bidirectional_charset_both_sides_can_request():
 
 def test_charset_request_response_cycle():
     """Test complete CHARSET REQUEST/ACCEPTED cycle."""
-    from telnetlib3.telopt import IAC, SB, CHARSET, REQUEST, ACCEPTED
-
     # Server initiates REQUEST
     ws, ts, _ = new_writer(server=True)
     ws.remote_option[CHARSET] = True
@@ -258,8 +288,6 @@ def test_charset_request_response_cycle():
 
 def test_server_sends_will_charset_after_client_will():
     """Test server sends WILL CHARSET after receiving WILL CHARSET from client."""
-    from telnetlib3.telopt import IAC, WILL, DO, CHARSET
-
     ws, ts, _ = new_writer(server=True)
 
     # Server has not yet sent WILL CHARSET
@@ -285,8 +313,6 @@ def test_server_sends_will_charset_after_client_will():
 
 def test_server_does_not_send_duplicate_will_charset():
     """Test server doesn't send WILL CHARSET if already sent."""
-    from telnetlib3.telopt import IAC, WILL, DO, CHARSET
-
     ws, ts, _ = new_writer(server=True)
 
     # Server has already sent WILL CHARSET
@@ -305,39 +331,92 @@ def test_server_does_not_send_duplicate_will_charset():
     assert ws.remote_option.enabled(CHARSET)
 
 
-class CustomTelnetClient(telnetlib3.TelnetClient):
-    """Test client with controlled send_charset() behavior."""
+# --- Bug Fix Tests ---
 
-    def __init__(self, *args, **kwargs):
-        self.charset_behavior = kwargs.pop("charset_behavior", None)
-        self.charset_response = kwargs.pop("charset_response", None)
-        super().__init__(*args, **kwargs)
 
-    def send_charset(self, offered):
-        """Override to allow testing specific behavior branches."""
-        if self.charset_behavior == "unknown_encoding":
-            # Test LookupError handling with explicit encoding
-            self.default_encoding = "unknown-encoding-xyz"
-            return super().send_charset(offered)
-        elif self.charset_behavior == "no_viable_offers":
-            # Return empty offers list to test no viable offers path
-            return super().send_charset([])
-        elif self.charset_behavior == "explicit_non_latin1":
-            # Test rejection when explicit encoding isn't offered
-            self.default_encoding = "utf-16"
-            return super().send_charset(["utf-8", "ascii"])
-        elif self.charset_response is not None:
-            # Return a predetermined response
-            return self.charset_response
-        else:
-            return super().send_charset(offered)
+def test_client_responds_with_do_to_will_charset():
+    """Test client responds with DO CHARSET when receiving WILL CHARSET from server."""
+    # Create client writer instance
+    transport = MockTransport()
+    protocol = MockProtocol()
+    client_writer = TelnetWriter(transport, protocol, client=True, server=False)
+
+    # Simulate server sending WILL CHARSET
+    client_writer.handle_will(CHARSET)
+
+    # Verify client sent DO CHARSET in response
+    # The fix ensures this happens automatically in handle_will
+    sent_do_charset = False
+    for write in transport.writes:
+        if write == IAC + DO + CHARSET:
+            sent_do_charset = True
+            break
+
+    assert (
+        sent_do_charset
+    ), "Client did not send IAC DO CHARSET in response to IAC WILL CHARSET"
+    assert client_writer.remote_option.enabled(
+        CHARSET
+    ), "Client did not enable remote_option[CHARSET]"
+
+
+def test_unit_charset_negotiation_sequence():
+    """Unit test for the CHARSET negotiation sequence with the fixed code."""
+    # Create mock server and client
+    server_transport = MockTransport()
+    server_protocol = MockProtocol()
+    server_writer = TelnetWriter(server_transport, server_protocol, server=True)
+
+    client_transport = MockTransport()
+    client_protocol = MockProtocol()
+    client_writer = TelnetWriter(client_transport, client_protocol, client=True)
+
+    # Simulate the exact bug scenario:
+    # 1. Server sends IAC DO CHARSET
+    server_writer.iac(DO, CHARSET)
+    assert server_transport.writes[-1] == IAC + DO + CHARSET
+
+    # 2. Client receives IAC DO CHARSET and responds with IAC WILL CHARSET
+    client_writer.handle_do(CHARSET)
+    client_writer.local_option[CHARSET] = True  # Simulating the full code path
+    assert client_transport.writes[-1] == IAC + WILL + CHARSET
+
+    # 3. Server receives IAC WILL CHARSET
+    server_writer.handle_will(CHARSET)
+    assert server_writer.remote_option.enabled(CHARSET)
+
+    # Server should respond with its own IAC WILL CHARSET (bi-directional exchange)
+    # Note: The server also immediately sends CHARSET REQUEST after WILL CHARSET
+    # when both sides have CHARSET capability, so we need to check if WILL CHARSET is in the writes
+    will_charset_sent = False
+    for write in server_transport.writes:
+        if write == IAC + WILL + CHARSET:
+            will_charset_sent = True
+            break
+    assert will_charset_sent, "Server did not send IAC WILL CHARSET"
+
+    # 4. Client receives IAC WILL CHARSET and should respond with IAC DO CHARSET
+    client_transport.writes.clear()  # Clear previous writes
+    client_writer.handle_will(CHARSET)
+
+    # Verify that client sent IAC DO CHARSET (this would have failed before the fix)
+    assert (
+        IAC + DO + CHARSET in client_transport.writes
+    ), "Client failed to send IAC DO CHARSET"
+
+    # After this exchange, both sides should have CHARSET capability enabled
+    assert server_writer.remote_option.enabled(CHARSET)
+    assert server_writer.local_option.enabled(CHARSET)
+    assert client_writer.remote_option.enabled(CHARSET)
+    assert client_writer.local_option.enabled(CHARSET)
+
+
+# --- Edge Case Tests ---
 
 
 async def test_charset_send_unknown_encoding(bind_host, unused_tcp_port):
     """Test client with unknown encoding value."""
     # Given a client with an unknown encoding, it should handle LookupError
-    _waiter = asyncio.Future()
-
     await asyncio.get_event_loop().create_server(
         asyncio.Protocol, bind_host, unused_tcp_port
     )
@@ -357,8 +436,6 @@ async def test_charset_send_unknown_encoding(bind_host, unused_tcp_port):
 
 async def test_charset_send_no_viable_offers(bind_host, unused_tcp_port):
     """Test client with no viable encoding offers."""
-    _waiter = asyncio.Future()
-
     await asyncio.get_event_loop().create_server(
         asyncio.Protocol, bind_host, unused_tcp_port
     )
@@ -378,8 +455,6 @@ async def test_charset_send_no_viable_offers(bind_host, unused_tcp_port):
 
 async def test_charset_explicit_non_latin1_encoding(bind_host, unused_tcp_port):
     """Test client rejecting offered encodings when explicit non-latin1 is set."""
-    _waiter = asyncio.Future()
-
     await asyncio.get_event_loop().create_server(
         asyncio.Protocol, bind_host, unused_tcp_port
     )
