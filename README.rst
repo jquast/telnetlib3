@@ -103,8 +103,8 @@ command::
 
      python -c 'import telnetlib3.server;print(telnetlib3.server.__file__, telnetlib3.client.__file__)'
 
-You may also reuse them with the ``--shell`` argument, more
-details at end of section Command-line_.
+You may also use them as the entrypoint for your program by using the ``--shell`` argument,
+more details at end of section Command-line_.
 
 Command-line
 ------------
