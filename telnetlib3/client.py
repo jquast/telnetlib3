@@ -39,7 +39,7 @@ class TelnetClient(client_base.BaseClient):
         tspeed=(38400, 38400),
         xdisploc="",
         *args,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(*args, **kwargs)
         self._extra.update(
@@ -85,6 +85,27 @@ class TelnetClient(client_base.BaseClient):
         ):
             self.writer.set_ext_send_callback(opt, func)
 
+        # Override the default handle_will method to detect when both sides support CHARSET
+        original_handle_will = self.writer.handle_will
+
+        def enhanced_handle_will(opt):
+            result = original_handle_will(opt)
+
+            # If this was a WILL CHARSET from the server, and we also have WILL CHARSET enabled,
+            # log that both sides support CHARSET. The server should initiate the actual REQUEST.
+            if (
+                opt == CHARSET
+                and self.writer.remote_option.enabled(CHARSET)
+                and self.writer.local_option.enabled(CHARSET)
+            ):
+                self.log.debug(
+                    "Both sides support CHARSET, ready for server to initiate REQUEST"
+                )
+
+            return result
+
+        self.writer.handle_will = enhanced_handle_will
+
     def send_ttype(self):
         """Callback for responding to TTYPE requests."""
         return self._extra["term"]
@@ -122,38 +143,86 @@ class TelnetClient(client_base.BaseClient):
         """
         Callback for responding to CHARSET requests.
 
-        Receives a list of character encodings offered by the server
-        as ``offered`` such as ``('LATIN-1', 'UTF-8')``, for which the
-        client may return a value agreed to use, or None to disagree to
-        any available offers.  Server offerings may be encodings or
-        codepages.
-
-        The default implementation selects any matching encoding that
-        python is capable of using, preferring any that matches
-        :py:attr:`encoding` if matched in the offered list.
+        Simplified policy:
+        1. If client has explicit encoding that matches an offered charset, use it
+        2. If client has explicit encoding that isn't offered:
+           - For Latin-1 (weak default), accept first viable offered encoding
+           - For other explicit encodings, reject (keep client's choice)
+        3. If no explicit encoding preference, accept first viable offered encoding
+        4. If no viable encodings found, reject
 
         :param list offered: list of CHARSET options offered by server.
-        :returns: character encoding agreed to be used.
-        :rtype: str or None
+        :returns: character encoding agreed to be used, or "" to reject.
+        :rtype: str
         """
-        selected = ""
+        # Get client's desired encoding canonical name
+        desired_name = None
+        if self.default_encoding:
+            try:
+                desired_name = codecs.lookup(self.default_encoding).name
+            except LookupError:
+                # Unknown encoding, treat as no explicit preference
+                pass
+
+        # Find first viable offered encoding and check for exact match
+        first_viable = None
+        matched_offer = None
+
         for offer in offered:
             try:
-                codec = codecs.lookup(offer)
-            except LookupError as err:
-                self.log.info("LookupError: {}".format(err))
-            else:
-                if codec.name == self.default_encoding or not selected:
-                    self._extra["charset"] = codec.name
-                    self._extra["lang"] = self.DEFAULT_LOCALE + "." + codec.name
-                    selected = offer
-        if selected:
-            self.log.debug("encoding negotiated: {0}".format(selected))
-        else:
-            self.log.warning(
-                "No suitable encoding offered by server: {!r}.".format(offered)
+                canon = codecs.lookup(offer).name
+
+                # Record first viable encoding
+                if first_viable is None:
+                    first_viable = (offer, canon)
+
+                # Check for exact match with desired encoding
+                if desired_name and canon == desired_name:
+                    matched_offer = (offer, canon)
+                    break
+
+            except LookupError:
+                self.log.info(f"LookupError: encoding {offer} not available")
+                continue
+
+        # Decision logic:
+
+        # Case 1: Found exact match for desired encoding
+        if matched_offer:
+            offer, canon = matched_offer
+            self._extra["charset"] = canon
+            self._extra["lang"] = self.DEFAULT_LOCALE + "." + canon
+            self.log.debug(f"encoding negotiated: {offer}")
+            return offer
+
+        # Case 2: Has explicit encoding but not offered
+        if desired_name:
+            # Special case: Latin-1 is a weak default, accept first viable instead
+            is_latin1 = desired_name in ("latin-1", "latin1", "iso8859-1", "iso-8859-1")
+            if is_latin1 and first_viable:
+                offer, canon = first_viable
+                self._extra["charset"] = canon
+                self._extra["lang"] = self.DEFAULT_LOCALE + "." + canon
+                self.log.debug(f"encoding negotiated: {offer}")
+                return offer
+
+            # Otherwise reject - keep client's explicit encoding
+            self.log.debug(
+                f"Declining offered charsets {offered}; prefer {desired_name}"
             )
-        return selected
+            return ""
+
+        # Case 3: No explicit preference, use first viable
+        if first_viable:
+            offer, canon = first_viable
+            self._extra["charset"] = canon
+            self._extra["lang"] = self.DEFAULT_LOCALE + "." + canon
+            self.log.debug(f"encoding negotiated: {offer}")
+            return offer
+
+        # Case 4: No viable encodings found
+        self.log.warning(f"No suitable encoding offered by server: {offered}")
+        return ""
 
     def send_naws(self):
         """
@@ -267,7 +336,7 @@ async def open_connection(
     connect_maxwait=3.0,
     waiter_closed=None,
     _waiter_connected=None,
-    limit=None
+    limit=None,
 ):
     """
     Connect to a TCP Telnet server as a Telnet client.

@@ -424,7 +424,7 @@ class TelnetWriter:
             exc = self._reader.exception()
             if exc is not None:
                 raise exc
-        if self._transport.is_closing():
+        if self._transport is not None and self._transport.is_closing():
             # Wait for protocol.connection_lost() call
             # Raise connection closing error if any,
             # ConnectionResetError otherwise
@@ -435,7 +435,8 @@ class TelnetWriter:
             # in a loop would never call connection_lost(), so it
             # would not see an error when the socket is closed.
             await asyncio.sleep(0)
-        await self._protocol._drain_helper()
+        if self._protocol is not None:
+            await self._protocol._drain_helper()
 
     # proprietary write helper
 
@@ -531,8 +532,17 @@ class TelnetWriter:
                         self.pending_option[WILL + opt] = False
                         self.local_option[opt] = False
                 elif cmd == WILL:
-                    if not self.pending_option.enabled(DO + opt) and opt != TM:
+                    if not self.pending_option.enabled(DO + opt) and opt not in (
+                        TM,
+                        CHARSET,
+                    ):
                         self.log.debug("WILL {} unsolicited".format(name_command(opt)))
+                    elif opt == CHARSET and not self.pending_option.enabled(DO + opt):
+                        self.log.debug(
+                            "WILL {} (bi-directional capability exchange)".format(
+                                name_command(opt)
+                            )
+                        )
                     try:
                         self.handle_will(opt)
                     finally:
@@ -852,9 +862,15 @@ class TelnetWriter:
         is determined by function value returned by callback registered using
         :meth:`set_ext_send_callback` with value ``CHARSET``.
         """
-        if not self.remote_option.enabled(CHARSET):
+        # RFC 2066 Section 5: once either side has sent WILL and received DO, it may initiate.
+        # Permit initiating REQUEST if either:
+        # - peer has sent WILL (remote_option True), or
+        # - we have sent WILL and received DO (local_option True).
+        if not (
+            self.remote_option.enabled(CHARSET) or self.local_option.enabled(CHARSET)
+        ):
             self.log.debug(
-                "cannot send SB CHARSET REQUEST " "without receipt of WILL CHARSET"
+                "cannot send SB CHARSET REQUEST without CHARSET being active (no WILL/DO on either side)"
             )
             return False
 
@@ -1410,7 +1426,7 @@ class TelnetWriter:
         self.log.debug("Character Set requested")
         return ""
 
-    def handle_send_server_charset(self, charsets):
+    def handle_send_server_charset(self):
         """Send character set (encodings) offered to client, :rfc:`2066`."""
         assert self.server
         return ["UTF-8"]
@@ -1537,9 +1553,10 @@ class TelnetWriter:
                 NEW_ENVIRON,
                 XDISPLOC,
                 TSPEED,
-                CHARSET,
                 LINEMODE,
             ):
+                # Note that CHARSET is not included -- either side that has sent
+                # WILL and received DO may initiate SB at any time.
                 self.pending_option[SB + opt] = True
 
         else:
@@ -1640,15 +1657,32 @@ class TelnetWriter:
                 )
             self.remote_option[opt] = True
 
+            # Special handling for CHARSET: server should declare its own capability
+            # by sending WILL CHARSET after receiving WILL CHARSET from client
+            if opt == CHARSET and self.server:
+                if not self.local_option.enabled(CHARSET):
+                    # Special case: reciprocate WILL CHARSET with our own WILL CHARSET
+                    # but don't set pending_option since we're not expecting a response
+                    self.log.debug(
+                        "send IAC WILL CHARSET (reciprocating client's WILL)"
+                    )
+                    self.local_option[CHARSET] = True
+                    self.send_iac(IAC + WILL + CHARSET)
+
             # call one of the following callbacks.
-            {
-                XDISPLOC: self.request_xdisploc,
-                TTYPE: self.request_ttype,
-                TSPEED: self.request_tspeed,
-                CHARSET: self.request_charset,
-                NEW_ENVIRON: self.request_environ,
-                LFLOW: self.send_lineflow_mode,
-            }[opt]()
+            # For CHARSET, only server should automatically initiate REQUEST
+            if opt == CHARSET and self.client:
+                # Client received WILL CHARSET from server, but doesn't auto-request
+                pass
+            else:
+                {
+                    XDISPLOC: self.request_xdisploc,
+                    TTYPE: self.request_ttype,
+                    TSPEED: self.request_tspeed,
+                    CHARSET: self.request_charset,
+                    NEW_ENVIRON: self.request_environ,
+                    LFLOW: self.send_lineflow_mode,
+                }[opt]()
 
         else:
             # option value of -1 toggles opt.unsupported()
@@ -2106,26 +2140,39 @@ class TelnetWriter:
         This implementation does its best to analyze our perspective's state
         to the state options given.  Any discrepancies are reported to the
         error log, but no action is taken.
+
+        This implementation handles malformed STATUS data gracefully by skipping
+        invalid command bytes and continuing to process the remaining data.
         """
-        for pos in range(len(buf) // 2):
-            cmd = buf.popleft()
-            try:
-                opt = buf.popleft()
-            except IndexError:
-                # a remainder in division step-by-two, presumed nonsense.
-                raise ValueError(
-                    "STATUS incomplete at pos {}, cmd: {}".format(
-                        pos, name_command(cmd)
+        # Convert deque to list for processing
+        buf_list = list(buf)
+
+        # Process command-option pairs, handling malformed data gracefully
+        i = 0
+        while i < len(buf_list):
+            if i + 1 >= len(buf_list):
+                # Odd number of bytes remaining, log and skip
+                self.log.warning(
+                    "STATUS: incomplete pair at end, skipping byte: {}".format(
+                        buf_list[i]
                     )
                 )
+                break
+
+            cmd = buf_list[i]
+            opt = buf_list[i + 1]
+
+            # Skip invalid command bytes with a warning
+            if cmd not in (DO, DONT, WILL, WONT):
+                self.log.warning(
+                    "STATUS: invalid cmd at pos {}: {}, skipping. "
+                    "Expected DO DONT WILL WONT.".format(i, cmd)
+                )
+                # Try to resync by looking for the next valid command
+                i += 1
+                continue
 
             matching = False
-            if cmd not in (DO, DONT, WILL, WONT):
-                raise ValueError(
-                    "STATUS invalid cmd at pos {}: {}, "
-                    "expected DO DONT WILL WONT.".format(pos, cmd)
-                )
-
             if cmd in (DO, DONT):
                 _side = "local"
                 enabled = self.local_option.enabled(opt)
@@ -2164,10 +2211,15 @@ class TelnetWriter:
                         self.local_option.enabled(opt),
                     )
                 )
-                continue
-            self.log.debug(
-                "STATUS {} {} (agreed).".format(name_command(cmd), name_command(opt))
-            )
+            else:
+                self.log.debug(
+                    "STATUS {} {} (agreed).".format(
+                        name_command(cmd), name_command(opt)
+                    )
+                )
+
+            # Move to next pair
+            i += 2
 
     def _send_status(self):
         """Callback responds to IAC SB STATUS SEND, :rfc:`859`."""

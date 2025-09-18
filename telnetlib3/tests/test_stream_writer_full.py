@@ -415,11 +415,12 @@ def test_handle_sb_status_invalid_opt_and_receive_status_errors():
     # invalid option after STATUS
     with pytest.raises(ValueError):
         w._handle_sb_status(collections.deque([STATUS, b"\x99"]))
-    # _receive_status invalid cmd
-    with pytest.raises(ValueError, match="invalid cmd"):
-        w._receive_status(collections.deque([NOP, BINARY]))
-    # odd-length payload leaves remainder; implementation ignores trailing byte
-    w._receive_status(collections.deque([DO]))
+    # _receive_status now gracefully handles invalid cmd by logging warning
+    # instead of raising exception, this was changed to handle probably some
+    # unsupported "MUD" when testing with telnet://unitopia.de
+    w._receive_status(collections.deque([NOP, BINARY]))  # should not raise
+    # odd-length payload leaves remainder; implementation logs warning and continues
+    w._receive_status(collections.deque([DO]))  # should not raise
 
 
 def test_handle_sb_lflow_requires_do_lflow():
@@ -574,8 +575,8 @@ def test_request_tspeed_and_charset_pending_branches():
     assert w.request_tspeed() is True
     assert w.request_tspeed() is False
 
-    # CHARSET: pending suppresses second send
-    w.remote_option[CHARSET] = True
+    # CHARSET: requires active WILL/DO (local_option True); pending suppresses second send
+    w.local_option[CHARSET] = True
     w.set_ext_send_callback(CHARSET, lambda: ["UTF-8"])
     assert w.request_charset() is True
     assert w.request_charset() is False
@@ -848,7 +849,7 @@ def test_mode_client_kludge_and_server_kludge_and_remote_local():
 
 def test_handle_send_server_and_client_charset_returns():
     ws, ts, ps = new_writer(server=True)
-    assert ws.handle_send_server_charset(["UTF-8"]) == ["UTF-8"]
+    assert ws.handle_send_server_charset() == ["UTF-8"]
     wc, tc, pc = new_writer(server=False, client=True)
     assert wc.handle_send_client_charset(["UTF-8", "ASCII"]) == ""
 

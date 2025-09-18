@@ -145,7 +145,7 @@ async def test_telnet_client_and_server_encoding_bidirectional(
     bind_host, unused_tcp_port
 ):
     """Given a default encoding for client and server, client always wins!"""
-    # given
+    # given: server prefers latin1, client prefers cp437, client gets their wish
     _waiter = asyncio.Future()
 
     await telnetlib3.create_server(

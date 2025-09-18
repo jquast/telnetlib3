@@ -19,6 +19,7 @@ import signal
 # local
 from . import server_base
 from . import accessories
+from .telopt import name_commands
 
 __all__ = ("TelnetServer", "create_server", "run_server", "parse_server_args")
 
@@ -124,17 +125,47 @@ class TelnetServer(server_base.BaseServer):
         self.writer.iac(DO, NEW_ENVIRON)
         self.writer.iac(DO, NAWS)
         if self.default_encoding:
+            # Request client capability to negotiate character set
             self.writer.iac(DO, CHARSET)
 
     def check_negotiation(self, final=False):
-        from .telopt import TTYPE
+        from .telopt import TTYPE, NEW_ENVIRON, CHARSET, SB
+
+        # Debug log to see which options are still pending
+        pending = [
+            (name_commands(opt), val)
+            for opt, val in self.writer.pending_option.items()
+            if val
+        ]
+        if pending:
+            logger.debug("Pending options: %r", pending)
+
+        # Check if we're waiting for important subnegotiations -- environment or charset information
+        # These are critical for proper encoding determination
+        waiting_for_environ = (
+            SB + NEW_ENVIRON in self.writer.pending_option
+            and self.writer.pending_option[SB + NEW_ENVIRON]
+        )
+        waiting_for_charset = (
+            SB + CHARSET in self.writer.pending_option
+            and self.writer.pending_option[SB + CHARSET]
+        )
+
+        if waiting_for_environ or waiting_for_charset:
+            if final:
+                logger.warning(
+                    "Waiting for critical subnegotiation: environ=%s, charset=%s",
+                    waiting_for_environ,
+                    waiting_for_charset,
+                )
 
         parent = super().check_negotiation()
 
-        # in addition to the base class negotiation check, periodically check
+        # In addition to the base class negotiation check, periodically check
         # for completion of bidirectional encoding negotiation.
         result = self._check_encoding()
         encoding = self.encoding(outgoing=True, incoming=True)
+
         if not self.waiter_encoding.done() and result:
             logger.debug("encoding complete: {0!r}".format(encoding))
             self.waiter_encoding.set_result(result)
@@ -147,7 +178,12 @@ class TelnetServer(server_base.BaseServer):
             # to continue towards advanced negotiation of CHARSET, we assume
             # the distant end would not support it, declaring encoding failed.
             logger.debug(
-                "encoding failed after {0:1.2f}s: {1}".format(self.duration, encoding)
+                "encoding failed after {0:1.2f}s: {1}, remote_option[TTYPE]={2}, result={3}".format(
+                    self.duration,
+                    encoding,
+                    self.writer.remote_option.get(TTYPE),
+                    result,
+                )
             )
             self.waiter_encoding.set_result(result)  # False
             return parent
@@ -158,6 +194,11 @@ class TelnetServer(server_base.BaseServer):
             )
             self.waiter_encoding.set_result(result)  # False
             return parent
+
+        # Now consider the pending critical options for the final return value
+        # This ensures we don't complete negotiation until env/charset are done
+        if waiting_for_environ or waiting_for_charset:
+            return False
 
         return parent and result
 
@@ -188,13 +229,13 @@ class TelnetServer(server_base.BaseServer):
         _outgoing_only = outgoing and not incoming
         _incoming_only = not outgoing and incoming
         _bidirectional = outgoing and incoming
-        may_encode = (
+        may_encode = self.force_binary or (
             (_outgoing_only and self.writer.outbinary)
             or (_incoming_only and self.writer.inbinary)
             or (_bidirectional and self.writer.outbinary and self.writer.inbinary)
         )
 
-        if self.force_binary or may_encode:
+        if may_encode:
             # prefer 'LANG' environment variable forwarded by client, if any.
             # for modern systems, this is the preferred method of encoding
             # negotiation.
@@ -202,7 +243,7 @@ class TelnetServer(server_base.BaseServer):
             if _lang and _lang != "C":
                 return accessories.encoding_from_lang(_lang)
 
-            # otherwise, the less CHARSET negotiation may be found in many
+            # otherwise, less common CHARSET negotiation may be found in many
             # East-Asia BBS and Western MUD systems.
             return self.get_extra_info("charset") or self.default_encoding
         return "US-ASCII"
@@ -325,72 +366,30 @@ class TelnetServer(server_base.BaseServer):
 
             Any empty return value indicates that no encodings are offered.
 
-        The default return value begins::
+        The default return value includes common encodings for both Western and Eastern scripts::
 
-            ['UTF-8', 'UTF-16', 'LATIN1', 'US-ASCII', 'BIG5', 'GBK', ...]
+            ['UTF-8', 'UTF-16', 'LATIN1', 'US-ASCII', 'CP1252', 'ISO-8859-15', 'CP437',
+             'SHIFT_JIS', 'CP932', 'BIG5', 'CP950', 'GBK', 'GB2312', 'CP936', 'EUC-KR', 'CP949']
         """
-        return (
-            [
-                "UTF-8",
-                "UTF-16",
-                "LATIN1",
-                "US-ASCII",
-                "BIG5",
-                "GBK",
-                "SHIFTJIS",
-                "GB18030",
-                "KOI8-R",
-                "KOI8-U",
-            ]
-            + [
-                # "Part 12 was slated for Latin/Devanagari,
-                # but abandoned in 1997"
-                "ISO8859-{}".format(iso)
-                for iso in range(1, 16)
-                if iso != 12
-            ]
-            + [
-                "CP{}".format(cp)
-                for cp in (
-                    154,
-                    437,
-                    500,
-                    737,
-                    775,
-                    850,
-                    852,
-                    855,
-                    856,
-                    857,
-                    860,
-                    861,
-                    862,
-                    863,
-                    864,
-                    865,
-                    866,
-                    869,
-                    874,
-                    875,
-                    932,
-                    949,
-                    950,
-                    1006,
-                    1026,
-                    1140,
-                    1250,
-                    1251,
-                    1252,
-                    1253,
-                    1254,
-                    1255,
-                    1257,
-                    1257,
-                    1258,
-                    1361,
-                )
-            ]
-        )
+        return [
+            "UTF-8",  # Most common modern encoding
+            "UTF-16",  # Common Unicode encoding
+            "LATIN1",  # ISO-8859-1, Western European
+            "CP1252",  # Windows Western European
+            "ISO-8859-15",  # Updated Western European (includes Euro symbol)
+            "CP437",  # PC-DOS / US telnet BBS systems
+            # Eastern encodings
+            "SHIFT_JIS",  # Japan
+            "CP932",  # Japan (Windows code page)
+            "BIG5",  # Taiwan/Hong Kong
+            "CP950",  # Taiwan/Hong Kong (Windows code page)
+            "GBK",  # Mainland China
+            "GB2312",  # Mainland China
+            "CP936",  # Mainland China (Windows code page)
+            "EUC-KR",  # Korea
+            "CP949",  # Korea (Windows code page)
+            "US-ASCII",  # Basic ASCII
+        ]
 
     def on_charset(self, charset):
         """Callback for CHARSET response, :rfc:`2066`."""
@@ -449,19 +448,30 @@ class TelnetServer(server_base.BaseServer):
 
     def _check_encoding(self):
         # Periodically check for completion of ``waiter_encoding``.
-        from .telopt import DO, BINARY
+        from .telopt import DO, BINARY, CHARSET, SB
 
+        # Check if we need to request client to use BINARY mode for client-to-server communication
         if (
             self.writer.outbinary
             and not self.writer.inbinary
-            and not DO + BINARY in self.writer.pending_option
+            and not (DO + BINARY) in self.writer.pending_option
         ):
             logger.debug("BINARY in: direction request.")
             self.writer.iac(DO, BINARY)
             return False
 
+        # Check if CHARSET is enabled but no REQUEST has been sent yet
+        if (
+            self.writer.remote_option.enabled(CHARSET)
+            and self.writer.local_option.enabled(CHARSET)
+            and not (SB + CHARSET) in self.writer.pending_option
+        ):
+            logger.debug("Initiating CHARSET REQUEST after capabilities negotiation")
+            self.writer.request_charset()
+
         # are we able to negotiate BINARY bidirectionally?
-        return self.writer.outbinary and self.writer.inbinary
+        # or, is force_binary=True ?
+        return (self.writer.outbinary and self.writer.inbinary) or self.force_binary
 
 
 async def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwds):
@@ -487,14 +497,25 @@ async def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwd
         of ``LANG``, or by any legal value for CHARSET :rfc:`2066` negotiation.
 
         The server's attached ``reader, writer`` streams accept and return
-        unicode, unless this value explicitly set ``False``.  In that case, the
-        attached streams interfaces are bytes-only.
+        unicode, or natural strings, "hello world", unless this value explicitly
+        set ``False``.  In that case, the attached streams interfaces are
+        bytes-only, b"hello world".
     :param str encoding_errors: Same meaning as :meth:`codecs.Codec.encode`.
         Default value is ``strict``.
     :param bool force_binary: When ``True``, the encoding specified is
         used for both directions even when BINARY mode, :rfc:`856`, is not
         negotiated for the direction specified.  This parameter has no effect
         when ``encoding=False``.
+
+        Note that when combined with a default ``encoding``, use of this option
+        may prematurely cause data transmitted in the default encoding immediately
+        on-connect, before a "smart" telnet client or server can negotiate a
+        different one.
+
+        In most cases, so long as the initial login banner/etc is US-ASCII, this
+        may be no problem at all. If an encoding is assumed, as in many MUD and
+        BBS systems, the combination of ``force_binary`` with a default
+        ``encoding`` is often preferred.
     :param str term: Value returned for ``writer.get_extra_info('term')``
         until negotiated by TTYPE :rfc:`930`, or NAWS :rfc:`1572`.  Default value
         is ``'unknown'``.

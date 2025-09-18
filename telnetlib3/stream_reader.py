@@ -98,6 +98,22 @@ class TelnetReader:
             self._transport.resume_reading()
 
     def feed_eof(self):
+        """
+        Mark EOF on the reader and wake any pending readers.
+
+        This should be called by the Telnet protocol when the underlying
+        transport indicates end-of-input (e.g., in connection_lost()).
+        It sets the internal EOF flag and wakes any read coroutines waiting
+        for more data.
+
+        Application code typically should not call this method directly.
+        To gracefully close a connection from application code, call
+        writer.close() and await writer.wait_closed(). The protocol will
+        eventually call feed_eof() on the reader as part of shutdown.
+
+        After feed_eof(), read() will drain remaining buffered bytes and
+        then return b""; readline()/iteration will stop at EOF.
+        """
         self._eof = True
         self._wakeup_waiter()
 
@@ -459,12 +475,24 @@ class TelnetReader:
         warnings.warn(
             "connection_closed property removed, use at_eof() instead",
             DeprecationWarning,
+            stacklevel=2,
         )
         return self._eof
 
     def close(self):
+        """
+        Deprecated: use feed_eof() instead.
+
+        TelnetReader.close() existed briefly and is deprecated. Protocol
+        implementations should call feed_eof() to signal end-of-input.
+        Application code should not close the reader directly; instead,
+        call writer.close() and await writer.wait_closed() to initiate a
+        graceful shutdown.
+        """
         warnings.warn(
-            "connection_closed deprecated, use feed_eof() instead", DeprecationWarning
+            "close() is deprecated; use feed_eof() instead",
+            DeprecationWarning,
+            stacklevel=2,
         )
         self.feed_eof()
 
