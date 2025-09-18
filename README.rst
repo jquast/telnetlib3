@@ -38,6 +38,7 @@ instances of `telnetlib` to `telnetlib3`:
     import telnetlib3.telnetlib as telnetlib
     # - or - 
     from telnetlib3 import Telnet, ECHO, BINARY
+    from telnetlib3.telnetlib import Telnet, ECHO, BINARY
 
 .. _telnetlib.py: https://docs.python.org/3.12/library/telnetlib.html
 
@@ -45,7 +46,7 @@ instances of `telnetlib` to `telnetlib3`:
 Quick Example
 -------------
 
-Authoring a Telnet Server using Streams interface that offers a basic war game:
+Writing a Telnet Server that offers a basic "war game":
 
 .. code-block:: python
 
@@ -62,13 +63,12 @@ Authoring a Telnet Server using Streams interface that offers a basic war game:
         writer.close()
 
     async def main():
-        loop = asyncio.get_event_loop()
         server = await telnetlib3.create_server('127.0.0.1', 6023, shell=shell)
         await server.wait_closed()
 
     asyncio.run(main())
 
-Authoring a Telnet Client that plays the war game with this server:
+Writing a Telnet Client that plays the "war game" against this server:
 
 .. code-block:: python
 
@@ -92,43 +92,86 @@ Authoring a Telnet Client that plays the war game with this server:
         print()
 
     async def main():
-        loop = asyncio.get_event_loop()
         reader, writer = await telnetlib3.open_connection('localhost', 6023, shell=shell)
         await writer.protocol.waiter_closed
 
     asyncio.run(main())
 
-More advanced servers and client examples are provided at the python module
-paths `telnetlib3.server` and `telnetlib3.client`.  Find their filepaths using
-command::
-
-     python -c 'import telnetlib3.server;print(telnetlib3.server.__file__, telnetlib3.client.__file__)'
-
-You may also reuse them with the ``--shell`` argument, more
-details at end of section Command-line_.
-
 Command-line
 ------------
 
-Two command-line scripts are distributed with this package.
+Two command-line scripts are distributed with this package,
+`telnetlib3-client` and `telnetlib3-server`.
 
-``telnetlib3-client``
+Both command-line scripts accept argument ``--shell=my_module.fn_shell``
+describing a python module path to an function of signature
+``async def shell(reader, writer)``, as in the above examples.
 
-  Small terminal telnet client.  Some example destinations and options::
+These scripts also serve as more advanced server and client examples that
+perform advanced telnet option negotation and may serve as a basis for
+creating your own custom negotiation behaviors.
+
+Find their filepaths using command::
+
+     python -c 'import telnetlib3.server;print(telnetlib3.server.__file__, telnetlib3.client.__file__)'
+
+telnetlib3-client
+~~~~~~~~~~~~~~~~~
+
+This is an entry point for command ``python -m telnetlib3.client``
+
+Small terminal telnet client.  Some example destinations and options::
 
     telnetlib3-client --loglevel warn 1984.ws
     telnetlib3-client --loglevel debug --logfile logfile.txt nethack.alt.org 
     telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
 
-  This is an entry point for command `python -m telnetlib3.client`
+See section Encoding_ about arguments, ``--encoding=cp437`` and ``--force-binary``.
 
-  Note the use of `--encoding=cp437` and `--force-binary`, see section Encoding_
-  below for details.
+::
 
-``telnetlib3-server``
+    usage: telnetlib3-client [-h] [--term TERM] [--loglevel LOGLEVEL]
+                             [--logfmt LOGFMT] [--logfile LOGFILE] [--shell SHELL]
+                             [--encoding ENCODING] [--speed SPEED]
+                             [--encoding-errors {replace,ignore,strict}]
+                             [--force-binary] [--connect-minwait CONNECT_MINWAIT]
+                             [--connect-maxwait CONNECT_MAXWAIT]
+                             host [port]
+    
+    Telnet protocol client
+    
+    positional arguments:
+      host                  hostname
+      port                  port number (default: 23)
+    
+    optional arguments:
+      -h, --help            show this help message and exit
+      --term TERM           terminal type (default: xterm-256color)
+      --loglevel LOGLEVEL   log level (default: warn)
+      --logfmt LOGFMT       log format (default: %(asctime)s %(levelname)s
+                            %(filename)s:%(lineno)d %(message)s)
+      --logfile LOGFILE     filepath (default: None)
+      --shell SHELL         module.function_name (default:
+                            telnetlib3.telnet_client_shell)
+      --encoding ENCODING   encoding name (default: utf8)
+      --speed SPEED         connection speed (default: 38400)
+      --encoding-errors {replace,ignore,strict}
+                            handler for encoding errors (default: replace)
+      --force-binary        force encoding (default: True)
+      --connect-minwait CONNECT_MINWAIT
+                            shell delay for negotiation (default: 1.0)
+      --connect-maxwait CONNECT_MAXWAIT
+                            timeout for pending negotiation (default: 4.0)
 
-  Telnet server providing the default debugging shell.  This provides a simple
-  shell server that allows introspection of the session's values, for example::
+telnetlib3-server
+~~~~~~~~~~~~~~~~~
+
+This is an entry point for command ``python -m telnetlib3.server``
+
+Telnet server providing the default debugging shell.  This provides a simple
+shell server that allows introspection of the session's values.
+
+Example session::
 
      tel:sh> help
      quit, writer, slc, toggle [option|all], reader, proto
@@ -153,12 +196,33 @@ Two command-line scripts are distributed with this package.
      tel:sh> writer
      <TelnetWriter server mode:local -lineflow +xon_any +slc_sim client-will:NAWS,NEW_ENVIRON,TTYPE>
 
-  This is an entry point for command `python -m telnetlib3.server`
+::
 
-
-Both command-line scripts accept argument ``--shell=my_module.fn_shell``
-describing a python module path to an function of signature ``async def
-shell(reader, writer)``, as in the above examples.
+    usage: telnetlib3-server [-h] [--loglevel LOGLEVEL] [--logfile LOGFILE]
+                             [--logfmt LOGFMT] [--shell SHELL]
+                             [--encoding ENCODING] [--force-binary]
+                             [--timeout TIMEOUT]
+                             [--connect-maxwait CONNECT_MAXWAIT]
+                             [host] [port]
+    
+    Telnet protocol server
+    
+    positional arguments:
+      host                  bind address (default: localhost)
+      port                  bind port (default: 6023)
+    
+    optional arguments:
+      -h, --help            show this help message and exit
+      --loglevel LOGLEVEL   level name (default: info)
+      --logfile LOGFILE     filepath (default: None)
+      --logfmt LOGFMT       log format (default: %(asctime)s %(levelname)s
+                            %(filename)s:%(lineno)d %(message)s)
+      --shell SHELL         module.function_name (default: telnet_server_shell)
+      --encoding ENCODING   encoding name (default: utf8)
+      --force-binary        force binary transmission (default: False)
+      --timeout TIMEOUT     idle disconnect (0 disables) (default: 300)
+      --connect-maxwait CONNECT_MAXWAIT
+                            timeout for pending negotiation (default: 4.0)
 
 Encoding
 --------
@@ -168,22 +232,19 @@ In this client connection example::
     telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
 
 Note the use of `--encoding=cp437` to translate input and output characters of
-the remote end. CP437 is an American English IBM PC DOS encoding, and many such
-legacy BBS programs are unable to negotiate about or present characters in any
-other encoding. Because this BBS does not negotiate encoding, the default is
-assumed to be US-ASCII, the ``--encoding`` parameter changes this.
+the remote end. This example legacy telnet BBS is unable to negotiate about
+or present characters in any other encoding but CP437. Without these arguments,
+Telnet protocol would dictate our session to be US-ASCII.
 
-See also `--force-binary`, which may also sometimes be required with
-telnetlib3-client and telnetlib3-server. In the original Telnet protocol
+Argument `--force-binary` is *also* required in many cases, with both
+``telnetlib3-client`` and ``telnetlib3-server``. In the original Telnet protocol
 specifications, the Network Virtual Terminal (NVT) is defined as 7-bit US-ASCII,
-and this is the default state for both ends until negotiated otherwise.
+and this is the default state for both ends until negotiated otherwise by RFC-856_
+by negotiation of BINARY TRANSMISSION.
 
-RFC-856_ (BINARY TRANSMISSION) is the option that allows you to break out of the
-7-bit ASCII constraint. However, **many common telnet clients and servers fail
-to negotiate for BINARY** -- it may be rejected (DONT, WONT), unanswered, or
-only negotiated for a single direction. To support such clients and servers, use
-``--force-binary``, which forces bi-direction binary transmission no matter the
-state of BINARY negotiation.
+However, **many common telnet clients and servers fail to negotiate for BINARY**
+correctly or at all. Using ``--force-binary`` allows non-ASCII encodings to be
+used with those kinds of clients.
 
 A Telnet Server that prefers "utf8" encoding, and, transmits it even in the case
 of failed BINARY negotiation, to support a "dumb" telnet client like netcat::
@@ -246,4 +307,4 @@ The following RFC specifications are implemented:
 Further Reading
 ---------------
 
-Further documentation available at https://telnetlib3.readthedocs.org/
+Further documentation available at https://telnetlib3.readthedocs.io/
