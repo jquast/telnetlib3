@@ -366,9 +366,10 @@ class TelnetServer(server_base.BaseServer):
 
             Any empty return value indicates that no encodings are offered.
 
-        The default return value includes a few common encodings::
+        The default return value includes common encodings for both Western and Eastern scripts::
 
-            ['UTF-8', 'UTF-16', 'LATIN1', 'US-ASCII', 'CP1252', 'ISO-8859-15', 'CP437', 'US-ASCII']
+            ['UTF-8', 'UTF-16', 'LATIN1', 'US-ASCII', 'CP1252', 'ISO-8859-15', 'CP437',
+             'SHIFT_JIS', 'CP932', 'BIG5', 'CP950', 'GBK', 'GB2312', 'CP936', 'EUC-KR', 'CP949']
         """
         return [
             "UTF-8",  # Most common modern encoding
@@ -377,6 +378,16 @@ class TelnetServer(server_base.BaseServer):
             "CP1252",  # Windows Western European
             "ISO-8859-15",  # Updated Western European (includes Euro symbol)
             "CP437",  # PC-DOS / US telnet BBS systems
+            # Eastern encodings
+            "SHIFT_JIS",  # Japan
+            "CP932",  # Japan (Windows code page)
+            "BIG5",  # Taiwan/Hong Kong
+            "CP950",  # Taiwan/Hong Kong (Windows code page)
+            "GBK",  # Mainland China
+            "GB2312",  # Mainland China
+            "CP936",  # Mainland China (Windows code page)
+            "EUC-KR",  # Korea
+            "CP949",  # Korea (Windows code page)
             "US-ASCII",  # Basic ASCII
         ]
 
