@@ -279,26 +279,40 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         considered final, or after :attr:`connect_maxwait` has elapsed, setting
         the ``_waiter_connected`` attribute to value ``self`` when complete.
 
-        This method returns False until :attr:`connect_minwait` has elapsed,
+        If critical negotiations have completed (TTYPE and either NEW_ENVIRON or CHARSET),
+        negotiation is considered complete immediately without waiting for connect_minwait.
+        Otherwise, this method returns False until :attr:`connect_minwait` has elapsed,
         ensuring the server may batch telnet negotiation demands without
         prematurely entering the callback shell.
 
         Ensure ``super().check_negotiation()`` is called and conditionally
         combined when derived.
         """
-        return (
-            not any(self.writer.pending_option.values())
-            and
-            # This particular state check is interesting; what we're trying
-            # to allow is a period of time where the server may chose to
-            # make demands in batches.  Let us allow our protocol
-            # negotiation enough time for such demands to be received.
-            #
-            # A better measurement of would be to use something like TM
-            # (timing-mark) to measure the round-trip time, and double it
-            # for this value.
-            self.duration > self.connect_minwait
+        from .telopt import TTYPE, NEW_ENVIRON, CHARSET, SB
+
+        # First check if there are any pending options
+        if any(self.writer.pending_option.values()):
+            return False
+
+        # Check if critical options are enabled (terminal type and encoding info)
+        have_terminal_type = self.writer.local_option.enabled(TTYPE)
+        have_environ = self.writer.local_option.enabled(NEW_ENVIRON)
+        have_charset = self.writer.remote_option.enabled(
+            CHARSET
+        ) and self.writer.local_option.enabled(CHARSET)
+
+        # If we have terminal type and either environment or charset info, we can bypass the minwait
+        critical_options_negotiated = have_terminal_type and (
+            have_environ or have_charset
         )
+
+        if critical_options_negotiated:
+            if final:
+                self.log.debug("Critical options negotiated, bypassing connect_minwait")
+            return True
+
+        # Otherwise, ensure we wait the minimum time for server to batch commands
+        return self.duration > self.connect_minwait
 
     # private methods
 

@@ -1,12 +1,14 @@
 History
 =======
 2.0.6
- * bugfix: correcteded CHARSET protocol client/server role behavior :ghissue:`59`
+ * bugfix: corrected CHARSET protocol client/server role behavior :ghissue:`59`
  * bugfix: allow ``--force-binary`` and ``--encoding`` to be combined to prevent
-   long ``encoding failed after 4.00s`` connection delay at start of server
-   connection with non-compliant clients, :ghissue:`74`, see Encoding_.
- * bugfix: remove `'NoneType' object has no attribute 'is_closing'` exception
-   message on some types of closed connections
+   long ``encoding failed after 4.00s`` delays in ``telnetlib3-server`` with
+   non-compliant clients, :ghissue:`74`, see Encoding_.
+ * bugfix: reduce ``telnetlib3-client`` connection delay, session begins as
+   soon as TTYPE and either NEW_ENVIRON or CHARSET negotiation is completed.
+ * bugfix: remove `'NoneType' object has no attribute 'is_closing'` message
+   on some types of closed connections
  * bugfix: further improve ``telnetlib3-client`` performance, capable of
    11.2 Mbit/s or more.
  * bugfix: more gracefully handle unsupported SB STATUS codes.
