@@ -100,11 +100,12 @@ Writing a Telnet Client that plays the "war game" against this server:
 Command-line
 ------------
 
-Two command-line scripts are distributed with this package, `telnetlib3-client` and `telnetlib3-server`.
+Two command-line scripts are distributed with this package,
+`telnetlib3-client` and `telnetlib3-server`.
 
 Both command-line scripts accept argument ``--shell=my_module.fn_shell``
-describing a python module path to an function of signature ``async def
-shell(reader, writer)``, as in the above examples.
+describing a python module path to an function of signature
+``async def shell(reader, writer)``, as in the above examples.
 
 These scripts also serve as more advanced server and client examples that
 perform advanced telnet option negotation and may serve as a basis for
@@ -114,7 +115,8 @@ Find their filepaths using command::
 
      python -c 'import telnetlib3.server;print(telnetlib3.server.__file__, telnetlib3.client.__file__)'
 
-``telnetlib3-client``
+telnetlib3-client
+~~~~~~~~~~~~~~~~~
 
 This is an entry point for command `python -m telnetlib3.client`
 
@@ -161,7 +163,8 @@ See section Encoding_ about arguments, ``--encoding=cp437`` and ``--force-binary
       --connect-maxwait CONNECT_MAXWAIT
                             timeout for pending negotiation (default: 4.0)
 
-``telnetlib3-server``
+telnetlib3-server
+~~~~~~~~~~~~~~~~~
 
 This is an entry point for command `python -m telnetlib3.server`
 
