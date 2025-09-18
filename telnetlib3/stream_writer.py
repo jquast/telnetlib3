@@ -2138,15 +2138,8 @@ class TelnetWriter:
         This implementation handles malformed STATUS data gracefully by skipping
         invalid command bytes and continuing to process the remaining data.
         """
-        # Convert deque to bytes and unescape embedded IAC bytes
-        # In telnet protocol, IAC IAC in subnegotiation data represents a single IAC byte
-        raw_buf = b"".join(buf)
-
-        # Unescape IAC sequences: IAC IAC -> IAC
-        unescaped_buf = raw_buf.replace(IAC + IAC, IAC)
-
-        # Convert back to list for processing
-        buf_list = [bytes([b]) for b in unescaped_buf]
+        # Convert deque to list for processing
+        buf_list = list(buf)
 
         # Process command-option pairs, handling malformed data gracefully
         i = 0
