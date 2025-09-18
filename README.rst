@@ -46,7 +46,7 @@ instances of `telnetlib` to `telnetlib3`:
 Quick Example
 -------------
 
-Writing a Telnet Server using Streams interface that offers a basic war game:
+Writing a Telnet Server that offers a basic "war game":
 
 .. code-block:: python
 
@@ -68,7 +68,7 @@ Writing a Telnet Server using Streams interface that offers a basic war game:
 
     asyncio.run(main())
 
-Writing a Telnet Client that plays the war game with this server:
+Writing a Telnet Client that plays the "war game" against this server:
 
 .. code-block:: python
 
