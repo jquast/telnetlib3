@@ -126,40 +126,40 @@ Small terminal telnet client.  Some example destinations and options::
 
 See section Encoding_ about arguments, ``--encoding=cp437`` and ``--force-binary``.
 
-```
-usage: telnetlib3-client [-h] [--term TERM] [--loglevel LOGLEVEL]
-                         [--logfmt LOGFMT] [--logfile LOGFILE] [--shell SHELL]
-                         [--encoding ENCODING] [--speed SPEED]
-                         [--encoding-errors {replace,ignore,strict}]
-                         [--force-binary] [--connect-minwait CONNECT_MINWAIT]
-                         [--connect-maxwait CONNECT_MAXWAIT]
-                         host [port]
+::
 
-Telnet protocol client
-
-positional arguments:
-  host                  hostname
-  port                  port number (default: 23)
-
-optional arguments:
-  -h, --help            show this help message and exit
-  --term TERM           terminal type (default: xterm-256color)
-  --loglevel LOGLEVEL   log level (default: warn)
-  --logfmt LOGFMT       log format (default: %(asctime)s %(levelname)s
-                        %(filename)s:%(lineno)d %(message)s)
-  --logfile LOGFILE     filepath (default: None)
-  --shell SHELL         module.function_name (default:
-                        telnetlib3.telnet_client_shell)
-  --encoding ENCODING   encoding name (default: utf8)
-  --speed SPEED         connection speed (default: 38400)
-  --encoding-errors {replace,ignore,strict}
-                        handler for encoding errors (default: replace)
-  --force-binary        force encoding (default: True)
-  --connect-minwait CONNECT_MINWAIT
-                        shell delay for negotiation (default: 1.0)
-  --connect-maxwait CONNECT_MAXWAIT
-                        timeout for pending negotiation (default: 4.0)
-```
+    usage: telnetlib3-client [-h] [--term TERM] [--loglevel LOGLEVEL]
+                             [--logfmt LOGFMT] [--logfile LOGFILE] [--shell SHELL]
+                             [--encoding ENCODING] [--speed SPEED]
+                             [--encoding-errors {replace,ignore,strict}]
+                             [--force-binary] [--connect-minwait CONNECT_MINWAIT]
+                             [--connect-maxwait CONNECT_MAXWAIT]
+                             host [port]
+    
+    Telnet protocol client
+    
+    positional arguments:
+      host                  hostname
+      port                  port number (default: 23)
+    
+    optional arguments:
+      -h, --help            show this help message and exit
+      --term TERM           terminal type (default: xterm-256color)
+      --loglevel LOGLEVEL   log level (default: warn)
+      --logfmt LOGFMT       log format (default: %(asctime)s %(levelname)s
+                            %(filename)s:%(lineno)d %(message)s)
+      --logfile LOGFILE     filepath (default: None)
+      --shell SHELL         module.function_name (default:
+                            telnetlib3.telnet_client_shell)
+      --encoding ENCODING   encoding name (default: utf8)
+      --speed SPEED         connection speed (default: 38400)
+      --encoding-errors {replace,ignore,strict}
+                            handler for encoding errors (default: replace)
+      --force-binary        force encoding (default: True)
+      --connect-minwait CONNECT_MINWAIT
+                            shell delay for negotiation (default: 1.0)
+      --connect-maxwait CONNECT_MAXWAIT
+                            timeout for pending negotiation (default: 4.0)
 
 ``telnetlib3-server``
 
@@ -194,33 +194,33 @@ Example session::
      tel:sh> writer
      <TelnetWriter server mode:local -lineflow +xon_any +slc_sim client-will:NAWS,NEW_ENVIRON,TTYPE>
 
-```
-usage: telnetlib3-server [-h] [--loglevel LOGLEVEL] [--logfile LOGFILE]
-                         [--logfmt LOGFMT] [--shell SHELL]
-                         [--encoding ENCODING] [--force-binary]
-                         [--timeout TIMEOUT]
-                         [--connect-maxwait CONNECT_MAXWAIT]
-                         [host] [port]
+::
 
-Telnet protocol server
-
-positional arguments:
-  host                  bind address (default: localhost)
-  port                  bind port (default: 6023)
-
-optional arguments:
-  -h, --help            show this help message and exit
-  --loglevel LOGLEVEL   level name (default: info)
-  --logfile LOGFILE     filepath (default: None)
-  --logfmt LOGFMT       log format (default: %(asctime)s %(levelname)s
-                        %(filename)s:%(lineno)d %(message)s)
-  --shell SHELL         module.function_name (default: telnet_server_shell)
-  --encoding ENCODING   encoding name (default: utf8)
-  --force-binary        force binary transmission (default: False)
-  --timeout TIMEOUT     idle disconnect (0 disables) (default: 300)
-  --connect-maxwait CONNECT_MAXWAIT
-                        timeout for pending negotiation (default: 4.0)
-```
+    usage: telnetlib3-server [-h] [--loglevel LOGLEVEL] [--logfile LOGFILE]
+                             [--logfmt LOGFMT] [--shell SHELL]
+                             [--encoding ENCODING] [--force-binary]
+                             [--timeout TIMEOUT]
+                             [--connect-maxwait CONNECT_MAXWAIT]
+                             [host] [port]
+    
+    Telnet protocol server
+    
+    positional arguments:
+      host                  bind address (default: localhost)
+      port                  bind port (default: 6023)
+    
+    optional arguments:
+      -h, --help            show this help message and exit
+      --loglevel LOGLEVEL   level name (default: info)
+      --logfile LOGFILE     filepath (default: None)
+      --logfmt LOGFMT       log format (default: %(asctime)s %(levelname)s
+                            %(filename)s:%(lineno)d %(message)s)
+      --shell SHELL         module.function_name (default: telnet_server_shell)
+      --encoding ENCODING   encoding name (default: utf8)
+      --force-binary        force binary transmission (default: False)
+      --timeout TIMEOUT     idle disconnect (0 disables) (default: 300)
+      --connect-maxwait CONNECT_MAXWAIT
+                            timeout for pending negotiation (default: 4.0)
 
 Encoding
 --------
@@ -230,22 +230,19 @@ In this client connection example::
     telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
 
 Note the use of `--encoding=cp437` to translate input and output characters of
-the remote end. CP437 is an American English IBM PC DOS encoding, and many such
-legacy BBS programs are unable to negotiate about or present characters in any
-other encoding. Because this BBS does not negotiate encoding, the default is
-assumed to be US-ASCII, the ``--encoding`` parameter changes this.
+the remote end. This example legacy telnet BBS is unable to negotiate about
+or present characters in any other encoding but CP437. Without these arguments,
+Telnet protocol would dictate our session to be US-ASCII.
 
-See also `--force-binary`, which may also sometimes be required with
-telnetlib3-client and telnetlib3-server. In the original Telnet protocol
+Argument `--force-binary` is *also* required in many cases, with both
+``telnetlib3-client`` and ``telnetlib3-server``. In the original Telnet protocol
 specifications, the Network Virtual Terminal (NVT) is defined as 7-bit US-ASCII,
-and this is the default state for both ends until negotiated otherwise.
+and this is the default state for both ends until negotiated otherwise by RFC-856_
+by negotiation of BINARY TRANSMISSION.
 
-RFC-856_ (BINARY TRANSMISSION) is the option that allows you to break out of the
-7-bit ASCII constraint. However, **many common telnet clients and servers fail
-to negotiate for BINARY** -- it may be rejected (DONT, WONT), unanswered, or
-only negotiated for a single direction. To support such clients and servers, use
-``--force-binary``, which forces bi-direction binary transmission no matter the
-state of BINARY negotiation.
+However, **many common telnet clients and servers fail to negotiate for BINARY**
+correctly or at all. Using ``--force-binary`` allows non-ASCII encodings to be
+used with those kinds of clients.
 
 A Telnet Server that prefers "utf8" encoding, and, transmits it even in the case
 of failed BINARY negotiation, to support a "dumb" telnet client like netcat::
