@@ -97,37 +97,41 @@ Writing a Telnet Client that plays the "war game" against this server:
 
     asyncio.run(main())
 
-More advanced servers and client examples are provided at the python module
-paths `telnetlib3.server` and `telnetlib3.client`.  Find their filepaths using
-command::
-
-     python -c 'import telnetlib3.server;print(telnetlib3.server.__file__, telnetlib3.client.__file__)'
-
-You may also use them as the entrypoint for your program by using the ``--shell`` argument,
-more details at end of section Command-line_.
-
 Command-line
 ------------
 
-Two command-line scripts are distributed with this package.
+Two command-line scripts are distributed with this package, `telnetlib3-client` and `telnetlib3-server`.
+
+Both command-line scripts accept argument ``--shell=my_module.fn_shell``
+describing a python module path to an function of signature ``async def
+shell(reader, writer)``, as in the above examples.
+
+These scripts also serve as more advanced server and client examples that
+perform advanced telnet option negotation and may serve as a basis for
+creating your own custom negotiation behaviors.
+
+Find their filepaths using command::
+
+     python -c 'import telnetlib3.server;print(telnetlib3.server.__file__, telnetlib3.client.__file__)'
 
 ``telnetlib3-client``
 
-  Small terminal telnet client.  Some example destinations and options::
+This is an entry point for command `python -m telnetlib3.client`
+
+Small terminal telnet client.  Some example destinations and options::
 
     telnetlib3-client --loglevel warn 1984.ws
     telnetlib3-client --loglevel debug --logfile logfile.txt nethack.alt.org 
     telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
 
-  This is an entry point for command `python -m telnetlib3.client`
-
-  Note the use of `--encoding=cp437` and `--force-binary`, see section Encoding_
-  below for details.
+See section Encoding_ for explanation of `--encoding=cp437` and `--force-binary`.
 
 ``telnetlib3-server``
 
-  Telnet server providing the default debugging shell.  This provides a simple
-  shell server that allows introspection of the session's values, for example::
+This is an entry point for command `python -m telnetlib3.server`
+
+Telnet server providing the default debugging shell.  This provides a simple
+shell server that allows introspection of the session's values, for example::
 
      tel:sh> help
      quit, writer, slc, toggle [option|all], reader, proto
@@ -151,13 +155,6 @@ Two command-line scripts are distributed with this package.
 
      tel:sh> writer
      <TelnetWriter server mode:local -lineflow +xon_any +slc_sim client-will:NAWS,NEW_ENVIRON,TTYPE>
-
-  This is an entry point for command `python -m telnetlib3.server`
-
-
-Both command-line scripts accept argument ``--shell=my_module.fn_shell``
-describing a python module path to an function of signature ``async def
-shell(reader, writer)``, as in the above examples.
 
 Encoding
 --------
