@@ -1,5 +1,8 @@
 History
 =======
+2.0.7
+ * bugfix: respond WILL CHARSET with DO CHARSET
+
 2.0.6
  * bugfix: corrected CHARSET protocol client/server role behavior :ghissue:`59`
  * bugfix: allow ``--force-binary`` and ``--encoding`` to be combined to prevent
