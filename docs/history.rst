@@ -1,15 +1,16 @@
 History
 =======
 2.0.6
- * bugfix: correcteded CHARSET protocol client/server role behavior
+ * bugfix: correcteded CHARSET protocol client/server role behavior :ghissue:`59`
  * bugfix: allow ``--force-binary`` and ``--encoding`` to be combined to prevent
-   long ``encoding failed after 4.00s`` connection delay, see Encoding_.
+   long ``encoding failed after 4.00s`` connection delay at start of server
+   connection with non-compliant clients, :ghissue:`74`, see Encoding_.
  * bugfix: remove `'NoneType' object has no attribute 'is_closing'` exception
    message on some types of closed connections
  * bugfix: further improve ``telnetlib3-client`` performance, capable of
    11.2 Mbit/s or more.
  * bugfix: more gracefully handle unsupported SB STATUS codes.
- * feature: ``telnetlib3-client`` now negotiates terminal resize vents.
+ * feature: ``telnetlib3-client`` now negotiates terminal resize events.
 
 2.0.5
  * feature: legacy `telnetlib.py` from Python 3.11 now redistributed,
