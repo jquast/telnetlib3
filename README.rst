@@ -118,7 +118,7 @@ Find their filepaths using command::
 telnetlib3-client
 ~~~~~~~~~~~~~~~~~
 
-This is an entry point for command `python -m telnetlib3.client`
+This is an entry point for command ``python -m telnetlib3.client``
 
 Small terminal telnet client.  Some example destinations and options::
 
@@ -166,11 +166,10 @@ See section Encoding_ about arguments, ``--encoding=cp437`` and ``--force-binary
 telnetlib3-server
 ~~~~~~~~~~~~~~~~~
 
-This is an entry point for command `python -m telnetlib3.server`
+This is an entry point for command ``python -m telnetlib3.server``
 
 Telnet server providing the default debugging shell.  This provides a simple
 shell server that allows introspection of the session's values.
-
 
 Example session::
 
