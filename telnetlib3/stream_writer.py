@@ -1661,7 +1661,13 @@ class TelnetWriter:
             # by sending WILL CHARSET after receiving WILL CHARSET from client
             if opt == CHARSET and self.server:
                 if not self.local_option.enabled(CHARSET):
-                    self.iac(WILL, CHARSET)
+                    # Special case: reciprocate WILL CHARSET with our own WILL CHARSET
+                    # but don't set pending_option since we're not expecting a response
+                    self.log.debug(
+                        "send IAC WILL CHARSET (reciprocating client's WILL)"
+                    )
+                    self.local_option[CHARSET] = True
+                    self.send_iac(IAC + WILL + CHARSET)
 
             # call one of the following callbacks.
             # For CHARSET, only server should automatically initiate REQUEST

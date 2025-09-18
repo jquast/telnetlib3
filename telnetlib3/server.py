@@ -19,6 +19,7 @@ import signal
 # local
 from . import server_base
 from . import accessories
+from .telopt import name_commands
 
 __all__ = ("TelnetServer", "create_server", "run_server", "parse_server_args")
 
@@ -128,14 +129,43 @@ class TelnetServer(server_base.BaseServer):
             self.writer.iac(DO, CHARSET)
 
     def check_negotiation(self, final=False):
-        from .telopt import TTYPE
+        from .telopt import TTYPE, NEW_ENVIRON, CHARSET, SB
+
+        # Debug log to see which options are still pending
+        pending = [
+            (name_commands(opt), val)
+            for opt, val in self.writer.pending_option.items()
+            if val
+        ]
+        if pending:
+            logger.debug("Pending options: %r", pending)
+
+        # Check if we're waiting for important subnegotiations -- environment or charset information
+        # These are critical for proper encoding determination
+        waiting_for_environ = (
+            SB + NEW_ENVIRON in self.writer.pending_option
+            and self.writer.pending_option[SB + NEW_ENVIRON]
+        )
+        waiting_for_charset = (
+            SB + CHARSET in self.writer.pending_option
+            and self.writer.pending_option[SB + CHARSET]
+        )
+
+        if waiting_for_environ or waiting_for_charset:
+            if final:
+                logger.warning(
+                    "Waiting for critical subnegotiation: environ=%s, charset=%s",
+                    waiting_for_environ,
+                    waiting_for_charset,
+                )
 
         parent = super().check_negotiation()
 
-        # in addition to the base class negotiation check, periodically check
+        # In addition to the base class negotiation check, periodically check
         # for completion of bidirectional encoding negotiation.
         result = self._check_encoding()
         encoding = self.encoding(outgoing=True, incoming=True)
+
         if not self.waiter_encoding.done() and result:
             logger.debug("encoding complete: {0!r}".format(encoding))
             self.waiter_encoding.set_result(result)
@@ -164,6 +194,11 @@ class TelnetServer(server_base.BaseServer):
             )
             self.waiter_encoding.set_result(result)  # False
             return parent
+
+        # Now consider the pending critical options for the final return value
+        # This ensures we don't complete negotiation until env/charset are done
+        if waiting_for_environ or waiting_for_charset:
+            return False
 
         return parent and result
 
@@ -331,9 +366,9 @@ class TelnetServer(server_base.BaseServer):
 
             Any empty return value indicates that no encodings are offered.
 
-        The default return value includes the most common modern encodings::
+        The default return value includes a few common encodings::
 
-            ['UTF-8', 'UTF-16', 'LATIN1', 'US-ASCII', 'CP1252', 'ISO-8859-15']
+            ['UTF-8', 'UTF-16', 'LATIN1', 'US-ASCII', 'CP1252', 'ISO-8859-15', 'CP437', 'US-ASCII']
         """
         return [
             "UTF-8",  # Most common modern encoding
@@ -341,6 +376,7 @@ class TelnetServer(server_base.BaseServer):
             "LATIN1",  # ISO-8859-1, Western European
             "CP1252",  # Windows Western European
             "ISO-8859-15",  # Updated Western European (includes Euro symbol)
+            "CP437",  # PC-DOS / US telnet BBS systems
             "US-ASCII",  # Basic ASCII
         ]
 
@@ -401,16 +437,26 @@ class TelnetServer(server_base.BaseServer):
 
     def _check_encoding(self):
         # Periodically check for completion of ``waiter_encoding``.
-        from .telopt import DO, BINARY
+        from .telopt import DO, BINARY, CHARSET, SB
 
+        # Check if we need to request client to use BINARY mode for client-to-server communication
         if (
             self.writer.outbinary
             and not self.writer.inbinary
-            and not DO + BINARY in self.writer.pending_option
+            and not (DO + BINARY) in self.writer.pending_option
         ):
             logger.debug("BINARY in: direction request.")
             self.writer.iac(DO, BINARY)
             return False
+
+        # Check if CHARSET is enabled but no REQUEST has been sent yet
+        if (
+            self.writer.remote_option.enabled(CHARSET)
+            and self.writer.local_option.enabled(CHARSET)
+            and not (SB + CHARSET) in self.writer.pending_option
+        ):
+            logger.debug("Initiating CHARSET REQUEST after capabilities negotiation")
+            self.writer.request_charset()
 
         # are we able to negotiate BINARY bidirectionally?
         # or, is force_binary=True ?
