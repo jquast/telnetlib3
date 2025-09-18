@@ -1655,6 +1655,12 @@ class TelnetWriter:
                 raise ValueError(
                     "cannot recv WILL {} on client end.".format(name_command(opt))
                 )
+
+            # First, we need to acknowledge WILL with DO for all options
+            # This was missing for CHARSET when received by client
+            if opt == CHARSET and self.client:
+                self.iac(DO, CHARSET)
+
             self.remote_option[opt] = True
 
             # Special handling for CHARSET: server should declare its own capability
