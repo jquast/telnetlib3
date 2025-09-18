@@ -38,6 +38,7 @@ instances of `telnetlib` to `telnetlib3`:
     import telnetlib3.telnetlib as telnetlib
     # - or - 
     from telnetlib3 import Telnet, ECHO, BINARY
+    from telnetlib3.telnetlib import Telnet, ECHO, BINARY
 
 .. _telnetlib.py: https://docs.python.org/3.12/library/telnetlib.html
 
@@ -45,7 +46,7 @@ instances of `telnetlib` to `telnetlib3`:
 Quick Example
 -------------
 
-Authoring a Telnet Server using Streams interface that offers a basic war game:
+Writing a Telnet Server using Streams interface that offers a basic war game:
 
 .. code-block:: python
 
@@ -62,13 +63,12 @@ Authoring a Telnet Server using Streams interface that offers a basic war game:
         writer.close()
 
     async def main():
-        loop = asyncio.get_event_loop()
         server = await telnetlib3.create_server('127.0.0.1', 6023, shell=shell)
         await server.wait_closed()
 
     asyncio.run(main())
 
-Authoring a Telnet Client that plays the war game with this server:
+Writing a Telnet Client that plays the war game with this server:
 
 .. code-block:: python
 
@@ -92,7 +92,6 @@ Authoring a Telnet Client that plays the war game with this server:
         print()
 
     async def main():
-        loop = asyncio.get_event_loop()
         reader, writer = await telnetlib3.open_connection('localhost', 6023, shell=shell)
         await writer.protocol.waiter_closed
 
@@ -246,4 +245,4 @@ The following RFC specifications are implemented:
 Further Reading
 ---------------
 
-Further documentation available at https://telnetlib3.readthedocs.org/
+Further documentation available at https://telnetlib3.readthedocs.io/
