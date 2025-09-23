@@ -7,6 +7,11 @@ import telnetlib3
 from telnetlib3.tests.accessories import unused_tcp_port, bind_host
 
 
+@pytest.fixture(scope="module")
+def event_loop_policy():
+    return uvloop.EventLoopPolicy()
+
+
 async def minimal_shell(reader, writer):
     """Minimal shell that just sends OK and closes."""
     writer.write("OK\r\n")
