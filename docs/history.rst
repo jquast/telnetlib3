@@ -1,5 +1,8 @@
 History
 =======
+2.0.8
+ * bugfix: object has no attribute '_extra' :ghissue:`100`
+
 2.0.7
  * bugfix: respond WILL CHARSET with DO CHARSET
 
