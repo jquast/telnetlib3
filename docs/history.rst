@@ -10,7 +10,7 @@ History
  * bugfix: corrected CHARSET protocol client/server role behavior :ghissue:`59`
  * bugfix: allow ``--force-binary`` and ``--encoding`` to be combined to prevent
    long ``encoding failed after 4.00s`` delays in ``telnetlib3-server`` with
-   non-compliant clients, :ghissue:`74`, see Encoding_.
+   non-compliant clients, :ghissue:`74`.
  * bugfix: reduce ``telnetlib3-client`` connection delay, session begins as
    soon as TTYPE and either NEW_ENVIRON or CHARSET negotiation is completed.
  * bugfix: remove `'NoneType' object has no attribute 'is_closing'` message

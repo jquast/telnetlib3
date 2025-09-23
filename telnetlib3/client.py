@@ -144,12 +144,18 @@ class TelnetClient(client_base.BaseClient):
         Callback for responding to CHARSET requests.
 
         Simplified policy:
-        1. If client has explicit encoding that matches an offered charset, use it
-        2. If client has explicit encoding that isn't offered:
+
+        - If client has explicit encoding that matches an offered charset, use it
+
+        - If client has explicit encoding that isn't offered,
+
            - For Latin-1 (weak default), accept first viable offered encoding
+
            - For other explicit encodings, reject (keep client's choice)
-        3. If no explicit encoding preference, accept first viable offered encoding
-        4. If no viable encodings found, reject
+
+        - If no explicit encoding preference, accept first viable offered encoding
+
+        - If no viable encodings found, reject
 
         :param list offered: list of CHARSET options offered by server.
         :returns: character encoding agreed to be used, or "" to reject.
