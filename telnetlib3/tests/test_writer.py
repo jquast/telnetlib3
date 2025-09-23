@@ -190,7 +190,7 @@ async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
     )
 
     _, client_writer = await telnetlib3.open_connection(
-        host=bind_host, port=unused_tcp_port, connect_minwait=0.05
+        host=bind_host, port=unused_tcp_port, connect_minwait=0.05, connect_maxwait=0.05
     )
 
     # say it once,

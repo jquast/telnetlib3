@@ -245,7 +245,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     def get_extra_info(self, name, default=None):
         """Get optional server protocol or transport information."""
         if self._transport:
-            default = self._transport._extra.get(name, default)
+            default = self._transport.get_extra_info(name, default)
         return self._extra.get(name, default)
 
     def begin_negotiation(self):

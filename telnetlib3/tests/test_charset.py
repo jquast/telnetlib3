@@ -447,6 +447,7 @@ async def test_charset_send_no_viable_offers(bind_host, unused_tcp_port):
         host=bind_host,
         port=unused_tcp_port,
         connect_minwait=0.05,
+        connect_maxwait=0.25,
     )
 
     # Verify behavior - this should stick with the default encoding
@@ -466,6 +467,7 @@ async def test_charset_explicit_non_latin1_encoding(bind_host, unused_tcp_port):
         host=bind_host,
         port=unused_tcp_port,
         connect_minwait=0.05,
+        connect_maxwait=0.25,
     )
 
     # Verify behavior - this should stick with the default encoding
