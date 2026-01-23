@@ -3,14 +3,14 @@
 # std imports
 import asyncio
 
-# 3rd party
-import pytest
-
 # local
 # local imports
 import telnetlib3
 import telnetlib3.stream_writer
-from telnetlib3.tests.accessories import bind_host, unused_tcp_port
+from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+    bind_host,
+    unused_tcp_port,
+)
 
 
 async def test_telnet_server_on_ttype(bind_host, unused_tcp_port):
@@ -78,11 +78,11 @@ async def test_telnet_server_on_ttype_beyond_max(bind_host, unused_tcp_port):
 
             srv_instance = await asyncio.wait_for(_waiter, 0.5)
             for idx in range(telnetlib3.TelnetServer.TTYPE_LOOPMAX):
-                key = "ttype{0}".format(idx + 1)
+                key = f"ttype{idx + 1}"
                 expected = given_ttypes[idx]
                 assert srv_instance.get_extra_info(key) == expected, (idx, key)
 
-            key = "ttype{0}".format(telnetlib3.TelnetServer.TTYPE_LOOPMAX + 1)
+            key = f"ttype{telnetlib3.TelnetServer.TTYPE_LOOPMAX + 1}"
             expected = given_ttypes[-1]
             assert srv_instance.get_extra_info(key) == expected, (idx, key)
             assert srv_instance.get_extra_info("TERM") == given_ttypes[-1]

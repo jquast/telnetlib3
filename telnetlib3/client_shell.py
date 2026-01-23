@@ -37,7 +37,7 @@ else:
         """
 
         ModeDef = collections.namedtuple(
-            "mode", ["iflag", "oflag", "cflag", "lflag", "ispeed", "ospeed", "cc"]
+            "ModeDef", ["iflag", "oflag", "cflag", "lflag", "ispeed", "ospeed", "cc"]
         )
 
         def __init__(self, telnet_writer):

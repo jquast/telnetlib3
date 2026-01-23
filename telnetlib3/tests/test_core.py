@@ -7,7 +7,6 @@ import time
 import asyncio
 import platform
 import tempfile
-import unittest.mock
 
 # 3rd party
 import pytest
@@ -16,7 +15,10 @@ import pexpect
 # local
 # local imports
 import telnetlib3
-from telnetlib3.tests.accessories import bind_host, unused_tcp_port
+from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+    bind_host,
+    unused_tcp_port,
+)
 
 
 async def test_create_server(bind_host, unused_tcp_port):
@@ -116,7 +118,7 @@ async def test_telnet_client_open_close_by_write(bind_host, unused_tcp_port):
         ):
             writer.close()
             await writer.wait_closed()
-            assert (await reader.read()) == ""
+            assert not await reader.read()
             assert writer.is_closing()
 
 
@@ -137,7 +139,7 @@ async def test_telnet_client_open_closed_by_peer(bind_host, unused_tcp_port):
         ):
             # read until EOF, no data received.
             data_received = await reader.read()
-            assert data_received == ""
+            assert not data_received
 
 
 async def test_telnet_server_advanced_negotiation(bind_host, unused_tcp_port):
@@ -558,7 +560,7 @@ async def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port):
         "--loglevel=info",
         "--connect-minwait=0.15",
         "--connect-maxwait=0.15",
-        "--logfile={0}".format(logfile),
+        f"--logfile={logfile}",
     ]
 
     async def shell(reader, writer):
@@ -583,7 +585,7 @@ async def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port):
 
         stdout, stderr = await asyncio.wait_for(proc.communicate(b"\r"), 2)
 
-        with open(logfile) as f:
+        with open(logfile, encoding="utf-8") as f:
             logfile_output = f.read().splitlines()
         assert stdout == (
             b"Escape character is '^]'.\n"

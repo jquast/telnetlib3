@@ -6,6 +6,17 @@
 # isort: off
 # Import order matters: server_shell must come before server due to
 # function_lookup("telnetlib3.telnet_server_shell") at server.py load time
+from . import server_base
+from . import server_shell
+from . import server
+from . import stream_writer
+from . import stream_reader
+from . import client_base
+from . import client_shell
+from . import client
+from . import telopt
+from . import slc
+from . import telnetlib
 from .server_base import *  # noqa
 from .server_shell import *  # noqa
 from .server import *  # noqa

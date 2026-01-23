@@ -7,7 +7,7 @@ import asyncio
 # local
 from . import slc, telopt, accessories
 
-CR, LF, NUL = "\r\n\x00"
+CR, LF, NUL = ("\r", "\n", "\x00")
 ESC = "\x1b"
 
 

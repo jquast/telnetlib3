@@ -6,7 +6,47 @@ import pytest
 
 # local
 import telnetlib3
-from telnetlib3.tests.accessories import bind_host, unused_tcp_port
+from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+    bind_host,
+    unused_tcp_port,
+)
+
+
+class SimulSLCServer(telnetlib3.BaseServer):
+    """Test server for SLC simulation in kludge mode."""
+
+    slc_callbacks = [
+        getattr(telnetlib3.slc, "SLC_" + key)
+        for key in (
+            "IP",
+            "AO",
+            "AYT",
+            "ABORT",
+            "EOF",
+            "SUSP",
+            "EC",
+            "EL",
+            "EW",
+            "RP",
+            "LNEXT",
+            "XON",
+            "XOFF",
+        )
+    ]
+
+    def __init__(self):
+        super().__init__()
+        self.waiters = None
+
+    def connection_made(self, transport):
+        super().connection_made(transport)
+        self.waiters = {slc_cmd: asyncio.Future() for slc_cmd in self.slc_callbacks}
+
+        for slc_cmd in self.slc_callbacks:
+            self.writer.set_slc_callback(
+                slc_byte=slc_cmd,
+                func=lambda byte: self.waiters[byte].set_result(byte),
+            )
 
 
 def test_writer_instantiation_safety():
@@ -193,7 +233,7 @@ async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
 
             # say it again (this call is suppressed)
             result = client_writer.iac(DONT, ECHO)
-            assert result == False
+            assert result is False
 
             server_writer = (await asyncio.wait_for(_waiter_connected, 0.5)).writer
 
@@ -227,37 +267,6 @@ async def test_slc_simul(bind_host, unused_tcp_port):
         _waiter_input.set_result((writer.protocol.waiters, result))
         writer.close()
         await writer.wait_closed()
-
-    class SimulSLCServer(telnetlib3.BaseServer):
-        slc_callbacks = [
-            getattr(telnetlib3.slc, "SLC_" + key)
-            # no default value for break, sync, or end-of-record.
-            for key in (
-                "IP",
-                "AO",
-                "AYT",
-                "ABORT",
-                "EOF",
-                "SUSP",
-                "EC",
-                "EL",
-                "EW",
-                "RP",
-                "LNEXT",
-                "XON",
-                "XOFF",
-            )
-        ]
-
-        def connection_made(self, transport):
-            super().connection_made(transport)
-            self.waiters = {slc_cmd: asyncio.Future() for slc_cmd in self.slc_callbacks}
-
-            for slc_cmd in self.slc_callbacks:
-                self.writer.set_slc_callback(
-                    slc_byte=slc_cmd,
-                    func=lambda byte: self.waiters[byte].set_result(byte),
-                )
 
     async with create_server(
         protocol_factory=SimulSLCServer,

@@ -16,7 +16,7 @@ import signal
 import asyncio
 import logging
 import argparse
-import collections
+from typing import Callable, NamedTuple, Optional
 
 # local
 from . import accessories, server_base
@@ -24,40 +24,24 @@ from .telopt import name_commands
 
 __all__ = ("TelnetServer", "create_server", "run_server", "parse_server_args")
 
-CONFIG = collections.namedtuple(
-    "CONFIG",
-    [
-        "host",
-        "port",
-        "loglevel",
-        "logfile",
-        "logfmt",
-        "shell",
-        "encoding",
-        "force_binary",
-        "timeout",
-        "connect_maxwait",
-        "pty_exec",
-        "pty_args",
-        "robot_check",
-        "pty_fork_limit",
-    ],
-)(
-    host="localhost",
-    port=6023,
-    loglevel="info",
-    logfile=None,
-    logfmt=accessories._DEFAULT_LOGFMT,  # pylint: disable=protected-access
-    shell=accessories.function_lookup("telnetlib3.telnet_server_shell"),
-    encoding="utf8",
-    force_binary=False,
-    timeout=300,
-    connect_maxwait=4.0,
-    pty_exec=None,
-    pty_args=None,
-    robot_check=False,
-    pty_fork_limit=0,
-)
+
+class CONFIG(NamedTuple):
+    """Default configuration for the telnet server."""
+
+    host: str = "localhost"
+    port: int = 6023
+    loglevel: str = "info"
+    logfile: Optional[str] = None
+    logfmt: str = accessories._DEFAULT_LOGFMT  # pylint: disable=protected-access
+    shell: Callable = accessories.function_lookup("telnetlib3.telnet_server_shell")
+    encoding: str = "utf8"
+    force_binary: bool = False
+    timeout: int = 300
+    connect_maxwait: float = 4.0
+    pty_exec: Optional[str] = None
+    pty_args: Optional[str] = None
+    robot_check: bool = False
+    pty_fork_limit: int = 0
 logger = logging.getLogger("telnetlib3.server")
 
 

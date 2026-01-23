@@ -16,7 +16,10 @@ import pexpect
 # local
 # local imports
 import telnetlib3
-from telnetlib3.tests.accessories import bind_host, unused_tcp_port
+from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+    bind_host,
+    unused_tcp_port,
+)
 
 
 async def test_telnet_server_on_naws(bind_host, unused_tcp_port):
@@ -29,8 +32,8 @@ async def test_telnet_server_on_naws(bind_host, unused_tcp_port):
     given_cols, given_rows = 40, 20
 
     class ServerTestNaws(telnetlib3.TelnetServer):
-        def on_naws(self, width, height):
-            super().on_naws(width, height)
+        def on_naws(self, rows, cols):
+            super().on_naws(rows, cols)
             _waiter.set_result(self)
 
     async with create_server(
@@ -99,9 +102,9 @@ async def test_telnet_client_send_tty_naws(bind_host, unused_tcp_port):
     ]
 
     class ServerTestNaws(telnetlib3.TelnetServer):
-        def on_naws(self, width, height):
-            super().on_naws(width, height)
-            _waiter.set_result((height, width))
+        def on_naws(self, rows, cols):
+            super().on_naws(rows, cols)
+            _waiter.set_result((cols, rows))
             asyncio.get_event_loop().call_soon(self.connection_lost, None)
 
     async with create_server(
@@ -129,9 +132,9 @@ async def test_telnet_client_send_naws_65534(bind_host, unused_tcp_port):
     expect_cols, expect_rows = 65535, 0
 
     class ServerTestNaws(telnetlib3.TelnetServer):
-        def on_naws(self, width, height):
-            super().on_naws(width, height)
-            _waiter.set_result((height, width))
+        def on_naws(self, rows, cols):
+            super().on_naws(rows, cols)
+            _waiter.set_result((cols, rows))
 
     async with create_server(
         protocol_factory=ServerTestNaws,

@@ -9,7 +9,7 @@ from .client import open_connection
 from .accessories import make_reader_task
 from .server_shell import readline
 
-CR, LF, NUL = "\r\n\x00"
+CR, LF, NUL = ("\r", "\n", "\x00")
 
 # std imports
 

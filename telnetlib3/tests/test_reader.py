@@ -494,7 +494,7 @@ async def test_telnet_reader_readuntil_pattern_invalid_arguments():
 
     # Test ValueError for invalid pattern type
     with pytest.raises(ValueError, match="pattern should be a re.Pattern object"):
-        await reader.readuntil_pattern(None)  # type: ignore
+        await reader.readuntil_pattern(None)
 
     with pytest.raises(ValueError, match="Only bytes patterns are supported"):
         await reader.readuntil_pattern(re.compile("this is a string pattern"))

@@ -3,14 +3,14 @@
 # std imports
 import asyncio
 
-# 3rd party
-import pytest
-
 # local
 # local imports
 import telnetlib3
 import telnetlib3.stream_writer
-from telnetlib3.tests.accessories import bind_host, unused_tcp_port
+from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+    bind_host,
+    unused_tcp_port,
+)
 
 
 async def test_server_demands_remote_linemode_client_agrees(bind_host, unused_tcp_port):

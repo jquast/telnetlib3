@@ -1,14 +1,8 @@
 """Test CHARSET, rfc-2066_."""
 
-"""Test CHARSET, rfc-2066_."""
-
 # std imports
-import codecs
 import asyncio
 import collections
-
-# 3rd party
-import pytest
 
 # local
 import telnetlib3
@@ -18,17 +12,18 @@ from telnetlib3.telopt import (
     SB,
     SE,
     IAC,
-    DONT,
     WILL,
     WONT,
     TTYPE,
     CHARSET,
     REQUEST,
     ACCEPTED,
-    REJECTED,
 )
 from telnetlib3.stream_writer import TelnetWriter
-from telnetlib3.tests.accessories import bind_host, unused_tcp_port
+from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+    bind_host,
+    unused_tcp_port,
+)
 
 # local imports
 
@@ -82,18 +77,17 @@ class CustomTelnetClient(telnetlib3.TelnetClient):
             # Test LookupError handling with explicit encoding
             self.default_encoding = "unknown-encoding-xyz"
             return super().send_charset(offered)
-        elif self.charset_behavior == "no_viable_offers":
+        if self.charset_behavior == "no_viable_offers":
             # Return empty offers list to test no viable offers path
             return super().send_charset([])
-        elif self.charset_behavior == "explicit_non_latin1":
+        if self.charset_behavior == "explicit_non_latin1":
             # Test rejection when explicit encoding isn't offered
             self.default_encoding = "utf-16"
             return super().send_charset(["utf-8", "ascii"])
-        elif self.charset_response is not None:
+        if self.charset_response is not None:
             # Return a predetermined response
             return self.charset_response
-        else:
-            return super().send_charset(offered)
+        return super().send_charset(offered)
 
 
 # --- Basic CHARSET Tests ---
@@ -187,7 +181,7 @@ async def test_telnet_client_no_charset(bind_host, unused_tcp_port):
             connect_minwait=0.05,
         ) as (reader, writer):
             val = await asyncio.wait_for(_waiter, 0.5)
-            assert val == ""
+            assert not val
             assert writer.get_extra_info("charset") == "latin1"
 
 

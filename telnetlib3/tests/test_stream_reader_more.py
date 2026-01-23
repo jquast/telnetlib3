@@ -1,12 +1,11 @@
 # std imports
-import re
 import asyncio
 
 # 3rd party
 import pytest
 
 # local
-from telnetlib3.stream_reader import TelnetReader, TelnetReaderUnicode
+from telnetlib3.stream_reader import TelnetReader
 
 
 class PauseNIErrorTransport:

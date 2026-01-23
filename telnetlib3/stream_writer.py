@@ -1040,15 +1040,15 @@ class TelnetWriter:
         ), name_command(cmd)
         self._iac_callback[cmd] = func
 
-    def handle_nop(self, cmd):
+    def handle_nop(self, cmd):  # pylint:disable=unused-argument
         """Handle IAC No-Operation (NOP)."""
         self.log.debug("IAC NOP: Null Operation (unhandled).")
 
-    def handle_ga(self, cmd):
+    def handle_ga(self, cmd):  # pylint:disable=unused-argument
         """Handle IAC Go-Ahead (GA)."""
         self.log.debug("IAC GA: Go-Ahead (unhandled).")
 
-    def handle_dm(self, cmd):
+    def handle_dm(self, cmd):  # pylint:disable=unused-argument
         """Handle IAC Data-Mark (DM)."""
         self.log.debug("IAC DM: Data-Mark (unhandled).")
 

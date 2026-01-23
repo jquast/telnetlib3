@@ -9,7 +9,10 @@ import pytest
 
 # local
 import telnetlib3
-from telnetlib3.tests.accessories import bind_host, unused_tcp_port
+from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+    bind_host,
+    unused_tcp_port,
+)
 
 pytestmark = [
     pytest.mark.skipif(sys.platform == "win32", reason="PTY not supported on Windows"),
@@ -140,7 +143,7 @@ async def test_pty_shell_child_exit_closes_connection(
             assert "done" in result
 
             remaining = await asyncio.wait_for(reader.read(), 3.0)
-            assert remaining == ""
+            assert not remaining
 
 
 async def test_pty_shell_client_disconnect_kills_child(
