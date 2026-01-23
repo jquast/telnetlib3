@@ -26,6 +26,7 @@ def require_no_capture(request):
 
 async def test_pty_shell_basic_cat(bind_host, unused_tcp_port, require_no_capture):
     """Test basic echo with /bin/cat."""
+    # local
     from telnetlib3 import make_pty_shell
     from telnetlib3.tests.accessories import create_server, open_connection
 
@@ -63,6 +64,7 @@ async def test_pty_shell_basic_cat(bind_host, unused_tcp_port, require_no_captur
 
 async def test_pty_shell_term_propagation(bind_host, unused_tcp_port, require_no_capture):
     """Test TERM environment propagation."""
+    # local
     from telnetlib3 import make_pty_shell
     from telnetlib3.tests.accessories import create_server, open_connection
 
@@ -105,6 +107,7 @@ async def test_pty_shell_child_exit_closes_connection(
     bind_host, unused_tcp_port, require_no_capture
 ):
     """Test that child exit closes connection gracefully."""
+    # local
     from telnetlib3 import make_pty_shell
     from telnetlib3.tests.accessories import create_server, open_connection
 
@@ -144,6 +147,7 @@ async def test_pty_shell_client_disconnect_kills_child(
     bind_host, unused_tcp_port, require_no_capture
 ):
     """Test that client disconnect kills child process."""
+    # local
     from telnetlib3 import make_pty_shell
     from telnetlib3.tests.accessories import create_server, open_connection
 
@@ -183,6 +187,7 @@ async def test_pty_shell_client_disconnect_kills_child(
 
 async def test_pty_shell_naws_resize(bind_host, unused_tcp_port, require_no_capture):
     """Test NAWS resize forwarding."""
+    # local
     from telnetlib3 import make_pty_shell
     from telnetlib3.tests.accessories import create_server, open_connection
 

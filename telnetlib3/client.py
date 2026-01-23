@@ -74,6 +74,7 @@ class TelnetClient(client_base.BaseClient):
         and character set negotiation.
         """
         # pylint: disable=import-outside-toplevel
+        # local
         from telnetlib3.telopt import NAWS, TTYPE, TSPEED, CHARSET, XDISPLOC, NEW_ENVIRON
 
         super().connection_made(transport)
@@ -303,6 +304,7 @@ class TelnetTerminalClient(TelnetClient):
     @staticmethod
     def _winsize():
         try:
+            # std imports
             import fcntl  # pylint: disable=import-outside-toplevel
             import termios  # pylint: disable=import-outside-toplevel
 

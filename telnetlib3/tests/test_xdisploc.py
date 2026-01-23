@@ -15,6 +15,7 @@ from telnetlib3.tests.accessories import bind_host, unused_tcp_port
 
 async def test_telnet_server_on_xdisploc(bind_host, unused_tcp_port):
     """Test Server's callback method on_xdisploc()."""
+    # local
     from telnetlib3.telopt import IS, SB, SE, IAC, WILL, XDISPLOC
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
@@ -39,6 +40,7 @@ async def test_telnet_server_on_xdisploc(bind_host, unused_tcp_port):
 
 async def test_telnet_client_send_xdisploc(bind_host, unused_tcp_port):
     """Test Client's callback method send_xdisploc()."""
+    # local
     from telnetlib3.tests.accessories import create_server, open_connection
 
     _waiter = asyncio.Future()
@@ -50,6 +52,7 @@ async def test_telnet_client_send_xdisploc(bind_host, unused_tcp_port):
             _waiter.set_result(xdisploc)
 
         def begin_advanced_negotiation(self):
+            # local
             from telnetlib3.telopt import DO, XDISPLOC
 
             super().begin_advanced_negotiation()

@@ -15,6 +15,7 @@ from telnetlib3.tests.accessories import bind_host, unused_tcp_port
 
 async def test_telnet_server_on_ttype(bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype()."""
+    # local
     from telnetlib3.telopt import IS, SB, SE, IAC, WILL, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
@@ -41,6 +42,7 @@ async def test_telnet_server_on_ttype(bind_host, unused_tcp_port):
 
 async def test_telnet_server_on_ttype_beyond_max(bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype() with long list."""
+    # local
     from telnetlib3.telopt import IS, SB, SE, IAC, WILL, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
@@ -88,6 +90,7 @@ async def test_telnet_server_on_ttype_beyond_max(bind_host, unused_tcp_port):
 
 async def test_telnet_server_on_ttype_empty(bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype(): empty value is ignored."""
+    # local
     from telnetlib3.telopt import IS, SB, SE, IAC, WILL, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
@@ -116,6 +119,7 @@ async def test_telnet_server_on_ttype_empty(bind_host, unused_tcp_port):
 
 async def test_telnet_server_on_ttype_looped(bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype() when value looped."""
+    # local
     from telnetlib3.telopt import IS, SB, SE, IAC, WILL, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
@@ -149,6 +153,7 @@ async def test_telnet_server_on_ttype_looped(bind_host, unused_tcp_port):
 
 async def test_telnet_server_on_ttype_repeated(bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype() when value repeats."""
+    # local
     from telnetlib3.telopt import IS, SB, SE, IAC, WILL, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
@@ -182,6 +187,7 @@ async def test_telnet_server_on_ttype_repeated(bind_host, unused_tcp_port):
 
 async def test_telnet_server_on_ttype_mud(bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype() for MUD clients (MTTS)."""
+    # local
     from telnetlib3.telopt import IS, SB, SE, IAC, WILL, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 

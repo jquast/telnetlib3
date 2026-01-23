@@ -38,7 +38,9 @@ async def filter_ansi(reader, _writer):
 __all__ = ("telnet_server_shell",)
 
 
-async def telnet_server_shell(reader, writer):  # pylint: disable=too-complex,too-many-branches,too-many-statements
+async def telnet_server_shell(
+    reader, writer
+):  # pylint: disable=too-complex,too-many-branches,too-many-statements
     """
     A default telnet shell, appropriate for use with telnetlib3.create_server.
 
@@ -282,8 +284,7 @@ def do_toggle(writer, option):
 
     if not option:
         return "\r\n".join(
-            f"{opt} {'ON' if enabled else 'off'}"
-            for opt, enabled in sorted(tbl_opt.items())
+            f"{opt} {'ON' if enabled else 'off'}" for opt, enabled in sorted(tbl_opt.items())
         )
 
     msgs = []

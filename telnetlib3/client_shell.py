@@ -166,10 +166,8 @@ else:
             if term._istty and telnet_writer.will_echo:  # pylint: disable=protected-access
                 linesep = "\r\n"
             stdin, stdout = await term.make_stdio()
-            stdout.write(
-                f"Escape character is '{accessories.name_unicode(keyboard_escape)}'.{linesep}"
-                .encode()
-            )
+            escape_name = accessories.name_unicode(keyboard_escape)
+            stdout.write(f"Escape character is '{escape_name}'.{linesep}".encode())
 
             # Setup SIGWINCH handler to send NAWS on terminal resize (POSIX only).
             # We debounce to avoid flooding on continuous resizes.
@@ -180,6 +178,7 @@ else:
                 try:
 
                     def _send_naws():
+                        # local
                         from .telopt import NAWS  # pylint: disable=import-outside-toplevel
 
                         try:  # pylint: disable=broad-exception-caught
@@ -235,9 +234,7 @@ else:
                             if telnet_task in wait_for:
                                 telnet_task.cancel()
                                 wait_for.remove(telnet_task)
-                            stdout.write(
-                                f"\033[m{linesep}Connection closed.{linesep}".encode()
-                            )
+                            stdout.write(f"\033[m{linesep}Connection closed.{linesep}".encode())
                             # Cleanup resize handler on local escape close
                             if term._istty and remove_winch:  # pylint: disable=protected-access
                                 try:
@@ -269,8 +266,7 @@ else:
                             stdin_task.cancel()
                             wait_for.remove(stdin_task)
                         stdout.write(
-                            f"\033[m{linesep}Connection closed by foreign host.{linesep}"
-                            .encode()
+                            f"\033[m{linesep}Connection closed by foreign host.{linesep}".encode()
                         )
                         # Cleanup resize handler on remote close
                         if term._istty and remove_winch:  # pylint: disable=protected-access

@@ -14,6 +14,7 @@ from telnetlib3.tests.accessories import bind_host, unused_tcp_port
 
 
 async def test_server_demands_remote_linemode_client_agrees(bind_host, unused_tcp_port):
+    # local
     from telnetlib3.slc import LMODE_MODE, LMODE_MODE_ACK
     from telnetlib3.telopt import DO, SB, SE, IAC, WILL, LINEMODE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
@@ -69,6 +70,7 @@ async def test_server_demands_remote_linemode_client_agrees(bind_host, unused_tc
 
 
 async def test_server_demands_remote_linemode_client_demands_local(bind_host, unused_tcp_port):
+    # local
     from telnetlib3.slc import LMODE_MODE, LMODE_MODE_ACK, LMODE_MODE_LOCAL
     from telnetlib3.telopt import DO, SB, SE, IAC, WILL, LINEMODE
     from telnetlib3.tests.accessories import create_server, asyncio_connection

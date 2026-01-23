@@ -101,6 +101,7 @@ class CustomTelnetClient(telnetlib3.TelnetClient):
 
 async def test_telnet_server_on_charset(bind_host, unused_tcp_port):
     """Test Server's callback method on_charset()."""
+    # local
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
     _waiter = asyncio.Future()
@@ -126,6 +127,7 @@ async def test_telnet_server_on_charset(bind_host, unused_tcp_port):
 
 async def test_telnet_client_send_charset(bind_host, unused_tcp_port):
     """Test Client's callback method send_charset() selection for illegals."""
+    # local
     from telnetlib3.tests.accessories import create_server, open_connection
 
     _waiter = asyncio.Future()
@@ -157,6 +159,7 @@ async def test_telnet_client_send_charset(bind_host, unused_tcp_port):
 
 async def test_telnet_client_no_charset(bind_host, unused_tcp_port):
     """Test Client's callback method send_charset() does not select."""
+    # local
     from telnetlib3.tests.accessories import create_server, open_connection
 
     _waiter = asyncio.Future()
@@ -400,6 +403,7 @@ def test_unit_charset_negotiation_sequence():
 
 async def test_charset_send_unknown_encoding(bind_host, unused_tcp_port):
     """Test client with unknown encoding value."""
+    # local
     from telnetlib3.tests.accessories import asyncio_server, open_connection
 
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
@@ -416,6 +420,7 @@ async def test_charset_send_unknown_encoding(bind_host, unused_tcp_port):
 
 async def test_charset_send_no_viable_offers(bind_host, unused_tcp_port):
     """Test client with no viable encoding offers."""
+    # local
     from telnetlib3.tests.accessories import asyncio_server, open_connection
 
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
@@ -433,6 +438,7 @@ async def test_charset_send_no_viable_offers(bind_host, unused_tcp_port):
 
 async def test_charset_explicit_non_latin1_encoding(bind_host, unused_tcp_port):
     """Test client rejecting offered encodings when explicit non-latin1 is set."""
+    # local
     from telnetlib3.tests.accessories import asyncio_server, open_connection
 
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):

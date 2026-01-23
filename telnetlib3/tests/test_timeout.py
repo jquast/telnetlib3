@@ -16,6 +16,7 @@ from telnetlib3.tests.accessories import bind_host, unused_tcp_port
 
 async def test_telnet_server_default_timeout(bind_host, unused_tcp_port):
     """Test callback on_timeout() as coroutine of create_server()."""
+    # local
     from telnetlib3.telopt import IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
@@ -40,14 +41,13 @@ async def test_telnet_server_default_timeout(bind_host, unused_tcp_port):
 
 async def test_telnet_server_set_timeout(bind_host, unused_tcp_port):
     """Test callback on_timeout() as coroutine of create_server()."""
+    # local
     from telnetlib3.telopt import IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
     _waiter = asyncio.Future()
 
-    async with create_server(
-        _waiter_connected=_waiter, host=bind_host, port=unused_tcp_port
-    ):
+    async with create_server(_waiter_connected=_waiter, host=bind_host, port=unused_tcp_port):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
 
@@ -62,14 +62,13 @@ async def test_telnet_server_set_timeout(bind_host, unused_tcp_port):
 
 async def test_telnet_server_waitfor_timeout(bind_host, unused_tcp_port):
     """Test callback on_timeout() as coroutine of create_server()."""
+    # local
     from telnetlib3.telopt import DO, IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
     expected_output = IAC + DO + TTYPE + b"\r\nTimeout.\r\n"
 
-    async with create_server(
-        host=bind_host, port=unused_tcp_port, timeout=0.050
-    ):
+    async with create_server(host=bind_host, port=unused_tcp_port, timeout=0.050):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
 
@@ -82,14 +81,13 @@ async def test_telnet_server_waitfor_timeout(bind_host, unused_tcp_port):
 
 async def test_telnet_server_binary_mode(bind_host, unused_tcp_port):
     """Test callback on_timeout() in BINARY mode when encoding=False is used."""
+    # local
     from telnetlib3.telopt import DO, IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
     expected_output = IAC + DO + TTYPE + b"\r\nTimeout.\r\n"
 
-    async with create_server(
-        host=bind_host, port=unused_tcp_port, timeout=0.150, encoding=False
-    ):
+    async with create_server(host=bind_host, port=unused_tcp_port, timeout=0.150, encoding=False):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
 

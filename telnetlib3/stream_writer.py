@@ -269,9 +269,7 @@ class TelnetWriter:
             (NAWS, "naws"),
             (SNDLOC, "sndloc"),
         ):
-            self.set_ext_send_callback(
-                cmd=ext_cmd, func=getattr(self, f"handle_send_{key}")
-            )
+            self.set_ext_send_callback(cmd=ext_cmd, func=getattr(self, f"handle_send_{key}"))
 
         for ext_cmd, key in ((CHARSET, "charset"), (NEW_ENVIRON, "environ")):
             _cbname = "handle_send_server_" if self.server else "handle_send_client_"
@@ -469,9 +467,7 @@ class TelnetWriter:
                 # Any other, expect a callback.  Otherwise this protocol
                 # does not comprehend the remote end's request.
                 if cmd not in self._iac_callback:
-                    raise ValueError(
-                        f"IAC {name_command(cmd)}({cmd!r}): not a legal 2-byte cmd"
-                    )
+                    raise ValueError(f"IAC {name_command(cmd)}({cmd!r}): not a legal 2-byte cmd")
                 self._iac_callback[cmd](cmd)
             self.iac_received = False
 
@@ -480,15 +476,12 @@ class TelnetWriter:
             # IAC SB sub-negotiation buffer, assert command is SE.
             self.cmd_received = cmd = byte
             if cmd != SE:
-                self.log.error(
-                    "sub-negotiation buffer interrupted by IAC %s", name_command(cmd)
-                )
+                self.log.error("sub-negotiation buffer interrupted by IAC %s", name_command(cmd))
                 self._sb_buffer.clear()
             else:
                 # sub-negotiation end (SE), fire handle_subnegotiation
                 self.log.debug(
-                    "sub-negotiation cmd %s SE completion byte",
-                    name_command(self._sb_buffer[0])
+                    "sub-negotiation cmd %s SE completion byte", name_command(self._sb_buffer[0])
                 )
                 try:
                     self.handle_subnegotiation(self._sb_buffer)
@@ -557,7 +550,9 @@ class TelnetWriter:
             if callback:
                 self.log.debug(
                     "slc.snoop(%r): %s, callback is %s.",
-                    byte, slc.name_slc_command(slc_name), callback.__name__
+                    byte,
+                    slc.name_slc_command(slc_name),
+                    callback.__name__,
                 )
                 callback(slc_name)
 
@@ -603,11 +598,9 @@ class TelnetWriter:
         """
         Conditionally write ``data`` to transport when "remote echo" enabled.
 
-        :param bytes data: string received as input, conditionally written.
-
-        The default implementation depends on telnet negotiation willingness for local
-        echo, only an RFC-compliant telnet client will correctly set or unset echo accordingly
-        by demand.
+        :param bytes data: string received as input, conditionally written. The default
+            implementation depends on telnet negotiation willingness for local echo, only an RFC-
+            compliant telnet client will correctly set or unset echo accordingly by demand.
         """
         assert self.server, "Client never performs echo of input received."
         if self.will_echo:
@@ -862,9 +855,7 @@ class TelnetWriter:
         assert self.server, "SB NEW_ENVIRON SEND may only be sent by server"
 
         if not self.remote_option.enabled(NEW_ENVIRON):
-            self.log.debug(
-                "cannot send SB NEW_ENVIRON SEND IS without receipt of WILL NEW_ENVIRON"
-            )
+            self.log.debug("cannot send SB NEW_ENVIRON SEND IS without receipt of WILL NEW_ENVIRON")
             return False
 
         request_list = self._ext_send_callback[NEW_ENVIRON]()
@@ -1001,7 +992,9 @@ class TelnetWriter:
         An instance of the Linemode class, or self.linemode when unset.
         """
         if not (self.local_option.enabled(LINEMODE) or self.remote_option.enabled(LINEMODE)):
-            raise AssertionError("Cannot send LINEMODE-MODE without first (DO, WILL) LINEMODE received.")
+            raise AssertionError(
+                "Cannot send LINEMODE-MODE without first (DO, WILL) LINEMODE received."
+            )
 
         if linemode is not None:
             self.log.debug("set Linemode %r", linemode)
@@ -1441,13 +1434,9 @@ class TelnetWriter:
             XDISPLOC,
             LFLOW,
         ):
-            raise ValueError(
-                f"cannot recv DO {name_command(opt)} on server end (ignored)."
-            )
+            raise ValueError(f"cannot recv DO {name_command(opt)} on server end (ignored).")
         elif self.client and opt in (LOGOUT,):
-            raise ValueError(
-                f"cannot recv DO {name_command(opt)} on client end (ignored)."
-            )
+            raise ValueError(f"cannot recv DO {name_command(opt)} on client end (ignored).")
         elif opt == TM:
             # timing mark is special: simply by replying, the effect
             # is accomplished ('will' or 'wont' is non-consequential):
@@ -1768,7 +1757,9 @@ class TelnetWriter:
         elif opt == REJECTED:
             self.log.warning("recv IAC SB CHARSET REJECTED IAC SE")
         elif opt in (TTABLE_IS, TTABLE_ACK, TTABLE_NAK, TTABLE_REJECTED):
-            raise NotImplementedError(f"Translation table command received but not supported: {opt!r}")
+            raise NotImplementedError(
+                f"Translation table command received but not supported: {opt!r}"
+            )
         else:
             raise ValueError(f"Illegal option follows IAC SB CHARSET: {opt!r}.")
 
@@ -1779,9 +1770,7 @@ class TelnetWriter:
         assert cmd == TSPEED, (cmd, name_command(cmd))
         assert opt in (IS, SEND), opt
         opt_kind = {IS: "IS", SEND: "SEND"}.get(opt)
-        self.log.debug(
-            "recv %s %s: %r", name_command(cmd), opt_kind, b"".join(buf)
-        )
+        self.log.debug("recv %s %s: %r", name_command(cmd), opt_kind, b"".join(buf))
 
         if opt == IS:
             assert self.server, f"SE: cannot recv from server: {name_command(cmd)} {opt_kind}"
@@ -1834,9 +1823,7 @@ class TelnetWriter:
         assert cmd == XDISPLOC, (cmd, name_command(cmd))
         assert opt in (IS, SEND), opt
         opt_kind = {IS: "IS", SEND: "SEND"}.get(opt)
-        self.log.debug(
-            "recv %s %s: %r", name_command(cmd), opt_kind, b"".join(buf)
-        )
+        self.log.debug("recv %s %s: %r", name_command(cmd), opt_kind, b"".join(buf))
 
         if opt == IS:
             assert self.server, f"SE: cannot recv from server: {name_command(cmd)} {opt}"
@@ -1860,9 +1847,7 @@ class TelnetWriter:
         assert cmd == TTYPE, name_command(cmd)
         assert opt in (IS, SEND), opt
         opt_kind = {IS: "IS", SEND: "SEND"}.get(opt)
-        self.log.debug(
-            "recv %s %s: %r", name_command(cmd), opt_kind, b"".join(buf)
-        )
+        self.log.debug("recv %s %s: %r", name_command(cmd), opt_kind, b"".join(buf))
 
         if opt == IS:
             assert self.server, f"SE: cannot recv from server: {name_command(cmd)} {opt}"
@@ -1898,9 +1883,7 @@ class TelnetWriter:
         assert cmd == NEW_ENVIRON, (cmd, name_command(cmd))
         assert opt in (IS, SEND, INFO), opt
         opt_kind = {IS: "IS", INFO: "INFO", SEND: "SEND"}.get(opt)
-        self.log.debug(
-            "recv %s %s: %r", name_command(cmd), opt_kind, b"".join(buf)
-        )
+        self.log.debug("recv %s %s: %r", name_command(cmd), opt_kind, b"".join(buf))
 
         env = _decode_env_buf(b"".join(buf))
 
@@ -1990,8 +1973,7 @@ class TelnetWriter:
         elif opt in (LFLOW_RESTART_ANY, LFLOW_RESTART_XON):
             self.xon_any = opt is LFLOW_RESTART_XON
             self.log.debug(
-                "LFLOW (toggle-flow-control) %s",
-                "RESTART_ANY" if self.xon_any else "RESTART_XON"
+                "LFLOW (toggle-flow-control) %s", "RESTART_ANY" if self.xon_any else "RESTART_XON"
             )
 
         else:
@@ -2031,9 +2013,7 @@ class TelnetWriter:
         while i < len(buf_list):
             if i + 1 >= len(buf_list):
                 # Odd number of bytes remaining, log and skip
-                self.log.warning(
-                    "STATUS: incomplete pair at end, skipping byte: %s", buf_list[i]
-                )
+                self.log.warning("STATUS: incomplete pair at end, skipping byte: %s", buf_list[i])
                 break
 
             cmd = buf_list[i]
@@ -2042,7 +2022,9 @@ class TelnetWriter:
             # Skip invalid command bytes with a warning
             if cmd not in (DO, DONT, WILL, WONT):
                 self.log.warning(
-                    "STATUS: invalid cmd at pos %s: %s, skipping. Expected DO DONT WILL WONT.", i, cmd
+                    "STATUS: invalid cmd at pos %s: %s, skipping. Expected DO DONT WILL WONT.",
+                    i,
+                    cmd,
                 )
                 # Try to resync by looking for the next valid command
                 i += 1
@@ -2062,22 +2044,23 @@ class TelnetWriter:
             if not matching:
                 self.log.error(
                     "STATUS %s %s: disagreed, %s option is %s.",
-                    name_command(cmd), name_command(opt), _side, _mode
+                    name_command(cmd),
+                    name_command(opt),
+                    _side,
+                    _mode,
                 )
                 self.log.error(
                     "remote %r is %s",
                     [(name_commands(_opt), _val) for _opt, _val in self.remote_option.items()],
-                    self.remote_option.enabled(opt)
+                    self.remote_option.enabled(opt),
                 )
                 self.log.error(
                     " local %r is %s",
                     [(name_commands(_opt), _val) for _opt, _val in self.local_option.items()],
-                    self.local_option.enabled(opt)
+                    self.local_option.enabled(opt),
                 )
             else:
-                self.log.debug(
-                    "STATUS %s %s (agreed).", name_command(cmd), name_command(opt)
-                )
+                self.log.debug("STATUS %s %s (agreed).", name_command(cmd), name_command(opt))
 
             # Move to next pair
             i += 2
@@ -2109,7 +2092,7 @@ class TelnetWriter:
         response.extend([IAC, SE])
         self.log.debug(
             "send IAC SB STATUS IS %s IAC SE",
-            " ".join([name_command(byte) for byte in list(response)[4:-2]])
+            " ".join([name_command(byte) for byte in list(response)[4:-2]]),
         )
         self.send_iac(b"".join(response))
         if self.pending_option.enabled(WILL + STATUS):
@@ -2304,7 +2287,9 @@ class TelnetWriter:
 
         self.log.debug(
             "_slc_process %-9s mine=%s, his=%s",
-            slc.name_slc_command(func), self.slctab[func], slc_def
+            slc.name_slc_command(func),
+            self.slctab[func],
+            slc_def,
         )
 
         # evaluate slc
@@ -2314,9 +2299,7 @@ class TelnetWriter:
         elif slc_def.level == mylevel and slc_def.ack:
             return
         elif slc_def.ack:
-            self.log.debug(
-                "slc value mismatch with ack bit set: (%r,%r)", myvalue, slc_def.val
-            )
+            self.log.debug("slc value mismatch with ack bit set: (%r,%r)", myvalue, slc_def.val)
             return
         else:
             self._slc_change(func, slc_def)
@@ -2406,7 +2389,10 @@ class TelnetWriter:
         if self.client:
             assert self.local_option.enabled(
                 LINEMODE
-            ), f"cannot recv {name_command(cmd)} LMODE_FORWARDMASK without first sending WILL LINEMODE."
+            ), (
+                f"cannot recv {name_command(cmd)} LMODE_FORWARDMASK "
+                "without first sending WILL LINEMODE."
+            )
             assert cmd not in (
                 WILL,
                 WONT,

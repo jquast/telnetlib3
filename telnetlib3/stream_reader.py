@@ -554,8 +554,8 @@ class TelnetReaderUnicode(TelnetReader):
     """
     Unicode-decoding Telnet stream reader.
 
-    Extends TelnetReader to provide automatic decoding of bytes to unicode strings
-    using a configurable encoding determined by callback function.
+    Extends TelnetReader to provide automatic decoding of bytes to unicode strings using a
+    configurable encoding determined by callback function.
     """
 
     #: Late-binding instance of :class:`codecs.IncrementalDecoder`, some

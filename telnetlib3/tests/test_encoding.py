@@ -15,6 +15,7 @@ from telnetlib3.tests.accessories import bind_host, unused_tcp_port
 
 async def test_telnet_server_encoding_default(bind_host, unused_tcp_port):
     """Default encoding US-ASCII unless it can be negotiated/confirmed!"""
+    # local
     from telnetlib3.telopt import IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
@@ -39,12 +40,14 @@ async def test_telnet_server_encoding_default(bind_host, unused_tcp_port):
 
 async def test_telnet_client_encoding_default(bind_host, unused_tcp_port):
     """Default encoding US-ASCII unless it can be negotiated/confirmed!"""
+    # local
     from telnetlib3.tests.accessories import asyncio_server, open_connection
 
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
-        async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.05
-        ) as (reader, writer):
+        async with open_connection(host=bind_host, port=unused_tcp_port, connect_minwait=0.05) as (
+            reader,
+            writer,
+        ):
             assert writer.protocol.encoding(incoming=True) == "US-ASCII"
             assert writer.protocol.encoding(outgoing=True) == "US-ASCII"
             assert writer.protocol.encoding(incoming=True, outgoing=True) == "US-ASCII"
@@ -54,14 +57,13 @@ async def test_telnet_client_encoding_default(bind_host, unused_tcp_port):
 
 async def test_telnet_server_encoding_client_will(bind_host, unused_tcp_port):
     """Server Default encoding (utf8) incoming when client WILL."""
+    # local
     from telnetlib3.telopt import IAC, WILL, WONT, TTYPE, BINARY
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
     _waiter = asyncio.Future()
 
-    async with create_server(
-        host=bind_host, port=unused_tcp_port, _waiter_connected=_waiter
-    ):
+    async with create_server(host=bind_host, port=unused_tcp_port, _waiter_connected=_waiter):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WILL + BINARY)
             writer.write(IAC + WONT + TTYPE)
@@ -74,14 +76,13 @@ async def test_telnet_server_encoding_client_will(bind_host, unused_tcp_port):
 
 async def test_telnet_server_encoding_server_do(bind_host, unused_tcp_port):
     """Server's default encoding."""
+    # local
     from telnetlib3.telopt import DO, IAC, WONT, TTYPE, BINARY
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
     _waiter = asyncio.Future()
 
-    async with create_server(
-        host=bind_host, port=unused_tcp_port, _waiter_connected=_waiter
-    ):
+    async with create_server(host=bind_host, port=unused_tcp_port, _waiter_connected=_waiter):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + DO + BINARY)
             writer.write(IAC + WONT + TTYPE)
@@ -94,6 +95,7 @@ async def test_telnet_server_encoding_server_do(bind_host, unused_tcp_port):
 
 async def test_telnet_server_encoding_bidirectional(bind_host, unused_tcp_port):
     """Server's default encoding with bi-directional BINARY negotiation."""
+    # local
     from telnetlib3.telopt import DO, IAC, WILL, WONT, TTYPE, BINARY
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
@@ -118,6 +120,7 @@ async def test_telnet_server_encoding_bidirectional(bind_host, unused_tcp_port):
 
 async def test_telnet_client_and_server_encoding_bidirectional(bind_host, unused_tcp_port):
     """Given a default encoding for client and server, client always wins!"""
+    # local
     from telnetlib3.tests.accessories import create_server, open_connection
 
     _waiter = asyncio.Future()
@@ -144,14 +147,13 @@ async def test_telnet_client_and_server_encoding_bidirectional(bind_host, unused
 
 async def test_telnet_server_encoding_by_LANG(bind_host, unused_tcp_port):
     """Server's encoding negotiated by LANG value."""
+    # local
     from telnetlib3.telopt import DO, IS, SB, SE, IAC, WILL, WONT, TTYPE, BINARY, NEW_ENVIRON
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
     _waiter = asyncio.Future()
 
-    async with create_server(
-        host=bind_host, port=unused_tcp_port, _waiter_connected=_waiter
-    ):
+    async with create_server(host=bind_host, port=unused_tcp_port, _waiter_connected=_waiter):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + DO + BINARY)
             writer.write(IAC + WILL + BINARY)
@@ -180,6 +182,7 @@ async def test_telnet_server_encoding_by_LANG(bind_host, unused_tcp_port):
 
 async def test_telnet_server_binary_mode(bind_host, unused_tcp_port):
     """Server's encoding=False creates a binary reader/writer interface."""
+    # local
     from telnetlib3.telopt import DO, IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
@@ -219,6 +222,7 @@ async def test_telnet_server_binary_mode(bind_host, unused_tcp_port):
 
 async def test_telnet_client_and_server_escape_iac_encoding(bind_host, unused_tcp_port):
     """Ensure that IAC (byte 255) may be sent across the wire by encoding."""
+    # local
     from telnetlib3.tests.accessories import create_server, open_connection
 
     _waiter = asyncio.Future()
@@ -246,6 +250,7 @@ async def test_telnet_client_and_server_escape_iac_encoding(bind_host, unused_tc
 
 async def test_telnet_client_and_server_escape_iac_binary(bind_host, unused_tcp_port):
     """Ensure that IAC (byte 255) may be sent across the wire in binary."""
+    # local
     from telnetlib3.tests.accessories import create_server, open_connection
 
     _waiter = asyncio.Future()

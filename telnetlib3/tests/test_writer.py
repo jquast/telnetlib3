@@ -111,6 +111,7 @@ def test_sb_interrupted():
 
 async def test_iac_do_twice_replies_once(bind_host, unused_tcp_port):
     """WILL/WONT replied only once for repeated DO."""
+    # local
     from telnetlib3.telopt import DO, IAC, ECHO, WILL
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
@@ -138,6 +139,7 @@ async def test_iac_do_twice_replies_once(bind_host, unused_tcp_port):
 
 async def test_iac_dont_dont(bind_host, unused_tcp_port):
     """WILL/WONT replied only once for repeated DO."""
+    # local
     from telnetlib3.telopt import IAC, DONT, ECHO
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
@@ -165,6 +167,7 @@ async def test_iac_dont_dont(bind_host, unused_tcp_port):
 
 async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
     """Try a DONT and ensure it cannot be sent twice."""
+    # local
     from telnetlib3.telopt import DONT, ECHO
     from telnetlib3.tests.accessories import create_server, open_connection
 
@@ -201,6 +204,7 @@ async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
 async def test_slc_simul(bind_host, unused_tcp_port):
     """Test SLC control characters are simulated in kludge mode."""
     # For example, ^C is simulated as IP (Interrupt Process) callback.
+    # local
     from telnetlib3.telopt import DO, IAC, SGA, ECHO, WILL
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
@@ -278,6 +282,7 @@ async def test_slc_simul(bind_host, unused_tcp_port):
 
 async def test_unhandled_do_sends_wont(bind_host, unused_tcp_port):
     """An unhandled DO is denied by WONT."""
+    # local
     from telnetlib3.telopt import DO, IAC, NOP, WONT
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
@@ -302,6 +307,7 @@ async def test_unhandled_do_sends_wont(bind_host, unused_tcp_port):
 
 async def test_writelines_bytes(bind_host, unused_tcp_port):
     """Exercise bytes-only interface of writer.writelines() function."""
+    # local
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
     given = (b"a", b"b", b"c", b"d")
@@ -329,6 +335,7 @@ async def test_writelines_bytes(bind_host, unused_tcp_port):
 
 async def test_writelines_unicode(bind_host, unused_tcp_port):
     """Exercise unicode interface of writer.writelines() function."""
+    # local
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
     given = ("a", "b", "c", "d")
@@ -366,6 +373,7 @@ def test_bad_iac():
 
 async def test_send_ga(bind_host, unused_tcp_port):
     """Writer sends IAC + GA when SGA is not negotiated."""
+    # local
     from telnetlib3.telopt import GA, IAC
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
@@ -393,6 +401,7 @@ async def test_send_ga(bind_host, unused_tcp_port):
 
 async def test_not_send_ga(bind_host, unused_tcp_port):
     """Writer does not send IAC + GA when SGA is negotiated."""
+    # local
     from telnetlib3.telopt import DO, IAC, SGA, WILL
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
@@ -424,6 +433,7 @@ async def test_not_send_ga(bind_host, unused_tcp_port):
 
 async def test_not_send_eor(bind_host, unused_tcp_port):
     """Writer does not send IAC + EOR when un-negotiated."""
+    # local
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
     expected = b""
@@ -450,6 +460,7 @@ async def test_not_send_eor(bind_host, unused_tcp_port):
 
 async def test_send_eor(bind_host, unused_tcp_port):
     """Writer sends IAC + EOR if client requests by DO."""
+    # local
     from telnetlib3.telopt import DO, EOR, IAC, WILL, CMD_EOR
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 

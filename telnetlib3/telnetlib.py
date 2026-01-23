@@ -1,3 +1,4 @@
+# pylint: disable=duplicate-code
 # jdq(2025): This file is only very lightly modified from cpython 3.12
 # telnetlib.py, to make it compatible with pytest (renaming 'test' to 'main'),
 # and, to be incorporated into telnetlib3 module's namespace, by expanding
@@ -296,7 +297,9 @@ class Telnet:
         if host is not None:
             self.open(host, port, timeout)
 
-    def open(self, host, port=0, timeout=socket._GLOBAL_DEFAULT_TIMEOUT):  # pylint: disable=protected-access
+    def open(
+        self, host, port=0, timeout=socket._GLOBAL_DEFAULT_TIMEOUT
+    ):  # pylint: disable=protected-access
         """
         Connect to a host.
 
@@ -631,6 +634,7 @@ class Telnet:
 
     def mt_interact(self):
         """Multithreaded version of interact()."""
+        # std imports
         import _thread  # pylint: disable=import-outside-toplevel
 
         _thread.start_new_thread(self.listener, ())
@@ -683,6 +687,7 @@ class Telnet:
         for i in indices:
             if not hasattr(patterns[i], "search"):
                 if not re:
+                    # std imports
                     import re  # pylint: disable=import-outside-toplevel
                 patterns[i] = re.compile(patterns[i])
         if timeout is not None:

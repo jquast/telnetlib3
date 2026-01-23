@@ -71,7 +71,9 @@ class TelnetServer(server_base.BaseServer):
 
     # Derived methods from base class
 
-    def __init__(self, term="unknown", cols=80, rows=25, timeout=300, *args, **kwargs):  # pylint: disable=keyword-arg-before-vararg
+    def __init__(
+        self, term="unknown", cols=80, rows=25, timeout=300, *args, **kwargs
+    ):  # pylint: disable=keyword-arg-before-vararg
         """Initialize TelnetServer with terminal parameters."""
         super().__init__(*args, **kwargs)
         self.waiter_encoding = asyncio.Future()
@@ -90,7 +92,15 @@ class TelnetServer(server_base.BaseServer):
 
     def connection_made(self, transport):
         """Handle new connection and wire up telnet option callbacks."""
-        from .telopt import NAWS, TTYPE, TSPEED, CHARSET, XDISPLOC, NEW_ENVIRON  # pylint: disable=import-outside-toplevel
+        # local
+        from .telopt import (  # pylint: disable=import-outside-toplevel
+            NAWS,
+            TTYPE,
+            TSPEED,
+            CHARSET,
+            XDISPLOC,
+            NEW_ENVIRON,
+        )
 
         super().connection_made(transport)
 
@@ -123,6 +133,7 @@ class TelnetServer(server_base.BaseServer):
 
     def begin_negotiation(self):
         """Begin telnet negotiation by requesting terminal type."""
+        # local
         from .telopt import DO, TTYPE  # pylint: disable=import-outside-toplevel
 
         super().begin_negotiation()
@@ -130,7 +141,17 @@ class TelnetServer(server_base.BaseServer):
 
     def begin_advanced_negotiation(self):
         """Request advanced telnet options from client."""
-        from .telopt import DO, SGA, ECHO, NAWS, WILL, BINARY, CHARSET, NEW_ENVIRON  # pylint: disable=import-outside-toplevel
+        # local
+        from .telopt import (  # pylint: disable=import-outside-toplevel
+            DO,
+            SGA,
+            ECHO,
+            NAWS,
+            WILL,
+            BINARY,
+            CHARSET,
+            NEW_ENVIRON,
+        )
 
         super().begin_advanced_negotiation()
         self.writer.iac(WILL, SGA)
@@ -144,7 +165,13 @@ class TelnetServer(server_base.BaseServer):
 
     def check_negotiation(self, final=False):
         """Check if negotiation is complete including encoding."""
-        from .telopt import SB, TTYPE, CHARSET, NEW_ENVIRON  # pylint: disable=import-outside-toplevel
+        # local
+        from .telopt import (  # pylint: disable=import-outside-toplevel
+            SB,
+            TTYPE,
+            CHARSET,
+            NEW_ENVIRON,
+        )
 
         # Debug log to see which options are still pending
         pending = [
@@ -324,6 +351,7 @@ class TelnetServer(server_base.BaseServer):
             ['LANG', 'TERM', 'COLUMNS', 'LINES', 'DISPLAY', 'COLORTERM',
              VAR, USERVAR, 'COLORTERM']
         """
+        # local
         from .telopt import VAR, USERVAR  # pylint: disable=import-outside-toplevel
 
         return [
@@ -429,9 +457,7 @@ class TelnetServer(server_base.BaseServer):
 
         elif self._ttype_count == 3 and ttype.upper().startswith("MTTS "):
             val = self.get_extra_info("ttype2")
-            logger.debug(
-                "ttype cycle stop at %s: %s, using %s from ttype2.", key, ttype, val
-            )
+            logger.debug("ttype cycle stop at %s: %s, using %s from ttype2.", key, ttype, val)
             self._extra["TERM"] = val
 
         elif ttype == _lastval:
@@ -450,6 +476,7 @@ class TelnetServer(server_base.BaseServer):
 
     def _check_encoding(self):
         # Periodically check for completion of ``waiter_encoding``.
+        # local
         from .telopt import DO, SB, BINARY, CHARSET  # pylint: disable=import-outside-toplevel
 
         # Check if we need to request client to use BINARY mode for client-to-server communication
@@ -476,7 +503,9 @@ class TelnetServer(server_base.BaseServer):
         return (self.writer.outbinary and self.writer.inbinary) or self.force_binary
 
 
-async def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwds):  # pylint: disable=differing-param-doc,differing-type-doc
+async def create_server(
+    host=None, port=23, protocol_factory=TelnetServer, **kwds
+):  # pylint: disable=differing-param-doc,differing-type-doc
     """
     Create a TCP Telnet server.
 
@@ -555,6 +584,7 @@ async def _sigterm_handler(server, _log):
 
 def parse_server_args():
     """Parse command-line arguments for telnet server."""
+    # std imports
     import sys  # pylint: disable=import-outside-toplevel
 
     # Extract arguments after '--' for PTY program before argparse sees them
@@ -645,15 +675,22 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
     )
 
     if pty_exec:
+        # local
         from .pty_shell import make_pty_shell  # pylint: disable=import-outside-toplevel
 
         shell = make_pty_shell(pty_exec, pty_args)
 
     # Wrap shell with guards if enabled
     if robot_check or pty_fork_limit:
-        from .guard_shells import ConnectionCounter, busy_shell  # pylint: disable=import-outside-toplevel
-        from .guard_shells import robot_check as do_robot_check  # pylint: disable=import-outside-toplevel
+        # local
         from .guard_shells import robot_shell  # pylint: disable=import-outside-toplevel
+        from .guard_shells import (  # pylint: disable=import-outside-toplevel
+            ConnectionCounter,
+            busy_shell,
+        )
+        from .guard_shells import (
+            robot_check as do_robot_check,  # pylint: disable=import-outside-toplevel
+        )
 
         counter = ConnectionCounter(pty_fork_limit) if pty_fork_limit else None
         inner_shell = shell
@@ -688,9 +725,7 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
 
     # log all function arguments.
     _locals = locals()
-    _cfg_mapping = ", ".join((f"{field}={{{field}}}" for field in CONFIG._fields)).format(
-        **_locals
-    )
+    _cfg_mapping = ", ".join((f"{field}={{{field}}}" for field in CONFIG._fields)).format(**_locals)
     logger.debug("Server configuration: %s", _cfg_mapping)
 
     loop = asyncio.get_event_loop()

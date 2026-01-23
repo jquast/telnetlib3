@@ -401,9 +401,7 @@ class Forwardmask:
 
     def __str__(self):
         """Returns single string of binary 0 and 1 describing obj."""
-        bits = "".join(
-            value for (_, value) in [eightbits(byte).split("b") for byte in self.value]
-        )
+        bits = "".join(value for (_, value) in [eightbits(byte).split("b") for byte in self.value])
         return f"0b{bits}"
 
     def __contains__(self, number):
@@ -418,37 +416,37 @@ _DEBUG_SLC_OPTS = {
     for key, value in locals().items()
     if key
     in (
-            "SLC_SYNCH",
-            "SLC_BRK",
-            "SLC_IP",
-            "SLC_AO",
-            "SLC_AYT",
-            "SLC_EOR",
-            "SLC_ABORT",
-            "SLC_EOF",
-            "SLC_SUSP",
-            "SLC_EC",
-            "SLC_EL",
-            "SLC_EW",
-            "SLC_RP",
-            "SLC_LNEXT",
-            "SLC_XON",
-            "SLC_XOFF",
-            "SLC_FORW1",
-            "SLC_FORW2",
-            "SLC_MCL",
-            "SLC_MCR",
-            "SLC_MCWL",
-            "SLC_MCWR",
-            "SLC_MCBOL",
-            "SLC_MCEOL",
-            "SLC_INSRT",
-            "SLC_OVER",
-            "SLC_ECR",
-            "SLC_EWR",
-            "SLC_EBOL",
-            "SLC_EEOL",
-        )
+        "SLC_SYNCH",
+        "SLC_BRK",
+        "SLC_IP",
+        "SLC_AO",
+        "SLC_AYT",
+        "SLC_EOR",
+        "SLC_ABORT",
+        "SLC_EOF",
+        "SLC_SUSP",
+        "SLC_EC",
+        "SLC_EL",
+        "SLC_EW",
+        "SLC_RP",
+        "SLC_LNEXT",
+        "SLC_XON",
+        "SLC_XOFF",
+        "SLC_FORW1",
+        "SLC_FORW2",
+        "SLC_MCL",
+        "SLC_MCR",
+        "SLC_MCWL",
+        "SLC_MCWR",
+        "SLC_MCBOL",
+        "SLC_MCEOL",
+        "SLC_INSRT",
+        "SLC_OVER",
+        "SLC_ECR",
+        "SLC_EWR",
+        "SLC_EBOL",
+        "SLC_EEOL",
+    )
 }
 
 

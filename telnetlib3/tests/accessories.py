@@ -39,6 +39,7 @@ async def connection_context(reader, writer):
 async def create_server(*args, **kwargs):
     """Create a telnetlib3 server with automatic cleanup."""
     # local - avoid circular import
+    # local
     import telnetlib3
 
     server = await telnetlib3.create_server(*args, **kwargs)
@@ -53,6 +54,7 @@ async def create_server(*args, **kwargs):
 async def open_connection(*args, **kwargs):
     """Open a telnetlib3 connection with automatic cleanup."""
     # local - avoid circular import
+    # local
     import telnetlib3
 
     reader, writer = await telnetlib3.open_connection(*args, **kwargs)

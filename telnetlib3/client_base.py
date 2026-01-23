@@ -294,6 +294,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         combined when derived.
         """
         # pylint: disable=import-outside-toplevel
+        # local
         from .telopt import TTYPE, CHARSET, NEW_ENVIRON
 
         # First check if there are any pending options
