@@ -545,6 +545,7 @@ async def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port):
             writer.write("\ngoodbye.\n")
         await writer.drain()
         writer.close()
+        await writer.wait_closed()
 
     async with create_server(
         host=bind_host, port=unused_tcp_port, shell=shell, connect_maxwait=0.05
