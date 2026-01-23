@@ -1,17 +1,25 @@
 """Minimal uvloop integration test for telnetlib3."""
 
+# std imports
 import asyncio
+
+# 3rd party
 import pytest
 
 try:
+    # 3rd party
     import uvloop
 
     HAS_UVLOOP = True
 except ImportError:
     HAS_UVLOOP = False
 
+# local
 import telnetlib3
-from telnetlib3.tests.accessories import unused_tcp_port, bind_host
+from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+    bind_host,
+    unused_tcp_port,
+)
 
 pytestmark = pytest.mark.skipif(not HAS_UVLOOP, reason="uvloop not installed")
 
@@ -34,9 +42,7 @@ async def test_uvloop_telnet_integration(bind_host, unused_tcp_port):
     # Skip if uvloop isn't the active event loop (pytest-asyncio configuration issue)
     loop = asyncio.get_running_loop()
     if "uvloop" not in str(type(loop)).lower():
-        pytest.skip(
-            f"uvloop not active (got {type(loop).__name__}), check pytest-asyncio config"
-        )
+        pytest.skip(f"uvloop not active (got {type(loop).__name__}), check pytest-asyncio config")
 
     # Create server
     server = await telnetlib3.create_server(
@@ -44,9 +50,7 @@ async def test_uvloop_telnet_integration(bind_host, unused_tcp_port):
     )
 
     # Connect client
-    reader, writer = await telnetlib3.open_connection(
-        host=bind_host, port=unused_tcp_port
-    )
+    reader, writer = await telnetlib3.open_connection(host=bind_host, port=unused_tcp_port)
 
     # Read response and verify connection works
     data = await reader.read(1024)

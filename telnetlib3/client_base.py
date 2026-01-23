@@ -1,16 +1,18 @@
 """Module provides class BaseClient."""
 
+# std imports
+import sys
+import asyncio
 import logging
+import weakref
 import datetime
 import traceback
-import asyncio
 import collections
-import weakref
-import sys
 
-from .stream_writer import TelnetWriter, TelnetWriterUnicode
+# local
+from .telopt import theNULL, name_commands
 from .stream_reader import TelnetReader, TelnetReaderUnicode
-from .telopt import name_commands, theNULL
+from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
 __all__ = ("BaseClient",)
 
@@ -29,8 +31,9 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     _reader_factory_encoding = TelnetReaderUnicode
     _writer_factory = TelnetWriter
     _writer_factory_encoding = TelnetWriterUnicode
+    _check_later = None
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-positional-arguments
         self,
         shell=None,
         encoding="utf8",
@@ -50,7 +53,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self.default_encoding = encoding
         self._encoding_errors = encoding_errors
         self.force_binary = force_binary
-        self._extra = dict()
+        self._extra = {}
         self.waiter_closed = waiter_closed or asyncio.Future()
         #: a future used for testing
         self._waiter_connected = _waiter_connected or asyncio.Future()
@@ -152,7 +155,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         # Attach transport so TelnetReader can apply pause_reading/resume_reading
         try:
             self.reader.set_transport(transport)
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             # Reader may not support transport coupling; ignore.
             pass
 
@@ -161,7 +164,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             protocol=self,
             reader=self.reader,
             client=True,
-            **writer_kwds
+            **writer_kwds,
         )
 
         self.log.info("Connected to %s", self)
@@ -169,7 +172,8 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._waiter_connected.add_done_callback(self.begin_shell)
         asyncio.get_event_loop().call_soon(self.begin_negotiation)
 
-    def begin_shell(self, result):
+    def begin_shell(self, _result):
+        """Start the shell coroutine after negotiation completes."""
         if self.shell is not None:
             coro = self.shell(self.reader, self.writer)
             if asyncio.iscoroutine(coro):
@@ -193,9 +197,12 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 )
 
     def data_received(self, data):
-        """Process bytes received by transport."""
-        # Buffer incoming data and schedule async processing to keep the event loop responsive.
-        # Apply read-side backpressure using transport.pause_reading()/resume_reading().
+        """
+        Process bytes received by transport.
+
+        Buffer incoming data and schedule async processing to keep the event loop responsive. Apply
+        read-side backpressure using transport.pause_reading()/resume_reading().
+        """
         self._last_received = datetime.datetime.now()
 
         # Enqueue and account for buffered size
@@ -212,7 +219,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             try:
                 self._transport.pause_reading()
                 self._reading_paused = True
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 # Some transports may not support pause_reading; ignore.
                 pass
 
@@ -232,7 +239,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     def __repr__(self):
         hostport = self.get_extra_info("peername", ["-", "closing"])[:2]
-        return "<Peer {0} {1}>".format(*hostport)
+        return f"<Peer {hostport[0]} {hostport[1]}>"
 
     def get_extra_info(self, name, default=None):
         """Get optional client protocol or transport information."""
@@ -251,9 +258,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         Deriving implementations should always call
         ``super().begin_negotiation()``.
         """
-        self._check_later = asyncio.get_event_loop().call_soon(
-            self._check_negotiation_timer
-        )
+        self._check_later = asyncio.get_event_loop().call_soon(self._check_negotiation_timer)
         self._tasks.append(self._check_later)
 
     def encoding(self, outgoing=False, incoming=False):
@@ -288,7 +293,9 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         Ensure ``super().check_negotiation()`` is called and conditionally
         combined when derived.
         """
-        from .telopt import TTYPE, NEW_ENVIRON, CHARSET, SB
+        # pylint: disable=import-outside-toplevel
+        # local
+        from .telopt import TTYPE, CHARSET, NEW_ENVIRON
 
         # First check if there are any pending options
         if any(self.writer.pending_option.values()):
@@ -302,9 +309,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         ) and self.writer.local_option.enabled(CHARSET)
 
         # If we have terminal type and either environment or charset info, we can bypass the minwait
-        critical_options_negotiated = have_terminal_type and (
-            have_environ or have_charset
-        )
+        critical_options_negotiated = have_terminal_type and (have_environ or have_charset)
 
         if critical_options_negotiated:
             if final:
@@ -327,7 +332,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         # Snapshot whether SLC snooping is required for this chunk
         try:
             mode = writer.mode  # property
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             mode = "local"
         slc_needed = (mode == "remote") or (mode == "kludge" and writer.slc_simulated)
 
@@ -336,9 +341,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         # Precompute SLC trigger set if needed
         slc_vals = None
         if slc_needed:
-            slc_vals = {
-                defn.val[0] for defn in writer.slctab.values() if defn.val != theNULL
-            }
+            slc_vals = {defn.val[0] for defn in writer.slctab.values() if defn.val != theNULL}
 
         n = len(data)
         i = 0
@@ -363,7 +366,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             b = data[i]
             try:
                 recv_inband = writer.feed_byte(_ONE_BYTE[b])
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 self._log_exception(self.log.warning, *sys.exc_info())
             else:
                 if recv_inband:
@@ -400,7 +403,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                     try:
                         self._transport.resume_reading()
                         self._reading_paused = False
-                    except Exception:
+                    except Exception:  # pylint: disable=broad-exception-caught
                         pass
 
                 # Yield periodically to keep loop responsive without excessive context switching
@@ -421,16 +424,16 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         final = bool(later < 0)
 
         if self.check_negotiation(final=final):
-            self.log.debug("negotiation complete after {:1.2f}s.".format(self.duration))
+            self.log.debug("negotiation complete after %1.2fs.", self.duration)
             self._waiter_connected.set_result(weakref.proxy(self))
         elif final:
-            self.log.debug("negotiation failed after {:1.2f}s.".format(self.duration))
+            self.log.debug("negotiation failed after %1.2fs.", self.duration)
             _failed = [
                 name_commands(cmd_option)
                 for (cmd_option, pending) in self.writer.pending_option.items()
                 if pending
             ]
-            self.log.debug("failed-reply: {0!r}".format(", ".join(_failed)))
+            self.log.debug("failed-reply: %r", ", ".join(_failed))
             self._waiter_connected.set_result(weakref.proxy(self))
         else:
             # keep re-queuing until complete.  Aggressively re-queue until
@@ -446,12 +449,8 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     @staticmethod
     def _log_exception(logger, e_type, e_value, e_tb):
-        rows_tbk = [
-            line for line in "\n".join(traceback.format_tb(e_tb)).split("\n") if line
-        ]
-        rows_exc = [
-            line.rstrip() for line in traceback.format_exception_only(e_type, e_value)
-        ]
+        rows_tbk = [line for line in "\n".join(traceback.format_tb(e_tb)).split("\n") if line]
+        rows_exc = [line.rstrip() for line in traceback.format_exception_only(e_type, e_value)]
 
         for line in rows_tbk + rows_exc:
             logger(line)

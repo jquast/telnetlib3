@@ -1,10 +1,10 @@
 """Accessory functions."""
 
 # std imports
-import importlib
-import logging
-import asyncio
 import shlex
+import asyncio
+import logging
+import importlib
 
 __all__ = (
     "encoding_from_lang",
@@ -18,6 +18,7 @@ __all__ = (
 
 
 def get_version():
+    """Return the current version of telnetlib3."""
     return "2.1.0"  # keep in sync with setup.py and docs/conf.py !!
 
 
@@ -51,7 +52,7 @@ def name_unicode(ucs):
     elif bits < 32:
         rep = "^" + chr(((bits & 0x7F) | 0x20) + 0x20)
     else:
-        rep = r"\x{:02x}".format(bits)
+        rep = rf"\x{bits:02x}"
     return rep
 
 
@@ -65,8 +66,8 @@ def eightbits(number):
         '0b01100001'
     """
     # useful only so far in context of a forwardmask or any bitmask.
-    prefix, value = bin(number).split("b")
-    return "0b%0.8i" % (int(value),)
+    _, value = bin(number).split("b")
+    return f"0b{int(value):08d}"
 
 
 _DEFAULT_LOGFMT = " ".join(
@@ -89,9 +90,7 @@ def make_logger(name, loglevel="info", logfile=None, logfmt=_DEFAULT_LOGFMT):
 
 def repr_mapping(mapping):
     """Return printable string, 'key=value [key=value ...]' for mapping."""
-    return " ".join(
-        f"{key}={shlex.quote(str(value))}" for key, value in mapping.items()
-    )
+    return " ".join(f"{key}={shlex.quote(str(value))}" for key, value in mapping.items())
 
 
 def function_lookup(pymod_path):

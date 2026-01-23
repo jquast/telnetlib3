@@ -7,9 +7,6 @@ import codecs
 import asyncio
 import logging
 import warnings
-import asyncio
-
-from asyncio import events
 from asyncio import format_helpers
 
 __all__ = (
@@ -22,14 +19,15 @@ _DEFAULT_LIMIT = 2**16  # 64 KiB
 
 class TelnetReader:
     """
-    This is a copy of :class:`asyncio.StreamReader`, with a little
-    care for telnet-like readline(), and something about _waiter which I don't
-    really
+    Telnet protocol stream reader.
+
+    A copy of :class:`asyncio.StreamReader` with telnet-aware readline().
     """
 
     _source_traceback = None
 
     def __init__(self, limit=_DEFAULT_LIMIT):
+        """Initialize TelnetReader with optional buffer size limit."""
         self.log = logging.getLogger(__name__)
         # The line length limit is  a security feature;
         # it also doubles as half the buffer limit.
@@ -38,15 +36,18 @@ class TelnetReader:
             raise ValueError("Limit cannot be <= 0")
 
         self._limit = limit
-        self._loop = asyncio.get_event_loop()
         self._buffer = bytearray()
         self._eof = False  # Whether we're done.
         self._waiter = None  # A future used by _wait_for_data()
         self._exception = None
         self._transport = None
         self._paused = False
-        if self._loop.get_debug():
-            self._source_traceback = format_helpers.extract_stack(sys._getframe(1))
+        try:
+            loop = asyncio.get_running_loop()
+            if loop.get_debug():
+                self._source_traceback = format_helpers.extract_stack(sys._getframe(1))
+        except RuntimeError:
+            pass
 
     def __repr__(self):
         """Description of stream encoding state."""
@@ -66,12 +67,14 @@ class TelnetReader:
         if self._paused:
             info.append("paused")
         info.append("encoding=False")
-        return "<{}>".format(" ".join(info))
+        return f"<{' '.join(info)}>"
 
     def exception(self):
+        """Return the exception if set, otherwise None."""
         return self._exception
 
     def set_exception(self, exc):
+        """Set the exception and wake up any waiting coroutine."""
         self._exception = exc
 
         waiter = self._waiter
@@ -89,6 +92,7 @@ class TelnetReader:
                 waiter.set_result(None)
 
     def set_transport(self, transport):
+        """Set the transport for flow control."""
         assert self._transport is None, "Transport already set"
         self._transport = transport
 
@@ -101,18 +105,16 @@ class TelnetReader:
         """
         Mark EOF on the reader and wake any pending readers.
 
-        This should be called by the Telnet protocol when the underlying
-        transport indicates end-of-input (e.g., in connection_lost()).
-        It sets the internal EOF flag and wakes any read coroutines waiting
-        for more data.
+        This should be called by the Telnet protocol when the underlying transport indicates end-of-
+        input (e.g., in connection_lost()). It sets the internal EOF flag and wakes any read
+        coroutines waiting for more data.
 
-        Application code typically should not call this method directly.
-        To gracefully close a connection from application code, call
-        writer.close() and await writer.wait_closed(). The protocol will
-        eventually call feed_eof() on the reader as part of shutdown.
+        Application code typically should not call this method directly. To gracefully close a
+        connection from application code, call writer.close() and await writer.wait_closed(). The
+        protocol will eventually call feed_eof() on the reader as part of shutdown.
 
-        After feed_eof(), read() will drain remaining buffered bytes and
-        then return b""; readline()/iteration will stop at EOF.
+        After feed_eof(), read() will drain remaining buffered bytes and then return b"";
+        readline()/iteration will stop at EOF.
         """
         self._eof = True
         self._wakeup_waiter()
@@ -122,6 +124,7 @@ class TelnetReader:
         return self._eof and not self._buffer
 
     def feed_data(self, data):
+        """Feed data bytes to the reader buffer."""
         assert not self._eof, "feed_data after feed_eof"
 
         if not data:
@@ -130,11 +133,7 @@ class TelnetReader:
         self._buffer.extend(data)
         self._wakeup_waiter()
 
-        if (
-            self._transport is not None
-            and not self._paused
-            and len(self._buffer) > 2 * self._limit
-        ):
+        if self._transport is not None and not self._paused and len(self._buffer) > 2 * self._limit:
             try:
                 self._transport.pause_reading()
             except NotImplementedError:
@@ -146,7 +145,8 @@ class TelnetReader:
                 self._paused = True
 
     async def _wait_for_data(self, func_name):
-        """Wait until feed_data() or feed_eof() is called.
+        """
+        Wait until feed_data() or feed_eof() is called.
 
         If stream was paused, automatically resume it.
         """
@@ -168,62 +168,32 @@ class TelnetReader:
             self._paused = False
             self._transport.resume_reading()
 
-        self._waiter = self._loop.create_future()
+        self._waiter = asyncio.get_running_loop().create_future()
         try:
             await self._waiter
         finally:
             self._waiter = None
 
-    async def readline(self):
-        """Read chunk of data from the stream until newline (b'\n') is found.
-
-        On success, return chunk that ends with newline. If only partial
-        line can be read due to EOF, return incomplete line without
-        terminating newline. When EOF was reached while no bytes read, empty
-        bytes object is returned.
-
-        If limit is reached, ValueError will be raised. In that case, if
-        newline was found, complete line including newline will be removed
-        from internal buffer. Else, internal buffer will be cleared. Limit is
-        compared against part of the line without newline.
-
-        If stream was paused, this function will automatically resume it if
-        needed.
-        """
-        sep = b"\n"
-        seplen = len(sep)
-        try:
-            line = await self.readuntil(sep)
-        except asyncio.IncompleteReadError as e:
-            return e.partial
-        except asyncio.LimitOverrunError as e:
-            if self._buffer.startswith(sep, e.consumed):
-                del self._buffer[: e.consumed + seplen]
-            else:
-                self._buffer.clear()
-            self._maybe_resume_transport()
-            raise ValueError(e.args[0])
-        return line
-
     async def readuntil(self, separator=b"\n"):
-        """Read data from the stream until ``separator`` is found.
+        """
+        Read data from the stream until ``separator`` is found.
 
-        On success, the data and separator will be removed from the
-        internal buffer (consumed). Returned data will include the
-        separator at the end.
+        On success, the data and separator will be removed from the internal buffer (consumed).
+        Returned data will include the separator at the end.
 
-        Configured stream limit is used to check result. Limit sets the
-        maximal length of data that can be returned, not counting the
-        separator.
+        Configured stream limit is used to check result. Limit sets the maximal length of data that
+        can be returned, not counting the separator.
 
-        If an EOF occurs and the complete separator is still not found,
-        an IncompleteReadError exception will be raised, and the internal
-        buffer will be reset.  The IncompleteReadError.partial attribute
-        may contain the separator partially.
+        If an EOF occurs and the complete separator is still not found, an IncompleteReadError
+        exception will be raised, and the internal buffer will be reset.  The
+        IncompleteReadError.partial attribute may contain the separator partially.
 
-        If the data cannot be read because of over limit, a
-        LimitOverrunError exception  will be raised, and the data
-        will be left in the internal buffer, so it can be read again.
+        If the data cannot be read because of over limit, a LimitOverrunError exception  will be
+        raised, and the data will be left in the internal buffer, so it can be read again.
+
+        :raises ValueError: If separator is empty.
+        :raises LimitOverrunError: If separator is not found and buffer exceeds limit.
+        :raises IncompleteReadError: If EOF is reached before separator is found.
         """
         seplen = len(separator)
         if seplen == 0:
@@ -298,26 +268,26 @@ class TelnetReader:
         return bytes(chunk)
 
     async def readuntil_pattern(self, pattern: re.Pattern) -> bytes:
-        """Read data from the stream until ``pattern`` is found.
-
-        On success, the data and pattern will be removed from the
-        internal buffer (consumed). Returned data will include the
-        pattern at the end.
-
-        Configured stream limit is used to check result. Limit sets the
-        maximal length of data that can be returned, not counting the
-        pattern.
-
-        If an EOF occurs and the complete pattern is still not found,
-        an IncompleteReadError exception will be raised, and the internal
-        buffer will be reset. The IncompleteReadError.partial attribute
-        may contain the pattern partially.
-
-        If the data cannot be read because of over limit, a
-        LimitOverrunError exception will be raised, and the data
-        will be left in the internal buffer, so it can be read again.
         """
+        Read data from the stream until ``pattern`` is found.
 
+        On success, the data and pattern will be removed from the internal buffer (consumed).
+        Returned data will include the pattern at the end.
+
+        Configured stream limit is used to check result. Limit sets the maximal length of data that
+        can be returned, not counting the pattern.
+
+        If an EOF occurs and the complete pattern is still not found, an IncompleteReadError
+        exception will be raised, and the internal buffer will be reset. The
+        IncompleteReadError.partial attribute may contain the pattern partially.
+
+        If the data cannot be read because of over limit, a LimitOverrunError exception will be
+        raised, and the data will be left in the internal buffer, so it can be read again.
+
+        :raises ValueError: If pattern is None, not a re.Pattern, or not a bytes pattern.
+        :raises LimitOverrunError: If pattern is not found and buffer exceeds limit.
+        :raises IncompleteReadError: If EOF is reached before pattern is found.
+        """
         if pattern is None or not isinstance(pattern, re.Pattern):
             raise ValueError("pattern should be a re.Pattern object")
 
@@ -368,7 +338,8 @@ class TelnetReader:
             await self._wait_for_data("readuntil_pattern")
 
     async def read(self, n=-1):
-        """Read up to `n` bytes from the stream.
+        """
+        Read up to `n` bytes from the stream.
 
         If n is not provided, or set to -1, read until EOF and return all read
         bytes. If the EOF was received and the internal buffer is empty, return
@@ -387,7 +358,6 @@ class TelnetReader:
         If stream was paused, this function will automatically resume it if
         needed.
         """
-
         if self._exception is not None:
             raise self._exception
 
@@ -418,7 +388,8 @@ class TelnetReader:
         return data
 
     async def readexactly(self, n):
-        """Read exactly `n` bytes.
+        """
+        Read exactly `n` bytes.
 
         Raise an IncompleteReadError if EOF is reached before `n` bytes can be
         read. The IncompleteReadError.partial attribute of the exception will
@@ -431,6 +402,9 @@ class TelnetReader:
 
         If stream was paused, this function will automatically resume it if
         needed.
+
+        :raises ValueError: If n is negative.
+        :raises IncompleteReadError: If EOF is reached before n bytes are read.
         """
         if n < 0:
             raise ValueError("readexactly size can not be less than zero")
@@ -472,6 +446,7 @@ class TelnetReader:
     # reader.
     @property
     def connection_closed(self):
+        """Deprecated: use at_eof() instead."""
         warnings.warn(
             "connection_closed property removed, use at_eof() instead",
             DeprecationWarning,
@@ -509,7 +484,7 @@ class TelnetReader:
           NUL" must be used where a carriage return alone is actually desired;
           and the CR character must be avoided in other contexts.
 
-        And therefor, a line does not yield for a stream containing a
+        And therefore, a line does not yield for a stream containing a
         CR if it is not succeeded by NUL or LF.
 
         ================= =====================
@@ -579,6 +554,13 @@ class TelnetReader:
 
 
 class TelnetReaderUnicode(TelnetReader):
+    """
+    Unicode-decoding Telnet stream reader.
+
+    Extends TelnetReader to provide automatic decoding of bytes to unicode strings using a
+    configurable encoding determined by callback function.
+    """
+
     #: Late-binding instance of :class:`codecs.IncrementalDecoder`, some
     #: bytes may be lost if the protocol's encoding is changed after
     #: previously receiving a partial multibyte.  This isn't common in
@@ -608,10 +590,9 @@ class TelnetReaderUnicode(TelnetReader):
         encoding = self.fn_encoding(incoming=True)
 
         # late-binding,
+        # pylint: disable=protected-access
         if self._decoder is None or encoding != self._decoder._encoding:
-            self._decoder = codecs.getincrementaldecoder(encoding)(
-                errors=self.encoding_errors
-            )
+            self._decoder = codecs.getincrementaldecoder(encoding)(errors=self.encoding_errors)
             self._decoder._encoding = encoding
 
         return self._decoder.decode(buf, final)
@@ -629,11 +610,10 @@ class TelnetReaderUnicode(TelnetReader):
         """
         Read up to *n* bytes.
 
-        If the EOF was received and the internal buffer is empty, return an
-        empty string.
+        If the EOF was received and the internal buffer is empty, return an empty string.
 
-        :param int n:  If *n* is not provided, or set to -1, read until EOF
-            and return all characters as one large string.
+        :param int n: If *n* is not provided, or set to -1, read until EOF and return all characters
+            as one large string.
         :rtype: str
         """
         if self._exception is not None:
@@ -656,9 +636,8 @@ class TelnetReaderUnicode(TelnetReader):
                 blocks.append(block)
             return "".join(blocks)
 
-        else:
-            if not self._buffer and not self._eof:
-                await self._wait_for_data("read")
+        if not self._buffer and not self._eof:
+            await self._wait_for_data("read")
 
         buf = self.decode(bytes(self._buffer))
         if n < 0 or len(buf) <= n:

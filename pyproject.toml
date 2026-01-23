@@ -1,0 +1,139 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "telnetlib3"
+version = "2.1.0"
+description = "Python 3 asyncio Telnet server and client Protocol library"
+readme = "README.rst"
+license = "ISC"
+license-files = ["LICENSE"]
+authors = [
+    {name = "Jeff Quast", email = "contact@jeffquast.com"},
+]
+keywords = [
+    "telnet",
+    "server",
+    "client",
+    "bbs",
+    "mud",
+    "utf8",
+    "cp437",
+    "api",
+    "library",
+    "asyncio",
+    "pty",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: ISC License (ISCL)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Typing :: Typed",
+    "Topic :: Internet",
+    "Topic :: System :: Networking",
+    "Topic :: System :: Shells",
+    "Topic :: Terminals :: Telnet",
+]
+requires-python = ">=3.8"
+
+[project.optional-dependencies]
+docs = [
+    "Sphinx>3",
+    "sphinx_rtd_theme",
+]
+
+[project.scripts]
+telnetlib3-server = "telnetlib3.server:main"
+telnetlib3-client = "telnetlib3.client:main"
+
+[project.urls]
+Homepage = "https://github.com/jquast/telnetlib3"
+Documentation = "https://telnetlib3.readthedocs.io"
+Repository = "https://github.com/jquast/telnetlib3"
+Issues = "https://github.com/jquast/telnetlib3/issues"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/telnetlib3/**",
+    "/docs/**",
+    "/README.rst",
+    "/CONTRIBUTING.rst",
+    "/LICENSE",
+    "/tox.ini",
+    "/requirements*.txt",
+    "/.gitignore",
+    "/pyproject.toml",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["telnetlib3"]
+
+[tool.pylint.main]
+load-plugins = [
+    "pylint.extensions.check_elif",
+    "pylint.extensions.docparams",
+    "pylint.extensions.mccabe",
+    "pylint.extensions.overlapping_exceptions",
+    "pylint.extensions.redefined_variable_type",
+]
+persistent = false
+jobs = 0
+
+[tool.pylint."messages control"]
+enable = ["all"]
+disable = [
+    "fixme",
+    "locally-disabled",
+    "suppressed-message",
+    "wrong-import-order",
+    "wrong-import-position",
+    "use-implicit-booleaness-not-comparison-to-zero",
+    # telnetlib3 specific
+    "too-many-instance-attributes",
+    "too-many-public-methods",
+    "too-many-arguments",
+    "duplicate-code",  # intentional re-exports in telnetlib.py and telopt.py
+]
+
+[tool.pylint.format]
+max-line-length = 100
+good-names = ["fd", "_", "x", "y", "tn", "ip"]
+
+[tool.pylint.parameter_documentation]
+default-docstring-type = "sphinx"
+accept-no-raise-doc = false
+accept-no-param-doc = true
+accept-no-return-doc = true
+
+[tool.pylint.design]
+max-args = 12
+max-attributes = 15
+max-branches = 15
+max-complexity = 15
+max-locals = 20
+max-module-lines = 2000
+max-parents = 7
+max-public-methods = 30
+max-returns = 8
+max-statements = 60
+
+[tool.pylint.similarities]
+ignore-imports = true
+min-similarity-lines = 8
+
+[tool.pylint.reports]
+reports = false
+msg-template = "{path}:{line}: [{msg_id}({symbol}), {obj}] {msg}"
+
+[tool.black]
+line-length = 100
+target-version = ["py38", "py39", "py310", "py311", "py312", "py313"]

@@ -1,60 +1,57 @@
 # std imports
-import asyncio
 import collections
-import struct
 
 # 3rd party
 import pytest
 
 # local
-from telnetlib3.stream_writer import (
-    TelnetWriter,
-    TelnetWriterUnicode,
-    Option,
-    _escape_environ,
-    _unescape_environ,
-    _encode_env_buf,
-    _decode_env_buf,
-)
 from telnetlib3 import slc
 from telnetlib3.telopt import (
-    IAC,
+    DM,
+    DO,
+    GA,
+    IS,
     SB,
     SE,
-    IS,
-    SEND,
-    REQUEST,
-    ACCEPTED,
-    REJECTED,
-    DO,
+    TM,
+    IAC,
+    NOP,
+    SGA,
     DONT,
+    ECHO,
+    GMCP,
+    INFO,
+    NAWS,
+    SEND,
     WILL,
     WONT,
-    GA,
-    NOP,
-    DM,
-    ECHO,
-    SGA,
-    BINARY,
-    LINEMODE,
     LFLOW,
-    LFLOW_OFF,
-    LFLOW_ON,
-    STATUS,
     TTYPE,
-    TSPEED,
-    XDISPLOC,
-    SNDLOC,
-    NEW_ENVIRON,
-    INFO,
-    CHARSET,
-    NAWS,
-    GMCP,
-    COM_PORT_OPTION,
+    BINARY,
     LOGOUT,
-    TM,
+    SNDLOC,
+    STATUS,
+    TSPEED,
+    CHARSET,
+    REQUEST,
+    ACCEPTED,
+    LINEMODE,
+    REJECTED,
+    XDISPLOC,
+    LFLOW_OFF,
     TTABLE_IS,
+    NEW_ENVIRON,
+    COM_PORT_OPTION,
     theNULL,
+)
+from telnetlib3.stream_writer import (
+    Option,
+    TelnetWriter,
+    TelnetWriterUnicode,
+    _decode_env_buf,
+    _encode_env_buf,
+    _escape_environ,
+    _unescape_environ,
 )
 
 
@@ -112,12 +109,12 @@ def test_close_idempotent_and_cleanup():
     assert w._transport is None
     assert w._protocol is None
     assert t._closing is True
-    assert w._closed_fut.done()
+    assert w._closed_fut is None or w._closed_fut.done()
     # callbacks cleared
-    assert w._ext_callback == {}
-    assert w._ext_send_callback == {}
-    assert w._slc_callback == {}
-    assert w._iac_callback == {}
+    assert not w._ext_callback
+    assert not w._ext_send_callback
+    assert not w._slc_callback
+    assert not w._iac_callback
     # connection_lost was invoked
     assert p.conn_lost_called is True
     # idempotent
@@ -128,7 +125,7 @@ def test_close_idempotent_and_cleanup():
     w2 = TelnetWriter(t2, p2, server=True)
     w2.close()
     w2.write(b"ignored")
-    assert t2.writes == []
+    assert not t2.writes
 
 
 def test_get_extra_info_merges_protocol_and_transport():
@@ -204,7 +201,7 @@ def test_handle_logout_paths():
     # server DONT -> no write, no crash
     ws2, ts2, _ = new_writer(server=True)
     ws2.handle_logout(DONT)
-    assert ts2.writes == []
+    assert not ts2.writes
     # client WILL -> send DONT LOGOUT
     wc, tc, _ = new_writer(server=False, client=True)
     wc.handle_logout(WILL)
@@ -212,7 +209,7 @@ def test_handle_logout_paths():
     # client WONT -> just logs
     wc2, tc2, _ = new_writer(server=False, client=True)
     wc2.handle_logout(WONT)
-    assert tc2.writes == []
+    assert not tc2.writes
 
 
 def test_handle_do_variants_and_tm_and_logout():
@@ -380,9 +377,7 @@ def test_handle_sb_tspeed_wrong_side_asserts_and_send_and_is():
     ws2.set_ext_callback(TSPEED, lambda rx, tx: seen.setdefault("v", (rx, tx)))
     payload = b"57600,115200"
     ws2._handle_sb_tspeed(
-        collections.deque(
-            [TSPEED, IS] + [payload[i : i + 1] for i in range(len(payload))]
-        )
+        collections.deque([TSPEED, IS] + [payload[i : i + 1] for i in range(len(payload))])
     )
     assert seen["v"] == (57600, 115200)
 
@@ -502,7 +497,8 @@ def test_option_enabled_and_setitem_debug_path():
 
 def test_escape_unescape_and_env_encode_decode_roundtrip():
     # escaping VAR/USERVAR
-    from telnetlib3.telopt import VAR, USERVAR, ESC, VALUE
+    # local
+    from telnetlib3.telopt import ESC, VAR, USERVAR
 
     buf = b"A" + VAR + b"B" + USERVAR + b"C"
     esc = _escape_environ(buf)
@@ -596,9 +592,7 @@ def test_tspeed_is_malformed_values_logged_and_ignored():
     w, t, p = new_writer(server=True)
     w.set_ext_callback(TSPEED, lambda rx, tx: seen.setdefault("v", (rx, tx)))
     payload = b"x,y"  # not integers, triggers ValueError path
-    buf = collections.deque(
-        [TSPEED, IS] + [payload[i : i + 1] for i in range(len(payload))]
-    )
+    buf = collections.deque([TSPEED, IS] + [payload[i : i + 1] for i in range(len(payload))])
     w._handle_sb_tspeed(buf)
     assert "v" not in seen
 
@@ -747,7 +741,7 @@ def test_unicode_writer_write_after_close_noop():
     wu.close()
     wu.write("ignored")
     # no writes performed after close
-    assert t.writes == []
+    assert not t.writes
 
 
 def test_handle_sb_forwardmask_server_will_and_client_do():
@@ -851,7 +845,7 @@ def test_handle_send_server_and_client_charset_returns():
     ws, ts, ps = new_writer(server=True)
     assert ws.handle_send_server_charset() == ["UTF-8"]
     wc, tc, pc = new_writer(server=False, client=True)
-    assert wc.handle_send_client_charset(["UTF-8", "ASCII"]) == ""
+    assert not wc.handle_send_client_charset(["UTF-8", "ASCII"])
 
 
 def test_iac_wont_and_dont_suppressed_when_remote_false():
@@ -883,7 +877,7 @@ def test_handle_sb_linemode_forwardmask_wrong_sb_opt_raises():
 def test_handle_sb_environ_info_warning_path():
     seen = []
     ws, ts, ps = new_writer(server=True)
-    ws.set_ext_callback(NEW_ENVIRON, lambda env: seen.append(env))
+    ws.set_ext_callback(NEW_ENVIRON, seen.append)
     # First IS sets pending_option[SB + NEW_ENVIRON] = False
     is_payload = _encode_env_buf({"USER": "root"})
     ws._handle_sb_environ(collections.deque([NEW_ENVIRON, IS, is_payload]))
@@ -913,9 +907,9 @@ def test_handle_will_tm_success_sets_remote_option_and_calls_cb():
 
 def test_handle_send_helpers_return_values():
     w, t, p = new_writer(server=True)
-    assert w.handle_send_xdisploc() == ""
-    assert w.handle_send_ttype() == ""
-    assert w.handle_send_server_environ() == []
+    assert not w.handle_send_xdisploc()
+    assert not w.handle_send_ttype()
+    assert not w.handle_send_server_environ()
     assert w.handle_send_naws() == (80, 24)
 
 

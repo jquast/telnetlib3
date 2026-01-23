@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
-"""
-Telnet Client API for the 'telnetlib3' python package.
-"""
+"""Telnet Client API for the 'telnetlib3' python package."""
+
 # std imports
-import argparse
-import asyncio
+import os
+import sys
 import codecs
 import struct
-import sys
-import os
+import asyncio
+import argparse
 
+# local
 # local imports
-from telnetlib3 import accessories
-from telnetlib3 import client_base
+from telnetlib3 import accessories, client_base
 
 __all__ = ("TelnetClient", "TelnetTerminalClient", "open_connection")
 
@@ -21,8 +20,8 @@ class TelnetClient(client_base.BaseClient):
     """
     Telnet client that supports all common options.
 
-    This class is useful for automation, it appears to be a virtual terminal to
-    the remote end, but does not require an interactive terminal to run.
+    Useful for automation, appearing as a virtual terminal to the remote end without requiring an
+    interactive terminal to run.
     """
 
     #: On :meth:`send_env`, the value of 'LANG' will be 'C' for binary
@@ -31,7 +30,7 @@ class TelnetClient(client_base.BaseClient):
     #: full default LANG value of 'en_US.utf8'
     DEFAULT_LOCALE = "en_US"
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-positional-arguments,keyword-arg-before-vararg
         self,
         term="unknown",
         cols=80,
@@ -41,6 +40,7 @@ class TelnetClient(client_base.BaseClient):
         *args,
         **kwargs,
     ):
+        """Initialize TelnetClient with terminal parameters."""
         super().__init__(*args, **kwargs)
         self._extra.update(
             {
@@ -61,15 +61,21 @@ class TelnetClient(client_base.BaseClient):
                 "cols": cols,
                 "rows": rows,
                 "term": term,
-                "tspeed": "{},{}".format(*tspeed),
+                "tspeed": f"{tspeed[0]},{tspeed[1]}",
                 "xdisploc": xdisploc,
             }
         )
 
     def connection_made(self, transport):
-        """Callback for connection made to server."""
-        from telnetlib3.telopt import TTYPE, TSPEED, XDISPLOC, NEW_ENVIRON
-        from telnetlib3.telopt import CHARSET, NAWS
+        """
+        Handle connection made to server.
+
+        Wire up telnet option callbacks for terminal type, speed, display, environment, window size,
+        and character set negotiation.
+        """
+        # pylint: disable=import-outside-toplevel
+        # local
+        from telnetlib3.telopt import NAWS, TTYPE, TSPEED, CHARSET, XDISPLOC, NEW_ENVIRON
 
         super().connection_made(transport)
 
@@ -98,9 +104,7 @@ class TelnetClient(client_base.BaseClient):
                 and self.writer.remote_option.enabled(CHARSET)
                 and self.writer.local_option.enabled(CHARSET)
             ):
-                self.log.debug(
-                    "Both sides support CHARSET, ready for server to initiate REQUEST"
-                )
+                self.log.debug("Both sides support CHARSET, ready for server to initiate REQUEST")
 
             return result
 
@@ -122,12 +126,10 @@ class TelnetClient(client_base.BaseClient):
         """
         Callback for responding to NEW_ENVIRON requests.
 
-        :param dict keys: Values are requested for the keys specified.
-           When empty, all environment values that wish to be volunteered
-           should be returned.
-        :returns: dictionary of environment values requested, or an
-            empty string for keys not available. A return value must be
-            given for each key requested.
+        :param dict keys: Values are requested for the keys specified. When empty, all environment
+            values that wish to be volunteered should be returned.
+        :returns: dictionary of environment values requested, or an empty string for keys not
+            available. A return value must be given for each key requested.
         :rtype: dict
         """
         env = {
@@ -188,7 +190,7 @@ class TelnetClient(client_base.BaseClient):
                     break
 
             except LookupError:
-                self.log.info(f"LookupError: encoding {offer} not available")
+                self.log.info("LookupError: encoding %s not available", offer)
                 continue
 
         # Decision logic:
@@ -198,7 +200,7 @@ class TelnetClient(client_base.BaseClient):
             offer, canon = matched_offer
             self._extra["charset"] = canon
             self._extra["lang"] = self.DEFAULT_LOCALE + "." + canon
-            self.log.debug(f"encoding negotiated: {offer}")
+            self.log.debug("encoding negotiated: %s", offer)
             return offer
 
         # Case 2: Has explicit encoding but not offered
@@ -209,13 +211,11 @@ class TelnetClient(client_base.BaseClient):
                 offer, canon = first_viable
                 self._extra["charset"] = canon
                 self._extra["lang"] = self.DEFAULT_LOCALE + "." + canon
-                self.log.debug(f"encoding negotiated: {offer}")
+                self.log.debug("encoding negotiated: %s", offer)
                 return offer
 
             # Otherwise reject - keep client's explicit encoding
-            self.log.debug(
-                f"Declining offered charsets {offered}; prefer {desired_name}"
-            )
+            self.log.debug("Declining offered charsets %s; prefer %s", offered, desired_name)
             return ""
 
         # Case 3: No explicit preference, use first viable
@@ -223,11 +223,11 @@ class TelnetClient(client_base.BaseClient):
             offer, canon = first_viable
             self._extra["charset"] = canon
             self._extra["lang"] = self.DEFAULT_LOCALE + "." + canon
-            self.log.debug(f"encoding negotiated: {offer}")
+            self.log.debug("encoding negotiated: %s", offer)
             return offer
 
         # Case 4: No viable encodings found
-        self.log.warning(f"No suitable encoding offered by server: {offered}")
+        self.log.warning("No suitable encoding offered by server: %s", offered)
         return ""
 
     def send_naws(self):
@@ -256,8 +256,7 @@ class TelnetClient(client_base.BaseClient):
         """
         if not (outgoing or incoming):
             raise TypeError(
-                "encoding arguments 'outgoing' and 'incoming' "
-                "are required: toggle at least one."
+                "encoding arguments 'outgoing' and 'incoming' are required: toggle at least one."
             )
 
         # may we encode in the direction indicated?
@@ -305,8 +304,9 @@ class TelnetTerminalClient(TelnetClient):
     @staticmethod
     def _winsize():
         try:
-            import fcntl
-            import termios
+            # std imports
+            import fcntl  # pylint: disable=import-outside-toplevel
+            import termios  # pylint: disable=import-outside-toplevel
 
             fmt = "hhhh"
             buf = "\x00" * struct.calcsize(fmt)
@@ -321,7 +321,7 @@ class TelnetTerminalClient(TelnetClient):
             )
 
 
-async def open_connection(
+async def open_connection(  # pylint: disable=too-many-locals
     host=None,
     port=23,
     *,
@@ -380,10 +380,6 @@ async def open_connection(
         :rfc:`1079`.
     :param str xdisploc: String transmitted in response for request of
         XDISPLOC, :rfc:`1086` by server (X11).
-    :param shell: A async function that is called after negotiation completes,
-        receiving arguments ``(reader, writer)``.  The reader is a
-        :class:`~.TelnetReader` instance, the writer is a
-        :class:`~.TelnetWriter` instance.
     :param float connect_minwait: The client allows any additional telnet
         negotiations to be demanded by the server within this period of time
         before launching the shell.  Servers should assert desired negotiation
@@ -397,6 +393,12 @@ async def open_connection(
         greater of this value has elapsed.  A client that is not answering
         option negotiation will delay the start of the shell by this amount.
 
+    :param bool force_binary: When ``True``, the encoding is used regardless
+        of BINARY mode negotiation.
+    :param asyncio.Future waiter_closed: Future that completes when the
+        connection is closed.
+    :param callable shell: An async function that is called after negotiation completes,
+        receiving arguments ``(reader, writer)``.
     :param int limit: The buffer limit for reader stream.
     :return (reader, writer): The reader is a :class:`~.TelnetReader`
         instance, the writer is a :class:`~.TelnetWriter` instance.
@@ -424,7 +426,7 @@ async def open_connection(
             limit=limit,
         )
 
-    transport, protocol = await asyncio.get_event_loop().create_connection(
+    _, protocol = await asyncio.get_event_loop().create_connection(
         connection_factory,
         host,
         port,
@@ -433,30 +435,37 @@ async def open_connection(
         local_addr=local_addr,
     )
 
-    await protocol._waiter_connected
+    await protocol._waiter_connected  # pylint: disable=protected-access
 
     return protocol.reader, protocol.writer
 
 
 async def run_client():
     """Command-line 'telnetlib3-client' entry point, via setuptools."""
-    kwargs = _transform_args(_get_argument_parser().parse_args())
-    config_msg = "Client configuration: {key_values}".format(
-        key_values=accessories.repr_mapping(kwargs)
-    )
-    host = kwargs.pop("host")
-    port = kwargs.pop("port")
+    args = _transform_args(_get_argument_parser().parse_args())
+    config_msg = f"Client configuration: {accessories.repr_mapping(args)}"
 
     log = accessories.make_logger(
         name=__name__,
-        loglevel=kwargs.pop("loglevel"),
-        logfile=kwargs.pop("logfile"),
-        logfmt=kwargs.pop("logfmt"),
+        loglevel=args["loglevel"],
+        logfile=args["logfile"],
+        logfmt=args["logfmt"],
     )
     log.debug(config_msg)
 
+    # Build connection kwargs explicitly to avoid pylint false positive
+    connection_kwargs = {
+        "encoding": args["encoding"],
+        "tspeed": args["tspeed"],
+        "shell": args["shell"],
+        "term": args["term"],
+        "force_binary": args["force_binary"],
+        "encoding_errors": args["encoding_errors"],
+        "connect_minwait": args["connect_minwait"],
+    }
+
     # connect
-    reader, writer = await open_connection(host, port, **kwargs)
+    _, writer = await open_connection(args["host"], args["port"], **connection_kwargs)
 
     # repl loop
     await writer.protocol.waiter_closed
@@ -469,13 +478,10 @@ def _get_argument_parser():
     )
     parser.add_argument("host", action="store", help="hostname")
     parser.add_argument("port", nargs="?", default=23, type=int, help="port number")
-    parser.add_argument(
-        "--term", default=os.environ.get("TERM", "unknown"), help="terminal type"
-    )
+    parser.add_argument("--term", default=os.environ.get("TERM", "unknown"), help="terminal type")
     parser.add_argument("--loglevel", default="warn", help="log level")
-    parser.add_argument(
-        "--logfmt", default=accessories._DEFAULT_LOGFMT, help="log format"
-    )
+    # pylint: disable=protected-access
+    parser.add_argument("--logfmt", default=accessories._DEFAULT_LOGFMT, help="log format")
     parser.add_argument("--logfile", help="filepath")
     parser.add_argument(
         "--shell", default="telnetlib3.telnet_client_shell", help="module.function_name"
@@ -489,9 +495,7 @@ def _get_argument_parser():
         choices=("replace", "ignore", "strict"),
     )
 
-    parser.add_argument(
-        "--force-binary", action="store_true", help="force encoding", default=True
-    )
+    parser.add_argument("--force-binary", action="store_true", help="force encoding", default=True)
     parser.add_argument(
         "--connect-minwait", default=1.0, type=float, help="shell delay for negotiation"
     )
@@ -522,6 +526,7 @@ def _transform_args(args):
 
 
 def main():
+    """Entry point for telnetlib3-client command."""
     asyncio.run(run_client())
 
 

@@ -1,9 +1,11 @@
+"""Telnet client shell implementations for interactive terminal sessions."""
+
+# pylint: disable=too-complex
+
 # std imports
-import collections
-import contextlib
-import logging
-import asyncio
 import sys
+import asyncio
+import collections
 
 # local
 from . import accessories
@@ -17,40 +19,32 @@ __all__ = ("telnet_client_shell",)
 if sys.platform == "win32":
 
     async def telnet_client_shell(telnet_reader, telnet_writer):
-        raise NotImplementedError(
-            "win32 not yet supported as telnet client. Please contribute!"
-        )
+        """Win32 telnet client shell (not implemented)."""
+        raise NotImplementedError("win32 not yet supported as telnet client. Please contribute!")
 
 else:
-    import termios
+    # std imports
     import os
     import signal
+    import termios
 
-    @contextlib.contextmanager
-    def _set_tty(fobj, tty_func):
+    class Terminal:
         """
-        return context manager for manipulating stdin tty state.
+        Context manager for terminal mode handling on POSIX systems.
 
-        if stdin is not attached to a terminal, no action is performed
-        before or after yielding.
-        """
-
-    class Terminal(object):
-        """
-        Context manager that yields (sys.stdin, sys.stdout) for POSIX systems.
-
-        When sys.stdin is a attached to a terminal, it is configured for
-        the matching telnet modes negotiated for the given telnet_writer.
+        When sys.stdin is attached to a terminal, it is configured for the matching telnet modes
+        negotiated for the given telnet_writer.
         """
 
         ModeDef = collections.namedtuple(
-            "mode", ["iflag", "oflag", "cflag", "lflag", "ispeed", "ospeed", "cc"]
+            "ModeDef", ["iflag", "oflag", "cflag", "lflag", "ispeed", "ospeed", "cc"]
         )
 
         def __init__(self, telnet_writer):
             self.telnet_writer = telnet_writer
             self._fileno = sys.stdin.fileno()
             self._istty = os.path.sameopenfile(0, 1)
+            self._save_mode = None
 
         def __enter__(self):
             self._save_mode = self.get_mode()
@@ -60,23 +54,20 @@ else:
 
         def __exit__(self, *_):
             if self._istty:
-                termios.tcsetattr(
-                    self._fileno, termios.TCSAFLUSH, list(self._save_mode)
-                )
+                termios.tcsetattr(self._fileno, termios.TCSAFLUSH, list(self._save_mode))
 
         def get_mode(self):
+            """Return current terminal mode if attached to a tty, otherwise None."""
             if self._istty:
                 return self.ModeDef(*termios.tcgetattr(self._fileno))
+            return None
 
         def set_mode(self, mode):
+            """Set terminal mode attributes."""
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSAFLUSH, list(mode))
 
         def determine_mode(self, mode):
-            """
-            Return copy of 'mode' with changes suggested for telnet connection.
-            """
-            from telnetlib3.telopt import ECHO
-
+            """Return copy of 'mode' with changes suggested for telnet connection."""
             if not self.telnet_writer.will_echo:
                 # return mode as-is
                 self.telnet_writer.log.debug("local echo, linemode")
@@ -104,9 +95,7 @@ else:
             # Disable canonical input (^H and ^C processing),
             # disable any other special control characters,
             # disable checking for INTR, QUIT, and SUSP input.
-            lflag = mode.lflag & ~(
-                termios.ICANON | termios.IEXTEN | termios.ISIG | termios.ECHO
-            )
+            lflag = mode.lflag & ~(termios.ICANON | termios.IEXTEN | termios.ISIG | termios.ECHO)
 
             # Disable post-output processing,
             # such as mapping LF('\n') to CRLF('\r\n') in output.
@@ -132,9 +121,7 @@ else:
             )
 
         async def make_stdio(self):
-            """
-            Return (reader, writer) pair for sys.stdin, sys.stdout.
-            """
+            """Return (reader, writer) pair for sys.stdin, sys.stdout."""
             reader = asyncio.StreamReader()
             reader_protocol = asyncio.StreamReaderProtocol(reader)
 
@@ -161,14 +148,14 @@ else:
 
             return reader, writer
 
+    # pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-many-nested-blocks
     async def telnet_client_shell(telnet_reader, telnet_writer):
         """
         Minimal telnet client shell for POSIX terminals.
 
-        This shell performs minimal tty mode handling when a terminal is
-        attached to standard in (keyboard), notably raw mode is often set
-        and this shell may exit only by disconnect from server, or the
-        escape character, ^].
+        This shell performs minimal tty mode handling when a terminal is attached to standard in
+        (keyboard), notably raw mode is often set and this shell may exit only by disconnect from
+        server, or the escape character, ^].
 
         stdin or stdout may also be a pipe or file, behaving much like nc(1).
         """
@@ -176,34 +163,31 @@ else:
 
         with Terminal(telnet_writer=telnet_writer) as term:
             linesep = "\n"
-            if term._istty and telnet_writer.will_echo:
+            if term._istty and telnet_writer.will_echo:  # pylint: disable=protected-access
                 linesep = "\r\n"
             stdin, stdout = await term.make_stdio()
-            stdout.write(
-                "Escape character is '{escape}'.{linesep}".format(
-                    escape=accessories.name_unicode(keyboard_escape), linesep=linesep
-                ).encode()
-            )
+            escape_name = accessories.name_unicode(keyboard_escape)
+            stdout.write(f"Escape character is '{escape_name}'.{linesep}".encode())
 
             # Setup SIGWINCH handler to send NAWS on terminal resize (POSIX only).
             # We debounce to avoid flooding on continuous resizes.
             loop = asyncio.get_event_loop()
             winch_pending = {"h": None}
             remove_winch = False
-            if term._istty:
+            if term._istty:  # pylint: disable=protected-access
                 try:
 
                     def _send_naws():
-                        from .telopt import NAWS
+                        # local
+                        from .telopt import NAWS  # pylint: disable=import-outside-toplevel
 
                         try:
                             if (
                                 telnet_writer.local_option.enabled(NAWS)
                                 and not telnet_writer.is_closing()
                             ):
-                                telnet_writer._send_naws()
-                        except Exception:
-                            # Avoid surfacing errors from signal context
+                                telnet_writer._send_naws()  # pylint: disable=protected-access
+                        except Exception:  # pylint: disable=broad-exception-caught
                             pass
 
                     def _on_winch():
@@ -211,25 +195,21 @@ else:
                         if h is not None and not h.cancelled():
                             try:
                                 h.cancel()
-                            except Exception:
+                            except Exception:  # pylint: disable=broad-exception-caught
                                 pass
-                        # small delay to debounce rapid resize events
                         winch_pending["h"] = loop.call_later(0.05, _send_naws)
 
                     if hasattr(signal, "SIGWINCH"):
                         loop.add_signal_handler(signal.SIGWINCH, _on_winch)
                         remove_winch = True
-                except Exception:
-                    # add_signal_handler may be unsupported in some environments
+                except Exception:  # pylint: disable=broad-exception-caught
                     remove_winch = False
 
             stdin_task = accessories.make_reader_task(stdin)
             telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
             wait_for = set([stdin_task, telnet_task])
             while wait_for:
-                done, pending = await asyncio.wait(
-                    wait_for, return_when=asyncio.FIRST_COMPLETED
-                )
+                done, _ = await asyncio.wait(wait_for, return_when=asyncio.FIRST_COMPLETED)
 
                 # Prefer handling stdin events first to avoid starvation under heavy output
                 if stdin_task in done:
@@ -249,33 +229,28 @@ else:
                             # on ^], close connection to remote host
                             try:
                                 telnet_writer.close()
-                            except Exception:
+                            except Exception:  # pylint: disable=broad-exception-caught
                                 pass
                             if telnet_task in wait_for:
                                 telnet_task.cancel()
                                 wait_for.remove(telnet_task)
-                            stdout.write(
-                                "\033[m{linesep}Connection closed.{linesep}".format(
-                                    linesep=linesep
-                                ).encode()
-                            )
+                            stdout.write(f"\033[m{linesep}Connection closed.{linesep}".encode())
                             # Cleanup resize handler on local escape close
-                            if term._istty and remove_winch:
+                            if term._istty and remove_winch:  # pylint: disable=protected-access
                                 try:
                                     loop.remove_signal_handler(signal.SIGWINCH)
-                                except Exception:
+                                except Exception:  # pylint: disable=broad-exception-caught
                                     pass
                             h = winch_pending.get("h")
                             if h is not None:
                                 try:
                                     h.cancel()
-                                except Exception:
+                                except Exception:  # pylint: disable=broad-exception-caught
                                     pass
                             break
-                        else:
-                            telnet_writer.write(inp.decode())
-                            stdin_task = accessories.make_reader_task(stdin)
-                            wait_for.add(stdin_task)
+                        telnet_writer.write(inp.decode())
+                        stdin_task = accessories.make_reader_task(stdin)
+                        wait_for.add(stdin_task)
                     else:
                         telnet_writer.log.debug("EOF from client stdin")
 
@@ -286,33 +261,26 @@ else:
                     # TODO: We should not require to check for '_eof' value,
                     # but for some systems, htc.zapto.org, it is required,
                     # where b'' is received even though connection is on?.
-                    if not out and telnet_reader._eof:
+                    if not out and telnet_reader._eof:  # pylint: disable=protected-access
                         if stdin_task in wait_for:
                             stdin_task.cancel()
                             wait_for.remove(stdin_task)
                         stdout.write(
-                            (
-                                "\033[m{linesep}Connection closed "
-                                "by foreign host.{linesep}"
-                            )
-                            .format(linesep=linesep)
-                            .encode()
+                            f"\033[m{linesep}Connection closed by foreign host.{linesep}".encode()
                         )
                         # Cleanup resize handler on remote close
-                        if term._istty and remove_winch:
+                        if term._istty and remove_winch:  # pylint: disable=protected-access
                             try:
                                 loop.remove_signal_handler(signal.SIGWINCH)
-                            except Exception:
+                            except Exception:  # pylint: disable=broad-exception-caught
                                 pass
                         h = winch_pending.get("h")
                         if h is not None:
                             try:
                                 h.cancel()
-                            except Exception:
+                            except Exception:  # pylint: disable=broad-exception-caught
                                 pass
                     else:
                         stdout.write(out.encode() or b":?!?:")
-                        telnet_task = accessories.make_reader_task(
-                            telnet_reader, size=2**24
-                        )
+                        telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
                         wait_for.add(telnet_task)

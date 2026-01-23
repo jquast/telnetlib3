@@ -1,6 +1,6 @@
 # std imports
-import asyncio
 import re
+import asyncio
 
 # 3rd party
 import pytest
@@ -113,7 +113,7 @@ async def test_pause_and_resume_transport_based_on_buffer_limit():
 async def test_anext_iterates_lines_and_stops_on_eof():
     r = TelnetReader()
     r.feed_data(b"Line1\nLine2\n")
-    # first line
+    # first line (using __anext__ for Python 3.8/3.9 compat; anext() is 3.10+)
     one = await r.__anext__()
     assert one == b"Line1\n"
     # second line
@@ -166,7 +166,7 @@ async def test_unicode_reader_read_zero_and_read_consumes():
     ur = TelnetReaderUnicode(fn_encoding=enc)
     # read(0) yields empty string
     out0 = await ur.read(0)
-    assert out0 == ""
+    assert not out0
 
     ur.feed_data(b"abc")
     out2 = await ur.read(2)

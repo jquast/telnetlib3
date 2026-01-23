@@ -1,22 +1,24 @@
-"""PTY shell implementation for telnetlib3.
+"""
+PTY shell implementation for telnetlib3.
 
-This module provides the ability to spawn PTY-connected programs (bash, tmux,
-nethack, etc.) for each telnet connection, with proper terminal negotiation
-forwarding.
+This module provides the ability to spawn PTY-connected programs (bash, tmux, nethack, etc.) for
+each telnet connection, with proper terminal negotiation forwarding.
 """
 
-import asyncio
-import errno
-import fcntl
-import logging
+# std imports
 import os
 import pty
+import sys
+import errno
+import fcntl
+import codecs
 import signal
 import struct
-import sys
+import asyncio
+import logging
 import termios
-import tty
 
+# local
 from .telopt import NAWS
 
 __all__ = ("make_pty_shell", "pty_shell")
@@ -56,6 +58,8 @@ class PTYSession:
         self._closing = False
         self._output_buffer = b""
         self._in_sync_update = False
+        self._decoder = None
+        self._decoder_charset = None
 
     def start(self):
         """Fork PTY, configure environment, and exec program."""
@@ -189,13 +193,12 @@ class PTYSession:
                 except OSError as e:
                     if e.errno == errno.EAGAIN:
                         break  # No more data available
-                    elif e.errno == errno.EIO:
+                    if e.errno == errno.EIO:
                         self._closing = True
                         break
-                    else:
-                        logger.debug("PTY read error: %s", e)
-                        self._closing = True
-                        break
+                    logger.debug("PTY read error: %s", e)
+                    self._closing = True
+                    break
             if chunks:
                 pty_data_queue.put_nowait(b"".join(chunks))
             pty_read_event.set()
@@ -246,7 +249,7 @@ class PTYSession:
                         # EAGAIN was hit - flush any remaining partial line
                         self._flush_remaining()
                         pty_read_event.clear()
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-exception-caught
                     logger.debug("bridge loop error: %s", e)
                     self._closing = True
                     break
@@ -304,13 +307,21 @@ class PTYSession:
                     # next sync boundary, or when more data arrives with EAGAIN)
                     break
 
-    def _flush_output(self, data):
-        """Send data to telnet client."""
+    def _flush_output(self, data, final=False):
+        """Send data to telnet client using incremental decoder."""
         if not data:
             return
         charset = self.writer.get_extra_info("charset") or "utf-8"
-        text = data.decode(charset, errors="replace")
-        self.writer.write(text)
+
+        # Get or create incremental decoder, recreating if charset changed
+        if self._decoder is None or self._decoder_charset != charset:
+            self._decoder = codecs.getincrementaldecoder(charset)(errors="replace")
+            self._decoder_charset = charset
+
+        # Decode using incremental decoder - it buffers incomplete sequences
+        text = self._decoder.decode(data, final)
+        if text:
+            self.writer.write(text)
 
     def _flush_remaining(self):
         """Flush remaining buffer after EAGAIN (partial lines, prompts, etc.)."""
@@ -320,9 +331,9 @@ class PTYSession:
 
     def cleanup(self):
         """Kill child process and close PTY fd."""
-        # Flush any remaining output buffer
+        # Flush any remaining output buffer with final=True to emit buffered bytes
         if self._output_buffer:
-            self._flush_output(self._output_buffer)
+            self._flush_output(self._output_buffer, final=True)
             self._output_buffer = b""
 
         if self.master_fd is not None:
@@ -367,10 +378,10 @@ async def pty_shell(reader, writer, program, args=None):
     """
     PTY shell callback for telnet server.
 
-    :param reader: TelnetReader instance.
-    :param writer: TelnetWriter instance.
-    :param program: Path to program to execute.
-    :param args: List of arguments for the program.
+    :param TelnetReader reader: TelnetReader instance.
+    :param TelnetWriter writer: TelnetWriter instance.
+    :param str program: Path to program to execute.
+    :param list args: List of arguments for the program.
     """
     _platform_check()
 
@@ -390,8 +401,8 @@ def make_pty_shell(program, args=None):
     """
     Factory returning a shell callback for PTY execution.
 
-    :param program: Path to program to execute.
-    :param args: List of arguments for the program.
+    :param str program: Path to program to execute.
+    :param list args: List of arguments for the program.
     :returns: Async shell callback suitable for use with create_server().
 
     Example usage::

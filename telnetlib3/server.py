@@ -1,7 +1,9 @@
 """
+Telnet server implementation with command-line interface.
+
 The ``main`` function here is wired to the command line tool by name
-telnetlib3-server.  If this server's PID receives the SIGTERM signal, it
-attempts to shutdown gracefully.
+telnetlib3-server. If this server's PID receives the SIGTERM signal,
+it attempts to shutdown gracefully.
 
 The :class:`TelnetServer` class negotiates a character-at-a-time (WILL-SGA,
 WILL-ECHO) session with support for negotiation about window size, environment
@@ -10,53 +12,52 @@ after an idle period.
 """
 
 # std imports
-import collections
-import argparse
+import signal
 import asyncio
 import logging
-import signal
+import argparse
+from typing import Callable, Optional, NamedTuple
 
 # local
-from . import server_base
-from . import accessories
+from . import accessories, server_base
 from .telopt import name_commands
+
+# Check if PTY support is available (Unix-only modules: pty, termios, fcntl)
+try:
+    # std imports
+    import pty  # noqa: F401 pylint:disable=unused-import
+    import fcntl  # noqa: F401 pylint:disable=unused-import
+    import termios  # noqa: F401 pylint:disable=unused-import
+    PTY_SUPPORT = True
+except ImportError:
+    PTY_SUPPORT = False
 
 __all__ = ("TelnetServer", "create_server", "run_server", "parse_server_args")
 
-CONFIG = collections.namedtuple(
-    "CONFIG",
-    [
-        "host",
-        "port",
-        "loglevel",
-        "logfile",
-        "logfmt",
-        "shell",
-        "encoding",
-        "force_binary",
-        "timeout",
-        "connect_maxwait",
-        "pty_exec",
-        "pty_args",
-        "robot_check",
-        "pty_fork_limit",
-    ],
-)(
-    host="localhost",
-    port=6023,
-    loglevel="info",
-    logfile=None,
-    logfmt=accessories._DEFAULT_LOGFMT,
-    shell=accessories.function_lookup("telnetlib3.telnet_server_shell"),
-    encoding="utf8",
-    force_binary=False,
-    timeout=300,
-    connect_maxwait=4.0,
-    pty_exec=None,
-    pty_args=None,
-    robot_check=False,
-    pty_fork_limit=0,
-)
+
+class CONFIG(NamedTuple):
+    """Default configuration for the telnet server."""
+
+    host: str = "localhost"
+    port: int = 6023
+    loglevel: str = "info"
+    logfile: Optional[str] = None
+    logfmt: str = accessories._DEFAULT_LOGFMT  # pylint: disable=protected-access
+    shell: Callable = accessories.function_lookup("telnetlib3.telnet_server_shell")
+    encoding: str = "utf8"
+    force_binary: bool = False
+    timeout: int = 300
+    connect_maxwait: float = 4.0
+    pty_exec: Optional[str] = None
+    pty_args: Optional[str] = None
+    robot_check: bool = False
+    pty_fork_limit: int = 0
+
+
+# Default config instance - use this to access default values
+# (accessing CONFIG.field directly returns _tuplegetter in Python 3.8)
+_config = CONFIG()
+
 logger = logging.getLogger("telnetlib3.server")
 
 
@@ -70,7 +71,10 @@ class TelnetServer(server_base.BaseServer):
 
     # Derived methods from base class
 
-    def __init__(self, term="unknown", cols=80, rows=25, timeout=300, *args, **kwargs):
+    def __init__(
+        self, term="unknown", cols=80, rows=25, timeout=300, *args, **kwargs
+    ):  # pylint: disable=keyword-arg-before-vararg
+        """Initialize TelnetServer with terminal parameters."""
         super().__init__(*args, **kwargs)
         self.waiter_encoding = asyncio.Future()
         self._tasks.append(self.waiter_encoding)
@@ -87,7 +91,16 @@ class TelnetServer(server_base.BaseServer):
         )
 
     def connection_made(self, transport):
-        from .telopt import NAWS, NEW_ENVIRON, TSPEED, TTYPE, XDISPLOC, CHARSET
+        """Handle new connection and wire up telnet option callbacks."""
+        # local
+        from .telopt import (  # pylint: disable=import-outside-toplevel
+            NAWS,
+            TTYPE,
+            TSPEED,
+            CHARSET,
+            XDISPLOC,
+            NEW_ENVIRON,
+        )
 
         super().connection_made(transport)
 
@@ -114,17 +127,31 @@ class TelnetServer(server_base.BaseServer):
             self.writer.set_ext_send_callback(tel_opt, callback_fn)
 
     def data_received(self, data):
+        """Process received data and reset timeout timer."""
         self.set_timeout()
         super().data_received(data)
 
     def begin_negotiation(self):
-        from .telopt import DO, TTYPE
+        """Begin telnet negotiation by requesting terminal type."""
+        # local
+        from .telopt import DO, TTYPE  # pylint: disable=import-outside-toplevel
 
         super().begin_negotiation()
         self.writer.iac(DO, TTYPE)
 
     def begin_advanced_negotiation(self):
-        from .telopt import DO, WILL, SGA, ECHO, BINARY, NEW_ENVIRON, NAWS, CHARSET
+        """Request advanced telnet options from client."""
+        # local
+        from .telopt import (  # pylint: disable=import-outside-toplevel
+            DO,
+            SGA,
+            ECHO,
+            NAWS,
+            WILL,
+            BINARY,
+            CHARSET,
+            NEW_ENVIRON,
+        )
 
         super().begin_advanced_negotiation()
         self.writer.iac(WILL, SGA)
@@ -137,13 +164,18 @@ class TelnetServer(server_base.BaseServer):
             self.writer.iac(DO, CHARSET)
 
     def check_negotiation(self, final=False):
-        from .telopt import TTYPE, NEW_ENVIRON, CHARSET, SB
+        """Check if negotiation is complete including encoding."""
+        # local
+        from .telopt import (  # pylint: disable=import-outside-toplevel
+            SB,
+            TTYPE,
+            CHARSET,
+            NEW_ENVIRON,
+        )
 
         # Debug log to see which options are still pending
         pending = [
-            (name_commands(opt), val)
-            for opt, val in self.writer.pending_option.items()
-            if val
+            (name_commands(opt), val) for opt, val in self.writer.pending_option.items() if val
         ]
         if pending:
             logger.debug("Pending options: %r", pending)
@@ -155,8 +187,7 @@ class TelnetServer(server_base.BaseServer):
             and self.writer.pending_option[SB + NEW_ENVIRON]
         )
         waiting_for_charset = (
-            SB + CHARSET in self.writer.pending_option
-            and self.writer.pending_option[SB + CHARSET]
+            SB + CHARSET in self.writer.pending_option and self.writer.pending_option[SB + CHARSET]
         )
 
         if waiting_for_environ or waiting_for_charset:
@@ -175,31 +206,25 @@ class TelnetServer(server_base.BaseServer):
         encoding = self.encoding(outgoing=True, incoming=True)
 
         if not self.waiter_encoding.done() and result:
-            logger.debug("encoding complete: {0!r}".format(encoding))
+            logger.debug("encoding complete: %r", encoding)
             self.waiter_encoding.set_result(result)
 
-        elif (
-            not self.waiter_encoding.done()
-            and self.writer.remote_option.get(TTYPE) is False
-        ):
+        elif not self.waiter_encoding.done() and self.writer.remote_option.get(TTYPE) is False:
             # if the remote end doesn't support TTYPE, which is agreed upon
             # to continue towards advanced negotiation of CHARSET, we assume
             # the distant end would not support it, declaring encoding failed.
             logger.debug(
-                "encoding failed after {0:1.2f}s: {1}, remote_option[TTYPE]={2}, result={3}".format(
-                    self.duration,
-                    encoding,
-                    self.writer.remote_option.get(TTYPE),
-                    result,
-                )
+                "encoding failed after %1.2fs: %s, remote_option[TTYPE]=%s, result=%s",
+                self.duration,
+                encoding,
+                self.writer.remote_option.get(TTYPE),
+                result,
             )
             self.waiter_encoding.set_result(result)  # False
             return parent
 
         elif not self.waiter_encoding.done() and final:
-            logger.debug(
-                "encoding failed after {0:1.2f}s: {1}".format(self.duration, encoding)
-            )
+            logger.debug("encoding failed after %1.2fs: %s", self.duration, encoding)
             self.waiter_encoding.set_result(result)  # False
             return parent
 
@@ -229,8 +254,7 @@ class TelnetServer(server_base.BaseServer):
         """
         if not (outgoing or incoming):
             raise TypeError(
-                "encoding arguments 'outgoing' and 'incoming' "
-                "are required: toggle at least one."
+                "encoding arguments 'outgoing' and 'incoming' are required: toggle at least one."
             )
 
         # may we encode in the direction indicated?
@@ -288,7 +312,7 @@ class TelnetServer(server_base.BaseServer):
         This can be disabled by calling :meth:`set_timeout` with
         ``duration` value of ``0``.
         """
-        logger.debug("Timeout after {self.idle:1.2f}s".format(self=self))
+        logger.debug("Timeout after %1.2fs", self.idle)
         # try to write timeout using encoding,
         try:
             self.writer.write("\r\nTimeout.\r\n")
@@ -327,7 +351,8 @@ class TelnetServer(server_base.BaseServer):
             ['LANG', 'TERM', 'COLUMNS', 'LINES', 'DISPLAY', 'COLORTERM',
              VAR, USERVAR, 'COLORTERM']
         """
-        from .telopt import VAR, USERVAR
+        # local
+        from .telopt import VAR, USERVAR  # pylint: disable=import-outside-toplevel
 
         return [
             "LANG",
@@ -344,11 +369,10 @@ class TelnetServer(server_base.BaseServer):
         """Callback receives NEW_ENVIRON response, :rfc:`1572`."""
         # A well-formed client responds with empty values for variables to
         # mean "no value".  They might have it, they just may not wish to
-        # divulge that information.  We pop these keys as a side effect in
-        # the result statement of the following list comprehension.
-        no_value = [
-            mapping.pop(key) or key for key, val in list(mapping.items()) if not val
-        ]
+        # divulge that information.  We pop these keys as a side effect.
+        for key, val in list(mapping.items()):
+            if not val:
+                mapping.pop(key)
 
         # because we are working with "untrusted input", we make one fair
         # distinction: all keys received by NEW_ENVIRON are in uppercase.
@@ -356,7 +380,7 @@ class TelnetServer(server_base.BaseServer):
         # 'peer'.
         u_mapping = {key.upper(): val for key, val in list(mapping.items())}
 
-        logger.debug("on_environ received: {0!r}".format(u_mapping))
+        logger.debug("on_environ received: %r", u_mapping)
 
         self._extra.update(u_mapping)
 
@@ -405,7 +429,7 @@ class TelnetServer(server_base.BaseServer):
 
     def on_tspeed(self, rx, tx):
         """Callback for TSPEED response, :rfc:`1079`."""
-        self._extra["tspeed"] = "{0},{1}".format(rx, tx)
+        self._extra["tspeed"] = f"{rx},{tx}"
 
     def on_ttype(self, ttype):
         """Callback for TTYPE response, :rfc:`930`."""
@@ -416,35 +440,31 @@ class TelnetServer(server_base.BaseServer):
         #
         # The most recently received terminal type by the server is
         # assumed TERM by this implementation, even when unsolicited.
-        key = "ttype{}".format(self._ttype_count)
+        key = f"ttype{self._ttype_count}"
         self._extra[key] = ttype
         if ttype:
             self._extra["TERM"] = ttype
 
-        _lastval = self.get_extra_info("ttype{0}".format(self._ttype_count - 1))
+        _lastval = self.get_extra_info(f"ttype{self._ttype_count - 1}")
 
         if key != "ttype1" and ttype == self.get_extra_info("ttype1", None):
             # cycle has looped, stop
-            logger.debug("ttype cycle stop at {0}: {1}, looped.".format(key, ttype))
+            logger.debug("ttype cycle stop at %s: %s, looped.", key, ttype)
 
         elif not ttype or self._ttype_count > self.TTYPE_LOOPMAX:
             # empty reply string or too many responses!
-            logger.warning("ttype cycle stop at {0}: {1}.".format(key, ttype))
+            logger.warning("ttype cycle stop at %s: %s.", key, ttype)
 
         elif self._ttype_count == 3 and ttype.upper().startswith("MTTS "):
             val = self.get_extra_info("ttype2")
-            logger.debug(
-                "ttype cycle stop at {0}: {1}, using {2} from ttype2.".format(
-                    key, ttype, val
-                )
-            )
+            logger.debug("ttype cycle stop at %s: %s, using %s from ttype2.", key, ttype, val)
             self._extra["TERM"] = val
 
         elif ttype == _lastval:
-            logger.debug("ttype cycle stop at {0}: {1}, repeated.".format(key, ttype))
+            logger.debug("ttype cycle stop at %s: %s, repeated.", key, ttype)
 
         else:
-            logger.debug("ttype cycle cont at {0}: {1}.".format(key, ttype))
+            logger.debug("ttype cycle cont at %s: %s.", key, ttype)
             self._ttype_count += 1
             self.writer.request_ttype()
 
@@ -456,13 +476,14 @@ class TelnetServer(server_base.BaseServer):
 
     def _check_encoding(self):
         # Periodically check for completion of ``waiter_encoding``.
-        from .telopt import DO, BINARY, CHARSET, SB
+        # local
+        from .telopt import DO, SB, BINARY, CHARSET  # pylint: disable=import-outside-toplevel
 
         # Check if we need to request client to use BINARY mode for client-to-server communication
         if (
             self.writer.outbinary
             and not self.writer.inbinary
-            and not (DO + BINARY) in self.writer.pending_option
+            and (DO + BINARY) not in self.writer.pending_option
         ):
             logger.debug("BINARY in: direction request.")
             self.writer.iac(DO, BINARY)
@@ -472,7 +493,7 @@ class TelnetServer(server_base.BaseServer):
         if (
             self.writer.remote_option.enabled(CHARSET)
             and self.writer.local_option.enabled(CHARSET)
-            and not (SB + CHARSET) in self.writer.pending_option
+            and (SB + CHARSET) not in self.writer.pending_option
         ):
             logger.debug("Initiating CHARSET REQUEST after capabilities negotiation")
             self.writer.request_charset()
@@ -482,7 +503,9 @@ class TelnetServer(server_base.BaseServer):
         return (self.writer.outbinary and self.writer.inbinary) or self.force_binary
 
 
-async def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwds):
+async def create_server(
+    host=None, port=23, protocol_factory=TelnetServer, **kwds
+):  # pylint: disable=differing-param-doc,differing-type-doc
     """
     Create a TCP Telnet server.
 
@@ -540,6 +563,7 @@ async def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwd
         greater of this value has elapsed.  A client that is not answering
         option negotiation will delay the start of the shell by this amount.
     :param int limit: The buffer limit for the reader stream.
+    :param kwds: Additional keyword arguments passed to the protocol factory.
 
     :return asyncio.Server: The return value is the same as
         :meth:`asyncio.loop.create_server`, An object which can be used
@@ -550,7 +574,7 @@ async def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwd
     return await loop.create_server(lambda: protocol_factory(**kwds), host, port)
 
 
-async def _sigterm_handler(server, log):
+async def _sigterm_handler(server, _log):
     logger.info("SIGTERM received, closing server.")
 
     # This signals the completion of the server.wait_closed() Future,
@@ -559,12 +583,14 @@ async def _sigterm_handler(server, log):
 
 
 def parse_server_args():
-    import sys
+    """Parse command-line arguments for telnet server."""
+    # std imports
+    import sys  # pylint: disable=import-outside-toplevel
 
     # Extract arguments after '--' for PTY program before argparse sees them
     argv = sys.argv[1:]
     pty_args = []
-    if "--" in argv:
+    if PTY_SUPPORT and "--" in argv:
         idx = argv.index("--")
         pty_args = argv[idx + 1 :]
         argv = argv[:idx]
@@ -573,99 +599,101 @@ def parse_server_args():
         description="Telnet protocol server",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("host", nargs="?", default=CONFIG.host, help="bind address")
-    parser.add_argument(
-        "port", nargs="?", type=int, default=CONFIG.port, help="bind port"
-    )
-    parser.add_argument("--loglevel", default=CONFIG.loglevel, help="level name")
-    parser.add_argument("--logfile", default=CONFIG.logfile, help="filepath")
-    parser.add_argument("--logfmt", default=CONFIG.logfmt, help="log format")
+    parser.add_argument("host", nargs="?", default=_config.host, help="bind address")
+    parser.add_argument("port", nargs="?", type=int, default=_config.port, help="bind port")
+    parser.add_argument("--loglevel", default=_config.loglevel, help="level name")
+    parser.add_argument("--logfile", default=_config.logfile, help="filepath")
+    parser.add_argument("--logfmt", default=_config.logfmt, help="log format")
     parser.add_argument(
         "--shell",
-        default=CONFIG.shell,
+        default=_config.shell,
         type=accessories.function_lookup,
         help="module.function_name",
     )
-    parser.add_argument("--encoding", default=CONFIG.encoding, help="encoding name")
+    parser.add_argument("--encoding", default=_config.encoding, help="encoding name")
     parser.add_argument(
         "--force-binary",
         action="store_true",
-        default=CONFIG.force_binary,
+        default=_config.force_binary,
         help="force binary transmission",
     )
-    parser.add_argument(
-        "--timeout", default=CONFIG.timeout, help="idle disconnect (0 disables)"
-    )
+    parser.add_argument("--timeout", default=_config.timeout, help="idle disconnect (0 disables)")
     parser.add_argument(
         "--connect-maxwait",
         type=float,
-        default=CONFIG.connect_maxwait,
+        default=_config.connect_maxwait,
         help="timeout for pending negotiation",
     )
-    parser.add_argument(
-        "--pty-exec",
-        metavar="PROGRAM",
-        default=CONFIG.pty_exec,
-        help="execute PROGRAM in a PTY for each connection (use -- to pass args)",
-    )
+    if PTY_SUPPORT:
+        parser.add_argument(
+            "--pty-exec",
+            metavar="PROGRAM",
+            default=_config.pty_exec,
+            help="execute PROGRAM in a PTY for each connection (use -- to pass args)",
+        )
+        parser.add_argument(
+            "--pty-fork-limit",
+            type=int,
+            metavar="N",
+            default=_config.pty_fork_limit,
+            help="limit concurrent PTY connections (0 disables)",
+        )
     parser.add_argument(
         "--robot-check",
         action="store_true",
-        default=CONFIG.robot_check,
+        default=_config.robot_check,
         help="check if client can render wide unicode (rejects bots)",
     )
-    parser.add_argument(
-        "--pty-fork-limit",
-        type=int,
-        metavar="N",
-        default=CONFIG.pty_fork_limit,
-        help="limit concurrent PTY connections (0 disables)",
-    )
     result = vars(parser.parse_args(argv))
-    result["pty_args"] = pty_args
+    result["pty_args"] = pty_args if PTY_SUPPORT else None
+    if not PTY_SUPPORT:
+        result["pty_exec"] = None
+        result["pty_fork_limit"] = 0
     return result
 
 
-async def run_server(
-    host=CONFIG.host,
-    port=CONFIG.port,
-    loglevel=CONFIG.loglevel,
-    logfile=CONFIG.logfile,
-    logfmt=CONFIG.logfmt,
-    shell=CONFIG.shell,
-    encoding=CONFIG.encoding,
-    force_binary=CONFIG.force_binary,
-    timeout=CONFIG.timeout,
-    connect_maxwait=CONFIG.connect_maxwait,
-    pty_exec=CONFIG.pty_exec,
-    pty_args=CONFIG.pty_args,
-    robot_check=CONFIG.robot_check,
-    pty_fork_limit=CONFIG.pty_fork_limit,
+async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-locals
+    host=_config.host,
+    port=_config.port,
+    loglevel=_config.loglevel,
+    logfile=_config.logfile,
+    logfmt=_config.logfmt,
+    shell=_config.shell,
+    encoding=_config.encoding,
+    force_binary=_config.force_binary,
+    timeout=_config.timeout,
+    connect_maxwait=_config.connect_maxwait,
+    pty_exec=_config.pty_exec,
+    pty_args=_config.pty_args,
+    robot_check=_config.robot_check,
+    pty_fork_limit=_config.pty_fork_limit,
 ):
+    # pylint: disable=missing-raises-doc
     """
     Program entry point for server daemon.
 
-    This function configures a logger and creates a telnet server for the
-    given keyword arguments, serving forever, completing only upon receipt of
-    SIGTERM.
+    This function configures a logger and creates a telnet server for the given keyword arguments,
+    serving forever, completing only upon receipt of SIGTERM.
     """
     log = accessories.make_logger(
         name="telnetlib3.server", loglevel=loglevel, logfile=logfile, logfmt=logfmt
     )
 
     if pty_exec:
-        from .pty_shell import make_pty_shell
+        if not PTY_SUPPORT:
+            raise NotImplementedError("PTY support is not available on this platform (Windows?)")
+        # local
+        from .pty_shell import make_pty_shell  # pylint: disable=import-outside-toplevel
 
         shell = make_pty_shell(pty_exec, pty_args)
 
     # Wrap shell with guards if enabled
     if robot_check or pty_fork_limit:
-        from .guard_shells import (
-            robot_check as do_robot_check,
-            robot_shell,
-            busy_shell,
-            ConnectionCounter,
-        )
+        # local
+        # pylint: disable=import-outside-toplevel
+        from .guard_shells import robot_shell  # pylint: disable=import-outside-toplevel
+        from .guard_shells import ConnectionCounter, busy_shell
+        from .guard_shells import robot_check as do_robot_check
 
         counter = ConnectionCounter(pty_fork_limit) if pty_fork_limit else None
         inner_shell = shell
@@ -700,10 +728,8 @@ async def run_server(
 
     # log all function arguments.
     _locals = locals()
-    _cfg_mapping = ", ".join(
-        ("{0}={{{0}}}".format(field) for field in CONFIG._fields)
-    ).format(**_locals)
-    logger.debug("Server configuration: {}".format(_cfg_mapping))
+    _cfg_mapping = ", ".join((f"{field}={{{field}}}" for field in CONFIG._fields)).format(**_locals)
+    logger.debug("Server configuration: %s", _cfg_mapping)
 
     loop = asyncio.get_event_loop()
 
@@ -719,11 +745,9 @@ async def run_server(
     )
 
     # SIGTERM cases server to gracefully stop
-    loop.add_signal_handler(
-        signal.SIGTERM, asyncio.ensure_future, _sigterm_handler(server, log)
-    )
+    loop.add_signal_handler(signal.SIGTERM, asyncio.ensure_future, _sigterm_handler(server, log))
 
-    logger.info("Server ready on {0}:{1}".format(host, port))
+    logger.info("Server ready on %s:%s", host, port)
 
     # await completion of server stop
     try:
@@ -736,6 +760,7 @@ async def run_server(
 
 
 def main():
+    """Entry point for telnetlib3-server command."""
     asyncio.run(run_server(**parse_server_args()))
 
 

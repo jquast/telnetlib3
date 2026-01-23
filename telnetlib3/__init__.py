@@ -1,8 +1,23 @@
 """telnetlib3: an asyncio Telnet Protocol implemented in python."""
 
-# pylint: disable=wildcard-import,undefined-variable
+# flake8: noqa: F405
+# fmt: off
+# isort: off
+# Import order matters: server_shell symbols must be exported before server
+# import due to function_lookup("telnetlib3.telnet_server_shell") at server.py load time
+from . import server_base
+from . import server_shell
+from .server_shell import *  # noqa - Must export before server import
+from . import server
+from . import stream_writer
+from . import stream_reader
+from . import client_base
+from . import client_shell
+from . import client
+from . import telopt
+from . import slc
+from . import telnetlib
 from .server_base import *  # noqa
-from .server_shell import *  # noqa
 from .server import *  # noqa
 from .stream_writer import *  # noqa
 from .stream_reader import *  # noqa
@@ -12,11 +27,18 @@ from .client import *  # noqa
 from .telopt import *  # noqa
 from .telnetlib import *  # noqa
 from .slc import *  # noqa
-from . import pty_shell as _pty_shell_module
-from .pty_shell import *  # noqa
+try:
+    from . import pty_shell as _pty_shell_module
+    from .pty_shell import *  # noqa
+    PTY_SUPPORT = True  # invalid-name
+except ImportError:
+    _pty_shell_module = None
+    PTY_SUPPORT = False  # invalid-name
 from . import guard_shells as _guard_shells_module
 from .guard_shells import *  # noqa
 from .accessories import get_version as __get_version
+# isort: on
+# fmt: on
 
 __all__ = (
     server_base.__all__
@@ -30,7 +52,7 @@ __all__ = (
     + telopt.__all__
     + slc.__all__
     + telnetlib.__all__
-    + _pty_shell_module.__all__
+    + (_pty_shell_module.__all__ if PTY_SUPPORT else ())
     + _guard_shells_module.__all__
 )  # noqa
 

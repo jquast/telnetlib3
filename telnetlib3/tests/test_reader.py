@@ -1,14 +1,17 @@
 # std imports
-import asyncio
 import re
 import string
+import asyncio
 
 # 3rd party
 import pytest
 
 # local
 import telnetlib3
-from telnetlib3.tests.accessories import unused_tcp_port, bind_host
+from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+    bind_host,
+    unused_tcp_port,
+)
 
 
 def test_reader_instantiation_safety():
@@ -32,9 +35,7 @@ def test_reader_with_encoding_instantiation_safety():
     def fn_encoding(incoming):
         return "def-ENC"
 
-    expected_result = (
-        "<TelnetReaderUnicode encoding='def-ENC' " "limit=1999 buflen=0 eof=False>"
-    )
+    expected_result = "<TelnetReaderUnicode encoding='def-ENC' limit=1999 buflen=0 eof=False>"
 
     reader = telnetlib3.TelnetReaderUnicode(fn_encoding=fn_encoding, limit=1999)
 
@@ -63,9 +64,7 @@ def test_reader_unicode_eof_safety():
     def fn_encoding(incoming):
         return "def-ENC"
 
-    expected_result = (
-        "<TelnetReaderUnicode encoding='def-ENC' " "limit=65536 buflen=0 eof=True>"
-    )
+    expected_result = "<TelnetReaderUnicode encoding='def-ENC' limit=65536 buflen=0 eof=True>"
 
     reader = telnetlib3.TelnetReaderUnicode(fn_encoding=fn_encoding)
     reader.feed_eof()
@@ -79,8 +78,9 @@ def test_reader_unicode_eof_safety():
 
 async def test_telnet_reader_using_readline_unicode(bind_host, unused_tcp_port):
     """Ensure strict RFC interpretation of newlines in readline method."""
-    # given
-    _waiter = asyncio.Future()
+    # local
+    from telnetlib3.tests.accessories import create_server, open_connection
+
     given_expected = {
         "alpha\r\x00": "alpha\r",
         "bravo\r\n": "bravo\r\n",
@@ -98,32 +98,26 @@ async def test_telnet_reader_using_readline_unicode(bind_host, unused_tcp_port):
             writer.write(item)
         writer.close()
 
-    await telnetlib3.create_server(
+    async with create_server(
         host=bind_host, port=unused_tcp_port, connect_maxwait=0.05, shell=shell
-    )
+    ):
+        async with open_connection(host=bind_host, port=unused_tcp_port, connect_minwait=0.05) as (
+            client_reader,
+            client_writer,
+        ):
+            for given, expected in sorted(given_expected.items()):
+                result = await asyncio.wait_for(client_reader.readline(), 0.5)
+                assert result == expected
 
-    client_reader, client_writer = await telnetlib3.open_connection(
-        host=bind_host, port=unused_tcp_port, connect_minwait=0.05
-    )
-
-    # exercise,
-    for given, expected in sorted(given_expected.items()):
-        result = await asyncio.wait_for(client_reader.readline(), 0.5)
-
-        # verify.
-        assert result == expected
-
-    # exercise,
-    eof = await asyncio.wait_for(client_reader.read(), 0.5)
-
-    # verify.
-    assert eof == ""
+            eof = await asyncio.wait_for(client_reader.read(), 0.5)
+            assert not eof
 
 
 async def test_telnet_reader_using_readline_bytes(bind_host, unused_tcp_port):
     """Ensure strict RFC interpretation of newlines in readline method."""
-    # given
-    _waiter = asyncio.Future()
+    # local
+    from telnetlib3.tests.accessories import create_server, open_connection
+
     given_expected = {
         b"alpha\r\x00": b"alpha\r",
         b"bravo\r\n": b"bravo\r\n",
@@ -141,36 +135,29 @@ async def test_telnet_reader_using_readline_bytes(bind_host, unused_tcp_port):
             writer.write(item)
         writer.close()
 
-    await telnetlib3.create_server(
+    async with create_server(
         host=bind_host,
         port=unused_tcp_port,
         connect_maxwait=0.05,
         shell=shell,
         encoding=False,
-    )
+    ):
+        async with open_connection(
+            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False
+        ) as (client_reader, client_writer):
+            for given, expected in sorted(given_expected.items()):
+                result = await asyncio.wait_for(client_reader.readline(), 0.5)
+                assert result == expected
 
-    client_reader, client_writer = await telnetlib3.open_connection(
-        host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False
-    )
-
-    # exercise,
-    for given, expected in sorted(given_expected.items()):
-        result = await asyncio.wait_for(client_reader.readline(), 0.5)
-
-        # verify.
-        assert result == expected
-
-    # exercise,
-    eof = await asyncio.wait_for(client_reader.read(), 0.5)
-
-    # verify.
-    assert eof == b""
+            eof = await asyncio.wait_for(client_reader.read(), 0.5)
+            assert eof == b""
 
 
 async def test_telnet_reader_read_exactly_unicode(bind_host, unused_tcp_port):
     """Ensure TelnetReader.readexactly, especially IncompleteReadError."""
-    # given
-    _waiter = asyncio.Future()
+    # local
+    from telnetlib3.tests.accessories import create_server, open_connection
+
     given = "☭---------"
     given_partial = "💉-"
 
@@ -179,33 +166,29 @@ async def test_telnet_reader_read_exactly_unicode(bind_host, unused_tcp_port):
         writer.write(given_partial)
         writer.close()
 
-    await telnetlib3.create_server(
+    async with create_server(
         host=bind_host, port=unused_tcp_port, connect_maxwait=0.05, shell=shell
-    )
+    ):
+        async with open_connection(host=bind_host, port=unused_tcp_port, connect_minwait=0.05) as (
+            client_reader,
+            client_writer,
+        ):
+            result = await asyncio.wait_for(client_reader.readexactly(len(given)), 0.5)
+            assert result == given
 
-    client_reader, client_writer = await telnetlib3.open_connection(
-        host=bind_host, port=unused_tcp_port, connect_minwait=0.05
-    )
+            given_readsize = len(given_partial) + 1
+            with pytest.raises(asyncio.IncompleteReadError) as exc_info:
+                await asyncio.wait_for(client_reader.readexactly(given_readsize), 0.5)
 
-    # exercise, readexactly # bytes of given
-    result = await asyncio.wait_for(client_reader.readexactly(len(given)), 0.5)
-
-    # verify,
-    assert result == given
-
-    # exercise, read 1 byte beyond given_partial
-    given_readsize = len(given_partial) + 1
-    with pytest.raises(asyncio.IncompleteReadError) as exc_info:
-        result = await asyncio.wait_for(client_reader.readexactly(given_readsize), 0.5)
-
-    assert exc_info.value.partial == given_partial
-    assert exc_info.value.expected == given_readsize
+            assert exc_info.value.partial == given_partial
+            assert exc_info.value.expected == given_readsize
 
 
 async def test_telnet_reader_read_exactly_bytes(bind_host, unused_tcp_port):
     """Ensure TelnetReader.readexactly, especially IncompleteReadError."""
-    # given
-    _waiter = asyncio.Future()
+    # local
+    from telnetlib3.tests.accessories import create_server, open_connection
+
     given = string.ascii_letters.encode("ascii")
     given_partial = b"zzz"
 
@@ -213,31 +196,25 @@ async def test_telnet_reader_read_exactly_bytes(bind_host, unused_tcp_port):
         writer.write(given + given_partial)
         writer.close()
 
-    await telnetlib3.create_server(
+    async with create_server(
         host=bind_host,
         port=unused_tcp_port,
         connect_maxwait=0.05,
         shell=shell,
         encoding=False,
-    )
+    ):
+        async with open_connection(
+            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False
+        ) as (client_reader, client_writer):
+            result = await asyncio.wait_for(client_reader.readexactly(len(given)), 0.5)
+            assert result == given
 
-    client_reader, client_writer = await telnetlib3.open_connection(
-        host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False
-    )
+            given_readsize = len(given_partial) + 1
+            with pytest.raises(asyncio.IncompleteReadError) as exc_info:
+                await asyncio.wait_for(client_reader.readexactly(given_readsize), 0.5)
 
-    # exercise, readexactly # bytes of given
-    result = await asyncio.wait_for(client_reader.readexactly(len(given)), 0.5)
-
-    # verify,
-    assert result == given
-
-    # exercise, read 1 byte beyond given_partial
-    given_readsize = len(given_partial) + 1
-    with pytest.raises(asyncio.IncompleteReadError) as exc_info:
-        result = await asyncio.wait_for(client_reader.readexactly(given_readsize), 0.5)
-
-    assert exc_info.value.partial == given_partial
-    assert exc_info.value.expected == given_readsize
+            assert exc_info.value.partial == given_partial
+            assert exc_info.value.expected == given_readsize
 
 
 async def test_telnet_reader_read_0(bind_host, unused_tcp_port):
@@ -253,13 +230,13 @@ async def test_telnet_reader_read_0(bind_host, unused_tcp_port):
     value = await reader.read(0)
 
     # verify
-    assert value == ""
+    assert not value
 
 
 async def test_telnet_reader_read_beyond_limit_unicode(bind_host, unused_tcp_port):
     """Ensure ability to read(-1) beyond segment sizes of reader._limit."""
-    # given
-    _waiter = asyncio.Future()
+    # local
+    from telnetlib3.tests.accessories import create_server, open_connection
 
     limit = 10
 
@@ -269,27 +246,25 @@ async def test_telnet_reader_read_beyond_limit_unicode(bind_host, unused_tcp_por
         writer.write(given)
         writer.close()
 
-    await telnetlib3.create_server(
+    async with create_server(
         host=bind_host,
         port=unused_tcp_port,
         connect_maxwait=0.05,
         shell=shell,
         limit=limit,
-    )
-
-    client_reader, client_writer = await telnetlib3.open_connection(
-        host=bind_host, port=unused_tcp_port, connect_minwait=0.05, limit=limit
-    )
-
-    assert client_reader._limit == limit
-    value = await asyncio.wait_for(client_reader.read(), 0.5)
-    assert value == "x" * (limit + 1)
+    ):
+        async with open_connection(
+            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, limit=limit
+        ) as (client_reader, client_writer):
+            assert client_reader._limit == limit
+            value = await asyncio.wait_for(client_reader.read(), 0.5)
+            assert value == "x" * (limit + 1)
 
 
 async def test_telnet_reader_read_beyond_limit_bytes(bind_host, unused_tcp_port):
     """Ensure ability to read(-1) beyond segment sizes of reader._limit."""
-    # given
-    _waiter = asyncio.Future()
+    # local
+    from telnetlib3.tests.accessories import create_server, open_connection
 
     limit = 10
 
@@ -299,31 +274,31 @@ async def test_telnet_reader_read_beyond_limit_bytes(bind_host, unused_tcp_port)
         writer.write(given)
         writer.close()
 
-    await telnetlib3.create_server(
+    async with create_server(
         host=bind_host,
         port=unused_tcp_port,
         connect_maxwait=0.05,
         shell=shell,
         encoding=False,
         limit=limit,
-    )
-
-    client_reader, client_writer = await telnetlib3.open_connection(
-        host=bind_host,
-        port=unused_tcp_port,
-        connect_minwait=0.05,
-        encoding=False,
-        limit=limit,
-    )
-
-    assert client_reader._limit == limit
-    value = await asyncio.wait_for(client_reader.read(), 0.5)
-    assert value == b"x" * (limit + 1)
+    ):
+        async with open_connection(
+            host=bind_host,
+            port=unused_tcp_port,
+            connect_minwait=0.05,
+            encoding=False,
+            limit=limit,
+        ) as (client_reader, client_writer):
+            assert client_reader._limit == limit
+            value = await asyncio.wait_for(client_reader.read(), 0.5)
+            assert value == b"x" * (limit + 1)
 
 
 async def test_telnet_reader_readuntil_pattern_success(bind_host, unused_tcp_port):
     """Test successful pattern matching with readuntil_pattern."""
-    # given
+    # local
+    from telnetlib3.tests.accessories import create_server, open_connection
+
     given_shell_banner = b"""
 Router> enable
 Router# configure terminal
@@ -339,42 +314,42 @@ Router>
         writer.write(given_shell_banner)
         writer.close()
 
-    await telnetlib3.create_server(
+    async with create_server(
         host=bind_host,
         port=unused_tcp_port,
         connect_maxwait=0.05,
         shell=shell,
         encoding=False,
         limit=limit,
-    )
+    ):
+        async with open_connection(
+            host=bind_host,
+            port=unused_tcp_port,
+            connect_minwait=0.05,
+            encoding=False,
+            limit=limit,
+        ) as (client_reader, _):
+            # Test successful reads within limit
+            result = await client_reader.readuntil_pattern(pattern)
+            assert result == b"\nRouter>"
 
-    client_reader, _ = await telnetlib3.open_connection(
-        host=bind_host,
-        port=unused_tcp_port,
-        connect_minwait=0.05,
-        encoding=False,
-        limit=limit,
-    )
+            result = await client_reader.readuntil_pattern(pattern)
+            assert result == b" enable\nRouter#"
 
-    # Test successful reads within limit
-    result = await client_reader.readuntil_pattern(pattern)
-    assert result == b"\nRouter>"
+            result = await client_reader.readuntil_pattern(pattern)
+            assert result == b" configure terminal\nRouter(config)#"
 
-    result = await client_reader.readuntil_pattern(pattern)
-    assert result == b" enable\nRouter#"
-
-    result = await client_reader.readuntil_pattern(pattern)
-    assert result == b" configure terminal\nRouter(config)#"
-
-    result = await client_reader.readuntil_pattern(pattern)
-    assert result == b" exit\nRouter>"
+            result = await client_reader.readuntil_pattern(pattern)
+            assert result == b" exit\nRouter>"
 
 
 async def test_telnet_reader_readuntil_pattern_limit_overrun_chunk_too_large(
     bind_host, unused_tcp_port
 ):
     """Test LimitOverrunError when pattern is found but chunk exceeds limit."""
-    # given
+    # local
+    from telnetlib3.tests.accessories import create_server, open_connection
+
     given_shell_banner = b"""
 Router> enable
 Router# configure terminal which is a very long command line that exceeds our limit
@@ -390,47 +365,48 @@ Router>
         writer.write(given_shell_banner)
         writer.close()
 
-    await telnetlib3.create_server(
+    async with create_server(
         host=bind_host,
         port=unused_tcp_port,
         connect_maxwait=0.05,
         shell=shell,
         encoding=False,
         limit=limit,
-    )
+    ):
+        async with open_connection(
+            host=bind_host,
+            port=unused_tcp_port,
+            connect_minwait=0.05,
+            encoding=False,
+            limit=limit,
+        ) as (client_reader, _):
+            # First successful read
+            result = await client_reader.readuntil_pattern(pattern)
+            assert result == b"\nRouter>"
 
-    client_reader, _ = await telnetlib3.open_connection(
-        host=bind_host,
-        port=unused_tcp_port,
-        connect_minwait=0.05,
-        encoding=False,
-        limit=limit,
-    )
+            result = await client_reader.readuntil_pattern(pattern)
+            assert result == b" enable\nRouter#"
 
-    # First successful read
-    result = await client_reader.readuntil_pattern(pattern)
-    assert result == b"\nRouter>"
+            # Test LimitOverrunError: pattern found but data chunk exceeds limit
+            with pytest.raises(asyncio.LimitOverrunError) as exc_info:
+                await client_reader.readuntil_pattern(pattern)
 
-    result = await client_reader.readuntil_pattern(pattern)
-    assert result == b" enable\nRouter#"
-
-    # Test LimitOverrunError: pattern found but data chunk exceeds limit
-    with pytest.raises(asyncio.LimitOverrunError) as exc_info:
-        await client_reader.readuntil_pattern(pattern)
-
-    assert "Pattern is found, but chunk is longer than limit" in str(exc_info.value)
-    # consumed should be the expected length of the oversized chunk
-    expected_chunk_size = len(
-        b" configure terminal which is a very long command line that exceeds our limit\nRouter(config)#"
-    )
-    assert exc_info.value.consumed == expected_chunk_size
+            assert "Pattern is found, but chunk is longer than limit" in str(exc_info.value)
+            # consumed should be the expected length of the oversized chunk
+            expected_chunk_size = len(
+                b" configure terminal which is a very long command line"
+                b" that exceeds our limit\nRouter(config)#"
+            )
+            assert exc_info.value.consumed == expected_chunk_size
 
 
 async def test_telnet_reader_readuntil_pattern_limit_overrun_buffer_full(
     bind_host, unused_tcp_port
 ):
     """Test LimitOverrunError when buffer exceeds limit and pattern not found."""
-    # given
+    # local
+    from telnetlib3.tests.accessories import create_server, open_connection
+
     # Create data that will exceed the limit when searching for non-existent pattern
     long_data = b"x" * 50  # exceeds limit of 30
     given_shell_banner = b"Router> " + long_data
@@ -442,40 +418,38 @@ async def test_telnet_reader_readuntil_pattern_limit_overrun_buffer_full(
         writer.write(given_shell_banner)
         writer.close()
 
-    await telnetlib3.create_server(
+    async with create_server(
         host=bind_host,
         port=unused_tcp_port,
         connect_maxwait=0.05,
         shell=shell,
         encoding=False,
         limit=limit,
-    )
+    ):
+        async with open_connection(
+            host=bind_host,
+            port=unused_tcp_port,
+            connect_minwait=0.05,
+            encoding=False,
+            limit=limit,
+        ) as (client_reader, _):
+            # First read the Router> prompt
+            result = await client_reader.readuntil_pattern(pattern)
+            assert result == b"Router>"
 
-    client_reader, _ = await telnetlib3.open_connection(
-        host=bind_host,
-        port=unused_tcp_port,
-        connect_minwait=0.05,
-        encoding=False,
-        limit=limit,
-    )
+            # Test LimitOverrunError: buffer exceeds limit, pattern not found
+            with pytest.raises(asyncio.LimitOverrunError) as exc_info:
+                await client_reader.readuntil_pattern(re.compile(b"non-existent"))
 
-    # First read the Router> prompt
-    result = await client_reader.readuntil_pattern(pattern)
-    assert result == b"Router>"
-
-    # Test LimitOverrunError: buffer exceeds limit, pattern not found
-    with pytest.raises(asyncio.LimitOverrunError) as exc_info:
-        await client_reader.readuntil_pattern(re.compile(b"non-existent"))
-
-    assert "Pattern not found, and buffer exceed the limit" in str(exc_info.value)
-    assert exc_info.value.consumed > limit
+            assert "Pattern not found, and buffer exceed the limit" in str(exc_info.value)
+            assert exc_info.value.consumed > limit
 
 
-async def test_telnet_reader_readuntil_pattern_incomplete_read_eof(
-    bind_host, unused_tcp_port
-):
+async def test_telnet_reader_readuntil_pattern_incomplete_read_eof(bind_host, unused_tcp_port):
     """Test IncompleteReadError when EOF occurs before pattern is found."""
-    # given
+    # local
+    from telnetlib3.tests.accessories import create_server, open_connection
+
     given_shell_banner = b"Router> some incomplete data\n"
 
     pattern = re.compile(rb"\S+[>#]")
@@ -485,39 +459,37 @@ async def test_telnet_reader_readuntil_pattern_incomplete_read_eof(
         writer.write(given_shell_banner)
         writer.close()
 
-    await telnetlib3.create_server(
+    async with create_server(
         host=bind_host,
         port=unused_tcp_port,
         connect_maxwait=0.05,
         shell=shell,
         encoding=False,
         limit=limit,
-    )
+    ):
+        async with open_connection(
+            host=bind_host,
+            port=unused_tcp_port,
+            connect_minwait=0.05,
+            encoding=False,
+            limit=limit,
+        ) as (client_reader, _):
+            # First successful read
+            result = await client_reader.readuntil_pattern(pattern)
+            assert result == b"Router>"
 
-    client_reader, _ = await telnetlib3.open_connection(
-        host=bind_host,
-        port=unused_tcp_port,
-        connect_minwait=0.05,
-        encoding=False,
-        limit=limit,
-    )
+            # Test IncompleteReadError: EOF before pattern found
+            with pytest.raises(asyncio.IncompleteReadError) as exc_info:
+                await client_reader.readuntil_pattern(pattern)
 
-    # First successful read
-    result = await client_reader.readuntil_pattern(pattern)
-    assert result == b"Router>"
+            # 'partial' should contain remaining data
+            assert exc_info.value.partial == b" some incomplete data\n"
+            assert exc_info.value.expected is None
 
-    # Test IncompleteReadError: EOF before pattern found
-    with pytest.raises(asyncio.IncompleteReadError) as exc_info:
-        await client_reader.readuntil_pattern(pattern)
-
-    # 'partial' should contain remaining data
-    assert exc_info.value.partial == b" some incomplete data\n"
-    assert exc_info.value.expected is None
-
-    # After IncompleteReadError, subsequent reads should also fail with empty buffer
-    with pytest.raises(asyncio.IncompleteReadError) as exc_info:
-        await client_reader.readuntil_pattern(pattern)
-    assert exc_info.value.partial == b""
+            # After IncompleteReadError, subsequent reads should also fail with empty buffer
+            with pytest.raises(asyncio.IncompleteReadError) as exc_info:
+                await client_reader.readuntil_pattern(pattern)
+            assert exc_info.value.partial == b""
 
 
 async def test_telnet_reader_readuntil_pattern_invalid_arguments():
@@ -526,17 +498,17 @@ async def test_telnet_reader_readuntil_pattern_invalid_arguments():
 
     # Test ValueError for invalid pattern type
     with pytest.raises(ValueError, match="pattern should be a re.Pattern object"):
-        await reader.readuntil_pattern(None)  # type: ignore
+        await reader.readuntil_pattern(None)
 
     with pytest.raises(ValueError, match="Only bytes patterns are supported"):
         await reader.readuntil_pattern(re.compile("this is a string pattern"))
 
 
-async def test_telnet_reader_readuntil_pattern_cancelled_error(
-    bind_host, unused_tcp_port
-):
+async def test_telnet_reader_readuntil_pattern_cancelled_error(bind_host, unused_tcp_port):
     """Test CancelledError handling in readuntil_pattern."""
-    # given
+    # local
+    from telnetlib3.tests.accessories import create_server, open_connection
+
     given_shell_banner = b"Router> "
 
     pattern = re.compile(rb"\S+[>#]")
@@ -546,24 +518,22 @@ async def test_telnet_reader_readuntil_pattern_cancelled_error(
         writer.write(given_shell_banner)
         writer.close()
 
-    await telnetlib3.create_server(
+    async with create_server(
         host=bind_host,
         port=unused_tcp_port,
         connect_maxwait=0.05,
         shell=shell,
         encoding=False,
         limit=limit,
-    )
-
-    client_reader, _ = await telnetlib3.open_connection(
-        host=bind_host,
-        port=unused_tcp_port,
-        connect_minwait=0.05,
-        encoding=False,
-        limit=limit,
-    )
-
-    # Set exception and test it's properly raised
-    client_reader.set_exception(asyncio.CancelledError())
-    with pytest.raises(asyncio.CancelledError):
-        await client_reader.readuntil_pattern(pattern)
+    ):
+        async with open_connection(
+            host=bind_host,
+            port=unused_tcp_port,
+            connect_minwait=0.05,
+            encoding=False,
+            limit=limit,
+        ) as (client_reader, _):
+            # Set exception and test it's properly raised
+            client_reader.set_exception(asyncio.CancelledError())
+            with pytest.raises(asyncio.CancelledError):
+                await client_reader.readuntil_pattern(pattern)

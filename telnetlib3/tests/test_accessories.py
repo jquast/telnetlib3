@@ -1,8 +1,5 @@
-from telnetlib3.accessories import (
-    encoding_from_lang,
-    name_unicode,
-    eightbits,
-)
+# local
+from telnetlib3.accessories import eightbits, name_unicode, encoding_from_lang
 
 
 def test_name_unicode():

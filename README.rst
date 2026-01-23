@@ -36,7 +36,7 @@ instances of `telnetlib` to `telnetlib3`:
 
     # NEW imports:
     import telnetlib3.telnetlib as telnetlib
-    # - or - 
+    # - or -
     from telnetlib3 import Telnet, ECHO, BINARY
     from telnetlib3.telnetlib import Telnet, ECHO, BINARY
 
@@ -108,7 +108,7 @@ describing a python module path to an function of signature
 ``async def shell(reader, writer)``, as in the above examples.
 
 These scripts also serve as more advanced server and client examples that
-perform advanced telnet option negotation and may serve as a basis for
+perform advanced telnet option negotiation and may serve as a basis for
 creating your own custom negotiation behaviors.
 
 Find their filepaths using command::
@@ -123,7 +123,7 @@ This is an entry point for command ``python -m telnetlib3.client``
 Small terminal telnet client.  Some example destinations and options::
 
     telnetlib3-client --loglevel warn 1984.ws
-    telnetlib3-client --loglevel debug --logfile logfile.txt nethack.alt.org 
+    telnetlib3-client --loglevel debug --logfile logfile.txt nethack.alt.org
     telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
 
 See section Encoding_ about arguments, ``--encoding=cp437`` and ``--force-binary``.
@@ -137,13 +137,13 @@ See section Encoding_ about arguments, ``--encoding=cp437`` and ``--force-binary
                              [--force-binary] [--connect-minwait CONNECT_MINWAIT]
                              [--connect-maxwait CONNECT_MAXWAIT]
                              host [port]
-    
+
     Telnet protocol client
-    
+
     positional arguments:
       host                  hostname
       port                  port number (default: 23)
-    
+
     optional arguments:
       -h, --help            show this help message and exit
       --term TERM           terminal type (default: xterm-256color)

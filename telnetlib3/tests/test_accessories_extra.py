@@ -1,16 +1,14 @@
+# std imports
+import shlex
 import asyncio
 import logging
-import shlex
 from collections import OrderedDict
 
+# 3rd party
 import pytest
 
-from telnetlib3.accessories import (
-    make_logger,
-    repr_mapping,
-    function_lookup,
-    make_reader_task,
-)
+# local
+from telnetlib3.accessories import make_logger, repr_mapping, function_lookup, make_reader_task
 
 
 def test_make_logger_no_file():

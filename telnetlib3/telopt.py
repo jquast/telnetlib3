@@ -1,3 +1,5 @@
+"""Telnet option constants exported from the deprecated telnetlib module."""
+
 # Exported from the telnetlib module, which is marked for deprecation in version
 # 3.11 and removal in 3.13
 LINEMODE = b'"'
@@ -32,7 +34,7 @@ SB = b"\xfa"
 LOGOUT = b"\x12"
 CHARSET = b"*"
 SNDLOC = b"\x17"
-theNULL = b"\x00"
+theNULL = b"\x00"  # pylint: disable=invalid-name
 ENCRYPT = b"&"
 AUTHENTICATION = b"%"
 TN3270E = b"("
@@ -167,106 +169,102 @@ __all__ = (
     "name_commands",
 )
 
-(EOF, SUSP, ABORT, CMD_EOR) = (bytes([const]) for const in range(236, 240))
-(IS, SEND, INFO) = (bytes([const]) for const in range(3))
-(VAR, VALUE, ESC, USERVAR) = (bytes([const]) for const in range(4))
-(LFLOW_OFF, LFLOW_ON, LFLOW_RESTART_ANY, LFLOW_RESTART_XON) = (
-    bytes([const]) for const in range(4)
-)
-(REQUEST, ACCEPTED, REJECTED, TTABLE_IS, TTABLE_REJECTED, TTABLE_ACK, TTABLE_NAK) = (
+EOF, SUSP, ABORT, CMD_EOR = (bytes([const]) for const in range(236, 240))
+IS, SEND, INFO = (bytes([const]) for const in range(3))
+VAR, VALUE, ESC, USERVAR = (bytes([const]) for const in range(4))
+LFLOW_OFF, LFLOW_ON, LFLOW_RESTART_ANY, LFLOW_RESTART_XON = (bytes([const]) for const in range(4))
+REQUEST, ACCEPTED, REJECTED, TTABLE_IS, TTABLE_REJECTED, TTABLE_ACK, TTABLE_NAK = (
     bytes([const]) for const in range(1, 8)
 )
-(MCCP_COMPRESS, MCCP2_COMPRESS) = (bytes([85]), bytes([86]))
+MCCP_COMPRESS, MCCP2_COMPRESS = (bytes([85]), bytes([86]))
 GMCP = bytes([201])
 
 #: List of globals that may match an iac command option bytes
-_DEBUG_OPTS = dict(
-    [
-        (value, key)
-        for key, value in globals().items()
-        if key
-        in (
-            "LINEMODE",
-            "LMODE_FORWARDMASK",
-            "NAWS",
-            "NEW_ENVIRON",
-            "ENCRYPT",
-            "AUTHENTICATION",
-            "BINARY",
-            "SGA",
-            "ECHO",
-            "STATUS",
-            "TTYPE",
-            "TSPEED",
-            "LFLOW",
-            "XDISPLOC",
-            "IAC",
-            "DONT",
-            "DO",
-            "WONT",
-            "WILL",
-            "SE",
-            "NOP",
-            "DM",
-            "TM",
-            "BRK",
-            "IP",
-            "ABORT",
-            "AO",
-            "AYT",
-            "EC",
-            "EL",
-            "EOR",
-            "GA",
-            "SB",
-            "EOF",
-            "SUSP",
-            "ABORT",
-            "CMD_EOR",
-            "LOGOUT",
-            "CHARSET",
-            "SNDLOC",
-            "MCCP_COMPRESS",
-            "MCCP2_COMPRESS",
-            "GMCP",
-            "ENCRYPT",
-            "AUTHENTICATION",
-            "TN3270E",
-            "XAUTH",
-            "RSP",
-            "COM_PORT_OPTION",
-            "SUPPRESS_LOCAL_ECHO",
-            "TLS",
-            "KERMIT",
-            "SEND_URL",
-            "FORWARD_X",
-            "PRAGMA_LOGON",
-            "SSPI_LOGON",
-            "PRAGMA_HEARTBEAT",
-            "EXOPL",
-            "X3PAD",
-            "VT3270REGIME",
-            "TTYLOC",
-            "SUPDUPOUTPUT",
-            "SUPDUP",
-            "DET",
-            "BM",
-            "XASCII",
-            "RCP",
-            "NAMS",
-            "RCTE",
-            "NAOL",
-            "NAOP",
-            "NAOCRD",
-            "NAOHTS",
-            "NAOHTD",
-            "NAOFFD",
-            "NAOVTS",
-            "NAOVTD",
-            "NAOLFD",
-        )
-    ]
-)
+_DEBUG_OPTS = {
+    value: key
+    for key, value in globals().items()
+    if key
+    in (
+        "LINEMODE",
+        "LMODE_FORWARDMASK",
+        "NAWS",
+        "NEW_ENVIRON",
+        "ENCRYPT",
+        "AUTHENTICATION",
+        "BINARY",
+        "SGA",
+        "ECHO",
+        "STATUS",
+        "TTYPE",
+        "TSPEED",
+        "LFLOW",
+        "XDISPLOC",
+        "IAC",
+        "DONT",
+        "DO",
+        "WONT",
+        "WILL",
+        "SE",
+        "NOP",
+        "DM",
+        "TM",
+        "BRK",
+        "IP",
+        "ABORT",
+        "AO",
+        "AYT",
+        "EC",
+        "EL",
+        "EOR",
+        "GA",
+        "SB",
+        "EOF",
+        "SUSP",
+        "ABORT",
+        "CMD_EOR",
+        "LOGOUT",
+        "CHARSET",
+        "SNDLOC",
+        "MCCP_COMPRESS",
+        "MCCP2_COMPRESS",
+        "GMCP",
+        "ENCRYPT",
+        "AUTHENTICATION",
+        "TN3270E",
+        "XAUTH",
+        "RSP",
+        "COM_PORT_OPTION",
+        "SUPPRESS_LOCAL_ECHO",
+        "TLS",
+        "KERMIT",
+        "SEND_URL",
+        "FORWARD_X",
+        "PRAGMA_LOGON",
+        "SSPI_LOGON",
+        "PRAGMA_HEARTBEAT",
+        "EXOPL",
+        "X3PAD",
+        "VT3270REGIME",
+        "TTYLOC",
+        "SUPDUPOUTPUT",
+        "SUPDUP",
+        "DET",
+        "BM",
+        "XASCII",
+        "RCP",
+        "NAMS",
+        "RCTE",
+        "NAOL",
+        "NAOP",
+        "NAOCRD",
+        "NAOHTS",
+        "NAOHTD",
+        "NAOFFD",
+        "NAOVTS",
+        "NAOVTD",
+        "NAOLFD",
+    )
+}
 
 
 def name_command(byte):

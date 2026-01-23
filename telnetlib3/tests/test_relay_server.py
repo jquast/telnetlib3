@@ -1,8 +1,10 @@
+# std imports
 import asyncio
-import types
 
+# 3rd party
 import pytest
 
+# local
 from telnetlib3.relay_server import relay_shell
 
 
@@ -35,6 +37,7 @@ class FakeWriter:
 class SeqReader:
     """
     Async reader that returns provided sequence 1 byte at a time.
+
     When the sequence is exhausted, returns '' to indicate EOF.
     """
 
@@ -53,9 +56,7 @@ class SeqReader:
 
 
 class PayloadReader:
-    """
-    Reader that yields a list of payloads on subsequent read() calls, then ''.
-    """
+    """Reader that yields a list of payloads on subsequent read() calls, then ''."""
 
     def __init__(self, payloads):
         self.payloads = list(payloads)
@@ -80,9 +81,7 @@ class DummyServerWriter:
 
 @pytest.mark.asyncio
 async def test_relay_shell_wrong_passcode_closes(monkeypatch):
-    """
-    Relay shell should prompt for passcode 3 times and close on failure.
-    """
+    """Relay shell should prompt for passcode 3 times and close on failure."""
     # Prepare fake client I/O
     client_reader = SeqReader("bad1\rbad2\rbad3\r")
     client_writer = FakeWriter()
@@ -107,9 +106,7 @@ async def test_relay_shell_wrong_passcode_closes(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_relay_shell_success_relays_and_closes(monkeypatch):
-    """
-    Relay shell should connect on correct passcode and relay server output.
-    """
+    """Relay shell should connect on correct passcode and relay server output."""
     # Client enters correct passcode then EOF from client
     client_reader = PayloadReader(
         # readline() is fed 1 char at a time
@@ -133,9 +130,7 @@ async def test_relay_shell_success_relays_and_closes(monkeypatch):
         assert cols == 80 and rows == 24
         return server_reader, server_writer
 
-    monkeypatch.setattr(
-        "telnetlib3.relay_server.open_connection", _fake_open_connection
-    )
+    monkeypatch.setattr("telnetlib3.relay_server.open_connection", _fake_open_connection)
 
     await relay_shell(client_reader, client_writer)
 
