@@ -3,7 +3,6 @@
 # std imports
 import sys
 import asyncio
-import contextlib
 import collections
 
 # local

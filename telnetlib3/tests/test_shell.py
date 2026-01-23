@@ -258,7 +258,7 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
         (
             b"toggle\n",
             (
-                # and therefor the same state values remain unchanged --
+                # and therefore the same state values remain unchanged --
                 # with exception of lineflow and xon-any, which are
                 # states toggled by the shell directly (and presumably
                 # knows what to do with it!)

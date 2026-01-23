@@ -67,6 +67,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._limit = limit
 
     def timeout_connection(self):
+        """Close the connection due to timeout."""
         self.reader.feed_eof()
         self.writer.close()
 
@@ -177,6 +178,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         asyncio.get_event_loop().call_soon(self.begin_negotiation)
 
     def begin_shell(self, result):
+        """Start the shell coroutine after negotiation completes."""
         if self.shell is not None:
             coro = self.shell(self.reader, self.writer)
             if asyncio.iscoroutine(coro):

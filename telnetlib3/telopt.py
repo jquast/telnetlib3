@@ -1,3 +1,5 @@
+"""Telnet option constants exported from the deprecated telnetlib module."""
+
 # Exported from the telnetlib module, which is marked for deprecation in version
 # 3.11 and removal in 3.13
 LINEMODE = b'"'

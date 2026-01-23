@@ -78,8 +78,11 @@ __all__ = (
 
 
 class TelnetWriter:
-    """This is a copy of :class:`asyncio.StreamWriter`, except that it is a Telnet IAC Interpreter
-    implementing the telnet protocol."""
+    """
+    Telnet IAC Interpreter implementing the telnet protocol.
+
+    A copy of :class:`asyncio.StreamWriter` with IAC interpretation.
+    """
 
     #: Total bytes sent to :meth:`~.feed_byte`
     byte_count = 0
@@ -127,9 +130,12 @@ class TelnetWriter:
         reader=None,
     ):
         """
-        Almost all negotiation actions are performed through the writer interface, as any action
-        requires writing bytes to the underling stream.  This class implements :meth:`~.feed_byte`,
-        which acts as a Telnet *Is-A-Command* (IAC) interpreter.
+        Initialize TelnetWriter.
+
+        Almost all negotiation actions are performed through the writer interface,
+        as any action requires writing bytes to the underling stream. This class
+        implements :meth:`~.feed_byte`, which acts as a Telnet *Is-A-Command*
+        (IAC) interpreter.
 
         The significance of the last byte passed to this method is tested
         by instance attribute :attr:`~.is_oob`, following the call to
@@ -270,15 +276,18 @@ class TelnetWriter:
 
     @property
     def connection_closed(self):
+        """Return True if connection has been closed."""
         return self._connection_closed
 
     # Base protocol methods
 
     @property
     def transport(self):
+        """Return the underlying transport."""
         return self._transport
 
     def close(self):
+        """Close the connection and release resources."""
         if self.connection_closed:
             return
         # Proactively notify the protocol so it can release references immediately.
@@ -304,6 +313,7 @@ class TelnetWriter:
             self._closed_fut.set_result(None)
 
     def is_closing(self):
+        """Return True if the connection is closing or already closed."""
         if self._transport is not None:
             if self._transport.is_closing():
                 return True
@@ -390,9 +400,11 @@ class TelnetWriter:
         self.write(b"".join(lines))
 
     def write_eof(self):
+        """Write EOF to the transport."""
         return self._transport.write_eof()
 
     def can_write_eof(self):
+        """Return True if the transport supports write_eof()."""
         return self._transport.can_write_eof()
 
     async def drain(self):
@@ -1155,7 +1167,7 @@ class TelnetWriter:
         assert callable(func), "Argument func must be callable"
         assert (
             isinstance(slc_byte, bytes) and 0 < ord(slc_byte) < slc.NSLC + 1
-        ), "Uknown SLC byte: {!r}".format(slc_byte)
+        ), "Unknown SLC byte: {!r}".format(slc_byte)
         self._slc_callback[slc_byte] = func
 
     def handle_ew(self, slc):
@@ -1663,7 +1675,7 @@ class TelnetWriter:
 
         SB options handled here are TTYPE, XDISPLOC, NEW_ENVIRON,
         NAWS, and STATUS, and are delegated to their ``handle_``
-        equivalent methods. Implementors of additional SB options
+        equivalent methods. Implementers of additional SB options
         should extend this method.
         """
         if not buf:
@@ -2486,7 +2498,6 @@ class TelnetWriter:
 
         :param bytes buf: bytes following IAC SB LINEMODE DO FORWARDMASK.
         """
-
         self.log.debug("SB unhandled: cmd={}, buf={!r}".format(name_command(COM_PORT_OPTION), buf))
 
         return
@@ -2499,7 +2510,6 @@ class TelnetWriter:
 
         :param bytes buf: bytes following IAC SB GMCP.
         """
-
         self.log.debug("SB unhandled: cmd={}, buf={!r}".format(name_command(GMCP), b"".join(buf)))
 
         return
@@ -2529,6 +2539,7 @@ class TelnetWriterUnicode(TelnetWriter):
     """
 
     def __init__(self, transport, protocol, fn_encoding, *, encoding_errors="strict", **kwds):
+        """Initialize TelnetWriterUnicode with encoding callback."""
         self.fn_encoding = fn_encoding
         self.encoding_errors = encoding_errors
         super().__init__(transport, protocol, **kwds)

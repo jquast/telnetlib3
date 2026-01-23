@@ -20,8 +20,8 @@ class TelnetClient(client_base.BaseClient):
     """
     Telnet client that supports all common options.
 
-    This class is useful for automation, it appears to be a virtual terminal to the remote end, but
-    does not require an interactive terminal to run.
+    Useful for automation, appearing as a virtual terminal to the remote end without requiring an
+    interactive terminal to run.
     """
 
     #: On :meth:`send_env`, the value of 'LANG' will be 'C' for binary
@@ -40,6 +40,7 @@ class TelnetClient(client_base.BaseClient):
         *args,
         **kwargs,
     ):
+        """Initialize TelnetClient with terminal parameters."""
         super().__init__(*args, **kwargs)
         self._extra.update(
             {
@@ -66,7 +67,12 @@ class TelnetClient(client_base.BaseClient):
         )
 
     def connection_made(self, transport):
-        """Callback for connection made to server."""
+        """
+        Handle connection made to server.
+
+        Wire up telnet option callbacks for terminal type, speed, display, environment, window size,
+        and character set negotiation.
+        """
         # local
         from telnetlib3.telopt import NAWS, TTYPE, TSPEED, CHARSET, XDISPLOC, NEW_ENVIRON
 

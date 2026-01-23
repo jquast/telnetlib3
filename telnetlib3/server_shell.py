@@ -1,3 +1,5 @@
+"""Telnet server shell implementations."""
+
 # std imports
 import types
 import asyncio
@@ -147,8 +149,7 @@ def character_dump(kb_limit):
 
 
 async def get_next_ascii(reader, writer):
-    """A coroutine that accepts the next character from `reader` that is not a part of an ANSI
-    escape sequence."""
+    """Accept the next non-ANSI-escape character from reader."""
     escape_sequence = False
     while not writer.is_closing():
         next_char = await reader.read(1)
@@ -202,8 +203,7 @@ def readline(reader, writer):
 
 async def readline2(reader, writer):
     """
-    Another crude readline interface as a more amiable asynchronous function than :func:`readline`
-    supplied with the earliest version of this library.
+    Async readline interface that filters ANSI escape sequences.
 
     This version attempts to filter away escape sequences, such as when a user
     presses an arrow or function key. Delete key is backspace.

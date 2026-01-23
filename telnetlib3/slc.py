@@ -284,15 +284,14 @@ def snoop(byte, slctab, slc_callbacks):
 
 class Linemode(object):
     def __init__(self, mask=b"\x00"):
-        """
-        A mask of ``LMODE_MODE_LOCAL`` means that all line editing is performed on the client side
-        (default).
+        r"""
+        Initialize Linemode with the given mask.
 
-        A mask of theNULL (\x00)
-        indicates that editing is performed on the remote side.
-        Valid bit flags of mask are: ``LMODE_MODE_TRAPSIG``,
-        ``LMODE_MODE_ACK``, ``LMODE_MODE_SOFT_TAB``, and
-        ``LMODE_MODE_LIT_ECHO``.
+        A mask of ``LMODE_MODE_LOCAL`` means that all line editing is performed
+        on the client side (default). A mask of theNULL (``\x00``) indicates
+        that editing is performed on the remote side. Valid bit flags of mask
+        are: ``LMODE_MODE_TRAPSIG``, ``LMODE_MODE_ACK``, ``LMODE_MODE_SOFT_TAB``,
+        and ``LMODE_MODE_LIT_ECHO``.
         """
         assert type(mask) is bytes and len(mask) == 1, (repr(mask), mask)
         self.mask = mask
@@ -326,7 +325,7 @@ class Linemode(object):
 
     @property
     def soft_tab(self):
-        """Returns True if client will expand horizontal tab (\x09)."""
+        r"""Returns True if client will expand horizontal tab (``\x09``)."""
         return bool(ord(self.mask) & ord(LMODE_MODE_SOFT_TAB))
 
     @property

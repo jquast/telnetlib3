@@ -1,6 +1,9 @@
 """
-The ``main`` function here is wired to the command line tool by name telnetlib3-server.  If this
-server's PID receives the SIGTERM signal, it attempts to shutdown gracefully.
+Telnet server implementation with command-line interface.
+
+The ``main`` function here is wired to the command line tool by name
+telnetlib3-server. If this server's PID receives the SIGTERM signal,
+it attempts to shutdown gracefully.
 
 The :class:`TelnetServer` class negotiates a character-at-a-time (WILL-SGA,
 WILL-ECHO) session with support for negotiation about window size, environment
@@ -69,6 +72,7 @@ class TelnetServer(server_base.BaseServer):
     # Derived methods from base class
 
     def __init__(self, term="unknown", cols=80, rows=25, timeout=300, *args, **kwargs):
+        """Initialize TelnetServer with terminal parameters."""
         super().__init__(*args, **kwargs)
         self.waiter_encoding = asyncio.Future()
         self._tasks.append(self.waiter_encoding)
@@ -85,6 +89,7 @@ class TelnetServer(server_base.BaseServer):
         )
 
     def connection_made(self, transport):
+        """Handle new connection and wire up telnet option callbacks."""
         # local
         from .telopt import NAWS, TTYPE, TSPEED, CHARSET, XDISPLOC, NEW_ENVIRON
 
@@ -113,10 +118,12 @@ class TelnetServer(server_base.BaseServer):
             self.writer.set_ext_send_callback(tel_opt, callback_fn)
 
     def data_received(self, data):
+        """Process received data and reset timeout timer."""
         self.set_timeout()
         super().data_received(data)
 
     def begin_negotiation(self):
+        """Begin telnet negotiation by requesting terminal type."""
         # local
         from .telopt import DO, TTYPE
 
@@ -124,6 +131,7 @@ class TelnetServer(server_base.BaseServer):
         self.writer.iac(DO, TTYPE)
 
     def begin_advanced_negotiation(self):
+        """Request advanced telnet options from client."""
         # local
         from .telopt import DO, SGA, ECHO, NAWS, WILL, BINARY, CHARSET, NEW_ENVIRON
 
@@ -138,6 +146,7 @@ class TelnetServer(server_base.BaseServer):
             self.writer.iac(DO, CHARSET)
 
     def check_negotiation(self, final=False):
+        """Check if negotiation is complete including encoding."""
         # local
         from .telopt import SB, TTYPE, CHARSET, NEW_ENVIRON
 
@@ -551,6 +560,7 @@ async def _sigterm_handler(server, log):
 
 
 def parse_server_args():
+    """Parse command-line arguments for telnet server."""
     # std imports
     import sys
 

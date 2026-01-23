@@ -96,7 +96,7 @@ async def test_telnet_server_on_ttype_beyond_max(bind_host, unused_tcp_port):
         expected = given_ttypes[idx]
         assert srv_instance.get_extra_info(key) == expected, (idx, key)
 
-    # ttype{max} gets overwritten continiously, so the last given
+    # ttype{max} gets overwritten continuously, so the last given
     # ttype is the last value.
     key = "ttype{0}".format(telnetlib3.TelnetServer.TTYPE_LOOPMAX + 1)
     expected = given_ttypes[-1]

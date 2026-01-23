@@ -64,7 +64,7 @@ def test_legal_2byte_iac():
 
 
 def test_sb_interrupted():
-    """IAC SB gets interrupted by IAC command, reseting and exiting state."""
+    """IAC SB gets interrupted by IAC command, resetting and exiting state."""
     # when within an SB buffer, all SB protocols we know about remark that
     # IAC must be escaped -- for example, the NAWS negotiation of a 65535
     # by 0 window size should be '\xff\xff\xff\xff\x00\x00' -- so if we

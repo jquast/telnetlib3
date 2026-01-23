@@ -7,18 +7,17 @@ r"""
 TELNET client class.
 
 Based on RFC 854: TELNET Protocol Specification, by J. Postel and
-J. Reynolds
+J. Reynolds.
 
-Example:
+Example::
 
->>> from telnetlib import Telnet
->>> tn = Telnet('www.python.org', 79)   # connect to finger port
->>> tn.write(b'guido\r\n')
->>> print(tn.read_all())
-Login       Name               TTY         Idle    When    Where
-guido    Guido van Rossum      pts/2        <Dec  2 11:10> snag.cnri.reston..
-
->>>
+    >>> from telnetlib import Telnet
+    >>> tn = Telnet('www.python.org', 79)   # connect to finger port
+    >>> tn.write(b'guido\r\n')
+    >>> print(tn.read_all())
+    Login       Name               TTY         Idle    When    Where
+    guido    Guido van Rossum      pts/2        <Dec  2 11:10> snag.cnri.reston..
+    >>>
 
 Note that read_all() won't read until eof -- it just reads some data
 -- but it guarantees to read at least one byte unless EOF is hit.
@@ -355,7 +354,7 @@ class Telnet:
         return self.sock
 
     def fileno(self):
-        """Return the fileno() of the socket object used internally."""
+        """Return the file descriptor of the socket used internally."""
         return self.sock.fileno()
 
     def write(self, buffer):

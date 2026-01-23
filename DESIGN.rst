@@ -184,7 +184,7 @@ connecting clients and hosts, due to limitations of their networking Transport
 This implementation aims to implement only those capabilities "found in the
 wild", and includes, or does not include, mechanisms that are suitable only
 for legacy or vendor-implemented options. It even makes one of its own: the
-encoding' used in binary mode is the value replied by the CHARSET negotation
+encoding' used in binary mode is the value replied by the CHARSET negotiation
 (`rfc-2066`_).
 
 
@@ -374,10 +374,10 @@ Carriage Return
 There are five supported signaling mechanisms for "send" or "end of line"
 received by clients.  The default implementation supplies remote line editing
 and callback of ``line_received`` with all client-supported carriage returns,
-but may cause loss of data for implementors wishing to distinguish among them.
+but may cause loss of data for implementers wishing to distinguish among them.
 
 Namely, the difference between 'return' and 'enter' or raw file transfers.
-Those implementors should directly override ``data_received``, or carefully
+Those implementers should directly override ``data_received``, or carefully
 deriving their own implementations of ``editing_received`` and ``character_received``.
 
 An overview of the primary callbacks and their interaction with carriage

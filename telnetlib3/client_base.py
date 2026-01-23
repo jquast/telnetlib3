@@ -172,6 +172,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         asyncio.get_event_loop().call_soon(self.begin_negotiation)
 
     def begin_shell(self, result):
+        """Start the shell coroutine after negotiation completes."""
         if self.shell is not None:
             coro = self.shell(self.reader, self.writer)
             if asyncio.iscoroutine(coro):
@@ -195,9 +196,12 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 )
 
     def data_received(self, data):
-        """Process bytes received by transport."""
-        # Buffer incoming data and schedule async processing to keep the event loop responsive.
-        # Apply read-side backpressure using transport.pause_reading()/resume_reading().
+        """
+        Process bytes received by transport.
+
+        Buffer incoming data and schedule async processing to keep the event loop responsive. Apply
+        read-side backpressure using transport.pause_reading()/resume_reading().
+        """
         self._last_received = datetime.datetime.now()
 
         # Enqueue and account for buffered size

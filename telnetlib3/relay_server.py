@@ -1,3 +1,5 @@
+"""Telnet relay server shell implementation."""
+
 # std imports
 import asyncio
 import logging
@@ -16,13 +18,14 @@ CR, LF, NUL = "\r\n\x00"
 
 async def relay_shell(client_reader, client_writer):
     """
-    An example 'telnet relay shell', appropriate for use with
-    telnetlib3.create_server, run command::
+    Example telnet relay shell for use with telnetlib3.create_server.
+
+    Run command::
 
         telnetlib3 --shell telnetlib3.relay_server.relay_shell
 
     This relay service is very basic, it still needs to somehow forward the TERM
-    type and environment variable of value COLORTERM
+    type and environment variable of value COLORTERM.
     """
     log = logging.getLogger("relay_server")
 

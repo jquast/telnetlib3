@@ -18,12 +18,16 @@ _DEFAULT_LIMIT = 2**16  # 64 KiB
 
 
 class TelnetReader:
-    """This is a copy of :class:`asyncio.StreamReader`, with a little care for telnet-like
-    readline(), and something about _waiter which I don't really."""
+    """
+    Telnet protocol stream reader.
+
+    A copy of :class:`asyncio.StreamReader` with telnet-aware readline().
+    """
 
     _source_traceback = None
 
     def __init__(self, limit=_DEFAULT_LIMIT):
+        """Initialize TelnetReader with optional buffer size limit."""
         self.log = logging.getLogger(__name__)
         # The line length limit is  a security feature;
         # it also doubles as half the buffer limit.
@@ -63,9 +67,11 @@ class TelnetReader:
         return "<{}>".format(" ".join(info))
 
     def exception(self):
+        """Return the exception if set, otherwise None."""
         return self._exception
 
     def set_exception(self, exc):
+        """Set the exception and wake up any waiting coroutine."""
         self._exception = exc
 
         waiter = self._waiter
@@ -83,6 +89,7 @@ class TelnetReader:
                 waiter.set_result(None)
 
     def set_transport(self, transport):
+        """Set the transport for flow control."""
         assert self._transport is None, "Transport already set"
         self._transport = transport
 
@@ -114,6 +121,7 @@ class TelnetReader:
         return self._eof and not self._buffer
 
     def feed_data(self, data):
+        """Feed data bytes to the reader buffer."""
         assert not self._eof, "feed_data after feed_eof"
 
         if not data:
@@ -269,7 +277,6 @@ class TelnetReader:
         If the data cannot be read because of over limit, a LimitOverrunError exception will be
         raised, and the data will be left in the internal buffer, so it can be read again.
         """
-
         if pattern is None or not isinstance(pattern, re.Pattern):
             raise ValueError("pattern should be a re.Pattern object")
 
@@ -340,7 +347,6 @@ class TelnetReader:
         If stream was paused, this function will automatically resume it if
         needed.
         """
-
         if self._exception is not None:
             raise self._exception
 
@@ -426,6 +432,7 @@ class TelnetReader:
     # reader.
     @property
     def connection_closed(self):
+        """Deprecated: use at_eof() instead."""
         warnings.warn(
             "connection_closed property removed, use at_eof() instead",
             DeprecationWarning,
@@ -463,7 +470,7 @@ class TelnetReader:
           NUL" must be used where a carriage return alone is actually desired;
           and the CR character must be avoided in other contexts.
 
-        And therefor, a line does not yield for a stream containing a
+        And therefore, a line does not yield for a stream containing a
         CR if it is not succeeded by NUL or LF.
 
         ================= =====================
