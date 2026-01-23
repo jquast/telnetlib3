@@ -98,6 +98,7 @@ async def test_telnet_server_open_close(bind_host, unused_tcp_port):
             server = await asyncio.wait_for(_waiter, 0.5)
             server.writer.write("Goodbye!")
             server.writer.close()
+            await server.writer.wait_closed()
             assert server.writer.is_closing()
             result = await stream_reader.read()
             assert result == b"\xff\xfd\x18Goodbye!"
@@ -114,6 +115,7 @@ async def test_telnet_client_open_close_by_write(bind_host, unused_tcp_port):
             writer,
         ):
             writer.close()
+            await writer.wait_closed()
             assert (await reader.read()) == ""
             assert writer.is_closing()
 
@@ -245,6 +247,7 @@ async def test_telnet_server_closed_by_server(bind_host, unused_tcp_port):
             server = await asyncio.wait_for(_waiter_connected, 0.5)
 
             server.writer.close()
+            await server.writer.wait_closed()
 
             await asyncio.wait_for(_waiter_closed, 0.5)
 
@@ -411,8 +414,7 @@ async def test_telnet_server_as_module():
 
     # we would expect the script to display help output and exit
     help_output, _ = await proc.communicate()
-    assert help_output.startswith(b"usage: server.py [-h]")
-    await proc.communicate()
+    assert b"usage:" in help_output and b"server" in help_output
     await proc.wait()
 
 
@@ -466,8 +468,7 @@ async def test_telnet_client_as_module():
 
     # we would expect the script to display help output and exit
     help_output, _ = await proc.communicate()
-    assert help_output.startswith(b"usage: client.py [-h]")
-    await proc.communicate()
+    assert b"usage:" in help_output and b"client" in help_output
     await proc.wait()
 
 

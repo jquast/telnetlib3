@@ -117,6 +117,7 @@ async def test_iac_do_twice_replies_once(bind_host, unused_tcp_port):
 
     async def shell(reader, writer):
         writer.close()
+        await writer.wait_closed()
 
     given_from_client = IAC + DO + ECHO + IAC + DO + ECHO
     expect_from_server = IAC + WILL + ECHO
@@ -145,6 +146,7 @@ async def test_iac_dont_dont(bind_host, unused_tcp_port):
 
     async def shell(reader, writer):
         writer.close()
+        await writer.wait_closed()
 
     given_from_client = IAC + DONT + ECHO + IAC + DONT + ECHO
     expect_from_server = b""
@@ -224,6 +226,7 @@ async def test_slc_simul(bind_host, unused_tcp_port):
         # then report what was received and hangup on client
         _waiter_input.set_result((writer.protocol.waiters, result))
         writer.close()
+        await writer.wait_closed()
 
     class SimulSLCServer(telnetlib3.BaseServer):
         slc_callbacks = [
@@ -316,6 +319,7 @@ async def test_writelines_bytes(bind_host, unused_tcp_port):
     async def shell(reader, writer):
         writer.writelines(given)
         writer.close()
+        await writer.wait_closed()
 
     async with create_server(
         protocol_factory=telnetlib3.BaseServer,
@@ -344,6 +348,7 @@ async def test_writelines_unicode(bind_host, unused_tcp_port):
     async def shell(reader, writer):
         writer.writelines(given)
         writer.close()
+        await writer.wait_closed()
 
     async with create_server(
         protocol_factory=telnetlib3.BaseServer,
@@ -383,6 +388,7 @@ async def test_send_ga(bind_host, unused_tcp_port):
         result = writer.send_ga()
         assert result is True
         writer.close()
+        await writer.wait_closed()
 
     async with create_server(
         protocol_factory=telnetlib3.BaseServer,
@@ -414,6 +420,7 @@ async def test_not_send_ga(bind_host, unused_tcp_port):
         result = writer.send_ga()
         assert result is False
         writer.close()
+        await writer.wait_closed()
 
     async with create_server(
         protocol_factory=telnetlib3.BaseServer,
@@ -442,6 +449,7 @@ async def test_not_send_eor(bind_host, unused_tcp_port):
         result = writer.send_eor()
         assert result is False
         writer.close()
+        await writer.wait_closed()
 
     async with create_server(
         protocol_factory=telnetlib3.BaseServer,
@@ -477,6 +485,7 @@ async def test_send_eor(bind_host, unused_tcp_port):
         assert result is True
         writer.write(">")
         writer.close()
+        await writer.wait_closed()
 
     async with create_server(
         protocol_factory=telnetlib3.BaseServer,

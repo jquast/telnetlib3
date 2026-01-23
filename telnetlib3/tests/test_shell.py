@@ -114,6 +114,7 @@ async def test_telnet_server_no_shell(bind_host, unused_tcp_port):
             server = await asyncio.wait_for(_waiter, 0.5)
             server.writer.write("beta")
             server.writer.close()
+            await server.writer.wait_closed()
             client_recv = await client_reader.read()
             assert client_recv == client_expected
 

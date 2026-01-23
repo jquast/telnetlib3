@@ -683,14 +683,10 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
     # Wrap shell with guards if enabled
     if robot_check or pty_fork_limit:
         # local
+        # pylint: disable=import-outside-toplevel
         from .guard_shells import robot_shell  # pylint: disable=import-outside-toplevel
-        from .guard_shells import (  # pylint: disable=import-outside-toplevel
-            ConnectionCounter,
-            busy_shell,
-        )
-        from .guard_shells import (
-            robot_check as do_robot_check,  # pylint: disable=import-outside-toplevel
-        )
+        from .guard_shells import ConnectionCounter, busy_shell
+        from .guard_shells import robot_check as do_robot_check
 
         counter = ConnectionCounter(pty_fork_limit) if pty_fork_limit else None
         inner_shell = shell

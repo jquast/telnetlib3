@@ -71,9 +71,9 @@ def test_repr_shows_key_fields():
     assert "encoding=False" in rep
 
 
-def test_set_exception_and_wakeup_waiter():
+async def test_set_exception_and_wakeup_waiter():
     r = TelnetReader()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     fut = loop.create_future()
     r._waiter = fut
     err = RuntimeError("oops")
@@ -183,16 +183,16 @@ async def test_readexactly_exact_and_split_paths():
     assert bytes(r2._buffer) == b"de"
 
 
-def test_readuntil_separator_empty_raises():
+async def test_readuntil_separator_empty_raises():
     r = TelnetReader()
     with pytest.raises(ValueError):
         # empty separator not allowed
-        asyncio.get_event_loop().run_until_complete(r.readuntil(b""))
+        await r.readuntil(b"")
 
 
-def test_readuntil_pattern_invalid_types():
+async def test_readuntil_pattern_invalid_types():
     r = TelnetReader()
     with pytest.raises(ValueError, match="pattern should be a re\\.Pattern"):
-        asyncio.get_event_loop().run_until_complete(r.readuntil_pattern(None))
+        await r.readuntil_pattern(None)
 
     # pattern compiled

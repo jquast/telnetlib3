@@ -165,10 +165,7 @@ class TelnetWriter:
                 reader,
             )
         self._reader = reader
-        self._loop = asyncio.get_event_loop()
-        self._complete_fut = self._loop.create_future()
-        self._complete_fut.set_result(None)
-        self._closed_fut = self._loop.create_future()
+        self._closed_fut = None
 
         if not any((client, server)) or all((client, server)):
             raise TypeError("keyword arguments `client', and `server' are mutually exclusive.")
@@ -310,7 +307,7 @@ class TelnetWriter:
         self._transport = None
         self._connection_closed = True
         # Signal that the connection is closed
-        if not self._closed_fut.done():
+        if self._closed_fut is not None and not self._closed_fut.done():
             self._closed_fut.set_result(None)
 
     def is_closing(self):
@@ -329,6 +326,10 @@ class TelnetWriter:
         This method returns when the underlying connection has been closed. It can be used to wait
         for the connection to be fully closed after calling close().
         """
+        if self._connection_closed:
+            return
+        if self._closed_fut is None:
+            self._closed_fut = asyncio.get_running_loop().create_future()
         await self._closed_fut
 
     def __repr__(self):
@@ -430,7 +431,7 @@ class TelnetWriter:
 
     # proprietary write helper
 
-    # pylint: disable=too-many-branches,too-many-statements
+    # pylint: disable=too-many-branches,too-many-statements,too-complex
     def feed_byte(self, byte):
         """
         Feed a single byte into Telnet option state machine.
@@ -543,7 +544,7 @@ class TelnetWriter:
 
         elif self.mode == "remote" or self.mode == "kludge" and self.slc_simulated:
             # 'byte' is tested for SLC characters
-            callback, slc_name, slc_def = slc.snoop(byte, self.slctab, self._slc_callback)
+            callback, slc_name, _ = slc.snoop(byte, self.slctab, self._slc_callback)
 
             # Inform caller which SLC function occurred by this attribute.
             self.slc_received = slc_name
@@ -691,6 +692,8 @@ class TelnetWriter:
         Returns True if command was sent. Not all commands are legal in the context of client,
         server, or pending negotiation state, emitting a relevant debug warning to the log handler
         if not sent.
+
+        :raises ValueError: When cmd is not DO, DONT, WILL, or WONT.
         """
         if cmd not in (DO, DONT, WILL, WONT):
             raise ValueError(f"Expected DO, DONT, WILL, WONT, got {name_command(cmd)}.")
@@ -924,8 +927,7 @@ class TelnetWriter:
             self.pending_option[SB + TTYPE] = True
             self.send_iac(b"".join(response))
             return True
-        else:
-            self.log.debug("cannot send SB TTYPE SEND, request pending.")
+        self.log.debug("cannot send SB TTYPE SEND, request pending.")
         return False
 
     def request_forwardmask(self, fmask=None):
@@ -990,6 +992,8 @@ class TelnetWriter:
         Set and Inform other end to agree to change to linemode, ``linemode``.
 
         An instance of the Linemode class, or self.linemode when unset.
+
+        :raises AssertionError: When LINEMODE not negotiated.
         """
         if not (self.local_option.enabled(LINEMODE) or self.remote_option.enabled(LINEMODE)):
             raise AssertionError(
@@ -1259,6 +1263,8 @@ class TelnetWriter:
 
         * ``CHARSET``: for servers, receiving one string, the character set
           negotiated by client. :rfc:`2066`.
+
+        :param callable func: The callback function to register.
         """
         assert cmd in (
             LOGOUT,
@@ -1409,6 +1415,8 @@ class TelnetWriter:
         - DO LOGOUT executes extended callback registered by cmd LOGOUT
           with argument DO (indicating a request for voluntary logoff).
         - DO STATUS sends state of all local, remote, and pending options.
+
+        :raises ValueError: When opt is invalid for the current endpoint role (server/client).
         """
         # For unsupported capabilities, RFC specifies a response of
         # (IAC, WONT, opt).  Similarly, set ``self.local_option[opt]``
@@ -1490,7 +1498,7 @@ class TelnetWriter:
                 self.pending_option[SB + opt] = True
 
         else:
-            self.log.debug(f"DO {name_command(opt)} not supported.")
+            self.log.debug("DO %s not supported.", name_command(opt))
             if self.local_option.get(opt, None) is None:
                 self.iac(WONT, opt)
             return False
@@ -1513,7 +1521,7 @@ class TelnetWriter:
         # Correctly, a DONT can not be declined, so there is no need to
         # affirm in the negative.
 
-    # pylint: disable=too-many-branches
+    # pylint: disable=too-many-branches,too-complex
     def handle_will(self, opt):
         """
         Process byte 3 of series (IAC, DONT, opt) received by remote end.
@@ -1543,7 +1551,7 @@ class TelnetWriter:
         if opt in (BINARY, SGA, ECHO, NAWS, LINEMODE, EOR, SNDLOC):
             if opt == ECHO and self.server:
                 raise ValueError("cannot recv WILL ECHO on server end")
-            elif opt in (NAWS, LINEMODE, SNDLOC) and self.client:
+            if opt in (NAWS, LINEMODE, SNDLOC) and self.client:
                 raise ValueError(f"cannot recv WILL {name_command(opt)} on client end")
             if not self.remote_option.enabled(opt):
                 self.iac(DO, opt)
@@ -1641,7 +1649,7 @@ class TelnetWriter:
         self.log.debug("handle_wont(%s)", name_command(opt))
         if opt == TM and not self.pending_option.enabled(DO + TM):
             raise ValueError("WONT TM received but DO TM was not sent")
-        elif opt == TM:
+        if opt == TM:
             self.log.debug("WONT TIMING-MARK")
             self.remote_option[opt] = False
         elif opt == LOGOUT:
@@ -2296,13 +2304,12 @@ class TelnetWriter:
         mylevel, myvalue = (self.slctab[func].level, self.slctab[func].val)
         if slc_def.level == mylevel and myvalue == slc_def.val:
             return
-        elif slc_def.level == mylevel and slc_def.ack:
+        if slc_def.level == mylevel and slc_def.ack:
             return
-        elif slc_def.ack:
+        if slc_def.ack:
             self.log.debug("slc value mismatch with ack bit set: (%r,%r)", myvalue, slc_def.val)
             return
-        else:
-            self._slc_change(func, slc_def)
+        self._slc_change(func, slc_def)
 
     def _slc_change(self, func, slc_def):
         """
@@ -2387,9 +2394,7 @@ class TelnetWriter:
                 DONT,
             ), f"cannot recv {name_command(cmd)} LMODE_FORWARDMASK on server end"
         if self.client:
-            assert self.local_option.enabled(
-                LINEMODE
-            ), (
+            assert self.local_option.enabled(LINEMODE), (
                 f"cannot recv {name_command(cmd)} LMODE_FORWARDMASK "
                 "without first sending WILL LINEMODE."
             )
@@ -2426,8 +2431,6 @@ class TelnetWriter:
         """
         self.log.debug("SB unhandled: cmd=%s, buf=%r", name_command(COM_PORT_OPTION), buf)
 
-        return
-
     def _handle_sb_gmcp(self, buf):
         """
         Callback handles request for Generic Mud Communication Protocol (GMCP).
@@ -2437,8 +2440,6 @@ class TelnetWriter:
         :param bytes buf: bytes following IAC SB GMCP.
         """
         self.log.debug("SB unhandled: cmd=%s, buf=%r", name_command(GMCP), b"".join(buf))
-
-        return
 
     def _handle_do_forwardmask(self, buf):
         """
@@ -2474,8 +2475,7 @@ class TelnetWriterUnicode(TelnetWriter):  # pylint: disable=abstract-method
         """
         Encode ``string`` using protocol-preferred encoding.
 
-        :param str errors: same as meaning in :meth:`codecs.Codec.encode`.  When None,
-            value of ``encoding_errors`` given to class initializer is used.
+        :param str string: unicode string to encode.
         :param str errors: same as meaning in :meth:`codecs.Codec.encode`, when
             ``None`` (default), value of class initializer keyword argument,
             ``encoding_errors``.
@@ -2488,7 +2488,7 @@ class TelnetWriterUnicode(TelnetWriter):  # pylint: disable=abstract-method
         encoding = self.fn_encoding(outgoing=True)
         return bytes(string, encoding, errors or self.encoding_errors)
 
-    def write(self, string, errors=None):
+    def write(self, string, errors=None):  # pylint: disable=arguments-renamed
         """
         Write unicode string to transport, using protocol-preferred encoding.
 
@@ -2516,7 +2516,7 @@ class TelnetWriterUnicode(TelnetWriter):  # pylint: disable=abstract-method
         """
         self.write(string="".join(lines), errors=errors)
 
-    def echo(self, string, errors=None):
+    def echo(self, string, errors=None):  # pylint: disable=arguments-renamed
         """
         Conditionally write ``string`` to transport when "remote echo" enabled.
 

@@ -181,7 +181,7 @@ else:
                         # local
                         from .telopt import NAWS  # pylint: disable=import-outside-toplevel
 
-                        try:  # pylint: disable=broad-exception-caught
+                        try:
                             if (
                                 telnet_writer.local_option.enabled(NAWS)
                                 and not telnet_writer.is_closing()

@@ -23,6 +23,7 @@ async def server_context(server):
     finally:
         server.close()
         await server.wait_closed()
+        await asyncio.sleep(0)
 
 
 @contextlib.asynccontextmanager
@@ -33,6 +34,7 @@ async def connection_context(reader, writer):
     finally:
         writer.close()
         await writer.wait_closed()
+        await asyncio.sleep(0)
 
 
 @contextlib.asynccontextmanager
@@ -48,6 +50,7 @@ async def create_server(*args, **kwargs):
     finally:
         server.close()
         await server.wait_closed()
+        await asyncio.sleep(0)
 
 
 @contextlib.asynccontextmanager
@@ -63,6 +66,7 @@ async def open_connection(*args, **kwargs):
     finally:
         writer.close()
         await writer.wait_closed()
+        await asyncio.sleep(0)
 
 
 @contextlib.asynccontextmanager
@@ -74,6 +78,7 @@ async def asyncio_connection(host, port):
     finally:
         writer.close()
         await writer.wait_closed()
+        await asyncio.sleep(0)
 
 
 @contextlib.asynccontextmanager
@@ -85,6 +90,7 @@ async def asyncio_server(protocol_factory, host, port):
     finally:
         server.close()
         await server.wait_closed()
+        await asyncio.sleep(0)
 
 
 __all__ = (

@@ -196,6 +196,7 @@ async def test_telnet_server_binary_mode(bind_host, unused_tcp_port):
         val = await reader.readexactly(len(b"lient "))
         assert val == b"lient "
         writer.close()
+        await writer.wait_closed()
         val = await reader.read()
         assert val == b"output"
 
@@ -244,6 +245,7 @@ async def test_telnet_client_and_server_escape_iac_encoding(bind_host, unused_tc
             result = await client_reader.readexactly(len(given_string))
             assert result == given_string
             server.writer.close()
+            await server.writer.wait_closed()
             eof = await asyncio.wait_for(client_reader.read(), 0.5)
             assert eof == ""
 
@@ -272,5 +274,6 @@ async def test_telnet_client_and_server_escape_iac_binary(bind_host, unused_tcp_
             result = await client_reader.readexactly(len(given_string))
             assert result == given_string
             server.writer.close()
+            await server.writer.wait_closed()
             eof = await asyncio.wait_for(client_reader.read(), 0.5)
             assert eof == b""

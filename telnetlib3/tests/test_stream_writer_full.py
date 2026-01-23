@@ -112,7 +112,7 @@ def test_close_idempotent_and_cleanup():
     assert w._transport is None
     assert w._protocol is None
     assert t._closing is True
-    assert w._closed_fut.done()
+    assert w._closed_fut is None or w._closed_fut.done()
     # callbacks cleared
     assert w._ext_callback == {}
     assert w._ext_send_callback == {}

@@ -1,4 +1,3 @@
-# pylint: disable=duplicate-code
 # jdq(2025): This file is only very lightly modified from cpython 3.12
 # telnetlib.py, to make it compatible with pytest (renaming 'test' to 'main'),
 # and, to be incorporated into telnetlib3 module's namespace, by expanding
@@ -657,7 +656,7 @@ class Telnet:
             else:
                 sys.stdout.flush()
 
-    def expect(self, patterns, timeout=None):  # pylint: disable=redefined-builtin
+    def expect(self, patterns, timeout=None):
         """
         Read until one from a list of a regular expressions matches.
 

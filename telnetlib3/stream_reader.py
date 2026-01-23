@@ -36,15 +36,18 @@ class TelnetReader:
             raise ValueError("Limit cannot be <= 0")
 
         self._limit = limit
-        self._loop = asyncio.get_event_loop()
         self._buffer = bytearray()
         self._eof = False  # Whether we're done.
         self._waiter = None  # A future used by _wait_for_data()
         self._exception = None
         self._transport = None
         self._paused = False
-        if self._loop.get_debug():
-            self._source_traceback = format_helpers.extract_stack(sys._getframe(1))
+        try:
+            loop = asyncio.get_running_loop()
+            if loop.get_debug():
+                self._source_traceback = format_helpers.extract_stack(sys._getframe(1))
+        except RuntimeError:
+            pass
 
     def __repr__(self):
         """Description of stream encoding state."""
@@ -165,7 +168,7 @@ class TelnetReader:
             self._paused = False
             self._transport.resume_reading()
 
-        self._waiter = self._loop.create_future()
+        self._waiter = asyncio.get_running_loop().create_future()
         try:
             await self._waiter
         finally:

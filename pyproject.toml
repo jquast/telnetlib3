@@ -101,6 +101,7 @@ disable = [
     "too-many-instance-attributes",
     "too-many-public-methods",
     "too-many-arguments",
+    "duplicate-code",  # intentional re-exports in telnetlib.py and telopt.py
 ]
 
 [tool.pylint.format]
