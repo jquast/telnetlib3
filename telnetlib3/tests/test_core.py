@@ -120,12 +120,14 @@ async def test_telnet_client_open_closed_by_peer(bind_host, unused_tcp_port):
 
     class DisconnecterProtocol(asyncio.Protocol):
         def connection_made(self, transport):
+            # disconnect on connect
             transport.close()
 
     async with asyncio_server(DisconnecterProtocol, bind_host, unused_tcp_port):
         async with open_connection(
             host=bind_host, port=unused_tcp_port, connect_minwait=0.05
         ) as (reader, writer):
+            # read until EOF, no data received.
             data_received = await reader.read()
             assert data_received == ""
 
@@ -163,8 +165,11 @@ async def test_telnet_server_advanced_negotiation(bind_host, unused_tcp_port):
 
             assert server.writer.remote_option[TTYPE] is True
             assert server.writer.pending_option == {
+                # server's request to negotiation TTYPE affirmed
                 DO + TTYPE: False,
+                # server's request for TTYPE value unreplied
                 SB + TTYPE: True,
+                # remaining unreplied values from begin_advanced_negotiation()
                 DO + NEW_ENVIRON: True,
                 DO + CHARSET: True,
                 DO + NAWS: True,

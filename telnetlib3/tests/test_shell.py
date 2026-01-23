@@ -32,13 +32,17 @@ async def test_telnet_server_shell_as_coroutine(bind_host, unused_tcp_port):
 
     async with create_server(host=bind_host, port=unused_tcp_port, shell=shell):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
+            # verify IAC DO TTYPE
             hello = await asyncio.wait_for(reader.readexactly(len(expect_hello)), 0.5)
             assert hello == expect_hello
 
+            # respond 'WONT TTYPE' to quickly complete negotiation as failed.
             writer.write(hello_reply)
 
+            # await for the shell callback to be ready,
             await asyncio.wait_for(_waiter, 0.5)
 
+            # client sends input, reads shell output response
             writer.write(send_input.encode("ascii"))
             server_output = await asyncio.wait_for(
                 reader.readexactly(len(expect_output)), 0.5
@@ -46,6 +50,7 @@ async def test_telnet_server_shell_as_coroutine(bind_host, unused_tcp_port):
 
             assert server_output.decode("ascii") == expect_output
 
+            # nothing more to read from server; server writer closed in shell.
             result = await reader.read()
             assert result == b""
 
@@ -57,8 +62,10 @@ async def test_telnet_client_shell_as_coroutine(bind_host, unused_tcp_port):
     _waiter = asyncio.Future()
 
     async def shell(reader, writer):
+        # just hang up
         _waiter.set_result(True)
 
+    # a server that doesn't care
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
         async with open_connection(
             host=bind_host,
@@ -81,6 +88,7 @@ async def test_telnet_server_shell_make_coro_by_function(bind_host, unused_tcp_p
 
     async with create_server(host=bind_host, port=unused_tcp_port, shell=shell):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
+            # cancel negotiation and await for the shell callback
             writer.write(IAC + WONT + TTYPE)
 
             await asyncio.wait_for(_waiter, 0.5)
@@ -271,9 +279,11 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
                     result = await reader.read(1024)
                 else:
                     if result != output_expected:
+                        # fetch extra output, if any, for better understanding of error
                         result += await reader.read(1024)
                 assert result == output_expected and timed_out == False
 
+            # nothing more to read.
             result = await reader.read()
             assert result == b""
 

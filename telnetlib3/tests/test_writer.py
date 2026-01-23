@@ -182,9 +182,11 @@ async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
         async with open_connection(
             host=bind_host, port=unused_tcp_port, connect_minwait=0.05, connect_maxwait=0.05
         ) as (_, client_writer):
+            # say it once,
             result = client_writer.iac(DONT, ECHO)
             assert result
 
+            # say it again (this call is suppressed)
             result = client_writer.iac(DONT, ECHO)
             assert result == False
 
@@ -198,22 +200,31 @@ async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
 
 async def test_slc_simul(bind_host, unused_tcp_port):
     """Test SLC control characters are simulated in kludge mode."""
+    # For example, ^C is simulated as IP (Interrupt Process) callback.
     from telnetlib3.telopt import DO, IAC, SGA, ECHO, WILL
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
+    # First, change server state into kludge mode -- Then, send all control
+    # characters.  We ensure all of our various callbacks that are simulated
+    # by control characters were 'fired', as well as the raw bytes received
+    # as-is.
     given_input_outband = IAC + DO + ECHO + IAC + DO + SGA
     given_input_inband = bytes(range(ord(" "))) + b"\x7f"
     expected_from_server = IAC + WILL + ECHO + IAC + WILL + SGA
     _waiter_input = asyncio.Future()
 
     async def shell(reader, writer):
+        # read everything from client until they hang up.
         result = await reader.read()
+
+        # then report what was received and hangup on client
         _waiter_input.set_result((writer.protocol.waiters, result))
         writer.close()
 
     class SimulSLCServer(telnetlib3.BaseServer):
         slc_callbacks = [
             getattr(telnetlib3.slc, "SLC_" + key)
+            # no default value for break, sync, or end-of-record.
             for key in (
                 "IP",
                 "AO",
@@ -385,6 +396,9 @@ async def test_not_send_ga(bind_host, unused_tcp_port):
     from telnetlib3.telopt import DO, IAC, SGA, WILL
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
+    # we require IAC + DO + SGA, and expect a confirming reply.  We also
+    # call writer.send_ga() from the shell, whose result should be False
+    # (not sent).  The reader never receives an IAC + GA.
     expected = IAC + WILL + SGA
 
     async def shell(reader, writer):
@@ -442,6 +456,7 @@ async def test_send_eor(bind_host, unused_tcp_port):
     given = IAC + DO + EOR
     expected = IAC + WILL + EOR + b"<" + IAC + CMD_EOR + b">"
 
+    # just verify rfc constants are used appropriately in this context
     assert EOR == bytes([25])
     assert CMD_EOR == bytes([239])
 
