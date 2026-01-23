@@ -14,7 +14,7 @@ def _get_long_description(fname, encoding="utf8"):
 
 setup(
     name="telnetlib3",
-    version="2.0.8",  # keep in sync with docs/conf.py and telnetlib3/accessories.py !!
+    version="2.1.0",  # keep in sync with docs/conf.py and telnetlib3/accessories.py !!
     url="http://telnetlib3.rtfd.org/",
     license="ISC",
     author="Jeff Quast",

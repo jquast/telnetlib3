@@ -18,7 +18,7 @@ __all__ = (
 
 
 def get_version():
-    return "2.0.8"  # keep in sync with setup.py and docs/conf.py !!
+    return "2.1.0"  # keep in sync with setup.py and docs/conf.py !!
 
 
 def encoding_from_lang(lang):
