@@ -30,6 +30,8 @@ between "no data" and "connection closed" (since the socket also appears ready
 for reading when it is closed).
 """
 
+from __future__ import annotations
+
 # std imports
 # Imported modules
 import sys

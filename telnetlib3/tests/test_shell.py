@@ -121,7 +121,9 @@ async def test_telnet_server_no_shell(bind_host, unused_tcp_port):
             assert client_recv == client_expected
 
 
-async def test_telnet_server_given_shell(bind_host, unused_tcp_port):  # pylint: disable=too-many-locals
+async def test_telnet_server_given_shell(
+    bind_host, unused_tcp_port
+):  # pylint: disable=too-many-locals
     """Iterate all state-reading commands of default telnet_server_shell."""
     # local
     from telnetlib3 import telnet_server_shell

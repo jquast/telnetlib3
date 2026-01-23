@@ -16,7 +16,7 @@ import signal
 import asyncio
 import logging
 import argparse
-from typing import Callable, NamedTuple, Optional
+from typing import Callable, Optional, NamedTuple
 
 # local
 from . import accessories, server_base
@@ -42,6 +42,12 @@ class CONFIG(NamedTuple):
     pty_args: Optional[str] = None
     robot_check: bool = False
     pty_fork_limit: int = 0
+
+
+# Default config instance - use this to access default values
+# (accessing CONFIG.field directly returns _tuplegetter in Python 3.8)
+_config = CONFIG()
+
 logger = logging.getLogger("telnetlib3.server")
 
 
@@ -583,48 +589,48 @@ def parse_server_args():
         description="Telnet protocol server",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("host", nargs="?", default=CONFIG.host, help="bind address")
-    parser.add_argument("port", nargs="?", type=int, default=CONFIG.port, help="bind port")
-    parser.add_argument("--loglevel", default=CONFIG.loglevel, help="level name")
-    parser.add_argument("--logfile", default=CONFIG.logfile, help="filepath")
-    parser.add_argument("--logfmt", default=CONFIG.logfmt, help="log format")
+    parser.add_argument("host", nargs="?", default=_config.host, help="bind address")
+    parser.add_argument("port", nargs="?", type=int, default=_config.port, help="bind port")
+    parser.add_argument("--loglevel", default=_config.loglevel, help="level name")
+    parser.add_argument("--logfile", default=_config.logfile, help="filepath")
+    parser.add_argument("--logfmt", default=_config.logfmt, help="log format")
     parser.add_argument(
         "--shell",
-        default=CONFIG.shell,
+        default=_config.shell,
         type=accessories.function_lookup,
         help="module.function_name",
     )
-    parser.add_argument("--encoding", default=CONFIG.encoding, help="encoding name")
+    parser.add_argument("--encoding", default=_config.encoding, help="encoding name")
     parser.add_argument(
         "--force-binary",
         action="store_true",
-        default=CONFIG.force_binary,
+        default=_config.force_binary,
         help="force binary transmission",
     )
-    parser.add_argument("--timeout", default=CONFIG.timeout, help="idle disconnect (0 disables)")
+    parser.add_argument("--timeout", default=_config.timeout, help="idle disconnect (0 disables)")
     parser.add_argument(
         "--connect-maxwait",
         type=float,
-        default=CONFIG.connect_maxwait,
+        default=_config.connect_maxwait,
         help="timeout for pending negotiation",
     )
     parser.add_argument(
         "--pty-exec",
         metavar="PROGRAM",
-        default=CONFIG.pty_exec,
+        default=_config.pty_exec,
         help="execute PROGRAM in a PTY for each connection (use -- to pass args)",
     )
     parser.add_argument(
         "--robot-check",
         action="store_true",
-        default=CONFIG.robot_check,
+        default=_config.robot_check,
         help="check if client can render wide unicode (rejects bots)",
     )
     parser.add_argument(
         "--pty-fork-limit",
         type=int,
         metavar="N",
-        default=CONFIG.pty_fork_limit,
+        default=_config.pty_fork_limit,
         help="limit concurrent PTY connections (0 disables)",
     )
     result = vars(parser.parse_args(argv))
@@ -633,20 +639,20 @@ def parse_server_args():
 
 
 async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-locals
-    host=CONFIG.host,
-    port=CONFIG.port,
-    loglevel=CONFIG.loglevel,
-    logfile=CONFIG.logfile,
-    logfmt=CONFIG.logfmt,
-    shell=CONFIG.shell,
-    encoding=CONFIG.encoding,
-    force_binary=CONFIG.force_binary,
-    timeout=CONFIG.timeout,
-    connect_maxwait=CONFIG.connect_maxwait,
-    pty_exec=CONFIG.pty_exec,
-    pty_args=CONFIG.pty_args,
-    robot_check=CONFIG.robot_check,
-    pty_fork_limit=CONFIG.pty_fork_limit,
+    host=_config.host,
+    port=_config.port,
+    loglevel=_config.loglevel,
+    logfile=_config.logfile,
+    logfmt=_config.logfmt,
+    shell=_config.shell,
+    encoding=_config.encoding,
+    force_binary=_config.force_binary,
+    timeout=_config.timeout,
+    connect_maxwait=_config.connect_maxwait,
+    pty_exec=_config.pty_exec,
+    pty_args=_config.pty_args,
+    robot_check=_config.robot_check,
+    pty_fork_limit=_config.pty_fork_limit,
 ):
     """
     Program entry point for server daemon.
