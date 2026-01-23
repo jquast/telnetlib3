@@ -171,18 +171,7 @@ async def test_telnet_client_and_server_encoding_bidirectional(bind_host, unused
 async def test_telnet_server_encoding_by_LANG(bind_host, unused_tcp_port):
     """Server's encoding negotiated by LANG value."""
     # local
-    from telnetlib3.telopt import (
-        DO,
-        IS,
-        SB,
-        SE,
-        IAC,
-        WILL,
-        WONT,
-        TTYPE,
-        BINARY,
-        NEW_ENVIRON,
-    )
+    from telnetlib3.telopt import DO, IS, SB, SE, IAC, WILL, WONT, TTYPE, BINARY, NEW_ENVIRON
 
     # given
     _waiter = asyncio.Future()

@@ -6,13 +6,12 @@ each telnet connection, with proper terminal negotiation forwarding.
 """
 
 # std imports
-import codecs
 import os
 import pty
 import sys
-import tty
 import errno
 import fcntl
+import codecs
 import signal
 import struct
 import asyncio

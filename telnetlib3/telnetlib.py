@@ -35,7 +35,6 @@ for reading when it is closed).
 # Imported modules
 import sys
 import socket
-import warnings
 import selectors
 from time import monotonic as _time
 

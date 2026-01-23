@@ -8,12 +8,7 @@ from collections import OrderedDict
 import pytest
 
 # local
-from telnetlib3.accessories import (
-    make_logger,
-    repr_mapping,
-    function_lookup,
-    make_reader_task,
-)
+from telnetlib3.accessories import make_logger, repr_mapping, function_lookup, make_reader_task
 
 
 def test_make_logger_no_file():

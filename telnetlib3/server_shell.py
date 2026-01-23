@@ -1,10 +1,37 @@
 # std imports
-from . import slc, telopt, accessories
 import types
 import asyncio
 
-CR, LF, NUL = "\r\n\x00"
 # local
+from . import slc, telopt, accessories
+
+CR, LF, NUL = "\r\n\x00"
+ESC = "\x1b"
+
+
+async def filter_ansi(reader, writer):
+    """
+    Read and return the next non-ANSI-escape character from reader.
+
+    ANSI escape sequences (ESC [ ... final_byte) are silently consumed.
+    """
+    while True:
+        char = await reader.read(1)
+        if char == "":
+            return ""
+        if char != ESC:
+            return char
+        # Consume escape sequence: ESC [ (params) final_byte
+        next_char = await reader.read(1)
+        if next_char != "[":
+            # Not a CSI sequence, return the second char
+            return next_char
+        # Read until final byte (0x40-0x7E)
+        while True:
+            seq_char = await reader.read(1)
+            if seq_char == "" or (0x40 <= ord(seq_char) <= 0x7E):
+                break
+
 
 __all__ = ("telnet_server_shell",)
 

@@ -338,9 +338,10 @@ class TelnetServer(server_base.BaseServer):
         """Callback receives NEW_ENVIRON response, :rfc:`1572`."""
         # A well-formed client responds with empty values for variables to
         # mean "no value".  They might have it, they just may not wish to
-        # divulge that information.  We pop these keys as a side effect in
-        # the result statement of the following list comprehension.
-        no_value = [mapping.pop(key) or key for key, val in list(mapping.items()) if not val]
+        # divulge that information.  We pop these keys as a side effect.
+        for key, val in list(mapping.items()):
+            if not val:
+                mapping.pop(key)
 
         # because we are working with "untrusted input", we make one fair
         # distinction: all keys received by NEW_ENVIRON are in uppercase.

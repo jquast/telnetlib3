@@ -1,8 +1,11 @@
-from .server_shell import readline
-from .accessories import make_reader_task
-from .client import open_connection
-import logging
+# std imports
 import asyncio
+import logging
+
+# local
+from .client import open_connection
+from .accessories import make_reader_task
+from .server_shell import readline
 
 CR, LF, NUL = "\r\n\x00"
 

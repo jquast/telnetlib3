@@ -7,7 +7,7 @@ import codecs
 import asyncio
 import logging
 import warnings
-from asyncio import events, format_helpers
+from asyncio import format_helpers
 
 __all__ = (
     "TelnetReader",
@@ -162,35 +162,6 @@ class TelnetReader:
             await self._waiter
         finally:
             self._waiter = None
-
-    async def readline(self):
-        """
-        Read chunk of data from the stream until newline (b'\n') is found.
-
-        On success, return chunk that ends with newline. If only partial line can be read due to
-        EOF, return incomplete line without terminating newline. When EOF was reached while no bytes
-        read, empty bytes object is returned.
-
-        If limit is reached, ValueError will be raised. In that case, if newline was found, complete
-        line including newline will be removed from internal buffer. Else, internal buffer will be
-        cleared. Limit is compared against part of the line without newline.
-
-        If stream was paused, this function will automatically resume it if needed.
-        """
-        sep = b"\n"
-        seplen = len(sep)
-        try:
-            line = await self.readuntil(sep)
-        except asyncio.IncompleteReadError as e:
-            return e.partial
-        except asyncio.LimitOverrunError as e:
-            if self._buffer.startswith(sep, e.consumed):
-                del self._buffer[: e.consumed + seplen]
-            else:
-                self._buffer.clear()
-            self._maybe_resume_transport()
-            raise ValueError(e.args[0])
-        return line
 
     async def readuntil(self, separator=b"\n"):
         """

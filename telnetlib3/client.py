@@ -68,14 +68,7 @@ class TelnetClient(client_base.BaseClient):
     def connection_made(self, transport):
         """Callback for connection made to server."""
         # local
-        from telnetlib3.telopt import (
-            NAWS,
-            TTYPE,
-            TSPEED,
-            CHARSET,
-            XDISPLOC,
-            NEW_ENVIRON,
-        )
+        from telnetlib3.telopt import NAWS, TTYPE, TSPEED, CHARSET, XDISPLOC, NEW_ENVIRON
 
         super().connection_made(transport)
 

@@ -3,8 +3,16 @@
 """Test CHARSET, rfc-2066_."""
 
 # std imports
-from telnetlib3.tests.accessories import bind_host, unused_tcp_port
-from telnetlib3.stream_writer import TelnetWriter
+import codecs
+import asyncio
+import collections
+
+# 3rd party
+import pytest
+
+# local
+import telnetlib3
+import telnetlib3.stream_writer
 from telnetlib3.telopt import (
     DO,
     SB,
@@ -19,16 +27,9 @@ from telnetlib3.telopt import (
     ACCEPTED,
     REJECTED,
 )
-import telnetlib3.stream_writer
-import telnetlib3
-import pytest
-import collections
-import codecs
-import asyncio
+from telnetlib3.stream_writer import TelnetWriter
+from telnetlib3.tests.accessories import bind_host, unused_tcp_port
 
-# 3rd party
-
-# local
 # local imports
 
 # --- Common Mock Classes ---

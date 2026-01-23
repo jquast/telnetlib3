@@ -823,9 +823,7 @@ class TelnetWriter:
         # - peer has sent WILL (remote_option True), or
         # - we have sent WILL and received DO (local_option True).
         if not (self.remote_option.enabled(CHARSET) or self.local_option.enabled(CHARSET)):
-            self.log.debug(
-                "cannot send SB CHARSET REQUEST without CHARSET being active (no WILL/DO on either side)"
-            )
+            self.log.debug("cannot send SB CHARSET REQUEST without CHARSET being active")
             return False
 
         if self.pending_option.enabled(SB + CHARSET):
@@ -1156,7 +1154,7 @@ class TelnetWriter:
         """
         assert callable(func), "Argument func must be callable"
         assert (
-            type(slc_byte) == bytes and 0 < ord(slc_byte) < slc.NSLC + 1
+            isinstance(slc_byte, bytes) and 0 < ord(slc_byte) < slc.NSLC + 1
         ), "Uknown SLC byte: {!r}".format(slc_byte)
         self._slc_callback[slc_byte] = func
 

@@ -1,7 +1,6 @@
 # std imports
 import sys
 import asyncio
-import logging
 import contextlib
 import collections
 
@@ -69,9 +68,6 @@ else:
 
         def determine_mode(self, mode):
             """Return copy of 'mode' with changes suggested for telnet connection."""
-            # local
-            from telnetlib3.telopt import ECHO
-
             if not self.telnet_writer.will_echo:
                 # return mode as-is
                 self.telnet_writer.log.debug("local echo, linemode")

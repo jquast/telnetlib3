@@ -1,6 +1,7 @@
 """telnetlib3: an asyncio Telnet Protocol implemented in python."""
 
 # pylint: disable=wildcard-import,undefined-variable
+# flake8: noqa: F405
 # fmt: off
 # isort: off
 # Import order matters: server_shell must come before server due to

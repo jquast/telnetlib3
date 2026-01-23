@@ -289,7 +289,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         combined when derived.
         """
         # local
-        from .telopt import SB, TTYPE, CHARSET, NEW_ENVIRON
+        from .telopt import TTYPE, CHARSET, NEW_ENVIRON
 
         # First check if there are any pending options
         if any(self.writer.pending_option.values()):
