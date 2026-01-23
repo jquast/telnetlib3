@@ -16,7 +16,10 @@ except ImportError:
 
 # local
 import telnetlib3
-from telnetlib3.tests.accessories import bind_host, unused_tcp_port
+from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+    bind_host,
+    unused_tcp_port,
+)
 
 pytestmark = pytest.mark.skipif(not HAS_UVLOOP, reason="uvloop not installed")
 

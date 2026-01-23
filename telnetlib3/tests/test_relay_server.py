@@ -1,5 +1,4 @@
 # std imports
-import types
 import asyncio
 
 # 3rd party

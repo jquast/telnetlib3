@@ -4,10 +4,11 @@
 # flake8: noqa: F405
 # fmt: off
 # isort: off
-# Import order matters: server_shell must come before server due to
-# function_lookup("telnetlib3.telnet_server_shell") at server.py load time
+# Import order matters: server_shell symbols must be exported before server
+# import due to function_lookup("telnetlib3.telnet_server_shell") at server.py load time
 from . import server_base
 from . import server_shell
+from .server_shell import *  # noqa - Must export before server import
 from . import server
 from . import stream_writer
 from . import stream_reader
@@ -18,7 +19,6 @@ from . import telopt
 from . import slc
 from . import telnetlib
 from .server_base import *  # noqa
-from .server_shell import *  # noqa
 from .server import *  # noqa
 from .stream_writer import *  # noqa
 from .stream_reader import *  # noqa

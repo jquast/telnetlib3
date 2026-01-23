@@ -1,7 +1,6 @@
 # std imports
 import sys
 import types
-import asyncio
 
 # 3rd party
 import pytest
@@ -166,15 +165,15 @@ async def test_terminal_determine_mode_will_echo_adjusts_flags(monkeypatch):
 
     # verify input flags cleared
     for flag in (t.BRKINT, t.ICRNL, t.INPCK, t.ISTRIP, t.IXON):
-        assert not (new_mode.iflag & flag)
+        assert not new_mode.iflag & flag
 
     # verify output flags cleared
-    assert not (new_mode.oflag & t.OPOST)
+    assert not new_mode.oflag & t.OPOST
     if hasattr(t, "ONLCR"):
-        assert not (new_mode.oflag & t.ONLCR)
+        assert not new_mode.oflag & t.ONLCR
 
     # verify cflag: PARENB cleared, CS8 set, CSIZE cleared except CS8
-    assert not (new_mode.cflag & t.PARENB)
+    assert not new_mode.cflag & t.PARENB
     assert new_mode.cflag & t.CS8
     # CSIZE mask bits should be exactly CS8 now
     assert (new_mode.cflag & t.CSIZE) == t.CS8
@@ -184,7 +183,7 @@ async def test_terminal_determine_mode_will_echo_adjusts_flags(monkeypatch):
 
     # verify lflag cleared for ICANON, IEXTEN, ISIG, ECHO
     for flag in (t.ICANON, t.IEXTEN, t.ISIG, t.ECHO):
-        assert not (new_mode.lflag & flag)
+        assert not new_mode.lflag & flag
 
     # cc changes
     assert new_mode.cc[t.VMIN] == 1

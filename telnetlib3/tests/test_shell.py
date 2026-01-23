@@ -6,8 +6,10 @@ import logging
 
 # local
 # local imports
-import telnetlib3
-from telnetlib3.tests.accessories import bind_host, unused_tcp_port
+from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+    bind_host,
+    unused_tcp_port,
+)
 
 
 async def test_telnet_server_shell_as_coroutine(bind_host, unused_tcp_port):
@@ -119,7 +121,7 @@ async def test_telnet_server_no_shell(bind_host, unused_tcp_port):
             assert client_recv == client_expected
 
 
-async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
+async def test_telnet_server_given_shell(bind_host, unused_tcp_port):  # pylint: disable=too-many-locals
     """Iterate all state-reading commands of default telnet_server_shell."""
     # local
     from telnetlib3 import telnet_server_shell
@@ -170,8 +172,8 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
                 (
                     b"reader\r\n",
                     (
-                        b"\r\n<TelnetReaderUnicode encoding='US-ASCII' limit=13377 buflen=1 eof=False>"
-                        b"\r\ntel:sh> "
+                        b"\r\n<TelnetReaderUnicode encoding='US-ASCII' "
+                        b"limit=13377 buflen=1 eof=False>\r\ntel:sh> "
                     ),
                 ),
                 (
@@ -287,7 +289,7 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
                     if result != output_expected:
                         # fetch extra output, if any, for better understanding of error
                         result += await reader.read(1024)
-                assert result == output_expected and timed_out == False
+                assert result == output_expected and timed_out is False
 
             # nothing more to read.
             result = await reader.read()

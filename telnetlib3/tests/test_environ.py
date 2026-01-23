@@ -130,15 +130,6 @@ async def test_telnet_client_send_var_uservar_environ(bind_host, unused_tcp_port
             mapping = await asyncio.wait_for(_waiter, 0.5)
             assert mapping == {}
 
-            mapping == {
-                "COLUMNS": str(given_cols),
-                "LANG": "en_US." + given_encoding,
-                "LINES": str(given_rows),
-                "TERM": "vt220",
-            }
-            for key, val in mapping.items():
-                assert writer.get_extra_info(key) == val
-
 
 async def test_telnet_server_reject_environ(bind_host, unused_tcp_port):
     """Test Client's callback method send_environ() for specific requests."""

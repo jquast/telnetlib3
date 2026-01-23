@@ -8,7 +8,10 @@ import pytest
 
 # local
 import telnetlib3
-from telnetlib3.tests.accessories import bind_host, unused_tcp_port
+from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+    bind_host,
+    unused_tcp_port,
+)
 
 
 def test_reader_instantiation_safety():
@@ -32,7 +35,9 @@ def test_reader_with_encoding_instantiation_safety():
     def fn_encoding(incoming):
         return "def-ENC"
 
-    expected_result = "<TelnetReaderUnicode encoding='def-ENC' " "limit=1999 buflen=0 eof=False>"
+    expected_result = (
+        "<TelnetReaderUnicode encoding='def-ENC' limit=1999 buflen=0 eof=False>"
+    )
 
     reader = telnetlib3.TelnetReaderUnicode(fn_encoding=fn_encoding, limit=1999)
 
@@ -61,7 +66,9 @@ def test_reader_unicode_eof_safety():
     def fn_encoding(incoming):
         return "def-ENC"
 
-    expected_result = "<TelnetReaderUnicode encoding='def-ENC' " "limit=65536 buflen=0 eof=True>"
+    expected_result = (
+        "<TelnetReaderUnicode encoding='def-ENC' limit=65536 buflen=0 eof=True>"
+    )
 
     reader = telnetlib3.TelnetReaderUnicode(fn_encoding=fn_encoding)
     reader.feed_eof()
@@ -107,7 +114,7 @@ async def test_telnet_reader_using_readline_unicode(bind_host, unused_tcp_port):
                 assert result == expected
 
             eof = await asyncio.wait_for(client_reader.read(), 0.5)
-            assert eof == ""
+            assert not eof
 
 
 async def test_telnet_reader_using_readline_bytes(bind_host, unused_tcp_port):
@@ -227,7 +234,7 @@ async def test_telnet_reader_read_0(bind_host, unused_tcp_port):
     value = await reader.read(0)
 
     # verify
-    assert value == ""
+    assert not value
 
 
 async def test_telnet_reader_read_beyond_limit_unicode(bind_host, unused_tcp_port):
@@ -391,7 +398,8 @@ Router>
             assert "Pattern is found, but chunk is longer than limit" in str(exc_info.value)
             # consumed should be the expected length of the oversized chunk
             expected_chunk_size = len(
-                b" configure terminal which is a very long command line that exceeds our limit\nRouter(config)#"
+                b" configure terminal which is a very long command line"
+                b" that exceeds our limit\nRouter(config)#"
             )
             assert exc_info.value.consumed == expected_chunk_size
 

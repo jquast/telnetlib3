@@ -10,7 +10,10 @@ import pytest
 # local imports
 import telnetlib3
 import telnetlib3.stream_writer
-from telnetlib3.tests.accessories import bind_host, unused_tcp_port
+from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+    bind_host,
+    unused_tcp_port,
+)
 
 
 async def test_telnet_server_encoding_default(bind_host, unused_tcp_port):
@@ -247,7 +250,7 @@ async def test_telnet_client_and_server_escape_iac_encoding(bind_host, unused_tc
             server.writer.close()
             await server.writer.wait_closed()
             eof = await asyncio.wait_for(client_reader.read(), 0.5)
-            assert eof == ""
+            assert not eof
 
 
 async def test_telnet_client_and_server_escape_iac_binary(bind_host, unused_tcp_port):

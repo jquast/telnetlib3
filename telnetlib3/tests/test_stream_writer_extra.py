@@ -1,6 +1,5 @@
 # std imports
 import struct
-import asyncio
 import collections
 
 # 3rd party
@@ -13,20 +12,16 @@ from telnetlib3.telopt import (
     IS,
     SB,
     SE,
-    TM,
     EOR,
     IAC,
     SGA,
-    DONT,
     ECHO,
     NAWS,
     SEND,
     WILL,
-    WONT,
     LFLOW,
     TTYPE,
     BINARY,
-    LOGOUT,
     STATUS,
     TSPEED,
     CHARSET,
@@ -39,7 +34,6 @@ from telnetlib3.telopt import (
     NEW_ENVIRON,
     LFLOW_RESTART_ANY,
     LFLOW_RESTART_XON,
-    name_command,
 )
 from telnetlib3.stream_writer import TelnetWriter
 
@@ -115,7 +109,7 @@ def test_iac_do_sets_pending_and_writes_when_not_enabled():
     assert w.remote_option.enabled(BINARY) is False
     sent = w.iac(DO, BINARY)
     assert sent is True
-    assert (DO + BINARY) in w.pending_option
+    assert DO + BINARY in w.pending_option
     assert t.writes[-1] == IAC + DO + BINARY
 
 
