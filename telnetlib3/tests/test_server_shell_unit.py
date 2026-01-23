@@ -1,12 +1,15 @@
-import asyncio
-import types
+# std imports
 import sys
+import types
+import asyncio
 
+# 3rd party
 import pytest
 
-from telnetlib3 import server_shell as ss
+# local
 from telnetlib3 import slc as slc_mod
 from telnetlib3 import client_shell as cs
+from telnetlib3 import server_shell as ss
 
 
 class DummyWriter:
@@ -25,9 +28,7 @@ class DummyWriter:
 
 
 def _run_readline(sequence):
-    """
-    Drive ss.readline coroutine with given sequence and return list of commands produced.
-    """
+    """Drive ss.readline coroutine with given sequence and return list of commands produced."""
     w = DummyWriter()
     gen = ss.readline(None, w)
     # prime the coroutine

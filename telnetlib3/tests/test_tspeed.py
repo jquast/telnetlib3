@@ -3,19 +3,21 @@
 # std imports
 import asyncio
 
+# 3rd party
+import pytest
+
+# local
 # local imports
 import telnetlib3
 import telnetlib3.stream_writer
-from telnetlib3.tests.accessories import unused_tcp_port, bind_host
-
-# 3rd party
-import pytest
+from telnetlib3.tests.accessories import bind_host, unused_tcp_port
 
 
 async def test_telnet_server_on_tspeed(bind_host, unused_tcp_port):
     """Test Server's callback method on_tspeed()."""
     # given
-    from telnetlib3.telopt import IAC, WILL, SB, SE, IS, TSPEED
+    # local
+    from telnetlib3.telopt import IS, SB, SE, IAC, WILL, TSPEED
 
     _waiter = asyncio.Future()
 
@@ -51,6 +53,7 @@ async def test_telnet_client_send_tspeed(bind_host, unused_tcp_port):
             _waiter.set_result((rx, tx))
 
         def begin_advanced_negotiation(self):
+            # local
             from telnetlib3.telopt import DO, TSPEED
 
             super().begin_advanced_negotiation()

@@ -1,10 +1,14 @@
-CR, LF, NUL = "\r\n\x00"
-
+from .server_shell import readline
+from .accessories import make_reader_task
+from .client import open_connection
 import logging
 import asyncio
-from .server_shell import readline
-from .client import open_connection
-from .accessories import make_reader_task
+
+CR, LF, NUL = "\r\n\x00"
+
+# std imports
+
+# local
 
 
 async def relay_shell(client_reader, client_writer):
@@ -64,9 +68,7 @@ async def relay_shell(client_reader, client_writer):
     server_stdout = make_reader_task(server_reader)
     wait_for = {client_stdin, server_stdout}
     while wait_for:
-        done, remaining = await asyncio.wait(
-            wait_for, return_when=asyncio.FIRST_COMPLETED
-        )
+        done, remaining = await asyncio.wait(wait_for, return_when=asyncio.FIRST_COMPLETED)
         while done:
             task = done.pop()
             wait_for.remove(task)

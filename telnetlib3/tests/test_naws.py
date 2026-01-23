@@ -1,23 +1,29 @@
-"""Negotiate About Window Size, *NAWS*. rfc-1073_."""
+"""
+Negotiate About Window Size, *NAWS*.
+
+rfc-1073_.
+"""
 
 # std imports
-import platform
-import asyncio
-import pexpect
 import struct
-
-# local imports
-import telnetlib3
-from telnetlib3.tests.accessories import unused_tcp_port, bind_host
+import asyncio
+import platform
 
 # 3rd party
 import pytest
+import pexpect
+
+# local
+# local imports
+import telnetlib3
+from telnetlib3.tests.accessories import bind_host, unused_tcp_port
 
 
 async def test_telnet_server_on_naws(bind_host, unused_tcp_port):
     """Test Server's Negotiate about window size (NAWS)."""
     # given
-    from telnetlib3.telopt import IAC, WILL, SB, SE, NAWS
+    # local
+    from telnetlib3.telopt import SB, SE, IAC, NAWS, WILL
 
     _waiter = asyncio.Future()
     given_cols, given_rows = 40, 20
@@ -41,9 +47,7 @@ async def test_telnet_server_on_naws(bind_host, unused_tcp_port):
 
     # exercise,
     writer.write(IAC + WILL + NAWS)
-    writer.write(
-        IAC + SB + NAWS + struct.pack("!HH", given_cols, given_rows) + IAC + SE
-    )
+    writer.write(IAC + SB + NAWS + struct.pack("!HH", given_cols, given_rows) + IAC + SE)
 
     srv_instance = await asyncio.wait_for(_waiter, 0.5)
     assert srv_instance.get_extra_info("cols") == given_cols

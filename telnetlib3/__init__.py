@@ -1,6 +1,10 @@
 """telnetlib3: an asyncio Telnet Protocol implemented in python."""
 
 # pylint: disable=wildcard-import,undefined-variable
+# fmt: off
+# isort: off
+# Import order matters: server_shell must come before server due to
+# function_lookup("telnetlib3.telnet_server_shell") at server.py load time
 from .server_base import *  # noqa
 from .server_shell import *  # noqa
 from .server import *  # noqa
@@ -17,6 +21,8 @@ from .pty_shell import *  # noqa
 from . import guard_shells as _guard_shells_module
 from .guard_shells import *  # noqa
 from .accessories import get_version as __get_version
+# isort: on
+# fmt: on
 
 __all__ = (
     server_base.__all__

@@ -1,7 +1,6 @@
 """
-The ``main`` function here is wired to the command line tool by name
-telnetlib3-server.  If this server's PID receives the SIGTERM signal, it
-attempts to shutdown gracefully.
+The ``main`` function here is wired to the command line tool by name telnetlib3-server.  If this
+server's PID receives the SIGTERM signal, it attempts to shutdown gracefully.
 
 The :class:`TelnetServer` class negotiates a character-at-a-time (WILL-SGA,
 WILL-ECHO) session with support for negotiation about window size, environment
@@ -10,15 +9,14 @@ after an idle period.
 """
 
 # std imports
-import collections
-import argparse
+import signal
 import asyncio
 import logging
-import signal
+import argparse
+import collections
 
 # local
-from . import server_base
-from . import accessories
+from . import accessories, server_base
 from .telopt import name_commands
 
 __all__ = ("TelnetServer", "create_server", "run_server", "parse_server_args")
@@ -87,7 +85,8 @@ class TelnetServer(server_base.BaseServer):
         )
 
     def connection_made(self, transport):
-        from .telopt import NAWS, NEW_ENVIRON, TSPEED, TTYPE, XDISPLOC, CHARSET
+        # local
+        from .telopt import NAWS, TTYPE, TSPEED, CHARSET, XDISPLOC, NEW_ENVIRON
 
         super().connection_made(transport)
 
@@ -118,13 +117,15 @@ class TelnetServer(server_base.BaseServer):
         super().data_received(data)
 
     def begin_negotiation(self):
+        # local
         from .telopt import DO, TTYPE
 
         super().begin_negotiation()
         self.writer.iac(DO, TTYPE)
 
     def begin_advanced_negotiation(self):
-        from .telopt import DO, WILL, SGA, ECHO, BINARY, NEW_ENVIRON, NAWS, CHARSET
+        # local
+        from .telopt import DO, SGA, ECHO, NAWS, WILL, BINARY, CHARSET, NEW_ENVIRON
 
         super().begin_advanced_negotiation()
         self.writer.iac(WILL, SGA)
@@ -137,13 +138,12 @@ class TelnetServer(server_base.BaseServer):
             self.writer.iac(DO, CHARSET)
 
     def check_negotiation(self, final=False):
-        from .telopt import TTYPE, NEW_ENVIRON, CHARSET, SB
+        # local
+        from .telopt import SB, TTYPE, CHARSET, NEW_ENVIRON
 
         # Debug log to see which options are still pending
         pending = [
-            (name_commands(opt), val)
-            for opt, val in self.writer.pending_option.items()
-            if val
+            (name_commands(opt), val) for opt, val in self.writer.pending_option.items() if val
         ]
         if pending:
             logger.debug("Pending options: %r", pending)
@@ -155,8 +155,7 @@ class TelnetServer(server_base.BaseServer):
             and self.writer.pending_option[SB + NEW_ENVIRON]
         )
         waiting_for_charset = (
-            SB + CHARSET in self.writer.pending_option
-            and self.writer.pending_option[SB + CHARSET]
+            SB + CHARSET in self.writer.pending_option and self.writer.pending_option[SB + CHARSET]
         )
 
         if waiting_for_environ or waiting_for_charset:
@@ -178,10 +177,7 @@ class TelnetServer(server_base.BaseServer):
             logger.debug("encoding complete: {0!r}".format(encoding))
             self.waiter_encoding.set_result(result)
 
-        elif (
-            not self.waiter_encoding.done()
-            and self.writer.remote_option.get(TTYPE) is False
-        ):
+        elif not self.waiter_encoding.done() and self.writer.remote_option.get(TTYPE) is False:
             # if the remote end doesn't support TTYPE, which is agreed upon
             # to continue towards advanced negotiation of CHARSET, we assume
             # the distant end would not support it, declaring encoding failed.
@@ -197,9 +193,7 @@ class TelnetServer(server_base.BaseServer):
             return parent
 
         elif not self.waiter_encoding.done() and final:
-            logger.debug(
-                "encoding failed after {0:1.2f}s: {1}".format(self.duration, encoding)
-            )
+            logger.debug("encoding failed after {0:1.2f}s: {1}".format(self.duration, encoding))
             self.waiter_encoding.set_result(result)  # False
             return parent
 
@@ -229,8 +223,7 @@ class TelnetServer(server_base.BaseServer):
         """
         if not (outgoing or incoming):
             raise TypeError(
-                "encoding arguments 'outgoing' and 'incoming' "
-                "are required: toggle at least one."
+                "encoding arguments 'outgoing' and 'incoming' " "are required: toggle at least one."
             )
 
         # may we encode in the direction indicated?
@@ -327,6 +320,7 @@ class TelnetServer(server_base.BaseServer):
             ['LANG', 'TERM', 'COLUMNS', 'LINES', 'DISPLAY', 'COLORTERM',
              VAR, USERVAR, 'COLORTERM']
         """
+        # local
         from .telopt import VAR, USERVAR
 
         return [
@@ -346,9 +340,7 @@ class TelnetServer(server_base.BaseServer):
         # mean "no value".  They might have it, they just may not wish to
         # divulge that information.  We pop these keys as a side effect in
         # the result statement of the following list comprehension.
-        no_value = [
-            mapping.pop(key) or key for key, val in list(mapping.items()) if not val
-        ]
+        no_value = [mapping.pop(key) or key for key, val in list(mapping.items()) if not val]
 
         # because we are working with "untrusted input", we make one fair
         # distinction: all keys received by NEW_ENVIRON are in uppercase.
@@ -434,9 +426,7 @@ class TelnetServer(server_base.BaseServer):
         elif self._ttype_count == 3 and ttype.upper().startswith("MTTS "):
             val = self.get_extra_info("ttype2")
             logger.debug(
-                "ttype cycle stop at {0}: {1}, using {2} from ttype2.".format(
-                    key, ttype, val
-                )
+                "ttype cycle stop at {0}: {1}, using {2} from ttype2.".format(key, ttype, val)
             )
             self._extra["TERM"] = val
 
@@ -456,7 +446,8 @@ class TelnetServer(server_base.BaseServer):
 
     def _check_encoding(self):
         # Periodically check for completion of ``waiter_encoding``.
-        from .telopt import DO, BINARY, CHARSET, SB
+        # local
+        from .telopt import DO, SB, BINARY, CHARSET
 
         # Check if we need to request client to use BINARY mode for client-to-server communication
         if (
@@ -559,6 +550,7 @@ async def _sigterm_handler(server, log):
 
 
 def parse_server_args():
+    # std imports
     import sys
 
     # Extract arguments after '--' for PTY program before argparse sees them
@@ -574,9 +566,7 @@ def parse_server_args():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("host", nargs="?", default=CONFIG.host, help="bind address")
-    parser.add_argument(
-        "port", nargs="?", type=int, default=CONFIG.port, help="bind port"
-    )
+    parser.add_argument("port", nargs="?", type=int, default=CONFIG.port, help="bind port")
     parser.add_argument("--loglevel", default=CONFIG.loglevel, help="level name")
     parser.add_argument("--logfile", default=CONFIG.logfile, help="filepath")
     parser.add_argument("--logfmt", default=CONFIG.logfmt, help="log format")
@@ -593,9 +583,7 @@ def parse_server_args():
         default=CONFIG.force_binary,
         help="force binary transmission",
     )
-    parser.add_argument(
-        "--timeout", default=CONFIG.timeout, help="idle disconnect (0 disables)"
-    )
+    parser.add_argument("--timeout", default=CONFIG.timeout, help="idle disconnect (0 disables)")
     parser.add_argument(
         "--connect-maxwait",
         type=float,
@@ -645,27 +633,25 @@ async def run_server(
     """
     Program entry point for server daemon.
 
-    This function configures a logger and creates a telnet server for the
-    given keyword arguments, serving forever, completing only upon receipt of
-    SIGTERM.
+    This function configures a logger and creates a telnet server for the given keyword arguments,
+    serving forever, completing only upon receipt of SIGTERM.
     """
     log = accessories.make_logger(
         name="telnetlib3.server", loglevel=loglevel, logfile=logfile, logfmt=logfmt
     )
 
     if pty_exec:
+        # local
         from .pty_shell import make_pty_shell
 
         shell = make_pty_shell(pty_exec, pty_args)
 
     # Wrap shell with guards if enabled
     if robot_check or pty_fork_limit:
-        from .guard_shells import (
-            robot_check as do_robot_check,
-            robot_shell,
-            busy_shell,
-            ConnectionCounter,
-        )
+        # local
+        from .guard_shells import ConnectionCounter, busy_shell
+        from .guard_shells import robot_check as do_robot_check
+        from .guard_shells import robot_shell
 
         counter = ConnectionCounter(pty_fork_limit) if pty_fork_limit else None
         inner_shell = shell
@@ -700,9 +686,9 @@ async def run_server(
 
     # log all function arguments.
     _locals = locals()
-    _cfg_mapping = ", ".join(
-        ("{0}={{{0}}}".format(field) for field in CONFIG._fields)
-    ).format(**_locals)
+    _cfg_mapping = ", ".join(("{0}={{{0}}}".format(field) for field in CONFIG._fields)).format(
+        **_locals
+    )
     logger.debug("Server configuration: {}".format(_cfg_mapping))
 
     loop = asyncio.get_event_loop()
@@ -719,9 +705,7 @@ async def run_server(
     )
 
     # SIGTERM cases server to gracefully stop
-    loop.add_signal_handler(
-        signal.SIGTERM, asyncio.ensure_future, _sigterm_handler(server, log)
-    )
+    loop.add_signal_handler(signal.SIGTERM, asyncio.ensure_future, _sigterm_handler(server, log))
 
     logger.info("Server ready on {0}:{1}".format(host, port))
 

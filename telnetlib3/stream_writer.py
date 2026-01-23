@@ -1,75 +1,75 @@
 """Module provides :class:`TelnetWriter` and :class:`TelnetWriterUnicode`."""
 
 # std imports
-import asyncio
-import collections
-import logging
 import struct
+import asyncio
+import logging
+import collections
 
+# local
 # local imports
 from . import slc
 from .telopt import (
-    ABORT,
-    ACCEPTED,
     AO,
-    AYT,
-    BINARY,
-    BRK,
-    CHARSET,
-    CMD_EOR,
-    COM_PORT_OPTION,
     DM,
     DO,
-    DONT,
     EC,
-    ECHO,
     EL,
+    GA,
+    IP,
+    IS,
+    SB,
+    SE,
+    TM,
+    AYT,
+    BRK,
     EOF,
     EOR,
     ESC,
-    GA,
-    GMCP,
     IAC,
-    INFO,
-    IP,
-    IS,
-    LFLOW,
-    LFLOW_OFF,
-    LFLOW_ON,
-    LFLOW_RESTART_ANY,
-    LFLOW_RESTART_XON,
-    LINEMODE,
-    LOGOUT,
-    NAWS,
-    NEW_ENVIRON,
     NOP,
-    REJECTED,
-    REQUEST,
-    SB,
-    SE,
-    SEND,
     SGA,
-    SNDLOC,
-    STATUS,
-    SUSP,
-    TM,
-    TSPEED,
-    TTABLE_ACK,
-    TTABLE_NAK,
-    TTABLE_IS,
-    TTABLE_REJECTED,
-    TTYPE,
-    USERVAR,
-    VALUE,
     VAR,
+    DONT,
+    ECHO,
+    GMCP,
+    INFO,
+    NAWS,
+    SEND,
+    SUSP,
     WILL,
     WONT,
+    ABORT,
+    LFLOW,
+    TTYPE,
+    VALUE,
+    BINARY,
+    LOGOUT,
+    SNDLOC,
+    STATUS,
+    TSPEED,
+    CHARSET,
+    CMD_EOR,
+    REQUEST,
+    USERVAR,
+    ACCEPTED,
+    LFLOW_ON,
+    LINEMODE,
+    REJECTED,
     XDISPLOC,
+    LFLOW_OFF,
+    TTABLE_IS,
+    TTABLE_ACK,
+    TTABLE_NAK,
+    NEW_ENVIRON,
+    COM_PORT_OPTION,
+    TTABLE_REJECTED,
+    LFLOW_RESTART_ANY,
+    LFLOW_RESTART_XON,
+    theNULL,
     name_command,
     name_commands,
-    theNULL,
 )
-
 
 __all__ = (
     "TelnetWriter",
@@ -78,10 +78,8 @@ __all__ = (
 
 
 class TelnetWriter:
-    """
-    This is a copy of :class:`asyncio.StreamWriter`, except that
-    it is a Telnet IAC Interpreter implementing the telnet protocol.
-    """
+    """This is a copy of :class:`asyncio.StreamWriter`, except that it is a Telnet IAC Interpreter
+    implementing the telnet protocol."""
 
     #: Total bytes sent to :meth:`~.feed_byte`
     byte_count = 0
@@ -129,10 +127,9 @@ class TelnetWriter:
         reader=None,
     ):
         """
-        Almost all negotiation actions are performed through the writer
-        interface, as any action requires writing bytes to the underling
-        stream.  This class implements :meth:`~.feed_byte`, which acts as a
-        Telnet *Is-A-Command* (IAC) interpreter.
+        Almost all negotiation actions are performed through the writer interface, as any action
+        requires writing bytes to the underling stream.  This class implements :meth:`~.feed_byte`,
+        which acts as a Telnet *Is-A-Command* (IAC) interpreter.
 
         The significance of the last byte passed to this method is tested
         by instance attribute :attr:`~.is_oob`, following the call to
@@ -165,9 +162,7 @@ class TelnetWriter:
         self._closed_fut = self._loop.create_future()
 
         if not any((client, server)) or all((client, server)):
-            raise TypeError(
-                "keyword arguments `client', and `server' are mutually exclusive."
-            )
+            raise TypeError("keyword arguments `client', and `server' are mutually exclusive.")
         self._server = server
         self.log = logging.getLogger(__name__)
 
@@ -221,9 +216,7 @@ class TelnetWriter:
             (CMD_EOR, "eor"),
             (TM, "tm"),
         ):
-            self.set_iac_callback(
-                cmd=iac_cmd, func=getattr(self, "handle_{}".format(key))
-            )
+            self.set_iac_callback(cmd=iac_cmd, func=getattr(self, "handle_{}".format(key)))
 
         self._slc_callback = {}
         for slc_cmd, key in (
@@ -244,9 +237,7 @@ class TelnetWriter:
             (slc.SLC_XON, "xon"),
             (slc.SLC_XOFF, "xoff"),
         ):
-            self.set_slc_callback(
-                slc_byte=slc_cmd, func=getattr(self, "handle_{}".format(key))
-            )
+            self.set_slc_callback(slc_byte=slc_cmd, func=getattr(self, "handle_{}".format(key)))
 
         self._ext_callback = {}
         for ext_cmd, key in (
@@ -259,9 +250,7 @@ class TelnetWriter:
             (NEW_ENVIRON, "environ"),
             (CHARSET, "charset"),
         ):
-            self.set_ext_callback(
-                cmd=ext_cmd, func=getattr(self, "handle_{}".format(key))
-            )
+            self.set_ext_callback(cmd=ext_cmd, func=getattr(self, "handle_{}".format(key)))
 
         self._ext_send_callback = {}
         for ext_cmd, key in (
@@ -326,9 +315,8 @@ class TelnetWriter:
         """
         Wait until the underlying connection has completed closing.
 
-        This method returns when the underlying connection has been closed.
-        It can be used to wait for the connection to be fully closed after
-        calling close().
+        This method returns when the underlying connection has been closed. It can be used to wait
+        for the connection to be fully closed after calling close().
 
         :rtype: None
         """
@@ -367,9 +355,7 @@ class TelnetWriter:
         )
         if _local:
             localpoint = "server" if self.server else "client"
-            info.append(
-                "{kind}-will:{opts}".format(kind=localpoint, opts=",".join(_local))
-            )
+            info.append("{kind}-will:{opts}".format(kind=localpoint, opts=",".join(_local)))
 
         _remote = sorted(
             [
@@ -379,9 +365,7 @@ class TelnetWriter:
             ]
         )
         if _remote:
-            info.append(
-                "{kind}-will:{opts}".format(kind=endpoint, opts=",".join(_remote))
-            )
+            info.append("{kind}-will:{opts}".format(kind=endpoint, opts=",".join(_remote)))
 
         return "<{0}>".format(" ".join(info))
 
@@ -400,9 +384,8 @@ class TelnetWriter:
         """
         Write unicode strings to transport.
 
-        Note that newlines are not added.  The sequence can be any iterable
-        object producing strings. This is equivalent to calling write() for
-        each string.
+        Note that newlines are not added.  The sequence can be any iterable object producing
+        strings. This is equivalent to calling write() for each string.
         """
         self.write(b"".join(lines))
 
@@ -413,12 +396,12 @@ class TelnetWriter:
         return self._transport.can_write_eof()
 
     async def drain(self):
-        """Flush the write buffer.
+        """
+        Flush the write buffer.
 
         The intended use is to write
 
-          w.write(data)
-          await w.drain()
+        w.write(data) await w.drain()
         """
         if self._reader is not None:
             exc = self._reader.exception()
@@ -476,9 +459,7 @@ class TelnetWriter:
                 # does not comprehend the remote end's request.
                 if cmd not in self._iac_callback:
                     raise ValueError(
-                        "IAC {0}({1!r}): not a legal 2-byte cmd".format(
-                            name_command(cmd), cmd
-                        )
+                        "IAC {0}({1!r}): not a legal 2-byte cmd".format(name_command(cmd), cmd)
                     )
                 self._iac_callback[cmd](cmd)
             self.iac_received = False
@@ -489,8 +470,7 @@ class TelnetWriter:
             self.cmd_received = cmd = byte
             if cmd != SE:
                 self.log.error(
-                    "sub-negotiation buffer interrupted "
-                    "by IAC {}".format(name_command(cmd))
+                    "sub-negotiation buffer interrupted " "by IAC {}".format(name_command(cmd))
                 )
                 self._sb_buffer.clear()
             else:
@@ -515,9 +495,7 @@ class TelnetWriter:
         elif self.cmd_received:
             # parse 3rd and final byte of IAC DO, DONT, WILL, WONT.
             cmd, opt = self.cmd_received, byte
-            self.log.debug(
-                "recv IAC {} {}".format(name_command(cmd), name_command(opt))
-            )
+            self.log.debug("recv IAC {} {}".format(name_command(cmd), name_command(opt)))
             try:
                 if cmd == DO:
                     try:
@@ -539,9 +517,7 @@ class TelnetWriter:
                         self.log.debug("WILL {} unsolicited".format(name_command(opt)))
                     elif opt == CHARSET and not self.pending_option.enabled(DO + opt):
                         self.log.debug(
-                            "WILL {} (bi-directional capability exchange)".format(
-                                name_command(opt)
-                            )
+                            "WILL {} (bi-directional capability exchange)".format(name_command(opt))
                         )
                     try:
                         self.handle_will(opt)
@@ -564,9 +540,7 @@ class TelnetWriter:
 
         elif self.mode == "remote" or self.mode == "kludge" and self.slc_simulated:
             # 'byte' is tested for SLC characters
-            (callback, slc_name, slc_def) = slc.snoop(
-                byte, self.slctab, self._slc_callback
-            )
+            callback, slc_name, slc_def = slc.snoop(byte, self.slctab, self._slc_callback)
 
             # Inform caller which SLC function occurred by this attribute.
             self.slc_received = slc_name
@@ -587,9 +561,9 @@ class TelnetWriter:
         """Get optional server protocol information."""
         # StreamWriter uses self._transport.get_extra_info, so we mix it in
         # here, but _protocol has all of the interesting telnet effects
-        return self._protocol.get_extra_info(
+        return self._protocol.get_extra_info(name, default) or self._transport.get_extra_info(
             name, default
-        ) or self._transport.get_extra_info(name, default)
+        )
 
     @property
     def protocol(self):
@@ -608,9 +582,7 @@ class TelnetWriter:
 
     @property
     def inbinary(self):
-        """
-        Whether binary data is expected to be received on reader, :rfc:`856`.
-        """
+        """Whether binary data is expected to be received on reader, :rfc:`856`."""
         return self.remote_option.enabled(BINARY)
 
     @property
@@ -623,11 +595,9 @@ class TelnetWriter:
         Conditionally write ``data`` to transport when "remote echo" enabled.
 
         :param bytes data: string received as input, conditionally written.
-        :rtype: None
-
-        The default implementation depends on telnet negotiation willingness
-        for local echo, only an RFC-compliant telnet client will correctly
-        set or unset echo accordingly by demand.
+        :rtype: None The default implementation depends on telnet negotiation willingness for local
+            echo, only an RFC-compliant telnet client will correctly set or unset echo accordingly
+            by demand.
         """
         assert self.server, "Client never performs echo of input received."
         if self.will_echo:
@@ -715,21 +685,17 @@ class TelnetWriter:
         """
         Send Is-A-Command 3-byte negotiation command.
 
-        Returns True if command was sent. Not all commands are legal in the
-        context of client, server, or pending negotiation state, emitting a
-        relevant debug warning to the log handler if not sent.
+        Returns True if command was sent. Not all commands are legal in the context of client,
+        server, or pending negotiation state, emitting a relevant debug warning to the log handler
+        if not sent.
         """
         if cmd not in (DO, DONT, WILL, WONT):
-            raise ValueError(
-                "Expected DO, DONT, WILL, WONT, got {0}.".format(name_command(cmd))
-            )
+            raise ValueError("Expected DO, DONT, WILL, WONT, got {0}.".format(name_command(cmd)))
 
         if cmd == DO and opt not in (TM, LOGOUT):
             if self.remote_option.enabled(opt):
                 self.log.debug(
-                    "skip {} {}; remote_option = True".format(
-                        name_command(cmd), name_command(opt)
-                    )
+                    "skip {} {}; remote_option = True".format(name_command(cmd), name_command(opt))
                 )
                 self.pending_option[cmd + opt] = False
                 return False
@@ -737,9 +703,7 @@ class TelnetWriter:
         if cmd in (DO, WILL):
             if self.pending_option.enabled(cmd + opt):
                 self.log.debug(
-                    "skip {} {}; pending_option = True".format(
-                        name_command(cmd), name_command(opt)
-                    )
+                    "skip {} {}; pending_option = True".format(name_command(cmd), name_command(opt))
                 )
                 return False
             self.pending_option[cmd + opt] = True
@@ -747,9 +711,7 @@ class TelnetWriter:
         if cmd == WILL and opt not in (TM,):
             if self.local_option.enabled(opt):
                 self.log.debug(
-                    "skip {} {}; local_option = True".format(
-                        name_command(cmd), name_command(opt)
-                    )
+                    "skip {} {}; local_option = True".format(name_command(cmd), name_command(opt))
                 )
                 self.pending_option[cmd + opt] = False
                 return False
@@ -758,9 +720,7 @@ class TelnetWriter:
             # IAC-DONT-LOGOUT is not a rejection of the negotiation option
             if opt in self.remote_option and not self.remote_option.enabled(opt):
                 self.log.debug(
-                    "skip {} {}; remote_option = False".format(
-                        name_command(cmd), name_command(opt)
-                    )
+                    "skip {} {}; remote_option = False".format(name_command(cmd), name_command(opt))
                 )
                 return False
             self.remote_option[opt] = False
@@ -779,8 +739,8 @@ class TelnetWriter:
         """
         Transmit IAC GA (Go-Ahead).
 
-        Returns True if sent.  If IAC-DO-SGA has been received, then
-        False is returned and IAC-GA is not transmitted.
+        Returns True if sent.  If IAC-DO-SGA has been received, then False is returned and IAC-GA is
+        not transmitted.
         """
         if self.local_option.enabled(SGA):
             self.log.debug("cannot send GA with receipt of DO SGA")
@@ -794,8 +754,8 @@ class TelnetWriter:
         """
         Transmit IAC CMD_EOR (End-of-Record), :rfc:`885`.
 
-        Returns True if sent. If IAC-DO-EOR has not been received,
-        False is returned and IAC-CMD_EOR is not transmitted.
+        Returns True if sent. If IAC-DO-EOR has not been received, False is returned and IAC-CMD_EOR
+        is not transmitted.
         """
         if not self.local_option.enabled(EOR):
             self.log.debug("cannot send CMD_EOR without receipt of DO EOR")
@@ -816,9 +776,7 @@ class TelnetWriter:
         received. Returns True if status request was sent.
         """
         if not self.remote_option.enabled(STATUS):
-            self.log.debug(
-                "cannot send SB STATUS SEND " "without receipt of WILL STATUS"
-            )
+            self.log.debug("cannot send SB STATUS SEND " "without receipt of WILL STATUS")
         elif not self.pending_option.enabled(SB + STATUS):
             response = [IAC, SB, STATUS, SEND, IAC, SE]
             self.log.debug("send IAC SB STATUS SEND IAC SE")
@@ -837,9 +795,7 @@ class TelnetWriter:
         received. Returns True if TSPEED request was sent.
         """
         if not self.remote_option.enabled(TSPEED):
-            self.log.debug(
-                "cannot send SB TSPEED SEND " "without receipt of WILL TSPEED"
-            )
+            self.log.debug("cannot send SB TSPEED SEND " "without receipt of WILL TSPEED")
         elif not self.pending_option.enabled(SB + TSPEED):
             self.pending_option[SB + TSPEED] = True
             response = [IAC, SB, TSPEED, SEND, IAC, SE]
@@ -866,9 +822,7 @@ class TelnetWriter:
         # Permit initiating REQUEST if either:
         # - peer has sent WILL (remote_option True), or
         # - we have sent WILL and received DO (local_option True).
-        if not (
-            self.remote_option.enabled(CHARSET) or self.local_option.enabled(CHARSET)
-        ):
+        if not (self.remote_option.enabled(CHARSET) or self.local_option.enabled(CHARSET)):
             self.log.debug(
                 "cannot send SB CHARSET REQUEST without CHARSET being active (no WILL/DO on either side)"
             )
@@ -886,9 +840,7 @@ class TelnetWriter:
         response.extend([bytes(sep, "ascii")])
         response.extend([bytes(sep.join(codepages), "ascii")])
         response.extend([IAC, SE])
-        self.log.debug(
-            "send IAC SB CHARSET REQUEST {} IAC SE".format(sep.join(codepages))
-        )
+        self.log.debug("send IAC SB CHARSET REQUEST {} IAC SE".format(sep.join(codepages)))
         self.send_iac(b"".join(response))
         self.pending_option[SB + CHARSET] = True
         return True
@@ -903,8 +855,7 @@ class TelnetWriter:
 
         if not self.remote_option.enabled(NEW_ENVIRON):
             self.log.debug(
-                "cannot send SB NEW_ENVIRON SEND IS "
-                "without receipt of WILL NEW_ENVIRON"
+                "cannot send SB NEW_ENVIRON SEND IS " "without receipt of WILL NEW_ENVIRON"
             )
             return False
 
@@ -912,8 +863,7 @@ class TelnetWriter:
 
         if not request_list:
             self.log.debug(
-                "request_environ: server protocol makes no demand, "
-                "no request will be made."
+                "request_environ: server protocol makes no demand, " "no request will be made."
             )
             return False
 
@@ -947,9 +897,7 @@ class TelnetWriter:
         """
         assert self.server, "SB XDISPLOC SEND may only be sent by server end"
         if not self.remote_option.enabled(XDISPLOC):
-            self.log.debug(
-                "cannot send SB XDISPLOC SEND" "without receipt of WILL XDISPLOC"
-            )
+            self.log.debug("cannot send SB XDISPLOC SEND" "without receipt of WILL XDISPLOC")
             return False
         if not self.pending_option.enabled(SB + XDISPLOC):
             response = [IAC, SB, XDISPLOC, SEND, IAC, SE]
@@ -991,9 +939,7 @@ class TelnetWriter:
         """
         assert self.server, "DO FORWARDMASK may only be sent by server end"
         if not self.remote_option.enabled(LINEMODE):
-            self.log.debug(
-                "cannot send SB LINEMODE DO" "without receipt of WILL LINEMODE"
-            )
+            self.log.debug("cannot send SB LINEMODE DO" "without receipt of WILL LINEMODE")
         else:
             if fmask is None:
                 opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
@@ -1021,7 +967,8 @@ class TelnetWriter:
         return False
 
     def send_lineflow_mode(self):
-        """Send LFLOW mode sub-negotiation, :rfc:`1372`.
+        """
+        Send LFLOW mode sub-negotiation, :rfc:`1372`.
 
         Returns True if request is valid for telnet state, and was sent.
         """
@@ -1031,9 +978,9 @@ class TelnetWriter:
             self.log.error("cannot send IAC SB LFLOW " "without receipt of WILL LFLOW")
         else:
             if self.xon_any:
-                (mode, desc) = (LFLOW_RESTART_ANY, "LFLOW_RESTART_ANY")
+                mode, desc = (LFLOW_RESTART_ANY, "LFLOW_RESTART_ANY")
             else:
-                (mode, desc) = (LFLOW_RESTART_XON, "LFLOW_RESTART_XON")
+                mode, desc = (LFLOW_RESTART_XON, "LFLOW_RESTART_XON")
             self.log.debug("send IAC SB LFLOW {} IAC SE".format(desc))
             self.send_iac(b"".join([IAC, SB, LFLOW, mode, IAC, SE]))
             return True
@@ -1045,21 +992,14 @@ class TelnetWriter:
 
         An instance of the Linemode class, or self.linemode when unset.
         """
-        if not (
-            self.local_option.enabled(LINEMODE) or self.remote_option.enabled(LINEMODE)
-        ):
-            assert False, (
-                "Cannot send LINEMODE-MODE without first "
-                "(DO, WILL) LINEMODE received."
-            )
+        if not (self.local_option.enabled(LINEMODE) or self.remote_option.enabled(LINEMODE)):
+            assert False, "Cannot send LINEMODE-MODE without first " "(DO, WILL) LINEMODE received."
 
         if linemode is not None:
             self.log.debug("set Linemode {0!r}".format(linemode))
             self._linemode = linemode
 
-        self.log.debug(
-            "send IAC SB LINEMODE LINEMODE-MODE {0!r} IAC SE".format(self._linemode)
-        )
+        self.log.debug("send IAC SB LINEMODE LINEMODE-MODE {0!r} IAC SE".format(self._linemode))
 
         self.send_iac(IAC + SB + LINEMODE + slc.LMODE_MODE)
         self._transport.write(self._linemode.mask)
@@ -1113,8 +1053,8 @@ class TelnetWriter:
         """
         Handle IAC Erase Line (EL, SLC_EL).
 
-        Provides a function which discards all the data ready on current
-        line of input. The prompt should be re-displayed.
+        Provides a function which discards all the data ready on current line of input. The prompt
+        should be re-displayed.
         """
         self.log.debug("IAC EL: Erase Line (unhandled).")
 
@@ -1126,8 +1066,8 @@ class TelnetWriter:
         """
         Handle IAC Abort (ABORT, SLC_ABORT).
 
-        Similar to Interrupt Process (IP), but means only to abort or
-        terminate the process to which the NVT is connected.
+        Similar to Interrupt Process (IP), but means only to abort or terminate the process to which
+        the NVT is connected.
         """
         self.log.debug("IAC ABORT: Abort (unhandled).")
 
@@ -1139,12 +1079,11 @@ class TelnetWriter:
         """
         Handle IAC Suspend Process (SUSP, SLC_SUSP).
 
-        Suspends the execution of the current process attached to the NVT
-        in such a way that another process will take over control of the
-        NVT, and the suspended process can be resumed at a later time.
+        Suspends the execution of the current process attached to the NVT in such a way that another
+        process will take over control of the NVT, and the suspended process can be resumed at a
+        later time.
 
-        If the receiving system does not support this functionality, it
-        should be ignored.
+        If the receiving system does not support this functionality, it should be ignored.
         """
         self.log.debug("IAC SUSP: Suspend (unhandled).")
 
@@ -1152,9 +1091,8 @@ class TelnetWriter:
         """
         Handle IAC Break (BRK, SLC_BRK).
 
-        Sent by clients to indicate BREAK keypress. This is not the same
-        as IP (^c), but a means to map sysystem-dependent break key such
-        as found on an IBM Systems.
+        Sent by clients to indicate BREAK keypress. This is not the same as IP (^c), but a means to
+        map sysystem-dependent break key such as found on an IBM Systems.
         """
         self.log.debug("IAC BRK: Break (unhandled).")
 
@@ -1162,8 +1100,8 @@ class TelnetWriter:
         """
         Handle IAC Are You There (AYT, SLC_AYT).
 
-        Provides the user with some visible (e.g., printable) evidence
-        that the system is still up and running.
+        Provides the user with some visible (e.g., printable) evidence that the system is still up
+        and running.
         """
         self.log.debug("IAC AYT: Are You There? (unhandled).")
 
@@ -1187,8 +1125,8 @@ class TelnetWriter:
         """
         Handle IAC Erase Character (EC, SLC_EC).
 
-        Provides a function which deletes the last preceding undeleted
-        character from data ready on current line of input.
+        Provides a function which deletes the last preceding undeleted character from data ready on
+        current line of input.
         """
         self.log.debug("IAC EC: Erase Character (unhandled).")
 
@@ -1196,13 +1134,11 @@ class TelnetWriter:
         """
         Handle IAC (WILL, WONT, DO, DONT) Timing Mark (TM).
 
-        TM is essentially a NOP that any IAC interpreter must answer, if at
-        least it answers WONT to unknown options (required), it may still
-        be used as a means to accurately measure the "ping" time.
+        TM is essentially a NOP that any IAC interpreter must answer, if at least it answers WONT to
+        unknown options (required), it may still be used as a means to accurately measure the "ping"
+        time.
         """
-        self.log.debug(
-            "IAC TM: Received {} TM (Timing Mark).".format(name_command(cmd))
-        )
+        self.log.debug("IAC TM: Received {} TM (Timing Mark).".format(name_command(cmd)))
 
     # public Special Line Mode (SLC) callbacks
     #
@@ -1228,9 +1164,8 @@ class TelnetWriter:
         """
         Handle SLC_EW (Erase Word).
 
-        Provides a function which deletes the last preceding undeleted
-        character, and any subsequent bytes until next whitespace character
-        from data ready on current line of input.
+        Provides a function which deletes the last preceding undeleted character, and any subsequent
+        bytes until next whitespace character from data ready on current line of input.
         """
         self.log.debug("SLC EC: Erase Word (unhandled).")
 
@@ -1418,9 +1353,8 @@ class TelnetWriter:
         """
         Send character set selection as string, :rfc:`2066`.
 
-        Given the available encodings presented by the server, select and
-        return only one.  Returning an empty string indicates that no
-        selection is made (request is ignored).
+        Given the available encodings presented by the server, select and return only one. Returning
+        an empty string indicates that no selection is made (request is ignored).
         """
         assert not self.server
         self.log.debug("Character Set requested")
@@ -1435,8 +1369,7 @@ class TelnetWriter:
         """
         Handle (IAC, (DO | DONT | WILL | WONT), LOGOUT), :rfc:`727`.
 
-        Only the server end may receive (DO, DONT).
-        Only the client end may receive (WILL, WONT).
+        Only the server end may receive (DO, DONT). Only the client end may receive (WILL, WONT).
         """
         # Close the transport on receipt of DO, Reply DONT on receipt
         # of WILL.  Nothing is done on receipt of DONT or WONT LOGOFF.
@@ -1652,9 +1585,7 @@ class TelnetWriter:
             #
             # Though Others -- XDISPLOC, TTYPE, TSPEED, are 1-directional.
             if not self.server and opt not in (CHARSET,):
-                raise ValueError(
-                    "cannot recv WILL {} on client end.".format(name_command(opt))
-                )
+                raise ValueError("cannot recv WILL {} on client end.".format(name_command(opt)))
 
             # First, we need to acknowledge WILL with DO for all options
             # This was missing for CHARSET when received by client
@@ -1669,9 +1600,7 @@ class TelnetWriter:
                 if not self.local_option.enabled(CHARSET):
                     # Special case: reciprocate WILL CHARSET with our own WILL CHARSET
                     # but don't set pending_option since we're not expecting a response
-                    self.log.debug(
-                        "send IAC WILL CHARSET (reciprocating client's WILL)"
-                    )
+                    self.log.debug("send IAC WILL CHARSET (reciprocating client's WILL)")
                     self.local_option[CHARSET] = True
                     self.send_iac(IAC + WILL + CHARSET)
 
@@ -1734,10 +1663,10 @@ class TelnetWriter:
         """
         Callback for end of sub-negotiation buffer.
 
-            SB options handled here are TTYPE, XDISPLOC, NEW_ENVIRON,
-            NAWS, and STATUS, and are delegated to their ``handle_``
-            equivalent methods. Implementors of additional SB options
-            should extend this method.
+        SB options handled here are TTYPE, XDISPLOC, NEW_ENVIRON,
+        NAWS, and STATUS, and are delegated to their ``handle_``
+        equivalent methods. Implementors of additional SB options
+        should extend this method.
         """
         if not buf:
             raise ValueError("SE: buffer empty")
@@ -1767,9 +1696,7 @@ class TelnetWriter:
             GMCP: self._handle_sb_gmcp,
         }.get(cmd)
         if fn_call is None:
-            raise ValueError(
-                "SB unhandled: cmd={}, buf={!r}".format(name_command(cmd), buf)
-            )
+            raise ValueError("SB unhandled: cmd={}, buf={!r}".format(name_command(cmd), buf))
 
         fn_call(buf)
 
@@ -1823,9 +1750,7 @@ class TelnetWriter:
                 response.extend([IAC, SB, CHARSET, ACCEPTED])
                 response.extend([bytes(selected, "ascii")])
                 response.extend([IAC, SE])
-                self.log.debug(
-                    "send IAC SB CHARSET ACCEPTED {} IAC SE".format(selected)
-                )
+                self.log.debug("send IAC SB CHARSET ACCEPTED {} IAC SE".format(selected))
                 self.send_iac(b"".join(response))
         elif opt == ACCEPTED:
             charset = b"".join(buf).decode("ascii")
@@ -1835,8 +1760,7 @@ class TelnetWriter:
             self.log.warning("recv IAC SB CHARSET REJECTED IAC SE")
         elif opt in (TTABLE_IS, TTABLE_ACK, TTABLE_NAK, TTABLE_REJECTED):
             raise NotImplementedError(
-                "Translation table command received "
-                "but not supported: {!r}".format(opt)
+                "Translation table command received " "but not supported: {!r}".format(opt)
             )
         else:
             raise ValueError("Illegal option follows IAC SB CHARSET: {!r}.".format(opt))
@@ -1889,7 +1813,7 @@ class TelnetWriter:
                 name_command(cmd),
                 opt_kind,
             )
-            (rx, tx) = self._ext_send_callback[TSPEED]()
+            rx, tx = self._ext_send_callback[TSPEED]()
             assert (
                 type(rx),
                 type(tx),
@@ -2014,17 +1938,13 @@ class TelnetWriter:
             )
             if opt == IS:
                 if not self.pending_option.enabled(SB + cmd):
-                    self.log.debug(
-                        "{} {} unsolicited".format(name_command(cmd), opt_kind)
-                    )
+                    self.log.debug("{} {} unsolicited".format(name_command(cmd), opt_kind))
                 self.pending_option[SB + cmd] = False
             elif self.pending_option.get(SB + cmd, None) is False:
                 # a pending option of value of 'False' means it was previously
                 # completed, subsequent environment values *should* have been
                 # sent as command INFO ...
-                self.log.warning(
-                    "{} IS already recv; expected INFO.".format(name_command(cmd))
-                )
+                self.log.warning("{} IS already recv; expected INFO.".format(name_command(cmd)))
             if env:
                 self._ext_callback[cmd](env)
         elif opt == SEND:
@@ -2065,9 +1985,7 @@ class TelnetWriter:
         #
         value = self._escape_iac(struct.pack("!HH", cols, rows))
         response = [IAC, SB, NAWS, value, IAC, SE]
-        self.log.debug(
-            "send IAC SB NAWS (rows={0}, cols={1}) IAC SE".format(rows, cols)
-        )
+        self.log.debug("send IAC SB NAWS (rows={0}, cols={1}) IAC SE".format(rows, cols))
         self.send_iac(b"".join(response))
 
     def _handle_sb_naws(self, buf):
@@ -2083,9 +2001,7 @@ class TelnetWriter:
         #    cols, rows = ((256 * buf[0]) + buf[1],
         #                  (256 * buf[2]) + buf[3])
         cols, rows = struct.unpack("!HH", b"".join(buf))
-        self.log.debug(
-            "recv IAC SB NAWS (cols={0}, rows={1}) IAC SE".format(cols, rows)
-        )
+        self.log.debug("recv IAC SB NAWS (cols={0}, rows={1}) IAC SE".format(cols, rows))
 
         # Flip the bytestream order (cols, rows) -> (rows, cols).
         #
@@ -2097,15 +2013,11 @@ class TelnetWriter:
         """Callback responds to IAC SB LFLOW, :rfc:`1372`."""
         buf.popleft()  # LFLOW
         if not self.local_option.enabled(LFLOW):
-            raise ValueError(
-                "received IAC SB LFLOW without " "first receiving IAC DO LFLOW."
-            )
+            raise ValueError("received IAC SB LFLOW without " "first receiving IAC DO LFLOW.")
         opt = buf.popleft()
         if opt in (LFLOW_OFF, LFLOW_ON):
             self.lflow = opt is LFLOW_ON
-            self.log.debug(
-                "LFLOW (toggle-flow-control) {}".format("ON" if self.lflow else "OFF")
-            )
+            self.log.debug("LFLOW (toggle-flow-control) {}".format("ON" if self.lflow else "OFF"))
 
         elif opt in (LFLOW_RESTART_ANY, LFLOW_RESTART_XON):
             self.xon_any = opt is LFLOW_RESTART_XON
@@ -2133,22 +2045,18 @@ class TelnetWriter:
             self._receive_status(buf)
         else:
             raise ValueError(
-                "Illegal byte following IAC SB STATUS: {!r}, "
-                "expected SEND or IS.".format(opt)
+                "Illegal byte following IAC SB STATUS: {!r}, " "expected SEND or IS.".format(opt)
             )
 
     def _receive_status(self, buf):
         """
         Callback responds to IAC SB STATUS IS, :rfc:`859`.
 
-        :param bytes buf: sub-negotiation byte buffer containing status data.
-
-        This implementation does its best to analyze our perspective's state
-        to the state options given.  Any discrepancies are reported to the
-        error log, but no action is taken.
-
-        This implementation handles malformed STATUS data gracefully by skipping
-        invalid command bytes and continuing to process the remaining data.
+        :param bytes buf: sub-negotiation byte buffer containing status data. This implementation
+            does its best to analyze our perspective's state to the state options given. Any
+            discrepancies are reported to the error log, but no action is taken. This implementation
+            handles malformed STATUS data gracefully by skipping invalid command bytes and
+            continuing to process the remaining data.
         """
         # Convert deque to list for processing
         buf_list = list(buf)
@@ -2159,9 +2067,7 @@ class TelnetWriter:
             if i + 1 >= len(buf_list):
                 # Odd number of bytes remaining, log and skip
                 self.log.warning(
-                    "STATUS: incomplete pair at end, skipping byte: {}".format(
-                        buf_list[i]
-                    )
+                    "STATUS: incomplete pair at end, skipping byte: {}".format(buf_list[i])
                 )
                 break
 
@@ -2201,27 +2107,19 @@ class TelnetWriter:
                 )
                 self.log.error(
                     "remote {!r} is {}".format(
-                        [
-                            (name_commands(_opt), _val)
-                            for _opt, _val in self.remote_option.items()
-                        ],
+                        [(name_commands(_opt), _val) for _opt, _val in self.remote_option.items()],
                         self.remote_option.enabled(opt),
                     )
                 )
                 self.log.error(
                     " local {!r} is {}".format(
-                        [
-                            (name_commands(_opt), _val)
-                            for _opt, _val in self.local_option.items()
-                        ],
+                        [(name_commands(_opt), _val) for _opt, _val in self.local_option.items()],
                         self.local_option.enabled(opt),
                     )
                 )
             else:
                 self.log.debug(
-                    "STATUS {} {} (agreed).".format(
-                        name_command(cmd), name_command(opt)
-                    )
+                    "STATUS {} {} (agreed).".format(name_command(cmd), name_command(opt))
                 )
 
             # Move to next pair
@@ -2229,13 +2127,8 @@ class TelnetWriter:
 
     def _send_status(self):
         """Callback responds to IAC SB STATUS SEND, :rfc:`859`."""
-        if not (
-            self.pending_option.enabled(WILL + STATUS)
-            or self.local_option.enabled(STATUS)
-        ):
-            raise ValueError(
-                "Only sender of IAC WILL STATUS " "may reply by IAC SB STATUS IS."
-            )
+        if not (self.pending_option.enabled(WILL + STATUS) or self.local_option.enabled(STATUS)):
+            raise ValueError("Only sender of IAC WILL STATUS " "may reply by IAC SB STATUS IS.")
 
         response = collections.deque()
         response.extend([IAC, SB, STATUS, IS])
@@ -2283,9 +2176,7 @@ class TelnetWriter:
                     "Illegal byte follows IAC SB LINEMODE {}: {!r}, "
                     " expected LMODE_FORWARDMASK.".format(name_command(opt), sb_opt)
                 )
-            self.log.debug(
-                "recv IAC SB LINEMODE {} LMODE_FORWARDMASK,".format(name_command(opt))
-            )
+            self.log.debug("recv IAC SB LINEMODE {} LMODE_FORWARDMASK,".format(name_command(opt)))
             self._handle_sb_forwardmask(LINEMODE, buf)
         else:
             raise ValueError("Illegal IAC SB LINEMODE option {!r}".format(opt))
@@ -2301,9 +2192,7 @@ class TelnetWriter:
         """
         suggest_mode = slc.Linemode(mode[0])
 
-        self.log.debug(
-            "recv IAC SB LINEMODE LINEMODE-MODE {0!r} IAC SE".format(suggest_mode.mask)
-        )
+        self.log.debug("recv IAC SB LINEMODE LINEMODE-MODE {0!r} IAC SE".format(suggest_mode.mask))
 
         if not suggest_mode.ack:
             # This implementation acknowledges and sets local linemode
@@ -2361,9 +2250,7 @@ class TelnetWriter:
         accordingly.
         """
         if not len(buf) - 2 % 3:
-            raise ValueError(
-                "SLC buffer wrong size: expect multiple of 3: {}".format(len(buf) - 2)
-            )
+            raise ValueError("SLC buffer wrong size: expect multiple of 3: {}".format(len(buf) - 2))
         self._slc_start()
         while len(buf):
             func = buf.popleft()
@@ -2394,8 +2281,7 @@ class TelnetWriter:
         """
         Send supported SLC characters of current tabset, or specified tabset.
 
-        :param dict slctab: SLC byte tabset as dictionary, such as
-            slc.BSD_SLC_TAB.
+        :param dict slctab: SLC byte tabset as dictionary, such as slc.BSD_SLC_TAB.
         """
         send_count = 0
         slctab = slctab or self.slctab
@@ -2423,9 +2309,7 @@ class TelnetWriter:
         """
         if slc_def is None:
             slc_def = self.slctab[func]
-        self.log.debug(
-            "_slc_add ({:<10} {})".format(slc.name_slc_command(func) + ",", slc_def)
-        )
+        self.log.debug("_slc_add ({:<10} {})".format(slc.name_slc_command(func) + ",", slc_def))
         if len(self._slc_buffer) >= slc.NSLC * 6:
             raise ValueError("SLC: buffer full!")
         self._slc_buffer.extend([func, slc_def.mask, slc_def.val])
@@ -2476,9 +2360,7 @@ class TelnetWriter:
             return
         elif slc_def.ack:
             self.log.debug(
-                "slc value mismatch with ack bit set: ({!r},{!r})".format(
-                    myvalue, slc_def.val
-                )
+                "slc value mismatch with ack bit set: ({!r},{!r})".format(myvalue, slc_def.val)
             )
             return
         else:
@@ -2568,26 +2450,21 @@ class TelnetWriter:
             assert cmd not in (
                 DO,
                 DONT,
-            ), "cannot recv {} LMODE_FORWARDMASK on server end".format(
-                name_command(cmd)
-            )
+            ), "cannot recv {} LMODE_FORWARDMASK on server end".format(name_command(cmd))
         if self.client:
-            assert self.local_option.enabled(LINEMODE), (
-                "cannot recv {} LMODE_FORWARDMASK without first "
-                " sending WILL LINEMODE.".format(name_command(cmd))
+            assert self.local_option.enabled(
+                LINEMODE
+            ), "cannot recv {} LMODE_FORWARDMASK without first " " sending WILL LINEMODE.".format(
+                name_command(cmd)
             )
             assert cmd not in (
                 WILL,
                 WONT,
-            ), "cannot recv {} LMODE_FORWARDMASK on client end".format(
-                name_command(cmd)
-            )
+            ), "cannot recv {} LMODE_FORWARDMASK on client end".format(name_command(cmd))
             assert (
                 cmd not in (DONT,) or len(buf) == 0
             ), "Illegal bytes follow DONT LMODE_FORWARDMASK: {!r}".format(buf)
-            assert cmd not in (DO,) and len(
-                buf
-            ), "bytes must follow DO LMODE_FORWARDMASK"
+            assert cmd not in (DO,) and len(buf), "bytes must follow DO LMODE_FORWARDMASK"
 
         opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
         if cmd in (
@@ -2612,9 +2489,7 @@ class TelnetWriter:
         :param bytes buf: bytes following IAC SB LINEMODE DO FORWARDMASK.
         """
 
-        self.log.debug(
-            "SB unhandled: cmd={}, buf={!r}".format(name_command(COM_PORT_OPTION), buf)
-        )
+        self.log.debug("SB unhandled: cmd={}, buf={!r}".format(name_command(COM_PORT_OPTION), buf))
 
         return
 
@@ -2627,9 +2502,7 @@ class TelnetWriter:
         :param bytes buf: bytes following IAC SB GMCP.
         """
 
-        self.log.debug(
-            "SB unhandled: cmd={}, buf={!r}".format(name_command(GMCP), b"".join(buf))
-        )
+        self.log.debug("SB unhandled: cmd={}, buf={!r}".format(name_command(GMCP), b"".join(buf)))
 
         return
 
@@ -2637,8 +2510,8 @@ class TelnetWriter:
         """
         Callback handles request for LINEMODE DO FORWARDMASK.
 
-        :param bytes buf: bytes following IAC SB LINEMODE DO FORWARDMASK.
-        :raises NotImplementedError
+        :param bytes buf: bytes following IAC SB LINEMODE DO FORWARDMASK. :raises
+            NotImplementedError
         """
         raise NotImplementedError
 
@@ -2657,9 +2530,7 @@ class TelnetWriterUnicode(TelnetWriter):
     discovered by ``LANG`` environment variables by NEW_ENVIRON, :rfc:`1572`.
     """
 
-    def __init__(
-        self, transport, protocol, fn_encoding, *, encoding_errors="strict", **kwds
-    ):
+    def __init__(self, transport, protocol, fn_encoding, *, encoding_errors="strict", **kwds):
         self.fn_encoding = fn_encoding
         self.encoding_errors = encoding_errors
         super().__init__(transport, protocol, **kwds)
@@ -2706,9 +2577,8 @@ class TelnetWriterUnicode(TelnetWriter):
         """
         Write unicode strings to transport.
 
-        Note that newlines are not added.  The sequence can be any iterable
-        object producing strings. This is equivalent to calling write() for
-        each string.
+        Note that newlines are not added.  The sequence can be any iterable object producing
+        strings. This is equivalent to calling write() for each string.
         """
         self.write(string="".join(lines), errors=errors)
 
@@ -2733,16 +2603,16 @@ class Option(dict):
     """
     Telnet option state negotiation helper class.
 
-    This class simply acts as a logging decorator for state changes of
-    a dictionary describing telnet option negotiation.
+    This class simply acts as a logging decorator for state changes of a dictionary describing
+    telnet option negotiation.
     """
 
     def __init__(self, name, log):
         """
         Class initializer.
 
-        :param str name: decorated name representing option class, such as
-            'local', 'remote', or 'pending'.
+        :param str name: decorated name representing option class, such as 'local', 'remote', or
+            'pending'.
         """
         self.name, self.log = name, log
         dict.__init__(self)
@@ -2760,8 +2630,7 @@ class Option(dict):
         # the real purpose of this class, tracking state negotiation.
         if value != dict.get(self, key, None):
             descr = " + ".join(
-                [name_command(bytes([byte])) for byte in key[:2]]
-                + [repr(byte) for byte in key[2:]]
+                [name_command(bytes([byte])) for byte in key[:2]] + [repr(byte) for byte in key[2:]]
             )
             self.log.debug("{}[{}] = {}".format(self.name, descr, value))
         dict.__setitem__(self, key, value)

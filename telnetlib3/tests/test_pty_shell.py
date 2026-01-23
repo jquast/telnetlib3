@@ -1,13 +1,15 @@
 """Tests for PTY shell functionality."""
 
-import asyncio
+# std imports
 import sys
+import asyncio
 
+# 3rd party
 import pytest
 
+# local
 import telnetlib3
-from telnetlib3.tests.accessories import unused_tcp_port, bind_host
-
+from telnetlib3.tests.accessories import bind_host, unused_tcp_port
 
 pytestmark = [
     pytest.mark.skipif(sys.platform == "win32", reason="PTY not supported on Windows"),
@@ -24,6 +26,7 @@ def require_no_capture(request):
 
 async def test_pty_shell_basic_cat(bind_host, unused_tcp_port, require_no_capture):
     """Test basic echo with /bin/cat."""
+    # local
     from telnetlib3 import make_pty_shell
 
     _waiter = asyncio.Future()
@@ -62,10 +65,9 @@ async def test_pty_shell_basic_cat(bind_host, unused_tcp_port, require_no_captur
     writer.close()
 
 
-async def test_pty_shell_term_propagation(
-    bind_host, unused_tcp_port, require_no_capture
-):
+async def test_pty_shell_term_propagation(bind_host, unused_tcp_port, require_no_capture):
     """Test TERM environment propagation."""
+    # local
     from telnetlib3 import make_pty_shell
 
     _waiter = asyncio.Future()
@@ -111,6 +113,7 @@ async def test_pty_shell_child_exit_closes_connection(
     bind_host, unused_tcp_port, require_no_capture
 ):
     """Test that child exit closes connection gracefully."""
+    # local
     from telnetlib3 import make_pty_shell
 
     _waiter = asyncio.Future()
@@ -151,6 +154,7 @@ async def test_pty_shell_client_disconnect_kills_child(
     bind_host, unused_tcp_port, require_no_capture
 ):
     """Test that client disconnect kills child process."""
+    # local
     from telnetlib3 import make_pty_shell
 
     _waiter = asyncio.Future()
@@ -193,6 +197,7 @@ async def test_pty_shell_client_disconnect_kills_child(
 
 async def test_pty_shell_naws_resize(bind_host, unused_tcp_port, require_no_capture):
     """Test NAWS resize forwarding."""
+    # local
     from telnetlib3 import make_pty_shell
 
     _waiter = asyncio.Future()
@@ -230,6 +235,7 @@ async def test_pty_shell_naws_resize(bind_host, unused_tcp_port, require_no_capt
 
 def test_platform_check_not_windows():
     """Test that platform check raises on Windows."""
+    # local
     from telnetlib3.pty_shell import _platform_check
 
     original_platform = sys.platform
@@ -243,6 +249,7 @@ def test_platform_check_not_windows():
 
 def test_make_pty_shell_returns_callable():
     """Test that make_pty_shell returns a callable."""
+    # local
     from telnetlib3 import make_pty_shell
 
     shell = make_pty_shell("/bin/sh")
@@ -254,8 +261,11 @@ def test_make_pty_shell_returns_callable():
 
 async def test_pty_session_build_environment():
     """Test PTYSession environment building."""
-    from telnetlib3.pty_shell import PTYSession
+    # std imports
     from unittest.mock import MagicMock
+
+    # local
+    from telnetlib3.pty_shell import PTYSession
 
     reader = MagicMock()
     writer = MagicMock()
@@ -282,8 +292,11 @@ async def test_pty_session_build_environment():
 
 async def test_pty_session_build_environment_charset_fallback():
     """Test PTYSession environment building with charset fallback."""
-    from telnetlib3.pty_shell import PTYSession
+    # std imports
     from unittest.mock import MagicMock
+
+    # local
+    from telnetlib3.pty_shell import PTYSession
 
     reader = MagicMock()
     writer = MagicMock()

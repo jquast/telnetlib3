@@ -3,19 +3,21 @@
 # std imports
 import asyncio
 
+# 3rd party
+import pytest
+
+# local
 # local imports
 import telnetlib3
 import telnetlib3.stream_writer
-from telnetlib3.tests.accessories import unused_tcp_port, bind_host
-
-# 3rd party
-import pytest
+from telnetlib3.tests.accessories import bind_host, unused_tcp_port
 
 
 async def test_telnet_server_on_environ(bind_host, unused_tcp_port):
     """Test Server's callback method on_environ()."""
     # given
-    from telnetlib3.telopt import IAC, WILL, SB, SE, IS, NEW_ENVIRON
+    # local
+    from telnetlib3.telopt import IS, SB, SE, IAC, WILL, NEW_ENVIRON
 
     _waiter = asyncio.Future()
 
@@ -53,9 +55,7 @@ async def test_telnet_server_on_environ(bind_host, unused_tcp_port):
     srv_instance = await asyncio.wait_for(_waiter, 0.5)
     assert srv_instance.get_extra_info("ALPHA") == "oMeGa"
     assert srv_instance.get_extra_info("BETA") == "b"
-    assert srv_instance.get_extra_info("GAMMA") == (
-        "".join(chr(n) for n in range(0, 128))
-    )
+    assert srv_instance.get_extra_info("GAMMA") == ("".join(chr(n) for n in range(0, 128)))
 
 
 async def test_telnet_client_send_environ(bind_host, unused_tcp_port):
@@ -110,6 +110,7 @@ async def test_telnet_client_send_var_uservar_environ(bind_host, unused_tcp_port
             _waiter.set_result(mapping)
 
         def on_request_environ(self):
+            # local
             from telnetlib3.telopt import VAR, USERVAR
 
             return [VAR, USERVAR]
@@ -148,6 +149,7 @@ async def test_telnet_client_send_var_uservar_environ(bind_host, unused_tcp_port
 
 async def test_telnet_server_reject_environ(bind_host, unused_tcp_port):
     """Test Client's callback method send_environ() for specific requests."""
+    # local
     from telnetlib3.telopt import SB, NEW_ENVIRON
 
     # given

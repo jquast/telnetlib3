@@ -1,9 +1,8 @@
-"""
-Special Line Character support for Telnet Linemode Option (:rfc:`1184`).
-"""
+"""Special Line Character support for Telnet Linemode Option (:rfc:`1184`)."""
 
-from .accessories import eightbits, name_unicode
+# local
 from .telopt import theNULL
+from .accessories import eightbits, name_unicode
 
 __all__ = (
     "SLC",
@@ -44,12 +43,10 @@ __all__ = (
     "SLC_AO",
 )
 
-(SLC_NOSUPPORT, SLC_CANTCHANGE, SLC_VARIABLE, SLC_DEFAULT) = (
+SLC_NOSUPPORT, SLC_CANTCHANGE, SLC_VARIABLE, SLC_DEFAULT = (
     bytes([const]) for const in range(4)
 )  # 0, 1, 2, 3
-(SLC_FLUSHOUT, SLC_FLUSHIN, SLC_ACK) = (
-    bytes([2**const]) for const in range(5, 8)
-)  # 32, 64, 128
+SLC_FLUSHOUT, SLC_FLUSHIN, SLC_ACK = (bytes([2**const]) for const in range(5, 8))  # 32, 64, 128
 
 SLC_LEVELBITS = 0x03
 NSLC = 30
@@ -86,11 +83,9 @@ NSLC = 30
     SLC_EEOL,
 ) = (bytes([const]) for const in range(1, NSLC + 1))
 
-(LMODE_MODE, LMODE_FORWARDMASK, LMODE_SLC) = (bytes([const]) for const in range(1, 4))
-(LMODE_MODE_REMOTE, LMODE_MODE_LOCAL, LMODE_MODE_TRAPSIG) = (
-    bytes([const]) for const in range(3)
-)
-(LMODE_MODE_ACK, LMODE_MODE_SOFT_TAB, LMODE_MODE_LIT_ECHO) = (
+LMODE_MODE, LMODE_FORWARDMASK, LMODE_SLC = (bytes([const]) for const in range(1, 4))
+LMODE_MODE_REMOTE, LMODE_MODE_LOCAL, LMODE_MODE_TRAPSIG = (bytes([const]) for const in range(3))
+LMODE_MODE_ACK, LMODE_MODE_SOFT_TAB, LMODE_MODE_LIT_ECHO = (
     bytes([4]),
     bytes([8]),
     bytes([16]),
@@ -183,20 +178,14 @@ class SLC(object):
             if getattr(self, flag):
                 flags.append(flag)
         return "({value}, {flags})".format(
-            value=(
-                name_unicode(self.val)
-                if self.val != _POSIX_VDISABLE
-                else "(DISABLED:\\xff)"
-            ),
+            value=(name_unicode(self.val) if self.val != _POSIX_VDISABLE else "(DISABLED:\\xff)"),
             flags="|".join(flags),
         )
 
 
 class SLC_nosupport(SLC):
     def __init__(self):
-        """
-        SLC definition inferring our unwillingness to support the option.
-        """
+        """SLC definition inferring our unwillingness to support the option."""
         SLC.__init__(self, SLC_NOSUPPORT, _POSIX_VDISABLE)
 
 
@@ -236,7 +225,9 @@ BSD_SLC_TAB = {
 
 
 def generate_slctab(tabset=None):
-    """Returns full 'SLC Tab' for definitions found using ``tabset``.
+    """
+    Returns full 'SLC Tab' for definitions found using ``tabset``.
+
     Functions not listed in ``tabset`` are set as SLC_NOSUPPORT.
     """
     if tabset is None:
@@ -266,7 +257,7 @@ def generate_forwardmask(binary_mode, tabset, ack=False):
         last = start + 7
         byte = theNULL
         for char in range(start, last + 1):
-            (func, slc_name, slc_def) = snoop(bytes([char]), tabset, dict())
+            func, slc_name, slc_def = snoop(bytes([char]), tabset, dict())
             if func is not None and not slc_def.nosupport:
                 # set bit for this character, it is a supported slc char
                 byte = bytes([ord(byte) | 1])
@@ -279,11 +270,11 @@ def generate_forwardmask(binary_mode, tabset, ack=False):
 
 
 def snoop(byte, slctab, slc_callbacks):
-    """Scan ``slctab`` for matching ``byte`` values.
+    """
+    Scan ``slctab`` for matching ``byte`` values.
 
-    Returns (callback, func_byte, slc_definition) on match.
-    Otherwise, (None, None, None). If no callback is assigned,
-    the value of callback is always None.
+    Returns (callback, func_byte, slc_definition) on match. Otherwise, (None, None, None). If no
+    callback is assigned, the value of callback is always None.
     """
     for slc_func, slc_def in slctab.items():
         if byte == slc_def.val and slc_def.val != theNULL:
@@ -293,8 +284,11 @@ def snoop(byte, slctab, slc_callbacks):
 
 class Linemode(object):
     def __init__(self, mask=b"\x00"):
-        """A mask of ``LMODE_MODE_LOCAL`` means that all line editing is
-        performed on the client side (default). A mask of theNULL (\x00)
+        """
+        A mask of ``LMODE_MODE_LOCAL`` means that all line editing is performed on the client side
+        (default).
+
+        A mask of theNULL (\x00)
         indicates that editing is performed on the remote side.
         Valid bit flags of mask are: ``LMODE_MODE_TRAPSIG``,
         ``LMODE_MODE_ACK``, ``LMODE_MODE_SOFT_TAB``, and
@@ -308,9 +302,7 @@ class Linemode(object):
         # the inverse OR(|) of acknowledge bit UNSET in comparator,
         # would be the AND OR(& ~) to compare modes without acknowledge
         # bit set.
-        return (ord(self.mask) | ord(LMODE_MODE_ACK)) == (
-            ord(other.mask) | ord(LMODE_MODE_ACK)
-        )
+        return (ord(self.mask) | ord(LMODE_MODE_ACK)) == (ord(other.mask) | ord(LMODE_MODE_ACK))
 
     @property
     def local(self):
@@ -343,7 +335,7 @@ class Linemode(object):
         return bool(ord(self.mask) & ord(LMODE_MODE_LIT_ECHO))
 
     def __str__(self):
-        """Returns string representation of line mode, for debugging"""
+        """Returns string representation of line mode, for debugging."""
         return "remote" if self.remote else "local"
 
     def __repr__(self):
@@ -379,16 +371,18 @@ class Forwardmask(object):
         self.ack = ack
 
     def description_table(self):
-        """
-        Returns list of strings describing obj as a tabular ASCII map.
-        """
+        """Returns list of strings describing obj as a tabular ASCII map."""
         result = []
         MRK_CONT = "(...)"
-        continuing = lambda: len(result) and result[-1] == MRK_CONT
-        is_last = lambda mask: mask == len(self.value) - 1
-        same_as_last = lambda row: (
-            len(result) and result[-1].endswith(row.split()[-1])
-        )
+
+        def continuing():
+            return len(result) and result[-1] == MRK_CONT
+
+        def is_last(mask):
+            return mask == len(self.value) - 1
+
+        def same_as_last(row):
+            return len(result) and result[-1].endswith(row.split()[-1])
 
         for mask, byte in enumerate(self.value):
             if byte == 0:
@@ -406,11 +400,7 @@ class Forwardmask(object):
                 start = mask * 8
                 last = start + 7
                 characters = ", ".join(
-                    [
-                        name_unicode(chr(char))
-                        for char in range(start, last + 1)
-                        if char in self
-                    ]
+                    [name_unicode(chr(char)) for char in range(start, last + 1) if char in self]
                 )
                 result.append(
                     "[%2d] %s %s"
@@ -426,12 +416,7 @@ class Forwardmask(object):
         """Returns single string of binary 0 and 1 describing obj."""
         return "0b%s" % (
             "".join(
-                [
-                    value
-                    for (prefix, value) in [
-                        eightbits(byte).split("b") for byte in self.value
-                    ]
-                ]
+                [value for (prefix, value) in [eightbits(byte).split("b") for byte in self.value]]
             ),
         )
 

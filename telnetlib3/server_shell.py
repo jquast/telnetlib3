@@ -1,10 +1,10 @@
+# std imports
+from . import slc, telopt, accessories
 import types
 import asyncio
 
 CR, LF, NUL = "\r\n\x00"
-from . import slc
-from . import telopt
-from . import accessories
+# local
 
 __all__ = ("telnet_server_shell",)
 
@@ -13,8 +13,8 @@ async def telnet_server_shell(reader, writer):
     """
     A default telnet shell, appropriate for use with telnetlib3.create_server.
 
-    This shell provides a very simple REPL, allowing introspection and state
-    toggling of the connected client session.
+    This shell provides a very simple REPL, allowing introspection and state toggling of the
+    connected client session.
     """
     linereader = readline(reader, writer)
     linereader.send(None)
@@ -120,10 +120,8 @@ def character_dump(kb_limit):
 
 
 async def get_next_ascii(reader, writer):
-    """
-    A coroutine that accepts the next character from `reader` that is not a
-    part of an ANSI escape sequence.
-    """
+    """A coroutine that accepts the next character from `reader` that is not a part of an ANSI
+    escape sequence."""
     escape_sequence = False
     while not writer.is_closing():
         next_char = await reader.read(1)
@@ -140,7 +138,9 @@ async def get_next_ascii(reader, writer):
 @types.coroutine
 def readline(reader, writer):
     """
-    A very crude readline coroutine interface. This is a legacy function
+    A very crude readline coroutine interface.
+
+    This is a legacy function
     designed for Python 3.4 and remains here for compatibility, superseded by
     :func:`~.readline2`
     """
@@ -175,8 +175,8 @@ def readline(reader, writer):
 
 async def readline2(reader, writer):
     """
-    Another crude readline interface as a more amiable asynchronous function
-    than :func:`readline` supplied with the earliest version of this library.
+    Another crude readline interface as a more amiable asynchronous function than :func:`readline`
+    supplied with the earliest version of this library.
 
     This version attempts to filter away escape sequences, such as when a user
     presses an arrow or function key. Delete key is backspace.

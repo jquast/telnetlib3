@@ -1,6 +1,6 @@
 # std imports
-import asyncio
 import re
+import asyncio
 
 # 3rd party
 import pytest

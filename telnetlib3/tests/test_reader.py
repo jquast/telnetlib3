@@ -1,14 +1,14 @@
 # std imports
-import asyncio
 import re
 import string
+import asyncio
 
 # 3rd party
 import pytest
 
 # local
 import telnetlib3
-from telnetlib3.tests.accessories import unused_tcp_port, bind_host
+from telnetlib3.tests.accessories import bind_host, unused_tcp_port
 
 
 def test_reader_instantiation_safety():
@@ -32,9 +32,7 @@ def test_reader_with_encoding_instantiation_safety():
     def fn_encoding(incoming):
         return "def-ENC"
 
-    expected_result = (
-        "<TelnetReaderUnicode encoding='def-ENC' " "limit=1999 buflen=0 eof=False>"
-    )
+    expected_result = "<TelnetReaderUnicode encoding='def-ENC' " "limit=1999 buflen=0 eof=False>"
 
     reader = telnetlib3.TelnetReaderUnicode(fn_encoding=fn_encoding, limit=1999)
 
@@ -63,9 +61,7 @@ def test_reader_unicode_eof_safety():
     def fn_encoding(incoming):
         return "def-ENC"
 
-    expected_result = (
-        "<TelnetReaderUnicode encoding='def-ENC' " "limit=65536 buflen=0 eof=True>"
-    )
+    expected_result = "<TelnetReaderUnicode encoding='def-ENC' " "limit=65536 buflen=0 eof=True>"
 
     reader = telnetlib3.TelnetReaderUnicode(fn_encoding=fn_encoding)
     reader.feed_eof()
@@ -471,9 +467,7 @@ async def test_telnet_reader_readuntil_pattern_limit_overrun_buffer_full(
     assert exc_info.value.consumed > limit
 
 
-async def test_telnet_reader_readuntil_pattern_incomplete_read_eof(
-    bind_host, unused_tcp_port
-):
+async def test_telnet_reader_readuntil_pattern_incomplete_read_eof(bind_host, unused_tcp_port):
     """Test IncompleteReadError when EOF occurs before pattern is found."""
     # given
     given_shell_banner = b"Router> some incomplete data\n"
@@ -532,9 +526,7 @@ async def test_telnet_reader_readuntil_pattern_invalid_arguments():
         await reader.readuntil_pattern(re.compile("this is a string pattern"))
 
 
-async def test_telnet_reader_readuntil_pattern_cancelled_error(
-    bind_host, unused_tcp_port
-):
+async def test_telnet_reader_readuntil_pattern_cancelled_error(bind_host, unused_tcp_port):
     """Test CancelledError handling in readuntil_pattern."""
     # given
     given_shell_banner = b"Router> "

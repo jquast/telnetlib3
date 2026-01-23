@@ -1,14 +1,16 @@
 """Module provides class BaseServer."""
 
-import traceback
+# std imports
+import sys
 import asyncio
 import logging
-import datetime
 import weakref
-import sys
+import datetime
+import traceback
 
-from .stream_writer import TelnetWriter, TelnetWriterUnicode
+# local
 from .stream_reader import TelnetReader, TelnetReaderUnicode
+from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
 __all__ = ("BaseServer",)
 
@@ -166,7 +168,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             protocol=self,
             reader=self.reader,
             server=True,
-            **writer_kwds
+            **writer_kwds,
         )
 
         logger.info("Connection from %s", self)
@@ -209,7 +211,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         for byte in data:
             try:
                 recv_inband = self.writer.feed_byte(bytes([byte]))
-            except:
+            except BaseException:
                 self._log_exception(logger.warning, *sys.exc_info())
             else:
                 if recv_inband:
@@ -256,9 +258,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         immediately after connection.  Deriving implementations should always
         call ``super().begin_negotiation()``.
         """
-        self._check_later = asyncio.get_event_loop().call_soon(
-            self._check_negotiation_timer
-        )
+        self._check_later = asyncio.get_event_loop().call_soon(self._check_negotiation_timer)
         self._tasks.append(self._check_later)
 
     def begin_advanced_negotiation(self):
@@ -351,12 +351,8 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     @staticmethod
     def _log_exception(logger, e_type, e_value, e_tb):
-        rows_tbk = [
-            line for line in "\n".join(traceback.format_tb(e_tb)).split("\n") if line
-        ]
-        rows_exc = [
-            line.rstrip() for line in traceback.format_exception_only(e_type, e_value)
-        ]
+        rows_tbk = [line for line in "\n".join(traceback.format_tb(e_tb)).split("\n") if line]
+        rows_exc = [line.rstrip() for line in traceback.format_exception_only(e_type, e_value)]
 
         for line in rows_tbk + rows_exc:
             logger(line)

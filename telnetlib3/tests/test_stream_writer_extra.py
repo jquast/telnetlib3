@@ -1,47 +1,47 @@
 # std imports
+import struct
 import asyncio
 import collections
-import struct
 
 # 3rd party
 import pytest
 
 # local
-from telnetlib3.stream_writer import TelnetWriter
 from telnetlib3 import slc
 from telnetlib3.telopt import (
-    IAC,
+    DO,
+    IS,
     SB,
     SE,
-    IS,
-    REQUEST,
-    SEND,
-    DO,
+    TM,
+    EOR,
+    IAC,
+    SGA,
     DONT,
+    ECHO,
+    NAWS,
+    SEND,
     WILL,
     WONT,
-    ECHO,
-    SGA,
-    BINARY,
-    LINEMODE,
     LFLOW,
-    LFLOW_OFF,
+    TTYPE,
+    BINARY,
+    LOGOUT,
+    STATUS,
+    TSPEED,
+    CHARSET,
+    CMD_EOR,
+    REQUEST,
     LFLOW_ON,
+    LINEMODE,
+    XDISPLOC,
+    LFLOW_OFF,
+    NEW_ENVIRON,
     LFLOW_RESTART_ANY,
     LFLOW_RESTART_XON,
-    STATUS,
-    TTYPE,
-    TSPEED,
-    XDISPLOC,
-    NEW_ENVIRON,
-    CHARSET,
-    NAWS,
-    EOR,
-    CMD_EOR,
-    LOGOUT,
-    TM,
     name_command,
 )
+from telnetlib3.stream_writer import TelnetWriter
 
 
 class MockTransport:
@@ -218,9 +218,7 @@ def test_request_tspeed_and_handle_send_and_is():
     ws2.set_ext_callback(TSPEED, lambda rx, tx: seen.setdefault("v", (rx, tx)))
     payload = b"57600,115200"
     # feed payload as individual bytes, matching expected subnegotiation format
-    buf2 = collections.deque(
-        [TSPEED, IS] + [payload[i : i + 1] for i in range(len(payload))]
-    )
+    buf2 = collections.deque([TSPEED, IS] + [payload[i : i + 1] for i in range(len(payload))])
     ws2._handle_sb_tspeed(buf2)
     assert seen["v"] == (57600, 115200)
 
@@ -240,9 +238,7 @@ def test_handle_sb_charset_request_accept_reject_and_accepted():
     w2.set_ext_send_callback(CHARSET, lambda offers=None: "UTF-8")
     buf2 = collections.deque([CHARSET, REQUEST, sep, offers])
     w2._handle_sb_charset(buf2)
-    assert (
-        t2.writes[-1] == IAC + SB + CHARSET + b"\x02" + b"UTF-8" + IAC + SE
-    )  # ACCEPTED = 2
+    assert t2.writes[-1] == IAC + SB + CHARSET + b"\x02" + b"UTF-8" + IAC + SE  # ACCEPTED = 2
 
     # ACCEPTED -> callback fired
     seen = {}
@@ -294,6 +290,7 @@ def test_handle_sb_ttype_is_and_send():
 
 def _encode_env(env):
     """Helper to encode env dict like _encode_env_buf would, for tests."""
+    # local
     from telnetlib3.stream_writer import _encode_env_buf
 
     return _encode_env_buf(env)
@@ -420,9 +417,7 @@ def test_send_naws_and_handle_naws():
     ws.remote_option[NAWS] = True
     ws.set_ext_callback(NAWS, lambda r, c: seen.setdefault("sz", (r, c)))
     payload2 = struct.pack("!HH", 100, 200)
-    buf2 = collections.deque(
-        [NAWS, payload2[0:1], payload2[1:2], payload2[2:3], payload2[3:4]]
-    )
+    buf2 = collections.deque([NAWS, payload2[0:1], payload2[1:2], payload2[2:3], payload2[3:4]])
     ws._handle_sb_naws(buf2)
     assert seen["sz"] == (200, 100)
 
@@ -515,9 +510,7 @@ def test_handle_subnegotiation_dispatch_and_unhandled():
     # must reflect receipt of WILL NAWS prior to NAWS subnegotiation
     ws.remote_option[NAWS] = True
     payload = struct.pack("!HH", 10, 20)
-    buf = collections.deque(
-        [NAWS, payload[0:1], payload[1:2], payload[2:3], payload[3:4]]
-    )
+    buf = collections.deque([NAWS, payload[0:1], payload[1:2], payload[2:3], payload[3:4]])
     ws._handle_sb_naws(buf)
 
     # unhandled command

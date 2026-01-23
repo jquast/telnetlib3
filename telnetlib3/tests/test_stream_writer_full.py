@@ -1,60 +1,60 @@
 # std imports
+import struct
 import asyncio
 import collections
-import struct
 
 # 3rd party
 import pytest
 
 # local
-from telnetlib3.stream_writer import (
-    TelnetWriter,
-    TelnetWriterUnicode,
-    Option,
-    _escape_environ,
-    _unescape_environ,
-    _encode_env_buf,
-    _decode_env_buf,
-)
 from telnetlib3 import slc
 from telnetlib3.telopt import (
-    IAC,
+    DM,
+    DO,
+    GA,
+    IS,
     SB,
     SE,
-    IS,
-    SEND,
-    REQUEST,
-    ACCEPTED,
-    REJECTED,
-    DO,
+    TM,
+    IAC,
+    NOP,
+    SGA,
     DONT,
+    ECHO,
+    GMCP,
+    INFO,
+    NAWS,
+    SEND,
     WILL,
     WONT,
-    GA,
-    NOP,
-    DM,
-    ECHO,
-    SGA,
-    BINARY,
-    LINEMODE,
     LFLOW,
-    LFLOW_OFF,
-    LFLOW_ON,
-    STATUS,
     TTYPE,
-    TSPEED,
-    XDISPLOC,
-    SNDLOC,
-    NEW_ENVIRON,
-    INFO,
-    CHARSET,
-    NAWS,
-    GMCP,
-    COM_PORT_OPTION,
+    BINARY,
     LOGOUT,
-    TM,
+    SNDLOC,
+    STATUS,
+    TSPEED,
+    CHARSET,
+    REQUEST,
+    ACCEPTED,
+    LFLOW_ON,
+    LINEMODE,
+    REJECTED,
+    XDISPLOC,
+    LFLOW_OFF,
     TTABLE_IS,
+    NEW_ENVIRON,
+    COM_PORT_OPTION,
     theNULL,
+)
+from telnetlib3.stream_writer import (
+    Option,
+    TelnetWriter,
+    TelnetWriterUnicode,
+    _decode_env_buf,
+    _encode_env_buf,
+    _escape_environ,
+    _unescape_environ,
 )
 
 
@@ -380,9 +380,7 @@ def test_handle_sb_tspeed_wrong_side_asserts_and_send_and_is():
     ws2.set_ext_callback(TSPEED, lambda rx, tx: seen.setdefault("v", (rx, tx)))
     payload = b"57600,115200"
     ws2._handle_sb_tspeed(
-        collections.deque(
-            [TSPEED, IS] + [payload[i : i + 1] for i in range(len(payload))]
-        )
+        collections.deque([TSPEED, IS] + [payload[i : i + 1] for i in range(len(payload))])
     )
     assert seen["v"] == (57600, 115200)
 
@@ -502,7 +500,8 @@ def test_option_enabled_and_setitem_debug_path():
 
 def test_escape_unescape_and_env_encode_decode_roundtrip():
     # escaping VAR/USERVAR
-    from telnetlib3.telopt import VAR, USERVAR, ESC, VALUE
+    # local
+    from telnetlib3.telopt import ESC, VAR, VALUE, USERVAR
 
     buf = b"A" + VAR + b"B" + USERVAR + b"C"
     esc = _escape_environ(buf)
@@ -596,9 +595,7 @@ def test_tspeed_is_malformed_values_logged_and_ignored():
     w, t, p = new_writer(server=True)
     w.set_ext_callback(TSPEED, lambda rx, tx: seen.setdefault("v", (rx, tx)))
     payload = b"x,y"  # not integers, triggers ValueError path
-    buf = collections.deque(
-        [TSPEED, IS] + [payload[i : i + 1] for i in range(len(payload))]
-    )
+    buf = collections.deque([TSPEED, IS] + [payload[i : i + 1] for i in range(len(payload))])
     w._handle_sb_tspeed(buf)
     assert "v" not in seen
 

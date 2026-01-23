@@ -1,12 +1,14 @@
-"""Guard shells for connection limiting and robot detection.
+"""
+Guard shells for connection limiting and robot detection.
 
-These shells are used when normal shell access is denied due to connection
-limits or failed robot checks.
+These shells are used when normal shell access is denied due to connection limits or failed robot
+checks.
 """
 
+# std imports
+import re
 import asyncio
 import logging
-import re
 
 __all__ = ("robot_check", "robot_shell", "busy_shell", "ConnectionCounter")
 
@@ -35,7 +37,11 @@ class ConnectionCounter:
         self._count = 0
 
     def try_acquire(self):
-        """Try to acquire a connection slot. Returns True if successful."""
+        """
+        Try to acquire a connection slot.
+
+        Returns True if successful.
+        """
         if self._count < self.limit:
             self._count += 1
             return True

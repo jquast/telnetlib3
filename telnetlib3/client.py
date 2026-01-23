@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
-"""
-Telnet Client API for the 'telnetlib3' python package.
-"""
+"""Telnet Client API for the 'telnetlib3' python package."""
+
 # std imports
-import argparse
-import asyncio
+import os
+import sys
 import codecs
 import struct
-import sys
-import os
+import asyncio
+import argparse
 
+# local
 # local imports
-from telnetlib3 import accessories
-from telnetlib3 import client_base
+from telnetlib3 import accessories, client_base
 
 __all__ = ("TelnetClient", "TelnetTerminalClient", "open_connection")
 
@@ -21,8 +20,8 @@ class TelnetClient(client_base.BaseClient):
     """
     Telnet client that supports all common options.
 
-    This class is useful for automation, it appears to be a virtual terminal to
-    the remote end, but does not require an interactive terminal to run.
+    This class is useful for automation, it appears to be a virtual terminal to the remote end, but
+    does not require an interactive terminal to run.
     """
 
     #: On :meth:`send_env`, the value of 'LANG' will be 'C' for binary
@@ -68,8 +67,15 @@ class TelnetClient(client_base.BaseClient):
 
     def connection_made(self, transport):
         """Callback for connection made to server."""
-        from telnetlib3.telopt import TTYPE, TSPEED, XDISPLOC, NEW_ENVIRON
-        from telnetlib3.telopt import CHARSET, NAWS
+        # local
+        from telnetlib3.telopt import (
+            NAWS,
+            TTYPE,
+            TSPEED,
+            CHARSET,
+            XDISPLOC,
+            NEW_ENVIRON,
+        )
 
         super().connection_made(transport)
 
@@ -98,9 +104,7 @@ class TelnetClient(client_base.BaseClient):
                 and self.writer.remote_option.enabled(CHARSET)
                 and self.writer.local_option.enabled(CHARSET)
             ):
-                self.log.debug(
-                    "Both sides support CHARSET, ready for server to initiate REQUEST"
-                )
+                self.log.debug("Both sides support CHARSET, ready for server to initiate REQUEST")
 
             return result
 
@@ -122,12 +126,10 @@ class TelnetClient(client_base.BaseClient):
         """
         Callback for responding to NEW_ENVIRON requests.
 
-        :param dict keys: Values are requested for the keys specified.
-           When empty, all environment values that wish to be volunteered
-           should be returned.
-        :returns: dictionary of environment values requested, or an
-            empty string for keys not available. A return value must be
-            given for each key requested.
+        :param dict keys: Values are requested for the keys specified. When empty, all environment
+            values that wish to be volunteered should be returned.
+        :returns: dictionary of environment values requested, or an empty string for keys not
+            available. A return value must be given for each key requested.
         :rtype: dict
         """
         env = {
@@ -213,9 +215,7 @@ class TelnetClient(client_base.BaseClient):
                 return offer
 
             # Otherwise reject - keep client's explicit encoding
-            self.log.debug(
-                f"Declining offered charsets {offered}; prefer {desired_name}"
-            )
+            self.log.debug(f"Declining offered charsets {offered}; prefer {desired_name}")
             return ""
 
         # Case 3: No explicit preference, use first viable
@@ -256,8 +256,7 @@ class TelnetClient(client_base.BaseClient):
         """
         if not (outgoing or incoming):
             raise TypeError(
-                "encoding arguments 'outgoing' and 'incoming' "
-                "are required: toggle at least one."
+                "encoding arguments 'outgoing' and 'incoming' " "are required: toggle at least one."
             )
 
         # may we encode in the direction indicated?
@@ -305,6 +304,7 @@ class TelnetTerminalClient(TelnetClient):
     @staticmethod
     def _winsize():
         try:
+            # std imports
             import fcntl
             import termios
 
@@ -469,13 +469,9 @@ def _get_argument_parser():
     )
     parser.add_argument("host", action="store", help="hostname")
     parser.add_argument("port", nargs="?", default=23, type=int, help="port number")
-    parser.add_argument(
-        "--term", default=os.environ.get("TERM", "unknown"), help="terminal type"
-    )
+    parser.add_argument("--term", default=os.environ.get("TERM", "unknown"), help="terminal type")
     parser.add_argument("--loglevel", default="warn", help="log level")
-    parser.add_argument(
-        "--logfmt", default=accessories._DEFAULT_LOGFMT, help="log format"
-    )
+    parser.add_argument("--logfmt", default=accessories._DEFAULT_LOGFMT, help="log format")
     parser.add_argument("--logfile", help="filepath")
     parser.add_argument(
         "--shell", default="telnetlib3.telnet_client_shell", help="module.function_name"
@@ -489,9 +485,7 @@ def _get_argument_parser():
         choices=("replace", "ignore", "strict"),
     )
 
-    parser.add_argument(
-        "--force-binary", action="store_true", help="force encoding", default=True
-    )
+    parser.add_argument("--force-binary", action="store_true", help="force encoding", default=True)
     parser.add_argument(
         "--connect-minwait", default=1.0, type=float, help="shell delay for negotiation"
     )

@@ -1,16 +1,18 @@
 """Module provides class BaseClient."""
 
+# std imports
+import sys
+import asyncio
 import logging
+import weakref
 import datetime
 import traceback
-import asyncio
 import collections
-import weakref
-import sys
 
-from .stream_writer import TelnetWriter, TelnetWriterUnicode
+# local
+from .telopt import theNULL, name_commands
 from .stream_reader import TelnetReader, TelnetReaderUnicode
-from .telopt import name_commands, theNULL
+from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
 __all__ = ("BaseClient",)
 
@@ -161,7 +163,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             protocol=self,
             reader=self.reader,
             client=True,
-            **writer_kwds
+            **writer_kwds,
         )
 
         self.log.info("Connected to %s", self)
@@ -251,9 +253,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         Deriving implementations should always call
         ``super().begin_negotiation()``.
         """
-        self._check_later = asyncio.get_event_loop().call_soon(
-            self._check_negotiation_timer
-        )
+        self._check_later = asyncio.get_event_loop().call_soon(self._check_negotiation_timer)
         self._tasks.append(self._check_later)
 
     def encoding(self, outgoing=False, incoming=False):
@@ -288,7 +288,8 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         Ensure ``super().check_negotiation()`` is called and conditionally
         combined when derived.
         """
-        from .telopt import TTYPE, NEW_ENVIRON, CHARSET, SB
+        # local
+        from .telopt import SB, TTYPE, CHARSET, NEW_ENVIRON
 
         # First check if there are any pending options
         if any(self.writer.pending_option.values()):
@@ -302,9 +303,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         ) and self.writer.local_option.enabled(CHARSET)
 
         # If we have terminal type and either environment or charset info, we can bypass the minwait
-        critical_options_negotiated = have_terminal_type and (
-            have_environ or have_charset
-        )
+        critical_options_negotiated = have_terminal_type and (have_environ or have_charset)
 
         if critical_options_negotiated:
             if final:
@@ -336,9 +335,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         # Precompute SLC trigger set if needed
         slc_vals = None
         if slc_needed:
-            slc_vals = {
-                defn.val[0] for defn in writer.slctab.values() if defn.val != theNULL
-            }
+            slc_vals = {defn.val[0] for defn in writer.slctab.values() if defn.val != theNULL}
 
         n = len(data)
         i = 0
@@ -446,12 +443,8 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     @staticmethod
     def _log_exception(logger, e_type, e_value, e_tb):
-        rows_tbk = [
-            line for line in "\n".join(traceback.format_tb(e_tb)).split("\n") if line
-        ]
-        rows_exc = [
-            line.rstrip() for line in traceback.format_exception_only(e_type, e_value)
-        ]
+        rows_tbk = [line for line in "\n".join(traceback.format_tb(e_tb)).split("\n") if line]
+        rows_exc = [line.rstrip() for line in traceback.format_exception_only(e_type, e_value)]
 
         for line in rows_tbk + rows_exc:
             logger(line)

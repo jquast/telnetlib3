@@ -6,7 +6,7 @@ import pytest
 
 # local
 import telnetlib3
-from telnetlib3.tests.accessories import unused_tcp_port, bind_host
+from telnetlib3.tests.accessories import bind_host, unused_tcp_port
 
 
 def test_writer_instantiation_safety():
@@ -24,17 +24,14 @@ def test_repr():
     """Test writer.__repr__ for client and server viewpoint."""
     srv = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
     clt = telnetlib3.TelnetWriter(transport=None, protocol=None, client=True)
-    assert repr(srv) == (
-        "<TelnetWriter server " "mode:local +lineflow -xon_any +slc_sim>"
-    )
-    assert repr(clt) == (
-        "<TelnetWriter client " "mode:local +lineflow -xon_any +slc_sim>"
-    )
+    assert repr(srv) == ("<TelnetWriter server " "mode:local +lineflow -xon_any +slc_sim>")
+    assert repr(clt) == ("<TelnetWriter client " "mode:local +lineflow -xon_any +slc_sim>")
 
 
 def test_illegal_2byte_iac():
     """Given an illegal 2byte IAC command, raise ValueError."""
     writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
+    # local
     from telnetlib3.telopt import IAC, SGA
 
     writer.feed_byte(IAC)
@@ -45,9 +42,11 @@ def test_illegal_2byte_iac():
 
 def test_legal_2byte_iac():
     """Nothing special about a 2-byte IAC, test wiring a callback."""
-    from telnetlib3.telopt import IAC, NOP
-
+    # std imports
     import threading
+
+    # local
+    from telnetlib3.telopt import IAC, NOP
 
     called = threading.Event()
 
@@ -76,7 +75,8 @@ def test_sb_interrupted():
     # instead of awaiting the unlikely SE, and throwing all intermediary bytes
     # out, we just clear what we have received so far within this so called
     # 'SB', and exit the sb buffering state.
-    from telnetlib3.telopt import IAC, SB, TM, SE
+    # local
+    from telnetlib3.telopt import SB, SE, TM, IAC
 
     writer = telnetlib3.TelnetWriter(
         transport=None,
@@ -111,7 +111,8 @@ def test_sb_interrupted():
 
 async def test_iac_do_twice_replies_once(bind_host, unused_tcp_port):
     """WILL/WONT replied only once for repeated DO."""
-    from telnetlib3.telopt import IAC, DO, WILL, ECHO
+    # local
+    from telnetlib3.telopt import DO, IAC, ECHO, WILL
 
     async def shell(reader, writer):
         writer.close()
@@ -143,6 +144,7 @@ async def test_iac_do_twice_replies_once(bind_host, unused_tcp_port):
 
 async def test_iac_dont_dont(bind_host, unused_tcp_port):
     """WILL/WONT replied only once for repeated DO."""
+    # local
     from telnetlib3.telopt import IAC, DONT, ECHO
 
     async def shell(reader, writer):
@@ -175,6 +177,7 @@ async def test_iac_dont_dont(bind_host, unused_tcp_port):
 
 async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
     """Try a DONT and ensure it cannot be sent twice."""
+    # local
     from telnetlib3.telopt import DONT, ECHO
 
     _waiter_connected = asyncio.Future()
@@ -195,7 +198,7 @@ async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
 
     # say it once,
     result = client_writer.iac(DONT, ECHO)
-    assert result == True
+    assert result
 
     # say it again (this call is suppressed)
     result = client_writer.iac(DONT, ECHO)
@@ -212,7 +215,8 @@ async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
 async def test_slc_simul(bind_host, unused_tcp_port):
     """Test SLC control characters are simulated in kludge mode."""
     # For example, ^C is simulated as IP (Interrupt Process) callback.
-    from telnetlib3.telopt import IAC, DO, WILL, ECHO, SGA
+    # local
+    from telnetlib3.telopt import DO, IAC, SGA, ECHO, WILL
 
     # First, change server state into kludge mode -- Then, send all control
     # characters.  We ensure all of our various callbacks that are simulated
@@ -294,7 +298,8 @@ async def test_slc_simul(bind_host, unused_tcp_port):
 
 async def test_unhandled_do_sends_wont(bind_host, unused_tcp_port):
     """An unhandled DO is denied by WONT."""
-    from telnetlib3.telopt import IAC, DO, NOP, WONT
+    # local
+    from telnetlib3.telopt import DO, IAC, NOP, WONT
 
     given_input_outband = IAC + DO + NOP
     expected_output = IAC + WONT + NOP
@@ -314,9 +319,7 @@ async def test_unhandled_do_sends_wont(bind_host, unused_tcp_port):
 
     # exercise,
     client_writer.write(given_input_outband)
-    result = await asyncio.wait_for(
-        client_reader.readexactly(len(expected_output)), 0.5
-    )
+    result = await asyncio.wait_for(client_reader.readexactly(len(expected_output)), 0.5)
     assert result == expected_output
 
 
@@ -380,6 +383,7 @@ async def test_writelines_unicode(bind_host, unused_tcp_port):
 
 def test_bad_iac():
     """Test using writer.iac for something outside of DO/DONT/WILL/WONT."""
+    # local
     from telnetlib3.telopt import NOP
 
     writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
@@ -389,7 +393,8 @@ def test_bad_iac():
 
 async def test_send_ga(bind_host, unused_tcp_port):
     """Writer sends IAC + GA when SGA is not negotiated."""
-    from telnetlib3.telopt import IAC, GA
+    # local
+    from telnetlib3.telopt import GA, IAC
 
     expected = IAC + GA
 
@@ -418,7 +423,8 @@ async def test_send_ga(bind_host, unused_tcp_port):
 
 async def test_not_send_ga(bind_host, unused_tcp_port):
     """Writer does not send IAC + GA when SGA is negotiated."""
-    from telnetlib3.telopt import IAC, DO, WILL, SGA
+    # local
+    from telnetlib3.telopt import DO, IAC, SGA, WILL
 
     # we requires IAC + DO + SGA, and expect a confirming reply.  We also
     # call writer.send_ga() from the shell, whose result should be False
@@ -478,7 +484,8 @@ async def test_not_send_eor(bind_host, unused_tcp_port):
 
 async def test_send_eor(bind_host, unused_tcp_port):
     """Writer sends IAC + EOR if client requests by DO."""
-    from telnetlib3.telopt import IAC, DO, WILL, CMD_EOR, EOR
+    # local
+    from telnetlib3.telopt import DO, EOR, IAC, WILL, CMD_EOR
 
     given = IAC + DO + EOR
     expected = IAC + WILL + EOR + b"<" + IAC + CMD_EOR + b">"

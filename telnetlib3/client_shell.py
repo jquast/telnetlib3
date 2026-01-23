@@ -1,9 +1,9 @@
 # std imports
-import collections
-import contextlib
-import logging
-import asyncio
 import sys
+import asyncio
+import logging
+import contextlib
+import collections
 
 # local
 from . import accessories
@@ -17,30 +17,28 @@ __all__ = ("telnet_client_shell",)
 if sys.platform == "win32":
 
     async def telnet_client_shell(telnet_reader, telnet_writer):
-        raise NotImplementedError(
-            "win32 not yet supported as telnet client. Please contribute!"
-        )
+        raise NotImplementedError("win32 not yet supported as telnet client. Please contribute!")
 
 else:
-    import termios
+    # std imports
     import os
     import signal
+    import termios
 
     @contextlib.contextmanager
     def _set_tty(fobj, tty_func):
         """
-        return context manager for manipulating stdin tty state.
+        Return context manager for manipulating stdin tty state.
 
-        if stdin is not attached to a terminal, no action is performed
-        before or after yielding.
+        if stdin is not attached to a terminal, no action is performed before or after yielding.
         """
 
     class Terminal(object):
         """
         Context manager that yields (sys.stdin, sys.stdout) for POSIX systems.
 
-        When sys.stdin is a attached to a terminal, it is configured for
-        the matching telnet modes negotiated for the given telnet_writer.
+        When sys.stdin is a attached to a terminal, it is configured for the matching telnet modes
+        negotiated for the given telnet_writer.
         """
 
         ModeDef = collections.namedtuple(
@@ -60,9 +58,7 @@ else:
 
         def __exit__(self, *_):
             if self._istty:
-                termios.tcsetattr(
-                    self._fileno, termios.TCSAFLUSH, list(self._save_mode)
-                )
+                termios.tcsetattr(self._fileno, termios.TCSAFLUSH, list(self._save_mode))
 
         def get_mode(self):
             if self._istty:
@@ -72,9 +68,8 @@ else:
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSAFLUSH, list(mode))
 
         def determine_mode(self, mode):
-            """
-            Return copy of 'mode' with changes suggested for telnet connection.
-            """
+            """Return copy of 'mode' with changes suggested for telnet connection."""
+            # local
             from telnetlib3.telopt import ECHO
 
             if not self.telnet_writer.will_echo:
@@ -104,9 +99,7 @@ else:
             # Disable canonical input (^H and ^C processing),
             # disable any other special control characters,
             # disable checking for INTR, QUIT, and SUSP input.
-            lflag = mode.lflag & ~(
-                termios.ICANON | termios.IEXTEN | termios.ISIG | termios.ECHO
-            )
+            lflag = mode.lflag & ~(termios.ICANON | termios.IEXTEN | termios.ISIG | termios.ECHO)
 
             # Disable post-output processing,
             # such as mapping LF('\n') to CRLF('\r\n') in output.
@@ -132,9 +125,7 @@ else:
             )
 
         async def make_stdio(self):
-            """
-            Return (reader, writer) pair for sys.stdin, sys.stdout.
-            """
+            """Return (reader, writer) pair for sys.stdin, sys.stdout."""
             reader = asyncio.StreamReader()
             reader_protocol = asyncio.StreamReaderProtocol(reader)
 
@@ -165,10 +156,9 @@ else:
         """
         Minimal telnet client shell for POSIX terminals.
 
-        This shell performs minimal tty mode handling when a terminal is
-        attached to standard in (keyboard), notably raw mode is often set
-        and this shell may exit only by disconnect from server, or the
-        escape character, ^].
+        This shell performs minimal tty mode handling when a terminal is attached to standard in
+        (keyboard), notably raw mode is often set and this shell may exit only by disconnect from
+        server, or the escape character, ^].
 
         stdin or stdout may also be a pipe or file, behaving much like nc(1).
         """
@@ -194,6 +184,7 @@ else:
                 try:
 
                     def _send_naws():
+                        # local
                         from .telopt import NAWS
 
                         try:
@@ -227,9 +218,7 @@ else:
             telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
             wait_for = set([stdin_task, telnet_task])
             while wait_for:
-                done, pending = await asyncio.wait(
-                    wait_for, return_when=asyncio.FIRST_COMPLETED
-                )
+                done, pending = await asyncio.wait(wait_for, return_when=asyncio.FIRST_COMPLETED)
 
                 # Prefer handling stdin events first to avoid starvation under heavy output
                 if stdin_task in done:
@@ -291,10 +280,7 @@ else:
                             stdin_task.cancel()
                             wait_for.remove(stdin_task)
                         stdout.write(
-                            (
-                                "\033[m{linesep}Connection closed "
-                                "by foreign host.{linesep}"
-                            )
+                            ("\033[m{linesep}Connection closed " "by foreign host.{linesep}")
                             .format(linesep=linesep)
                             .encode()
                         )
@@ -312,7 +298,5 @@ else:
                                 pass
                     else:
                         stdout.write(out.encode() or b":?!?:")
-                        telnet_task = accessories.make_reader_task(
-                            telnet_reader, size=2**24
-                        )
+                        telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
                         wait_for.add(telnet_task)

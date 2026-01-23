@@ -1,22 +1,25 @@
-"""PTY shell implementation for telnetlib3.
+"""
+PTY shell implementation for telnetlib3.
 
-This module provides the ability to spawn PTY-connected programs (bash, tmux,
-nethack, etc.) for each telnet connection, with proper terminal negotiation
-forwarding.
+This module provides the ability to spawn PTY-connected programs (bash, tmux, nethack, etc.) for
+each telnet connection, with proper terminal negotiation forwarding.
 """
 
-import asyncio
-import errno
-import fcntl
-import logging
+# std imports
+import codecs
 import os
 import pty
+import sys
+import tty
+import errno
+import fcntl
 import signal
 import struct
-import sys
+import asyncio
+import logging
 import termios
-import tty
 
+# local
 from .telopt import NAWS
 
 __all__ = ("make_pty_shell", "pty_shell")
@@ -56,6 +59,8 @@ class PTYSession:
         self._closing = False
         self._output_buffer = b""
         self._in_sync_update = False
+        self._decoder = None
+        self._decoder_charset = None
 
     def start(self):
         """Fork PTY, configure environment, and exec program."""
@@ -304,13 +309,21 @@ class PTYSession:
                     # next sync boundary, or when more data arrives with EAGAIN)
                     break
 
-    def _flush_output(self, data):
-        """Send data to telnet client."""
+    def _flush_output(self, data, final=False):
+        """Send data to telnet client using incremental decoder."""
         if not data:
             return
         charset = self.writer.get_extra_info("charset") or "utf-8"
-        text = data.decode(charset, errors="replace")
-        self.writer.write(text)
+
+        # Get or create incremental decoder, recreating if charset changed
+        if self._decoder is None or self._decoder_charset != charset:
+            self._decoder = codecs.getincrementaldecoder(charset)(errors="replace")
+            self._decoder_charset = charset
+
+        # Decode using incremental decoder - it buffers incomplete sequences
+        text = self._decoder.decode(data, final)
+        if text:
+            self.writer.write(text)
 
     def _flush_remaining(self):
         """Flush remaining buffer after EAGAIN (partial lines, prompts, etc.)."""
@@ -320,9 +333,9 @@ class PTYSession:
 
     def cleanup(self):
         """Kill child process and close PTY fd."""
-        # Flush any remaining output buffer
+        # Flush any remaining output buffer with final=True to emit buffered bytes
         if self._output_buffer:
-            self._flush_output(self._output_buffer)
+            self._flush_output(self._output_buffer, final=True)
             self._output_buffer = b""
 
         if self.master_fd is not None:
