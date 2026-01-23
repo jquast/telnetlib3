@@ -659,7 +659,7 @@ class Telnet:
             else:
                 sys.stdout.flush()
 
-    def expect(self, patterns, timeout=None):
+    def expect(self, list, timeout=None):  # pylint: disable=redefined-builtin
         """
         Read until one from a list of a regular expressions matches.
 
@@ -684,14 +684,14 @@ class Telnet:
         :raises EOFError: When EOF is read and no text was read.
         """
         re = None
-        patterns = patterns[:]
-        indices = range(len(patterns))
+        list = list[:]  # noqa: A001 - stdlib telnetlib compatibility
+        indices = range(len(list))
         for i in indices:
-            if not hasattr(patterns[i], "search"):
+            if not hasattr(list[i], "search"):
                 if not re:
                     # std imports
                     import re  # pylint: disable=import-outside-toplevel
-                patterns[i] = re.compile(patterns[i])
+                list[i] = re.compile(list[i])
         if timeout is not None:
             deadline = _time() + timeout
         with _TelnetSelector() as selector:
@@ -699,7 +699,7 @@ class Telnet:
             while not self.eof:
                 self.process_rawq()
                 for i in indices:
-                    m = patterns[i].search(self.cookedq)
+                    m = list[i].search(self.cookedq)
                     if m:
                         e = m.end()
                         text = self.cookedq[:e]
