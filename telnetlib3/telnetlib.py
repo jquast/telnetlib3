@@ -132,7 +132,7 @@ DONT = bytes([254])
 DO = bytes([253])
 WONT = bytes([252])
 WILL = bytes([251])
-theNULL = bytes([0])
+theNULL = bytes([0])  # pylint: disable=invalid-name
 
 SE = bytes([240])  # Subnegotiation End
 NOP = bytes([241])  # No Operation
@@ -296,7 +296,7 @@ class Telnet:
         if host is not None:
             self.open(host, port, timeout)
 
-    def open(self, host, port=0, timeout=socket._GLOBAL_DEFAULT_TIMEOUT):
+    def open(self, host, port=0, timeout=socket._GLOBAL_DEFAULT_TIMEOUT):  # pylint: disable=protected-access
         """
         Connect to a host.
 
@@ -325,7 +325,7 @@ class Telnet:
         string formatting operator.
         """
         if self.debuglevel > 0:
-            print("Telnet(%s,%s):" % (self.host, self.port), end=" ")
+            print(f"Telnet({self.host},{self.port}):", end=" ")
             if args:
                 print(msg % args)
             else:
@@ -470,6 +470,8 @@ class Telnet:
 
         Raise EOFError if connection closed and no data available. Return b'' if no cooked data
         available otherwise.  Don't block.
+
+        :raises EOFError: When connection is closed and no data available.
         """
         buf = self.cookedq
         self.cookedq = b""
@@ -493,7 +495,7 @@ class Telnet:
         """Provide a callback function called after each receipt of a telnet option."""
         self.option_callback = callback
 
-    def process_rawq(self):
+    def process_rawq(self):  # pylint: disable=too-complex,too-many-branches
         """
         Transfer from raw queue to cooked queue.
 
@@ -511,8 +513,7 @@ class Telnet:
                     if c != IAC:
                         buf[self.sb] = buf[self.sb] + c
                         continue
-                    else:
-                        self.iacseq += c
+                    self.iacseq += c
                 elif len(self.iacseq) == 1:
                     # 'IAC: IAC CMD [OPTION only for WILL/WONT/DO/DONT]'
                     if c in (DO, DONT, WILL, WONT):
@@ -538,7 +539,7 @@ class Telnet:
                             # We can't offer automatic processing of
                             # suboptions. Alas, we should not get any
                             # unless we did a WILL/DO before.
-                            self.msg("IAC %d not recognized" % ord(c))
+                            self.msg(f"IAC {ord(c)} not recognized")
                 elif len(self.iacseq) == 2:
                     cmd = self.iacseq[1:2]
                     self.iacseq = b""
@@ -566,6 +567,8 @@ class Telnet:
         Get next char from raw queue.
 
         Block if no data is immediately available.  Raise EOFError when connection is closed.
+
+        :raises EOFError: When connection is closed.
         """
         if not self.rawq:
             self.fill_rawq()
@@ -610,7 +613,7 @@ class Telnet:
             selector.register(sys.stdin, selectors.EVENT_READ)
 
             while True:
-                for key, events in selector.select():
+                for key, _ in selector.select():
                     if key.fileobj is self:
                         try:
                             text = self.read_eager()
@@ -628,8 +631,7 @@ class Telnet:
 
     def mt_interact(self):
         """Multithreaded version of interact()."""
-        # std imports
-        import _thread
+        import _thread  # pylint: disable=import-outside-toplevel
 
         _thread.start_new_thread(self.listener, ())
         while 1:
@@ -651,7 +653,7 @@ class Telnet:
             else:
                 sys.stdout.flush()
 
-    def expect(self, list, timeout=None):
+    def expect(self, patterns, timeout=None):  # pylint: disable=redefined-builtin
         """
         Read until one from a list of a regular expressions matches.
 
@@ -672,16 +674,17 @@ class Telnet:
         If a regular expression ends with a greedy match (e.g. '.*')
         or if more than one expression can match the same input, the
         results are undeterministic, and may depend on the I/O timing.
+
+        :raises EOFError: When EOF is read and no text was read.
         """
         re = None
-        list = list[:]
-        indices = range(len(list))
+        patterns = patterns[:]
+        indices = range(len(patterns))
         for i in indices:
-            if not hasattr(list[i], "search"):
+            if not hasattr(patterns[i], "search"):
                 if not re:
-                    # std imports
-                    import re
-                list[i] = re.compile(list[i])
+                    import re  # pylint: disable=import-outside-toplevel
+                patterns[i] = re.compile(patterns[i])
         if timeout is not None:
             deadline = _time() + timeout
         with _TelnetSelector() as selector:
@@ -689,7 +692,7 @@ class Telnet:
             while not self.eof:
                 self.process_rawq()
                 for i in indices:
-                    m = list[i].search(self.cookedq)
+                    m = patterns[i].search(self.cookedq)
                     if m:
                         e = m.end()
                         text = self.cookedq[:e]
@@ -701,8 +704,7 @@ class Telnet:
                     if not ready:
                         if timeout < 0:
                             break
-                        else:
-                            continue
+                        continue
                 self.fill_rawq()
         text = self.read_very_lazy()
         if not text and self.eof:
@@ -712,7 +714,7 @@ class Telnet:
     def __enter__(self):
         return self
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(self, type, value, traceback):  # pylint: disable=redefined-builtin
         self.close()
 
 

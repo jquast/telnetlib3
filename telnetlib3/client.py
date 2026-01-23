@@ -30,7 +30,7 @@ class TelnetClient(client_base.BaseClient):
     #: full default LANG value of 'en_US.utf8'
     DEFAULT_LOCALE = "en_US"
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-positional-arguments,keyword-arg-before-vararg
         self,
         term="unknown",
         cols=80,
@@ -61,7 +61,7 @@ class TelnetClient(client_base.BaseClient):
                 "cols": cols,
                 "rows": rows,
                 "term": term,
-                "tspeed": "{},{}".format(*tspeed),
+                "tspeed": f"{tspeed[0]},{tspeed[1]}",
                 "xdisploc": xdisploc,
             }
         )
@@ -73,7 +73,7 @@ class TelnetClient(client_base.BaseClient):
         Wire up telnet option callbacks for terminal type, speed, display, environment, window size,
         and character set negotiation.
         """
-        # local
+        # pylint: disable=import-outside-toplevel
         from telnetlib3.telopt import NAWS, TTYPE, TSPEED, CHARSET, XDISPLOC, NEW_ENVIRON
 
         super().connection_made(transport)
@@ -255,7 +255,7 @@ class TelnetClient(client_base.BaseClient):
         """
         if not (outgoing or incoming):
             raise TypeError(
-                "encoding arguments 'outgoing' and 'incoming' " "are required: toggle at least one."
+                "encoding arguments 'outgoing' and 'incoming' are required: toggle at least one."
             )
 
         # may we encode in the direction indicated?
@@ -303,9 +303,8 @@ class TelnetTerminalClient(TelnetClient):
     @staticmethod
     def _winsize():
         try:
-            # std imports
-            import fcntl
-            import termios
+            import fcntl  # pylint: disable=import-outside-toplevel
+            import termios  # pylint: disable=import-outside-toplevel
 
             fmt = "hhhh"
             buf = "\x00" * struct.calcsize(fmt)
@@ -320,7 +319,7 @@ class TelnetTerminalClient(TelnetClient):
             )
 
 
-async def open_connection(
+async def open_connection(  # pylint: disable=too-many-locals
     host=None,
     port=23,
     *,
@@ -379,10 +378,6 @@ async def open_connection(
         :rfc:`1079`.
     :param str xdisploc: String transmitted in response for request of
         XDISPLOC, :rfc:`1086` by server (X11).
-    :param shell: A async function that is called after negotiation completes,
-        receiving arguments ``(reader, writer)``.  The reader is a
-        :class:`~.TelnetReader` instance, the writer is a
-        :class:`~.TelnetWriter` instance.
     :param float connect_minwait: The client allows any additional telnet
         negotiations to be demanded by the server within this period of time
         before launching the shell.  Servers should assert desired negotiation
@@ -396,6 +391,12 @@ async def open_connection(
         greater of this value has elapsed.  A client that is not answering
         option negotiation will delay the start of the shell by this amount.
 
+    :param bool force_binary: When ``True``, the encoding is used regardless
+        of BINARY mode negotiation.
+    :param asyncio.Future waiter_closed: Future that completes when the
+        connection is closed.
+    :param callable shell: An async function that is called after negotiation completes,
+        receiving arguments ``(reader, writer)``.
     :param int limit: The buffer limit for reader stream.
     :return (reader, writer): The reader is a :class:`~.TelnetReader`
         instance, the writer is a :class:`~.TelnetWriter` instance.
@@ -423,7 +424,7 @@ async def open_connection(
             limit=limit,
         )
 
-    transport, protocol = await asyncio.get_event_loop().create_connection(
+    _, protocol = await asyncio.get_event_loop().create_connection(
         connection_factory,
         host,
         port,
@@ -432,30 +433,37 @@ async def open_connection(
         local_addr=local_addr,
     )
 
-    await protocol._waiter_connected
+    await protocol._waiter_connected  # pylint: disable=protected-access
 
     return protocol.reader, protocol.writer
 
 
 async def run_client():
     """Command-line 'telnetlib3-client' entry point, via setuptools."""
-    kwargs = _transform_args(_get_argument_parser().parse_args())
-    config_msg = "Client configuration: {key_values}".format(
-        key_values=accessories.repr_mapping(kwargs)
-    )
-    host = kwargs.pop("host")
-    port = kwargs.pop("port")
+    args = _transform_args(_get_argument_parser().parse_args())
+    config_msg = f"Client configuration: {accessories.repr_mapping(args)}"
 
     log = accessories.make_logger(
         name=__name__,
-        loglevel=kwargs.pop("loglevel"),
-        logfile=kwargs.pop("logfile"),
-        logfmt=kwargs.pop("logfmt"),
+        loglevel=args["loglevel"],
+        logfile=args["logfile"],
+        logfmt=args["logfmt"],
     )
     log.debug(config_msg)
 
+    # Build connection kwargs explicitly to avoid pylint false positive
+    connection_kwargs = {
+        "encoding": args["encoding"],
+        "tspeed": args["tspeed"],
+        "shell": args["shell"],
+        "term": args["term"],
+        "force_binary": args["force_binary"],
+        "encoding_errors": args["encoding_errors"],
+        "connect_minwait": args["connect_minwait"],
+    }
+
     # connect
-    reader, writer = await open_connection(host, port, **kwargs)
+    _, writer = await open_connection(args["host"], args["port"], **connection_kwargs)
 
     # repl loop
     await writer.protocol.waiter_closed
@@ -470,6 +478,7 @@ def _get_argument_parser():
     parser.add_argument("port", nargs="?", default=23, type=int, help="port number")
     parser.add_argument("--term", default=os.environ.get("TERM", "unknown"), help="terminal type")
     parser.add_argument("--loglevel", default="warn", help="log level")
+    # pylint: disable=protected-access
     parser.add_argument("--logfmt", default=accessories._DEFAULT_LOGFMT, help="log format")
     parser.add_argument("--logfile", help="filepath")
     parser.add_argument(
@@ -515,6 +524,7 @@ def _transform_args(args):
 
 
 def main():
+    """Entry point for telnetlib3-client command."""
     asyncio.run(run_client())
 
 

@@ -60,7 +60,7 @@ async def relay_shell(client_reader, client_writer):
         return
 
     # connect to another telnet server (next_host, next_port)
-    client_writer.write("Connecting to {}:{} ... ".format(next_host, next_port))
+    client_writer.write(f"Connecting to {next_host}:{next_port} ... ")
     server_reader, server_writer = await open_connection(
         next_host,
         next_port,
@@ -74,7 +74,7 @@ async def relay_shell(client_reader, client_writer):
     server_stdout = make_reader_task(server_reader)
     wait_for = {client_stdin, server_stdout}
     while wait_for:
-        done, remaining = await asyncio.wait(wait_for, return_when=asyncio.FIRST_COMPLETED)
+        done, _ = await asyncio.wait(wait_for, return_when=asyncio.FIRST_COMPLETED)
         while done:
             task = done.pop()
             wait_for.remove(task)

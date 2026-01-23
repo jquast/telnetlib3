@@ -34,7 +34,7 @@ SB = b"\xfa"
 LOGOUT = b"\x12"
 CHARSET = b"*"
 SNDLOC = b"\x17"
-theNULL = b"\x00"
+theNULL = b"\x00"  # pylint: disable=invalid-name
 ENCRYPT = b"&"
 AUTHENTICATION = b"%"
 TN3270E = b"("
@@ -180,12 +180,11 @@ MCCP_COMPRESS, MCCP2_COMPRESS = (bytes([85]), bytes([86]))
 GMCP = bytes([201])
 
 #: List of globals that may match an iac command option bytes
-_DEBUG_OPTS = dict(
-    [
-        (value, key)
-        for key, value in globals().items()
-        if key
-        in (
+_DEBUG_OPTS = {
+    value: key
+    for key, value in globals().items()
+    if key
+    in (
             "LINEMODE",
             "LMODE_FORWARDMASK",
             "NAWS",
@@ -265,8 +264,7 @@ _DEBUG_OPTS = dict(
             "NAOVTD",
             "NAOLFD",
         )
-    ]
-)
+}
 
 
 def name_command(byte):

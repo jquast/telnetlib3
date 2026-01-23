@@ -26,8 +26,9 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     _transport = None
     _advanced = False
     _closing = False
+    _check_later = None
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-positional-arguments
         self,
         shell=None,
         _waiter_connected=None,
@@ -47,7 +48,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self.default_encoding = encoding
         self._encoding_errors = encoding_errors
         self.force_binary = force_binary
-        self._extra = dict()
+        self._extra = {}
 
         self._reader_factory = reader_factory
         self._reader_factory_encoding = reader_factory_encoding
@@ -104,13 +105,13 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         for task in self._tasks:
             try:
                 task.cancel()
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 pass
         # drop references to scheduled tasks/callbacks
         self._tasks.clear()
         try:
             self._waiter_connected.remove_done_callback(self.begin_shell)
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             pass
 
         # close transport (may already be closed), set _waiter_closed and
@@ -120,7 +121,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             try:
                 if hasattr(self._transport, "set_protocol"):
                     self._transport.set_protocol(asyncio.Protocol())
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 pass
             self._transport.close()
         if not self._waiter_connected.cancelled() and not self._waiter_connected.done():
@@ -177,7 +178,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._waiter_connected.add_done_callback(self.begin_shell)
         asyncio.get_event_loop().call_soon(self.begin_negotiation)
 
-    def begin_shell(self, result):
+    def begin_shell(self, _result):
         """Start the shell coroutine after negotiation completes."""
         if self.shell is not None:
             coro = self.shell(self.reader, self.writer)
@@ -195,6 +196,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
                 def _on_shell_done(_fut):
                     self_ = ref_self()
+                    # pylint: disable=protected-access
                     if self_ is not None and self_._waiter_closed is not None:
                         self_._waiter_closed.set_result(weakref.proxy(self_))
 
@@ -213,7 +215,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         for byte in data:
             try:
                 recv_inband = self.writer.feed_byte(bytes([byte]))
-            except BaseException:
+            except BaseException:  # pylint: disable=broad-exception-caught
                 self._log_exception(logger.warning, *sys.exc_info())
             else:
                 if recv_inband:
@@ -244,7 +246,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     def __repr__(self):
         hostport = self.get_extra_info("peername", ["-", "closing"])[:2]
-        return "<Peer {0} {1}>".format(*hostport)
+        return f"<Peer {hostport[0]} {hostport[1]}>"
 
     def get_extra_info(self, name, default=None):
         """Get optional server protocol or transport information."""
@@ -275,7 +277,6 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         Only called if sub-classing :meth:`begin_negotiation` causes
         at least one negotiation option to be affirmatively acknowledged.
         """
-        pass
 
     def encoding(self, outgoing=False, incoming=False):
         """
@@ -304,7 +305,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         client_will = sum(enabled for _, enabled in self.writer.local_option.items())
         return bool(server_do or client_will)
 
-    def check_negotiation(self, final=False):
+    def check_negotiation(self, final=False):  # pylint: disable=unused-argument
         """
         Callback, return whether negotiation is complete.
 
@@ -339,10 +340,10 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         final = bool(later < 0)
 
         if self.check_negotiation(final=final):
-            logger.debug("negotiation complete after {:1.2f}s.".format(self.duration))
+            logger.debug("negotiation complete after %1.2fs.", self.duration)
             self._waiter_connected.set_result(weakref.proxy(self))
         elif final:
-            logger.debug("negotiation failed after {:1.2f}s.".format(self.duration))
+            logger.debug("negotiation failed after %1.2fs.", self.duration)
             self._waiter_connected.set_result(weakref.proxy(self))
         else:
             # keep re-queuing until complete
@@ -352,9 +353,9 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             self._tasks.append(self._check_later)
 
     @staticmethod
-    def _log_exception(logger, e_type, e_value, e_tb):
+    def _log_exception(log, e_type, e_value, e_tb):
         rows_tbk = [line for line in "\n".join(traceback.format_tb(e_tb)).split("\n") if line]
         rows_exc = [line.rstrip() for line in traceback.format_exception_only(e_type, e_value)]
 
         for line in rows_tbk + rows_exc:
-            logger(line)
+            log(line)

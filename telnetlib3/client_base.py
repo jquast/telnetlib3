@@ -31,8 +31,9 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     _reader_factory_encoding = TelnetReaderUnicode
     _writer_factory = TelnetWriter
     _writer_factory_encoding = TelnetWriterUnicode
+    _check_later = None
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-positional-arguments
         self,
         shell=None,
         encoding="utf8",
@@ -52,7 +53,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self.default_encoding = encoding
         self._encoding_errors = encoding_errors
         self.force_binary = force_binary
-        self._extra = dict()
+        self._extra = {}
         self.waiter_closed = waiter_closed or asyncio.Future()
         #: a future used for testing
         self._waiter_connected = _waiter_connected or asyncio.Future()
@@ -154,7 +155,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         # Attach transport so TelnetReader can apply pause_reading/resume_reading
         try:
             self.reader.set_transport(transport)
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             # Reader may not support transport coupling; ignore.
             pass
 
@@ -171,7 +172,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._waiter_connected.add_done_callback(self.begin_shell)
         asyncio.get_event_loop().call_soon(self.begin_negotiation)
 
-    def begin_shell(self, result):
+    def begin_shell(self, _result):
         """Start the shell coroutine after negotiation completes."""
         if self.shell is not None:
             coro = self.shell(self.reader, self.writer)
@@ -218,7 +219,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             try:
                 self._transport.pause_reading()
                 self._reading_paused = True
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 # Some transports may not support pause_reading; ignore.
                 pass
 
@@ -238,7 +239,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     def __repr__(self):
         hostport = self.get_extra_info("peername", ["-", "closing"])[:2]
-        return "<Peer {0} {1}>".format(*hostport)
+        return f"<Peer {hostport[0]} {hostport[1]}>"
 
     def get_extra_info(self, name, default=None):
         """Get optional client protocol or transport information."""
@@ -292,7 +293,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         Ensure ``super().check_negotiation()`` is called and conditionally
         combined when derived.
         """
-        # local
+        # pylint: disable=import-outside-toplevel
         from .telopt import TTYPE, CHARSET, NEW_ENVIRON
 
         # First check if there are any pending options
@@ -330,7 +331,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         # Snapshot whether SLC snooping is required for this chunk
         try:
             mode = writer.mode  # property
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             mode = "local"
         slc_needed = (mode == "remote") or (mode == "kludge" and writer.slc_simulated)
 
@@ -364,7 +365,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             b = data[i]
             try:
                 recv_inband = writer.feed_byte(_ONE_BYTE[b])
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 self._log_exception(self.log.warning, *sys.exc_info())
             else:
                 if recv_inband:
@@ -401,7 +402,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                     try:
                         self._transport.resume_reading()
                         self._reading_paused = False
-                    except Exception:
+                    except Exception:  # pylint: disable=broad-exception-caught
                         pass
 
                 # Yield periodically to keep loop responsive without excessive context switching
@@ -422,16 +423,16 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         final = bool(later < 0)
 
         if self.check_negotiation(final=final):
-            self.log.debug("negotiation complete after {:1.2f}s.".format(self.duration))
+            self.log.debug("negotiation complete after %1.2fs.", self.duration)
             self._waiter_connected.set_result(weakref.proxy(self))
         elif final:
-            self.log.debug("negotiation failed after {:1.2f}s.".format(self.duration))
+            self.log.debug("negotiation failed after %1.2fs.", self.duration)
             _failed = [
                 name_commands(cmd_option)
                 for (cmd_option, pending) in self.writer.pending_option.items()
                 if pending
             ]
-            self.log.debug("failed-reply: {0!r}".format(", ".join(_failed)))
+            self.log.debug("failed-reply: %r", ", ".join(_failed))
             self._waiter_connected.set_result(weakref.proxy(self))
         else:
             # keep re-queuing until complete.  Aggressively re-queue until

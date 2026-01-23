@@ -1,5 +1,7 @@
 """Telnet client shell implementations for interactive terminal sessions."""
 
+# pylint: disable=too-complex
+
 # std imports
 import sys
 import asyncio
@@ -26,7 +28,7 @@ else:
     import signal
     import termios
 
-    class Terminal(object):
+    class Terminal:
         """
         Context manager for terminal mode handling on POSIX systems.
 
@@ -42,6 +44,7 @@ else:
             self.telnet_writer = telnet_writer
             self._fileno = sys.stdin.fileno()
             self._istty = os.path.sameopenfile(0, 1)
+            self._save_mode = None
 
         def __enter__(self):
             self._save_mode = self.get_mode()
@@ -54,10 +57,13 @@ else:
                 termios.tcsetattr(self._fileno, termios.TCSAFLUSH, list(self._save_mode))
 
         def get_mode(self):
+            """Return current terminal mode if attached to a tty, otherwise None."""
             if self._istty:
                 return self.ModeDef(*termios.tcgetattr(self._fileno))
+            return None
 
         def set_mode(self, mode):
+            """Set terminal mode attributes."""
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSAFLUSH, list(mode))
 
         def determine_mode(self, mode):
@@ -142,6 +148,7 @@ else:
 
             return reader, writer
 
+    # pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-many-nested-blocks
     async def telnet_client_shell(telnet_reader, telnet_writer):
         """
         Minimal telnet client shell for POSIX terminals.
@@ -156,13 +163,12 @@ else:
 
         with Terminal(telnet_writer=telnet_writer) as term:
             linesep = "\n"
-            if term._istty and telnet_writer.will_echo:
+            if term._istty and telnet_writer.will_echo:  # pylint: disable=protected-access
                 linesep = "\r\n"
             stdin, stdout = await term.make_stdio()
             stdout.write(
-                "Escape character is '{escape}'.{linesep}".format(
-                    escape=accessories.name_unicode(keyboard_escape), linesep=linesep
-                ).encode()
+                f"Escape character is '{accessories.name_unicode(keyboard_escape)}'.{linesep}"
+                .encode()
             )
 
             # Setup SIGWINCH handler to send NAWS on terminal resize (POSIX only).
@@ -170,21 +176,19 @@ else:
             loop = asyncio.get_event_loop()
             winch_pending = {"h": None}
             remove_winch = False
-            if term._istty:
+            if term._istty:  # pylint: disable=protected-access
                 try:
 
                     def _send_naws():
-                        # local
-                        from .telopt import NAWS
+                        from .telopt import NAWS  # pylint: disable=import-outside-toplevel
 
-                        try:
+                        try:  # pylint: disable=broad-exception-caught
                             if (
                                 telnet_writer.local_option.enabled(NAWS)
                                 and not telnet_writer.is_closing()
                             ):
-                                telnet_writer._send_naws()
-                        except Exception:
-                            # Avoid surfacing errors from signal context
+                                telnet_writer._send_naws()  # pylint: disable=protected-access
+                        except Exception:  # pylint: disable=broad-exception-caught
                             pass
 
                     def _on_winch():
@@ -192,23 +196,21 @@ else:
                         if h is not None and not h.cancelled():
                             try:
                                 h.cancel()
-                            except Exception:
+                            except Exception:  # pylint: disable=broad-exception-caught
                                 pass
-                        # small delay to debounce rapid resize events
                         winch_pending["h"] = loop.call_later(0.05, _send_naws)
 
                     if hasattr(signal, "SIGWINCH"):
                         loop.add_signal_handler(signal.SIGWINCH, _on_winch)
                         remove_winch = True
-                except Exception:
-                    # add_signal_handler may be unsupported in some environments
+                except Exception:  # pylint: disable=broad-exception-caught
                     remove_winch = False
 
             stdin_task = accessories.make_reader_task(stdin)
             telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
             wait_for = set([stdin_task, telnet_task])
             while wait_for:
-                done, pending = await asyncio.wait(wait_for, return_when=asyncio.FIRST_COMPLETED)
+                done, _ = await asyncio.wait(wait_for, return_when=asyncio.FIRST_COMPLETED)
 
                 # Prefer handling stdin events first to avoid starvation under heavy output
                 if stdin_task in done:
@@ -228,33 +230,30 @@ else:
                             # on ^], close connection to remote host
                             try:
                                 telnet_writer.close()
-                            except Exception:
+                            except Exception:  # pylint: disable=broad-exception-caught
                                 pass
                             if telnet_task in wait_for:
                                 telnet_task.cancel()
                                 wait_for.remove(telnet_task)
                             stdout.write(
-                                "\033[m{linesep}Connection closed.{linesep}".format(
-                                    linesep=linesep
-                                ).encode()
+                                f"\033[m{linesep}Connection closed.{linesep}".encode()
                             )
                             # Cleanup resize handler on local escape close
-                            if term._istty and remove_winch:
+                            if term._istty and remove_winch:  # pylint: disable=protected-access
                                 try:
                                     loop.remove_signal_handler(signal.SIGWINCH)
-                                except Exception:
+                                except Exception:  # pylint: disable=broad-exception-caught
                                     pass
                             h = winch_pending.get("h")
                             if h is not None:
                                 try:
                                     h.cancel()
-                                except Exception:
+                                except Exception:  # pylint: disable=broad-exception-caught
                                     pass
                             break
-                        else:
-                            telnet_writer.write(inp.decode())
-                            stdin_task = accessories.make_reader_task(stdin)
-                            wait_for.add(stdin_task)
+                        telnet_writer.write(inp.decode())
+                        stdin_task = accessories.make_reader_task(stdin)
+                        wait_for.add(stdin_task)
                     else:
                         telnet_writer.log.debug("EOF from client stdin")
 
@@ -265,26 +264,25 @@ else:
                     # TODO: We should not require to check for '_eof' value,
                     # but for some systems, htc.zapto.org, it is required,
                     # where b'' is received even though connection is on?.
-                    if not out and telnet_reader._eof:
+                    if not out and telnet_reader._eof:  # pylint: disable=protected-access
                         if stdin_task in wait_for:
                             stdin_task.cancel()
                             wait_for.remove(stdin_task)
                         stdout.write(
-                            ("\033[m{linesep}Connection closed " "by foreign host.{linesep}")
-                            .format(linesep=linesep)
+                            f"\033[m{linesep}Connection closed by foreign host.{linesep}"
                             .encode()
                         )
                         # Cleanup resize handler on remote close
-                        if term._istty and remove_winch:
+                        if term._istty and remove_winch:  # pylint: disable=protected-access
                             try:
                                 loop.remove_signal_handler(signal.SIGWINCH)
-                            except Exception:
+                            except Exception:  # pylint: disable=broad-exception-caught
                                 pass
                         h = winch_pending.get("h")
                         if h is not None:
                             try:
                                 h.cancel()
-                            except Exception:
+                            except Exception:  # pylint: disable=broad-exception-caught
                                 pass
                     else:
                         stdout.write(out.encode() or b":?!?:")

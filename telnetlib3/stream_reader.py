@@ -64,7 +64,7 @@ class TelnetReader:
         if self._paused:
             info.append("paused")
         info.append("encoding=False")
-        return "<{}>".format(" ".join(info))
+        return f"<{' '.join(info)}>"
 
     def exception(self):
         """Return the exception if set, otherwise None."""
@@ -187,6 +187,10 @@ class TelnetReader:
 
         If the data cannot be read because of over limit, a LimitOverrunError exception  will be
         raised, and the data will be left in the internal buffer, so it can be read again.
+
+        :raises ValueError: If separator is empty.
+        :raises LimitOverrunError: If separator is not found and buffer exceeds limit.
+        :raises IncompleteReadError: If EOF is reached before separator is found.
         """
         seplen = len(separator)
         if seplen == 0:
@@ -276,6 +280,10 @@ class TelnetReader:
 
         If the data cannot be read because of over limit, a LimitOverrunError exception will be
         raised, and the data will be left in the internal buffer, so it can be read again.
+
+        :raises ValueError: If pattern is None, not a re.Pattern, or not a bytes pattern.
+        :raises LimitOverrunError: If pattern is not found and buffer exceeds limit.
+        :raises IncompleteReadError: If EOF is reached before pattern is found.
         """
         if pattern is None or not isinstance(pattern, re.Pattern):
             raise ValueError("pattern should be a re.Pattern object")
@@ -391,6 +399,9 @@ class TelnetReader:
 
         If stream was paused, this function will automatically resume it if
         needed.
+
+        :raises ValueError: If n is negative.
+        :raises IncompleteReadError: If EOF is reached before n bytes are read.
         """
         if n < 0:
             raise ValueError("readexactly size can not be less than zero")
@@ -540,6 +551,13 @@ class TelnetReader:
 
 
 class TelnetReaderUnicode(TelnetReader):
+    """
+    Unicode-decoding Telnet stream reader.
+
+    Extends TelnetReader to provide automatic decoding of bytes to unicode strings
+    using a configurable encoding determined by callback function.
+    """
+
     #: Late-binding instance of :class:`codecs.IncrementalDecoder`, some
     #: bytes may be lost if the protocol's encoding is changed after
     #: previously receiving a partial multibyte.  This isn't common in
@@ -569,6 +587,7 @@ class TelnetReaderUnicode(TelnetReader):
         encoding = self.fn_encoding(incoming=True)
 
         # late-binding,
+        # pylint: disable=protected-access
         if self._decoder is None or encoding != self._decoder._encoding:
             self._decoder = codecs.getincrementaldecoder(encoding)(errors=self.encoding_errors)
             self._decoder._encoding = encoding
@@ -614,9 +633,8 @@ class TelnetReaderUnicode(TelnetReader):
                 blocks.append(block)
             return "".join(blocks)
 
-        else:
-            if not self._buffer and not self._eof:
-                await self._wait_for_data("read")
+        if not self._buffer and not self._eof:
+            await self._wait_for_data("read")
 
         buf = self.decode(bytes(self._buffer))
         if n < 0 or len(buf) <= n:

@@ -193,13 +193,12 @@ class PTYSession:
                 except OSError as e:
                     if e.errno == errno.EAGAIN:
                         break  # No more data available
-                    elif e.errno == errno.EIO:
+                    if e.errno == errno.EIO:
                         self._closing = True
                         break
-                    else:
-                        logger.debug("PTY read error: %s", e)
-                        self._closing = True
-                        break
+                    logger.debug("PTY read error: %s", e)
+                    self._closing = True
+                    break
             if chunks:
                 pty_data_queue.put_nowait(b"".join(chunks))
             pty_read_event.set()
@@ -250,7 +249,7 @@ class PTYSession:
                         # EAGAIN was hit - flush any remaining partial line
                         self._flush_remaining()
                         pty_read_event.clear()
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-exception-caught
                     logger.debug("bridge loop error: %s", e)
                     self._closing = True
                     break
@@ -379,10 +378,10 @@ async def pty_shell(reader, writer, program, args=None):
     """
     PTY shell callback for telnet server.
 
-    :param reader: TelnetReader instance.
-    :param writer: TelnetWriter instance.
-    :param program: Path to program to execute.
-    :param args: List of arguments for the program.
+    :param TelnetReader reader: TelnetReader instance.
+    :param TelnetWriter writer: TelnetWriter instance.
+    :param str program: Path to program to execute.
+    :param list args: List of arguments for the program.
     """
     _platform_check()
 
@@ -402,8 +401,8 @@ def make_pty_shell(program, args=None):
     """
     Factory returning a shell callback for PTY execution.
 
-    :param program: Path to program to execute.
-    :param args: List of arguments for the program.
+    :param str program: Path to program to execute.
+    :param list args: List of arguments for the program.
     :returns: Async shell callback suitable for use with create_server().
 
     Example usage::
