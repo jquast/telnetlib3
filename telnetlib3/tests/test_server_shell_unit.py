@@ -90,6 +90,7 @@ def test_get_slcdata_contains_expected_sections():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="Terminal class not available on Windows")
 async def test_terminal_determine_mode_no_echo_returns_same(monkeypatch):
     # Build a dummy telnet_writer with will_echo False
     class TW:
@@ -119,6 +120,7 @@ async def test_terminal_determine_mode_no_echo_returns_same(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="Terminal class not available on Windows")
 async def test_terminal_determine_mode_will_echo_adjusts_flags(monkeypatch):
     # Build a dummy telnet_writer with will_echo True
     class TW:

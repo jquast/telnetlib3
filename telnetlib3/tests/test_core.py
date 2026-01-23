@@ -420,6 +420,7 @@ async def test_telnet_server_as_module():
     await proc.wait()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Signal handlers not supported on Windows")
 async def test_telnet_server_cmdline(bind_host, unused_tcp_port):
     """Test executing telnetlib3/server.py as server."""
     # local
@@ -474,6 +475,7 @@ async def test_telnet_client_as_module():
     await proc.wait()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Client shell not implemented on Windows")
 async def test_telnet_client_cmdline(bind_host, unused_tcp_port):
     """Test executing telnetlib3/client.py as client."""
     # local
@@ -544,6 +546,7 @@ async def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port):
         )
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Client shell not implemented on Windows")
 async def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port):
     """Test sending data through command-line client (by os PIPE)."""
     # local
