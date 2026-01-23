@@ -204,6 +204,7 @@ Example session::
                              [--timeout TIMEOUT]
                              [--connect-maxwait CONNECT_MAXWAIT]
                              [--pty-exec PROGRAM]
+                             [--robot-check] [--pty-fork-limit N]
                              [host] [port] [-- ARG ...]
 
     Telnet protocol server
@@ -226,6 +227,8 @@ Example session::
                             timeout for pending negotiation (default: 4.0)
       --pty-exec PROGRAM    execute PROGRAM in a PTY for each connection
                             (use -- to pass args to PROGRAM)
+      --robot-check         check if client can render wide unicode (default: False)
+      --pty-fork-limit N    limit concurrent PTY connections (default: 0, unlimited)
 
 PTY Execution
 ~~~~~~~~~~~~~
@@ -246,6 +249,30 @@ Arguments after ``--`` are passed to the program, for example, to execute python
 with argument of a script as a subprocess::
 
     telnetlib3-server --pty-exec $(which python) -- ../blessed/bin/cellestial.py
+
+Connection Guards
+~~~~~~~~~~~~~~~~~
+
+The server supports two guard mechanisms to protect resources:
+
+**Robot Check** (``--robot-check``): Tests whether the connecting client can
+properly render wide Unicode characters. This uses cursor position reporting
+(CPR) to measure if a wide character (U+231A ⌚) renders as width 2. Clients
+that fail (bots, basic scripts, broken terminals) are redirected to a
+philosophical shell that asks questions and logs responses before disconnecting.
+
+**Connection Limit** (``--pty-fork-limit N``): Limits the number of concurrent
+PTY connections. When the limit is reached, new connections are redirected to
+a "busy" shell that displays a message, logs any input, and disconnects. This
+is useful for resource-constrained servers running memory-intensive programs.
+
+Example with both guards enabled, limiting to 4 concurrent connections::
+
+    telnetlib3-server --robot-check --pty-fork-limit 4 --pty-exec /bin/bash -- --login
+
+Guard shells log all input at INFO level, useful for monitoring connection
+attempts. Input is limited to 2KB per read with timeouts (10s for robot check,
+30s for busy shell).
 
 Encoding
 --------

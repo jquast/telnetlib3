@@ -14,6 +14,8 @@ from .telnetlib import *  # noqa
 from .slc import *  # noqa
 from . import pty_shell as _pty_shell_module
 from .pty_shell import *  # noqa
+from . import guard_shells as _guard_shells_module
+from .guard_shells import *  # noqa
 from .accessories import get_version as __get_version
 
 __all__ = (
@@ -29,6 +31,7 @@ __all__ = (
     + slc.__all__
     + telnetlib.__all__
     + _pty_shell_module.__all__
+    + _guard_shells_module.__all__
 )  # noqa
 
 __author__ = "Jeff Quast"

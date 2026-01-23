@@ -38,6 +38,8 @@ CONFIG = collections.namedtuple(
         "connect_maxwait",
         "pty_exec",
         "pty_args",
+        "robot_check",
+        "pty_fork_limit",
     ],
 )(
     host="localhost",
@@ -52,6 +54,8 @@ CONFIG = collections.namedtuple(
     connect_maxwait=4.0,
     pty_exec=None,
     pty_args=None,
+    robot_check=False,
+    pty_fork_limit=0,
 )
 logger = logging.getLogger("telnetlib3.server")
 
@@ -604,6 +608,19 @@ def parse_server_args():
         default=CONFIG.pty_exec,
         help="execute PROGRAM in a PTY for each connection (use -- to pass args)",
     )
+    parser.add_argument(
+        "--robot-check",
+        action="store_true",
+        default=CONFIG.robot_check,
+        help="check if client can render wide unicode (rejects bots)",
+    )
+    parser.add_argument(
+        "--pty-fork-limit",
+        type=int,
+        metavar="N",
+        default=CONFIG.pty_fork_limit,
+        help="limit concurrent PTY connections (0 disables)",
+    )
     result = vars(parser.parse_args(argv))
     result["pty_args"] = pty_args
     return result
@@ -622,6 +639,8 @@ async def run_server(
     connect_maxwait=CONFIG.connect_maxwait,
     pty_exec=CONFIG.pty_exec,
     pty_args=CONFIG.pty_args,
+    robot_check=CONFIG.robot_check,
+    pty_fork_limit=CONFIG.pty_fork_limit,
 ):
     """
     Program entry point for server daemon.
@@ -638,6 +657,46 @@ async def run_server(
         from .pty_shell import make_pty_shell
 
         shell = make_pty_shell(pty_exec, pty_args)
+
+    # Wrap shell with guards if enabled
+    if robot_check or pty_fork_limit:
+        from .guard_shells import (
+            robot_check as do_robot_check,
+            robot_shell,
+            busy_shell,
+            ConnectionCounter,
+        )
+
+        counter = ConnectionCounter(pty_fork_limit) if pty_fork_limit else None
+        inner_shell = shell
+
+        async def guarded_shell(reader, writer):
+            # Check connection limit first
+            if counter and not counter.try_acquire():
+                try:
+                    await busy_shell(reader, writer)
+                finally:
+                    if not writer.is_closing():
+                        writer.close()
+                return
+
+            try:
+                # Check robot if enabled
+                if robot_check:
+                    passed = await do_robot_check(reader, writer)
+                    if not passed:
+                        await robot_shell(reader, writer)
+                        if not writer.is_closing():
+                            writer.close()
+                        return
+
+                # Run actual shell
+                await inner_shell(reader, writer)
+            finally:
+                if counter:
+                    counter.release()
+
+        shell = guarded_shell
 
     # log all function arguments.
     _locals = locals()
