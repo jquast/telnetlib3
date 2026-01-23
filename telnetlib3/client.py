@@ -190,7 +190,7 @@ class TelnetClient(client_base.BaseClient):
                     break
 
             except LookupError:
-                self.log.info(f"LookupError: encoding {offer} not available")
+                self.log.info("LookupError: encoding %s not available", offer)
                 continue
 
         # Decision logic:
@@ -200,7 +200,7 @@ class TelnetClient(client_base.BaseClient):
             offer, canon = matched_offer
             self._extra["charset"] = canon
             self._extra["lang"] = self.DEFAULT_LOCALE + "." + canon
-            self.log.debug(f"encoding negotiated: {offer}")
+            self.log.debug("encoding negotiated: %s", offer)
             return offer
 
         # Case 2: Has explicit encoding but not offered
@@ -211,11 +211,11 @@ class TelnetClient(client_base.BaseClient):
                 offer, canon = first_viable
                 self._extra["charset"] = canon
                 self._extra["lang"] = self.DEFAULT_LOCALE + "." + canon
-                self.log.debug(f"encoding negotiated: {offer}")
+                self.log.debug("encoding negotiated: %s", offer)
                 return offer
 
             # Otherwise reject - keep client's explicit encoding
-            self.log.debug(f"Declining offered charsets {offered}; prefer {desired_name}")
+            self.log.debug("Declining offered charsets %s; prefer %s", offered, desired_name)
             return ""
 
         # Case 3: No explicit preference, use first viable
@@ -223,11 +223,11 @@ class TelnetClient(client_base.BaseClient):
             offer, canon = first_viable
             self._extra["charset"] = canon
             self._extra["lang"] = self.DEFAULT_LOCALE + "." + canon
-            self.log.debug(f"encoding negotiated: {offer}")
+            self.log.debug("encoding negotiated: %s", offer)
             return offer
 
         # Case 4: No viable encodings found
-        self.log.warning(f"No suitable encoding offered by server: {offered}")
+        self.log.warning("No suitable encoding offered by server: %s", offered)
         return ""
 
     def send_naws(self):

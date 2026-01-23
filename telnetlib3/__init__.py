@@ -1,6 +1,5 @@
 """telnetlib3: an asyncio Telnet Protocol implemented in python."""
 
-# pylint: disable=undefined-variable
 # flake8: noqa: F405
 # fmt: off
 # isort: off

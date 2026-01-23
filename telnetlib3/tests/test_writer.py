@@ -34,8 +34,8 @@ class SimulSLCServer(telnetlib3.BaseServer):
         )
     ]
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self.waiters = None
 
     def connection_made(self, transport):
@@ -248,7 +248,6 @@ async def test_slc_simul(bind_host, unused_tcp_port):
     # For example, ^C is simulated as IP (Interrupt Process) callback.
     # local
     from telnetlib3.telopt import DO, IAC, SGA, ECHO, WILL
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
 
     # First, change server state into kludge mode -- Then, send all control
     # characters.  We ensure all of our various callbacks that are simulated
@@ -266,30 +265,38 @@ async def test_slc_simul(bind_host, unused_tcp_port):
         # then report what was received and hangup on client
         _waiter_input.set_result((writer.protocol.waiters, result))
         writer.close()
-        await writer.wait_closed()
 
-    async with create_server(
+    server = await telnetlib3.create_server(
         protocol_factory=SimulSLCServer,
         host=bind_host,
         shell=shell,
         port=unused_tcp_port,
         connect_maxwait=0.05,
         encoding=False,
-    ):
-        async with asyncio_connection(bind_host, unused_tcp_port) as (
-            client_reader,
-            client_writer,
-        ):
-            client_writer.write(given_input_outband)
-            client_writer.write(given_input_inband)
-            await client_writer.drain()
-            result = await client_reader.readexactly(len(expected_from_server))
-            assert result == expected_from_server
+    )
 
+    try:
+        client_reader, client_writer = await asyncio.open_connection(
+            host=bind_host,
+            port=unused_tcp_port,
+        )
+
+        # exercise
+        client_writer.write(given_input_outband)
+        client_writer.write(given_input_inband)
+        await client_writer.drain()
+        result = await client_reader.readexactly(len(expected_from_server))
+        assert result == expected_from_server
+        client_writer.close()
+
+        # verify
         callbacks, data_received = await asyncio.wait_for(_waiter_input, 0.5)
         for byte, waiter in callbacks.items():
             assert waiter.done(), telnetlib3.slc.name_slc_command(byte)
         assert data_received == given_input_inband
+    finally:
+        server.close()
+        await server.wait_closed()
 
 
 async def test_unhandled_do_sends_wont(bind_host, unused_tcp_port):

@@ -77,7 +77,10 @@ async def asyncio_connection(host, port):
         yield reader, writer
     finally:
         writer.close()
-        await writer.wait_closed()
+        try:
+            await writer.wait_closed()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
         await asyncio.sleep(0)
 
 
