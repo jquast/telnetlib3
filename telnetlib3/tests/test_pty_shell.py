@@ -26,8 +26,8 @@ def require_no_capture(request):
 
 async def test_pty_shell_basic_cat(bind_host, unused_tcp_port, require_no_capture):
     """Test basic echo with /bin/cat."""
-    # local
     from telnetlib3 import make_pty_shell
+    from telnetlib3.tests.accessories import create_server, open_connection
 
     _waiter = asyncio.Future()
 
@@ -37,38 +37,34 @@ async def test_pty_shell_basic_cat(bind_host, unused_tcp_port, require_no_captur
             if not _waiter.done():
                 _waiter.set_result(self)
 
-    await telnetlib3.create_server(
+    async with create_server(
         protocol_factory=ServerWithWaiter,
         host=bind_host,
         port=unused_tcp_port,
         shell=make_pty_shell("/bin/cat"),
         connect_maxwait=0.5,
-    )
+    ):
+        async with open_connection(
+            host=bind_host,
+            port=unused_tcp_port,
+            cols=80,
+            rows=25,
+            connect_minwait=0.05,
+        ) as (reader, writer):
+            await asyncio.wait_for(_waiter, 2.0)
+            await asyncio.sleep(0.3)
 
-    reader, writer = await telnetlib3.open_connection(
-        host=bind_host,
-        port=unused_tcp_port,
-        cols=80,
-        rows=25,
-        connect_minwait=0.05,
-    )
+            writer.write("hello world\n")
+            await writer.drain()
 
-    await asyncio.wait_for(_waiter, 2.0)
-    await asyncio.sleep(0.3)
-
-    writer.write("hello world\n")
-    await writer.drain()
-
-    result = await asyncio.wait_for(reader.read(50), 2.0)
-    assert "hello world" in result
-
-    writer.close()
+            result = await asyncio.wait_for(reader.read(50), 2.0)
+            assert "hello world" in result
 
 
 async def test_pty_shell_term_propagation(bind_host, unused_tcp_port, require_no_capture):
     """Test TERM environment propagation."""
-    # local
     from telnetlib3 import make_pty_shell
+    from telnetlib3.tests.accessories import create_server, open_connection
 
     _waiter = asyncio.Future()
     _output = asyncio.Future()
@@ -85,36 +81,32 @@ async def test_pty_shell_term_propagation(bind_host, unused_tcp_port, require_no
         output = await asyncio.wait_for(reader.read(100), 2.0)
         _output.set_result(output)
 
-    await telnetlib3.create_server(
+    async with create_server(
         protocol_factory=ServerWithWaiter,
         host=bind_host,
         port=unused_tcp_port,
         shell=make_pty_shell("/bin/sh", ["-c", "echo $TERM"]),
         connect_maxwait=0.5,
-    )
-
-    reader, writer = await telnetlib3.open_connection(
-        host=bind_host,
-        port=unused_tcp_port,
-        cols=80,
-        rows=25,
-        term="vt220",
-        shell=client_shell,
-        connect_minwait=0.05,
-    )
-
-    output = await asyncio.wait_for(_output, 5.0)
-    assert "vt220" in output or "xterm" in output
-
-    writer.close()
+    ):
+        async with open_connection(
+            host=bind_host,
+            port=unused_tcp_port,
+            cols=80,
+            rows=25,
+            term="vt220",
+            shell=client_shell,
+            connect_minwait=0.05,
+        ) as (reader, writer):
+            output = await asyncio.wait_for(_output, 5.0)
+            assert "vt220" in output or "xterm" in output
 
 
 async def test_pty_shell_child_exit_closes_connection(
     bind_host, unused_tcp_port, require_no_capture
 ):
     """Test that child exit closes connection gracefully."""
-    # local
     from telnetlib3 import make_pty_shell
+    from telnetlib3.tests.accessories import create_server, open_connection
 
     _waiter = asyncio.Future()
 
@@ -124,38 +116,36 @@ async def test_pty_shell_child_exit_closes_connection(
             if not _waiter.done():
                 _waiter.set_result(self)
 
-    await telnetlib3.create_server(
+    async with create_server(
         protocol_factory=ServerWithWaiter,
         host=bind_host,
         port=unused_tcp_port,
         shell=make_pty_shell("/bin/sh", ["-c", "echo done; exit 0"]),
         connect_maxwait=0.5,
-    )
+    ):
+        async with open_connection(
+            host=bind_host,
+            port=unused_tcp_port,
+            cols=80,
+            rows=25,
+            connect_minwait=0.05,
+        ) as (reader, writer):
+            await asyncio.wait_for(_waiter, 2.0)
+            await asyncio.sleep(0.3)
 
-    reader, writer = await telnetlib3.open_connection(
-        host=bind_host,
-        port=unused_tcp_port,
-        cols=80,
-        rows=25,
-        connect_minwait=0.05,
-    )
+            result = await asyncio.wait_for(reader.read(100), 3.0)
+            assert "done" in result
 
-    await asyncio.wait_for(_waiter, 2.0)
-    await asyncio.sleep(0.3)
-
-    result = await asyncio.wait_for(reader.read(100), 3.0)
-    assert "done" in result
-
-    remaining = await asyncio.wait_for(reader.read(), 3.0)
-    assert remaining == ""
+            remaining = await asyncio.wait_for(reader.read(), 3.0)
+            assert remaining == ""
 
 
 async def test_pty_shell_client_disconnect_kills_child(
     bind_host, unused_tcp_port, require_no_capture
 ):
     """Test that client disconnect kills child process."""
-    # local
     from telnetlib3 import make_pty_shell
+    from telnetlib3.tests.accessories import create_server, open_connection
 
     _waiter = asyncio.Future()
     _closed = asyncio.Future()
@@ -171,34 +161,30 @@ async def test_pty_shell_client_disconnect_kills_child(
             if not _closed.done():
                 _closed.set_result(True)
 
-    await telnetlib3.create_server(
+    async with create_server(
         protocol_factory=ServerWithWaiter,
         host=bind_host,
         port=unused_tcp_port,
         shell=make_pty_shell("/bin/cat"),
         connect_maxwait=0.5,
-    )
+    ):
+        async with open_connection(
+            host=bind_host,
+            port=unused_tcp_port,
+            cols=80,
+            rows=25,
+            connect_minwait=0.05,
+        ) as (reader, writer):
+            await asyncio.wait_for(_waiter, 2.0)
+            await asyncio.sleep(0.3)
 
-    reader, writer = await telnetlib3.open_connection(
-        host=bind_host,
-        port=unused_tcp_port,
-        cols=80,
-        rows=25,
-        connect_minwait=0.05,
-    )
-
-    await asyncio.wait_for(_waiter, 2.0)
-    await asyncio.sleep(0.3)
-
-    writer.close()
-
-    await asyncio.wait_for(_closed, 3.0)
+        await asyncio.wait_for(_closed, 3.0)
 
 
 async def test_pty_shell_naws_resize(bind_host, unused_tcp_port, require_no_capture):
     """Test NAWS resize forwarding."""
-    # local
     from telnetlib3 import make_pty_shell
+    from telnetlib3.tests.accessories import create_server, open_connection
 
     _waiter = asyncio.Future()
 
@@ -208,29 +194,25 @@ async def test_pty_shell_naws_resize(bind_host, unused_tcp_port, require_no_capt
             if not _waiter.done():
                 _waiter.set_result(self)
 
-    await telnetlib3.create_server(
+    async with create_server(
         protocol_factory=ServerWithWaiter,
         host=bind_host,
         port=unused_tcp_port,
         shell=make_pty_shell("/bin/sh", ["-c", "stty size"]),
         connect_maxwait=0.5,
-    )
+    ):
+        async with open_connection(
+            host=bind_host,
+            port=unused_tcp_port,
+            cols=80,
+            rows=25,
+            connect_minwait=0.05,
+        ) as (reader, writer):
+            await asyncio.wait_for(_waiter, 2.0)
+            await asyncio.sleep(0.3)
 
-    reader, writer = await telnetlib3.open_connection(
-        host=bind_host,
-        port=unused_tcp_port,
-        cols=80,
-        rows=25,
-        connect_minwait=0.05,
-    )
-
-    await asyncio.wait_for(_waiter, 2.0)
-    await asyncio.sleep(0.3)
-
-    output = await asyncio.wait_for(reader.read(50), 2.0)
-    assert "25 80" in output
-
-    writer.close()
+            output = await asyncio.wait_for(reader.read(50), 2.0)
+            assert "25 80" in output
 
 
 def test_platform_check_not_windows():
