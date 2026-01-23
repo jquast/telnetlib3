@@ -24,9 +24,10 @@ from .telopt import name_commands
 
 # Check if PTY support is available (Unix-only modules: pty, termios, fcntl)
 try:
-    import pty  # noqa: F401
-    import termios  # noqa: F401
-    import fcntl  # noqa: F401
+    # std imports
+    import pty  # noqa: F401 pylint:disable=unused-import
+    import fcntl  # noqa: F401 pylint:disable=unused-import
+    import termios  # noqa: F401 pylint:disable=unused-import
     PTY_SUPPORT = True
 except ImportError:
     PTY_SUPPORT = False
@@ -667,6 +668,7 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
     robot_check=_config.robot_check,
     pty_fork_limit=_config.pty_fork_limit,
 ):
+    # pylint: disable=missing-raises-doc
     """
     Program entry point for server daemon.
 

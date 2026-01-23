@@ -30,10 +30,10 @@ from .slc import *  # noqa
 try:
     from . import pty_shell as _pty_shell_module
     from .pty_shell import *  # noqa
-    PTY_SUPPORT = True
+    PTY_SUPPORT = True  # invalid-name
 except ImportError:
     _pty_shell_module = None
-    PTY_SUPPORT = False
+    PTY_SUPPORT = False  # invalid-name
 from . import guard_shells as _guard_shells_module
 from .guard_shells import *  # noqa
 from .accessories import get_version as __get_version
