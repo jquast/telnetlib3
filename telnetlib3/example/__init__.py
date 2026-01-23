@@ -1,1 +1,0 @@
-"""Example telnet shell implementations."""
