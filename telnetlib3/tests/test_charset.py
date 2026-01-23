@@ -101,7 +101,8 @@ class CustomTelnetClient(telnetlib3.TelnetClient):
 
 async def test_telnet_server_on_charset(bind_host, unused_tcp_port):
     """Test Server's callback method on_charset()."""
-    # given
+    from telnetlib3.tests.accessories import create_server, asyncio_connection
+
     _waiter = asyncio.Future()
     given_charset = "KOI8-U"
 
@@ -110,26 +111,23 @@ async def test_telnet_server_on_charset(bind_host, unused_tcp_port):
             super().on_charset(charset)
             _waiter.set_result(self)
 
-    await telnetlib3.create_server(
+    async with create_server(
         protocol_factory=ServerTestCharset, host=bind_host, port=unused_tcp_port
-    )
+    ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
+            await asyncio.wait_for(reader.readexactly(3), 0.5)
+            writer.write(IAC + WILL + CHARSET)
+            writer.write(IAC + WONT + TTYPE)
+            writer.write(IAC + SB + CHARSET + ACCEPTED + given_charset.encode("ascii") + IAC + SE)
 
-    reader, writer = await asyncio.open_connection(host=bind_host, port=unused_tcp_port)
-
-    val = await asyncio.wait_for(reader.readexactly(3), 0.5)
-    # exercise,
-    writer.write(IAC + WILL + CHARSET)
-    writer.write(IAC + WONT + TTYPE)
-    writer.write(IAC + SB + CHARSET + ACCEPTED + given_charset.encode("ascii") + IAC + SE)
-
-    # verify,
-    srv_instance = await asyncio.wait_for(_waiter, 2.0)
-    assert srv_instance.get_extra_info("charset") == given_charset
+            srv_instance = await asyncio.wait_for(_waiter, 2.0)
+            assert srv_instance.get_extra_info("charset") == given_charset
 
 
 async def test_telnet_client_send_charset(bind_host, unused_tcp_port):
     """Test Client's callback method send_charset() selection for illegals."""
-    # given
+    from telnetlib3.tests.accessories import create_server, open_connection
+
     _waiter = asyncio.Future()
 
     class ServerTestCharset(telnetlib3.TelnetServer):
@@ -142,32 +140,25 @@ async def test_telnet_client_send_charset(bind_host, unused_tcp_port):
             _waiter.set_result(selected)
             return selected
 
-    await asyncio.wait_for(
-        telnetlib3.create_server(
-            protocol_factory=ServerTestCharset, host=bind_host, port=unused_tcp_port
-        ),
-        0.15,
-    )
-
-    reader, writer = await asyncio.wait_for(
-        telnetlib3.open_connection(
+    async with create_server(
+        protocol_factory=ServerTestCharset, host=bind_host, port=unused_tcp_port
+    ):
+        async with open_connection(
             client_factory=ClientTestCharset,
             host=bind_host,
             port=unused_tcp_port,
             encoding="latin1",
             connect_minwait=0.05,
-        ),
-        0.15,
-    )
-
-    val = await asyncio.wait_for(_waiter, 1.5)
-    assert val == "cp437"
-    assert writer.get_extra_info("charset") == "cp437"
+        ) as (reader, writer):
+            val = await asyncio.wait_for(_waiter, 1.5)
+            assert val == "cp437"
+            assert writer.get_extra_info("charset") == "cp437"
 
 
 async def test_telnet_client_no_charset(bind_host, unused_tcp_port):
     """Test Client's callback method send_charset() does not select."""
-    # given
+    from telnetlib3.tests.accessories import create_server, open_connection
+
     _waiter = asyncio.Future()
 
     class ServerTestCharset(telnetlib3.TelnetServer):
@@ -180,24 +171,21 @@ async def test_telnet_client_no_charset(bind_host, unused_tcp_port):
             _waiter.set_result(selected)
             return selected
 
-    await telnetlib3.create_server(
+    async with create_server(
         protocol_factory=ServerTestCharset,
         host=bind_host,
         port=unused_tcp_port,
-    )
-
-    reader, writer = await telnetlib3.open_connection(
-        client_factory=ClientTestCharset,
-        host=bind_host,
-        port=unused_tcp_port,
-        encoding="latin1",
-        connect_minwait=0.05,
-    )
-
-    # charset remains latin1
-    val = await asyncio.wait_for(_waiter, 0.5)
-    assert val == ""
-    assert writer.get_extra_info("charset") == "latin1"
+    ):
+        async with open_connection(
+            client_factory=ClientTestCharset,
+            host=bind_host,
+            port=unused_tcp_port,
+            encoding="latin1",
+            connect_minwait=0.05,
+        ) as (reader, writer):
+            val = await asyncio.wait_for(_waiter, 0.5)
+            assert val == ""
+            assert writer.get_extra_info("charset") == "latin1"
 
 
 # --- Negotiation Protocol Tests ---
@@ -412,53 +400,49 @@ def test_unit_charset_negotiation_sequence():
 
 async def test_charset_send_unknown_encoding(bind_host, unused_tcp_port):
     """Test client with unknown encoding value."""
-    # Given a client with an unknown encoding, it should handle LookupError
-    await asyncio.get_event_loop().create_server(asyncio.Protocol, bind_host, unused_tcp_port)
+    from telnetlib3.tests.accessories import asyncio_server, open_connection
 
-    reader, writer = await telnetlib3.open_connection(
-        client_factory=lambda **kwargs: CustomTelnetClient(
-            charset_behavior="unknown_encoding", **kwargs
-        ),
-        host=bind_host,
-        port=unused_tcp_port,
-        connect_minwait=0.05,
-    )
-
-    # Verify behavior - mainly we're checking that this doesn't raise an exception
-    assert writer.protocol.encoding(incoming=True) == "US-ASCII"
+    async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
+        async with open_connection(
+            client_factory=lambda **kwargs: CustomTelnetClient(
+                charset_behavior="unknown_encoding", **kwargs
+            ),
+            host=bind_host,
+            port=unused_tcp_port,
+            connect_minwait=0.05,
+        ) as (reader, writer):
+            assert writer.protocol.encoding(incoming=True) == "US-ASCII"
 
 
 async def test_charset_send_no_viable_offers(bind_host, unused_tcp_port):
     """Test client with no viable encoding offers."""
-    await asyncio.get_event_loop().create_server(asyncio.Protocol, bind_host, unused_tcp_port)
+    from telnetlib3.tests.accessories import asyncio_server, open_connection
 
-    reader, writer = await telnetlib3.open_connection(
-        client_factory=lambda **kwargs: CustomTelnetClient(
-            charset_behavior="no_viable_offers", **kwargs
-        ),
-        host=bind_host,
-        port=unused_tcp_port,
-        connect_minwait=0.05,
-        connect_maxwait=0.25,
-    )
-
-    # Verify behavior - this should stick with the default encoding
-    assert writer.protocol.encoding(incoming=True) == "US-ASCII"
+    async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
+        async with open_connection(
+            client_factory=lambda **kwargs: CustomTelnetClient(
+                charset_behavior="no_viable_offers", **kwargs
+            ),
+            host=bind_host,
+            port=unused_tcp_port,
+            connect_minwait=0.05,
+            connect_maxwait=0.25,
+        ) as (reader, writer):
+            assert writer.protocol.encoding(incoming=True) == "US-ASCII"
 
 
 async def test_charset_explicit_non_latin1_encoding(bind_host, unused_tcp_port):
     """Test client rejecting offered encodings when explicit non-latin1 is set."""
-    await asyncio.get_event_loop().create_server(asyncio.Protocol, bind_host, unused_tcp_port)
+    from telnetlib3.tests.accessories import asyncio_server, open_connection
 
-    reader, writer = await telnetlib3.open_connection(
-        client_factory=lambda **kwargs: CustomTelnetClient(
-            charset_behavior="explicit_non_latin1", **kwargs
-        ),
-        host=bind_host,
-        port=unused_tcp_port,
-        connect_minwait=0.05,
-        connect_maxwait=0.25,
-    )
-
-    # Verify behavior - this should stick with the default encoding
-    assert writer.protocol.encoding(incoming=True) == "US-ASCII"
+    async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
+        async with open_connection(
+            client_factory=lambda **kwargs: CustomTelnetClient(
+                charset_behavior="explicit_non_latin1", **kwargs
+            ),
+            host=bind_host,
+            port=unused_tcp_port,
+            connect_minwait=0.05,
+            connect_maxwait=0.25,
+        ) as (reader, writer):
+            assert writer.protocol.encoding(incoming=True) == "US-ASCII"
