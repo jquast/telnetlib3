@@ -22,6 +22,15 @@ from typing import Callable, Optional, NamedTuple
 from . import accessories, server_base
 from .telopt import name_commands
 
+# Check if PTY support is available (Unix-only modules: pty, termios, fcntl)
+try:
+    import pty  # noqa: F401
+    import termios  # noqa: F401
+    import fcntl  # noqa: F401
+    PTY_SUPPORT = True
+except ImportError:
+    PTY_SUPPORT = False
+
 __all__ = ("TelnetServer", "create_server", "run_server", "parse_server_args")
 
 
@@ -580,7 +589,7 @@ def parse_server_args():
     # Extract arguments after '--' for PTY program before argparse sees them
     argv = sys.argv[1:]
     pty_args = []
-    if "--" in argv:
+    if PTY_SUPPORT and "--" in argv:
         idx = argv.index("--")
         pty_args = argv[idx + 1 :]
         argv = argv[:idx]
@@ -614,27 +623,31 @@ def parse_server_args():
         default=_config.connect_maxwait,
         help="timeout for pending negotiation",
     )
-    parser.add_argument(
-        "--pty-exec",
-        metavar="PROGRAM",
-        default=_config.pty_exec,
-        help="execute PROGRAM in a PTY for each connection (use -- to pass args)",
-    )
+    if PTY_SUPPORT:
+        parser.add_argument(
+            "--pty-exec",
+            metavar="PROGRAM",
+            default=_config.pty_exec,
+            help="execute PROGRAM in a PTY for each connection (use -- to pass args)",
+        )
+        parser.add_argument(
+            "--pty-fork-limit",
+            type=int,
+            metavar="N",
+            default=_config.pty_fork_limit,
+            help="limit concurrent PTY connections (0 disables)",
+        )
     parser.add_argument(
         "--robot-check",
         action="store_true",
         default=_config.robot_check,
         help="check if client can render wide unicode (rejects bots)",
     )
-    parser.add_argument(
-        "--pty-fork-limit",
-        type=int,
-        metavar="N",
-        default=_config.pty_fork_limit,
-        help="limit concurrent PTY connections (0 disables)",
-    )
     result = vars(parser.parse_args(argv))
-    result["pty_args"] = pty_args
+    result["pty_args"] = pty_args if PTY_SUPPORT else None
+    if not PTY_SUPPORT:
+        result["pty_exec"] = None
+        result["pty_fork_limit"] = 0
     return result
 
 
@@ -665,6 +678,8 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
     )
 
     if pty_exec:
+        if not PTY_SUPPORT:
+            raise NotImplementedError("PTY support is not available on this platform (Windows?)")
         # local
         from .pty_shell import make_pty_shell  # pylint: disable=import-outside-toplevel
 
