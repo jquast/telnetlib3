@@ -1,3 +1,5 @@
+"""Telnet client shell implementations for interactive terminal sessions."""
+
 # std imports
 import sys
 import asyncio
@@ -16,6 +18,7 @@ __all__ = ("telnet_client_shell",)
 if sys.platform == "win32":
 
     async def telnet_client_shell(telnet_reader, telnet_writer):
+        """Win32 telnet client shell (not implemented)."""
         raise NotImplementedError("win32 not yet supported as telnet client. Please contribute!")
 
 else:
@@ -24,19 +27,11 @@ else:
     import signal
     import termios
 
-    @contextlib.contextmanager
-    def _set_tty(fobj, tty_func):
-        """
-        Return context manager for manipulating stdin tty state.
-
-        if stdin is not attached to a terminal, no action is performed before or after yielding.
-        """
-
     class Terminal(object):
         """
-        Context manager that yields (sys.stdin, sys.stdout) for POSIX systems.
+        Context manager for terminal mode handling on POSIX systems.
 
-        When sys.stdin is a attached to a terminal, it is configured for the matching telnet modes
+        When sys.stdin is attached to a terminal, it is configured for the matching telnet modes
         negotiated for the given telnet_writer.
         """
 
