@@ -36,6 +36,8 @@ CONFIG = collections.namedtuple(
         "force_binary",
         "timeout",
         "connect_maxwait",
+        "pty_exec",
+        "pty_args",
     ],
 )(
     host="localhost",
@@ -48,6 +50,8 @@ CONFIG = collections.namedtuple(
     force_binary=False,
     timeout=300,
     connect_maxwait=4.0,
+    pty_exec=None,
+    pty_args=None,
 )
 logger = logging.getLogger("telnetlib3.server")
 
@@ -551,6 +555,16 @@ async def _sigterm_handler(server, log):
 
 
 def parse_server_args():
+    import sys
+
+    # Extract arguments after '--' for PTY program before argparse sees them
+    argv = sys.argv[1:]
+    pty_args = []
+    if "--" in argv:
+        idx = argv.index("--")
+        pty_args = argv[idx + 1 :]
+        argv = argv[:idx]
+
     parser = argparse.ArgumentParser(
         description="Telnet protocol server",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -584,7 +598,15 @@ def parse_server_args():
         default=CONFIG.connect_maxwait,
         help="timeout for pending negotiation",
     )
-    return vars(parser.parse_args())
+    parser.add_argument(
+        "--pty-exec",
+        metavar="PROGRAM",
+        default=CONFIG.pty_exec,
+        help="execute PROGRAM in a PTY for each connection (use -- to pass args)",
+    )
+    result = vars(parser.parse_args(argv))
+    result["pty_args"] = pty_args
+    return result
 
 
 async def run_server(
@@ -598,6 +620,8 @@ async def run_server(
     force_binary=CONFIG.force_binary,
     timeout=CONFIG.timeout,
     connect_maxwait=CONFIG.connect_maxwait,
+    pty_exec=CONFIG.pty_exec,
+    pty_args=CONFIG.pty_args,
 ):
     """
     Program entry point for server daemon.
@@ -609,6 +633,11 @@ async def run_server(
     log = accessories.make_logger(
         name="telnetlib3.server", loglevel=loglevel, logfile=logfile, logfmt=logfmt
     )
+
+    if pty_exec:
+        from .pty_shell import make_pty_shell
+
+        shell = make_pty_shell(pty_exec, pty_args)
 
     # log all function arguments.
     _locals = locals()

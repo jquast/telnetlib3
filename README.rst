@@ -203,14 +203,15 @@ Example session::
                              [--encoding ENCODING] [--force-binary]
                              [--timeout TIMEOUT]
                              [--connect-maxwait CONNECT_MAXWAIT]
-                             [host] [port]
-    
+                             [--pty-exec PROGRAM]
+                             [host] [port] [-- ARG ...]
+
     Telnet protocol server
-    
+
     positional arguments:
       host                  bind address (default: localhost)
       port                  bind port (default: 6023)
-    
+
     optional arguments:
       -h, --help            show this help message and exit
       --loglevel LOGLEVEL   level name (default: info)
@@ -223,6 +224,28 @@ Example session::
       --timeout TIMEOUT     idle disconnect (0 disables) (default: 300)
       --connect-maxwait CONNECT_MAXWAIT
                             timeout for pending negotiation (default: 4.0)
+      --pty-exec PROGRAM    execute PROGRAM in a PTY for each connection
+                            (use -- to pass args to PROGRAM)
+
+PTY Execution
+~~~~~~~~~~~~~
+
+The server can spawn a PTY-connected program for each connection::
+
+    telnetlib3-server --pty-exec /bin/bash -- --login
+
+This spawns an interactive bash login shell. The ``--login`` flag (or ``-l``)
+is recommended for proper shell initialization (readline, history, profile
+sourcing).
+
+For a minimal shell without these features::
+
+    telnetlib3-server --pty-exec /bin/sh
+
+Arguments after ``--`` are passed to the program, for example, to execute python
+with argument of a script as a subprocess::
+
+    telnetlib3-server --pty-exec $(which python) -- ../blessed/bin/cellestial.py
 
 Encoding
 --------
