@@ -8,6 +8,7 @@ telnet option negotiation states before proceeding.
 The server waits for:
 - NAWS (window size) to be negotiated
 - TTYPE (terminal type) negotiation to complete
+- BINARY mode (bidirectional)
 """
 
 # std imports
@@ -21,32 +22,24 @@ async def shell(_reader, writer):
     """Handle client with explicit negotiation waits."""
     writer.write("\r\nWaiting for terminal negotiation...\r\n")
 
-    # Wait for NAWS (Negotiate About Window Size) to be enabled
-    try:
-        await asyncio.wait_for(writer.wait_for(local={"NAWS": True}), timeout=5.0)
-        cols = writer.get_extra_info("cols")
-        rows = writer.get_extra_info("rows")
-        writer.write(f"Window size: {cols}x{rows}\r\n")
-    except asyncio.TimeoutError:
-        writer.write("NAWS not negotiated (timeout)\r\n")
-
-    # Wait for TTYPE (Terminal Type) negotiation to complete
-    try:
-        await asyncio.wait_for(writer.wait_for(pending={"TTYPE": False}), timeout=5.0)
-        term = writer.get_extra_info("TERM")
-        writer.write(f"Terminal type: {term}\r\n")
-    except asyncio.TimeoutError:
-        writer.write("TTYPE not negotiated (timeout)\r\n")
-
-    # Wait for both BINARY options if client supports them
+    # Wait for NAWS, TTYPE, and BINARY negotiation to complete
     try:
         await asyncio.wait_for(
-            writer.wait_for(remote={"BINARY": True}, local={"BINARY": True}),
-            timeout=2.0,
+            writer.wait_for(
+                local={"NAWS": True, "BINARY": True},
+                remote={"BINARY": True},
+                pending={"TTYPE": False},
+            ),
+            timeout=1.5,
         )
+        cols = writer.get_extra_info("cols")
+        rows = writer.get_extra_info("rows")
+        term = writer.get_extra_info("TERM")
+        writer.write(f"Window size: {cols}x{rows}\r\n")
+        writer.write(f"Terminal type: {term}\r\n")
         writer.write("Binary mode enabled (bidirectional)\r\n")
     except asyncio.TimeoutError:
-        writer.write("Binary mode not fully negotiated\r\n")
+        writer.write("Negotiation timed out\r\n")
 
     writer.write("\r\nNegotiation complete. Goodbye!\r\n")
     await writer.drain()

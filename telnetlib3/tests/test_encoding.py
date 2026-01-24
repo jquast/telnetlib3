@@ -82,8 +82,9 @@ async def test_telnet_server_encoding_server_do(bind_host, unused_tcp_port):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + DO + BINARY)
             writer.write(IAC + WONT + TTYPE)
+            await writer.drain()
 
-            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 2.0)
             assert srv_instance.encoding(incoming=True) == "US-ASCII"
             assert srv_instance.encoding(outgoing=True) == "utf8"
             assert srv_instance.encoding(incoming=True, outgoing=True) == "US-ASCII"

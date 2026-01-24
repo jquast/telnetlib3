@@ -574,9 +574,7 @@ class Server:
             )
 
 
-async def create_server(
-    host=None, port=23, protocol_factory=TelnetServer, **kwds
-):
+async def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwds):
     """
     Create a TCP Telnet server.
 
