@@ -53,9 +53,11 @@ telnetlib3 provides multiple interfaces for working with the Telnet protocol:
 
 **Blocking API**
   A synchronous interface modeled after telnetlib (client) and miniboa_ (server),
-  with enhancements. See the `sync API documentation`_.
+  with enhancements.
 
-  Enhancements over standard telnetlib:
+  See `sync API documentation`_.
+
+  Enhancements over Python 3.11 telnetlib (client):
 
   - Full RFC 854 protocol negotiation (NAWS, TTYPE, BINARY, ECHO, SGA)
   - `wait_for()`_ method to block until specific option states are negotiated
@@ -63,7 +65,7 @@ telnetlib3 provides multiple interfaces for working with the Telnet protocol:
   - Context manager support (``with TelnetConnection(...) as conn:``)
   - Thread-safe operation with asyncio_ running in background
 
-  Enhancements over miniboa for server-side:
+  Enhancements over miniboa (server):
 
   - Thread-per-connection model with blocking I/O (vs poll-based)
   - `readline()`_ and `read_until()`_ blocking methods
