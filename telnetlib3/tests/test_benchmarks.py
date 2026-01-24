@@ -8,10 +8,10 @@ import pytest
 
 # local
 import telnetlib3
-from telnetlib3.slc import generate_slctab, snoop
+from telnetlib3.slc import snoop, generate_slctab
+from telnetlib3.telopt import IAC, NAWS, WILL, TTYPE, theNULL
 from telnetlib3.stream_reader import TelnetReader
 from telnetlib3.stream_writer import TelnetWriter
-from telnetlib3.telopt import IAC, NAWS, TTYPE, WILL, theNULL
 
 
 class MockTransport:

@@ -552,7 +552,6 @@ class Server:
         :returns: List of protocol instances for all connected clients.
         """
         # Filter out closed protocols (lazy cleanup)
-        # pylint: disable=protected-access
         self._protocols = [p for p in self._protocols if not getattr(p, "_closing", False)]
         return list(self._protocols)
 
