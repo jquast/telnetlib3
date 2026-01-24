@@ -33,8 +33,6 @@ async def connection_context(reader, writer):
     finally:
         writer.close()
         await writer.wait_closed()
-        # Small delay for Windows IOCP socket cleanup
-        await asyncio.sleep(0.01)
 
 
 @contextlib.asynccontextmanager
@@ -65,8 +63,6 @@ async def open_connection(*args, **kwargs):
     finally:
         writer.close()
         await writer.wait_closed()
-        # Small delay for Windows IOCP socket cleanup
-        await asyncio.sleep(0.01)
 
 
 @contextlib.asynccontextmanager
@@ -81,8 +77,6 @@ async def asyncio_connection(host, port):
             await writer.wait_closed()
         except (BrokenPipeError, ConnectionResetError):
             pass
-        # Small delay for Windows IOCP socket cleanup
-        await asyncio.sleep(0.01)
 
 
 @contextlib.asynccontextmanager
@@ -94,8 +88,6 @@ async def asyncio_server(protocol_factory, host, port):
     finally:
         server.close()
         await server.wait_closed()
-        # Small delay for Windows IOCP socket cleanup
-        await asyncio.sleep(0.01)
 
 
 __all__ = (

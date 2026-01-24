@@ -50,7 +50,7 @@ jobs:
         run: python -Im tox -e ${{ matrix.toxenv }}
 
   tests:
-    name: Python ${{ matrix.python-version }} (${{ matrix.os }})
+    name: Python ${{ matrix.python-version }} (${{ matrix.os }})${{ matrix.asyncio-debug && ' [asyncio-debug]' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -69,6 +69,11 @@ jobs:
           # Python 3.14 pre-release
           - os: ubuntu-latest
             python-version: "3.14"
+
+          # Python 3.14 with asyncio debug mode
+          - os: ubuntu-latest
+            python-version: "3.14"
+            asyncio-debug: true
 
     runs-on: ${{ matrix.os }}
 
@@ -93,6 +98,8 @@ jobs:
 
       - name: Run tests
         run: python -Im tox -e ${{ env.TOX_ENV }}
+        env:
+          PYTHONASYNCIODEBUG: ${{ matrix.asyncio-debug && '1' || '' }}
 
       - name: Upload coverage data
         uses: actions/upload-artifact@v4

@@ -530,18 +530,8 @@ class Server:
     async def wait_closed(self):
         """Wait until the server and all client connections are closed."""
         await self._server.wait_closed()
-        # Wait for all client protocols to fully close.
-        # On Windows IOCP, socket closure is asynchronous - we must wait for
-        # connection_lost() to be called on each protocol (sets _transport=None).
-        for _ in range(100):  # Max ~1 second wait
-            # Check if all protocols have closed (transport set to None in connection_lost)
-            # pylint: disable=protected-access
-            all_closed = all(
-                getattr(p, "_transport", None) is None for p in self._protocols
-            )
-            if all_closed:
-                break
-            await asyncio.sleep(0.01)
+        # Yield to event loop for pending close callbacks
+        await asyncio.sleep(0)
         # Clear protocol list now that server is closed
         self._protocols.clear()
 
