@@ -190,6 +190,10 @@ async def test_telnet_server_closed_by_client(bind_host, unused_tcp_port):
 
             srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
 
+            # Verify negotiation state: client refused TTYPE
+            assert srv_instance.writer.remote_option[TTYPE] is False
+            assert srv_instance.writer.pending_option.get(TTYPE) is not True
+
             writer.close()
             await writer.wait_closed()
 
@@ -213,6 +217,10 @@ async def test_telnet_server_eof_by_client(bind_host, unused_tcp_port):
             writer.write(IAC + WONT + TTYPE)
 
             srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
+
+            # Verify negotiation state: client refused TTYPE
+            assert srv_instance.writer.remote_option[TTYPE] is False
+            assert srv_instance.writer.pending_option.get(TTYPE) is not True
 
             writer.write_eof()
 
@@ -240,6 +248,14 @@ async def test_telnet_server_closed_by_server(bind_host, unused_tcp_port):
 
             writer.write(hello_reply)
             srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
+
+            # Verify negotiation state: client refused TTYPE
+            assert srv_instance.writer.remote_option[TTYPE] is False
+            assert srv_instance.writer.pending_option.get(TTYPE) is not True
+
+            # Verify in-band data was received
+            data = await asyncio.wait_for(srv_instance.reader.readline(), 0.5)
+            assert data == "quit\r\n"
 
             srv_instance.writer.close()
             await srv_instance.writer.wait_closed()

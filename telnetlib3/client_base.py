@@ -114,7 +114,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             # we are disconnected before negotiation may be considered
             # complete.  We set waiter_closed, and any function consuming
             # the StreamReader will receive eof.
-            self._waiter_connected.set_result(weakref.proxy(self))
+            self._waiter_connected.set_result(None)
 
         if self.shell is None:
             # when a shell is defined, we allow the completion of the coroutine
@@ -436,7 +436,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         if self.check_negotiation(final=final):
             self.log.debug("negotiation complete after %1.2fs.", self.duration)
-            self._waiter_connected.set_result(weakref.proxy(self))
+            self._waiter_connected.set_result(None)
         elif final:
             self.log.debug("negotiation failed after %1.2fs.", self.duration)
             _failed = [
@@ -445,7 +445,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 if pending
             ]
             self.log.debug("failed-reply: %r", ", ".join(_failed))
-            self._waiter_connected.set_result(weakref.proxy(self))
+            self._waiter_connected.set_result(None)
         else:
             # keep re-queuing until complete.  Aggressively re-queue until
             # connect_minwait, or connect_maxwait, whichever occurs next

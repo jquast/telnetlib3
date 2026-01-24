@@ -579,7 +579,7 @@ class Server:
         # (custom protocols like plain asyncio.Protocol won't have these)
         if hasattr(protocol, "_waiter_connected"):
             protocol._waiter_connected.add_done_callback(
-                lambda f: self._new_client.put_nowait(f.result()) if not f.cancelled() else None
+                lambda f, p=protocol: self._new_client.put_nowait(p) if not f.cancelled() else None
             )
 
 

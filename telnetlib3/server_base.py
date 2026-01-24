@@ -4,7 +4,6 @@
 import sys
 import asyncio
 import logging
-import weakref
 import datetime
 import traceback
 
@@ -318,10 +317,10 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         if self.check_negotiation(final=final):
             logger.debug("negotiation complete after %1.2fs.", self.duration)
-            self._waiter_connected.set_result(weakref.proxy(self))
+            self._waiter_connected.set_result(None)
         elif final:
             logger.debug("negotiation failed after %1.2fs.", self.duration)
-            self._waiter_connected.set_result(weakref.proxy(self))
+            self._waiter_connected.set_result(None)
         else:
             # keep re-queuing until complete
             self._check_later = asyncio.get_event_loop().call_later(
