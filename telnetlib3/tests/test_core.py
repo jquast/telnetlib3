@@ -482,7 +482,7 @@ async def test_telnet_client_cmdline(bind_host, unused_tcp_port):
 
 
 @pytest.mark.skipif(
-    tuple(map(int, platform.python_version_tuple())) > (3, 10),
+    tuple(map(int, platform.python_version_tuple()[:2])) > (3, 10),
     reason="those shabby pexpect maintainers still use @asyncio.coroutine",
 )
 async def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port):
