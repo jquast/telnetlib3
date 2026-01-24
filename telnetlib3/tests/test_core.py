@@ -177,33 +177,47 @@ async def test_telnet_server_advanced_negotiation(bind_host, unused_tcp_port):
 async def test_telnet_server_closed_by_client(bind_host, unused_tcp_port):
     """Exercise TelnetServer.connection_lost."""
     # local
+    from telnetlib3.telopt import DO, IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
-    _waiter = asyncio.Future()
-
-    async with create_server(_waiter_closed=_waiter, host=bind_host, port=unused_tcp_port):
+    async with create_server(host=bind_host, port=unused_tcp_port) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
+            # Read server's negotiation request and send minimal reply
+            expect_hello = IAC + DO + TTYPE
+            hello = await reader.readexactly(len(expect_hello))
+            assert hello == expect_hello
+            writer.write(IAC + WONT + TTYPE)
+
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
+
             writer.close()
             await writer.wait_closed()
 
-            srv_instance = await asyncio.wait_for(_waiter, 0.5)
+            # Wait for server to notice client disconnect
+            await asyncio.sleep(0.05)
             assert srv_instance._closing
-
-            srv_instance.connection_lost(exc=None)
 
 
 async def test_telnet_server_eof_by_client(bind_host, unused_tcp_port):
     """Exercise TelnetServer.eof_received()."""
     # local
+    from telnetlib3.telopt import DO, IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
-    _waiter = asyncio.Future()
-
-    async with create_server(_waiter_closed=_waiter, host=bind_host, port=unused_tcp_port):
+    async with create_server(host=bind_host, port=unused_tcp_port) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
+            # Read server's negotiation request and send minimal reply
+            expect_hello = IAC + DO + TTYPE
+            hello = await reader.readexactly(len(expect_hello))
+            assert hello == expect_hello
+            writer.write(IAC + WONT + TTYPE)
+
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
+
             writer.write_eof()
 
-            srv_instance = await asyncio.wait_for(_waiter, 0.5)
+            # Wait for server to notice EOF
+            await asyncio.sleep(0.05)
             assert srv_instance._closing
 
 
@@ -213,10 +227,7 @@ async def test_telnet_server_closed_by_server(bind_host, unused_tcp_port):
     from telnetlib3.telopt import DO, IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
-    _waiter_closed = asyncio.Future()
-
     async with create_server(
-        _waiter_closed=_waiter_closed,
         host=bind_host,
         port=unused_tcp_port,
     ) as server:
@@ -233,7 +244,9 @@ async def test_telnet_server_closed_by_server(bind_host, unused_tcp_port):
             srv_instance.writer.close()
             await srv_instance.writer.wait_closed()
 
-            await asyncio.wait_for(_waiter_closed, 0.5)
+            # Wait for server to process connection close
+            await asyncio.sleep(0.05)
+            assert srv_instance._closing
 
 
 async def test_telnet_server_idle_duration(bind_host, unused_tcp_port):

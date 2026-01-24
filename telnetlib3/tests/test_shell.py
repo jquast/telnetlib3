@@ -302,16 +302,15 @@ async def test_telnet_server_shell_eof(bind_host, unused_tcp_port):
     from telnetlib3.telopt import IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
-    _waiter_closed = asyncio.Future()
-
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
-        _waiter_closed=_waiter_closed,
         shell=telnet_server_shell,
         timeout=0.25,
     ) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
-            await asyncio.wait_for(server.wait_for_client(), 0.5)
-        await asyncio.wait_for(_waiter_closed, 0.5)
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
+        # Wait for server to process client disconnect
+        await asyncio.sleep(0.05)
+        assert srv_instance._closing

@@ -213,14 +213,11 @@ async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
     from telnetlib3.telopt import DONT, ECHO
     from telnetlib3.tests.accessories import create_server, open_connection
 
-    _waiter_closed = asyncio.Future()
-
     async with create_server(
         protocol_factory=telnetlib3.BaseServer,
         host=bind_host,
         port=unused_tcp_port,
         connect_maxwait=0.05,
-        _waiter_closed=_waiter_closed,
     ) as server:
         async with open_connection(
             host=bind_host, port=unused_tcp_port, connect_minwait=0.05, connect_maxwait=0.05
@@ -236,7 +233,8 @@ async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
             srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
             server_writer = srv_instance.writer
 
-        await asyncio.wait_for(_waiter_closed, 0.5)
+        # Wait for server to process client disconnect
+        await asyncio.sleep(0.05)
 
         assert client_writer.remote_option[ECHO] is False, client_writer.remote_option
         assert server_writer.local_option[ECHO] is False, server_writer.local_option

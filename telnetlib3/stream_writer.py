@@ -333,6 +333,9 @@ class TelnetWriter:
         for the connection to be fully closed after calling close().
         """
         if self._connection_closed:
+            # Yield to event loop to ensure transport close callbacks complete.
+            # On Windows IOCP, socket closure is asynchronous.
+            await asyncio.sleep(0)
             return
         if self._closed_fut is None:
             self._closed_fut = asyncio.get_running_loop().create_future()

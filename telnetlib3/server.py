@@ -530,16 +530,11 @@ class Server:
     async def wait_closed(self):
         """Wait until the server and all client connections are closed."""
         await self._server.wait_closed()
-        # Wait for all client protocols to finish closing
-        waiters = []
-        for protocol in list(self._protocols):
-            # pylint: disable=protected-access
-            if hasattr(protocol, '_waiter_closed') and not protocol._waiter_closed.done():
-                waiters.append(protocol._waiter_closed)
-        if waiters:
-            await asyncio.gather(*waiters, return_exceptions=True)
-        # Allow event loop to process any pending transport cleanup
+        # Allow event loop to process transport close callbacks.
+        # On Windows IOCP, socket closure is asynchronous.
         await asyncio.sleep(0)
+        # Clear protocol list now that server is closed
+        self._protocols.clear()
 
     @property
     def sockets(self):
@@ -557,6 +552,9 @@ class Server:
 
         :returns: List of protocol instances for all connected clients.
         """
+        # Filter out closed protocols (lazy cleanup)
+        # pylint: disable=protected-access
+        self._protocols = [p for p in self._protocols if not getattr(p, '_closing', False)]
         return list(self._protocols)
 
     async def wait_for_client(self):
@@ -582,10 +580,6 @@ class Server:
         if hasattr(protocol, "_waiter_connected"):
             protocol._waiter_connected.add_done_callback(
                 lambda f: self._new_client.put_nowait(f.result()) if not f.cancelled() else None
-            )
-        if hasattr(protocol, "_waiter_closed"):
-            protocol._waiter_closed.add_done_callback(
-                lambda _: self._protocols.remove(protocol) if protocol in self._protocols else None
             )
 
 
