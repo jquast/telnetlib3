@@ -519,12 +519,19 @@ class Server:
         self._new_client = asyncio.Queue()
 
     def close(self):
-        """Close the server and stop accepting new connections."""
+        """Close the server, stop accepting new connections, and close all clients."""
         self._server.close()
+        # Close all connected client transports
+        for protocol in list(self._protocols):
+            # pylint: disable=protected-access
+            if hasattr(protocol, "_transport") and protocol._transport is not None:
+                protocol._transport.close()
 
     async def wait_closed(self):
-        """Wait until the server is closed."""
+        """Wait until the server and all client connections are closed."""
         await self._server.wait_closed()
+        # Give event loop a chance to process the transport closes
+        await asyncio.sleep(0)
 
     @property
     def sockets(self):
