@@ -72,6 +72,7 @@ from .telopt import (
     theNULL,
     name_command,
     name_commands,
+    option_from_name,
 )
 
 __all__ = (
@@ -172,20 +173,23 @@ class TelnetWriter:
         self._server = server
         self.log = logging.getLogger(__name__)
 
+        #: List of (predicate, future) tuples for wait_for functionality
+        self._waiters = []
+
         #: Dictionary of telnet option byte(s) that follow an
         #: IAC-DO or IAC-DONT command, and contains a value of ``True``
         #: until IAC-WILL or IAC-WONT has been received by remote end.
-        self.pending_option = Option("pending_option", self.log)
+        self.pending_option = Option("pending_option", self.log, on_change=self._check_waiters)
 
         #: Dictionary of telnet option byte(s) that follow an
         #: IAC-WILL or IAC-WONT command, sent by our end,
         #: indicating state of local capabilities.
-        self.local_option = Option("local_option", self.log)
+        self.local_option = Option("local_option", self.log, on_change=self._check_waiters)
 
         #: Dictionary of telnet option byte(s) that follow an
         #: IAC-WILL or IAC-WONT command received by remote end,
         #: indicating state of remote capabilities.
-        self.remote_option = Option("remote_option", self.log)
+        self.remote_option = Option("remote_option", self.log, on_change=self._check_waiters)
 
         #: Sub-negotiation buffer
         self._sb_buffer = collections.deque()
@@ -288,6 +292,8 @@ class TelnetWriter:
         """Close the connection and release resources."""
         if self.connection_closed:
             return
+        # Cancel any pending waiters
+        self._cancel_waiters()
         # Proactively notify the protocol so it can release references immediately.
         # Transport will also call connection_lost(), but doing it here ensures
         # cleanup happens deterministically and is idempotent due to _closing guard.
@@ -331,6 +337,96 @@ class TelnetWriter:
         if self._closed_fut is None:
             self._closed_fut = asyncio.get_running_loop().create_future()
         await self._closed_fut
+
+    def _check_waiters(self):
+        """Check all registered waiters and resolve those whose conditions are met."""
+        for check, fut in self._waiters[:]:
+            if not fut.done() and check():
+                fut.set_result(True)
+
+    def _cancel_waiters(self):
+        """Cancel all pending waiters, typically called on connection close."""
+        for _check, fut in self._waiters[:]:
+            if not fut.done():
+                fut.cancel()
+        self._waiters.clear()
+
+    async def wait_for(self, *, remote=None, local=None, pending=None):
+        """
+        Wait for negotiation state conditions to be met.
+
+        :param dict remote: Dict of option_name -> bool for remote_option checks.
+        :param dict local: Dict of option_name -> bool for local_option checks.
+        :param dict pending: Dict of option_name -> bool for pending_option checks.
+        :returns: True when all conditions are met.
+        :raises KeyError: If an option name is not recognized.
+        :raises asyncio.CancelledError: If connection closes while waiting.
+
+        Example::
+
+            # Wait for TTYPE and NAWS negotiation to complete
+            await writer.wait_for(remote={"TTYPE": True, "NAWS": True})
+
+            # Wait for pending options to clear
+            await writer.wait_for(pending={"TTYPE": False})
+        """
+        conditions = []
+        for spec, option_dict in [
+            (remote, self.remote_option),
+            (local, self.local_option),
+            (pending, self.pending_option),
+        ]:
+            if spec:
+                for name, expected in spec.items():
+                    opt = option_from_name(name)
+                    conditions.append((option_dict, opt, expected))
+
+        def check():
+            for option_dict, opt, expected in conditions:
+                if expected:
+                    if not option_dict.enabled(opt):
+                        return False
+                else:
+                    if option_dict.get(opt) not in (False, None):
+                        return False
+            return True
+
+        if check():
+            return True
+
+        fut = asyncio.get_running_loop().create_future()
+        self._waiters.append((check, fut))
+
+        try:
+            return await fut
+        finally:
+            self._waiters = [(c, f) for c, f in self._waiters if f is not fut]
+
+    async def wait_for_condition(self, predicate):
+        """
+        Wait for a custom condition to be met.
+
+        :param predicate: Callable taking TelnetWriter, returning bool.
+        :returns: True when predicate returns True.
+        :raises asyncio.CancelledError: If connection closes while waiting.
+
+        Example::
+
+            await writer.wait_for_condition(lambda w: w.mode == "kludge")
+        """
+        if predicate(self):
+            return True
+
+        def check():
+            return predicate(self)
+
+        fut = asyncio.get_running_loop().create_future()
+        self._waiters.append((check, fut))
+
+        try:
+            return await fut
+        finally:
+            self._waiters = [(c, f) for c, f in self._waiters if f is not fut]
 
     def __repr__(self):
         """Description of stream encoding state."""
@@ -2541,14 +2637,16 @@ class Option(dict):
     telnet option negotiation.
     """
 
-    def __init__(self, name, log):
+    def __init__(self, name, log, on_change=None):
         """
         Class initializer.
 
         :param str name: decorated name representing option class, such as 'local', 'remote', or
             'pending'.
+        :param on_change: optional callback invoked when option state changes.
         """
         self.name, self.log = name, log
+        self._on_change = on_change
         dict.__init__(self)
 
     def enabled(self, key):
@@ -2568,6 +2666,8 @@ class Option(dict):
             )
             self.log.debug("%s[%s] = %s", self.name, descr, value)
         dict.__setitem__(self, key, value)
+        if self._on_change is not None:
+            self._on_change()
 
 
 def _escape_environ(buf):

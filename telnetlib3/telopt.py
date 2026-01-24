@@ -167,6 +167,7 @@ __all__ = (
     "theNULL",
     "name_command",
     "name_commands",
+    "option_from_name",
 )
 
 EOF, SUSP, ABORT, CMD_EOR = (bytes([const]) for const in range(236, 240))
@@ -265,6 +266,20 @@ _DEBUG_OPTS = {
         "NAOLFD",
     )
 }
+
+#: Reverse mapping of option names to option bytes
+_NAME_TO_OPT = {name: opt for opt, name in _DEBUG_OPTS.items()}
+
+
+def option_from_name(name):
+    """
+    Return option bytes for a given option name.
+
+    :param str name: Option name (e.g., "NAWS", "TTYPE")
+    :returns: Option bytes
+    :raises KeyError: If name is not a known telnet option
+    """
+    return _NAME_TO_OPT[name.upper()]
 
 
 def name_command(byte):
