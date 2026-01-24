@@ -53,7 +53,7 @@ class CONFIG(NamedTuple):
     pty_args: Optional[str] = None
     robot_check: bool = False
     pty_fork_limit: int = 0
-    status_interval: int = 60
+    status_interval: int = 20
 
 
 # Default config instance - use this to access default values
@@ -803,7 +803,8 @@ def parse_server_args():
         type=int,
         metavar="SECONDS",
         default=_config.status_interval,
-        help="periodic status log interval in seconds (0 to disable)",
+        help=("periodic status log interval in seconds (0 to disable). "
+              "status only logged when connected clients has changed."),
     )
     result = vars(parser.parse_args(argv))
     result["pty_args"] = pty_args if PTY_SUPPORT else None
@@ -844,7 +845,7 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
         if not PTY_SUPPORT:
             raise NotImplementedError("PTY support is not available on this platform (Windows?)")
         # local
-        from .pty_shell import make_pty_shell  # pylint: disable=import-outside-toplevel
+        from .server_pty_shell import make_pty_shell  # pylint: disable=import-outside-toplevel
 
         shell = make_pty_shell(pty_exec, pty_args)
 

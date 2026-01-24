@@ -19,6 +19,43 @@ Modern asyncio_ and legacy blocking API's are provided.
 
 The python telnetlib.py_ module removed by Python 3.13 is also re-distributed as a backport.
 
+Overview
+--------
+
+telnetlib3 provides multiple interfaces for working with the Telnet protocol:
+
+**Legacy telnetlib**
+  A copy of Python 3.12's telnetlib.py_ for code migrating from Python 3.11 and
+  earlier. See `Legacy telnetlib`_ below.
+
+**Asyncio Protocol**
+  Modern async/await interface for both client and server, supporting concurrent
+  connections. See the `Guidebook`_ for examples and the `API documentation`_.
+
+**Command-line Utilities**
+  Two CLI tools are included: ``telnetlib3-client`` for connecting to servers
+  and ``telnetlib3-server`` for hosting. See `Command-line`_ below.
+
+**Blocking API**
+  A synchronous interface modeled after telnetlib (client) and miniboa_ (server),
+  with enhancements. See the `sync API documentation`_.
+
+  Enhancements over standard telnetlib:
+
+  - Full RFC 854 protocol negotiation (NAWS, TTYPE, BINARY, ECHO, SGA)
+  - `wait_for()`_ method to block until specific option states are negotiated
+  - `get_extra_info()`_ for terminal type, size, and other metadata
+  - Context manager support (``with TelnetConnection(...) as conn:``)
+  - Thread-safe operation with asyncio_ running in background
+
+  Enhancements over miniboa for server-side:
+
+  - Thread-per-connection model with blocking I/O (vs poll-based)
+  - `readline()`_ and `read_until()`_ blocking methods
+  - Full telnet option negotiation and inspection
+  - miniboa-compatible properties: `active`_, `address`_, `terminal_type`_,
+    `columns`_, `rows`_, `idle()`_, `duration()`_, `deactivate()`_
+
 Quick Example
 -------------
 
@@ -147,6 +184,22 @@ The following RFC specifications are implemented:
 .. _rfc-2066: https://www.rfc-editor.org/rfc/rfc2066.txt
 .. _telnetlib.py: https://docs.python.org/3.12/library/telnetlib.html
 .. _Guidebook: https://telnetlib3.readthedocs.io/en/latest/guidebook.html
+.. _API documentation: https://telnetlib3.readthedocs.io/en/latest/api.html
+.. _sync API documentation: https://telnetlib3.readthedocs.io/en/latest/api/sync.html
+.. _miniboa: https://github.com/shmup/miniboa
+.. _asyncio: https://docs.python.org/3/library/asyncio.html
+.. _wait_for(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.TelnetConnection.wait_for
+.. _get_extra_info(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.TelnetConnection.get_extra_info
+.. _readline(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.TelnetConnection.readline
+.. _read_until(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.TelnetConnection.read_until
+.. _active: https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.active
+.. _address: https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.address
+.. _terminal_type: https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.terminal_type
+.. _columns: https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.columns
+.. _rows: https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.rows
+.. _idle(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.idle
+.. _duration(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.duration
+.. _deactivate(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.deactivate
 
 Further Reading
 ---------------
