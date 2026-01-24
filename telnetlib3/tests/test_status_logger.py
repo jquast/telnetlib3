@@ -158,6 +158,7 @@ async def test_status_logger_disabled_with_zero_interval(bind_host, unused_tcp_p
 def test_status_interval_cli_arg_default():
     """--status-interval CLI argument has correct default."""
     import sys
+
     old_argv = sys.argv
     try:
         sys.argv = ["test"]
@@ -170,6 +171,7 @@ def test_status_interval_cli_arg_default():
 def test_status_interval_cli_arg_custom():
     """--status-interval CLI argument accepts custom values."""
     import sys
+
     old_argv = sys.argv
     try:
         sys.argv = ["test", "--status-interval", "30"]
@@ -182,6 +184,7 @@ def test_status_interval_cli_arg_custom():
 def test_status_interval_cli_arg_disabled():
     """--status-interval 0 disables status logging."""
     import sys
+
     old_argv = sys.argv
     try:
         sys.argv = ["test", "--status-interval", "0"]

@@ -42,28 +42,30 @@ from .accessories import get_version as _get_version
 # isort: on
 # fmt: on
 
-__all__ = tuple(dict.fromkeys(
-    # server,
-    server_base.__all__
-    + server.__all__
-    + server_shell.__all__
-    + guard_shells.__all__
-    + (server_pty_shell.__all__ if PTY_SUPPORT else ())
-    # client,
-    + client_base.__all__
-    + client.__all__
-    + client_shell.__all__
-    # telnet protocol stream / decoders,
-    + stream_writer.__all__
-    + stream_reader.__all__
-    # blocking i/o wrapper
-    + sync.__all__
-    # protocol bits, bytes, and names
-    + telopt.__all__
-    + slc.__all__
-    # python's legacy stdlib api
-    + telnetlib.__all__
-))  # noqa - deduplicate, preserving order
+__all__ = tuple(
+    dict.fromkeys(
+        # server,
+        server_base.__all__
+        + server.__all__
+        + server_shell.__all__
+        + guard_shells.__all__
+        + (server_pty_shell.__all__ if PTY_SUPPORT else ())
+        # client,
+        + client_base.__all__
+        + client.__all__
+        + client_shell.__all__
+        # telnet protocol stream / decoders,
+        + stream_writer.__all__
+        + stream_reader.__all__
+        # blocking i/o wrapper
+        + sync.__all__
+        # protocol bits, bytes, and names
+        + telopt.__all__
+        + slc.__all__
+        # python's legacy stdlib api
+        + telnetlib.__all__
+    )
+)  # noqa - deduplicate, preserving order
 
 __author__ = "Jeff Quast"
 __url__ = "https://github.com/jquast/telnetlib3/"

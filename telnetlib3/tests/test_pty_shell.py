@@ -329,11 +329,9 @@ async def test_pty_session_naws_debouncing():
     def mock_killpg(pgid, sig):
         signal_calls.append((pgid, sig))
 
-    with (
-        patch("os.getpgid", return_value=12345),
-        patch("os.killpg", side_effect=mock_killpg),
-        patch("fcntl.ioctl"),
-    ):
+    with patch("os.getpgid", return_value=12345), \
+         patch("os.killpg", side_effect=mock_killpg), \
+         patch("fcntl.ioctl"):
         session._on_naws(25, 80)
         session._on_naws(30, 90)
         session._on_naws(35, 100)
@@ -358,7 +356,7 @@ async def test_pty_session_naws_debouncing():
 async def test_pty_session_naws_debounce_uses_latest_values():
     """Test that debounced NAWS uses the latest values."""
     # std imports
-    from unittest.mock import MagicMock, patch, call
+    from unittest.mock import MagicMock, call, patch
 
     # local
     from telnetlib3.server_pty_shell import PTYSession
@@ -378,11 +376,9 @@ async def test_pty_session_naws_debounce_uses_latest_values():
     def mock_ioctl(fd, cmd, data):
         ioctl_calls.append((fd, cmd, data))
 
-    with (
-        patch("os.getpgid", return_value=12345),
-        patch("os.killpg"),
-        patch("fcntl.ioctl", side_effect=mock_ioctl),
-    ):
+    with patch("os.getpgid", return_value=12345), \
+         patch("os.killpg"), \
+         patch("fcntl.ioctl", side_effect=mock_ioctl):
         session._on_naws(25, 80)
         session._on_naws(30, 90)
         session._on_naws(50, 150)
@@ -390,8 +386,10 @@ async def test_pty_session_naws_debounce_uses_latest_values():
         await asyncio.sleep(0.25)
 
         assert len(ioctl_calls) == 1
+        # std imports
         import struct
         import termios
+
         expected_winsize = struct.pack("HHHH", 50, 150, 0, 0)
         assert ioctl_calls[0][2] == expected_winsize
 
@@ -417,18 +415,18 @@ async def test_pty_session_naws_cleanup_cancels_pending():
     signal_calls = []
 
     def mock_killpg(pgid, sig):
+        # std imports
         import signal as signal_mod
+
         if sig == signal_mod.SIGWINCH:
             signal_calls.append((pgid, sig))
 
-    with (
-        patch("os.getpgid", return_value=12345),
-        patch("os.killpg", side_effect=mock_killpg),
-        patch("os.kill"),
-        patch("os.waitpid", return_value=(0, 0)),
-        patch("os.close"),
-        patch("fcntl.ioctl"),
-    ):
+    with patch("os.getpgid", return_value=12345), \
+         patch("os.killpg", side_effect=mock_killpg), \
+         patch("os.kill"), \
+         patch("os.waitpid", return_value=(0, 0)), \
+         patch("os.close"), \
+         patch("fcntl.ioctl"):
         session._on_naws(25, 80)
 
         session.cleanup()

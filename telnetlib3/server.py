@@ -603,12 +603,14 @@ class StatusLogger:
         client_data = []
         for client in clients:
             peername = client.get_extra_info("peername", ("-", 0))
-            client_data.append({
-                "ip": peername[0],
-                "port": peername[1],
-                "rx": getattr(client, "rx_bytes", 0),
-                "tx": getattr(client, "tx_bytes", 0),
-            })
+            client_data.append(
+                {
+                    "ip": peername[0],
+                    "port": peername[1],
+                    "rx": getattr(client, "rx_bytes", 0),
+                    "tx": getattr(client, "tx_bytes", 0),
+                }
+            )
         client_data.sort(key=lambda x: (x["ip"], x["port"]))
         return {"count": len(clients), "clients": client_data}
 
@@ -623,8 +625,7 @@ class StatusLogger:
         if status["count"] == 0:
             return "0 clients connected"
         client_info = ", ".join(
-            f"{c['ip']}:{c['port']} (rx={c['rx']}, tx={c['tx']})"
-            for c in status["clients"]
+            f"{c['ip']}:{c['port']} (rx={c['rx']}, tx={c['tx']})" for c in status["clients"]
         )
         return f"{status['count']} client(s): {client_info}"
 
@@ -803,8 +804,10 @@ def parse_server_args():
         type=int,
         metavar="SECONDS",
         default=_config.status_interval,
-        help=("periodic status log interval in seconds (0 to disable). "
-              "status only logged when connected clients has changed."),
+        help=(
+            "periodic status log interval in seconds (0 to disable). "
+            "status only logged when connected clients has changed."
+        ),
     )
     result = vars(parser.parse_args(argv))
     result["pty_args"] = pty_args if PTY_SUPPORT else None
