@@ -348,14 +348,25 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         out_start = 0
         feeding_oob = False
 
-        def is_special(b):
-            return b == 255 or (slc_needed and slc_vals and b in slc_vals)
+        # Build set of special bytes for fast lookup
+        special_bytes = frozenset({255} | (slc_vals or set()))
 
         while i < n:
             if not feeding_oob:
                 # Scan forward until next special byte (IAC or SLC trigger)
-                while i < n and not is_special(data[i]):
-                    i += 1
+                if not slc_vals:
+                    # Fast path: only IAC (255) is special - use C-level find
+                    next_iac = data.find(255, i)
+                    if next_iac == -1:
+                        # No IAC found, consume rest of chunk
+                        if n > out_start:
+                            reader.feed_data(data[out_start:])
+                        return cmd_received
+                    i = next_iac
+                else:
+                    # Slow path: SLC bytes also special - scan byte by byte
+                    while i < n and data[i] not in special_bytes:
+                        i += 1
                 # Flush non-special run
                 if i > out_start:
                     reader.feed_data(data[out_start:i])

@@ -18,23 +18,21 @@ async def test_telnet_server_default_timeout(bind_host, unused_tcp_port):
     from telnetlib3.telopt import IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
-    _waiter = asyncio.Future()
     given_timeout = 19.29
 
     async with create_server(
-        _waiter_connected=_waiter,
         host=bind_host,
         port=unused_tcp_port,
         timeout=given_timeout,
-    ):
+    ) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
 
-            server = await asyncio.wait_for(_waiter, 0.5)
-            assert server.get_extra_info("timeout") == given_timeout
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
+            assert srv_instance.get_extra_info("timeout") == given_timeout
 
-            server.set_timeout()
-            assert server.get_extra_info("timeout") == given_timeout
+            srv_instance.set_timeout()
+            assert srv_instance.get_extra_info("timeout") == given_timeout
 
 
 async def test_telnet_server_set_timeout(bind_host, unused_tcp_port):
@@ -43,19 +41,17 @@ async def test_telnet_server_set_timeout(bind_host, unused_tcp_port):
     from telnetlib3.telopt import IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
-    _waiter = asyncio.Future()
-
-    async with create_server(_waiter_connected=_waiter, host=bind_host, port=unused_tcp_port):
+    async with create_server(host=bind_host, port=unused_tcp_port) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
 
-            server = await asyncio.wait_for(_waiter, 0.5)
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
             for value in (19.29, 0):
-                server.set_timeout(value)
-                assert server.get_extra_info("timeout") == value
+                srv_instance.set_timeout(value)
+                assert srv_instance.get_extra_info("timeout") == value
 
-            server.set_timeout()
-            assert server.get_extra_info("timeout") == 0
+            srv_instance.set_timeout()
+            assert srv_instance.get_extra_info("timeout") == 0
 
 
 async def test_telnet_server_waitfor_timeout(bind_host, unused_tcp_port):

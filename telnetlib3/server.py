@@ -513,6 +513,7 @@ class Server:
     """
 
     def __init__(self, server):
+        """Initialize wrapper around asyncio.Server."""
         self._server = server
         self._protocols = []
         self._new_client = asyncio.Queue()
@@ -544,7 +545,7 @@ class Server:
         return list(self._protocols)
 
     async def wait_for_client(self):
-        """
+        r"""
         Wait for a client to connect and complete negotiation.
 
         :returns: The protocol instance for the connected client.
@@ -553,7 +554,7 @@ class Server:
 
             server = await telnetlib3.create_server(port=6023)
             client = await server.wait_for_client()
-            client.writer.write("Welcome!\\r\\n")
+            client.writer.write("Welcome!\r\n")
         """
         return await self._new_client.get()
 
@@ -561,12 +562,16 @@ class Server:
         """Register a new protocol instance (called by factory)."""
         # pylint: disable=protected-access
         self._protocols.append(protocol)
-        protocol._waiter_connected.add_done_callback(
-            lambda f: self._new_client.put_nowait(f.result()) if not f.cancelled() else None
-        )
-        protocol._waiter_closed.add_done_callback(
-            lambda _: self._protocols.remove(protocol) if protocol in self._protocols else None
-        )
+        # Only register callbacks if protocol has the required waiters
+        # (custom protocols like plain asyncio.Protocol won't have these)
+        if hasattr(protocol, "_waiter_connected"):
+            protocol._waiter_connected.add_done_callback(
+                lambda f: self._new_client.put_nowait(f.result()) if not f.cancelled() else None
+            )
+        if hasattr(protocol, "_waiter_closed"):
+            protocol._waiter_closed.add_done_callback(
+                lambda _: self._protocols.remove(protocol) if protocol in self._protocols else None
+            )
 
 
 async def create_server(
