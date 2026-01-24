@@ -161,8 +161,7 @@ def test_slc_value_set_membership(benchmark, slctab):
 DATA_1MB = b"x" * (1024 * 1024)
 
 
-@pytest.fixture
-async def server_client_pair():
+async def _setup_server_client_pair():
     """Create connected server and client pair."""
     received_data = bytearray()
     server_ready = asyncio.Event()
@@ -197,7 +196,7 @@ async def server_client_pair():
 
     await server_ready.wait()
 
-    yield {
+    return {
         "server": server,
         "srv_writer": srv_writer,
         "client_reader": client_reader,
@@ -205,42 +204,61 @@ async def server_client_pair():
         "received_data": received_data,
     }
 
-    client_writer.close()
-    await client_writer.wait_closed()
-    server.close()
-    await server.wait_closed()
+
+async def _teardown_server_client_pair(pair):
+    """Clean up server and client pair."""
+    pair["client_writer"].close()
+    await pair["client_writer"].wait_closed()
+    pair["server"].close()
+    await pair["server"].wait_closed()
 
 
-async def test_bulk_transfer_client_to_server(benchmark, server_client_pair):
+def test_bulk_transfer_client_to_server(benchmark):
     """Benchmark 1MB bulk transfer from client to server."""
-    pair = server_client_pair
-    client_writer = pair["client_writer"]
-    received = pair["received_data"]
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
-    async def send_1mb():
-        received.clear()
-        client_writer.write(DATA_1MB)
-        await client_writer.drain()
-        while len(received) < len(DATA_1MB):
-            await asyncio.sleep(0.001)
+    try:
+        pair = loop.run_until_complete(_setup_server_client_pair())
+        client_writer = pair["client_writer"]
+        received = pair["received_data"]
 
-    await benchmark(send_1mb)
+        async def send_1mb():
+            received.clear()
+            client_writer.write(DATA_1MB)
+            await client_writer.drain()
+            while len(received) < len(DATA_1MB):
+                await asyncio.sleep(0.001)
+
+        benchmark(lambda: loop.run_until_complete(send_1mb()))
+
+        loop.run_until_complete(_teardown_server_client_pair(pair))
+    finally:
+        loop.close()
 
 
-async def test_bulk_transfer_server_to_client(benchmark, server_client_pair):
+def test_bulk_transfer_server_to_client(benchmark):
     """Benchmark 1MB bulk transfer from server to client."""
-    pair = server_client_pair
-    srv_writer = pair["srv_writer"]
-    client_reader = pair["client_reader"]
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
-    async def send_1mb():
-        srv_writer.write(DATA_1MB)
-        await srv_writer.drain()
-        received = 0
-        while received < len(DATA_1MB):
-            chunk = await client_reader.read(65536)
-            if not chunk:
-                break
-            received += len(chunk)
+    try:
+        pair = loop.run_until_complete(_setup_server_client_pair())
+        srv_writer = pair["srv_writer"]
+        client_reader = pair["client_reader"]
 
-    await benchmark(send_1mb)
+        async def send_1mb():
+            srv_writer.write(DATA_1MB)
+            await srv_writer.drain()
+            received = 0
+            while received < len(DATA_1MB):
+                chunk = await client_reader.read(65536)
+                if not chunk:
+                    break
+                received += len(chunk)
+
+        benchmark(lambda: loop.run_until_complete(send_1mb()))
+
+        loop.run_until_complete(_teardown_server_client_pair(pair))
+    finally:
+        loop.close()
