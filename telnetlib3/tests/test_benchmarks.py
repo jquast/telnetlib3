@@ -27,8 +27,6 @@ class MockTransport:
 class MockProtocol:
     """Minimal protocol mock for benchmarking."""
 
-    pass
-
 
 @pytest.fixture
 def writer():
