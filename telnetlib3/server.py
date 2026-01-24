@@ -531,7 +531,9 @@ class Server:
         """Wait until the server and all client connections are closed."""
         await self._server.wait_closed()
         # Allow event loop to process transport close callbacks.
-        # On Windows IOCP, socket closure is asynchronous.
+        # On Windows IOCP, socket closure is asynchronous and may require
+        # multiple event loop iterations for full cleanup.
+        await asyncio.sleep(0)
         await asyncio.sleep(0)
         # Clear protocol list now that server is closed
         self._protocols.clear()

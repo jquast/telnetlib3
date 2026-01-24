@@ -334,7 +334,9 @@ class TelnetWriter:
         """
         if self._connection_closed:
             # Yield to event loop to ensure transport close callbacks complete.
-            # On Windows IOCP, socket closure is asynchronous.
+            # On Windows IOCP, socket closure is asynchronous and may require
+            # multiple event loop iterations for full cleanup.
+            await asyncio.sleep(0)
             await asyncio.sleep(0)
             return
         if self._closed_fut is None:
