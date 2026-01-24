@@ -13,10 +13,11 @@
 Introduction
 ============
 
-telnetlib3 is a Telnet Client and Server library for python.  This project
-requires python 3.7 and later, using the asyncio_ module.
+``telnetlib3`` is a full-featured Telnet Client and Server library for python3.8 and newer.
 
-.. _asyncio: http://docs.python.org/3.11/library/asyncio.html
+Modern asyncio_ and legacy blocking API's are provided.
+
+The python telnetlib.py_ module removed by Python 3.13 is also re-distributed as a backport.
 
 Quick Example
 -------------
@@ -46,8 +47,6 @@ A simple telnet server:
 
 More examples are available in the `Guidebook`_ and the ``bin/`` directory.
 
-.. _Guidebook: https://telnetlib3.readthedocs.io/en/latest/guidebook.html
-
 Legacy telnetlib
 ----------------
 
@@ -60,15 +59,19 @@ To migrate code from Python 3.11 and earlier:
 
     # OLD imports:
     import telnetlib
-    # - or -
+
+    # NEW imports:
+    import telnetlib3
+
+Or, using *from* syntax,
+
+.. code-block:: python
+
+    # OLD imports:
     from telnetlib import Telnet, ECHO, BINARY
 
     # NEW imports:
-    import telnetlib3.telnetlib as telnetlib
-    # - or -
-    from telnetlib3.telnetlib import Telnet, ECHO, BINARY
-
-.. _telnetlib.py: https://docs.python.org/3.12/library/telnetlib.html
+    from telnetlib3 import Telnet, ECHO, BINARY
 
 Command-line
 ------------
@@ -142,6 +145,8 @@ The following RFC specifications are implemented:
 .. _rfc-1571: https://www.rfc-editor.org/rfc/rfc1571.txt
 .. _rfc-1572: https://www.rfc-editor.org/rfc/rfc1572.txt
 .. _rfc-2066: https://www.rfc-editor.org/rfc/rfc2066.txt
+.. _telnetlib.py: https://docs.python.org/3.12/library/telnetlib.html
+.. _Guidebook: https://telnetlib3.readthedocs.io/en/latest/guidebook.html
 
 Further Reading
 ---------------
