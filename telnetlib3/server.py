@@ -53,6 +53,7 @@ class CONFIG(NamedTuple):
     pty_args: Optional[str] = None
     robot_check: bool = False
     pty_fork_limit: int = 0
+    status_interval: int = 20
 
 
 # Default config instance - use this to access default values
@@ -581,6 +582,73 @@ class Server:
             )
 
 
+class StatusLogger:
+    """Periodic status logger for connected clients."""
+
+    def __init__(self, server, interval):
+        """
+        Initialize status logger.
+
+        :param server: Server instance to monitor.
+        :param interval: Logging interval in seconds.
+        """
+        self._server = server
+        self._interval = interval
+        self._task = None
+        self._last_status = None
+
+    def _get_status(self):
+        """Get current status snapshot using IP:port pairs for change detection."""
+        clients = self._server.clients
+        client_data = []
+        for client in clients:
+            peername = client.get_extra_info("peername", ("-", 0))
+            client_data.append(
+                {
+                    "ip": peername[0],
+                    "port": peername[1],
+                    "rx": getattr(client, "rx_bytes", 0),
+                    "tx": getattr(client, "tx_bytes", 0),
+                }
+            )
+        client_data.sort(key=lambda x: (x["ip"], x["port"]))
+        return {"count": len(clients), "clients": client_data}
+
+    def _status_changed(self, current):
+        """Check if status differs from last logged."""
+        if self._last_status is None:
+            return current["count"] > 0
+        return current != self._last_status
+
+    def _format_status(self, status):
+        """Format status for logging."""
+        if status["count"] == 0:
+            return "0 clients connected"
+        client_info = ", ".join(
+            f"{c['ip']}:{c['port']} (rx={c['rx']}, tx={c['tx']})" for c in status["clients"]
+        )
+        return f"{status['count']} client(s): {client_info}"
+
+    async def _run(self):
+        """Run periodic status logging."""
+        while True:
+            await asyncio.sleep(self._interval)
+            status = self._get_status()
+            if self._status_changed(status):
+                logger.info("Status: %s", self._format_status(status))
+                self._last_status = status
+
+    def start(self):
+        """Start the status logging task."""
+        if self._interval > 0:
+            self._task = asyncio.create_task(self._run())
+
+    def stop(self):
+        """Stop the status logging task."""
+        if self._task:
+            self._task.cancel()
+
+
 async def create_server(host=None, port=23, protocol_factory=TelnetServer, **kwds):
     """
     Create a TCP Telnet server.
@@ -731,6 +799,16 @@ def parse_server_args():
         default=_config.robot_check,
         help="check if client can render wide unicode (rejects bots)",
     )
+    parser.add_argument(
+        "--status-interval",
+        type=int,
+        metavar="SECONDS",
+        default=_config.status_interval,
+        help=(
+            "periodic status log interval in seconds (0 to disable). "
+            "status only logged when connected clients has changed."
+        ),
+    )
     result = vars(parser.parse_args(argv))
     result["pty_args"] = pty_args if PTY_SUPPORT else None
     if not PTY_SUPPORT:
@@ -754,6 +832,7 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
     pty_args=_config.pty_args,
     robot_check=_config.robot_check,
     pty_fork_limit=_config.pty_fork_limit,
+    status_interval=_config.status_interval,
 ):
     """
     Program entry point for server daemon.
@@ -769,7 +848,7 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
         if not PTY_SUPPORT:
             raise NotImplementedError("PTY support is not available on this platform (Windows?)")
         # local
-        from .pty_shell import make_pty_shell  # pylint: disable=import-outside-toplevel
+        from .server_pty_shell import make_pty_shell  # pylint: disable=import-outside-toplevel
 
         shell = make_pty_shell(pty_exec, pty_args)
 
@@ -833,12 +912,21 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
     # SIGTERM cases server to gracefully stop
     loop.add_signal_handler(signal.SIGTERM, asyncio.ensure_future, _sigterm_handler(server, log))
 
+    # Start periodic status logger if enabled
+    status_logger = None
+    if status_interval > 0:
+        status_logger = StatusLogger(server, status_interval)
+        status_logger.start()
+
     logger.info("Server ready on %s:%s", host, port)
 
     # await completion of server stop
     try:
         await server.wait_closed()
     finally:
+        # stop status logger
+        if status_logger:
+            status_logger.stop()
         # remove signal handler on stop
         loop.remove_signal_handler(signal.SIGTERM)
 

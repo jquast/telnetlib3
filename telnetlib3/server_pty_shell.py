@@ -23,7 +23,7 @@ from .telopt import NAWS
 
 __all__ = ("make_pty_shell", "pty_shell")
 
-logger = logging.getLogger("telnetlib3.pty_shell")
+logger = logging.getLogger("telnetlib3.server_pty_shell")
 
 # Synchronized Output sequences (DEC private mode 2026)
 # https://gist.github.com/christianparpart/d8a62cc1ab659194337d73e399004036
@@ -60,6 +60,8 @@ class PTYSession:
         self._in_sync_update = False
         self._decoder = None
         self._decoder_charset = None
+        self._naws_pending = None
+        self._naws_timer = None
 
     def start(self):
         """Fork PTY, configure environment, and exec program."""
@@ -149,9 +151,25 @@ class PTYSession:
         self.writer.set_ext_callback(NAWS, self._on_naws)
 
     def _on_naws(self, rows, cols):
-        """Handle NAWS updates by resizing PTY."""
+        """Handle NAWS updates by resizing PTY with debouncing."""
         self.writer.protocol.on_naws(rows, cols)
-        self._set_window_size(rows, cols)
+        self._schedule_naws_update(rows, cols)
+
+    def _schedule_naws_update(self, rows, cols):
+        """Schedule debounced NAWS update to avoid signal storms during rapid resize."""
+        self._naws_pending = (rows, cols)
+        if self._naws_timer is not None:
+            self._naws_timer.cancel()
+        loop = asyncio.get_event_loop()
+        self._naws_timer = loop.call_later(0.2, self._fire_naws_update)
+
+    def _fire_naws_update(self):
+        """Fire the pending NAWS update after debounce delay."""
+        if self._naws_pending is not None:
+            rows, cols = self._naws_pending
+            self._naws_pending = None
+            self._naws_timer = None
+            self._set_window_size(rows, cols)
 
     def _set_window_size(self, rows, cols):
         """Set PTY window size and send SIGWINCH to child."""
@@ -331,6 +349,12 @@ class PTYSession:
 
     def cleanup(self):
         """Kill child process and close PTY fd."""
+        # Cancel any pending NAWS timer
+        if self._naws_timer is not None:
+            self._naws_timer.cancel()
+            self._naws_timer = None
+            self._naws_pending = None
+
         # Flush any remaining output buffer with final=True to emit buffered bytes
         if self._output_buffer:
             self._flush_output(self._output_buffer, final=True)

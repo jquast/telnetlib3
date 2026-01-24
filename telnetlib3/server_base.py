@@ -30,6 +30,8 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     _advanced = False
     _closing = False
     _check_later = None
+    _rx_bytes = 0
+    _tx_bytes = 0
 
     def __init__(  # pylint: disable=too-many-positional-arguments
         self,
@@ -203,6 +205,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         # hundreds of times faster though much more complicated.
         #
         self._last_received = datetime.datetime.now()
+        self._rx_bytes += len(data)
         writer = self.writer
         reader = self.reader
 
@@ -244,6 +247,8 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             # Process special byte
             try:
                 recv_inband = writer.feed_byte(_ONE_BYTE[data[i]])
+            except ValueError as exc:
+                logger.debug("Invalid telnet byte from %s: %s", self, exc)
             except BaseException:  # pylint: disable=broad-exception-caught
                 self._log_exception(logger.warning, *sys.exc_info())
             else:
@@ -270,6 +275,16 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     def idle(self):
         """Time elapsed since data last received, in seconds as float."""
         return (datetime.datetime.now() - self._last_received).total_seconds()
+
+    @property
+    def rx_bytes(self):
+        """Total bytes received from client."""
+        return self._rx_bytes
+
+    @property
+    def tx_bytes(self):
+        """Total bytes sent to client."""
+        return self._tx_bytes
 
     # public protocol methods
 

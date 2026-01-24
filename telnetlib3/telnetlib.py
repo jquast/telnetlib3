@@ -11,7 +11,7 @@ J. Reynolds.
 
 Example::
 
-    >>> from telnetlib import Telnet
+    >>> from telnetlib3 import Telnet
     >>> tn = Telnet('www.python.org', 79)   # connect to finger port
     >>> tn.write(b'guido\r\n')
     >>> print(tn.read_all())

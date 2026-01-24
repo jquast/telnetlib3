@@ -10,13 +10,62 @@
     :alt: codecov.io Code Coverage
     :target: https://codecov.io/gh/jquast/telnetlib3/
 
+.. image:: https://img.shields.io/badge/Linux-yes-success?logo=linux
+    :alt: Linux supported
+
+.. image:: https://img.shields.io/badge/Windows-yes-success?logo=windows
+    :alt: Windows supported
+
+.. image:: https://img.shields.io/badge/MacOS-yes-success?logo=apple
+    :alt: MacOS supported
+
+.. image:: https://img.shields.io/badge/BSD-yes-success?logo=freebsd
+    :alt: BSD supported
+
 Introduction
 ============
 
-telnetlib3 is a Telnet Client and Server library for python.  This project
-requires python 3.7 and later, using the asyncio_ module.
+``telnetlib3`` is a full-featured Telnet Client and Server library for python3.8 and newer.
 
-.. _asyncio: http://docs.python.org/3.11/library/asyncio.html
+Modern asyncio_ and legacy blocking API's are provided.
+
+The python telnetlib.py_ module removed by Python 3.13 is also re-distributed as a backport.
+
+Overview
+--------
+
+telnetlib3 provides multiple interfaces for working with the Telnet protocol:
+
+**Legacy telnetlib**
+  An unadulterated copy of Python 3.12's telnetlib.py_ See `Legacy telnetlib`_ below.
+
+**Asyncio Protocol**
+  Modern async/await interface for both client and server, supporting concurrent
+  connections. See the `Guidebook`_ for examples and the `API documentation`_.
+
+**Command-line Utilities**
+  Two CLI tools are included: ``telnetlib3-client`` for connecting to servers
+  and ``telnetlib3-server`` for hosting. See `Command-line`_ below.
+
+**Blocking API**
+  A synchronous interface modeled after telnetlib (client) and miniboa_ (server),
+  with enhancements. See the `sync API documentation`_.
+
+  Enhancements over standard telnetlib:
+
+  - Full RFC 854 protocol negotiation (NAWS, TTYPE, BINARY, ECHO, SGA)
+  - `wait_for()`_ method to block until specific option states are negotiated
+  - `get_extra_info()`_ for terminal type, size, and other metadata
+  - Context manager support (``with TelnetConnection(...) as conn:``)
+  - Thread-safe operation with asyncio_ running in background
+
+  Enhancements over miniboa for server-side:
+
+  - Thread-per-connection model with blocking I/O (vs poll-based)
+  - `readline()`_ and `read_until()`_ blocking methods
+  - Full telnet option negotiation and inspection
+  - miniboa-compatible properties: `active`_, `address`_, `terminal_type`_,
+    `columns`_, `rows`_, `idle()`_, `duration()`_, `deactivate()`_
 
 Quick Example
 -------------
@@ -46,29 +95,22 @@ A simple telnet server:
 
 More examples are available in the `Guidebook`_ and the ``bin/`` directory.
 
-.. _Guidebook: https://telnetlib3.readthedocs.io/en/latest/guidebook.html
-
 Legacy telnetlib
 ----------------
 
 This library *also* contains a copy of telnetlib.py_ from the standard library of
-Python 3.12 before it was removed in Python 3.13. asyncio_ is not required.
+Python 3.12 before it was removed in Python 3.13. asyncio_ is not required to use
+it.
 
-To migrate code from Python 3.11 and earlier:
+To migrate code, change import statements:
 
 .. code-block:: python
 
     # OLD imports:
     import telnetlib
-    # - or -
-    from telnetlib import Telnet, ECHO, BINARY
 
     # NEW imports:
-    import telnetlib3.telnetlib as telnetlib
-    # - or -
-    from telnetlib3.telnetlib import Telnet, ECHO, BINARY
-
-.. _telnetlib.py: https://docs.python.org/3.12/library/telnetlib.html
+    import telnetlib3
 
 Command-line
 ------------
@@ -82,7 +124,10 @@ module path to a function of signature ``async def shell(reader, writer)``.
 ::
 
     telnetlib3-client nethack.alt.org
+    telnetlib3-client xibalba.l33t.codes 44510
+    telnetlib3-client --shell bin.client_wargame.shell 1984.ws 666
     telnetlib3-server --pty-exec /bin/bash -- --login
+    telnetlib3-server 0.0.0.0 6023 --shell='bin.server_wargame.shell
 
 Encoding
 --------
@@ -91,8 +136,15 @@ Use ``--encoding`` and ``--force-binary`` for non-ASCII terminals::
 
     telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
 
-The default encoding is UTF-8. Use ``--force-binary`` when the server
-doesn't properly negotiate BINARY mode.
+The default encoding is UTF-8, but all text is limited to ASCII until BINARY
+mode is agreed by compliance of their respective RFCs.
+
+However, many clients and servers that are capable of non-ascii encodings like
+utf-8 or cp437 may not be capable of negotiating about BINARY, NEW_ENVIRON,
+or CHARSET to demand about it.
+
+In this case, use ``--force-binary`` argument for clients and servers to
+enforce that the specified ``--encoding`` is always used, no matter what.
 
 Features
 --------
@@ -142,6 +194,24 @@ The following RFC specifications are implemented:
 .. _rfc-1571: https://www.rfc-editor.org/rfc/rfc1571.txt
 .. _rfc-1572: https://www.rfc-editor.org/rfc/rfc1572.txt
 .. _rfc-2066: https://www.rfc-editor.org/rfc/rfc2066.txt
+.. _telnetlib.py: https://docs.python.org/3.12/library/telnetlib.html
+.. _Guidebook: https://telnetlib3.readthedocs.io/en/latest/guidebook.html
+.. _API documentation: https://telnetlib3.readthedocs.io/en/latest/api.html
+.. _sync API documentation: https://telnetlib3.readthedocs.io/en/latest/api/sync.html
+.. _miniboa: https://github.com/shmup/miniboa
+.. _asyncio: https://docs.python.org/3/library/asyncio.html
+.. _wait_for(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.TelnetConnection.wait_for
+.. _get_extra_info(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.TelnetConnection.get_extra_info
+.. _readline(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.TelnetConnection.readline
+.. _read_until(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.TelnetConnection.read_until
+.. _active: https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.active
+.. _address: https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.address
+.. _terminal_type: https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.terminal_type
+.. _columns: https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.columns
+.. _rows: https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.rows
+.. _idle(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.idle
+.. _duration(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.duration
+.. _deactivate(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.deactivate
 
 Further Reading
 ---------------

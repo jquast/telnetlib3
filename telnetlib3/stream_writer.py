@@ -781,6 +781,8 @@ class TelnetWriter:
         assert buf and buf.startswith(IAC), buf
         if self._transport is not None:
             self._transport.write(buf)
+            if hasattr(self._protocol, "_tx_bytes"):
+                self._protocol._tx_bytes += len(buf)
 
     def iac(self, cmd, opt=b""):
         """
@@ -1830,6 +1832,8 @@ class TelnetWriter:
                 buf = self._escape_iac(buf)
 
             self._transport.write(buf)
+            if hasattr(self._protocol, "_tx_bytes"):
+                self._protocol._tx_bytes += len(buf)
 
     # Private sub-negotiation (SB) routines
 

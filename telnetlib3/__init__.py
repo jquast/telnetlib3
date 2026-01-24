@@ -17,6 +17,8 @@ from . import client
 from . import telopt
 from . import slc
 from . import telnetlib
+from . import guard_shells
+from . import sync
 from .server_base import *  # noqa
 from .server import *  # noqa
 from .stream_writer import *  # noqa
@@ -25,43 +27,49 @@ from .client_base import *  # noqa
 from .client_shell import *  # noqa
 from .client import *  # noqa
 from .telopt import *  # noqa
-from .telnetlib import *  # noqa
 from .slc import *  # noqa
+from .telnetlib import *  # noqa
+from .guard_shells import *  # noqa
+from .sync import *  # noqa
 try:
-    from . import pty_shell as _pty_shell_module
-    from .pty_shell import *  # noqa
+    from . import server_pty_shell
+    from .server_pty_shell import *  # noqa
     PTY_SUPPORT = True  # pylint: disable=invalid-name
 except ImportError:
-    _pty_shell_module = None  # type: ignore[assignment]
+    server_pty_shell = None  # type: ignore[assignment]
     PTY_SUPPORT = False  # pylint: disable=invalid-name
-from . import guard_shells as _guard_shells_module
-from .guard_shells import *  # noqa
-from . import sync as _sync_module
-from .sync import *  # noqa
-from .accessories import get_version as __get_version
+from .accessories import get_version as _get_version
 # isort: on
 # fmt: on
 
-__all__ = (
-    server_base.__all__
-    + server_shell.__all__
-    + server.__all__
-    + client_base.__all__
-    + client_shell.__all__
-    + client.__all__
-    + stream_writer.__all__
-    + stream_reader.__all__
-    + telopt.__all__
-    + slc.__all__
-    + telnetlib.__all__
-    + (_pty_shell_module.__all__ if PTY_SUPPORT else ())
-    + _guard_shells_module.__all__
-    + _sync_module.__all__
-)  # noqa
+__all__ = tuple(
+    dict.fromkeys(
+        # server,
+        server_base.__all__
+        + server.__all__
+        + server_shell.__all__
+        + guard_shells.__all__
+        + (server_pty_shell.__all__ if PTY_SUPPORT else ())
+        # client,
+        + client_base.__all__
+        + client.__all__
+        + client_shell.__all__
+        # telnet protocol stream / decoders,
+        + stream_writer.__all__
+        + stream_reader.__all__
+        # blocking i/o wrapper
+        + sync.__all__
+        # protocol bits, bytes, and names
+        + telopt.__all__
+        + slc.__all__
+        # python's legacy stdlib api
+        + telnetlib.__all__
+    )
+)  # noqa - deduplicate, preserving order
 
 __author__ = "Jeff Quast"
 __url__ = "https://github.com/jquast/telnetlib3/"
 __copyright__ = "Copyright 2013"
 __credits__ = ["Jim Storch", "Wijnand Modderman-Lenstra"]
 __license__ = "ISC"
-__version__ = __get_version()
+__version__ = _get_version()

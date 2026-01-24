@@ -226,7 +226,7 @@ async def test_pty_shell_naws_resize(bind_host, unused_tcp_port, require_no_capt
 def test_platform_check_not_windows():
     """Test that platform check raises on Windows."""
     # local
-    from telnetlib3.pty_shell import _platform_check
+    from telnetlib3.server_pty_shell import _platform_check
 
     original_platform = sys.platform
     try:
@@ -255,7 +255,7 @@ async def test_pty_session_build_environment():
     from unittest.mock import MagicMock
 
     # local
-    from telnetlib3.pty_shell import PTYSession
+    from telnetlib3.server_pty_shell import PTYSession
 
     reader = MagicMock()
     writer = MagicMock()
@@ -286,7 +286,7 @@ async def test_pty_session_build_environment_charset_fallback():
     from unittest.mock import MagicMock
 
     # local
-    from telnetlib3.pty_shell import PTYSession
+    from telnetlib3.server_pty_shell import PTYSession
 
     reader = MagicMock()
     writer = MagicMock()
@@ -304,3 +304,133 @@ async def test_pty_session_build_environment_charset_fallback():
 
     assert env["TERM"] == "vt100"
     assert env["LANG"] == "en_US.ISO-8859-1"
+
+
+async def test_pty_session_naws_debouncing():
+    """Test that rapid NAWS updates are debounced."""
+    # std imports
+    from unittest.mock import MagicMock, patch
+
+    # local
+    from telnetlib3.server_pty_shell import PTYSession
+
+    reader = MagicMock()
+    writer = MagicMock()
+    protocol = MagicMock()
+    writer.protocol = protocol
+    writer.get_extra_info = MagicMock(return_value=None)
+
+    session = PTYSession(reader, writer, "/bin/sh", [])
+    session.master_fd = 1
+    session.child_pid = 12345
+
+    signal_calls = []
+
+    def mock_killpg(pgid, sig):
+        signal_calls.append((pgid, sig))
+
+    with patch("os.getpgid", return_value=12345), \
+         patch("os.killpg", side_effect=mock_killpg), \
+         patch("fcntl.ioctl"):
+        session._on_naws(25, 80)
+        session._on_naws(30, 90)
+        session._on_naws(35, 100)
+
+        assert len(signal_calls) == 0
+
+        await asyncio.sleep(0.25)
+
+        assert len(signal_calls) == 1
+
+        signal_calls.clear()
+        session._on_naws(40, 120)
+        session._on_naws(45, 130)
+
+        assert len(signal_calls) == 0
+
+        await asyncio.sleep(0.25)
+
+        assert len(signal_calls) == 1
+
+
+async def test_pty_session_naws_debounce_uses_latest_values():
+    """Test that debounced NAWS uses the latest values."""
+    # std imports
+    from unittest.mock import MagicMock, call, patch
+
+    # local
+    from telnetlib3.server_pty_shell import PTYSession
+
+    reader = MagicMock()
+    writer = MagicMock()
+    protocol = MagicMock()
+    writer.protocol = protocol
+    writer.get_extra_info = MagicMock(return_value=None)
+
+    session = PTYSession(reader, writer, "/bin/sh", [])
+    session.master_fd = 1
+    session.child_pid = 12345
+
+    ioctl_calls = []
+
+    def mock_ioctl(fd, cmd, data):
+        ioctl_calls.append((fd, cmd, data))
+
+    with patch("os.getpgid", return_value=12345), \
+         patch("os.killpg"), \
+         patch("fcntl.ioctl", side_effect=mock_ioctl):
+        session._on_naws(25, 80)
+        session._on_naws(30, 90)
+        session._on_naws(50, 150)
+
+        await asyncio.sleep(0.25)
+
+        assert len(ioctl_calls) == 1
+        # std imports
+        import struct
+        import termios
+
+        expected_winsize = struct.pack("HHHH", 50, 150, 0, 0)
+        assert ioctl_calls[0][2] == expected_winsize
+
+
+async def test_pty_session_naws_cleanup_cancels_pending():
+    """Test that cleanup cancels pending NAWS timer."""
+    # std imports
+    from unittest.mock import MagicMock, patch
+
+    # local
+    from telnetlib3.server_pty_shell import PTYSession
+
+    reader = MagicMock()
+    writer = MagicMock()
+    protocol = MagicMock()
+    writer.protocol = protocol
+    writer.get_extra_info = MagicMock(return_value=None)
+
+    session = PTYSession(reader, writer, "/bin/sh", [])
+    session.master_fd = 1
+    session.child_pid = 12345
+
+    signal_calls = []
+
+    def mock_killpg(pgid, sig):
+        # std imports
+        import signal as signal_mod
+
+        if sig == signal_mod.SIGWINCH:
+            signal_calls.append((pgid, sig))
+
+    with patch("os.getpgid", return_value=12345), \
+         patch("os.killpg", side_effect=mock_killpg), \
+         patch("os.kill"), \
+         patch("os.waitpid", return_value=(0, 0)), \
+         patch("os.close"), \
+         patch("fcntl.ioctl"):
+        session._on_naws(25, 80)
+
+        session.cleanup()
+
+        await asyncio.sleep(0.25)
+
+        assert len(signal_calls) == 0
