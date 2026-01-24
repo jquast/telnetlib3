@@ -6,17 +6,6 @@ Retired by author, looking for new owner :) or some help!
 Design
 ======
 
-performance
------------
-
-The client appears to be very poor-performing under load. I wrote a basic server
-that is capable of sending a very large stream of data, "max headroom" demo at
-telnet 1984.ws, and it totally kills the client. Maybe the client is so busy
-processing incoming data that it is not allowing for tasks to read it from the
-other end?
-
-Maybe this is async "backpressure"
-
 reduce
 ------
 
@@ -26,28 +15,6 @@ rather shoe-horned, main() should declare keywords.
 
 **this is completed for server, copy to client**
 
-
-wait_for_negotiation
---------------------
-
-We need a way to wish to wait for a state. For example, our client shell might await
-until local_echo is False, or remote_option[ECHO] is True to change terminal state
-to reflect it. A function wait_for, receiving a function that returns True when state
-is met, will be called back continuously after each block of data received containing
-an IAC command byte, but the boiler code simply returns the waiter.
-
-This should allow us to spray the client with feature requests, and await the
-completion of their negotiation, especially for things like LINEMODE that might
-have many state changes, this allows asyncio to solve the complex "awaiting
-many future states in parallel" event loop easily
-
--- just accept a future, and on each state change, call an internal function
-that checks for equality for the parameters given, and when true, set .done()
-
-after some thought, we should hardcode common ones, such as await
-negotiate_kludge() -> bool, wait_for_naws() -> bool, and,
-maybe a common wait_for_slc() that just returns some description
-of the state change that has occurred with maybe values
 
 BaseTelnetProtocol
 ------------------
