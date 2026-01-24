@@ -554,7 +554,7 @@ class Server:
         """
         # Filter out closed protocols (lazy cleanup)
         # pylint: disable=protected-access
-        self._protocols = [p for p in self._protocols if not getattr(p, '_closing', False)]
+        self._protocols = [p for p in self._protocols if not getattr(p, "_closing", False)]
         return list(self._protocols)
 
     async def wait_for_client(self):
