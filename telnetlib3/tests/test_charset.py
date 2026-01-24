@@ -118,6 +118,9 @@ async def test_telnet_server_on_charset(bind_host, unused_tcp_port):
             srv_instance = await asyncio.wait_for(_waiter, 2.0)
             assert srv_instance.get_extra_info("charset") == given_charset
 
+            srv_instance.writer.close()
+            await srv_instance.writer.wait_closed()
+
 
 async def test_telnet_client_send_charset(bind_host, unused_tcp_port):
     """Test Client's callback method send_charset() selection for illegals."""
@@ -125,8 +128,13 @@ async def test_telnet_client_send_charset(bind_host, unused_tcp_port):
     from telnetlib3.tests.accessories import create_server, open_connection
 
     _waiter = asyncio.Future()
+    server_instance = {"protocol": None}
 
     class ServerTestCharset(telnetlib3.TelnetServer):
+        def begin_negotiation(self):
+            server_instance["protocol"] = self
+            return super().begin_negotiation()
+
         def on_request_charset(self):
             return ["illegal", "cp437"]
 
@@ -150,6 +158,10 @@ async def test_telnet_client_send_charset(bind_host, unused_tcp_port):
             assert val == "cp437"
             assert writer.get_extra_info("charset") == "cp437"
 
+            if server_instance["protocol"]:
+                server_instance["protocol"].writer.close()
+                await server_instance["protocol"].writer.wait_closed()
+
 
 async def test_telnet_client_no_charset(bind_host, unused_tcp_port):
     """Test Client's callback method send_charset() does not select."""
@@ -157,8 +169,13 @@ async def test_telnet_client_no_charset(bind_host, unused_tcp_port):
     from telnetlib3.tests.accessories import create_server, open_connection
 
     _waiter = asyncio.Future()
+    server_instance = {"protocol": None}
 
     class ServerTestCharset(telnetlib3.TelnetServer):
+        def begin_negotiation(self):
+            server_instance["protocol"] = self
+            return super().begin_negotiation()
+
         def on_request_charset(self):
             return ["illegal", "this-is-no-good-either"]
 
@@ -183,6 +200,10 @@ async def test_telnet_client_no_charset(bind_host, unused_tcp_port):
             val = await asyncio.wait_for(_waiter, 0.5)
             assert not val
             assert writer.get_extra_info("charset") == "latin1"
+
+            if server_instance["protocol"]:
+                server_instance["protocol"].writer.close()
+                await server_instance["protocol"].writer.wait_closed()
 
 
 # --- Negotiation Protocol Tests ---

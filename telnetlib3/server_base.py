@@ -8,10 +8,14 @@ import datetime
 import traceback
 
 # local
+from .telopt import theNULL
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
 __all__ = ("BaseServer",)
+
+# Pre-allocated single-byte cache to avoid per-byte bytes() allocations
+_ONE_BYTE = [bytes([i]) for i in range(256)]
 
 
 logger = logging.getLogger("telnetlib3.server_base")
@@ -170,8 +174,11 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._waiter_connected.add_done_callback(self.begin_shell)
         asyncio.get_event_loop().call_soon(self.begin_negotiation)
 
-    def begin_shell(self, _result):
+    def begin_shell(self, future):
         """Start the shell coroutine after negotiation completes."""
+        # Don't start shell if the connection was cancelled or errored
+        if future.cancelled() or future.exception() is not None:
+            return
         if self.shell is not None:
             coro = self.shell(self.reader, self.writer)
             if asyncio.iscoroutine(coro):
@@ -179,30 +186,76 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 loop.create_task(coro)
 
     def data_received(self, data):
-        """Process bytes received by transport."""
-        # This may seem strange; feeding all bytes received to the **writer**,
-        # and, only if they test positive, duplicating to the **reader**.
+        """
+        Process bytes received by transport.
+
+        This may seem strange; feeding all bytes received to the **writer**, and, only if they test
+        positive, duplicating to the **reader**.
+
+        The writer receives a copy of all raw bytes because, as an IAC interpreter, it may likely
+        **write** a responding reply.
+        """
+        # pylint: disable=too-many-branches
+        # This is a "hot path" method, and so it is not broken into "helper functions" to help with
+        # performance.  Uses batched processing: scans for IAC (255) and SLC bytes, batching regular
+        # data into single feed_data() calls for performance.  This can be done, and previously was,
+        # more simply by processing a "byte at a time", but, this "batch and seek" solution can be
+        # hundreds of times faster though much more complicated.
         #
-        # The writer receives a copy of all raw bytes because, as an IAC
-        # interpreter, it may likely **write** a responding reply.
         self._last_received = datetime.datetime.now()
+        writer = self.writer
+        reader = self.reader
+
+        # Build set of special bytes: IAC + SLC values when simulation enabled
+        if writer.slc_simulated:
+            slc_vals = {defn.val[0] for defn in writer.slctab.values() if defn.val != theNULL}
+            special = frozenset({255} | slc_vals)
+        else:
+            special = None  # Only IAC is special
 
         cmd_received = False
-        for byte in data:
+        n = len(data)
+        i = 0
+        out_start = 0
+        feeding_oob = False
+
+        while i < n:
+            if not feeding_oob:
+                # Scan forward to next special byte
+                if special is None:
+                    # Fast path: only IAC (255) is special
+                    next_special = data.find(255, i)
+                    if next_special == -1:
+                        # No IAC found - batch entire remainder
+                        if n > out_start:
+                            reader.feed_data(data[out_start:])
+                        break
+                    i = next_special
+                else:
+                    # SLC bytes also special
+                    while i < n and data[i] not in special:
+                        i += 1
+                # Flush non-special bytes
+                if i > out_start:
+                    reader.feed_data(data[out_start:i])
+                if i >= n:
+                    break
+
+            # Process special byte
             try:
-                recv_inband = self.writer.feed_byte(bytes([byte]))
+                recv_inband = writer.feed_byte(_ONE_BYTE[data[i]])
             except BaseException:  # pylint: disable=broad-exception-caught
                 self._log_exception(logger.warning, *sys.exc_info())
             else:
                 if recv_inband:
-                    # forward to reader (shell).
-                    self.reader.feed_data(bytes([byte]))
+                    reader.feed_data(data[i : i + 1])
+                else:
+                    cmd_received = True
+            i += 1
+            out_start = i
+            feeding_oob = bool(writer.is_oob)
 
-                # becomes True if any out of band data is received.
-                cmd_received = cmd_received or not recv_inband
-
-        # until negotiation is complete, re-check negotiation aggressively
-        # upon receipt of any command byte.
+        # Re-check negotiation on command receipt
         if not self._waiter_connected.done() and cmd_received:
             self._check_negotiation_timer()
 
