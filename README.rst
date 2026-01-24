@@ -10,6 +10,18 @@
     :alt: codecov.io Code Coverage
     :target: https://codecov.io/gh/jquast/telnetlib3/
 
+.. image:: https://img.shields.io/badge/Linux-yes-success?logo=linux
+    :alt: Linux supported
+
+.. image:: https://img.shields.io/badge/Windows-yes-success?logo=windows
+    :alt: Windows supported
+
+.. image:: https://img.shields.io/badge/MacOS-yes-success?logo=apple
+    :alt: MacOS supported
+
+.. image:: https://img.shields.io/badge/BSD-yes-success?logo=freebsd
+    :alt: BSD supported
+
 Introduction
 ============
 
@@ -25,8 +37,7 @@ Overview
 telnetlib3 provides multiple interfaces for working with the Telnet protocol:
 
 **Legacy telnetlib**
-  A copy of Python 3.12's telnetlib.py_ for code migrating from Python 3.11 and
-  earlier. See `Legacy telnetlib`_ below.
+  An unadulterated copy of Python 3.12's telnetlib.py_ See `Legacy telnetlib`_ below.
 
 **Asyncio Protocol**
   Modern async/await interface for both client and server, supporting concurrent
@@ -88,9 +99,10 @@ Legacy telnetlib
 ----------------
 
 This library *also* contains a copy of telnetlib.py_ from the standard library of
-Python 3.12 before it was removed in Python 3.13. asyncio_ is not required.
+Python 3.12 before it was removed in Python 3.13. asyncio_ is not required to use
+it.
 
-To migrate code from Python 3.11 and earlier:
+To migrate code, change import statements:
 
 .. code-block:: python
 
@@ -99,16 +111,6 @@ To migrate code from Python 3.11 and earlier:
 
     # NEW imports:
     import telnetlib3
-
-Or, using *from* syntax,
-
-.. code-block:: python
-
-    # OLD imports:
-    from telnetlib import Telnet, ECHO, BINARY
-
-    # NEW imports:
-    from telnetlib3 import Telnet, ECHO, BINARY
 
 Command-line
 ------------
@@ -122,7 +124,10 @@ module path to a function of signature ``async def shell(reader, writer)``.
 ::
 
     telnetlib3-client nethack.alt.org
+    telnetlib3-client xibalba.l33t.codes 44510
+    telnetlib3-client --shell bin.client_wargame.shell 1984.ws 666
     telnetlib3-server --pty-exec /bin/bash -- --login
+    telnetlib3-server 0.0.0.0 6023 --shell='bin.server_wargame.shell
 
 Encoding
 --------
@@ -131,8 +136,15 @@ Use ``--encoding`` and ``--force-binary`` for non-ASCII terminals::
 
     telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
 
-The default encoding is UTF-8. Use ``--force-binary`` when the server
-doesn't properly negotiate BINARY mode.
+The default encoding is UTF-8, but all text is limited to ASCII until BINARY
+mode is agreed by compliance of their respective RFCs.
+
+However, many clients and servers that are capable of non-ascii encodings like
+utf-8 or cp437 may not be capable of negotiating about BINARY, NEW_ENVIRON,
+or CHARSET to demand about it.
+
+In this case, use ``--force-binary`` argument for clients and servers to
+enforce that the specified ``--encoding`` is always used, no matter what.
 
 Features
 --------
