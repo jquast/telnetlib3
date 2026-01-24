@@ -172,8 +172,11 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._waiter_connected.add_done_callback(self.begin_shell)
         asyncio.get_event_loop().call_soon(self.begin_negotiation)
 
-    def begin_shell(self, _result):
+    def begin_shell(self, future):
         """Start the shell coroutine after negotiation completes."""
+        # Don't start shell if the connection was cancelled or errored
+        if future.cancelled() or future.exception() is not None:
+            return
         if self.shell is not None:
             coro = self.shell(self.reader, self.writer)
             if asyncio.iscoroutine(coro):

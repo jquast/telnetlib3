@@ -1,93 +1,248 @@
-"""Benchmarks for telnetlib3."""
+"""Benchmarks for telnetlib3 hot paths."""
+
+# std imports
+import asyncio
+
+# 3rd party
+import pytest
 
 # local
-from telnetlib3.slc import (
-    BSD_SLC_TAB,
-    SLC,
-    SLC_DEFAULT,
-    SLC_IP,
-    SLC_VARIABLE,
-    Forwardmask,
-    Linemode,
-    generate_forwardmask,
-    generate_slctab,
-    name_slc_command,
-    snoop,
+import telnetlib3
+from telnetlib3.slc import generate_slctab, snoop
+from telnetlib3.stream_reader import TelnetReader
+from telnetlib3.stream_writer import TelnetWriter
+from telnetlib3.telopt import IAC, NAWS, TTYPE, WILL, theNULL
+
+
+class MockTransport:
+    """Minimal transport mock for benchmarking."""
+
+    def write(self, data):
+        pass
+
+    def get_write_buffer_size(self):
+        return 0
+
+
+class MockProtocol:
+    """Minimal protocol mock for benchmarking."""
+
+    pass
+
+
+@pytest.fixture
+def writer():
+    """Create a TelnetWriter for benchmarking."""
+    return TelnetWriter(
+        transport=MockTransport(),
+        protocol=MockProtocol(),
+        server=True,
+    )
+
+
+@pytest.fixture
+def reader():
+    """Create a TelnetReader for benchmarking."""
+    return TelnetReader()
+
+
+# -- feed_byte: the main IAC parser, called for every byte on server --
+
+
+@pytest.mark.parametrize(
+    "byte",
+    [
+        pytest.param(b"A", id="normal"),
+        pytest.param(b"\x00", id="null"),
+        pytest.param(b"\xff", id="iac"),
+    ],
 )
-from telnetlib3.telopt import name_command, name_commands
+def test_feed_byte(benchmark, writer, byte):
+    """Benchmark feed_byte() with different byte types."""
+    benchmark(writer.feed_byte, byte)
 
 
-def test_snoop_match(benchmark):
-    """Benchmark snoop() with matching SLC character."""
-    slctab = generate_slctab()
-    benchmark(snoop, b"\x03", slctab, {})
+def test_feed_byte_iac_nop(benchmark, writer):
+    """Benchmark feed_byte() for complete IAC NOP sequence."""
+
+    def feed_iac_nop():
+        writer.feed_byte(IAC)
+        writer.feed_byte(b"\xf1")  # NOP
+
+    benchmark(feed_iac_nop)
 
 
-def test_snoop_no_match(benchmark):
-    """Benchmark snoop() with non-matching character."""
-    slctab = generate_slctab()
-    benchmark(snoop, b"A", slctab, {})
+def test_feed_byte_iac_will(benchmark, writer):
+    """Benchmark feed_byte() for IAC WILL TTYPE negotiation."""
+
+    def feed_iac_will():
+        writer.feed_byte(IAC)
+        writer.feed_byte(WILL)
+        writer.feed_byte(TTYPE)
+
+    benchmark(feed_iac_will)
 
 
-def test_generate_slctab(benchmark):
-    """Benchmark generate_slctab()."""
-    benchmark(generate_slctab)
+# -- is_oob: checked after every feed_byte() call --
 
 
-def test_generate_slctab_with_tabset(benchmark):
-    """Benchmark generate_slctab() with BSD tabset."""
-    benchmark(generate_slctab, BSD_SLC_TAB)
+def test_is_oob_property(benchmark, writer):
+    """Benchmark is_oob property access."""
+    benchmark(lambda: writer.is_oob)
 
 
-def test_generate_forwardmask_binary(benchmark):
-    """Benchmark generate_forwardmask() in binary mode."""
-    benchmark(generate_forwardmask, True, BSD_SLC_TAB)
+# -- Option dict lookups: checked during negotiation --
 
 
-def test_generate_forwardmask_ascii(benchmark):
-    """Benchmark generate_forwardmask() in ASCII mode."""
-    benchmark(generate_forwardmask, False, BSD_SLC_TAB)
+@pytest.mark.parametrize(
+    "option_attr",
+    [
+        pytest.param("local_option", id="local"),
+        pytest.param("remote_option", id="remote"),
+        pytest.param("pending_option", id="pending"),
+    ],
+)
+def test_option_lookup(benchmark, writer, option_attr):
+    """Benchmark option dictionary lookups."""
+    option = getattr(writer, option_attr)
+    benchmark(option.enabled, TTYPE)
 
 
-def test_slc_level_property(benchmark):
-    """Benchmark SLC.level property access."""
-    slc = SLC(SLC_VARIABLE, b"\x03")
-    benchmark(lambda: slc.level)
+def test_option_setitem(benchmark, writer):
+    """Benchmark option dictionary assignment."""
+    benchmark(writer.local_option.__setitem__, NAWS, True)
 
 
-def test_slc_nosupport_property(benchmark):
-    """Benchmark SLC.nosupport property access."""
-    slc = SLC(SLC_DEFAULT, b"\x00")
-    benchmark(lambda: slc.nosupport)
+# -- TelnetReader.feed_data: buffers incoming data --
 
 
-def test_linemode_local_property(benchmark):
-    """Benchmark Linemode.local property."""
-    lm = Linemode(b"\x02")
-    benchmark(lambda: lm.local)
+@pytest.mark.parametrize(
+    "size",
+    [
+        pytest.param(1, id="1byte"),
+        pytest.param(64, id="64bytes"),
+        pytest.param(1024, id="1kb"),
+    ],
+)
+def test_reader_feed_data(benchmark, reader, size):
+    """Benchmark TelnetReader.feed_data() with different chunk sizes."""
+    data = b"x" * size
+    benchmark(reader.feed_data, data)
 
 
-def test_forwardmask_contains(benchmark):
-    """Benchmark Forwardmask.__contains__()."""
-    fm = generate_forwardmask(False, BSD_SLC_TAB)
-    benchmark(lambda: 3 in fm)
+# -- SLC snoop: used in client fast path for SLC character detection --
 
 
-def test_name_command_known(benchmark):
-    """Benchmark name_command() with known option."""
-    benchmark(name_command, b"\xff")
+@pytest.fixture
+def slctab():
+    """Generate SLC table for benchmarking."""
+    return generate_slctab()
 
 
-def test_name_command_unknown(benchmark):
-    """Benchmark name_command() with unknown option."""
-    benchmark(name_command, b"\x99")
+@pytest.mark.parametrize(
+    "byte",
+    [
+        pytest.param(b"\x03", id="match_ip"),
+        pytest.param(b"A", id="no_match"),
+    ],
+)
+def test_snoop(benchmark, slctab, byte):
+    """Benchmark snoop() for SLC character matching."""
+    benchmark(snoop, byte, slctab, {})
 
 
-def test_name_commands(benchmark):
-    """Benchmark name_commands() with multiple bytes."""
-    benchmark(name_commands, b"\xff\xfb\x18")
+def test_slc_value_set_membership(benchmark, slctab):
+    """Benchmark SLC value set membership check (client fast path)."""
+    slc_vals = frozenset(defn.val[0] for defn in slctab.values() if defn.val != theNULL)
+    benchmark(lambda: 3 in slc_vals)
 
 
-def test_name_slc_command(benchmark):
-    """Benchmark name_slc_command()."""
-    benchmark(name_slc_command, SLC_IP)
+# -- End-to-end: full connection with bulk data transfer --
+
+
+DATA_1MB = b"x" * (1024 * 1024)
+
+
+@pytest.fixture
+async def server_client_pair():
+    """Create connected server and client pair."""
+    received_data = bytearray()
+    server_ready = asyncio.Event()
+    srv_writer = None
+
+    async def shell(reader, writer):
+        nonlocal srv_writer
+        srv_writer = writer
+        server_ready.set()
+        while True:
+            data = await reader.read(65536)
+            if not data:
+                break
+            received_data.extend(data.encode() if isinstance(data, str) else data)
+
+    server = await telnetlib3.create_server(
+        host="127.0.0.1",
+        port=0,
+        shell=shell,
+        encoding=False,
+        connect_maxwait=0.1,
+    )
+    port = server.sockets[0].getsockname()[1]
+
+    client_reader, client_writer = await telnetlib3.open_connection(
+        host="127.0.0.1",
+        port=port,
+        encoding=False,
+        connect_minwait=0.05,
+        connect_maxwait=0.1,
+    )
+
+    await server_ready.wait()
+
+    yield {
+        "server": server,
+        "srv_writer": srv_writer,
+        "client_reader": client_reader,
+        "client_writer": client_writer,
+        "received_data": received_data,
+    }
+
+    client_writer.close()
+    await client_writer.wait_closed()
+    server.close()
+    await server.wait_closed()
+
+
+async def test_bulk_transfer_client_to_server(benchmark, server_client_pair):
+    """Benchmark 1MB bulk transfer from client to server."""
+    pair = server_client_pair
+    client_writer = pair["client_writer"]
+    received = pair["received_data"]
+
+    async def send_1mb():
+        received.clear()
+        client_writer.write(DATA_1MB)
+        await client_writer.drain()
+        while len(received) < len(DATA_1MB):
+            await asyncio.sleep(0.001)
+
+    await benchmark(send_1mb)
+
+
+async def test_bulk_transfer_server_to_client(benchmark, server_client_pair):
+    """Benchmark 1MB bulk transfer from server to client."""
+    pair = server_client_pair
+    srv_writer = pair["srv_writer"]
+    client_reader = pair["client_reader"]
+
+    async def send_1mb():
+        srv_writer.write(DATA_1MB)
+        await srv_writer.drain()
+        received = 0
+        while received < len(DATA_1MB):
+            chunk = await client_reader.read(65536)
+            if not chunk:
+                break
+            received += len(chunk)
+
+    await benchmark(send_1mb)
