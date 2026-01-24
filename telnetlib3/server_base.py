@@ -191,7 +191,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         This may seem strange; feeding all bytes received to the **writer**, and, only if they test
         positive, duplicating to the **reader**.
-        
+
         The writer receives a copy of all raw bytes because, as an IAC interpreter, it may likely
         **write** a responding reply.
         """
