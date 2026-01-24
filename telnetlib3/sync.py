@@ -274,7 +274,8 @@ class TelnetConnection:
             self._loop.call_soon_threadsafe(self._loop.stop)
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
-        if self._loop and not self._loop.is_running():
+        # Always close the loop if it exists and isn't closed
+        if self._loop and not self._loop.is_closed():
             self._loop.close()
 
     async def _async_cleanup(self) -> None:
@@ -549,7 +550,8 @@ class BlockingTelnetServer:
             self._loop.call_soon_threadsafe(self._loop.stop)
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
-        if self._loop and not self._loop.is_running():
+        # Always close the loop if it exists and isn't closed
+        if self._loop and not self._loop.is_closed():
             self._loop.close()
 
     async def _async_shutdown(self) -> None:
