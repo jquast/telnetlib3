@@ -101,6 +101,14 @@ jobs:
         env:
           PYTHONASYNCIODEBUG: ${{ matrix.asyncio-debug && '1' || '' }}
 
+      - name: Rename coverage data
+        if: ${{ !matrix.asyncio-debug }}
+        shell: bash
+        run: |
+          if test -f .coverage; then
+            mv .coverage{,.${{ matrix.os }}.${{ env.TOX_ENV }}}
+          fi
+
       - name: Upload coverage data
         if: ${{ !matrix.asyncio-debug }}
         uses: actions/upload-artifact@v4
