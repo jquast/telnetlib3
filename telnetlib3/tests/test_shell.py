@@ -103,20 +103,19 @@ async def test_telnet_server_no_shell(bind_host, unused_tcp_port):
     from telnetlib3.telopt import DO, IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
-    _waiter = asyncio.Future()
     client_expected = IAC + DO + TTYPE + b"beta"
 
-    async with create_server(_waiter_connected=_waiter, host=bind_host, port=unused_tcp_port):
+    async with create_server(host=bind_host, port=unused_tcp_port) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (
             client_reader,
             client_writer,
         ):
             client_writer.write(IAC + WONT + TTYPE + b"alpha")
 
-            server = await asyncio.wait_for(_waiter, 0.5)
-            server.writer.write("beta")
-            server.writer.close()
-            await server.writer.wait_closed()
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
+            srv_instance.writer.write("beta")
+            srv_instance.writer.close()
+            await srv_instance.writer.wait_closed()
             client_recv = await client_reader.read()
             assert client_recv == client_expected
 
@@ -130,16 +129,14 @@ async def test_telnet_server_given_shell(
     from telnetlib3.telopt import DO, IAC, SGA, ECHO, WILL, WONT, TTYPE, BINARY
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
-    _waiter = asyncio.Future()
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
         shell=telnet_server_shell,
-        _waiter_connected=_waiter,
         connect_maxwait=0.05,
         timeout=1.25,
         limit=13377,
-    ):
+    ) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             expected = IAC + DO + TTYPE
             result = await asyncio.wait_for(reader.readexactly(len(expected)), 0.5)
@@ -151,8 +148,8 @@ async def test_telnet_server_given_shell(
             result = await asyncio.wait_for(reader.readexactly(len(expected)), 0.5)
             assert result == expected
 
-            server = await asyncio.wait_for(_waiter, 0.5)
-            server_port = str(server._transport.get_extra_info("peername")[1])
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
+            server_port = str(srv_instance._transport.get_extra_info("peername")[1])
 
             # Command & Response table
             cmd_output_table = (
@@ -305,18 +302,15 @@ async def test_telnet_server_shell_eof(bind_host, unused_tcp_port):
     from telnetlib3.telopt import IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
-    _waiter_connected = asyncio.Future()
-    _waiter_closed = asyncio.Future()
-
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
-        _waiter_connected=_waiter_connected,
-        _waiter_closed=_waiter_closed,
         shell=telnet_server_shell,
         timeout=0.25,
-    ):
+    ) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
-            await asyncio.wait_for(_waiter_connected, 0.5)
-        await asyncio.wait_for(_waiter_closed, 0.5)
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
+        # Wait for server to process client disconnect
+        await asyncio.sleep(0.05)
+        assert srv_instance._closing

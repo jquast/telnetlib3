@@ -11,6 +11,7 @@ Contents:
    :glob:
 
    intro
+   guidebook
    api
    rfcs
    contributing

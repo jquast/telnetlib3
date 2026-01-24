@@ -30,28 +30,6 @@ async def test_create_server(bind_host, unused_tcp_port):
         pass
 
 
-# disabled by jquast Sun Feb 17 13:44:15 PST 2019,
-# we need to await completion of full negotiation, travis-ci
-# is failing with additional, 'failed-reply:DO BINARY'
-# async def test_open_connection(bind_host, unused_tcp_port):
-#    """Exercise telnetlib3.open_connection with default options."""
-#    _waiter = asyncio.Future()
-#    await telnetlib3.create_server(bind_host, unused_tcp_port,
-#                                        _waiter_connected=_waiter,
-#                                        connect_maxwait=0.05)
-#    client_reader, client_writer = await telnetlib3.open_connection(
-#        bind_host, unused_tcp_port, connect_minwait=0.05)
-#    server = await asyncio.wait_for(_waiter, 0.5)
-#    assert repr(server.writer) == (
-#        '<TelnetWriter server mode:kludge +lineflow -xon_any +slc_sim '
-#        'server-will:BINARY,ECHO,SGA '
-#        'client-will:BINARY,CHARSET,NAWS,NEW_ENVIRON,TTYPE>')
-#    assert repr(client_writer) == (
-#        '<TelnetWriter client mode:kludge +lineflow -xon_any +slc_sim '
-#        'client-will:BINARY,CHARSET,NAWS,NEW_ENVIRON,TTYPE '
-#        'server-will:BINARY,ECHO,SGA>')
-
-
 async def test_create_server_conditionals(bind_host, unused_tcp_port):
     """Test telnetlib3.create_server conditionals."""
     # local
@@ -70,11 +48,14 @@ async def test_create_server_on_connect(bind_host, unused_tcp_port):
     # local
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
-    call_tracker = {"called": False}
+    call_tracker = {"called": False, "transport": None}
 
     class TrackingProtocol(asyncio.Protocol):
         def __init__(self):
             call_tracker["called"] = True
+
+        def connection_made(self, transport):
+            call_tracker["transport"] = transport
 
     async with create_server(
         protocol_factory=TrackingProtocol, host=bind_host, port=unused_tcp_port
@@ -82,6 +63,10 @@ async def test_create_server_on_connect(bind_host, unused_tcp_port):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             await asyncio.sleep(0.01)
             assert call_tracker["called"]
+        # Close server-side transport before server closes
+        if call_tracker["transport"]:
+            call_tracker["transport"].close()
+            await asyncio.sleep(0)
 
 
 async def test_telnet_server_open_close(bind_host, unused_tcp_port):
@@ -90,18 +75,17 @@ async def test_telnet_server_open_close(bind_host, unused_tcp_port):
     from telnetlib3.telopt import IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
-    _waiter = asyncio.Future()
-    async with create_server(_waiter_connected=_waiter, host=bind_host, port=unused_tcp_port):
+    async with create_server(host=bind_host, port=unused_tcp_port) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (
             stream_reader,
             stream_writer,
         ):
             stream_writer.write(IAC + WONT + TTYPE + b"bye\r")
-            server = await asyncio.wait_for(_waiter, 0.5)
-            server.writer.write("Goodbye!")
-            server.writer.close()
-            await server.writer.wait_closed()
-            assert server.writer.is_closing()
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
+            srv_instance.writer.write("Goodbye!")
+            srv_instance.writer.close()
+            await srv_instance.writer.wait_closed()
+            assert srv_instance.writer.is_closing()
             result = await stream_reader.read()
             assert result == b"\xff\xfd\x18Goodbye!"
 
@@ -172,10 +156,10 @@ async def test_telnet_server_advanced_negotiation(bind_host, unused_tcp_port):
     ):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WILL + TTYPE)
-            server = await asyncio.wait_for(_waiter, 0.5)
+            srv_instance = await asyncio.wait_for(_waiter, 0.5)
 
-            assert server.writer.remote_option[TTYPE] is True
-            assert server.writer.pending_option == {
+            assert srv_instance.writer.remote_option[TTYPE] is True
+            assert srv_instance.writer.pending_option == {
                 # server's request to negotiation TTYPE affirmed
                 DO + TTYPE: False,
                 # server's request for TTYPE value unreplied
@@ -193,33 +177,55 @@ async def test_telnet_server_advanced_negotiation(bind_host, unused_tcp_port):
 async def test_telnet_server_closed_by_client(bind_host, unused_tcp_port):
     """Exercise TelnetServer.connection_lost."""
     # local
+    from telnetlib3.telopt import DO, IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
-    _waiter = asyncio.Future()
-
-    async with create_server(_waiter_closed=_waiter, host=bind_host, port=unused_tcp_port):
+    async with create_server(host=bind_host, port=unused_tcp_port) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
+            # Read server's negotiation request and send minimal reply
+            expect_hello = IAC + DO + TTYPE
+            hello = await reader.readexactly(len(expect_hello))
+            assert hello == expect_hello
+            writer.write(IAC + WONT + TTYPE)
+
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
+
+            # Verify negotiation state: client refused TTYPE
+            assert srv_instance.writer.remote_option[TTYPE] is False
+            assert srv_instance.writer.pending_option.get(TTYPE) is not True
+
             writer.close()
             await writer.wait_closed()
 
-            srv_instance = await asyncio.wait_for(_waiter, 0.5)
+            # Wait for server to notice client disconnect
+            await asyncio.sleep(0.05)
             assert srv_instance._closing
-
-            srv_instance.connection_lost(exc=None)
 
 
 async def test_telnet_server_eof_by_client(bind_host, unused_tcp_port):
     """Exercise TelnetServer.eof_received()."""
     # local
+    from telnetlib3.telopt import DO, IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
-    _waiter = asyncio.Future()
-
-    async with create_server(_waiter_closed=_waiter, host=bind_host, port=unused_tcp_port):
+    async with create_server(host=bind_host, port=unused_tcp_port) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
+            # Read server's negotiation request and send minimal reply
+            expect_hello = IAC + DO + TTYPE
+            hello = await reader.readexactly(len(expect_hello))
+            assert hello == expect_hello
+            writer.write(IAC + WONT + TTYPE)
+
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
+
+            # Verify negotiation state: client refused TTYPE
+            assert srv_instance.writer.remote_option[TTYPE] is False
+            assert srv_instance.writer.pending_option.get(TTYPE) is not True
+
             writer.write_eof()
 
-            srv_instance = await asyncio.wait_for(_waiter, 0.5)
+            # Wait for server to notice EOF
+            await asyncio.sleep(0.05)
             assert srv_instance._closing
 
 
@@ -229,15 +235,10 @@ async def test_telnet_server_closed_by_server(bind_host, unused_tcp_port):
     from telnetlib3.telopt import DO, IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
-    _waiter_connected = asyncio.Future()
-    _waiter_closed = asyncio.Future()
-
     async with create_server(
-        _waiter_connected=_waiter_connected,
-        _waiter_closed=_waiter_closed,
         host=bind_host,
         port=unused_tcp_port,
-    ):
+    ) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             expect_hello = IAC + DO + TTYPE
             hello_reply = IAC + WONT + TTYPE + b"quit" + b"\r\n"
@@ -246,12 +247,22 @@ async def test_telnet_server_closed_by_server(bind_host, unused_tcp_port):
             assert hello == expect_hello
 
             writer.write(hello_reply)
-            server = await asyncio.wait_for(_waiter_connected, 0.5)
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
 
-            server.writer.close()
-            await server.writer.wait_closed()
+            # Verify negotiation state: client refused TTYPE
+            assert srv_instance.writer.remote_option[TTYPE] is False
+            assert srv_instance.writer.pending_option.get(TTYPE) is not True
 
-            await asyncio.wait_for(_waiter_closed, 0.5)
+            # Verify in-band data was received
+            data = await asyncio.wait_for(srv_instance.reader.readline(), 0.5)
+            assert data == "quit\r\n"
+
+            srv_instance.writer.close()
+            await srv_instance.writer.wait_closed()
+
+            # Wait for server to process connection close
+            await asyncio.sleep(0.05)
+            assert srv_instance._closing
 
 
 async def test_telnet_server_idle_duration(bind_host, unused_tcp_port):
@@ -260,21 +271,16 @@ async def test_telnet_server_idle_duration(bind_host, unused_tcp_port):
     from telnetlib3.telopt import IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
-    _waiter_connected = asyncio.Future()
-    _waiter_closed = asyncio.Future()
-
     async with create_server(
-        _waiter_connected=_waiter_connected,
-        _waiter_closed=_waiter_closed,
         host=bind_host,
         port=unused_tcp_port,
-    ):
+    ) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
-            server = await asyncio.wait_for(_waiter_connected, 0.5)
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
 
-            assert 0 <= server.idle <= 0.5
-            assert 0 <= server.duration <= 0.5
+            assert 0 <= srv_instance.idle <= 0.5
+            assert 0 <= srv_instance.duration <= 0.5
 
 
 async def test_telnet_client_idle_duration_minwait(bind_host, unused_tcp_port):
@@ -306,27 +312,22 @@ async def test_telnet_server_closed_by_error(bind_host, unused_tcp_port):
     from telnetlib3.telopt import IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
-    _waiter_connected = asyncio.Future()
-    _waiter_closed = asyncio.Future()
-
     async with create_server(
-        _waiter_connected=_waiter_connected,
-        _waiter_closed=_waiter_closed,
         host=bind_host,
         port=unused_tcp_port,
-    ):
+    ) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
-            server = await asyncio.wait_for(_waiter_connected, 0.5)
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
 
             class CustomException(Exception):
                 pass
 
-            server.writer.write("Bye!")
-            server.connection_lost(CustomException("blah!"))
+            srv_instance.writer.write("Bye!")
+            srv_instance.connection_lost(CustomException("blah!"))
 
             with pytest.raises(CustomException):
-                await server.reader.read()
+                await srv_instance.reader.read()
 
 
 async def test_telnet_client_open_close_by_error(bind_host, unused_tcp_port):
@@ -353,23 +354,20 @@ async def test_telnet_server_negotiation_fail(bind_host, unused_tcp_port):
     from telnetlib3.telopt import DO, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
-    _waiter_connected = asyncio.Future()
-
     async with create_server(
-        _waiter_connected=_waiter_connected,
         host=bind_host,
         port=unused_tcp_port,
         connect_maxwait=0.05,
-    ):
+    ) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             await reader.readexactly(3)  # IAC DO TTYPE, we ignore it!
 
-            server = await asyncio.wait_for(_waiter_connected, 1.0)
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 1.0)
 
-            assert server.negotiation_should_advance() is False
-            assert server.writer.pending_option[DO + TTYPE]
+            assert srv_instance.negotiation_should_advance() is False
+            assert srv_instance.writer.pending_option[DO + TTYPE]
 
-            assert repr(server.writer) == (
+            assert repr(srv_instance.writer) == (
                 "<TelnetWriter server "
                 "mode:local +lineflow -xon_any +slc_sim "
                 "failed-reply:DO TTYPE>"
@@ -513,7 +511,11 @@ async def test_telnet_client_cmdline(bind_host, unused_tcp_port):
 
 
 @pytest.mark.skipif(
-    tuple(map(int, platform.python_version_tuple())) > (3, 10),
+    sys.platform == "win32",
+    reason="pexpect.spawn requires Unix PTY",
+)
+@pytest.mark.skipif(
+    tuple(map(int, platform.python_version_tuple()[:2])) > (3, 10),
     reason="those shabby pexpect maintainers still use @asyncio.coroutine",
 )
 async def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port):

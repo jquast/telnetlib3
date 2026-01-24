@@ -21,8 +21,6 @@ async def test_server_demands_remote_linemode_client_agrees(  # pylint: disable=
     from telnetlib3.telopt import DO, SB, SE, IAC, WILL, LINEMODE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
-    _waiter = asyncio.Future()
-
     class ServerTestLinemode(telnetlib3.BaseServer):
         def begin_negotiation(self):
             super().begin_negotiation()
@@ -33,8 +31,7 @@ async def test_server_demands_remote_linemode_client_agrees(  # pylint: disable=
         protocol_factory=ServerTestLinemode,
         host=bind_host,
         port=unused_tcp_port,
-        _waiter_connected=_waiter,
-    ):
+    ) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (
             client_reader,
             client_writer,
@@ -55,8 +52,13 @@ async def test_server_demands_remote_linemode_client_agrees(  # pylint: disable=
             assert result == expect_stage2
             client_writer.write(reply_stage2)
 
-            srv_instance = await asyncio.wait_for(_waiter, 0.1)
-            assert not any(srv_instance.writer.pending_option.values())
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.1)
+            await asyncio.wait_for(
+                srv_instance.writer.wait_for(
+                    remote={"LINEMODE": True}, pending={"LINEMODE": False}
+                ),
+                0.1,
+            )
 
             result = await client_reader.read()
             assert result == b""
@@ -68,7 +70,6 @@ async def test_server_demands_remote_linemode_client_agrees(  # pylint: disable=
             assert srv_instance.writer.linemode.ack is True
             assert srv_instance.writer.linemode.soft_tab is False
             assert srv_instance.writer.linemode.lit_echo is True
-            assert srv_instance.writer.remote_option.enabled(LINEMODE)
 
 
 async def test_server_demands_remote_linemode_client_demands_local(  # pylint: disable=too-many-locals
@@ -78,8 +79,6 @@ async def test_server_demands_remote_linemode_client_demands_local(  # pylint: d
     from telnetlib3.slc import LMODE_MODE, LMODE_MODE_ACK, LMODE_MODE_LOCAL
     from telnetlib3.telopt import DO, SB, SE, IAC, WILL, LINEMODE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
-
-    _waiter = asyncio.Future()
 
     class ServerTestLinemode(telnetlib3.BaseServer):
         def begin_negotiation(self):
@@ -91,8 +90,7 @@ async def test_server_demands_remote_linemode_client_demands_local(  # pylint: d
         protocol_factory=ServerTestLinemode,
         host=bind_host,
         port=unused_tcp_port,
-        _waiter_connected=_waiter,
-    ):
+    ) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (
             client_reader,
             client_writer,
@@ -114,8 +112,13 @@ async def test_server_demands_remote_linemode_client_demands_local(  # pylint: d
             assert result == expect_stage2
             client_writer.write(reply_stage2)
 
-            srv_instance = await asyncio.wait_for(_waiter, 0.1)
-            assert not any(srv_instance.writer.pending_option.values())
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.1)
+            await asyncio.wait_for(
+                srv_instance.writer.wait_for(
+                    remote={"LINEMODE": True}, pending={"LINEMODE": False}
+                ),
+                0.1,
+            )
 
             result = await client_reader.read()
             assert result == b""
@@ -127,4 +130,3 @@ async def test_server_demands_remote_linemode_client_demands_local(  # pylint: d
             assert srv_instance.writer.linemode.ack is True
             assert srv_instance.writer.linemode.soft_tab is False
             assert srv_instance.writer.linemode.lit_echo is False
-            assert srv_instance.writer.remote_option.enabled(LINEMODE)

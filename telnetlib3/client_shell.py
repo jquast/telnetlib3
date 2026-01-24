@@ -13,9 +13,6 @@ from . import accessories
 __all__ = ("telnet_client_shell",)
 
 
-# TODO: needs 'wait_for' implementation (see DESIGN.rst)
-# task = telnet_writer.wait_for(lambda: telnet_writer.local_mode[ECHO] == True)
-
 if sys.platform == "win32":
 
     async def telnet_client_shell(telnet_reader, telnet_writer):

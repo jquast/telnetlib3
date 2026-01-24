@@ -5,6 +5,7 @@ rfc-1073_.
 """
 
 # std imports
+import sys
 import struct
 import asyncio
 import platform
@@ -83,7 +84,11 @@ async def test_telnet_client_send_naws(bind_host, unused_tcp_port):
 
 
 @pytest.mark.skipif(
-    tuple(map(int, platform.python_version_tuple())) > (3, 10),
+    sys.platform == "win32",
+    reason="pexpect.spawn requires Unix PTY",
+)
+@pytest.mark.skipif(
+    tuple(map(int, platform.python_version_tuple()[:2])) > (3, 10),
     reason="those shabby pexpect maintainers still use @asyncio.coroutine",
 )
 async def test_telnet_client_send_tty_naws(bind_host, unused_tcp_port):

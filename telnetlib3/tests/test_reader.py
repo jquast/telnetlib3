@@ -310,9 +310,11 @@ Router>
     pattern = re.compile(rb"\S+[>#]")
     limit = 50
 
-    def shell(_, writer):
+    async def shell(_, writer):
         writer.write(given_shell_banner)
+        await writer.drain()
         writer.close()
+        await writer.wait_closed()
 
     async with create_server(
         host=bind_host,
@@ -361,9 +363,11 @@ Router>
     pattern = re.compile(rb"\S+[>#]")
     limit = 30
 
-    def shell(_, writer):
+    async def shell(_, writer):
         writer.write(given_shell_banner)
+        await writer.drain()
         writer.close()
+        await writer.wait_closed()
 
     async with create_server(
         host=bind_host,
@@ -414,9 +418,11 @@ async def test_telnet_reader_readuntil_pattern_limit_overrun_buffer_full(
     pattern = re.compile(rb"\S+[>#]")
     limit = 30
 
-    def shell(_, writer):
+    async def shell(_, writer):
         writer.write(given_shell_banner)
+        await writer.drain()
         writer.close()
+        await writer.wait_closed()
 
     async with create_server(
         host=bind_host,
@@ -455,9 +461,11 @@ async def test_telnet_reader_readuntil_pattern_incomplete_read_eof(bind_host, un
     pattern = re.compile(rb"\S+[>#]")
     limit = 50
 
-    def shell(_, writer):
+    async def shell(_, writer):
         writer.write(given_shell_banner)
+        await writer.drain()
         writer.close()
+        await writer.wait_closed()
 
     async with create_server(
         host=bind_host,
@@ -514,9 +522,11 @@ async def test_telnet_reader_readuntil_pattern_cancelled_error(bind_host, unused
     pattern = re.compile(rb"\S+[>#]")
     limit = 50
 
-    def shell(_, writer):
+    async def shell(_, writer):
         writer.write(given_shell_banner)
+        await writer.drain()
         writer.close()
+        await writer.wait_closed()
 
     async with create_server(
         host=bind_host,

@@ -213,17 +213,12 @@ async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
     from telnetlib3.telopt import DONT, ECHO
     from telnetlib3.tests.accessories import create_server, open_connection
 
-    _waiter_connected = asyncio.Future()
-    _waiter_closed = asyncio.Future()
-
     async with create_server(
         protocol_factory=telnetlib3.BaseServer,
         host=bind_host,
         port=unused_tcp_port,
         connect_maxwait=0.05,
-        _waiter_connected=_waiter_connected,
-        _waiter_closed=_waiter_closed,
-    ):
+    ) as server:
         async with open_connection(
             host=bind_host, port=unused_tcp_port, connect_minwait=0.05, connect_maxwait=0.05
         ) as (_, client_writer):
@@ -235,9 +230,11 @@ async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
             result = client_writer.iac(DONT, ECHO)
             assert result is False
 
-            server_writer = (await asyncio.wait_for(_waiter_connected, 0.5)).writer
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
+            server_writer = srv_instance.writer
 
-        await asyncio.wait_for(_waiter_closed, 0.5)
+        # Wait for server to process client disconnect
+        await asyncio.sleep(0.05)
 
         assert client_writer.remote_option[ECHO] is False, client_writer.remote_option
         assert server_writer.local_option[ECHO] is False, server_writer.local_option
@@ -573,3 +570,169 @@ async def test_wait_closed():
 
     # Test calling wait_closed() after close() - should complete immediately
     await writer.wait_closed()  # Should complete immediately
+
+
+def test_option_from_name():
+    """Test option_from_name returns correct option bytes."""
+    # local
+    from telnetlib3.telopt import ECHO, NAWS, TTYPE, option_from_name
+
+    assert option_from_name("NAWS") == NAWS
+    assert option_from_name("naws") == NAWS
+    assert option_from_name("TTYPE") == TTYPE
+    assert option_from_name("ECHO") == ECHO
+
+    with pytest.raises(KeyError):
+        option_from_name("INVALID_OPTION")
+
+
+async def test_wait_for_immediate_return():
+    """Test wait_for returns immediately when conditions already met."""
+    # local
+    from telnetlib3.telopt import ECHO
+
+    writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
+    writer.remote_option[ECHO] = True
+
+    result = await writer.wait_for(remote={"ECHO": True})
+    assert result is True
+
+
+async def test_wait_for_remote_option():
+    """Test wait_for waits for remote option to become true."""
+    # local
+    from telnetlib3.telopt import ECHO
+
+    writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
+
+    async def set_option_later():
+        await asyncio.sleep(0.01)
+        writer.remote_option[ECHO] = True
+
+    task = asyncio.create_task(set_option_later())
+    result = await asyncio.wait_for(writer.wait_for(remote={"ECHO": True}), 0.5)
+    assert result is True
+    await task
+
+
+async def test_wait_for_local_option():
+    """Test wait_for waits for local option to become true."""
+    # local
+    from telnetlib3.telopt import ECHO
+
+    writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
+
+    async def set_option_later():
+        await asyncio.sleep(0.01)
+        writer.local_option[ECHO] = True
+
+    task = asyncio.create_task(set_option_later())
+    result = await asyncio.wait_for(writer.wait_for(local={"ECHO": True}), 0.5)
+    assert result is True
+    await task
+
+
+async def test_wait_for_pending_false():
+    """Test wait_for waits for pending option to become false."""
+    # local
+    from telnetlib3.telopt import DO, TTYPE
+
+    writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
+    writer.pending_option[DO + TTYPE] = True
+
+    async def clear_pending_later():
+        await asyncio.sleep(0.01)
+        writer.pending_option[DO + TTYPE] = False
+
+    task = asyncio.create_task(clear_pending_later())
+    result = await asyncio.wait_for(writer.wait_for(pending={"TTYPE": False}), 0.5)
+    assert result is True
+    await task
+
+
+async def test_wait_for_combined_conditions():
+    """Test wait_for with multiple conditions."""
+    # local
+    from telnetlib3.telopt import ECHO, NAWS
+
+    writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
+
+    async def set_options_later():
+        await asyncio.sleep(0.01)
+        writer.remote_option[ECHO] = True
+        await asyncio.sleep(0.01)
+        writer.local_option[NAWS] = True
+
+    task = asyncio.create_task(set_options_later())
+    result = await asyncio.wait_for(
+        writer.wait_for(remote={"ECHO": True}, local={"NAWS": True}), 0.5
+    )
+    assert result is True
+    await task
+
+
+async def test_wait_for_invalid_option():
+    """Test wait_for raises KeyError for invalid option names."""
+    writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
+
+    with pytest.raises(KeyError):
+        await writer.wait_for(remote={"INVALID": True})
+
+
+async def test_wait_for_cancelled_on_close():
+    """Test wait_for is cancelled when connection closes."""
+    writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
+
+    wait_task = asyncio.create_task(writer.wait_for(remote={"ECHO": True}))
+    await asyncio.sleep(0.01)
+
+    assert not wait_task.done()
+    writer.close()
+
+    with pytest.raises(asyncio.CancelledError):
+        await wait_task
+
+
+async def test_wait_for_condition_immediate():
+    """Test wait_for_condition returns immediately when condition met."""
+    writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
+
+    result = await writer.wait_for_condition(lambda w: w.server is True)
+    assert result is True
+
+
+async def test_wait_for_condition_waits():
+    """Test wait_for_condition waits for condition to become true."""
+    # local
+    from telnetlib3.telopt import ECHO
+
+    writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
+
+    async def set_option_later():
+        await asyncio.sleep(0.01)
+        writer.remote_option[ECHO] = True
+
+    task = asyncio.create_task(set_option_later())
+    result = await asyncio.wait_for(
+        writer.wait_for_condition(lambda w: w.remote_option.enabled(ECHO)), 0.5
+    )
+    assert result is True
+    await task
+
+
+async def test_wait_for_cleanup_on_success():
+    """Test that waiters are cleaned up after successful completion."""
+    # local
+    from telnetlib3.telopt import ECHO
+
+    writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
+
+    async def set_option_later():
+        await asyncio.sleep(0.01)
+        writer.remote_option[ECHO] = True
+
+    task = asyncio.create_task(set_option_later())
+    await asyncio.wait_for(writer.wait_for(remote={"ECHO": True}), 0.5)
+    await task
+
+    assert len(writer._waiters) == 0

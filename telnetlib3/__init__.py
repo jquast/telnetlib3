@@ -30,12 +30,14 @@ from .slc import *  # noqa
 try:
     from . import pty_shell as _pty_shell_module
     from .pty_shell import *  # noqa
-    PTY_SUPPORT = True  # invalid-name
+    PTY_SUPPORT = True  # pylint: disable=invalid-name
 except ImportError:
-    _pty_shell_module = None
-    PTY_SUPPORT = False  # invalid-name
+    _pty_shell_module = None  # type: ignore[assignment]
+    PTY_SUPPORT = False  # pylint: disable=invalid-name
 from . import guard_shells as _guard_shells_module
 from .guard_shells import *  # noqa
+from . import sync as _sync_module
+from .sync import *  # noqa
 from .accessories import get_version as __get_version
 # isort: on
 # fmt: on
@@ -54,6 +56,7 @@ __all__ = (
     + telnetlib.__all__
     + (_pty_shell_module.__all__ if PTY_SUPPORT else ())
     + _guard_shells_module.__all__
+    + _sync_module.__all__
 )  # noqa
 
 __author__ = "Jeff Quast"

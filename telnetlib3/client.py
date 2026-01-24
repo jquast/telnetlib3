@@ -397,7 +397,7 @@ async def open_connection(  # pylint: disable=too-many-locals
         of BINARY mode negotiation.
     :param asyncio.Future waiter_closed: Future that completes when the
         connection is closed.
-    :param callable shell: An async function that is called after negotiation completes,
+    :param shell: An async function that is called after negotiation completes,
         receiving arguments ``(reader, writer)``.
     :param int limit: The buffer limit for reader stream.
     :return (reader, writer): The reader is a :class:`~.TelnetReader`

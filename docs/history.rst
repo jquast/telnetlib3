@@ -1,7 +1,14 @@
 History
 =======
-2.1.0
-  * new: pty_shell_ and demonstrating ``telnetlib3-server --pty-exec`` CLI argument
+2.2.0
+  * new: ``Server`` class returned by ``create_server()`` with
+    ``wait_for_client()`` method and ``clients`` property for tracking
+    connected clients.
+  * new: ``TelnetWriter.wait_for()`` and ``wait_for_condition()``
+    methods for waiting on telnet option negotiation state.
+  * new: ``telnetlib3.sync`` module with blocking (non-asyncio) APIs:
+    ``TelnetConnection`` for clients, ``BlockingTelnetServer`` for servers.
+  * new: ``pty_shell`` module and demonstrating ``telnetlib3-server --pty-exec`` CLI argument
 
 2.0.8
  * bugfix: object has no attribute '_extra' :ghissue:`100`

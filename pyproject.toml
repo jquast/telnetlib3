@@ -80,7 +80,6 @@ packages = ["telnetlib3"]
 [tool.pylint.main]
 load-plugins = [
     "pylint.extensions.check_elif",
-    "pylint.extensions.docparams",
     "pylint.extensions.mccabe",
     "pylint.extensions.overlapping_exceptions",
     "pylint.extensions.redefined_variable_type",
@@ -107,12 +106,6 @@ disable = [
 [tool.pylint.format]
 max-line-length = 100
 good-names = ["fd", "_", "x", "y", "tn", "ip"]
-
-[tool.pylint.parameter_documentation]
-default-docstring-type = "sphinx"
-accept-no-raise-doc = false
-accept-no-param-doc = true
-accept-no-return-doc = true
 
 [tool.pylint.design]
 max-args = 12

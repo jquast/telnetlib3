@@ -4,7 +4,6 @@
 import sys
 import asyncio
 import logging
-import weakref
 import datetime
 import traceback
 
@@ -32,7 +31,6 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self,
         shell=None,
         _waiter_connected=None,
-        _waiter_closed=None,
         encoding="utf8",
         encoding_errors="strict",
         force_binary=False,
@@ -57,8 +55,6 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         #: a future used for testing
         self._waiter_connected = _waiter_connected or asyncio.Future()
-        #: a future used for testing
-        self._waiter_closed = _waiter_closed or asyncio.Future()
         self._tasks = [self._waiter_connected]
         self.shell = shell
         self.reader = None
@@ -114,8 +110,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         except Exception:  # pylint: disable=broad-exception-caught
             pass
 
-        # close transport (may already be closed), set _waiter_closed and
-        # cancel Future _waiter_connected.
+        # close transport (may already be closed), cancel Future _waiter_connected.
         if self._transport is not None:
             # Detach protocol from transport to drop strong reference immediately.
             try:
@@ -126,9 +121,6 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             self._transport.close()
         if not self._waiter_connected.cancelled() and not self._waiter_connected.done():
             self._waiter_connected.cancel()
-        if self.shell is None and self._waiter_closed is not None:
-            # raise deprecation warning, _waiter_closed should not be used!
-            self._waiter_closed.set_result(weakref.proxy(self))
 
         # break circular references for transport; keep reader/writer available
         # for inspection by tests after close.
@@ -184,23 +176,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             coro = self.shell(self.reader, self.writer)
             if asyncio.iscoroutine(coro):
                 loop = asyncio.get_event_loop()
-                fut = loop.create_task(coro)
-                # Avoid capturing self strongly in the callback to prevent
-                # keeping the protocol instance alive after close. Although I
-                # hope folks aren't using the 'waiter_closed' argument, we use
-                # it in automatic tests, and, because it returns "self", we have
-                # to ensure it is a "weak" reference -- in the future we should
-                # migrate to more dynamic "await connection and/or negotiation
-                # state"
-                ref_self = weakref.ref(self)
-
-                def _on_shell_done(_fut):
-                    self_ = ref_self()
-                    # pylint: disable=protected-access
-                    if self_ is not None and self_._waiter_closed is not None:
-                        self_._waiter_closed.set_result(weakref.proxy(self_))
-
-                fut.add_done_callback(_on_shell_done)
+                loop.create_task(coro)
 
     def data_received(self, data):
         """Process bytes received by transport."""
@@ -341,10 +317,10 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         if self.check_negotiation(final=final):
             logger.debug("negotiation complete after %1.2fs.", self.duration)
-            self._waiter_connected.set_result(weakref.proxy(self))
+            self._waiter_connected.set_result(None)
         elif final:
             logger.debug("negotiation failed after %1.2fs.", self.duration)
-            self._waiter_connected.set_result(weakref.proxy(self))
+            self._waiter_connected.set_result(None)
         else:
             # keep re-queuing until complete
             self._check_later = asyncio.get_event_loop().call_later(

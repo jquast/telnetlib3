@@ -114,7 +114,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             # we are disconnected before negotiation may be considered
             # complete.  We set waiter_closed, and any function consuming
             # the StreamReader will receive eof.
-            self._waiter_connected.set_result(weakref.proxy(self))
+            self._waiter_connected.set_result(None)
 
         if self.shell is None:
             # when a shell is defined, we allow the completion of the coroutine
@@ -321,7 +321,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     # private methods
 
-    def _process_chunk(self, data):
+    def _process_chunk(self, data):  # pylint: disable=too-many-branches,too-complex
         """Process a chunk of received bytes; return True if any IAC/SB cmd observed."""
         # This mirrors the previous optimized logic, but is called from an async task.
         self._last_received = datetime.datetime.now()
@@ -348,14 +348,25 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         out_start = 0
         feeding_oob = False
 
-        def is_special(b):
-            return b == 255 or (slc_needed and slc_vals and b in slc_vals)
+        # Build set of special bytes for fast lookup
+        special_bytes = frozenset({255} | (slc_vals or set()))
 
         while i < n:
             if not feeding_oob:
                 # Scan forward until next special byte (IAC or SLC trigger)
-                while i < n and not is_special(data[i]):
-                    i += 1
+                if not slc_vals:
+                    # Fast path: only IAC (255) is special - use C-level find
+                    next_iac = data.find(255, i)
+                    if next_iac == -1:
+                        # No IAC found, consume rest of chunk
+                        if n > out_start:
+                            reader.feed_data(data[out_start:])
+                        return cmd_received
+                    i = next_iac
+                else:
+                    # Slow path: SLC bytes also special - scan byte by byte
+                    while i < n and data[i] not in special_bytes:
+                        i += 1
                 # Flush non-special run
                 if i > out_start:
                     reader.feed_data(data[out_start:i])
@@ -425,7 +436,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         if self.check_negotiation(final=final):
             self.log.debug("negotiation complete after %1.2fs.", self.duration)
-            self._waiter_connected.set_result(weakref.proxy(self))
+            self._waiter_connected.set_result(None)
         elif final:
             self.log.debug("negotiation failed after %1.2fs.", self.duration)
             _failed = [
@@ -434,7 +445,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 if pending
             ]
             self.log.debug("failed-reply: %r", ", ".join(_failed))
-            self._waiter_connected.set_result(weakref.proxy(self))
+            self._waiter_connected.set_result(None)
         else:
             # keep re-queuing until complete.  Aggressively re-queue until
             # connect_minwait, or connect_maxwait, whichever occurs next
