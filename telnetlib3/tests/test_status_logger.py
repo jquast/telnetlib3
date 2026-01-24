@@ -162,7 +162,7 @@ def test_status_interval_cli_arg_default():
     try:
         sys.argv = ["test"]
         args = parse_server_args()
-        assert args["status_interval"] == 60
+        assert args["status_interval"] == 20
     finally:
         sys.argv = old_argv
 
