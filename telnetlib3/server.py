@@ -538,6 +538,8 @@ class Server:
                 waiters.append(protocol._waiter_closed)
         if waiters:
             await asyncio.gather(*waiters, return_exceptions=True)
+        # Allow event loop to process any pending transport cleanup
+        await asyncio.sleep(0)
 
     @property
     def sockets(self):

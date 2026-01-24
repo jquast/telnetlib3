@@ -23,6 +23,7 @@ async def server_context(server):
     finally:
         server.close()
         await server.wait_closed()
+        await asyncio.sleep(0)
 
 
 @contextlib.asynccontextmanager
