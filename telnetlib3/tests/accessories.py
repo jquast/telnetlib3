@@ -79,13 +79,38 @@ async def asyncio_connection(host, port):
             pass
 
 
+class _TrackingProtocol(asyncio.Protocol):
+    """Protocol wrapper that tracks transport for cleanup."""
+
+    _transports = None  # Class-level list, set per-server instance
+
+    def connection_made(self, transport):
+        if self._transports is not None:
+            self._transports.append(transport)
+        super().connection_made(transport)
+
+
 @contextlib.asynccontextmanager
 async def asyncio_server(protocol_factory, host, port):
     """Create an asyncio server with automatic cleanup."""
-    server = await asyncio.get_event_loop().create_server(protocol_factory, host, port)
+    # Track transports for accepted connections so we can close them
+    transports = []
+
+    # Create a subclass that tracks transports for this server instance
+    class TrackingProtocol(_TrackingProtocol, protocol_factory):
+        _transports = transports
+
+    server = await asyncio.get_event_loop().create_server(TrackingProtocol, host, port)
     try:
         yield server
     finally:
+        # Close all accepted connection transports
+        for transport in transports:
+            if not transport.is_closing():
+                transport.close()
+        # Give transports time to close
+        if transports:
+            await asyncio.sleep(0)
         server.close()
         await server.wait_closed()
 
