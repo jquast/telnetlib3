@@ -23,9 +23,6 @@ async def server_context(server):
     finally:
         server.close()
         await server.wait_closed()
-        # Windows IOCP needs multiple event loop iterations for socket cleanup
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
 
 
 @contextlib.asynccontextmanager
@@ -36,9 +33,8 @@ async def connection_context(reader, writer):
     finally:
         writer.close()
         await writer.wait_closed()
-        # Windows IOCP needs multiple event loop iterations for socket cleanup
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        # Small delay for Windows IOCP socket cleanup
+        await asyncio.sleep(0.01)
 
 
 @contextlib.asynccontextmanager
@@ -54,9 +50,6 @@ async def create_server(*args, **kwargs):
     finally:
         server.close()
         await server.wait_closed()
-        # Windows IOCP needs multiple event loop iterations for socket cleanup
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
 
 
 @contextlib.asynccontextmanager
@@ -72,9 +65,8 @@ async def open_connection(*args, **kwargs):
     finally:
         writer.close()
         await writer.wait_closed()
-        # Windows IOCP needs multiple event loop iterations for socket cleanup
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        # Small delay for Windows IOCP socket cleanup
+        await asyncio.sleep(0.01)
 
 
 @contextlib.asynccontextmanager
@@ -89,9 +81,8 @@ async def asyncio_connection(host, port):
             await writer.wait_closed()
         except (BrokenPipeError, ConnectionResetError):
             pass
-        # Windows IOCP needs multiple event loop iterations for socket cleanup
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        # Small delay for Windows IOCP socket cleanup
+        await asyncio.sleep(0.01)
 
 
 @contextlib.asynccontextmanager
@@ -103,9 +94,8 @@ async def asyncio_server(protocol_factory, host, port):
     finally:
         server.close()
         await server.wait_closed()
-        # Windows IOCP needs multiple event loop iterations for socket cleanup
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        # Small delay for Windows IOCP socket cleanup
+        await asyncio.sleep(0.01)
 
 
 __all__ = (
