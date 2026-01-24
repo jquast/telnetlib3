@@ -7,7 +7,7 @@ import time
 import asyncio
 
 
-async def benchmark_shell(reader, writer):
+async def benchmark_shell(reader, writer):  # pylint: disable=unused-argument
     """Minimal shell that just measures throughput."""
     total_bytes = 0
     start = time.perf_counter()
@@ -47,8 +47,9 @@ async def benchmark_shell(reader, writer):
 
 
 async def main():
+    """Connect to a telnet server and benchmark throughput."""
     # local
-    import telnetlib3
+    import telnetlib3  # pylint: disable=import-outside-toplevel
 
     if len(sys.argv) < 2:
         print(f"Usage: {sys.argv[0]} host [port]", file=sys.stderr)
@@ -59,7 +60,7 @@ async def main():
 
     print(f"Connecting to {host}:{port}...", file=sys.stderr)
 
-    reader, writer = await telnetlib3.open_connection(
+    _, writer = await telnetlib3.open_connection(
         host,
         port,
         shell=benchmark_shell,

@@ -30,10 +30,10 @@ from .slc import *  # noqa
 try:
     from . import pty_shell as _pty_shell_module
     from .pty_shell import *  # noqa
-    PTY_SUPPORT = True  # invalid-name
+    PTY_SUPPORT = True  # pylint: disable=invalid-name
 except ImportError:
     _pty_shell_module = None  # type: ignore[assignment]
-    PTY_SUPPORT = False  # invalid-name
+    PTY_SUPPORT = False  # pylint: disable=invalid-name
 from . import guard_shells as _guard_shells_module
 from .guard_shells import *  # noqa
 from . import sync as _sync_module

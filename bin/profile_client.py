@@ -13,7 +13,7 @@ from io import StringIO
 async def run_profiled():
     """Run client with timing instrumentation."""
     # local
-    from telnetlib3.client import run_client
+    from telnetlib3.client import run_client  # pylint: disable=import-outside-toplevel
 
     start = time.perf_counter()
     try:
@@ -25,6 +25,7 @@ async def run_profiled():
 
 
 def main():
+    """Entry point for profiling the telnet client."""
     if "--profile" in sys.argv:
         sys.argv.remove("--profile")
         profiler = cProfile.Profile()

@@ -576,7 +576,7 @@ class Server:
 
 async def create_server(
     host=None, port=23, protocol_factory=TelnetServer, **kwds
-):  # pylint: disable=differing-param-doc,differing-type-doc
+):
     """
     Create a TCP Telnet server.
 
@@ -750,7 +750,6 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
     robot_check=_config.robot_check,
     pty_fork_limit=_config.pty_fork_limit,
 ):
-    # pylint: disable=missing-raises-doc
     """
     Program entry point for server daemon.
 

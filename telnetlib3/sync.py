@@ -35,7 +35,12 @@ import threading
 from typing import Any, Union, Callable, Optional
 
 # local
-import telnetlib3
+# Import from submodules to avoid cyclic import
+from .client import open_connection as _open_connection
+from .server import Server
+from .server import create_server as _create_server
+from .stream_reader import TelnetReader
+from .stream_writer import TelnetWriter
 
 __all__ = ("TelnetConnection", "BlockingTelnetServer", "ServerConnection")
 
@@ -77,8 +82,8 @@ class TelnetConnection:
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
-        self._reader: Optional[telnetlib3.TelnetReader] = None
-        self._writer: Optional[telnetlib3.TelnetWriter] = None
+        self._reader: Optional[TelnetReader] = None
+        self._writer: Optional[TelnetWriter] = None
         self._connected = threading.Event()
         self._closed = False
 
@@ -118,7 +123,7 @@ class TelnetConnection:
 
     async def _async_connect(self) -> None:
         """Async connection coroutine."""
-        self._reader, self._writer = await telnetlib3.open_connection(
+        self._reader, self._writer = await _open_connection(
             self._host,
             self._port,
             encoding=self._encoding,
@@ -358,7 +363,7 @@ class TelnetConnection:
             raise TimeoutError("Wait for negotiation timed out") from exc
 
     @property
-    def writer(self) -> telnetlib3.TelnetWriter:
+    def writer(self) -> TelnetWriter:
         """
         Access the underlying TelnetWriter for advanced operations.
 
@@ -430,7 +435,7 @@ class BlockingTelnetServer:
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
-        self._server: Optional[telnetlib3.Server] = None
+        self._server: Optional[Server] = None
         self._client_queue: queue.Queue = queue.Queue()
         self._started = threading.Event()
         self._shutdown = threading.Event()
@@ -466,7 +471,7 @@ class BlockingTelnetServer:
         assert self._loop is not None
         loop = self._loop  # Capture for closure
 
-        async def shell(reader: telnetlib3.TelnetReader, writer: telnetlib3.TelnetWriter) -> None:
+        async def shell(reader: TelnetReader, writer: TelnetWriter) -> None:
             """Shell that queues connections for sync handling."""
             conn = ServerConnection(reader, writer, loop)
             self._client_queue.put(conn)
@@ -474,7 +479,7 @@ class BlockingTelnetServer:
             # pylint: disable=protected-access
             await conn._wait_closed()
 
-        self._server = await telnetlib3.create_server(
+        self._server = await _create_server(
             self._host,
             self._port,
             shell=shell,
@@ -590,8 +595,8 @@ class ServerConnection:
 
     def __init__(
         self,
-        reader: telnetlib3.TelnetReader,
-        writer: telnetlib3.TelnetWriter,
+        reader: TelnetReader,
+        writer: TelnetWriter,
         loop: asyncio.AbstractEventLoop,
     ):
         """Initialize connection from reader/writer pair."""
@@ -786,7 +791,7 @@ class ServerConnection:
             raise TimeoutError("Wait for negotiation timed out") from exc
 
     @property
-    def writer(self) -> telnetlib3.TelnetWriter:
+    def writer(self) -> TelnetWriter:
         """
         Access the underlying TelnetWriter for advanced operations.
 
