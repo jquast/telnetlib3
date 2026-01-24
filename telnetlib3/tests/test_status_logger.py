@@ -1,7 +1,7 @@
 # pylint: disable=unused-import
 # std imports
-import asyncio
 import sys
+import asyncio
 
 # local
 from telnetlib3.server import StatusLogger, parse_server_args
