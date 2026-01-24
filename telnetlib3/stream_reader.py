@@ -192,8 +192,8 @@ class TelnetReader:
         raised, and the data will be left in the internal buffer, so it can be read again.
 
         :raises ValueError: If separator is empty.
-        :raises LimitOverrunError: If separator is not found and buffer exceeds limit.
-        :raises IncompleteReadError: If EOF is reached before separator is found.
+        :raises asyncio.LimitOverrunError: If separator is not found and buffer exceeds limit.
+        :raises asyncio.IncompleteReadError: If EOF is reached before separator is found.
         """
         seplen = len(separator)
         if seplen == 0:
@@ -285,8 +285,8 @@ class TelnetReader:
         raised, and the data will be left in the internal buffer, so it can be read again.
 
         :raises ValueError: If pattern is None, not a re.Pattern, or not a bytes pattern.
-        :raises LimitOverrunError: If pattern is not found and buffer exceeds limit.
-        :raises IncompleteReadError: If EOF is reached before pattern is found.
+        :raises asyncio.LimitOverrunError: If pattern is not found and buffer exceeds limit.
+        :raises asyncio.IncompleteReadError: If EOF is reached before pattern is found.
         """
         if pattern is None or not isinstance(pattern, re.Pattern):
             raise ValueError("pattern should be a re.Pattern object")
@@ -404,7 +404,7 @@ class TelnetReader:
         needed.
 
         :raises ValueError: If n is negative.
-        :raises IncompleteReadError: If EOF is reached before n bytes are read.
+        :raises asyncio.IncompleteReadError: If EOF is reached before n bytes are read.
         """
         if n < 0:
             raise ValueError("readexactly size can not be less than zero")
@@ -571,10 +571,9 @@ class TelnetReaderUnicode(TelnetReader):
         """
         A Unicode StreamReader interface for Telnet protocol.
 
-        :param Callable fn_encoding: function callback, receiving boolean
-            keyword argument, ``incoming=True``, which is used by the callback
-            to determine what encoding should be used to decode the value in
-            the direction specified.
+        :param fn_encoding: Function callback, receiving boolean keyword argument
+            ``incoming=True``, which is used by the callback to determine what
+            encoding should be used to decode the value in the direction specified.
         """
         super().__init__(limit=limit)
 

@@ -28,11 +28,12 @@ try:
     import pty  # noqa: F401 pylint:disable=unused-import
     import fcntl  # noqa: F401 pylint:disable=unused-import
     import termios  # noqa: F401 pylint:disable=unused-import
+
     PTY_SUPPORT = True
 except ImportError:
     PTY_SUPPORT = False
 
-__all__ = ("TelnetServer", "create_server", "run_server", "parse_server_args")
+__all__ = ("TelnetServer", "Server", "create_server", "run_server", "parse_server_args")
 
 
 class CONFIG(NamedTuple):
@@ -503,6 +504,71 @@ class TelnetServer(server_base.BaseServer):
         return (self.writer.outbinary and self.writer.inbinary) or self.force_binary
 
 
+class Server:
+    """
+    Telnet server that tracks connected clients.
+
+    Wraps asyncio.Server with protocol tracking and connection waiting.
+    Returned by :func:`create_server`.
+    """
+
+    def __init__(self, server):
+        self._server = server
+        self._protocols = []
+        self._new_client = asyncio.Queue()
+
+    def close(self):
+        """Close the server and stop accepting new connections."""
+        self._server.close()
+
+    async def wait_closed(self):
+        """Wait until the server is closed."""
+        await self._server.wait_closed()
+
+    @property
+    def sockets(self):
+        """Return list of socket objects the server is listening on."""
+        return self._server.sockets
+
+    def is_serving(self):
+        """Return True if the server is accepting new connections."""
+        return self._server.is_serving()
+
+    @property
+    def clients(self):
+        """
+        List of connected client protocol instances.
+
+        :returns: List of protocol instances for all connected clients.
+        """
+        return list(self._protocols)
+
+    async def wait_for_client(self):
+        """
+        Wait for a client to connect and complete negotiation.
+
+        :returns: The protocol instance for the connected client.
+
+        Example::
+
+            server = await telnetlib3.create_server(port=6023)
+            client = await server.wait_for_client()
+            client.writer.write("Welcome!\\r\\n")
+        """
+        return await self._new_client.get()
+
+    def _register_protocol(self, protocol):
+        """Register a new protocol instance (called by factory)."""
+        # pylint: disable=protected-access
+        self._protocols.append(protocol)
+        protocol._waiter_connected.add_done_callback(
+            lambda f: self._new_client.put_nowait(f.result()) if not f.cancelled() else None
+        )
+        protocol._waiter_closed.add_done_callback(
+            lambda _: self._protocols.remove(protocol) if protocol in self._protocols else None
+        )
+
+
 async def create_server(
     host=None, port=23, protocol_factory=TelnetServer, **kwds
 ):  # pylint: disable=differing-param-doc,differing-type-doc
@@ -517,8 +583,8 @@ async def create_server(
     :param server_base.BaseServer protocol_factory: An alternate protocol
         factory for the server, when unspecified, :class:`TelnetServer` is
         used.
-    :param Callable shell: An async function that is called after
-        negotiation completes, receiving arguments ``(reader, writer)``.
+    :param shell: An async function that is called after negotiation
+        completes, receiving arguments ``(reader, writer)``.
         Default is :func:`~.telnet_server_shell`.  The reader is a
         :class:`~.TelnetReader` instance, the writer is a
         :class:`~.TelnetWriter` instance.
@@ -565,13 +631,24 @@ async def create_server(
     :param int limit: The buffer limit for the reader stream.
     :param kwds: Additional keyword arguments passed to the protocol factory.
 
-    :return asyncio.Server: The return value is the same as
-        :meth:`asyncio.loop.create_server`, An object which can be used
-        to stop the service.
+    :return Server: A :class:`Server` instance that wraps the asyncio.Server
+        and provides access to connected client protocols via
+        :meth:`Server.wait_for_client` and :attr:`Server.clients`.
     """
     protocol_factory = protocol_factory or TelnetServer
     loop = asyncio.get_event_loop()
-    return await loop.create_server(lambda: protocol_factory(**kwds), host, port)
+
+    telnet_server = Server(None)
+
+    def factory():
+        protocol = protocol_factory(**kwds)
+        telnet_server._register_protocol(protocol)  # pylint: disable=protected-access
+        return protocol
+
+    server = await loop.create_server(factory, host, port)
+    telnet_server._server = server  # pylint: disable=protected-access
+
+    return telnet_server
 
 
 async def _sigterm_handler(server, _log):

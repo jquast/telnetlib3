@@ -18,39 +18,15 @@ requires python 3.7 and later, using the asyncio_ module.
 
 .. _asyncio: http://docs.python.org/3.11/library/asyncio.html
 
-Legacy 'telnetlib'
-------------------
-
-This library *also* contains a copy of telnetlib.py_ from the standard library of
-Python 3.12 before it was removed in Python 3.13. asyncio_ is not required.
-
-To migrate code from Python 3.11 and earlier, install this library and change
-instances of `telnetlib` to `telnetlib3`:
-
-.. code-block:: python
-
-    # OLD imports:
-    import telnetlib
-    # - or -
-    from telnetlib import Telnet, ECHO, BINARY
-
-    # NEW imports:
-    import telnetlib3.telnetlib as telnetlib
-    # - or -
-    from telnetlib3 import Telnet, ECHO, BINARY
-    from telnetlib3.telnetlib import Telnet, ECHO, BINARY
-
-.. _telnetlib.py: https://docs.python.org/3.12/library/telnetlib.html
-
-
 Quick Example
 -------------
 
-Writing a Telnet Server that offers a basic "war game":
+A simple telnet server:
 
 .. code-block:: python
 
-    import asyncio, telnetlib3
+    import asyncio
+    import telnetlib3
 
     async def shell(reader, writer):
         writer.write('\r\nWould you like to play a game? ')
@@ -63,247 +39,60 @@ Writing a Telnet Server that offers a basic "war game":
         writer.close()
 
     async def main():
-        server = await telnetlib3.create_server('127.0.0.1', 6023, shell=shell)
+        server = await telnetlib3.create_server(port=6023, shell=shell)
         await server.wait_closed()
 
     asyncio.run(main())
 
-Writing a Telnet Client that plays the "war game" against this server:
+More examples are available in the `Guidebook`_ and the ``bin/`` directory.
+
+.. _Guidebook: https://telnetlib3.readthedocs.io/en/latest/guidebook.html
+
+Legacy telnetlib
+----------------
+
+This library *also* contains a copy of telnetlib.py_ from the standard library of
+Python 3.12 before it was removed in Python 3.13. asyncio_ is not required.
+
+To migrate code from Python 3.11 and earlier:
 
 .. code-block:: python
 
-    import asyncio, telnetlib3
+    # OLD imports:
+    import telnetlib
+    # - or -
+    from telnetlib import Telnet, ECHO, BINARY
 
-    async def shell(reader, writer):
-        while True:
-            # read stream until '?' mark is found
-            outp = await reader.read(1024)
-            if not outp:
-                # End of File
-                break
-            elif '?' in outp:
-                # reply all questions with 'y'.
-                writer.write('y')
+    # NEW imports:
+    import telnetlib3.telnetlib as telnetlib
+    # - or -
+    from telnetlib3.telnetlib import Telnet, ECHO, BINARY
 
-            # display all server output
-            print(outp, flush=True)
-
-        # EOF
-        print()
-
-    async def main():
-        reader, writer = await telnetlib3.open_connection('localhost', 6023, shell=shell)
-        await writer.protocol.waiter_closed
-
-    asyncio.run(main())
+.. _telnetlib.py: https://docs.python.org/3.12/library/telnetlib.html
 
 Command-line
 ------------
 
 Two command-line scripts are distributed with this package,
-`telnetlib3-client` and `telnetlib3-server`.
+``telnetlib3-client`` and ``telnetlib3-server``.
 
-Both command-line scripts accept argument ``--shell=my_module.fn_shell``
-describing a python module path to an function of signature
-``async def shell(reader, writer)``, as in the above examples.
-
-These scripts also serve as more advanced server and client examples that
-perform advanced telnet option negotiation and may serve as a basis for
-creating your own custom negotiation behaviors.
-
-Find their filepaths using command::
-
-     python -c 'import telnetlib3.server;print(telnetlib3.server.__file__, telnetlib3.client.__file__)'
-
-telnetlib3-client
-~~~~~~~~~~~~~~~~~
-
-This is an entry point for command ``python -m telnetlib3.client``
-
-Small terminal telnet client.  Some example destinations and options::
-
-    telnetlib3-client --loglevel warn 1984.ws
-    telnetlib3-client --loglevel debug --logfile logfile.txt nethack.alt.org
-    telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
-
-See section Encoding_ about arguments, ``--encoding=cp437`` and ``--force-binary``.
+Both accept argument ``--shell=my_module.fn_shell`` describing a python
+module path to a function of signature ``async def shell(reader, writer)``.
 
 ::
 
-    usage: telnetlib3-client [-h] [--term TERM] [--loglevel LOGLEVEL]
-                             [--logfmt LOGFMT] [--logfile LOGFILE] [--shell SHELL]
-                             [--encoding ENCODING] [--speed SPEED]
-                             [--encoding-errors {replace,ignore,strict}]
-                             [--force-binary] [--connect-minwait CONNECT_MINWAIT]
-                             [--connect-maxwait CONNECT_MAXWAIT]
-                             host [port]
-
-    Telnet protocol client
-
-    positional arguments:
-      host                  hostname
-      port                  port number (default: 23)
-
-    optional arguments:
-      -h, --help            show this help message and exit
-      --term TERM           terminal type (default: xterm-256color)
-      --loglevel LOGLEVEL   log level (default: warn)
-      --logfmt LOGFMT       log format (default: %(asctime)s %(levelname)s
-                            %(filename)s:%(lineno)d %(message)s)
-      --logfile LOGFILE     filepath (default: None)
-      --shell SHELL         module.function_name (default:
-                            telnetlib3.telnet_client_shell)
-      --encoding ENCODING   encoding name (default: utf8)
-      --speed SPEED         connection speed (default: 38400)
-      --encoding-errors {replace,ignore,strict}
-                            handler for encoding errors (default: replace)
-      --force-binary        force encoding (default: True)
-      --connect-minwait CONNECT_MINWAIT
-                            shell delay for negotiation (default: 1.0)
-      --connect-maxwait CONNECT_MAXWAIT
-                            timeout for pending negotiation (default: 4.0)
-
-telnetlib3-server
-~~~~~~~~~~~~~~~~~
-
-This is an entry point for command ``python -m telnetlib3.server``
-
-Telnet server providing the default debugging shell.  This provides a simple
-shell server that allows introspection of the session's values.
-
-Example session::
-
-     tel:sh> help
-     quit, writer, slc, toggle [option|all], reader, proto
-
-     tel:sh> writer
-     <TelnetWriter server mode:kludge +lineflow -xon_any +slc_sim server-will:BINARY,ECHO,SGA client-will:BINARY,NAWS,NEW_ENVIRON,TTYPE>
-
-     tel:sh> reader
-     <TelnetReaderUnicode encoding='utf8' limit=65536 buflen=0 eof=False>
-
-     tel:sh> toggle all
-     wont echo.
-     wont suppress go-ahead.
-     wont outbinary.
-     dont inbinary.
-     xon-any enabled.
-     lineflow disabled.
-
-     tel:sh> reader
-     <TelnetReaderUnicode encoding='US-ASCII' limit=65536 buflen=1 eof=False>
-
-     tel:sh> writer
-     <TelnetWriter server mode:local -lineflow +xon_any +slc_sim client-will:NAWS,NEW_ENVIRON,TTYPE>
-
-::
-
-    usage: telnetlib3-server [-h] [--loglevel LOGLEVEL] [--logfile LOGFILE]
-                             [--logfmt LOGFMT] [--shell SHELL]
-                             [--encoding ENCODING] [--force-binary]
-                             [--timeout TIMEOUT]
-                             [--connect-maxwait CONNECT_MAXWAIT]
-                             [--pty-exec PROGRAM]
-                             [--robot-check] [--pty-fork-limit N]
-                             [host] [port] [-- ARG ...]
-
-    Telnet protocol server
-
-    positional arguments:
-      host                  bind address (default: localhost)
-      port                  bind port (default: 6023)
-
-    optional arguments:
-      -h, --help            show this help message and exit
-      --loglevel LOGLEVEL   level name (default: info)
-      --logfile LOGFILE     filepath (default: None)
-      --logfmt LOGFMT       log format (default: %(asctime)s %(levelname)s
-                            %(filename)s:%(lineno)d %(message)s)
-      --shell SHELL         module.function_name (default: telnet_server_shell)
-      --encoding ENCODING   encoding name (default: utf8)
-      --force-binary        force binary transmission (default: False)
-      --timeout TIMEOUT     idle disconnect (0 disables) (default: 300)
-      --connect-maxwait CONNECT_MAXWAIT
-                            timeout for pending negotiation (default: 4.0)
-      --pty-exec PROGRAM    execute PROGRAM in a PTY for each connection
-                            (use -- to pass args to PROGRAM)
-      --robot-check         check if client can render wide unicode (default: False)
-      --pty-fork-limit N    limit concurrent PTY connections (default: 0, unlimited)
-
-PTY Execution
-~~~~~~~~~~~~~
-
-The server can spawn a PTY-connected program for each connection::
-
+    telnetlib3-client nethack.alt.org
     telnetlib3-server --pty-exec /bin/bash -- --login
-
-This spawns an interactive bash login shell. The ``--login`` flag (or ``-l``)
-is recommended for proper shell initialization (readline, history, profile
-sourcing).
-
-For a minimal shell without these features::
-
-    telnetlib3-server --pty-exec /bin/sh
-
-Arguments after ``--`` are passed to the program, for example, to execute python
-with argument of a script as a subprocess::
-
-    telnetlib3-server --pty-exec $(which python) -- ../blessed/bin/cellestial.py
-
-Connection Guards
-~~~~~~~~~~~~~~~~~
-
-The server supports two guard mechanisms to protect resources:
-
-**Robot Check** (``--robot-check``): Tests whether the connecting client can
-properly render wide Unicode characters. This uses cursor position reporting
-(CPR) to measure if a wide character (U+231A ⌚) renders as width 2. Clients
-that fail (bots, basic scripts, broken terminals) are redirected to a
-philosophical shell that asks questions and logs responses before disconnecting.
-
-**Connection Limit** (``--pty-fork-limit N``): Limits the number of concurrent
-PTY connections. When the limit is reached, new connections are redirected to
-a "busy" shell that displays a message, logs any input, and disconnects. This
-is useful for resource-constrained servers running memory-intensive programs.
-
-Example with both guards enabled, limiting to 4 concurrent connections::
-
-    telnetlib3-server --robot-check --pty-fork-limit 4 --pty-exec /bin/bash -- --login
-
-Guard shells log all input at INFO level, useful for monitoring connection
-attempts. Input is limited to 2KB per read with timeouts (10s for robot check,
-30s for busy shell).
 
 Encoding
 --------
 
-In this client connection example::
+Use ``--encoding`` and ``--force-binary`` for non-ASCII terminals::
 
     telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
 
-Note the use of `--encoding=cp437` to translate input and output characters of
-the remote end. This example legacy telnet BBS is unable to negotiate about
-or present characters in any other encoding but CP437. Without these arguments,
-Telnet protocol would dictate our session to be US-ASCII.
-
-Argument `--force-binary` is *also* required in many cases, with both
-``telnetlib3-client`` and ``telnetlib3-server``. In the original Telnet protocol
-specifications, the Network Virtual Terminal (NVT) is defined as 7-bit US-ASCII,
-and this is the default state for both ends until negotiated otherwise by RFC-856_
-by negotiation of BINARY TRANSMISSION.
-
-However, **many common telnet clients and servers fail to negotiate for BINARY**
-correctly or at all. Using ``--force-binary`` allows non-ASCII encodings to be
-used with those kinds of clients.
-
-A Telnet Server that prefers "utf8" encoding, and, transmits it even in the case
-of failed BINARY negotiation, to support a "dumb" telnet client like netcat::
-
-    telnetlib3-server --encoding=utf8 --force-binary
-
-Connecting with "dumb" client::
-
-    nc -t localhost 6023
+The default encoding is UTF-8. Use ``--force-binary`` when the server
+doesn't properly negotiate BINARY mode.
 
 Features
 --------

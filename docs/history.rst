@@ -1,7 +1,7 @@
 History
 =======
 2.1.0
-  * new: pty_shell_ and demonstrating ``telnetlib3-server --pty-exec`` CLI argument
+  * new: ``pty_shell`` module and demonstrating ``telnetlib3-server --pty-exec`` CLI argument
 
 2.0.8
  * bugfix: object has no attribute '_extra' :ghissue:`100`

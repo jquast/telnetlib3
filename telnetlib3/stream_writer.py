@@ -386,9 +386,8 @@ class TelnetWriter:
                 if expected:
                     if not option_dict.enabled(opt):
                         return False
-                else:
-                    if option_dict.get(opt) not in (False, None):
-                        return False
+                elif option_dict.get(opt) not in (False, None):
+                    return False
             return True
 
         if check():
@@ -1250,10 +1249,10 @@ class TelnetWriter:
         :param bytes slc_byte: any of SLC_SYNCH, SLC_BRK, SLC_IP, SLC_AO,
             SLC_AYT, SLC_EOR, SLC_ABORT, SLC_EOF, SLC_SUSP, SLC_EC, SLC_EL,
             SLC_EW, SLC_RP, SLC_XON, SLC_XOFF ...
-        :param Callable func: These callbacks receive a single argument: the
-            SLC function byte that fired it. Some SLC and IAC functions are
-            intermixed; which signaling mechanism used by client can be tested
-            by evaluating this argument.
+        :param func: Callback receiving a single argument: the SLC function byte
+            that fired it. Some SLC and IAC functions are intermixed; which
+            signaling mechanism used by client can be tested by evaluating this
+            argument.
         """
         assert callable(func), "Argument func must be callable"
         assert (
@@ -1292,7 +1291,7 @@ class TelnetWriter:
         """
         Register callback for inquires of sub-negotiation of ``cmd``.
 
-        :param Callable func: A callable function for the given ``cmd`` byte.
+        :param func: A callable function for the given ``cmd`` byte.
             Note that the return type must match those documented.
         :param bytes cmd: These callbacks must return any number of arguments,
             for each registered ``cmd`` byte, respectively:
@@ -1360,7 +1359,7 @@ class TelnetWriter:
         * ``CHARSET``: for servers, receiving one string, the character set
           negotiated by client. :rfc:`2066`.
 
-        :param callable func: The callback function to register.
+        :param func: The callback function to register.
         """
         assert cmd in (
             LOGOUT,

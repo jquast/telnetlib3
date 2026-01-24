@@ -577,7 +577,8 @@ async def test_wait_closed():
 
 def test_option_from_name():
     """Test option_from_name returns correct option bytes."""
-    from telnetlib3.telopt import option_from_name, NAWS, TTYPE, ECHO
+    # local
+    from telnetlib3.telopt import ECHO, NAWS, TTYPE, option_from_name
 
     assert option_from_name("NAWS") == NAWS
     assert option_from_name("naws") == NAWS
@@ -590,6 +591,7 @@ def test_option_from_name():
 
 async def test_wait_for_immediate_return():
     """Test wait_for returns immediately when conditions already met."""
+    # local
     from telnetlib3.telopt import ECHO
 
     writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
@@ -601,6 +603,7 @@ async def test_wait_for_immediate_return():
 
 async def test_wait_for_remote_option():
     """Test wait_for waits for remote option to become true."""
+    # local
     from telnetlib3.telopt import ECHO
 
     writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
@@ -617,6 +620,7 @@ async def test_wait_for_remote_option():
 
 async def test_wait_for_local_option():
     """Test wait_for waits for local option to become true."""
+    # local
     from telnetlib3.telopt import ECHO
 
     writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
@@ -633,7 +637,8 @@ async def test_wait_for_local_option():
 
 async def test_wait_for_pending_false():
     """Test wait_for waits for pending option to become false."""
-    from telnetlib3.telopt import TTYPE, DO
+    # local
+    from telnetlib3.telopt import DO, TTYPE
 
     writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
     writer.pending_option[DO + TTYPE] = True
@@ -650,6 +655,7 @@ async def test_wait_for_pending_false():
 
 async def test_wait_for_combined_conditions():
     """Test wait_for with multiple conditions."""
+    # local
     from telnetlib3.telopt import ECHO, NAWS
 
     writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
@@ -700,6 +706,7 @@ async def test_wait_for_condition_immediate():
 
 async def test_wait_for_condition_waits():
     """Test wait_for_condition waits for condition to become true."""
+    # local
     from telnetlib3.telopt import ECHO
 
     writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
@@ -718,6 +725,7 @@ async def test_wait_for_condition_waits():
 
 async def test_wait_for_cleanup_on_success():
     """Test that waiters are cleaned up after successful completion."""
+    # local
     from telnetlib3.telopt import ECHO
 
     writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
