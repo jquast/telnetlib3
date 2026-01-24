@@ -126,8 +126,9 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             self._transport.close()
         if not self._waiter_connected.cancelled() and not self._waiter_connected.done():
             self._waiter_connected.cancel()
-        if self.shell is None and self._waiter_closed is not None:
-            # raise deprecation warning, _waiter_closed should not be used!
+        # should raise deprecation warning.. _waiter_closed should not be used!
+        # this is legacy api, use Server().wait_for_clients() if you need references
+        if self._waiter_closed is not None and not self._waiter_closed.done():
             self._waiter_closed.set_result(weakref.proxy(self))
 
         # break circular references for transport; keep reader/writer available

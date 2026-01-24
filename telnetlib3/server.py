@@ -530,8 +530,13 @@ class Server:
     async def wait_closed(self):
         """Wait until the server and all client connections are closed."""
         await self._server.wait_closed()
-        # Give event loop a chance to process the transport closes
-        await asyncio.sleep(0)
+        # Wait for all client protocols to finish closing
+        waiters = []
+        for protocol in list(self._protocols):
+            if hasattr(protocol, '_waiter_closed') and not protocol._waiter_closed.done():
+                waiters.append(protocol._waiter_closed)
+        if waiters:
+            await asyncio.gather(*waiters, return_exceptions=True)
 
     @property
     def sockets(self):
