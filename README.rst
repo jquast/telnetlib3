@@ -12,15 +12,19 @@
 
 .. image:: https://img.shields.io/badge/Linux-yes-success?logo=linux
     :alt: Linux supported
+    :target: https://telnetlib3.readthedocs.io/
 
 .. image:: https://img.shields.io/badge/Windows-yes-success?logo=windows
     :alt: Windows supported
+    :target: https://telnetlib3.readthedocs.io/
 
 .. image:: https://img.shields.io/badge/MacOS-yes-success?logo=apple
     :alt: MacOS supported
+    :target: https://telnetlib3.readthedocs.io/
 
 .. image:: https://img.shields.io/badge/BSD-yes-success?logo=freebsd
     :alt: BSD supported
+    :target: https://telnetlib3.readthedocs.io/
 
 Introduction
 ============
