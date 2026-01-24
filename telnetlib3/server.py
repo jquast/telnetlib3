@@ -533,6 +533,7 @@ class Server:
         # Wait for all client protocols to finish closing
         waiters = []
         for protocol in list(self._protocols):
+            # pylint: disable=protected-access
             if hasattr(protocol, '_waiter_closed') and not protocol._waiter_closed.done():
                 waiters.append(protocol._waiter_closed)
         if waiters:
