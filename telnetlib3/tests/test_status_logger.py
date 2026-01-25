@@ -62,7 +62,7 @@ async def test_status_logger_get_status(bind_host, unused_tcp_port):
         status_logger = StatusLogger(server, 60)
         status = status_logger._get_status()
         assert status["count"] == 0
-        assert status["clients"] == []
+        assert not status["clients"]
 
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)

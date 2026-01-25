@@ -1,12 +1,49 @@
 """Test accessories for telnetlib3 project."""
 
 # std imports
+import os
 import asyncio
 import contextlib
 
 # 3rd party
 import pytest
 from pytest_asyncio.plugin import unused_tcp_port
+
+
+def init_subproc_coverage(run_note=None):
+    """
+    Initialize coverage tracking in a forked subprocess.
+
+    Derived from blessed library's test accessories.
+
+    :param run_note: Optional note (unused, for compatibility).
+    :returns: Coverage instance or None.
+    """
+    try:
+        # 3rd party
+        import coverage
+    except ImportError:
+        return None
+
+    coveragerc = os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, "tox.ini")
+    cov = coverage.Coverage(config_file=coveragerc)
+    cov.start()
+    return cov
+
+
+def make_preexec_coverage():
+    """
+    Create a preexec_fn for PTY coverage tracking.
+
+    Derived from blessed library's test accessories.
+
+    :returns: Callable that starts and returns coverage in forked child.
+    """
+
+    def preexec():
+        return init_subproc_coverage()
+
+    return preexec
 
 
 @pytest.fixture(scope="module", params=["127.0.0.1"])
@@ -121,6 +158,8 @@ __all__ = (
     "bind_host",
     "connection_context",
     "create_server",
+    "init_subproc_coverage",
+    "make_preexec_coverage",
     "open_connection",
     "server_context",
     "unused_tcp_port",

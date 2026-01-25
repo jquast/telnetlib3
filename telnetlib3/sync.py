@@ -32,6 +32,7 @@ import time
 import queue
 import asyncio
 import threading
+import concurrent.futures
 from typing import Any, Union, Callable, Optional
 
 # local
@@ -108,7 +109,7 @@ class TelnetConnection:
         future = asyncio.run_coroutine_threadsafe(self._async_connect(), self._loop)
         try:
             future.result(timeout=self._timeout)
-        except asyncio.TimeoutError as exc:
+        except concurrent.futures.TimeoutError as exc:
             self._cleanup()
             raise TimeoutError("Connection timed out") from exc
         except Exception:
@@ -159,7 +160,7 @@ class TelnetConnection:
             if not result:
                 raise EOFError("Connection closed")
             return result
-        except asyncio.TimeoutError as exc:
+        except concurrent.futures.TimeoutError as exc:
             future.cancel()
             raise TimeoutError("Read timed out") from exc
 
@@ -194,7 +195,7 @@ class TelnetConnection:
             if not result:
                 raise EOFError("Connection closed")
             return result
-        except asyncio.TimeoutError as exc:
+        except concurrent.futures.TimeoutError as exc:
             future.cancel()
             raise TimeoutError("Readline timed out") from exc
 
@@ -221,7 +222,7 @@ class TelnetConnection:
         future = asyncio.run_coroutine_threadsafe(self._reader.readuntil(match), self._loop)
         try:
             return future.result(timeout=timeout)
-        except asyncio.TimeoutError as exc:
+        except concurrent.futures.TimeoutError as exc:
             future.cancel()
             raise TimeoutError("Read until timed out") from exc
         except asyncio.IncompleteReadError as exc:
@@ -255,7 +256,7 @@ class TelnetConnection:
         future = asyncio.run_coroutine_threadsafe(self._writer.drain(), self._loop)
         try:
             future.result(timeout=timeout)
-        except asyncio.TimeoutError as exc:
+        except concurrent.futures.TimeoutError as exc:
             future.cancel()
             raise TimeoutError("Flush timed out") from exc
 
@@ -358,7 +359,7 @@ class TelnetConnection:
         )
         try:
             future.result(timeout=timeout)
-        except asyncio.TimeoutError as exc:
+        except concurrent.futures.TimeoutError as exc:
             future.cancel()
             raise TimeoutError("Wait for negotiation timed out") from exc
 
@@ -632,7 +633,7 @@ class ServerConnection:
                 raise EOFError("Connection closed")
             self._last_input_time = time.time()
             return result
-        except asyncio.TimeoutError as exc:
+        except concurrent.futures.TimeoutError as exc:
             future.cancel()
             raise TimeoutError("Read timed out") from exc
 
@@ -666,7 +667,7 @@ class ServerConnection:
                 raise EOFError("Connection closed")
             self._last_input_time = time.time()
             return result
-        except asyncio.TimeoutError as exc:
+        except concurrent.futures.TimeoutError as exc:
             future.cancel()
             raise TimeoutError("Readline timed out") from exc
 
@@ -693,7 +694,7 @@ class ServerConnection:
             result = future.result(timeout=timeout)
             self._last_input_time = time.time()
             return result
-        except asyncio.TimeoutError as exc:
+        except concurrent.futures.TimeoutError as exc:
             future.cancel()
             raise TimeoutError("Read until timed out") from exc
         except asyncio.IncompleteReadError as exc:
@@ -723,7 +724,7 @@ class ServerConnection:
         future = asyncio.run_coroutine_threadsafe(self._writer.drain(), self._loop)
         try:
             future.result(timeout=timeout)
-        except asyncio.TimeoutError as exc:
+        except concurrent.futures.TimeoutError as exc:
             future.cancel()
             raise TimeoutError("Flush timed out") from exc
 
@@ -786,7 +787,7 @@ class ServerConnection:
         )
         try:
             future.result(timeout=timeout)
-        except asyncio.TimeoutError as exc:
+        except concurrent.futures.TimeoutError as exc:
             future.cancel()
             raise TimeoutError("Wait for negotiation timed out") from exc
 

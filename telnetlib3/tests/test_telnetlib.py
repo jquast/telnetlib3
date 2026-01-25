@@ -1,6 +1,6 @@
 # jdq(2025): This file was modified from cpython 3.12 test_telnetlib.py, to make it compatible
 # with more versions of python, and, to use pytest instead of unittest.
-# pylint: disable-all
+# pylint: skip-file
 # std imports
 import io
 import re
