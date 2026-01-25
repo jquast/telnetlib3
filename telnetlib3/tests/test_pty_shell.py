@@ -12,8 +12,8 @@ import pytest
 import telnetlib3
 from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
     bind_host,
-    make_preexec_coverage,
     unused_tcp_port,
+    make_preexec_coverage,
 )
 
 pytestmark = [
@@ -42,7 +42,10 @@ def require_no_capture(request):
 @pytest.fixture
 def mock_session():
     """Create a mock PTYSession for unit testing."""
+    # std imports
     from unittest.mock import MagicMock
+
+    # local
     from telnetlib3.server_pty_shell import PTYSession
 
     def _create(extra_info=None, capture_writes=False):
@@ -50,15 +53,13 @@ def mock_session():
         writer = MagicMock()
         written = [] if capture_writes else None
         if capture_writes:
-            writer.write = lambda data: written.append(data)
+            writer.write = written.append
         if extra_info is None:
             writer.get_extra_info = MagicMock(return_value=None)
         elif callable(extra_info):
             writer.get_extra_info = MagicMock(side_effect=extra_info)
         else:
-            writer.get_extra_info = MagicMock(
-                side_effect=lambda k, d=None: extra_info.get(k, d)
-            )
+            writer.get_extra_info = MagicMock(side_effect=lambda k, d=None: extra_info.get(k, d))
         session = PTYSession(reader, writer, "/nonexistent.program", [])
         return session, written
 
@@ -85,8 +86,9 @@ async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capt
         protocol_factory=ServerWithWaiter,
         host=bind_host,
         port=unused_tcp_port,
-        shell=make_pty_shell(sys.executable, [PTY_HELPER, "cat"],
-                            preexec_fn=make_preexec_coverage()),
+        shell=make_pty_shell(
+            sys.executable, [PTY_HELPER, "cat"], preexec_fn=make_preexec_coverage()
+        ),
         connect_maxwait=0.5,
     ):
         async with open_connection(
@@ -119,8 +121,9 @@ async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capt
         protocol_factory=ServerWithWaiter,
         host=bind_host,
         port=unused_tcp_port,
-        shell=make_pty_shell(sys.executable, [PTY_HELPER, "env", "TERM"],
-                            preexec_fn=make_preexec_coverage()),
+        shell=make_pty_shell(
+            sys.executable, [PTY_HELPER, "env", "TERM"], preexec_fn=make_preexec_coverage()
+        ),
         connect_maxwait=0.5,
     ):
         async with open_connection(
@@ -142,8 +145,9 @@ async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capt
         protocol_factory=ServerWithWaiter,
         host=bind_host,
         port=unused_tcp_port,
-        shell=make_pty_shell(sys.executable, [PTY_HELPER, "stty_size"],
-                            preexec_fn=make_preexec_coverage()),
+        shell=make_pty_shell(
+            sys.executable, [PTY_HELPER, "stty_size"], preexec_fn=make_preexec_coverage()
+        ),
         connect_maxwait=0.5,
     ):
         async with open_connection(
@@ -180,8 +184,9 @@ async def test_pty_shell_lifecycle(bind_host, unused_tcp_port, require_no_captur
         protocol_factory=ServerWithWaiter,
         host=bind_host,
         port=unused_tcp_port,
-        shell=make_pty_shell(sys.executable, [PTY_HELPER, "exit_code", "0"],
-                            preexec_fn=make_preexec_coverage()),
+        shell=make_pty_shell(
+            sys.executable, [PTY_HELPER, "exit_code", "0"], preexec_fn=make_preexec_coverage()
+        ),
         connect_maxwait=0.5,
     ):
         async with open_connection(
@@ -219,8 +224,9 @@ async def test_pty_shell_lifecycle(bind_host, unused_tcp_port, require_no_captur
         protocol_factory=ServerWithCloseWaiter,
         host=bind_host,
         port=unused_tcp_port,
-        shell=make_pty_shell(sys.executable, [PTY_HELPER, "cat"],
-                            preexec_fn=make_preexec_coverage()),
+        shell=make_pty_shell(
+            sys.executable, [PTY_HELPER, "cat"], preexec_fn=make_preexec_coverage()
+        ),
         connect_maxwait=0.5,
     ):
         async with open_connection(
@@ -265,10 +271,15 @@ def test_make_pty_shell_returns_callable():
 async def test_pty_session_build_environment(mock_session):
     """Test PTYSession environment building with various configurations."""
     # Test with full environment info
-    session, _ = mock_session({
-        "TERM": "xterm-256color", "rows": 30, "cols": 100,
-        "LANG": "en_US.UTF-8", "DISPLAY": ":0",
-    })
+    session, _ = mock_session(
+        {
+            "TERM": "xterm-256color",
+            "rows": 30,
+            "cols": 100,
+            "LANG": "en_US.UTF-8",
+            "DISPLAY": ":0",
+        }
+    )
     env = session._build_environment()
     assert env["TERM"] == "xterm-256color"
     assert env["LINES"] == "30"
@@ -278,9 +289,14 @@ async def test_pty_session_build_environment(mock_session):
     assert env["DISPLAY"] == ":0"
 
     # Test charset fallback when no LANG
-    session, _ = mock_session({
-        "TERM": "vt100", "rows": 24, "cols": 80, "charset": "ISO-8859-1",
-    })
+    session, _ = mock_session(
+        {
+            "TERM": "vt100",
+            "rows": 24,
+            "cols": 80,
+            "charset": "ISO-8859-1",
+        }
+    )
     env = session._build_environment()
     assert env["TERM"] == "vt100"
     assert env["LANG"] == "en_US.ISO-8859-1"
@@ -306,9 +322,9 @@ async def test_pty_session_naws_behavior(mock_session):
     def mock_ioctl(fd, cmd, data):
         ioctl_calls.append((fd, cmd, data))
 
-    with patch("os.getpgid", return_value=12345), \
-         patch("os.killpg", side_effect=mock_killpg), \
-         patch("fcntl.ioctl", side_effect=mock_ioctl):
+    with patch("os.getpgid", return_value=12345), patch(
+        "os.killpg", side_effect=mock_killpg
+    ), patch("fcntl.ioctl", side_effect=mock_ioctl):
         # Rapid updates should be debounced - only one signal after delay
         session._on_naws(25, 80)
         session._on_naws(30, 90)
@@ -331,14 +347,17 @@ async def test_pty_session_naws_behavior(mock_session):
     winch_calls = []
 
     def mock_killpg_winch(pgid, sig):
+        # std imports
         import signal as signal_mod
+
         if sig == signal_mod.SIGWINCH:
             winch_calls.append((pgid, sig))
 
-    with patch("os.getpgid", return_value=12345), \
-         patch("os.killpg", side_effect=mock_killpg_winch), \
-         patch("os.kill"), patch("os.waitpid", return_value=(0, 0)), \
-         patch("os.close"), patch("fcntl.ioctl"):
+    with patch("os.getpgid", return_value=12345), patch(
+        "os.killpg", side_effect=mock_killpg_winch
+    ), patch("os.kill"), patch("os.waitpid", return_value=(0, 0)), patch("os.close"), patch(
+        "fcntl.ioctl"
+    ):
         session._on_naws(25, 80)
         session.cleanup()
         await asyncio.sleep(0.25)
@@ -398,7 +417,7 @@ async def test_pty_session_flush_output_behavior(mock_session):
     reader = MagicMock()
     writer = MagicMock()
     written = []
-    writer.write = lambda data: written.append(data)
+    writer.write = written.append
     charset_values = ["utf-8"]
     writer.get_extra_info = MagicMock(
         side_effect=lambda k, d=None: charset_values[0] if k == "charset" else d
@@ -468,7 +487,7 @@ async def test_pty_session_cleanup_flushes_remaining_buffer():
     reader = MagicMock()
     writer = MagicMock()
     written = []
-    writer.write = lambda data: written.append(data)
+    writer.write = written.append
     writer.get_extra_info = MagicMock(return_value="utf-8")
 
     session = PTYSession(reader, writer, "/nonexistent.program", [])
@@ -476,9 +495,7 @@ async def test_pty_session_cleanup_flushes_remaining_buffer():
     session.master_fd = 99
     session.child_pid = 12345
 
-    with patch("os.close"), \
-         patch("os.kill"), \
-         patch("os.waitpid", return_value=(0, 0)):
+    with patch("os.close"), patch("os.kill"), patch("os.waitpid", return_value=(0, 0)):
         session.cleanup()
 
     assert len(written) == 1
@@ -497,9 +514,7 @@ async def test_wait_for_terminal_info_behavior():
 
     # Returns early when TERM and rows available
     writer = MagicMock()
-    writer.get_extra_info = MagicMock(
-        side_effect=lambda k: {"TERM": "xterm", "rows": 25}.get(k)
-    )
+    writer.get_extra_info = MagicMock(side_effect={"TERM": "xterm", "rows": 25}.get)
     await _wait_for_terminal_info(writer, timeout=2.0)
 
     # Times out when info not available
@@ -538,7 +553,9 @@ async def test_pty_session_set_window_size_behavior(mock_session):
     session.master_fd = None
     session.child_pid = None
     ioctl_calls = []
-    with patch("fcntl.ioctl", side_effect=lambda fd, cmd, data: ioctl_calls.append((fd, cmd, data))):
+    with patch(
+        "fcntl.ioctl", side_effect=lambda fd, cmd, data: ioctl_calls.append((fd, cmd, data))
+    ):
         session._set_window_size(25, 80)
     assert len(ioctl_calls) == 0
 
@@ -546,17 +563,20 @@ async def test_pty_session_set_window_size_behavior(mock_session):
     session, _ = mock_session()
     session.master_fd = 99
     session.child_pid = 12345
-    with patch("fcntl.ioctl"), \
-         patch("os.getpgid", return_value=12345), \
-         patch("os.killpg", side_effect=ProcessLookupError("process gone")):
+    with patch("fcntl.ioctl"), patch("os.getpgid", return_value=12345), patch(
+        "os.killpg", side_effect=ProcessLookupError("process gone")
+    ):
         session._set_window_size(25, 80)
 
 
-@pytest.mark.parametrize("close_effect,kill_effect,waitpid_effect,check_attr", [
-    (None, None, ChildProcessError("already reaped"), "child_pid"),
-    (OSError("bad fd"), None, (0, 0), "master_fd"),
-    (None, ProcessLookupError("already dead"), (0, 0), "child_pid"),
-])
+@pytest.mark.parametrize(
+    "close_effect,kill_effect,waitpid_effect,check_attr",
+    [
+        (None, None, ChildProcessError("already reaped"), "child_pid"),
+        (OSError("bad fd"), None, (0, 0), "master_fd"),
+        (None, ProcessLookupError("already dead"), (0, 0), "child_pid"),
+    ],
+)
 async def test_pty_session_cleanup_error_recovery(
     close_effect, kill_effect, waitpid_effect, check_attr
 ):
@@ -587,10 +607,13 @@ async def test_pty_session_cleanup_error_recovery(
     assert getattr(session, check_attr) is None
 
 
-@pytest.mark.parametrize("in_sync_update,expected_writes,expected_buffer", [
-    (False, 1, b""),
-    (True, 0, b"partial line"),
-])
+@pytest.mark.parametrize(
+    "in_sync_update,expected_writes,expected_buffer",
+    [
+        (False, 1, b""),
+        (True, 0, b"partial line"),
+    ],
+)
 async def test_pty_session_flush_remaining_scenarios(
     in_sync_update, expected_writes, expected_buffer
 ):
@@ -604,7 +627,7 @@ async def test_pty_session_flush_remaining_scenarios(
     reader = MagicMock()
     writer = MagicMock()
     written = []
-    writer.write = lambda data: written.append(data)
+    writer.write = written.append
     writer.get_extra_info = MagicMock(return_value="utf-8")
 
     session = PTYSession(reader, writer, "/nonexistent.program", [])
@@ -630,7 +653,7 @@ async def test_pty_session_flush_output_empty_data():
     reader = MagicMock()
     writer = MagicMock()
     written = []
-    writer.write = lambda data: written.append(data)
+    writer.write = written.append
     writer.get_extra_info = MagicMock(return_value="utf-8")
 
     session = PTYSession(reader, writer, "/nonexistent.program", [])
@@ -647,12 +670,12 @@ async def test_pty_session_write_to_telnet_pre_bsu_content():
     from unittest.mock import MagicMock
 
     # local
-    from telnetlib3.server_pty_shell import PTYSession, _BSU, _ESU
+    from telnetlib3.server_pty_shell import _BSU, _ESU, PTYSession
 
     reader = MagicMock()
     writer = MagicMock()
     written = []
-    writer.write = lambda data: written.append(data)
+    writer.write = written.append
     writer.get_extra_info = MagicMock(return_value="utf-8")
 
     session = PTYSession(reader, writer, "/nonexistent.program", [])
@@ -673,10 +696,13 @@ async def test_pty_spawn_error():
     assert isinstance(err, Exception)
 
 
-@pytest.mark.parametrize("error_data,expected_substrings", [
-    (b"FileNotFoundError:2:No such file", ["FileNotFoundError", "No such file"]),
-    (b"just some error text", ["Exec failed"]),
-])
+@pytest.mark.parametrize(
+    "error_data,expected_substrings",
+    [
+        (b"FileNotFoundError:2:No such file", ["FileNotFoundError", "No such file"]),
+        (b"just some error text", ["Exec failed"]),
+    ],
+)
 async def test_pty_session_exec_error_parsing(error_data, expected_substrings):
     """Test _handle_exec_error parses various error formats."""
     # std imports
@@ -698,15 +724,17 @@ async def test_pty_session_exec_error_parsing(error_data, expected_substrings):
         assert substring in str(exc_info.value)
 
 
-@pytest.mark.parametrize("child_pid,waitpid_behavior,expected", [
-    (None, None, False),
-    (99999, ChildProcessError, False),
-    (12345, (0, 0), True),
-])
+@pytest.mark.parametrize(
+    "child_pid,waitpid_behavior,expected",
+    [
+        (None, None, False),
+        (99999, ChildProcessError, False),
+        (12345, (0, 0), True),
+    ],
+)
 async def test_pty_session_isalive_scenarios(child_pid, waitpid_behavior, expected):
     """Test _isalive returns correct values for various child states."""
     # std imports
-    import os
     from unittest.mock import MagicMock, patch
 
     # local
@@ -732,7 +760,6 @@ async def test_pty_session_isalive_scenarios(child_pid, waitpid_behavior, expect
 async def test_pty_session_terminate_scenarios():
     """Test _terminate handles various termination scenarios."""
     # std imports
-    import os
     import signal
     from unittest.mock import MagicMock, patch
 
@@ -760,9 +787,9 @@ async def test_pty_session_terminate_scenarios():
     def mock_isalive():
         return isalive_calls.pop(0) if isalive_calls else False
 
-    with patch.object(os, "kill", side_effect=mock_kill), \
-         patch.object(session, "_isalive", side_effect=mock_isalive), \
-         patch("time.sleep"):
+    with patch.object(os, "kill", side_effect=mock_kill), patch.object(
+        session, "_isalive", side_effect=mock_isalive
+    ), patch("time.sleep"):
         result = session._terminate()
 
     assert result is True
@@ -777,8 +804,9 @@ async def test_pty_session_terminate_scenarios():
     def mock_isalive_2():
         return isalive_returns.pop(0) if isalive_returns else False
 
-    with patch.object(os, "kill", side_effect=ProcessLookupError), \
-         patch.object(session, "_isalive", side_effect=mock_isalive_2):
+    with patch.object(os, "kill", side_effect=ProcessLookupError), patch.object(
+        session, "_isalive", side_effect=mock_isalive_2
+    ):
         result = session._terminate()
 
     assert result is True

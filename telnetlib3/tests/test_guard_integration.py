@@ -1,11 +1,9 @@
 # std imports
 import asyncio
 
-# 3rd party
-import pytest
-
 
 async def test_connection_counter_integration():
+    # local
     from telnetlib3.guard_shells import ConnectionCounter
 
     counter = ConnectionCounter(2)
@@ -27,6 +25,7 @@ async def test_connection_counter_integration():
 
 
 async def test_counter_release_on_completion():
+    # local
     from telnetlib3.guard_shells import ConnectionCounter
 
     counter = ConnectionCounter(1)
@@ -50,6 +49,7 @@ async def test_counter_release_on_completion():
 
 
 async def test_counter_release_in_guarded_pattern():
+    # local
     from telnetlib3.guard_shells import ConnectionCounter
 
     counter = ConnectionCounter(2)
@@ -85,6 +85,7 @@ async def test_counter_release_in_guarded_pattern():
 
 
 async def test_guarded_shell_pattern_busy_shell():
+    # local
     from telnetlib3.guard_shells import ConnectionCounter, busy_shell
 
     counter = ConnectionCounter(1)
@@ -159,7 +160,8 @@ async def test_guarded_shell_pattern_busy_shell():
     assert counter.count == 0
 
 
-async def test_guarded_shell_pattern_robot_check():
+async def test_guarded_shell_pattern_robot_check():  # pylint: disable=too-complex
+    # local
     from telnetlib3.guard_shells import ConnectionCounter
 
     counter = ConnectionCounter(5)
@@ -240,7 +242,8 @@ async def test_guarded_shell_pattern_robot_check():
     assert counter.count == 0
 
 
-async def test_full_guarded_shell_flow():
+async def test_full_guarded_shell_flow():  # pylint: disable=too-complex
+    # local
     from telnetlib3.guard_shells import ConnectionCounter, busy_shell, robot_shell
 
     counter = ConnectionCounter(2)

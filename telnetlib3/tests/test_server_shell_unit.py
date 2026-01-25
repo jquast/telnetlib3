@@ -1,7 +1,7 @@
 # std imports
-import asyncio
 import sys
 import types
+import asyncio
 
 # 3rd party
 import pytest
@@ -9,8 +9,8 @@ import pytest
 # local
 from telnetlib3 import slc as slc_mod
 from telnetlib3 import client_shell as cs
-from telnetlib3 import server_shell as ss
 from telnetlib3 import guard_shells as gs
+from telnetlib3 import server_shell as ss
 
 
 class DummyWriter:
@@ -235,12 +235,15 @@ class MockWriter:
         self.written.append(data)
 
 
-@pytest.mark.parametrize("limit,acquires,expected_count,expected_results", [
-    pytest.param(1, 1, 1, [True], id="single_acquire"),
-    pytest.param(1, 2, 1, [True, False], id="over_limit"),
-    pytest.param(3, 3, 3, [True, True, True], id="at_limit"),
-    pytest.param(2, 3, 2, [True, True, False], id="over_limit_by_one"),
-])
+@pytest.mark.parametrize(
+    "limit,acquires,expected_count,expected_results",
+    [
+        pytest.param(1, 1, 1, [True], id="single_acquire"),
+        pytest.param(1, 2, 1, [True, False], id="over_limit"),
+        pytest.param(3, 3, 3, [True, True, True], id="at_limit"),
+        pytest.param(2, 3, 2, [True, True, False], id="over_limit_by_one"),
+    ],
+)
 def test_connection_counter_acquire(limit, acquires, expected_count, expected_results):
     counter = gs.ConnectionCounter(limit)
     results = [counter.try_acquire() for _ in range(acquires)]
@@ -260,13 +263,16 @@ def test_connection_counter_release():
     assert counter.count == 0
 
 
-@pytest.mark.parametrize("input_data,max_len,expected", [
-    pytest.param("hi\r", 100, "hi", id="cr_terminator"),
-    pytest.param("hi\n", 100, "hi", id="lf_terminator"),
-    pytest.param("ab", 100, "ab", id="eof_no_terminator"),
-    pytest.param("", 100, "", id="empty_input"),
-    pytest.param("abcdefgh", 5, "abcde", id="truncated_at_max_len"),
-])
+@pytest.mark.parametrize(
+    "input_data,max_len,expected",
+    [
+        pytest.param("hi\r", 100, "hi", id="cr_terminator"),
+        pytest.param("hi\n", 100, "hi", id="lf_terminator"),
+        pytest.param("ab", 100, "ab", id="eof_no_terminator"),
+        pytest.param("", 100, "", id="empty_input"),
+        pytest.param("abcdefgh", 5, "abcde", id="truncated_at_max_len"),
+    ],
+)
 @pytest.mark.asyncio
 async def test_read_line_inner(input_data, max_len, expected):
     reader = MockReader(list(input_data))
@@ -307,14 +313,17 @@ async def test_busy_shell_full_conversation():
     assert "distant explosion" in written
 
 
-@pytest.mark.parametrize("input_chars,expected", [
-    pytest.param(["\x1b", "[", "A", "x"], "x", id="csi_sequence"),
-    pytest.param(["\x1b", "X"], "X", id="esc_non_bracket"),
-    pytest.param(["a"], "a", id="normal_char"),
-    pytest.param([""], "", id="eof"),
-    pytest.param(["\x1b", "[", "1", ";", "2", "H", "z"], "z", id="csi_with_params"),
-    pytest.param(["\x1b", "[", ""], "", id="csi_no_final_byte"),
-])
+@pytest.mark.parametrize(
+    "input_chars,expected",
+    [
+        pytest.param(["\x1b", "[", "A", "x"], "x", id="csi_sequence"),
+        pytest.param(["\x1b", "X"], "X", id="esc_non_bracket"),
+        pytest.param(["a"], "a", id="normal_char"),
+        pytest.param([""], "", id="eof"),
+        pytest.param(["\x1b", "[", "1", ";", "2", "H", "z"], "z", id="csi_with_params"),
+        pytest.param(["\x1b", "[", ""], "", id="csi_no_final_byte"),
+    ],
+)
 @pytest.mark.asyncio
 async def test_filter_ansi(input_chars, expected):
     reader = MockReader(input_chars)
@@ -323,12 +332,15 @@ async def test_filter_ansi(input_chars, expected):
     assert result == expected
 
 
-@pytest.mark.parametrize("input_chars,expected", [
-    pytest.param(["h", "e", "l", "l", "o", "\r"], "hello", id="basic"),
-    pytest.param(["h", "x", "\x7f", "i", "\r"], "hi", id="with_backspace"),
-    pytest.param(["\n", "\x00", "a", "\r"], "a", id="ignores_initial_lf_nul"),
-    pytest.param(["a", ""], None, id="returns_none_on_eof"),
-])
+@pytest.mark.parametrize(
+    "input_chars,expected",
+    [
+        pytest.param(["h", "e", "l", "l", "o", "\r"], "hello", id="basic"),
+        pytest.param(["h", "x", "\x7f", "i", "\r"], "hi", id="with_backspace"),
+        pytest.param(["\n", "\x00", "a", "\r"], "a", id="ignores_initial_lf_nul"),
+        pytest.param(["a", ""], None, id="returns_none_on_eof"),
+    ],
+)
 @pytest.mark.asyncio
 async def test_readline2(input_chars, expected):
     reader = MockReader(input_chars)
@@ -337,11 +349,14 @@ async def test_readline2(input_chars, expected):
     assert result == expected
 
 
-@pytest.mark.parametrize("input_chars,closing,expected", [
-    pytest.param(["a"], False, "a", id="normal"),
-    pytest.param(["\x1b", "A", "x"], False, "x", id="skips_escape"),
-    pytest.param([], True, None, id="returns_none_when_closing"),
-])
+@pytest.mark.parametrize(
+    "input_chars,closing,expected",
+    [
+        pytest.param(["a"], False, "a", id="normal"),
+        pytest.param(["\x1b", "A", "x"], False, "x", id="skips_escape"),
+        pytest.param([], True, None, id="returns_none_when_closing"),
+    ],
+)
 @pytest.mark.asyncio
 async def test_get_next_ascii(input_chars, closing, expected):
     reader = MockReader(input_chars)
@@ -364,13 +379,20 @@ class CPRReader:
         return result
 
 
-@pytest.mark.parametrize("input_data,expected", [
-    pytest.param([b"\x1b", b"[", b"1", b"0", b";", b"2", b"0", b"R"], (10, 20), id="valid_cpr"),
-    pytest.param([b"\x1b", b"[", b"1", b";", b"1", b"R"], (1, 1), id="single_digit"),
-    pytest.param([b"\x1b", b"[", b"2", b"5", b";", b"8", b"0", b"R"], (25, 80), id="typical_size"),
-    pytest.param([b""], None, id="eof"),
-    pytest.param([b"g", b"a", b"r", b"\x1b", b"[", b"5", b";", b"3", b"R"], (5, 3), id="garbage_prefix"),
-])
+@pytest.mark.parametrize(
+    "input_data,expected",
+    [
+        pytest.param([b"\x1b", b"[", b"1", b"0", b";", b"2", b"0", b"R"], (10, 20), id="valid_cpr"),
+        pytest.param([b"\x1b", b"[", b"1", b";", b"1", b"R"], (1, 1), id="single_digit"),
+        pytest.param(
+            [b"\x1b", b"[", b"2", b"5", b";", b"8", b"0", b"R"], (25, 80), id="typical_size"
+        ),
+        pytest.param([b""], None, id="eof"),
+        pytest.param(
+            [b"g", b"a", b"r", b"\x1b", b"[", b"5", b";", b"3", b"R"], (5, 3), id="garbage_prefix"
+        ),
+    ],
+)
 @pytest.mark.asyncio
 async def test_read_cpr_response(input_data, expected):
     reader = CPRReader(input_data)

@@ -319,7 +319,7 @@ async def test_telnet_server_shell_eof(bind_host, unused_tcp_port):
 async def test_telnet_server_shell_version_command(bind_host, unused_tcp_port):
     """Test version command in telnet_server_shell."""
     # local
-    from telnetlib3 import telnet_server_shell, accessories
+    from telnetlib3 import accessories, telnet_server_shell
     from telnetlib3.telopt import DO, IAC, WONT, TTYPE
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 

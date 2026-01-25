@@ -1,5 +1,6 @@
 #!/usr/bin/env python
-"""Simple PTY test programs for telnetlib3 tests.
+"""
+Simple PTY test programs for telnetlib3 tests.
 
 These programs are designed to be run via PTY for testing purposes.
 Usage: python -m telnetlib3.tests.pty_helper <mode> [args...]
@@ -16,6 +17,7 @@ Modes:
     partial_utf8 - Output incomplete UTF-8 then complete it
 """
 
+# std imports
 import os
 import sys
 
@@ -41,15 +43,16 @@ def echo_mode(args):
 
 def stty_size_mode():
     """Print terminal size."""
-    import struct
+    # std imports
     import fcntl
+    import struct
     import termios
 
     try:
         winsize = fcntl.ioctl(sys.stdin.fileno(), termios.TIOCGWINSZ, b"\x00" * 8)
         rows, cols = struct.unpack("HHHH", winsize)[:2]
         print(f"{rows} {cols}")
-    except Exception:
+    except OSError:
         print("unknown")
     sys.stdout.flush()
 
@@ -72,7 +75,9 @@ def env_mode(args):
 
 def sleep_mode(args):
     """Sleep for specified seconds."""
+    # std imports
     import time
+
     seconds = float(args[0]) if args else 60
     time.sleep(seconds)
 
@@ -98,13 +103,16 @@ def partial_utf8_mode():
     """Output incomplete UTF-8 then complete it."""
     sys.stdout.buffer.write(b"hello\xc3")
     sys.stdout.buffer.flush()
+    # std imports
     import time
+
     time.sleep(0.1)
     sys.stdout.buffer.write(b"\xa9world\n")
     sys.stdout.buffer.flush()
 
 
 def main():
+    """Entry point for PTY test helper."""
     if len(sys.argv) < 2:
         print("Usage: python -m telnetlib3.tests.pty_helper <mode> [args...]", file=sys.stderr)
         sys.exit(1)
@@ -113,15 +121,15 @@ def main():
     args = sys.argv[2:]
 
     modes = {
-        "cat": lambda: cat_mode(),
+        "cat": cat_mode,
         "echo": lambda: echo_mode(args),
-        "stty_size": lambda: stty_size_mode(),
+        "stty_size": stty_size_mode,
         "exit_code": lambda: exit_code_mode(args),
         "env": lambda: env_mode(args),
         "sleep": lambda: sleep_mode(args),
-        "env_all": lambda: env_all_mode(),
-        "sync_output": lambda: sync_output_mode(),
-        "partial_utf8": lambda: partial_utf8_mode(),
+        "env_all": env_all_mode,
+        "sync_output": sync_output_mode,
+        "partial_utf8": partial_utf8_mode,
     }
 
     if mode not in modes:

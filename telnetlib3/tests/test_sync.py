@@ -466,10 +466,13 @@ def test_client_readline_timeout(bind_host, unused_tcp_port):
     server.shutdown()
 
 
-@pytest.mark.parametrize("method,args,error_match", [
-    pytest.param("read", (1,), "Read timed out", id="read"),
-    pytest.param("readline", (), "Readline timed out", id="readline"),
-])
+@pytest.mark.parametrize(
+    "method,args,error_match",
+    [
+        pytest.param("read", (1,), "Read timed out", id="read"),
+        pytest.param("readline", (), "Readline timed out", id="readline"),
+    ],
+)
 def test_server_connection_timeout(bind_host, unused_tcp_port, method, args, error_match):
     """ServerConnection methods time out when no data available."""
     server = BlockingTelnetServer(bind_host, unused_tcp_port)
@@ -532,13 +535,16 @@ def test_server_connection_wait_for_timeout(bind_host, unused_tcp_port):
     server.shutdown()
 
 
-@pytest.mark.parametrize("method,args,kwargs", [
-    pytest.param("wait_for", (), {"remote": {"NAWS": True}}, id="wait_for"),
-    pytest.param("read_until", (">>> ",), {}, id="read_until"),
-    pytest.param("flush", (), {}, id="flush"),
-    pytest.param("readline", (), {}, id="readline"),
-])
-def test_server_connection_closed_error(bind_host, unused_tcp_port, method, args, kwargs):
+@pytest.mark.parametrize(
+    "method,args,kwargs",
+    [
+        pytest.param("wait_for", (), {"remote": {"NAWS": True}}, id="wait_for"),
+        pytest.param("read_until", (">>> ",), {}, id="read_until"),
+        pytest.param("flush", (), {}, id="flush"),
+        pytest.param("readline", (), {}, id="readline"),
+    ],
+)
+def test_server_connection_methods_closed_error(bind_host, unused_tcp_port, method, args, kwargs):
     """ServerConnection methods raise RuntimeError when called after close."""
     server = BlockingTelnetServer(bind_host, unused_tcp_port)
     server.start()
