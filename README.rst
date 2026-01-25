@@ -77,7 +77,7 @@ program.
 Legacy telnetlib
 ----------------
 
-This library contains an unadulterated copy of Python 3.12's telnetlib.py_, 
+This library contains an unadulterated copy of Python 3.12's telnetlib.py_,
 from the standard library before it was removed in Python 3.13.
 
 To migrate code, change import statements:
