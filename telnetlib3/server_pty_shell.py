@@ -9,6 +9,7 @@ each telnet connection, with proper terminal negotiation forwarding.
 import os
 import pty
 import sys
+import time
 import errno
 import fcntl
 import codecs
@@ -21,7 +22,16 @@ import termios
 # local
 from .telopt import NAWS
 
-__all__ = ("make_pty_shell", "pty_shell")
+__all__ = ("make_pty_shell", "pty_shell", "PTYSpawnError")
+
+# Delay between termination signals (seconds)
+_TERMINATE_DELAY = 0.1
+
+
+class PTYSpawnError(Exception):
+    """Raised when PTY child process fails to exec."""
+
+    pass
 
 logger = logging.getLogger("telnetlib3.server_pty_shell")
 
@@ -40,7 +50,7 @@ def _platform_check():
 class PTYSession:
     """Manages a PTY session lifecycle."""
 
-    def __init__(self, reader, writer, program, args):
+    def __init__(self, reader, writer, program, args, preexec_fn=None):
         """
         Initialize PTY session.
 
@@ -48,11 +58,15 @@ class PTYSession:
         :param writer: TelnetWriter instance.
         :param program: Path to program to execute.
         :param args: List of arguments for the program.
+        :param preexec_fn: Optional callable to run in child before exec.
+            Called with no arguments after fork but before _setup_child.
+            Useful for test coverage tracking in the forked child process.
         """
         self.reader = reader
         self.writer = writer
         self.program = program
         self.args = args or []
+        self.preexec_fn = preexec_fn
         self.master_fd = None
         self.child_pid = None
         self._closing = False
@@ -64,17 +78,45 @@ class PTYSession:
         self._naws_timer = None
 
     def start(self):
-        """Fork PTY, configure environment, and exec program."""
+        """Fork PTY, configure environment, and exec program.
+
+        :raises PTYSpawnError: If the child process fails to exec.
+        """
         _platform_check()
 
         env = self._build_environment()
         rows, cols = self._get_window_size()
 
+        # Create pipe for exec error detection (ptyprocess pattern).
+        # Child sets close-on-exec; successful exec closes pipe automatically.
+        # If exec fails, child writes error through pipe before exiting.
+        exec_err_pipe_read, exec_err_pipe_write = os.pipe()
+
         self.child_pid, self.master_fd = pty.fork()
 
         if self.child_pid == 0:
-            self._setup_child(env, rows, cols)
+            # Child process
+            os.close(exec_err_pipe_read)
+            fcntl.fcntl(exec_err_pipe_write, fcntl.F_SETFD, fcntl.FD_CLOEXEC)
+
+            # Coverage object from preexec_fn, saved before exec
+            child_cov = None
+            if self.preexec_fn is not None:
+                try:
+                    child_cov = self.preexec_fn()
+                except Exception as e:
+                    self._write_exec_error(exec_err_pipe_write, e)
+                    os._exit(1)
+            self._setup_child(env, rows, cols, exec_err_pipe_write, child_cov)
         else:
+            # Parent process
+            os.close(exec_err_pipe_write)
+            exec_err_data = os.read(exec_err_pipe_read, 4096)
+            os.close(exec_err_pipe_read)
+
+            if exec_err_data:
+                self._handle_exec_error(exec_err_data)
+
             logger.debug(
                 "forked PTY: program=%s pid=%d fd=%d",
                 self.program,
@@ -85,6 +127,26 @@ class PTYSession:
             pid, status = os.waitpid(self.child_pid, os.WNOHANG)
             if pid:
                 logger.warning("child already exited: status=%d", status)
+
+    def _write_exec_error(self, pipe_fd, exc):
+        """Write exception info to pipe for parent to read."""
+        ename = type(exc).__name__
+        msg = f"{ename}:{getattr(exc, 'errno', 0)}:{exc}"
+        os.write(pipe_fd, msg.encode("utf-8", errors="replace"))
+        os.close(pipe_fd)
+
+    def _handle_exec_error(self, data):
+        """Parse exec error from child and raise appropriate exception."""
+        try:
+            parts = data.decode("utf-8", errors="replace").split(":", 2)
+            if len(parts) == 3:
+                errclass, errno_s, errmsg = parts
+                raise PTYSpawnError(f"{errclass}: {errmsg}")
+            raise PTYSpawnError(f"Exec failed: {data!r}")
+        except PTYSpawnError:
+            raise
+        except Exception:
+            raise PTYSpawnError(f"Exec failed: {data!r}")
 
     def _build_environment(self):
         """Build environment dict from negotiated values."""
@@ -124,7 +186,7 @@ class PTYSession:
         cols = self.writer.get_extra_info("cols", 80)
         return rows, cols
 
-    def _setup_child(self, env, rows, cols):
+    def _setup_child(self, env, rows, cols, exec_err_pipe, child_cov=None):
         """Child process setup before exec."""
         # Note: pty.fork() already calls setsid() for the child, so we don't need to
 
@@ -141,8 +203,17 @@ class PTYSession:
         # Keep c_oflag intact - OPOST and ONLCR translate \n to \r\n
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, attrs)
 
+        # Save coverage data before exec replaces the process
+        if child_cov is not None:
+            child_cov.stop()
+            child_cov.save()
+
         argv = [self.program] + self.args
-        os.execvpe(self.program, argv, env)
+        try:
+            os.execvpe(self.program, argv, env)
+        except OSError as err:
+            self._write_exec_error(exec_err_pipe, err)
+            os._exit(os.EX_OSERR)
 
     def _setup_parent(self):
         """Parent process setup after fork."""
@@ -347,6 +418,42 @@ class PTYSession:
             self._flush_output(self._output_buffer)
             self._output_buffer = b""
 
+    def _isalive(self):
+        """Check if child process is still running."""
+        if self.child_pid is None:
+            return False
+        try:
+            pid, status = os.waitpid(self.child_pid, os.WNOHANG)
+            return pid == 0
+        except ChildProcessError:
+            return False
+
+    def _terminate(self, force=False):
+        """Terminate child with signal escalation (ptyprocess pattern).
+
+        Tries SIGHUP, SIGCONT, SIGINT in sequence. If force=True, also tries SIGKILL.
+
+        :param force: If True, use SIGKILL as last resort.
+        :returns: True if child was terminated, False otherwise.
+        """
+        if not self._isalive():
+            return True
+
+        signals = [signal.SIGHUP, signal.SIGCONT, signal.SIGINT]
+        if force:
+            signals.append(signal.SIGKILL)
+
+        for sig in signals:
+            try:
+                os.kill(self.child_pid, sig)
+            except ProcessLookupError:
+                return True
+            time.sleep(_TERMINATE_DELAY)
+            if not self._isalive():
+                return True
+
+        return not self._isalive()
+
     def cleanup(self):
         """Kill child process and close PTY fd."""
         # Cancel any pending NAWS timer
@@ -368,11 +475,7 @@ class PTYSession:
             self.master_fd = None
 
         if self.child_pid is not None:
-            try:
-                os.kill(self.child_pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-
+            self._terminate(force=True)
             try:
                 os.waitpid(self.child_pid, os.WNOHANG)
             except ChildProcessError:
@@ -398,7 +501,7 @@ async def _wait_for_terminal_info(writer, timeout=2.0):
         await asyncio.sleep(0.1)
 
 
-async def pty_shell(reader, writer, program, args=None):
+async def pty_shell(reader, writer, program, args=None, preexec_fn=None):
     """
     PTY shell callback for telnet server.
 
@@ -406,12 +509,13 @@ async def pty_shell(reader, writer, program, args=None):
     :param TelnetWriter writer: TelnetWriter instance.
     :param str program: Path to program to execute.
     :param list args: List of arguments for the program.
+    :param preexec_fn: Optional callable to run in child before exec.
     """
     _platform_check()
 
     await _wait_for_terminal_info(writer, timeout=2.0)
 
-    session = PTYSession(reader, writer, program, args)
+    session = PTYSession(reader, writer, program, args, preexec_fn=preexec_fn)
     try:
         session.start()
         await session.run()
@@ -421,12 +525,14 @@ async def pty_shell(reader, writer, program, args=None):
             writer.close()
 
 
-def make_pty_shell(program, args=None):
+def make_pty_shell(program, args=None, preexec_fn=None):
     """
     Factory returning a shell callback for PTY execution.
 
     :param str program: Path to program to execute.
     :param list args: List of arguments for the program.
+    :param preexec_fn: Optional callable to run in child before exec.
+        Useful for test coverage tracking in the forked child process.
     :returns: Async shell callback suitable for use with create_server().
 
     Example usage::
@@ -441,6 +547,6 @@ def make_pty_shell(program, args=None):
     """
 
     async def shell(reader, writer):
-        await pty_shell(reader, writer, program, args)
+        await pty_shell(reader, writer, program, args, preexec_fn=preexec_fn)
 
     return shell

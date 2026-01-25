@@ -314,3 +314,205 @@ async def test_telnet_server_shell_eof(bind_host, unused_tcp_port):
         # Wait for server to process client disconnect
         await asyncio.sleep(0.05)
         assert srv_instance._closing
+
+
+async def test_telnet_server_shell_version_command(bind_host, unused_tcp_port):
+    """Test version command in telnet_server_shell."""
+    # local
+    from telnetlib3 import telnet_server_shell, accessories
+    from telnetlib3.telopt import DO, IAC, WONT, TTYPE
+    from telnetlib3.tests.accessories import create_server, asyncio_connection
+
+    async with create_server(
+        host=bind_host,
+        port=unused_tcp_port,
+        shell=telnet_server_shell,
+        connect_maxwait=0.05,
+    ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
+            expected = IAC + DO + TTYPE
+            result = await asyncio.wait_for(reader.readexactly(len(expected)), 0.5)
+            assert result == expected
+
+            writer.write(IAC + WONT + TTYPE)
+
+            expected = b"Ready.\r\ntel:sh> "
+            result = await asyncio.wait_for(reader.readexactly(len(expected)), 0.5)
+            assert result == expected
+
+            writer.write(b"version\r")
+            await asyncio.sleep(0.05)
+
+            result = b""
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(reader.read(100), 0.2)
+                    if not chunk:
+                        break
+                    result += chunk
+                    if b"tel:sh>" in result:
+                        break
+                except asyncio.TimeoutError:
+                    break
+
+            expected_version = accessories.get_version()
+            assert expected_version.encode("ascii") in result
+
+
+async def test_telnet_server_shell_dump_with_kb_limit(bind_host, unused_tcp_port):
+    """Test dump command with explicit kb_limit."""
+    # local
+    from telnetlib3 import telnet_server_shell
+    from telnetlib3.telopt import DO, IAC, WONT, TTYPE
+    from telnetlib3.tests.accessories import create_server, asyncio_connection
+
+    async with create_server(
+        host=bind_host,
+        port=unused_tcp_port,
+        shell=telnet_server_shell,
+        connect_maxwait=0.05,
+    ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
+            expected = IAC + DO + TTYPE
+            await asyncio.wait_for(reader.readexactly(len(expected)), 0.5)
+            writer.write(IAC + WONT + TTYPE)
+
+            expected = b"Ready.\r\ntel:sh> "
+            await asyncio.wait_for(reader.readexactly(len(expected)), 0.5)
+
+            writer.write(b"dump 0\r")
+            await asyncio.sleep(0.05)
+
+            result = b""
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(reader.read(200), 0.2)
+                    if not chunk:
+                        break
+                    result += chunk
+                    if b"wrote 0 bytes" in result:
+                        break
+                except asyncio.TimeoutError:
+                    break
+
+            assert b"kb_limit=0" in result
+            assert b"wrote 0 bytes" in result
+
+
+async def test_telnet_server_shell_dump_with_all_options(bind_host, unused_tcp_port):
+    """Test dump command with all options including close."""
+    # local
+    from telnetlib3 import telnet_server_shell
+    from telnetlib3.telopt import DO, IAC, WONT, TTYPE
+    from telnetlib3.tests.accessories import create_server, asyncio_connection
+
+    async with create_server(
+        host=bind_host,
+        port=unused_tcp_port,
+        shell=telnet_server_shell,
+        connect_maxwait=0.05,
+    ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
+            expected = IAC + DO + TTYPE
+            await asyncio.wait_for(reader.readexactly(len(expected)), 0.5)
+            writer.write(IAC + WONT + TTYPE)
+
+            expected = b"Ready.\r\ntel:sh> "
+            await asyncio.wait_for(reader.readexactly(len(expected)), 0.5)
+
+            writer.write(b"dump 0 0 nodrain close\r")
+            await asyncio.sleep(0.05)
+
+            result = b""
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(reader.read(300), 0.2)
+                    if not chunk:
+                        break
+                    result += chunk
+                except asyncio.TimeoutError:
+                    break
+
+            assert b"kb_limit=0" in result
+            assert b"do_close=True" in result
+            assert b"drain=True" in result
+
+
+async def test_telnet_server_shell_dump_nodrain(bind_host, unused_tcp_port):
+    """Test dump command with nodrain option."""
+    # local
+    from telnetlib3 import telnet_server_shell
+    from telnetlib3.telopt import DO, IAC, WONT, TTYPE
+    from telnetlib3.tests.accessories import create_server, asyncio_connection
+
+    async with create_server(
+        host=bind_host,
+        port=unused_tcp_port,
+        shell=telnet_server_shell,
+        connect_maxwait=0.05,
+    ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
+            expected = IAC + DO + TTYPE
+            await asyncio.wait_for(reader.readexactly(len(expected)), 0.5)
+            writer.write(IAC + WONT + TTYPE)
+
+            expected = b"Ready.\r\ntel:sh> "
+            await asyncio.wait_for(reader.readexactly(len(expected)), 0.5)
+
+            writer.write(b"dump 0 0 drain\r")
+            await asyncio.sleep(0.05)
+
+            result = b""
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(reader.read(200), 0.2)
+                    if not chunk:
+                        break
+                    result += chunk
+                    if b"drain=False" in result:
+                        break
+                except asyncio.TimeoutError:
+                    break
+
+            assert b"kb_limit=0" in result
+            assert b"drain=False" in result
+
+
+async def test_telnet_server_shell_dump_large_output(bind_host, unused_tcp_port):
+    """Test dump command with larger output."""
+    # local
+    from telnetlib3 import telnet_server_shell
+    from telnetlib3.telopt import DO, IAC, WONT, TTYPE
+    from telnetlib3.tests.accessories import create_server, asyncio_connection
+
+    async with create_server(
+        host=bind_host,
+        port=unused_tcp_port,
+        shell=telnet_server_shell,
+        connect_maxwait=0.05,
+    ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
+            expected = IAC + DO + TTYPE
+            await asyncio.wait_for(reader.readexactly(len(expected)), 0.5)
+            writer.write(IAC + WONT + TTYPE)
+
+            expected = b"Ready.\r\ntel:sh> "
+            await asyncio.wait_for(reader.readexactly(len(expected)), 0.5)
+
+            writer.write(b"dump 1\r")
+            await asyncio.sleep(0.05)
+
+            result = b""
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(reader.read(4096), 0.5)
+                    if not chunk:
+                        break
+                    result += chunk
+                    if b"wrote" in result and b"bytes" in result:
+                        break
+                except asyncio.TimeoutError:
+                    break
+
+            assert b"kb_limit=1" in result
+            assert b"/" in result or b"\\" in result
