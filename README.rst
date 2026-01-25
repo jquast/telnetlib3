@@ -36,45 +36,85 @@ Modern asyncio_ and legacy blocking API's are provided.
 The python telnetlib.py_ module removed by Python 3.13 is also re-distributed as a backport.
 
 Overview
---------
+========
 
 telnetlib3 provides multiple interfaces for working with the Telnet protocol:
 
-**Legacy telnetlib**
-  An unadulterated copy of Python 3.12's telnetlib.py_ See `Legacy telnetlib`_ below.
+Asyncio Protocol
+----------------
 
-**Asyncio Protocol**
-  Modern async/await interface for both client and server, supporting concurrent
-  connections. See the `Guidebook`_ for examples and the `API documentation`_.
+Modern async/await interface for both client and server, supporting concurrent
+connections. See the `Guidebook`_ for examples and the `API documentation`_.
 
-**Command-line Utilities**
-  Two CLI tools are included: ``telnetlib3-client`` for connecting to servers
-  and ``telnetlib3-server`` for hosting. See `Command-line`_ below.
+Blocking API
+------------
 
-**Blocking API**
-  A synchronous interface modeled after telnetlib (client) and miniboa_ (server),
-  with enhancements.
+A traditional synchronous interface modeled after telnetlib.py_ (client) and miniboa_ (server),
+with various enhancements in protocol negotiation is provided. Blocking API calls for complex
+arrangements of clients and servers typically require threads.
 
-  See `sync API documentation`_.
+See `sync API documentation`_ for more.
 
-  Enhancements over Python 3.11 telnetlib (client):
+Command-line Utilities
+----------------------
 
-  - Full RFC 854 protocol negotiation (NAWS, TTYPE, BINARY, ECHO, SGA)
-  - `wait_for()`_ method to block until specific option states are negotiated
-  - `get_extra_info()`_ for terminal type, size, and other metadata
-  - Context manager support (``with TelnetConnection(...) as conn:``)
-  - Thread-safe operation with asyncio_ running in background
+Two CLI tools are included: ``telnetlib3-client`` for connecting to servers
+and ``telnetlib3-server`` for hosting a server.
 
-  Enhancements over miniboa (server):
+Both tools argument ``--shell=my_module.fn_shell`` describing a python
+module path to a function of signature ``async def shell(reader, writer)``.
+The server also provides ``--pty-exec`` argument to host a stand-alone
+program.
 
-  - Thread-per-connection model with blocking I/O (vs poll-based)
-  - `readline()`_ and `read_until()`_ blocking methods
-  - Full telnet option negotiation and inspection
-  - miniboa-compatible properties: `active`_, `address`_, `terminal_type`_,
-    `columns`_, `rows`_, `idle()`_, `duration()`_, `deactivate()`_
+::
+
+    telnetlib3-client nethack.alt.org
+    telnetlib3-client xibalba.l33t.codes 44510
+    telnetlib3-client --shell bin.client_wargame.shell 1984.ws 666
+    telnetlib3-server 0.0.0.0 1984 --shell=bin.server_wargame.shell
+    telnetlib3-server --pty-exec /bin/bash -- --login
+
+Legacy telnetlib
+----------------
+
+This library contains an unadulterated copy of Python 3.12's telnetlib.py_, 
+from the standard library before it was removed in Python 3.13.
+
+To migrate code, change import statements:
+
+.. code-block:: python
+
+    # OLD imports:
+    import telnetlib
+
+    # NEW imports:
+    import telnetlib3
+
+``telnetlib3`` did not provide server support, while this library also provides
+both client and server support through a similar Blocking API interface.
+
+See `sync API documentation`_ for details.
+
+Encoding
+--------
+
+Often required, ``--encoding`` and ``--force-binary``::
+
+    telnetlib3-client --encoding=cp437 --force-binary 20forbeers.com 1337
+
+The default encoding is the system locale, usually UTF-8, but all Telnet
+protocol text *should* be limited to ASCII until BINARY mode is agreed by
+compliance of their respective RFCs.
+
+However, many clients and servers that are capable of non-ascii encodings like
+UTF-8 or CP437 may not be capable of negotiating about BINARY, NEW_ENVIRON,
+or CHARSET to negotiate about it.
+
+In this case, use ``--force-binary`` and ``--encoding`` when the encoding of
+the remote end is known.
 
 Quick Example
--------------
+=============
 
 A simple telnet server:
 
@@ -99,58 +139,7 @@ A simple telnet server:
 
     asyncio.run(main())
 
-More examples are available in the `Guidebook`_ and the ``bin/`` directory.
-
-Legacy telnetlib
-----------------
-
-This library *also* contains a copy of telnetlib.py_ from the standard library of
-Python 3.12 before it was removed in Python 3.13. asyncio_ is not required to use
-it.
-
-To migrate code, change import statements:
-
-.. code-block:: python
-
-    # OLD imports:
-    import telnetlib
-
-    # NEW imports:
-    import telnetlib3
-
-Command-line
-------------
-
-Two command-line scripts are distributed with this package,
-``telnetlib3-client`` and ``telnetlib3-server``.
-
-Both accept argument ``--shell=my_module.fn_shell`` describing a python
-module path to a function of signature ``async def shell(reader, writer)``.
-
-::
-
-    telnetlib3-client nethack.alt.org
-    telnetlib3-client xibalba.l33t.codes 44510
-    telnetlib3-client --shell bin.client_wargame.shell 1984.ws 666
-    telnetlib3-server --pty-exec /bin/bash -- --login
-    telnetlib3-server 0.0.0.0 6023 --shell='bin.server_wargame.shell
-
-Encoding
---------
-
-Use ``--encoding`` and ``--force-binary`` for non-ASCII terminals::
-
-    telnetlib3-client --encoding=cp437 --force-binary blackflag.acid.org
-
-The default encoding is UTF-8, but all text is limited to ASCII until BINARY
-mode is agreed by compliance of their respective RFCs.
-
-However, many clients and servers that are capable of non-ascii encodings like
-utf-8 or cp437 may not be capable of negotiating about BINARY, NEW_ENVIRON,
-or CHARSET to demand about it.
-
-In this case, use ``--force-binary`` argument for clients and servers to
-enforce that the specified ``--encoding`` is always used, no matter what.
+More examples are available in the `Guidebook`_ and the `bin/`_ directory of the repository.
 
 Features
 --------
@@ -200,6 +189,7 @@ The following RFC specifications are implemented:
 .. _rfc-1571: https://www.rfc-editor.org/rfc/rfc1571.txt
 .. _rfc-1572: https://www.rfc-editor.org/rfc/rfc1572.txt
 .. _rfc-2066: https://www.rfc-editor.org/rfc/rfc2066.txt
+.. _`bin/`: https://github.com/jquast/telnetlib3/tree/master/bin
 .. _telnetlib.py: https://docs.python.org/3.12/library/telnetlib.html
 .. _Guidebook: https://telnetlib3.readthedocs.io/en/latest/guidebook.html
 .. _API documentation: https://telnetlib3.readthedocs.io/en/latest/api.html
