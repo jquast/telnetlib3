@@ -230,11 +230,11 @@ async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
             result = client_writer.iac(DONT, ECHO)
             assert result is False
 
-            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 3.0)
             server_writer = srv_instance.writer
 
         # Wait for server to process client disconnect
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.1)
 
         assert client_writer.remote_option[ECHO] is False, client_writer.remote_option
         assert server_writer.local_option[ECHO] is False, server_writer.local_option

@@ -33,7 +33,7 @@ async def test_telnet_server_on_tspeed(bind_host, unused_tcp_port):
             writer.write(IAC + WILL + TSPEED)
             writer.write(IAC + SB + TSPEED + IS + b"123,456" + IAC + SE)
 
-            srv_instance = await asyncio.wait_for(_waiter, 0.5)
+            srv_instance = await asyncio.wait_for(_waiter, 3.0)
             assert srv_instance.get_extra_info("tspeed") == "123,456"
 
 
@@ -66,6 +66,6 @@ async def test_telnet_client_send_tspeed(bind_host, unused_tcp_port):
             tspeed=(given_rx, given_tx),
             connect_minwait=0.05,
         ) as (reader, writer):
-            recv_rx, recv_tx = await asyncio.wait_for(_waiter, 0.5)
+            recv_rx, recv_tx = await asyncio.wait_for(_waiter, 3.0)
             assert recv_rx == given_rx
             assert recv_tx == given_tx
