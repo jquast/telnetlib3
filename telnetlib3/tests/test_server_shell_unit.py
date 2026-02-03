@@ -525,15 +525,14 @@ async def test_robot_check_returns_false_when_width_is_none(monkeypatch):
 @pytest.mark.asyncio
 async def test_robot_shell_timeout_on_first_question(monkeypatch):
     call_count = [0]
-    original_read_line = gs._read_line
 
-    async def mock_read_line(reader, timeout, max_len=gs._MAX_INPUT):
+    async def mock_readline_with_echo(reader, writer, timeout):
         call_count[0] += 1
         if call_count[0] == 1:
             return None
-        return await original_read_line(reader, timeout, max_len)
+        return "response"
 
-    monkeypatch.setattr(gs, "_read_line", mock_read_line)
+    monkeypatch.setattr(gs, "_readline_with_echo", mock_readline_with_echo)
 
     writer = MockWriter()
     await gs.robot_shell(MockReader([]), writer)
@@ -545,17 +544,16 @@ async def test_robot_shell_timeout_on_first_question(monkeypatch):
 @pytest.mark.asyncio
 async def test_robot_shell_timeout_on_second_question(monkeypatch):
     call_count = [0]
-    original_read_line = gs._read_line
 
-    async def mock_read_line(reader, timeout, max_len=gs._MAX_INPUT):
+    async def mock_readline_with_echo(reader, writer, timeout):
         call_count[0] += 1
         if call_count[0] == 1:
             return "y"
         if call_count[0] == 2:
             return None
-        return await original_read_line(reader, timeout, max_len)
+        return "response"
 
-    monkeypatch.setattr(gs, "_read_line", mock_read_line)
+    monkeypatch.setattr(gs, "_readline_with_echo", mock_readline_with_echo)
 
     writer = MockWriter()
     await gs.robot_shell(MockReader([]), writer)

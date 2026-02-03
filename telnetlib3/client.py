@@ -30,6 +30,9 @@ class TelnetClient(client_base.BaseClient):
     #: full default LANG value of 'en_US.utf8'
     DEFAULT_LOCALE = "en_US"
 
+    #: Default environment variables to send via NEW_ENVIRON
+    DEFAULT_SEND_ENVIRON = ("TERM", "LANG", "COLUMNS", "LINES", "COLORTERM")
+
     def __init__(  # pylint: disable=too-many-positional-arguments,keyword-arg-before-vararg
         self,
         term="unknown",
@@ -37,11 +40,13 @@ class TelnetClient(client_base.BaseClient):
         rows=25,
         tspeed=(38400, 38400),
         xdisploc="",
+        send_environ=None,
         *args,
         **kwargs,
     ):
         """Initialize TelnetClient with terminal parameters."""
         super().__init__(*args, **kwargs)
+        self._send_environ = set(send_environ or self.DEFAULT_SEND_ENVIRON)
         self._extra.update(
             {
                 "charset": kwargs["encoding"] or "",
@@ -126,19 +131,31 @@ class TelnetClient(client_base.BaseClient):
         """
         Callback for responding to NEW_ENVIRON requests.
 
+        Only sends variables listed in ``_send_environ`` (set via ``send_environ``
+        parameter or ``--send-environ`` CLI option).
+
         :param dict keys: Values are requested for the keys specified. When empty, all environment
             values that wish to be volunteered should be returned.
         :returns: dictionary of environment values requested, or an empty string for keys not
             available. A return value must be given for each key requested.
         :rtype: dict
         """
-        env = {
+        # All available values
+        all_env = {
+            # Terminal info from connection parameters
             "LANG": self._extra["lang"],
             "TERM": self._extra["term"],
-            "DISPLAY": self._extra["xdisploc"],
             "LINES": self._extra["rows"],
             "COLUMNS": self._extra["cols"],
+            # Environment variables from os.environ
+            "COLORTERM": os.environ.get("COLORTERM", ""),
+            "USER": os.environ.get("USER", ""),
+            "HOME": os.environ.get("HOME", ""),
+            "SHELL": os.environ.get("SHELL", ""),
+            # Note: DISPLAY intentionally not available (security)
         }
+        # Filter to only allowed variables
+        env = {k: v for k, v in all_env.items() if k in self._send_environ}
         return {key: env.get(key, "") for key in keys} or env
 
     def send_charset(self, offered):
@@ -343,6 +360,7 @@ async def open_connection(  # pylint: disable=too-many-locals
     waiter_closed=None,
     _waiter_connected=None,
     limit=None,
+    send_environ=None,
 ):
     """
     Connect to a TCP Telnet server as a Telnet client.
@@ -424,6 +442,7 @@ async def open_connection(  # pylint: disable=too-many-locals
             waiter_closed=waiter_closed,
             _waiter_connected=_waiter_connected,
             limit=limit,
+            send_environ=send_environ,
         )
 
     _, protocol = await asyncio.get_event_loop().create_connection(
@@ -462,6 +481,7 @@ async def run_client():
         "force_binary": args["force_binary"],
         "encoding_errors": args["encoding_errors"],
         "connect_minwait": args["connect_minwait"],
+        "send_environ": args["send_environ"],
     }
 
     # connect
@@ -505,6 +525,11 @@ def _get_argument_parser():
         type=float,
         help="timeout for pending negotiation",
     )
+    parser.add_argument(
+        "--send-environ",
+        default="TERM,LANG,COLUMNS,LINES,COLORTERM",
+        help="comma-separated environment variables to send (NEW_ENVIRON)",
+    )
     return parser
 
 
@@ -522,6 +547,7 @@ def _transform_args(args):
         "force_binary": args.force_binary,
         "encoding_errors": args.encoding_errors,
         "connect_minwait": args.connect_minwait,
+        "send_environ": tuple(v.strip() for v in args.send_environ.split(",") if v.strip()),
     }
 
 

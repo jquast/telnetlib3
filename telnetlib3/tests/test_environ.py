@@ -82,12 +82,13 @@ async def test_telnet_client_send_environ(bind_host, unused_tcp_port):
             connect_minwait=0.05,
         ) as (reader, writer):
             mapping = await asyncio.wait_for(_waiter, 0.5)
-            assert mapping == {
-                "COLUMNS": str(given_cols),
-                "LANG": "en_US." + given_encoding,
-                "LINES": str(given_rows),
-                "TERM": "vt220",
-            }
+            # Check expected values are present
+            assert mapping["COLUMNS"] == str(given_cols)
+            assert mapping["LANG"] == "en_US." + given_encoding
+            assert mapping["LINES"] == str(given_rows)
+            assert mapping["TERM"] == "vt220"
+            # Additional env vars may be present (USER, HOME, SHELL, COLORTERM)
+            # but their values depend on the test environment
 
 
 async def test_telnet_client_send_var_uservar_environ(bind_host, unused_tcp_port):

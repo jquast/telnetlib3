@@ -1,14 +1,23 @@
 """
 Guard shells for connection limiting and robot detection.
 
-These shells are used when normal shell access is denied due to connection limits or failed robot
-checks.
+When running a telnet server on a public IPv4 address, or even on large private networks,
+various network scanners, scrapers, worms, bots, and other automatons will connect.
+
+The ``robot_check`` function can reliably detect whether the remote end is a real terminal
+emulator by measuring the rendered width of a wide Unicode character. Real terminals
+render it as width 2, while bots typically see width 1 or timeout.
+
+These shells are used when normal shell access is denied due to connection limits or
+failed robot checks.
 """
 
 # std imports
 import re
 import asyncio
 import logging
+
+from .server_shell import readline2
 
 __all__ = ("robot_check", "robot_shell", "busy_shell", "ConnectionCounter")
 
@@ -79,11 +88,23 @@ async def _read_line(reader, timeout, max_len=_MAX_INPUT):
         return None
 
 
+async def _readline_with_echo(reader, writer, timeout):
+    """Read a line with echo and timeout, using readline2 from server_shell."""
+    try:
+        return await asyncio.wait_for(readline2(reader, writer), timeout)
+    except asyncio.TimeoutError:
+        return None
+
+
 async def _read_cpr_response(reader):
     """Read CPR response bytes until 'R' terminator."""
     buf = b""
     while True:
-        data = await reader.read(1)
+        try:
+            data = await reader.read(1)
+        except UnicodeDecodeError:
+            # Bot sent garbage bytes that can't be decoded
+            return None
         if not data:
             return None
         if isinstance(data, str):
@@ -147,36 +168,54 @@ async def robot_check(reader, writer, timeout=5.0):
     return width == 2
 
 
+async def _ask_question(reader, writer, prompt, timeout=10.0):
+    """Ask a question, echoing input and repeating prompt on blank input."""
+    while True:
+        writer.write(prompt)
+        await writer.drain()
+
+        line = await _readline_with_echo(reader, writer, timeout)
+        if line is None:
+            return None
+
+        if line.strip():
+            return line
+        # Blank input - repeat prompt
+        writer.write('\r\n')
+
+
 async def robot_shell(reader, writer):
     """
     Shell for failed robot checks.
 
     Asks philosophical questions, logs responses, and disconnects.
     """
-    logger.info("robot_shell: connection from %s", writer.get_extra_info("peername"))
+    peername = writer.get_extra_info("peername")
+    logger.info("robot_shell: connection from %s", peername)
 
-    writer.write("Do robots dream of electric sheep? [yn] ")
-    await writer.drain()
+    answers = []
+    try:
+        line1 = await _ask_question(
+            reader, writer, "Do robots dream of electric sheep? [yn] "
+        )
+        if line1 is None:
+            logger.info("robot_shell: timeout waiting for response")
+            return
+        answers.append(line1)
 
-    line1 = await _read_line(reader, timeout=10.0)
-    if line1 is None:
-        logger.info("robot_shell: timeout waiting for response")
-        return
+        line2 = await _ask_question(
+            reader, writer, "\r\nHave you ever wondered, who are the windowmakers? "
+        )
+        if line2 is None:
+            logger.info("robot_shell: timeout on second question")
+            return
+        answers.append(line2)
 
-    logger.info("robot denied, line1=%r", line1)
-
-    writer.write("\r\nHave you ever wondered, who are the windowmakers? ")
-    await writer.drain()
-
-    line2 = await _read_line(reader, timeout=10.0)
-    if line2 is None:
-        logger.info("robot_shell: timeout on second question")
-        return
-
-    logger.info("robot denied, line2=%r", line2)
-
-    writer.write("\r\n")
-    await writer.drain()
+        writer.write("\r\n")
+        await writer.drain()
+    finally:
+        if answers:
+            logger.info("robot denied, answers=%r", answers)
 
 
 async def busy_shell(reader, writer):

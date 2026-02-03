@@ -26,14 +26,23 @@ def encoding_from_lang(lang):
     """
     Parse encoding from LANG environment value.
 
+    Returns the encoding portion if present, or None if the LANG value
+    does not contain an encoding suffix (no '.' separator).
+
+    :param str lang: LANG environment value (e.g., 'en_US.UTF-8@misc')
+    :returns: Encoding string (e.g., 'UTF-8') or None if no encoding found
+    :rtype: str or None
+
     Example::
 
         >>> encoding_from_lang('en_US.UTF-8@misc')
         'UTF-8'
+        >>> encoding_from_lang('en_IL')
+        None
     """
-    encoding = lang
-    if "." in lang:
-        _, encoding = lang.split(".", 1)
+    if "." not in lang:
+        return None
+    _, encoding = lang.split(".", 1)
     if "@" in encoding:
         encoding, _ = encoding.split("@", 1)
     return encoding

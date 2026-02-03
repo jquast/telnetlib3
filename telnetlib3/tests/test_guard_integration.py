@@ -259,6 +259,9 @@ async def test_full_guarded_shell_flow():  # pylint: disable=too-complex
         def write(self, data):
             self.output.append(data)
 
+        def echo(self, data):
+            self.output.append(data)
+
         async def drain(self):
             pass
 

@@ -662,10 +662,16 @@ class TelnetWriter:
     def get_extra_info(self, name, default=None):
         """Get optional server protocol information."""
         # StreamWriter uses self._transport.get_extra_info, so we mix it in
-        # here, but _protocol has all of the interesting telnet effects
-        return self._protocol.get_extra_info(name, default) or self._transport.get_extra_info(
-            name, default
-        )
+        # here, but _protocol has all of the interesting telnet effects.
+        # Handle case where protocol/transport may be None (connection closed).
+        _missing = object()
+        if self._protocol is not None:
+            result = self._protocol.get_extra_info(name, _missing)
+            if result is not _missing:
+                return result
+        if self._transport is not None:
+            return self._transport.get_extra_info(name, default)
+        return default
 
     @property
     def protocol(self):

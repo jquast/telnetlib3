@@ -12,6 +12,7 @@ after an idle period.
 """
 
 # std imports
+import codecs
 import signal
 import asyncio
 import logging
@@ -275,7 +276,13 @@ class TelnetServer(server_base.BaseServer):
             # negotiation.
             _lang = self.get_extra_info("LANG", "")
             if _lang and _lang != "C":
-                return accessories.encoding_from_lang(_lang)
+                candidate = accessories.encoding_from_lang(_lang)
+                if candidate:
+                    try:
+                        codecs.lookup(candidate)
+                        return candidate
+                    except LookupError:
+                        pass  # fall through to charset or default
 
             # otherwise, less common CHARSET negotiation may be found in many
             # East-Asia BBS and Western MUD systems.
@@ -357,12 +364,18 @@ class TelnetServer(server_base.BaseServer):
         from .telopt import VAR, USERVAR  # pylint: disable=import-outside-toplevel
 
         return [
+            # Well-known VAR (RFC 1572)
+            "USER",
+            "DISPLAY",
+            # USERVAR - common environment variables
             "LANG",
             "TERM",
             "COLUMNS",
             "LINES",
-            "DISPLAY",
             "COLORTERM",
+            "HOME",
+            "SHELL",
+            # Request any other VAR/USERVAR the client wants to send
             VAR,
             USERVAR,
         ]

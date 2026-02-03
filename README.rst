@@ -74,6 +74,35 @@ program.
     telnetlib3-server 0.0.0.0 1984 --shell=bin.server_wargame.shell
     telnetlib3-server --pty-exec /bin/bash -- --login
 
+Fingerprinting Server
+---------------------
+
+A built-in fingerprinting shell is provided for identifying telnet client capabilities.
+This is useful for debugging client negotiation, collecting telnet client diversity
+data, or understanding what protocols a client supports::
+
+    telnetlib3-server --shell telnetlib3.fingerprinting_server_shell
+
+The fingerprinting shell probes all telnet protocol options and displays the session
+fingerprint as a Python dict (via pprint), including negotiated attributes, TTYPE
+cycle, option states, and probe results.
+
+To save fingerprint data to JSON files for later analysis, set the data directory::
+
+    export TELNETLIB3_DATA_DIR=./fingerprints
+    telnetlib3-server --shell telnetlib3.fingerprinting_server_shell
+
+Files are organized by protocol fingerprint hash, with a configurable limit per folder
+(default 100, set via ``TELNETLIB3_FINGERPRINT_MAX_FILES``).
+
+An optional post-fingerprint hook can process saved files. A built-in script
+pretty-prints the JSON to stdout::
+
+    export TELNETLIB3_FINGERPRINT_POST_SCRIPT=telnetlib3.fingerprinting:fingerprinting_post_script
+    telnetlib3-server --shell telnetlib3.fingerprinting_server_shell
+
+Custom hooks receive the filepath and can be sync or async.
+
 Legacy telnetlib
 ----------------
 
