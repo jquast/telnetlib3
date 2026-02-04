@@ -13,6 +13,7 @@ Example usage::
     $ export TELNETLIB3_DATA_DIR=./data
     $ python bin/moderate_fingerprints.py
     $ python bin/moderate_fingerprints.py --check-revise
+    $ python bin/moderate_fingerprints.py --no-prune
 """
 
 # std imports
@@ -160,6 +161,62 @@ def _review(entries, sample_data, names):
     return updated
 
 
+def _collect_data_hashes(data_dir):
+    """Collect all hashes that have actual data files in the client directory.
+
+    :param data_dir: Path to the data directory.
+    :returns: Set of hash strings found as telnet or terminal directories.
+    """
+    client_base = data_dir / "client"
+    if not client_base.is_dir():
+        return set()
+
+    found = set()
+    for telnet_dir in client_base.iterdir():
+        if not telnet_dir.is_dir():
+            continue
+        found.add(telnet_dir.name)
+        for terminal_dir in telnet_dir.iterdir():
+            if not terminal_dir.is_dir():
+                continue
+            found.add(terminal_dir.name)
+    return found
+
+
+def _prune(data_dir, names):
+    """Remove named hashes that have no data files in the client directory.
+
+    :param data_dir: Path to the data directory.
+    :param names: Mutable names dict, updated in place.
+    :returns: True if any names were removed.
+    """
+    data_hashes = _collect_data_hashes(data_dir)
+    orphaned = {h: name for h, name in names.items() if h not in data_hashes}
+
+    if not orphaned:
+        print("No orphaned hashes found.")
+        return False
+
+    print(f"Found {len(orphaned)} orphaned hash(es) with no data files:\n")
+    for h, name in sorted(orphaned.items(), key=lambda x: x[1]):
+        print(f"  {h}  {name}")
+
+    print()
+    try:
+        answer = input("Remove these entries? [y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+
+    if answer != "y":
+        print("No changes made.")
+        return False
+
+    for h in orphaned:
+        del names[h]
+    return True
+
+
 def main():
     """Review and moderate fingerprint name suggestions."""
     data_dir_env = os.environ.get("TELNETLIB3_DATA_DIR")
@@ -173,7 +230,15 @@ def main():
         sys.exit(1)
 
     check_revise = "--check-revise" in sys.argv
+    skip_prune = "--no-prune" in sys.argv
     names = _load_names(data_dir)
+
+    if not skip_prune:
+        pruned = _prune(data_dir, names)
+        if pruned:
+            _atomic_json_write(data_dir / "fingerprint_names.json", names)
+            print(f"\nSaved {data_dir / 'fingerprint_names.json'}")
+
     all_suggestions, sample_data = _scan_all(data_dir)
 
     if check_revise:
