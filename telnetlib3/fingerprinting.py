@@ -519,18 +519,6 @@ def _create_protocol_fingerprint(
         if key in extra_dict:
             fingerprint[key] = "True" if extra_dict[key] else "None"
 
-    # Terminal size categorization (inlined)
-    cols = writer.get_extra_info("cols")
-    rows = writer.get_extra_info("rows")
-    if cols is None or rows is None:
-        fingerprint["terminal-size"] = "None"
-    elif (cols, rows) == (80, 25):
-        fingerprint["terminal-size"] = "Yes-80x25"
-    elif (cols, rows) == (80, 24):
-        fingerprint["terminal-size"] = "Yes-80x24"
-    else:
-        fingerprint["terminal-size"] = "Yes-Other"
-
     # Encoding extracted from LANG
     if lang := writer.get_extra_info("LANG"):
         encoding = encoding_from_lang(lang)
@@ -561,7 +549,7 @@ def _create_protocol_fingerprint(
     ])
     refused = sorted([
         name for name, info in probe_results.items()
-        if info["status"] == "WONT"
+        if info["status"] in ("WONT", "timeout")
     ])
     fingerprint["supported-options"] = supported
     fingerprint["refused-options"] = refused

@@ -292,6 +292,39 @@ def test_protocol_fingerprint():
     assert fp["refused-options"] == ["SGA"]
 
 
+def test_protocol_fingerprint_no_terminal_size():
+    """Terminal size is not included in protocol fingerprint."""
+    probe = {"NAWS": {"status": "WILL", "opt": fps.NAWS}}
+    w = MockWriter(extra={"cols": 80, "rows": 24})
+    fp = fps._create_protocol_fingerprint(w, probe)
+    assert "terminal-size" not in fp
+    assert "NAWS" in fp["supported-options"]
+
+
+def test_protocol_fingerprint_same_hash_different_sizes():
+    """Different window sizes produce the same protocol fingerprint hash."""
+    probe = {"NAWS": {"status": "WILL", "opt": fps.NAWS}}
+    w1 = MockWriter(extra={"cols": 80, "rows": 24})
+    w2 = MockWriter(extra={"cols": 120, "rows": 40})
+    w3 = MockWriter(extra={"cols": 80, "rows": 25})
+    h1 = fps._hash_fingerprint(fps._create_protocol_fingerprint(w1, probe))
+    h2 = fps._hash_fingerprint(fps._create_protocol_fingerprint(w2, probe))
+    h3 = fps._hash_fingerprint(fps._create_protocol_fingerprint(w3, probe))
+    assert h1 == h2 == h3
+
+
+def test_protocol_fingerprint_timeout_as_refused():
+    """Timed-out probes are included in refused-options."""
+    probe = {
+        "BINARY": {"status": "WILL", "opt": fps.BINARY},
+        "SGA": {"status": "WONT", "opt": fps.SGA},
+        "ECHO": {"status": "timeout", "opt": fps.ECHO},
+    }
+    fp = fps._create_protocol_fingerprint(MockWriter(), probe)
+    assert fp["supported-options"] == ["BINARY"]
+    assert fp["refused-options"] == ["ECHO", "SGA"]
+
+
 def test_protocol_hash_consistency():
     probe = {"BINARY": {"status": "WILL", "opt": fps.BINARY}}
     w1 = MockWriter(extra={"TERM": "xterm", "HOME": "/home/alice"})
