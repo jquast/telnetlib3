@@ -2506,7 +2506,7 @@ class TelnetWriter:
         if self.server:
             if not self.remote_option.enabled(LINEMODE):
                 self.log.info(
-                    "receive and accept LMODE_FORWARDMASK %s without LINEMODE enabled; ",
+                    "receive and accept LMODE_FORWARDMASK %s without LINEMODE enabled",
                     name_command(cmd))
             if cmd in (DO, DONT):
                 self.log.warning(
@@ -2516,7 +2516,7 @@ class TelnetWriter:
         if self.client:
             if not self.local_option.enabled(LINEMODE):
                 self.log.info(
-                    "receive and accept LMODE_FORWARDMASK %s without LINEMODE enabled; ",
+                    "receive and accept LMODE_FORWARDMASK %s without LINEMODE enabled",
                     name_command(cmd))
             if cmd in (WILL, WONT):
                 self.log.warning(
