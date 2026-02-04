@@ -2241,7 +2241,7 @@ class TelnetWriter:
                     "expected LMODE_FORWARDMASK."
                 )
             self.log.debug("recv IAC SB LINEMODE %s LMODE_FORWARDMASK,", name_command(opt))
-            self._handle_sb_forwardmask(LINEMODE, buf)
+            self._handle_sb_forwardmask(opt, buf)
         else:
             raise ValueError(f"Illegal IAC SB LINEMODE option {opt!r}")
 
@@ -2504,27 +2504,32 @@ class TelnetWriter:
         # set and report about pending options by 2-byte opt,
         # not well tested, no known implementations exist !
         if self.server:
-            assert self.remote_option.enabled(LINEMODE), (
-                f"cannot recv LMODE_FORWARDMASK {cmd} ({buf!r}) "
-                "without first sending DO LINEMODE."
-            )
-            assert cmd not in (
-                DO,
-                DONT,
-            ), f"cannot recv {name_command(cmd)} LMODE_FORWARDMASK on server end"
+            if not self.remote_option.enabled(LINEMODE):
+                self.log.info(
+                    "receive and accept LMODE_FORWARDMASK %s without LINEMODE enabled; ",
+                    name_command(cmd))
+            if cmd in (DO, DONT):
+                self.log.warning(
+                    "cannot recv %s LMODE_FORWARDMASK on server end",
+                    name_command(cmd))
+                return
         if self.client:
-            assert self.local_option.enabled(LINEMODE), (
-                f"cannot recv {name_command(cmd)} LMODE_FORWARDMASK "
-                "without first sending WILL LINEMODE."
-            )
-            assert cmd not in (
-                WILL,
-                WONT,
-            ), f"cannot recv {name_command(cmd)} LMODE_FORWARDMASK on client end"
-            assert (
-                cmd not in (DONT,) or len(buf) == 0
-            ), f"Illegal bytes follow DONT LMODE_FORWARDMASK: {buf!r}"
-            assert cmd not in (DO,) and len(buf), "bytes must follow DO LMODE_FORWARDMASK"
+            if not self.local_option.enabled(LINEMODE):
+                self.log.info(
+                    "receive and accept LMODE_FORWARDMASK %s without LINEMODE enabled; ",
+                    name_command(cmd))
+            if cmd in (WILL, WONT):
+                self.log.warning(
+                    "cannot recv %s LMODE_FORWARDMASK on client end",
+                    name_command(cmd))
+                return
+            if cmd == DONT and len(buf) > 0:
+                self.log.warning(
+                    "Illegal bytes follow DONT LMODE_FORWARDMASK: %r", buf)
+                return
+            if cmd == DO and len(buf) == 0:
+                self.log.warning("bytes must follow DO LMODE_FORWARDMASK")
+                return
 
         opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
         if cmd in (

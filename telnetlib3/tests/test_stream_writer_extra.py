@@ -461,12 +461,10 @@ def test_handle_sb_status_send_and_is():
     ws2._handle_sb_status(buf2)
 
 
-def test_handle_sb_forwardmask_assertions_and_do_raises_notimplemented():
-    # client end receiving DO FORWARDMASK must have WILL LINEMODE True
+def test_handle_sb_forwardmask_do_raises_notimplemented():
     wc, _, _ = new_writer(server=False, client=True)
     wc.local_option[LINEMODE] = True
-    # DO with some bytes must call _handle_do_forwardmask -> NotImplementedError
-    with pytest.raises(AssertionError):
+    with pytest.raises(NotImplementedError):
         wc._handle_sb_forwardmask(DO, collections.deque([b"x", b"y"]))
 
 

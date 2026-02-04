@@ -9,6 +9,7 @@ History
   * new: ``telnetlib3.sync`` module with blocking (non-asyncio) APIs:
     ``TelnetConnection`` for clients, ``BlockingTelnetServer`` for servers.
   * new: ``pty_shell`` module and demonstrating ``telnetlib3-server --pty-exec`` CLI argument
+  * bugfix: in handling of LINEMODE FORWARDMASK command bytes.
   * performance: both client and server protocol data_received methods were
     optimized for ~50x throughput improvement in bulk data transfers.
 

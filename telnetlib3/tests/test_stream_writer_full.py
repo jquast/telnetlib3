@@ -762,11 +762,42 @@ def test_handle_sb_forwardmask_server_will_and_client_do():
     opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
     assert ws.remote_option[opt] is True
 
-    # client DO path currently asserts that bytes must follow DO (pre-check)
+    # client DO path -> _handle_do_forwardmask -> NotImplementedError
     wc, tc, pc = new_writer(server=False, client=True)
     wc.local_option[LINEMODE] = True
-    with pytest.raises(AssertionError):
+    with pytest.raises(NotImplementedError):
         wc._handle_sb_forwardmask(DO, collections.deque([b"x"]))
+
+
+def test_handle_sb_forwardmask_server_without_linemode():
+    ws, ts, ps = new_writer(server=True)
+    ws._handle_sb_forwardmask(WILL, collections.deque())
+    opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
+    assert ws.remote_option[opt] is True
+
+
+def test_handle_sb_forwardmask_server_rejects_do_dont():
+    ws, ts, ps = new_writer(server=True)
+    ws.remote_option[LINEMODE] = True
+    ws._handle_sb_forwardmask(DO, collections.deque())
+    opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
+    assert opt not in ws.remote_option
+
+
+def test_handle_sb_forwardmask_client_without_linemode():
+    wc, tc, pc = new_writer(server=False, client=True)
+    wc._handle_sb_forwardmask(DONT, collections.deque())
+    opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
+    assert wc.local_option[opt] is False
+
+
+def test_handle_sb_linemode_passes_opt_to_forwardmask():
+    ws, ts, ps = new_writer(server=True)
+    ws.remote_option[LINEMODE] = True
+    buf = collections.deque([LINEMODE, WONT, slc.LMODE_FORWARDMASK])
+    ws._handle_sb_linemode(buf)
+    opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
+    assert ws.remote_option[opt] is False
 
 
 def test_slc_add_buffer_full_raises():
