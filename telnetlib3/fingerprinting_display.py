@@ -7,6 +7,7 @@ integration, and interactive REPL code split from :mod:`fingerprinting`.
 
 # std imports
 import copy
+import functools
 import json
 import logging
 import os
@@ -37,8 +38,8 @@ logger = logging.getLogger("telnetlib3.fingerprint")
 
 _JQ = shutil.which("jq")
 
-# DECSCUSR cursor style — only emitted for truecolor terminals
-_CURSOR_BLINKING_BLOCK = "\x1b[1 q"
+echo = functools.partial(print, end="", flush=True)
+
 
 
 def _run_ucs_detect() -> Optional[Dict[str, Any]]:
@@ -57,8 +58,7 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
         "The tranquil mind eschews impatience",
         "Deliberation is preferable to haste",
     ])
-    sys.stdout.write(f"{patience_msg}...\r\n")
-    sys.stdout.flush()
+    echo(f"{patience_msg}...\r\n")
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
         tmp_path = tmp.name
@@ -485,16 +485,27 @@ def _cursor_show(term, truecolor: bool) -> str:
     """Show cursor, with blinking block shape for truecolor terminals."""
     result = term.cnorm
     if truecolor:
-        result += _CURSOR_BLINKING_BLOCK
+        result += term.Ss(1)
     return result
+
+
+def _hotkey(term, key: str) -> str:
+    """Format a hotkey as ``key-`` with key and dash in magenta."""
+    return f"{term.bold_magenta(key)}{term.bold_magenta('-')}"
+
+
+def _bracket_key(term, key: str) -> str:
+    """Format a hotkey as ``[key]`` with brackets in cyan, key in magenta."""
+    return f"{term.cyan('[')}{term.bold_magenta(key)}{term.cyan(']')}"
 
 
 def _cursor_bracket(
     term, has_unicode: bool, truecolor: bool = False
 ) -> str:
-    """Return bold-magenta cursor bracket with blinking block cursor."""
+    """Return cursor bracket with block cursor, positioned on the block."""
     block = "\u2588" if has_unicode else " "
-    return (f"{term.bold_magenta}[{block}]{term.normal}"
+    return (f"{term.cyan('[')}{term.bold_magenta(block)}"
+            f"{term.cyan(']')}{term.normal}"
             f"\b\b{_cursor_show(term, truecolor)}")
 
 
@@ -559,8 +570,7 @@ def _display_compact_summary(data: Dict[str, Any], term=None) -> bool:
     timeout = _sync_timeout(data)
 
     truecolor = _has_truecolor(data)
-    sys.stdout.write(
-        term.normal + _cursor_hide(term, truecolor))
+    echo(term.normal + _cursor_hide(term, truecolor))
 
     widths = [len(s.split("\n", 1)[0]) for s in table_strings]
     side_by_side = len(widths) < 2 or sum(widths) + 1 < (term.width or 80)
@@ -587,16 +597,12 @@ def _display_compact_summary(data: Dict[str, Any], term=None) -> bool:
             if (needs_paging
                     and idx + 1 < len(table_strings)
                     and term.is_a_tty):
-                sys.stdout.write(
-                    f"press return to continue: "
-                    f"{_cursor_bracket(term, has_unicode, truecolor)}")
-                sys.stdout.flush()
+                echo(f"press return to continue: "
+                     f"{_cursor_bracket(term, has_unicode, truecolor)}")
                 with term.cbreak():
                     term.inkey(timeout=None)
-                sys.stdout.write(
-                    f"\r{term.clear_eol}"
-                    f"{_cursor_hide(term, truecolor)}")
-                sys.stdout.flush()
+                echo(f"\r{term.clear_eol}"
+                     f"{_cursor_hide(term, truecolor)}")
     return True
 
 
@@ -774,11 +780,14 @@ def _build_seen_counts(
     terminal_unknown = (terminal_known
                         and terminal_hash not in _names)
     if (telnet_unknown or terminal_unknown) and _names:
-        lines.extend(_nearest_match_lines(
+        match_lines = _nearest_match_lines(
             data, _names, term,
             telnet_unknown=telnet_unknown,
             terminal_unknown=terminal_unknown,
-        ))
+        )
+        if match_lines:
+            lines.extend(match_lines)
+            lines.append("")
 
     if lines:
         return "\n".join(lines) + "\n"
@@ -836,15 +845,36 @@ def _repl_prompt(
     term, has_unicode: bool = True, truecolor: bool = False
 ) -> None:
     """Write the REPL prompt with hotkey legend and bracketed cursor."""
-    bm = term.bold_magenta
+    bk = _bracket_key
+    m = term.bold_magenta
     legend = (
-        f"{bm('q-')}logoff, {bm('1-')}terminal, "
-        f"{bm('2-')}telnet, {bm('d-')}database, "
-        f"{bm('r-')}refresh, {bm('u-')}update: "
+        f"{bk(term, 't')} terminal or {bk(term, 'l')} telnet details"
+        f"  {m('-')}  "
+        f"{bk(term, 's')} summarize or {bk(term, 'u')} update database: "
         f"{_cursor_bracket(term, has_unicode, truecolor)}"
     )
-    sys.stdout.write(f"\r\x1b[J{term.normal}{legend}")
-    sys.stdout.flush()
+    echo(f"\r{term.clear_eos}{term.normal}{legend}")
+
+
+def _page_prompt(term, has_unicode: bool, truecolor: bool) -> str:
+    """Display s-stop/c-continue/n-nonstop prompt, return the key pressed.
+
+    :returns: ``"s"``, ``"c"``, or ``"n"``.
+    """
+    hk = _hotkey
+    prompt = (
+        f"{hk(term, 's')}stop {hk(term, 'c')}continue "
+        f"{hk(term, 'n')}nonstop: "
+        f"{_cursor_bracket(term, has_unicode, truecolor)}")
+    echo(prompt)
+    key = term.inkey(timeout=None)
+    echo(f"{term.normal}\r{term.clear_eol}"
+         f"{_cursor_hide(term, truecolor)}")
+    if key == "s" or getattr(key, "name", None) == "KEY_UP":
+        return "s"
+    if key == "n":
+        return "n"
+    return "c"
 
 
 def _paginate(
@@ -863,29 +893,16 @@ def _paginate(
     nonstop = False
 
     for idx, line in enumerate(lines):
-        sys.stdout.write(line + "\n")
+        echo(line + "\n")
         if (not nonstop
                 and idx > 0
                 and (idx + 1) % page_size == 0
                 and idx + 1 < len(lines)):
-            bm = term.bold_magenta
-            prompt = (
-                f"{bm('s-')}stop {bm('c-')}continue "
-                f"{bm('n-')}nonstop: "
-                f"{_cursor_bracket(term, has_unicode, truecolor)}")
-            sys.stdout.write(prompt)
-            sys.stdout.flush()
-            key = term.inkey(timeout=None)
-            sys.stdout.write(
-                f"{term.normal}\r{term.clear_eol}"
-                f"{_cursor_hide(term, truecolor)}")
-            sys.stdout.flush()
-            if key == "s" or getattr(key, "name", None) == "KEY_UP":
+            action = _page_prompt(term, has_unicode, truecolor)
+            if action == "s":
                 return
-            elif key == "n":
+            elif action == "n":
                 nonstop = True
-            # 'c', KEY_DOWN, KEY_RIGHT, return — all continue
-    sys.stdout.flush()
 
 
 def _colorize_json(data: Any, term=None) -> str:
@@ -1032,11 +1049,7 @@ def _show_detail(term, data: Dict[str, Any], section: str) -> None:
 
     underline = term.cyan("=" * len(title))
     truecolor = _has_truecolor(data)
-    sys.stdout.write(
-        term.normal
-        + _cursor_hide(term, truecolor)
-        + term.clear)
-    sys.stdout.flush()
+    echo(term.normal + _cursor_hide(term, truecolor) + term.clear)
     if detail:
         text = (f"{term.magenta(title)}\n"
                 f"{underline}\n"
@@ -1044,8 +1057,7 @@ def _show_detail(term, data: Dict[str, Any], section: str) -> None:
                 f"{_colorize_json(detail, term)}")
         _paginate(term, text, _has_unicode(data), truecolor)
     else:
-        sys.stdout.write(f"{term.magenta(title)}\n{underline}\n\n(no data)\n")
-        sys.stdout.flush()
+        echo(f"{term.magenta(title)}\n{underline}\n\n(no data)\n")
 
 
 def _client_ip(data: Dict[str, Any]) -> str:
@@ -1108,18 +1120,15 @@ def _show_database(
     try:
         from prettytable import PrettyTable
     except ImportError:
-        sys.stdout.write("prettytable not installed.\n")
-        sys.stdout.flush()
+        echo("prettytable not installed.\n")
         return
 
     if not entries:
-        sys.stdout.write("No fingerprints in database.\n")
-        sys.stdout.flush()
+        echo("No fingerprints in database.\n")
         return
 
     has_unicode = _has_unicode(data)
     truecolor = _has_truecolor(data)
-    write = sys.stdout.write
     page_size = max(1, (term.height or 25) - 6)
     total_pages = (len(entries) + page_size - 1) // page_size
 
@@ -1139,18 +1148,11 @@ def _show_database(
         for kind, display_name, count in page:
             tbl.add_row([kind, term.forestgreen(display_name), str(count)])
 
-        write(term.clear + _cursor_hide(term, truecolor) + str(tbl) + "\n")
+        echo(term.clear + _cursor_hide(term, truecolor) + str(tbl) + "\n")
         if page_num + 1 >= total_pages:
             return
-        bm = term.bold_magenta
-        write(f"{bm('q-')}quit {bm('n-')}next: "
-              + _cursor_bracket(term, has_unicode, truecolor))
-        sys.stdout.flush()
-        with term.cbreak():
-            key = term.inkey(timeout=None)
-        write(f"{term.normal}\r{term.clear_eol}{_cursor_hide(term, truecolor)}")
-        sys.stdout.flush()
-        if key == "q" or key.name == "KEY_ESCAPE":
+        action = _page_prompt(term, has_unicode, truecolor)
+        if action == "s":
             return
 
 
@@ -1164,9 +1166,9 @@ def _fingerprint_repl(
     """Interactive REPL for exploring fingerprint data."""
     ip = _client_ip(data)
     _commands = {
-        "q": "logoff", "1": "terminal-detail",
-        "2": "telnet-detail", "d": "database",
-        "r": "refresh", "u": "update", "\x0c": "refresh",
+        "q": "logoff", "t": "terminal-detail",
+        "l": "telnet-detail", "s": "database",
+        "u": "update", "\x0c": "refresh",
     }
 
     truecolor = _has_truecolor(data)
@@ -1179,24 +1181,21 @@ def _fingerprint_repl(
 
         key_str = key.name or str(key)
         if key_str in _commands:
-            sys.stdout.write(str(key))
-            sys.stdout.flush()
+            echo(str(key))
             logger.info("%s: repl %s", ip, _commands[key_str])
         elif key_str not in ("KEY_ENTER", "\r", "\n"):
             logger.info("%s: repl unknown key %r", ip, key_str)
 
         if key == "q" or key.name == "KEY_ESCAPE" or key == "":
             logger.info("%s: repl logoff", ip)
-            sys.stdout.write(
-                f"\n{term.normal}"
-                f"{_cursor_show(term, truecolor)}")
-            sys.stdout.flush()
+            echo(f"\n{term.normal}"
+                 f"{_cursor_show(term, truecolor)}")
             break
-        elif key == "1":
+        elif key == "t":
             _show_detail(term, data, "terminal")
-        elif key == "2":
+        elif key == "l":
             _show_detail(term, data, "telnet")
-        elif key == "d":
+        elif key == "s":
             if db_cache is None:
                 db_cache = _build_database_entries(names)
             _show_database(term, data, db_cache)
@@ -1205,16 +1204,23 @@ def _fingerprint_repl(
             _prompt_fingerprint_identification(term, data, filepath, _names)
             names = _load_fingerprint_names()
             seen_counts = _build_seen_counts(data, names, term)
-        elif key == "r" or key == "\x0c":
-            sys.stdout.write(
-                term.normal
-                + _cursor_hide(term, truecolor)
-                + term.clear)
-            sys.stdout.flush()
+        elif key == "\x0c":
+            echo(term.normal + _cursor_hide(term, truecolor) + term.clear)
             _display_compact_summary(data, term)
             if seen_counts:
-                sys.stdout.write(seen_counts)
-                sys.stdout.flush()
+                echo(seen_counts)
+
+
+def _has_unknown_hashes(data: Dict[str, Any], names: Dict[str, str]) -> bool:
+    """Return True if either telnet or terminal hash is not yet named."""
+    telnet_hash = data.get("telnet-probe", {}).get("fingerprint", "")
+    terminal_hash = data.get("terminal-probe", {}).get(
+        "fingerprint", _UNKNOWN_TERMINAL_HASH)
+    if telnet_hash not in names:
+        return True
+    if terminal_hash != _UNKNOWN_TERMINAL_HASH and terminal_hash not in names:
+        return True
+    return False
 
 
 def _prompt_fingerprint_identification(
@@ -1231,12 +1237,9 @@ def _prompt_fingerprint_identification(
     all_known = telnet_known and terminal_known
 
     if all_known:
-        sys.stdout.write(
-            f"\n{term.bold_magenta}Suggest a revision{term.normal}\n")
+        echo(f"\n{term.bold_magenta}Suggest a revision{term.normal}\n")
     else:
-        sys.stdout.write(
-            f"\n{term.bold_magenta}Help our database!{term.normal}\n")
-    sys.stdout.flush()
+        echo(f"\n{term.bold_magenta}Help our database!{term.normal}\n")
 
     suggestions: Dict[str, str] = data.get("suggestions", {})
     revised = False
@@ -1287,8 +1290,7 @@ def _prompt_fingerprint_identification(
         _atomic_json_write(filepath, data)
 
     if revised:
-        sys.stdout.write("Your submission is under review.\n")
-        sys.stdout.flush()
+        echo("Your submission is under review.\n")
 
 
 def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
@@ -1330,19 +1332,17 @@ def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
         return
 
     term = _make_terminal()
-    sys.stdout.write(
-        _cursor_hide(term, _has_truecolor(data)))
-    sys.stdout.flush()
+    echo(_cursor_hide(term, _has_truecolor(data)))
     names = _load_fingerprint_names()
     seen_counts = _build_seen_counts(data, names, term)
     if not _display_compact_summary(data, term):
         print(json.dumps(data, indent=2, sort_keys=True))
     if seen_counts:
-        sys.stdout.write(seen_counts)
-        sys.stdout.flush()
+        echo(seen_counts)
 
     if term.is_a_tty:
-        _prompt_fingerprint_identification(term, data, filepath, names)
+        if _has_unknown_hashes(data, names):
+            _prompt_fingerprint_identification(term, data, filepath, names)
         _fingerprint_repl(term, data, seen_counts, filepath, names)
 
 
