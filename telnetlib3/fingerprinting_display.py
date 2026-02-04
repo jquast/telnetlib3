@@ -790,7 +790,7 @@ def _build_seen_counts(
             lines.append("")
 
     if lines:
-        return "\n".join(lines) + "\n"
+        return "\n".join(lines) + "\n\n"
     return ""
 
 
@@ -856,11 +856,8 @@ def _repl_prompt(
     echo(f"\r{term.clear_eos}{term.normal}{legend}")
 
 
-def _page_prompt(term, has_unicode: bool, truecolor: bool) -> str:
-    """Display s-stop/c-continue/n-nonstop prompt, return the key pressed.
-
-    :returns: ``"s"``, ``"c"``, or ``"n"``.
-    """
+def _page_prompt(term, has_unicode: bool, truecolor: bool):
+    """Display s-stop/c-continue/n-nonstop prompt, return the raw keystroke."""
     hk = _hotkey
     prompt = (
         f"{hk(term, 's')}stop {hk(term, 'c')}continue "
@@ -870,17 +867,17 @@ def _page_prompt(term, has_unicode: bool, truecolor: bool) -> str:
     key = term.inkey(timeout=None)
     echo(f"{term.normal}\r{term.clear_eol}"
          f"{_cursor_hide(term, truecolor)}")
-    if key == "s" or getattr(key, "name", None) == "KEY_UP":
-        return "s"
-    if key == "n":
-        return "n"
-    return "c"
+    return key
 
 
 def _paginate(
     term, text: str, has_unicode: bool = True, truecolor: bool = False
 ) -> None:
-    """Display text with simple pagination."""
+    """Display text with scrollable pagination.
+
+    Supports arrow-key scrolling: down advances one line efficiently,
+    up redraws the visible page via relative cursor movement.
+    """
     width = term.width or 80
     lines = []
     for raw in text.split("\n"):
@@ -890,19 +887,48 @@ def _paginate(
         )
         lines.extend(wrapped if wrapped else [raw])
     page_size = max(1, (term.height or 25) - 1)
-    nonstop = False
 
-    for idx, line in enumerate(lines):
-        echo(line + "\n")
-        if (not nonstop
-                and idx > 0
-                and (idx + 1) % page_size == 0
-                and idx + 1 < len(lines)):
-            action = _page_prompt(term, has_unicode, truecolor)
-            if action == "s":
+    if len(lines) <= page_size:
+        for line in lines:
+            echo(line + "\n")
+        return
+
+    top = 0
+    end = page_size
+    for i in range(top, end):
+        echo(lines[i] + "\n")
+
+    while True:
+        key = _page_prompt(term, has_unicode, truecolor)
+
+        if key == "s":
+            return
+        elif key == "n":
+            for i in range(end, len(lines)):
+                echo(lines[i] + "\n")
+            return
+        elif key.name == "KEY_DOWN":
+            if end >= len(lines):
                 return
-            elif action == "n":
-                nonstop = True
+            echo(f"{lines[end]}{term.clear_eos}\n")
+            top += 1
+            end += 1
+        elif key.name == "KEY_UP":
+            if top > 0:
+                top -= 1
+                end -= 1
+                echo(term.move_up * page_size)
+                for i in range(top, end):
+                    echo(f"\r{lines[i]}{term.clear_eol}\n")
+        else:
+            if end >= len(lines):
+                return
+            new_end = min(end + page_size, len(lines))
+            n = new_end - end
+            for i in range(end, new_end):
+                echo(lines[i] + "\n")
+            top += n
+            end = new_end
 
 
 def _colorize_json(data: Any, term=None) -> str:
@@ -1116,7 +1142,7 @@ def _show_database(
     data: Dict[str, Any],
     entries: List[Tuple[str, str, int]],
 ) -> None:
-    """Display paginated database of all known fingerprints."""
+    """Display scrollable database of all known fingerprints."""
     try:
         from prettytable import PrettyTable
     except ImportError:
@@ -1129,31 +1155,21 @@ def _show_database(
 
     has_unicode = _has_unicode(data)
     truecolor = _has_truecolor(data)
-    page_size = max(1, (term.height or 25) - 6)
-    total_pages = (len(entries) + page_size - 1) // page_size
 
-    for page_num in range(total_pages):
-        page = entries[page_num * page_size:(page_num + 1) * page_size]
-        tbl = PrettyTable()
-        if has_unicode:
-            _apply_unicode_borders(tbl)
-        tbl.title = term.magenta(
-            f"Database ({page_num + 1}/{total_pages},"
-            f" {len(entries)} fingerprints)")
-        tbl.field_names = ["Type", "Fingerprint", "Matches"]
-        tbl.align["Type"] = "l"
-        tbl.align["Fingerprint"] = "l"
-        tbl.align["Matches"] = "r"
-        tbl.max_table_width = max(40, (term.width or 80) - 1)
-        for kind, display_name, count in page:
-            tbl.add_row([kind, term.forestgreen(display_name), str(count)])
+    tbl = PrettyTable()
+    if has_unicode:
+        _apply_unicode_borders(tbl)
+    tbl.title = term.magenta(f"Database ({len(entries)} fingerprints)")
+    tbl.field_names = ["Type", "Fingerprint", "Matches"]
+    tbl.align["Type"] = "l"
+    tbl.align["Fingerprint"] = "l"
+    tbl.align["Matches"] = "r"
+    tbl.max_table_width = max(40, (term.width or 80) - 1)
+    for kind, display_name, count in entries:
+        tbl.add_row([kind, term.forestgreen(display_name), str(count)])
 
-        echo(term.clear + _cursor_hide(term, truecolor) + str(tbl) + "\n")
-        if page_num + 1 >= total_pages:
-            return
-        action = _page_prompt(term, has_unicode, truecolor)
-        if action == "s":
-            return
+    echo(_cursor_hide(term, truecolor))
+    _paginate(term, str(tbl), has_unicode, truecolor)
 
 
 def _fingerprint_repl(
