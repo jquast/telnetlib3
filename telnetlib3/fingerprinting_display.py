@@ -598,6 +598,113 @@ def _display_compact_summary(data: Dict[str, Any], term=None) -> bool:
     return True
 
 
+def _fingerprint_similarity(a: Dict[str, Any], b: Dict[str, Any]) -> float:
+    """Compute field-by-field similarity score between two fingerprint dicts.
+
+    :returns: Similarity as a float 0.0-1.0.
+    """
+    _skip = {"probed-protocol"}
+    all_keys = (set(a) | set(b)) - _skip
+    if not all_keys:
+        return 1.0
+
+    scores: List[float] = []
+    for key in all_keys:
+        va, vb = a.get(key), b.get(key)
+        if va is None and vb is None:
+            continue
+        if va is None or vb is None:
+            scores.append(0.0)
+            continue
+        if va == vb:
+            scores.append(1.0)
+            continue
+        if isinstance(va, list) and isinstance(vb, list):
+            sa, sb = set(map(str, va)), set(map(str, vb))
+            union = sa | sb
+            scores.append(len(sa & sb) / len(union) if union else 1.0)
+        elif isinstance(va, dict) and isinstance(vb, dict):
+            scores.append(_fingerprint_similarity(va, vb))
+        else:
+            scores.append(0.0)
+
+    return sum(scores) / len(scores) if scores else 1.0
+
+
+def _load_known_fingerprints(
+    probe_type: str,
+) -> Dict[str, Dict[str, Any]]:
+    """Load one fingerprint-data dict per unique hash from the data directory.
+
+    :param probe_type: ``"telnet-probe"`` or ``"terminal-probe"``.
+    :returns: Dict mapping hash string to fingerprint-data dict.
+    """
+    if DATA_DIR is None:
+        return {}
+    client_dir = os.path.join(DATA_DIR, "client")
+    if not os.path.isdir(client_dir):
+        return {}
+
+    seen: Dict[str, Dict[str, Any]] = {}
+    is_telnet = probe_type == "telnet-probe"
+
+    for telnet_hash in os.listdir(client_dir):
+        telnet_path = os.path.join(client_dir, telnet_hash)
+        if not os.path.isdir(telnet_path):
+            continue
+        if is_telnet and telnet_hash in seen:
+            continue
+        for terminal_hash in os.listdir(telnet_path):
+            if terminal_hash == _UNKNOWN_TERMINAL_HASH:
+                continue
+            terminal_path = os.path.join(telnet_path, terminal_hash)
+            if not os.path.isdir(terminal_path):
+                continue
+            if not is_telnet and terminal_hash in seen:
+                continue
+            target_hash = telnet_hash if is_telnet else terminal_hash
+            if target_hash in seen:
+                continue
+            for fname in os.listdir(terminal_path):
+                if not fname.endswith(".json"):
+                    continue
+                try:
+                    with open(os.path.join(terminal_path, fname)) as f:
+                        file_data = json.load(f)
+                    fp_data = file_data.get(probe_type, {}).get(
+                        "fingerprint-data")
+                    if fp_data:
+                        seen[target_hash] = fp_data
+                except (OSError, json.JSONDecodeError, KeyError):
+                    pass
+                break
+    return seen
+
+
+def _find_nearest_match(
+    fp_data: Dict[str, Any],
+    probe_type: str,
+    names: Dict[str, str],
+) -> Optional[Tuple[str, float]]:
+    """Find the most similar named fingerprint.
+
+    :returns: ``(name, similarity)`` tuple or None if no candidates or best < 50%.
+    """
+    known = _load_known_fingerprints(probe_type)
+    best_name: Optional[str] = None
+    best_score = 0.0
+    for h, known_fp in known.items():
+        if h not in names:
+            continue
+        score = _fingerprint_similarity(fp_data, known_fp)
+        if score > best_score:
+            best_score = score
+            best_name = names[h]
+    if best_name is None or best_score < 0.50:
+        return None
+    return (best_name, best_score)
+
+
 def _build_seen_counts(
     data: Dict[str, Any],
     names: Optional[Dict[str, str]] = None,
@@ -661,9 +768,64 @@ def _build_seen_counts(
             f" with {telnet_name}{terminal_suffix}."
         )
 
+    telnet_unknown = telnet_hash not in _names
+    terminal_unknown = (terminal_known
+                        and terminal_hash not in _names)
+    if (telnet_unknown or terminal_unknown) and _names:
+        _write_nearest_matches(
+            data, _names, term,
+            telnet_unknown=telnet_unknown,
+            terminal_unknown=terminal_unknown,
+        )
+
     if lines:
         return "\n".join(lines) + "\n"
     return ""
+
+
+def _color_match(term, name: str, pct: float) -> str:
+    """Color a nearest-match result by confidence threshold."""
+    label = f"{name} ({pct:.0f}%)"
+    if term is None:
+        return label
+    if pct >= 95:
+        return term.forestgreen(label)
+    elif pct >= 75:
+        return term.darkorange(label)
+    return term.firebrick1(label)
+
+
+def _write_nearest_matches(
+    data: Dict[str, Any],
+    names: Dict[str, str],
+    term,
+    telnet_unknown: bool = False,
+    terminal_unknown: bool = False,
+) -> None:
+    """Print nearest-match lines for unknown fingerprints."""
+    if telnet_unknown:
+        fp_data = data.get("telnet-probe", {}).get("fingerprint-data")
+        if fp_data:
+            sys.stdout.write("Nearest telnet match: ")
+            sys.stdout.flush()
+            result = _find_nearest_match(fp_data, "telnet-probe", names)
+            if result:
+                sys.stdout.write(_color_match(term, *result) + "\n")
+            else:
+                sys.stdout.write("(none)\n")
+            sys.stdout.flush()
+
+    if terminal_unknown:
+        fp_data = data.get("terminal-probe", {}).get("fingerprint-data")
+        if fp_data:
+            sys.stdout.write("Nearest terminal match: ")
+            sys.stdout.flush()
+            result = _find_nearest_match(fp_data, "terminal-probe", names)
+            if result:
+                sys.stdout.write(_color_match(term, *result) + "\n")
+            else:
+                sys.stdout.write("(none)\n")
+            sys.stdout.flush()
 
 
 def _repl_prompt(
