@@ -6,10 +6,17 @@ integration, and interactive REPL code split from :mod:`fingerprinting`.
 """
 
 # std imports
+import copy
 import json
 import logging
 import os
+import random
+import shutil
+import subprocess
+import sys
+import tempfile
 import textwrap
+import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
 from .fingerprinting import (
@@ -34,13 +41,22 @@ _CURSOR_BLINKING_BLOCK = "\x1b[1 q"
 
 def _run_ucs_detect() -> Optional[Dict[str, Any]]:
     """Run ucs-detect if available and return terminal fingerprint data."""
-    import shutil
-    import subprocess
-    import tempfile
-
     ucs_detect = shutil.which("ucs-detect")
     if not ucs_detect:
         return None
+
+    patience_msg = random.choice([
+        "Contemplate the virtue of patience",
+        "Endure delays with fortitude",
+        "To wait calmly requires discipline",
+        "Suspend expectations of imminence",
+        "The tide hastens for no man",
+        "Cultivate a stoic calmness",
+        "The tranquil mind eschews impatience",
+        "Deliberation is preferable to haste",
+    ])
+    sys.stdout.write(f"{patience_msg}...\r\n")
+    sys.stdout.flush()
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
         tmp_path = tmp.name
@@ -356,7 +372,6 @@ def _build_telnet_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
 
 def _make_terminal(**kwargs):
     """Create a blessed Terminal, falling back to ``ansi`` on setupterm failure."""
-    import warnings
     from blessed import Terminal
 
     with warnings.catch_warnings(record=True) as caught:
@@ -491,7 +506,6 @@ def _display_compact_summary(data: Dict[str, Any], term=None) -> bool:
     if not table_strings:
         return False
 
-    import sys
     timeout = _sync_timeout(data)
 
     truecolor = _has_truecolor(data)
@@ -606,7 +620,6 @@ def _repl_prompt(
     term, has_unicode: bool = True, truecolor: bool = False
 ) -> None:
     """Write the REPL prompt with hotkey legend and bracketed cursor."""
-    import sys
     bm = term.bold_magenta
     legend = (
         f"{bm('q-')}logoff, {bm('1-')}terminal, "
@@ -622,7 +635,6 @@ def _paginate(
     term, text: str, has_unicode: bool = True, truecolor: bool = False
 ) -> None:
     """Display text with simple pagination."""
-    import sys
     width = term.width or 80
     lines = []
     for raw in text.split("\n"):
@@ -756,7 +768,6 @@ def _filter_telnet_detail(
     """Filter telnet probe data for display."""
     if not detail:
         return detail
-    import copy
     result = copy.deepcopy(detail)
 
     if session_data := result.get("session-data"):
@@ -771,7 +782,6 @@ def _filter_telnet_detail(
 
 def _show_detail(term, data: Dict[str, Any], section: str) -> None:
     """Show detailed JSON for a fingerprint section with pagination."""
-    import sys
     if section == "terminal":
         terminal_probe = data.get("terminal-probe", {})
         detail = _filter_terminal_detail(terminal_probe.get("session-data"))
@@ -853,8 +863,6 @@ def _show_database(
     entries: List[Tuple[str, str, int]],
 ) -> None:
     """Display paginated database of all known fingerprints."""
-    import sys
-
     try:
         from prettytable import PrettyTable
     except ImportError:
@@ -912,7 +920,6 @@ def _fingerprint_repl(
     names: Optional[Dict[str, str]] = None,
 ) -> None:
     """Interactive REPL for exploring fingerprint data."""
-    import sys
     ip = _client_ip(data)
     _commands = {
         "q": "logoff", "1": "terminal-detail",
@@ -972,7 +979,6 @@ def _prompt_fingerprint_identification(
     term, data: Dict[str, Any], filepath: str, names: Dict[str, str]
 ) -> None:
     """Prompt user to identify unknown fingerprint hashes."""
-    import sys
     telnet_probe = data.get("telnet-probe", {})
     telnet_hash = telnet_probe.get("fingerprint", "")
     terminal_probe = data.get("terminal-probe", {})
@@ -1052,7 +1058,6 @@ def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
         print(json.dumps(data, indent=2, sort_keys=True))
         return
 
-    import sys
     term = _make_terminal()
     sys.stdout.write(
         _cursor_hide(term, _has_truecolor(data)))
@@ -1105,7 +1110,6 @@ def fingerprinting_post_script(filepath):
 
 
 if __name__ == "__main__":
-    import sys
     if len(sys.argv) != 2:
         print(f"Usage: python -m {__name__} <filepath>", file=sys.stderr)
         sys.exit(1)
