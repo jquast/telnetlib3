@@ -12,6 +12,7 @@ Example usage::
 
     $ export TELNETLIB3_DATA_DIR=./data
     $ python bin/moderate_fingerprints.py
+    $ python bin/moderate_fingerprints.py --check-revise
 """
 
 # std imports
@@ -25,6 +26,13 @@ from pathlib import Path
 
 
 _JQ = shutil.which("jq")
+
+_HASH_SOURCES = {
+    "telnet-client": "telnet-probe",
+    "terminal-emulator": "terminal-probe",
+    "telnet-client-revision": "telnet-probe",
+    "terminal-emulator-revision": "terminal-probe",
+}
 
 
 def _print_json(label, data):
@@ -59,12 +67,12 @@ def _load_names(data_dir):
     return {}
 
 
-def _scan_suggestions(data_dir):
-    """Scan ``client/{telnet}/{terminal}/*.json`` for suggestions, grouped by hash.
+def _scan_all(data_dir):
+    """Scan all client JSON files for suggestion and revision keys.
 
-    :returns: Dict mapping (hash_type, hash_val) to list of
-              (suggestion_text, filepath) tuples, plus a Counter
-              for frequency.
+    :returns: (suggestions, sample_data) where suggestions maps
+              (suggestion_key, hash_val) to list of suggested names,
+              and sample_data maps the same keys to fingerprint-data dicts.
     """
     suggestions = collections.defaultdict(list)
     sample_data = {}
@@ -84,27 +92,72 @@ def _scan_suggestions(data_dir):
         if not file_suggestions:
             continue
 
-        telnet_hash = data.get("telnet-probe", {}).get("fingerprint")
-        terminal_probe = data.get("terminal-probe", {})
-        terminal_hash = terminal_probe.get("fingerprint")
+        hashes = {
+            "telnet-probe": data.get("telnet-probe", {}).get("fingerprint"),
+            "terminal-probe": data.get("terminal-probe", {}).get("fingerprint"),
+        }
 
-        if telnet_hash and "telnet-client" in file_suggestions:
-            key = ("telnet-client", telnet_hash)
-            suggestions[key].append(file_suggestions["telnet-client"])
+        for sug_key, probe_key in _HASH_SOURCES.items():
+            if sug_key not in file_suggestions:
+                continue
+            hash_val = hashes.get(probe_key)
+            if not hash_val:
+                continue
+            key = (sug_key, hash_val)
+            suggestions[key].append(file_suggestions[sug_key])
             if key not in sample_data:
-                sample_data[key] = data.get(
-                    "telnet-probe", {}
-                ).get("fingerprint-data", {})
-
-        if terminal_hash and "terminal-emulator" in file_suggestions:
-            key = ("terminal-emulator", terminal_hash)
-            suggestions[key].append(file_suggestions["terminal-emulator"])
-            if key not in sample_data:
-                sample_data[key] = terminal_probe.get(
-                    "fingerprint-data", {}
-                )
+                sample_data[key] = data.get(probe_key, {}).get(
+                    "fingerprint-data", {})
 
     return suggestions, sample_data
+
+
+def _review(entries, sample_data, names):
+    """Interactive review loop for a set of suggestion entries.
+
+    :param entries: Dict of (sug_key, hash_val) -> list of suggested names.
+    :param sample_data: Dict of (sug_key, hash_val) -> fingerprint-data.
+    :param names: Mutable names dict, updated in place.
+    :returns: True if any names were updated.
+    """
+    updated = False
+    for (sug_key, hash_val), suggestion_list in sorted(entries.items()):
+        current_name = names.get(hash_val)
+        counter = collections.Counter(suggestion_list)
+        most_common = counter.most_common(1)[0][0]
+        total = sum(counter.values())
+
+        print(f"\n{'=' * 60}")
+        print(f"  {sug_key}: {hash_val}")
+        if current_name:
+            print(f"  current name: {current_name}")
+        print(f"  {total} suggestion(s):")
+        for name, count in counter.most_common():
+            print(f"    {count}x  {name}")
+
+        fp_data = sample_data.get((sug_key, hash_val))
+        if fp_data:
+            _print_json("  fingerprint-data:", fp_data)
+
+        prompt = f"  Name (press return for '{most_common}', Ctrl-D to skip): "
+        try:
+            raw = input(prompt).strip()
+        except EOFError:
+            print()
+            continue
+        except KeyboardInterrupt:
+            print("\nAborted.")
+            return updated
+
+        chosen = raw if raw else most_common
+        if chosen and chosen != current_name:
+            names[hash_val] = chosen
+            updated = True
+            print(f"  -> {hash_val} = {chosen}")
+        elif current_name:
+            print(f"  -> keeping {current_name}")
+
+    return updated
 
 
 def main():
@@ -119,55 +172,33 @@ def main():
         print(f"Error: {data_dir} does not exist", file=sys.stderr)
         sys.exit(1)
 
+    check_revise = "--check-revise" in sys.argv
     names = _load_names(data_dir)
-    suggestions, sample_data = _scan_suggestions(data_dir)
+    all_suggestions, sample_data = _scan_all(data_dir)
 
-    if not suggestions:
-        print("No suggestions found.")
-        return
-
-    # Filter to unknown hashes only
-    unknown = {
-        key: vals for key, vals in suggestions.items()
-        if key[1] not in names
-    }
-
-    if not unknown:
-        print("All suggested hashes are already named.")
-        return
-
-    updated = False
-    for (hash_type, hash_val), suggestion_list in sorted(unknown.items()):
-        counter = collections.Counter(suggestion_list)
-        most_common = counter.most_common(1)[0][0]
-        total = sum(counter.values())
-
-        print(f"\n{'=' * 60}")
-        print(f"  {hash_type}: {hash_val}")
-        print(f"  {total} suggestion(s):")
-        for name, count in counter.most_common():
-            print(f"    {count}x  {name}")
-
-        fp_data = sample_data.get((hash_type, hash_val))
-        if fp_data:
-            _print_json("  fingerprint-data:", fp_data)
-
-        prompt = f"  Name (press return for '{most_common}', Ctrl-D to skip): "
-        try:
-            raw = input(prompt).strip()
-        except EOFError:
-            print()
-            continue
-        except KeyboardInterrupt:
-            print("\nAborted.")
+    if check_revise:
+        revision_keys = {"telnet-client-revision", "terminal-emulator-revision"}
+        entries = {
+            k: v for k, v in all_suggestions.items()
+            if k[0] in revision_keys and k[1] in names
+        }
+        if not entries:
+            print("No revision suggestions found.")
             return
-        chosen = raw if raw else most_common
+    else:
+        new_keys = {"telnet-client", "terminal-emulator"}
+        entries = {
+            k: v for k, v in all_suggestions.items()
+            if k[0] in new_keys and k[1] not in names
+        }
+        if not entries:
+            if all_suggestions:
+                print("All suggested hashes are already named.")
+            else:
+                print("No suggestions found.")
+            return
 
-        if chosen:
-            names[hash_val] = chosen
-            updated = True
-            print(f"  -> {hash_val} = {chosen}")
-
+    updated = _review(entries, sample_data, names)
     if updated:
         _atomic_json_write(data_dir / "fingerprint_names.json", names)
         print(f"\nSaved {data_dir / 'fingerprint_names.json'}")

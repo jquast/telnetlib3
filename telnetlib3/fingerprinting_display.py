@@ -990,40 +990,67 @@ def _prompt_fingerprint_identification(
 
     telnet_known = telnet_hash in names
     terminal_known = terminal_hash in names or terminal_hash == _UNKNOWN_TERMINAL_HASH
+    all_known = telnet_known and terminal_known
 
-    if telnet_known and terminal_known:
-        return
-
-    sys.stdout.write(
-        f"\n{term.bold_magenta}Help our database!{term.normal}\n")
+    if all_known:
+        sys.stdout.write(
+            f"\n{term.bold_magenta}Suggest a revision{term.normal}\n")
+    else:
+        sys.stdout.write(
+            f"\n{term.bold_magenta}Help our database!{term.normal}\n")
     sys.stdout.flush()
 
     suggestions: Dict[str, str] = data.get("suggestions", {})
+    revised = False
 
-    if not terminal_known:
-        software_name = (terminal_probe.get("session-data", {})
-                         .get("software_name"))
-        if software_name:
-            prompt = (f"Terminal emulator name"
-                      f" (press return for \"{software_name}\"): ")
+    if terminal_hash != _UNKNOWN_TERMINAL_HASH:
+        current_name = names.get(terminal_hash)
+        if not terminal_known:
+            software_name = (terminal_probe.get("session-data", {})
+                             .get("software_name"))
+            default = software_name or ""
+            if default:
+                prompt = (f"Terminal emulator name"
+                          f" (press return for \"{default}\"): ")
+            else:
+                prompt = f"Terminal emulator name for {terminal_hash}: "
+            raw = _cooked_input(prompt)
+            if not raw and default:
+                raw = default
+            validated = _validate_suggestion(raw)
+            if validated:
+                suggestions["terminal-emulator"] = validated
         else:
-            prompt = f"Terminal emulator name for {terminal_hash}: "
-        raw = _cooked_input(prompt)
-        if not raw and software_name:
-            raw = software_name
-        validated = _validate_suggestion(raw)
-        if validated:
-            suggestions["terminal-emulator"] = validated
+            prompt = (f"Terminal emulator name"
+                      f" (press return for \"{current_name}\"): ")
+            raw = _cooked_input(prompt).strip()
+            validated = _validate_suggestion(raw) if raw else None
+            if validated and validated != current_name:
+                suggestions["terminal-emulator-revision"] = validated
+                revised = True
 
     if not telnet_known:
         raw = _cooked_input(f"Telnet client name for {telnet_hash}: ")
         validated = _validate_suggestion(raw)
         if validated:
             suggestions["telnet-client"] = validated
+    else:
+        current_name = names.get(telnet_hash)
+        prompt = (f"Telnet client name"
+                  f" (press return for \"{current_name}\"): ")
+        raw = _cooked_input(prompt).strip()
+        validated = _validate_suggestion(raw) if raw else None
+        if validated and validated != current_name:
+            suggestions["telnet-client-revision"] = validated
+            revised = True
 
     if suggestions:
         data["suggestions"] = suggestions
         _atomic_json_write(filepath, data)
+
+    if revised:
+        sys.stdout.write("Your submission is under review.\n")
+        sys.stdout.flush()
 
 
 def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:

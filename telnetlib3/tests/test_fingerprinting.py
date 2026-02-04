@@ -645,7 +645,7 @@ def test_prompt_stores_suggestions(tmp_path, monkeypatch):
     assert saved["suggestions"]["terminal-emulator"] == "Ghostty"
 
 
-def test_prompt_skips_when_known(tmp_path, monkeypatch):
+def test_prompt_no_revision_on_return(tmp_path, monkeypatch):
     filepath = tmp_path / "test.json"
     data = {
         "telnet-probe": {"fingerprint": "aaa"},
@@ -654,13 +654,56 @@ def test_prompt_skips_when_known(tmp_path, monkeypatch):
     }
     filepath.write_text(json.dumps(data))
 
-    monkeypatch.setattr(fpd, "_cooked_input",
-                        lambda prompt: "should not run")
+    monkeypatch.setattr(fpd, "_cooked_input", lambda prompt: "")
     names = {"aaa": "GNU Telnet", "bbbb": "Ghostty"}
     fpd._prompt_fingerprint_identification(
         MockTerm(), data, str(filepath), names
     )
-    assert "suggestions" not in data
+    assert "terminal-emulator-revision" not in data.get("suggestions", {})
+    assert "telnet-client-revision" not in data.get("suggestions", {})
+
+
+def test_prompt_stores_revision(tmp_path, monkeypatch):
+    filepath = tmp_path / "test.json"
+    data = {
+        "telnet-probe": {"fingerprint": "aaa"},
+        "terminal-probe": {"fingerprint": "bbbb"},
+        "sessions": [],
+    }
+    filepath.write_text(json.dumps(data))
+
+    inputs = iter(["Ghostty2", "inetutils-2.5"])
+    monkeypatch.setattr(fpd, "_cooked_input", lambda prompt: next(inputs))
+    names = {"aaa": "GNU Telnet", "bbbb": "Ghostty"}
+    fpd._prompt_fingerprint_identification(
+        MockTerm(), data, str(filepath), names
+    )
+    assert data["suggestions"]["terminal-emulator-revision"] == "Ghostty2"
+    assert data["suggestions"]["telnet-client-revision"] == "inetutils-2.5"
+
+    with open(filepath) as f:
+        saved = json.load(f)
+    assert saved["suggestions"]["terminal-emulator-revision"] == "Ghostty2"
+    assert saved["suggestions"]["telnet-client-revision"] == "inetutils-2.5"
+
+
+def test_prompt_revision_same_name_ignored(tmp_path, monkeypatch):
+    filepath = tmp_path / "test.json"
+    data = {
+        "telnet-probe": {"fingerprint": "aaa"},
+        "terminal-probe": {"fingerprint": "bbbb"},
+        "sessions": [],
+    }
+    filepath.write_text(json.dumps(data))
+
+    inputs = iter(["Ghostty", "GNU Telnet"])
+    monkeypatch.setattr(fpd, "_cooked_input", lambda prompt: next(inputs))
+    names = {"aaa": "GNU Telnet", "bbbb": "Ghostty"}
+    fpd._prompt_fingerprint_identification(
+        MockTerm(), data, str(filepath), names
+    )
+    assert "terminal-emulator-revision" not in data.get("suggestions", {})
+    assert "telnet-client-revision" not in data.get("suggestions", {})
 
 
 def test_prompt_skip_empty_input(tmp_path, monkeypatch):
