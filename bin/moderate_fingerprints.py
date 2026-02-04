@@ -162,24 +162,31 @@ def _review(entries, sample_data, names):
 
 
 def _collect_data_hashes(data_dir):
-    """Collect all hashes that have actual data files in the client directory.
+    """Collect all fingerprint hashes referenced by data files.
+
+    Scans directory names and JSON file contents, because the internal
+    ``fingerprint`` field may differ from its parent directory name.
 
     :param data_dir: Path to the data directory.
-    :returns: Set of hash strings found as telnet or terminal directories.
+    :returns: Set of hash strings found in the data tree.
     """
     client_base = data_dir / "client"
     if not client_base.is_dir():
         return set()
 
     found = set()
-    for telnet_dir in client_base.iterdir():
-        if not telnet_dir.is_dir():
+    for json_file in client_base.glob("*/*/*.json"):
+        found.add(json_file.parent.parent.name)
+        found.add(json_file.parent.name)
+        try:
+            with open(json_file) as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
             continue
-        found.add(telnet_dir.name)
-        for terminal_dir in telnet_dir.iterdir():
-            if not terminal_dir.is_dir():
-                continue
-            found.add(terminal_dir.name)
+        for probe_key in ("telnet-probe", "terminal-probe"):
+            h = data.get(probe_key, {}).get("fingerprint")
+            if h:
+                found.add(h)
     return found
 
 
