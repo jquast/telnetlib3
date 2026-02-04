@@ -9,13 +9,11 @@ in :mod:`telnetlib3.fingerprinting_display`.
 # std imports
 import asyncio
 import datetime
-import glob as glob_mod
 import hashlib
 import json
 import logging
 import os
 import time
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .accessories import encoding_from_lang
@@ -73,8 +71,8 @@ from .telopt import (
 )
 
 # Data directory for saving fingerprint data - None when unset (no saves)
-DATA_DIR: Optional[Path] = (
-    Path(os.environ["TELNETLIB3_DATA_DIR"])
+DATA_DIR: Optional[str] = (
+    os.environ["TELNETLIB3_DATA_DIR"]
     if os.environ.get("TELNETLIB3_DATA_DIR")
     else None
 )
@@ -123,9 +121,6 @@ __all__ = (
 )
 
 logger = logging.getLogger("telnetlib3.fingerprint")
-
-CR, LF = "\r", "\n"
-CRLF = CR + LF
 
 # Telnet options to probe, grouped by category
 # Each entry is (option_bytes, name, description)
@@ -203,40 +198,6 @@ _ALL_KNOWN_OPTIONS = ALL_PROBE_OPTIONS + EXTENDED_OPTIONS
 _OPT_BYTE_TO_NAME = {
     f"0x{opt[0]:02x}": name for opt, name, _ in _ALL_KNOWN_OPTIONS
 }
-
-
-def _display_fingerprint(session_fp: Dict[str, Any]) -> Dict[str, Any]:
-    """Filter session fingerprint for display, removing timing and defaults."""
-    result = {}
-
-    if session_fp.get("extra"):
-        extra = dict(session_fp["extra"])
-        extra.pop("timeout", None)
-        cols = extra.get("cols")
-        rows = extra.get("rows")
-        if cols == 80 and rows == 25:
-            extra.pop("cols", None)
-            extra.pop("rows", None)
-        if extra:
-            result["extra"] = extra
-
-    if session_fp.get("ttype_cycle"):
-        result["ttype_cycle"] = session_fp["ttype_cycle"]
-
-    if session_fp.get("probe"):
-        if supported := session_fp["probe"].get("WILL", {}):
-            result["supported"] = sorted(supported.keys())
-
-    return result
-
-
-# ANSI escape for clearing to end of line
-CLEAR_EOL = "\x1b[K"
-
-
-def _update_status_line(writer, message: str) -> None:
-    """Update the status line in place."""
-    writer.write(f"\r{message}{CLEAR_EOL}")
 
 
 async def probe_client_capabilities(
@@ -328,53 +289,13 @@ async def probe_client_capabilities(
     return results
 
 
-def format_probe_results(
-    results: Dict[str, Dict[str, Any]],
-    probe_time: Optional[float] = None,
-) -> str:
-    """
-    Format probe results for display.
-
-    Only shows supported (WILL) options as a comma-separated list.
-    Refused and timeout options are still stored in results but not displayed.
-
-    :param results: Dict from probe_client_capabilities().
-    :param probe_time: Time taken to probe, in seconds.
-    :returns: Formatted multi-line string.
-    """
-    lines = []
-
-    supported_names = []
-    for opt, name, description in ALL_PROBE_OPTIONS:
-        if name not in results:
-            continue
-        if results[name]["status"] == "WILL":
-            supported_names.append(name)
-
-    if supported_names:
-        lines.append(f"Telnet protocols: {', '.join(supported_names)}")
-
-    supported = len(supported_names)
-    refused = sum(1 for r in results.values() if r["status"] == "WONT")
-    no_response = sum(1 for r in results.values() if r["status"] == "timeout")
-
-    summary_parts = [f"{supported} supported", f"{refused} refused"]
-    if no_response > 0:
-        summary_parts.append(f"{no_response} no-response")
-    if probe_time is not None:
-        summary_parts.append(f"{probe_time:.2f}s")
-
-    lines.append(f"Telnet probe summary: {', '.join(summary_parts)}")
-
-    return CRLF.join(lines)
-
-
-# Keys to collect from extra_info, grouped by category
-_TERMINAL_KEYS = ("TERM", "term", "cols", "rows", "COLUMNS", "LINES")
-_ENCODING_KEYS = ("charset", "LANG", "COLORTERM")
-_NETWORK_KEYS = ("peername", "sockname", "tspeed", "xdisploc", "DISPLAY")
-_TTYPE_KEYS = tuple(f"ttype{n}" for n in range(1, 9))
-_PROTOCOL_KEYS = ("encoding",)
+# Keys to collect from extra_info
+_EXTRA_INFO_KEYS = (
+    "TERM", "term", "cols", "rows", "COLUMNS", "LINES",
+    "charset", "LANG", "COLORTERM",
+    "peername", "sockname", "tspeed", "xdisploc", "DISPLAY",
+    "encoding",
+) + tuple(f"ttype{n}" for n in range(1, 9))
 
 
 def get_client_fingerprint(writer) -> Dict[str, Any]:
@@ -386,11 +307,7 @@ def get_client_fingerprint(writer) -> Dict[str, Any]:
     """
     fingerprint = {}
 
-    all_keys = (
-        _TERMINAL_KEYS + _ENCODING_KEYS + _NETWORK_KEYS + _TTYPE_KEYS + _PROTOCOL_KEYS
-    )
-
-    for key in all_keys:
+    for key in _EXTRA_INFO_KEYS:
         value = writer.get_extra_info(key)
         if value is not None and value != "":
             fingerprint[key] = value
@@ -401,70 +318,6 @@ def get_client_fingerprint(writer) -> Dict[str, Any]:
             fingerprint[env_key] = value
 
     return fingerprint
-
-
-def describe_client(writer) -> str:
-    """
-    Generate a formatted description of the connected client.
-
-    :param writer: TelnetWriter instance.
-    :returns: Formatted multi-line string with sorted attributes.
-    """
-    fingerprint = get_client_fingerprint(writer)
-    attrs = []
-
-    peername = fingerprint.get("peername")
-    if peername:
-        attrs.append(f"Client: {peername[0]}:{peername[1]}")
-    else:
-        attrs.append("Client: unknown")
-
-    term = fingerprint.get("TERM") or fingerprint.get("term")
-    if term:
-        attrs.append(f"TERM: {term}")
-
-        ttype_values = []
-        for key in _TTYPE_KEYS:
-            if key in fingerprint:
-                ttype_values.append(fingerprint[key])
-        term_lower = term.lower()
-        other_types = list(dict.fromkeys(
-            v for v in ttype_values if v.lower() != term_lower
-        ))
-        if other_types:
-            attrs.append(f"TTYPE: {', '.join(other_types)}")
-
-    cols = fingerprint.get("cols") or fingerprint.get("COLUMNS")
-    rows = fingerprint.get("rows") or fingerprint.get("LINES")
-    if cols and rows:
-        attrs.append(f"Size: {cols}x{rows}")
-
-    if "tspeed" in fingerprint:
-        attrs.append(f"Speed: {fingerprint['tspeed']}")
-
-    if "charset" in fingerprint:
-        attrs.append(f"CHARSET: {fingerprint['charset']}")
-    if "LANG" in fingerprint:
-        attrs.append(f"LANG: {fingerprint['LANG']}")
-    if "encoding" in fingerprint:
-        attrs.append(f"Encoding: {fingerprint['encoding']}")
-    if "COLORTERM" in fingerprint:
-        attrs.append(f"COLORTERM: {fingerprint['COLORTERM']}")
-
-    xdisploc = fingerprint.get("xdisploc") or fingerprint.get("DISPLAY")
-    if xdisploc:
-        attrs.append(f"DISPLAY: {xdisploc}")
-
-    for key in ("USER", "LOGNAME", "SHELL", "HOME", "MAIL", "PATH"):
-        if key in fingerprint:
-            attrs.append(f"{key}: {fingerprint[key]}")
-
-    if len(attrs) <= 1:
-        attrs.append("(no negotiated attributes)")
-
-    attrs.sort()
-
-    return CRLF.join(attrs)
 
 
 async def _run_probe(
@@ -487,9 +340,14 @@ async def _run_probe(
     elapsed = time.time() - start_time
 
     if verbose:
-        _update_status_line(writer, "")
+        writer.write("\r\x1b[K")
 
     return results, elapsed
+
+
+def _get_protocol(writer):
+    """Return the protocol object from a writer."""
+    return getattr(writer, "_protocol", None) or getattr(writer, "protocol", None)
 
 
 def _opt_byte_to_name(opt: bytes) -> str:
@@ -503,27 +361,34 @@ def _opt_byte_to_name(opt: bytes) -> str:
 def _collect_option_states(writer) -> Dict[str, Dict[str, Any]]:
     """Collect all telnet option states from writer."""
     options = {}
-
-    remote = {}
-    for opt, enabled in writer.remote_option.items():
-        remote[_opt_byte_to_name(opt)] = enabled
-    if remote:
-        options["remote"] = remote
-
-    local = {}
-    for opt, enabled in writer.local_option.items():
-        local[_opt_byte_to_name(opt)] = enabled
-    if local:
-        options["local"] = local
-
+    for label, opt_dict in [("remote", writer.remote_option),
+                            ("local", writer.local_option)]:
+        entries = {_opt_byte_to_name(opt): enabled
+                   for opt, enabled in opt_dict.items()}
+        if entries:
+            options[label] = entries
     return options
+
+
+def _collect_rejected_options(writer) -> Dict[str, List[str]]:
+    """Collect rejected option offers from writer."""
+    result: Dict[str, List[str]] = {}
+    if getattr(writer, "rejected_will", None):
+        result["will"] = sorted(
+            _opt_byte_to_name(opt) for opt in writer.rejected_will
+        )
+    if getattr(writer, "rejected_do", None):
+        result["do"] = sorted(
+            _opt_byte_to_name(opt) for opt in writer.rejected_do
+        )
+    return result
 
 
 def _collect_extra_info(writer) -> Dict[str, Any]:
     """Collect all extra_info from writer, including private _extra dict."""
     extra = {}
 
-    protocol = getattr(writer, "_protocol", None) or getattr(writer, "protocol", None)
+    protocol = _get_protocol(writer)
     if protocol and hasattr(protocol, "_extra"):
         for key, value in protocol._extra.items():
             if isinstance(value, tuple):
@@ -558,7 +423,7 @@ def _collect_ttype_cycle(writer) -> List[str]:
     """Collect the full TTYPE cycle responses."""
     ttype_list = []
 
-    protocol = getattr(writer, "_protocol", None) or getattr(writer, "protocol", None)
+    protocol = _get_protocol(writer)
     extra_dict = getattr(protocol, "_extra", {}) if protocol else {}
 
     for i in range(1, 20):
@@ -572,7 +437,7 @@ def _collect_ttype_cycle(writer) -> List[str]:
 def _collect_protocol_timing(writer) -> Dict[str, Any]:
     """Collect timing information from protocol."""
     timing = {}
-    protocol = getattr(writer, "_protocol", None) or getattr(writer, "protocol", None)
+    protocol = _get_protocol(writer)
     if protocol:
         if hasattr(protocol, "duration"):
             timing["duration"] = protocol.duration
@@ -647,7 +512,7 @@ def _create_protocol_fingerprint(
         "probed-protocol": "client",
     }
 
-    protocol = getattr(writer, "_protocol", None) or getattr(writer, "protocol", None)
+    protocol = _get_protocol(writer)
     extra_dict = getattr(protocol, "_extra", {}) if protocol else {}
 
     for key in ("HOME", "USER", "SHELL"):
@@ -701,28 +566,40 @@ def _create_protocol_fingerprint(
     fingerprint["supported-options"] = supported
     fingerprint["refused-options"] = refused
 
+    rejected = _collect_rejected_options(writer)
+    if rejected.get("will"):
+        fingerprint["rejected-will"] = rejected["will"]
+    if rejected.get("do"):
+        fingerprint["rejected-do"] = rejected["do"]
+
     return fingerprint
 
 
-def _hash_protocol_fingerprint(protocol_fingerprint: Dict[str, Any]) -> str:
-    """Create deterministic SHA256 hash of protocol fingerprint."""
-    canonical = json.dumps(protocol_fingerprint, sort_keys=True, separators=(",", ":"))
+def _hash_fingerprint(data: Dict[str, Any]) -> str:
+    """Create deterministic 16-char SHA256 hash of a fingerprint dict."""
+    canonical = json.dumps(data, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
-def _count_protocol_folder_files(protocol_dir: Path) -> int:
+def _count_protocol_folder_files(protocol_dir: str) -> int:
     """Count JSON files in protocol fingerprint directory."""
-    if not protocol_dir.exists():
+    if not os.path.exists(protocol_dir):
         return 0
-    return sum(1 for f in protocol_dir.iterdir() if f.suffix == ".json")
+    return sum(1 for f in os.listdir(protocol_dir) if f.endswith(".json"))
 
 
-def _count_fingerprint_folders(data_dir: Optional[Path] = None) -> int:
-    """Count fingerprint folders in DATA_DIR."""
+def _count_fingerprint_folders(data_dir: Optional[str] = None) -> int:
+    """Count unique telnet fingerprint folders in ``DATA_DIR/client/``."""
     _dir = data_dir if data_dir is not None else DATA_DIR
-    if _dir is None or not _dir.exists():
+    if _dir is None:
         return 0
-    return sum(1 for f in _dir.iterdir() if f.is_dir())
+    client_dir = os.path.join(_dir, "client")
+    if not os.path.exists(client_dir):
+        return 0
+    return sum(
+        1 for f in os.listdir(client_dir)
+        if os.path.isdir(os.path.join(client_dir, f))
+    )
 
 
 _UNKNOWN_TERMINAL_HASH = "0" * 16
@@ -746,32 +623,16 @@ def _create_session_fingerprint(writer) -> Dict[str, Any]:
     return identity
 
 
-def _hash_session_fingerprint(session_identity: Dict[str, Any]) -> str:
-    """Create deterministic SHA256 hash of session identity."""
-    canonical = json.dumps(session_identity, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
-
-
-def _load_fingerprint_names(data_dir: Optional[Path] = None) -> Dict[str, str]:
+def _load_fingerprint_names(data_dir: Optional[str] = None) -> Dict[str, str]:
     """Load fingerprint hash-to-name mapping from ``fingerprint_names.json``."""
     _dir = data_dir if data_dir is not None else DATA_DIR
     if _dir is None:
         return {}
-    names_file = _dir / "fingerprint_names.json"
-    if not names_file.exists():
+    names_file = os.path.join(_dir, "fingerprint_names.json")
+    if not os.path.exists(names_file):
         return {}
     with open(names_file) as f:
         return json.load(f)
-
-
-def _save_fingerprint_names(
-    names: Dict[str, str], data_dir: Optional[Path] = None
-) -> None:
-    """Write fingerprint hash-to-name mapping to ``fingerprint_names.json``."""
-    _dir = data_dir if data_dir is not None else DATA_DIR
-    if _dir is None:
-        return
-    _atomic_json_write(_dir / "fingerprint_names.json", names)
 
 
 def _resolve_hash_name(hash_val: str, names: Dict[str, str]) -> str:
@@ -805,49 +666,12 @@ def _cooked_input(prompt: str) -> str:
         termios.tcsetattr(fd, termios.TCSANOW, old_attrs)
 
 
-def _atomic_json_write(filepath: Path, data: dict) -> None:
+def _atomic_json_write(filepath: str, data: dict) -> None:
     """Atomically write JSON data to file via write-to-new + rename."""
-    tmp_path = filepath.with_suffix(".json.new")
+    tmp_path = os.path.splitext(filepath)[0] + ".json.new"
     with open(tmp_path, "w") as f:
         json.dump(data, f, indent=2, sort_keys=True)
-    os.rename(str(tmp_path), str(filepath))
-
-
-def _count_matches(
-    hash_val: str,
-    position: str = "protocol",
-    prefix: str = "client",
-    data_dir: Optional[Path] = None,
-) -> Dict[str, int]:
-    """Count directories and session files matching a fingerprint hash."""
-    _dir = data_dir if data_dir is not None else DATA_DIR
-    if _dir is None or not _dir.exists():
-        return {"dirs": 0, "sessions": 0}
-    if position == "protocol":
-        pattern = f"{prefix}-{hash_val}-*"
-    else:
-        pattern = f"{prefix}-*-{hash_val}"
-    dirs = glob_mod.glob(str(_dir / pattern) + os.sep)
-    sessions = glob_mod.glob(str(_dir / pattern / "*.json"))
-    return {"dirs": len(dirs), "sessions": len(sessions)}
-
-
-def _count_protocol_matches(
-    telnet_hash: str,
-    prefix: str = "client",
-    data_dir: Optional[Path] = None,
-) -> Dict[str, int]:
-    """Count directories and session files matching a telnet protocol hash."""
-    return _count_matches(telnet_hash, "protocol", prefix, data_dir)
-
-
-def _count_terminal_matches(
-    terminal_hash: str,
-    prefix: str = "client",
-    data_dir: Optional[Path] = None,
-) -> Dict[str, int]:
-    """Count directories and session files matching a terminal fingerprint hash."""
-    return _count_matches(terminal_hash, "terminal", prefix, data_dir)
+    os.rename(tmp_path, filepath)
 
 
 def _build_session_fingerprint(
@@ -886,6 +710,9 @@ def _build_session_fingerprint(
     }
     if slc_tab:
         result["slc_tab"] = slc_tab
+    rejected = _collect_rejected_options(writer)
+    if rejected:
+        result["rejected"] = rejected
     return result
 
 
@@ -894,7 +721,7 @@ def _save_fingerprint_data(
     probe_results: Dict[str, Dict[str, Any]],
     probe_time: float,
     session_fp: Optional[Dict[str, Any]] = None,
-) -> Optional[Path]:
+) -> Optional[str]:
     """
     Save comprehensive fingerprint data to a JSON file.
 
@@ -909,21 +736,29 @@ def _save_fingerprint_data(
     """
     if DATA_DIR is None:
         return None
+    if not os.path.isdir(DATA_DIR):
+        os.makedirs(DATA_DIR, exist_ok=True)
 
     if session_fp is None:
         session_fp = _build_session_fingerprint(writer, probe_results, probe_time)
 
-    display_fp = _display_fingerprint(session_fp)
-
     protocol_fp = _create_protocol_fingerprint(writer, probe_results)
-    telnet_hash = _hash_protocol_fingerprint(protocol_fp)
+    telnet_hash = _hash_fingerprint(protocol_fp)
 
     session_identity = _create_session_fingerprint(writer)
-    session_hash = _hash_session_fingerprint(session_identity)
+    session_hash = _hash_fingerprint(session_identity)
 
-    folder_name = f"client-{telnet_hash}-{_UNKNOWN_TERMINAL_HASH}"
-    probe_dir = DATA_DIR / folder_name
-    is_new_dir = not probe_dir.exists()
+    telnet_dir = os.path.join(DATA_DIR, "client", telnet_hash)
+    probe_dir = None
+    if os.path.exists(telnet_dir):
+        for name in os.listdir(telnet_dir):
+            candidate = os.path.join(telnet_dir, name)
+            if os.path.isdir(candidate) and name != _UNKNOWN_TERMINAL_HASH:
+                probe_dir = candidate
+                break
+    if probe_dir is None:
+        probe_dir = os.path.join(telnet_dir, _UNKNOWN_TERMINAL_HASH)
+    is_new_dir = not os.path.exists(probe_dir)
 
     if is_new_dir:
         if _count_fingerprint_folders() >= FINGERPRINT_MAX_FINGERPRINTS:
@@ -934,11 +769,11 @@ def _save_fingerprint_data(
             )
             return None
         try:
-            probe_dir.mkdir(parents=True, exist_ok=True)
+            os.makedirs(probe_dir, exist_ok=True)
         except OSError as exc:
             logger.warning("failed to create directory %s: %s", probe_dir, exc)
             return None
-        logger.info("new fingerprint %s: %r", telnet_hash, display_fp)
+        logger.info("new fingerprint %s", telnet_hash)
     else:
         file_count = _count_protocol_folder_files(probe_dir)
         if file_count >= FINGERPRINT_MAX_FILES:
@@ -948,23 +783,18 @@ def _save_fingerprint_data(
                 FINGERPRINT_MAX_FILES,
             )
             return None
-        logger.info(
-            "connection for fingerprint %s: %r",
-            telnet_hash,
-            display_fp.get("extra", {}),
-        )
+        logger.info("connection for fingerprint %s", telnet_hash)
 
-    filepath = probe_dir / f"{session_hash}.json"
+    filepath = os.path.join(probe_dir, f"{session_hash}.json")
 
     peername = writer.get_extra_info("peername")
     now = datetime.datetime.now(datetime.timezone.utc)
     session_entry = {
+        "ip": str(peername[0]) if peername else None,
         "connected": now.isoformat(),
-        "client": list(peername) if peername else None,
-        "duration": session_fp.get("timing", {}).get("duration"),
     }
 
-    if filepath.exists():
+    if os.path.exists(filepath):
         try:
             with open(filepath) as f:
                 data = json.load(f)

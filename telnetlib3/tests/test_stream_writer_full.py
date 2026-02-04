@@ -267,14 +267,24 @@ def test_handle_will_invalid_cases_and_else_unhandled():
     w3.set_ext_callback(LOGOUT, lambda cmd: seen.setdefault("v", cmd))
     w3.handle_will(LOGOUT)
     assert seen["v"] == WILL
-    # ELSE branch (unhandled) -> DONT sent, options set -1, pending cleared
+    # ELSE branch (unhandled) -> DONT sent, pending cleared, rejected tracked
     w4, t4, _ = new_writer(server=True)
     w4.pending_option[DO + GMCP] = True
     w4.handle_will(GMCP)
     assert t4.writes[-1] == IAC + DONT + GMCP
-    assert w4.remote_option[GMCP] == -1
-    assert w4.local_option[GMCP] == -1
     assert not w4.pending_option.get(DO + GMCP, False)
+    assert GMCP in w4.rejected_will
+
+
+def test_handle_will_then_do_unsupported_sends_both_dont_and_wont():
+    """WILL then DO for unsupported option must send DONT and WONT."""
+    w, t, _ = new_writer(server=True)
+    w.handle_will(COM_PORT_OPTION)
+    assert t.writes[-1] == IAC + DONT + COM_PORT_OPTION
+    assert COM_PORT_OPTION in w.rejected_will
+    w.handle_do(COM_PORT_OPTION)
+    assert t.writes[-1] == IAC + WONT + COM_PORT_OPTION
+    assert COM_PORT_OPTION in w.rejected_do
 
 
 def test_handle_wont_tm_and_logout_paths():

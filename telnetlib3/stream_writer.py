@@ -191,6 +191,14 @@ class TelnetWriter:
         #: indicating state of remote capabilities.
         self.remote_option = Option("remote_option", self.log, on_change=self._check_waiters)
 
+        #: Set of option byte(s) for WILL received from remote end
+        #: that were rejected with DONT (unhandled options).
+        self.rejected_will: set = set()
+
+        #: Set of option byte(s) for DO received from remote end
+        #: that were rejected with WONT (unsupported options).
+        self.rejected_do: set = set()
+
         #: Sub-negotiation buffer
         self._sb_buffer = collections.deque()
 
@@ -1604,7 +1612,8 @@ class TelnetWriter:
 
         else:
             self.log.debug("DO %s not supported.", name_command(opt))
-            if self.local_option.get(opt, None) is None:
+            self.rejected_do.add(opt)
+            if not self.local_option.enabled(opt):
                 self.iac(WONT, opt)
             return False
         return True
@@ -1730,11 +1739,9 @@ class TelnetWriter:
                 }[opt]()
 
         else:
-            # option value of -1 toggles opt.unsupported()
             self.iac(DONT, opt)
-            self.remote_option[opt] = -1
+            self.rejected_will.add(opt)
             self.log.warning("Unhandled: WILL %s.", name_command(opt))
-            self.local_option[opt] = -1
             if self.pending_option.enabled(DO + opt):
                 self.pending_option[DO + opt] = False
 

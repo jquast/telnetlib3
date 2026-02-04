@@ -1,5 +1,6 @@
 # std imports
 import json
+from pathlib import Path
 
 # 3rd party
 import pytest
@@ -42,6 +43,8 @@ class MockWriter:
         self.remote_option = MockOption()
         self.local_option = MockOption()
         self.pending_option = MockOption()
+        self.rejected_will: set = set()
+        self.rejected_do: set = set()
         self.protocol = MockProtocol()
         self._protocol = MockProtocol(self._extra)
 
@@ -84,6 +87,8 @@ class MockReader:
 class MockTerm:
     normal = ""
     clear = ""
+    civis = ""
+    cnorm = ""
     height = 50
     width = 80
     green2 = staticmethod(lambda x: x)
@@ -113,7 +118,7 @@ async def test_probe_client_capabilities():
 
 
 def test_save_fingerprint_data(tmp_path, monkeypatch):
-    monkeypatch.setattr(fps, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(fps, "DATA_DIR", str(tmp_path))
 
     writer = MockWriter(extra={"peername": ("10.0.0.1", 9999),
                                "TERM": "xterm"})
@@ -124,7 +129,7 @@ def test_save_fingerprint_data(tmp_path, monkeypatch):
         "SGA": {"status": "WONT", "opt": fps.SGA},
     }
     filepath = fps._save_fingerprint_data(writer, probe, 0.5)
-    assert filepath is not None and filepath.exists()
+    assert filepath is not None and Path(filepath).exists()
 
     with open(filepath) as f:
         data = json.load(f)
@@ -139,11 +144,11 @@ def test_save_fingerprint_data(tmp_path, monkeypatch):
 
     # sessions list
     assert len(data["sessions"]) == 1
-    assert data["sessions"][0]["client"] == ["10.0.0.1", 9999]
+    assert data["sessions"][0]["ip"] == "10.0.0.1"
 
-    # folder name has client- prefix and unknown terminal hash
-    assert filepath.parent.name.startswith("client-")
-    assert filepath.parent.name.endswith(f"-{fps._UNKNOWN_TERMINAL_HASH}")
+    # nested layout: client/{telnet_hash}/{unknown_terminal_hash}/
+    assert Path(filepath).parent.name == fps._UNKNOWN_TERMINAL_HASH
+    assert Path(filepath).parent.parent.parent.name == "client"
 
     # DATA_DIR=None skips save
     monkeypatch.setattr(fps, "DATA_DIR", None)
@@ -151,7 +156,7 @@ def test_save_fingerprint_data(tmp_path, monkeypatch):
 
 
 def test_save_fingerprint_appends_session(tmp_path, monkeypatch):
-    monkeypatch.setattr(fps, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(fps, "DATA_DIR", str(tmp_path))
 
     writer = MockWriter(extra={"peername": ("10.0.0.1", 9999),
                                "TERM": "xterm"})
@@ -175,69 +180,65 @@ def test_session_fingerprint():
     assert identity["TERM"] == "xterm"
     assert identity["USER"] == "jq"
 
-    h = fps._hash_session_fingerprint(identity)
+    h = fps._hash_fingerprint(identity)
     assert len(h) == 16
-    assert h == fps._hash_session_fingerprint(identity)
+    assert h == fps._hash_fingerprint(identity)
 
 
 def test_atomic_json_write(tmp_path):
     filepath = tmp_path / "test.json"
-    fps._atomic_json_write(filepath, {"key": "value"})
+    fps._atomic_json_write(str(filepath), {"key": "value"})
     assert filepath.exists()
     assert not filepath.with_suffix(".json.new").exists()
     with open(filepath) as f:
         assert json.load(f) == {"key": "value"}
 
 
-def test_glob_counting(tmp_path):
-    (tmp_path / "client-aaa-bbb").mkdir()
-    (tmp_path / "client-aaa-bbb" / "s1.json").write_text("{}")
-    (tmp_path / "client-aaa-bbb" / "s2.json").write_text("{}")
-    (tmp_path / "client-aaa-ccc").mkdir()
-    (tmp_path / "client-aaa-ccc" / "s3.json").write_text("{}")
-    (tmp_path / "client-ddd-bbb").mkdir()
-    (tmp_path / "client-ddd-bbb" / "s4.json").write_text("{}")
-
-    p = fps._count_protocol_matches("aaa", data_dir=tmp_path)
-    assert p["dirs"] == 2
-    assert p["sessions"] == 3
-
-    t = fps._count_terminal_matches("bbb", data_dir=tmp_path)
-    assert t["dirs"] == 2
-    assert t["sessions"] == 3
-
-
 def test_build_seen_counts(tmp_path, monkeypatch):
-    monkeypatch.setattr(fpd, "DATA_DIR", tmp_path)
-    folder = tmp_path / "client-aaa-bbbb"
-    folder.mkdir()
+    monkeypatch.setattr(fpd, "DATA_DIR", str(tmp_path))
+    folder = tmp_path / "client" / "aaa" / "bbbb"
+    folder.mkdir(parents=True)
     (folder / "sess1.json").write_text("{}")
     (folder / "sess2.json").write_text("{}")
 
     data_first = {
-        "telnet-probe": {"fingerprint": "aaa"},
+        "telnet-probe": {
+            "fingerprint": "aaa",
+            "session-data": {"extra": {"USER": "jdoe"}},
+        },
         "terminal-probe": {"fingerprint": "bbbb"},
-        "sessions": [{"client": ["10.0.0.1", 1234]}],
+        "sessions": [{"ip": "10.0.0.1"}],
     }
     result = fpd._build_seen_counts(data_first)
-    assert "first time" in result
-    assert "10.0.0.1" in result
+    assert "Welcome jdoe!" in result
+    assert "Detected" in result
     assert "aaa" in result
     assert "bbbb" in result
     assert "1 other client" in result
 
-    data_return = {
+    data_no_user = {
         "telnet-probe": {"fingerprint": "aaa"},
         "terminal-probe": {"fingerprint": "bbbb"},
+        "sessions": [{"ip": "10.0.0.1"}],
+    }
+    result = fpd._build_seen_counts(data_no_user)
+    assert "Welcome!" in result
+    assert "unknown" not in result
+
+    data_return = {
+        "telnet-probe": {
+            "fingerprint": "aaa",
+            "session-data": {"extra": {"USER": "jdoe"}},
+        },
+        "terminal-probe": {"fingerprint": "bbbb"},
         "sessions": [
-            {"client": ["10.0.0.1", 1234]},
-            {"client": ["10.0.0.1", 5678]},
-            {"client": ["10.0.0.1", 9012]},
+            {"ip": "10.0.0.1"},
+            {"ip": "10.0.0.1"},
+            {"ip": "10.0.0.1"},
         ],
     }
     result = fpd._build_seen_counts(data_return)
-    assert "Welcome back" in result
-    assert "10.0.0.1" in result
+    assert "Welcome back jdoe!" in result
     assert "aaa" in result
     assert "bbbb" in result
     assert "#3" in result
@@ -298,12 +299,65 @@ def test_protocol_hash_consistency():
     w2 = MockWriter(extra={"TERM": "xterm", "HOME": "/home/bob"})
     w2._protocol = MockProtocol({"HOME": "/home/bob"})
 
-    h1 = fps._hash_protocol_fingerprint(
+    h1 = fps._hash_fingerprint(
         fps._create_protocol_fingerprint(w1, probe))
-    h2 = fps._hash_protocol_fingerprint(
+    h2 = fps._hash_fingerprint(
         fps._create_protocol_fingerprint(w2, probe))
     assert h1 == h2
     assert len(h1) == 16
+
+
+def test_collect_rejected_options():
+    w = MockWriter()
+    w.rejected_will = {fps.AUTHENTICATION, fps.KERMIT}
+    result = fps._collect_rejected_options(w)
+    assert result["will"] == ["AUTHENTICATION", "KERMIT"]
+    assert "do" not in result
+
+
+def test_collect_rejected_options_empty():
+    w = MockWriter()
+    assert fps._collect_rejected_options(w) == {}
+
+
+def test_collect_rejected_options_do():
+    w = MockWriter()
+    w.rejected_do = {fps.COM_PORT_OPTION}
+    result = fps._collect_rejected_options(w)
+    assert result["do"] == ["COM_PORT"]
+    assert "will" not in result
+
+
+def test_protocol_fingerprint_with_rejected():
+    probe = {"BINARY": {"status": "WILL", "opt": fps.BINARY}}
+    w = MockWriter()
+    w.rejected_will = {fps.AUTHENTICATION, fps.KERMIT}
+    fp = fps._create_protocol_fingerprint(w, probe)
+    assert fp["rejected-will"] == ["AUTHENTICATION", "KERMIT"]
+    assert "rejected-do" not in fp
+
+
+def test_protocol_fingerprint_hash_differs_with_rejected():
+    probe = {"BINARY": {"status": "WILL", "opt": fps.BINARY}}
+    w1 = MockWriter()
+    w2 = MockWriter()
+    w2.rejected_will = {fps.AUTHENTICATION}
+    h1 = fps._hash_fingerprint(
+        fps._create_protocol_fingerprint(w1, probe))
+    h2 = fps._hash_fingerprint(
+        fps._create_protocol_fingerprint(w2, probe))
+    assert h1 != h2
+
+
+def test_session_fingerprint_includes_rejected():
+    w = MockWriter(extra={
+        "peername": ("127.0.0.1", 12345),
+        "TERM": "xterm",
+    })
+    w.rejected_will = {fps.AUTHENTICATION}
+    probe = {"BINARY": {"status": "WILL", "opt": fps.BINARY}}
+    session = fps._build_session_fingerprint(w, probe, 0.5)
+    assert session["rejected"]["will"] == ["AUTHENTICATION"]
 
 
 def test_build_telnet_rows():
@@ -414,7 +468,7 @@ def test_display_compact_summary_fallback():
 
 
 @pytest.mark.parametrize("data,expected", [
-    ({"sessions": [{"client": ["192.168.1.1", 12345]}]}, "192.168.1.1"),
+    ({"sessions": [{"ip": "192.168.1.1"}]}, "192.168.1.1"),
     ({"sessions": []}, "unknown"),
     ({}, "unknown"),
 ])
@@ -449,28 +503,17 @@ def test_paginate_short_text(capsys):
 
 
 def test_load_fingerprint_names_missing(tmp_path):
-    assert fps._load_fingerprint_names(tmp_path) == {}
+    assert fps._load_fingerprint_names(str(tmp_path)) == {}
 
 
 def test_load_fingerprint_names_valid(tmp_path):
     names = {"abc123": "Ghostty", "def456": "GNU Telnet"}
     (tmp_path / "fingerprint_names.json").write_text(json.dumps(names))
-    assert fps._load_fingerprint_names(tmp_path) == names
+    assert fps._load_fingerprint_names(str(tmp_path)) == names
 
 
 def test_load_fingerprint_names_none():
     assert fps._load_fingerprint_names(None) == {}
-
-
-def test_save_fingerprint_names(tmp_path):
-    names = {"abc123": "Ghostty"}
-    fps._save_fingerprint_names(names, tmp_path)
-    loaded = fps._load_fingerprint_names(tmp_path)
-    assert loaded == names
-
-
-def test_save_fingerprint_names_none():
-    fps._save_fingerprint_names({"a": "b"}, None)
 
 
 def test_resolve_hash_name():
@@ -494,15 +537,15 @@ def test_validate_suggestion(text, expected):
 
 
 def test_build_seen_counts_with_names(tmp_path, monkeypatch):
-    monkeypatch.setattr(fpd, "DATA_DIR", tmp_path)
-    folder = tmp_path / "client-aaa-bbbb"
-    folder.mkdir()
+    monkeypatch.setattr(fpd, "DATA_DIR", str(tmp_path))
+    folder = tmp_path / "client" / "aaa" / "bbbb"
+    folder.mkdir(parents=True)
     (folder / "sess1.json").write_text("{}")
 
     data = {
         "telnet-probe": {"fingerprint": "aaa"},
         "terminal-probe": {"fingerprint": "bbbb"},
-        "sessions": [{"client": ["10.0.0.1", 1234]}],
+        "sessions": [{"ip": "10.0.0.1"}],
     }
     names = {"aaa": "GNU Telnet", "bbbb": "Ghostty"}
     result = fpd._build_seen_counts(data, names)
@@ -513,15 +556,15 @@ def test_build_seen_counts_with_names(tmp_path, monkeypatch):
 
 
 def test_build_seen_counts_no_names(tmp_path, monkeypatch):
-    monkeypatch.setattr(fpd, "DATA_DIR", tmp_path)
-    folder = tmp_path / "client-aaa-bbbb"
-    folder.mkdir()
+    monkeypatch.setattr(fpd, "DATA_DIR", str(tmp_path))
+    folder = tmp_path / "client" / "aaa" / "bbbb"
+    folder.mkdir(parents=True)
     (folder / "sess1.json").write_text("{}")
 
     data = {
         "telnet-probe": {"fingerprint": "aaa"},
         "terminal-probe": {"fingerprint": "bbbb"},
-        "sessions": [{"client": ["10.0.0.1", 1234]}],
+        "sessions": [{"ip": "10.0.0.1"}],
     }
     result = fpd._build_seen_counts(data)
     assert "aaa" in result
@@ -541,7 +584,7 @@ def test_prompt_stores_suggestions(tmp_path, monkeypatch):
     monkeypatch.setattr(fpd, "_cooked_input", lambda prompt: next(inputs))
 
     fpd._prompt_fingerprint_identification(
-        MockTerm(), data, filepath, {}
+        MockTerm(), data, str(filepath), {}
     )
     assert data["suggestions"]["terminal-emulator"] == "Ghostty"
     assert data["suggestions"]["telnet-client"] == "GNU Telnet"
@@ -564,7 +607,7 @@ def test_prompt_skips_when_known(tmp_path, monkeypatch):
                         lambda prompt: "should not run")
     names = {"aaa": "GNU Telnet", "bbbb": "Ghostty"}
     fpd._prompt_fingerprint_identification(
-        MockTerm(), data, filepath, names
+        MockTerm(), data, str(filepath), names
     )
     assert "suggestions" not in data
 
@@ -629,3 +672,109 @@ def test_prompt_uses_software_name_default(tmp_path, monkeypatch):
     )
     assert 'press return for "ghostty"' in prompts[0]
     assert data["suggestions"]["terminal-emulator"] == "ghostty"
+
+
+def test_setup_term_environ_truecolor(monkeypatch):
+    monkeypatch.delenv("COLORTERM", raising=False)
+    data = {
+        "terminal-probe": {"session-data": {
+            "terminal_results": {"number_of_colors": 16777216},
+        }},
+    }
+    fpd._setup_term_environ(data)
+    import os
+    assert os.environ["COLORTERM"] == "truecolor"
+
+
+def test_setup_term_environ_removes_stale(monkeypatch):
+    monkeypatch.setenv("COLORTERM", "stale-value")
+    data = {
+        "terminal-probe": {"session-data": {
+            "terminal_results": {"number_of_colors": 256},
+        }},
+    }
+    fpd._setup_term_environ(data)
+    import os
+    assert "COLORTERM" not in os.environ
+
+
+def test_setup_term_environ_empty_data(monkeypatch):
+    monkeypatch.setenv("COLORTERM", "stale")
+    fpd._setup_term_environ({})
+    import os
+    assert "COLORTERM" not in os.environ
+
+
+def test_build_database_entries(tmp_path, monkeypatch):
+    monkeypatch.setattr(fpd, "DATA_DIR", str(tmp_path))
+    for telnet_h, terminal_h, n_files in [
+        ("aaa", "xxx", 3),
+        ("aaa", "yyy", 1),
+        ("bbb", "xxx", 2),
+    ]:
+        d = tmp_path / "client" / telnet_h / terminal_h
+        d.mkdir(parents=True, exist_ok=True)
+        for i in range(n_files):
+            (d / f"sess{i}.json").write_text("{}")
+
+    entries = fpd._build_database_entries()
+    types = {e[0] for e in entries}
+    assert "Telnet" in types
+    assert "Terminal" in types
+    assert entries[0][2] >= entries[-1][2]
+
+    telnet_entries = {e[1]: e[2] for e in entries if e[0] == "Telnet"}
+    assert telnet_entries["aaa"] == 4
+    assert telnet_entries["bbb"] == 2
+
+    terminal_entries = {e[1]: e[2] for e in entries if e[0] == "Terminal"}
+    assert terminal_entries["xxx"] == 5
+    assert terminal_entries["yyy"] == 1
+
+
+def test_build_database_entries_with_names(tmp_path, monkeypatch):
+    monkeypatch.setattr(fpd, "DATA_DIR", str(tmp_path))
+    d = tmp_path / "client" / "aaa" / "xxx"
+    d.mkdir(parents=True)
+    (d / "sess.json").write_text("{}")
+
+    names = {"aaa": "PuTTY", "xxx": "xterm"}
+    entries = fpd._build_database_entries(names)
+    display_names = {e[1] for e in entries}
+    assert "PuTTY" in display_names
+    assert "xterm" in display_names
+
+
+def test_build_database_entries_unknown_terminal(tmp_path, monkeypatch):
+    monkeypatch.setattr(fpd, "DATA_DIR", str(tmp_path))
+    d = tmp_path / "client" / "aaa" / fps._UNKNOWN_TERMINAL_HASH
+    d.mkdir(parents=True)
+    (d / "sess.json").write_text("{}")
+
+    entries = fpd._build_database_entries()
+    terminal_entries = [e for e in entries if e[0] == "Terminal"]
+    assert terminal_entries[0][1] == "(unknown)"
+
+
+def test_build_database_entries_no_data(tmp_path, monkeypatch):
+    monkeypatch.setattr(fpd, "DATA_DIR", str(tmp_path))
+    assert fpd._build_database_entries() == []
+
+
+def test_build_database_entries_no_datadir(monkeypatch):
+    monkeypatch.setattr(fpd, "DATA_DIR", None)
+    assert fpd._build_database_entries() == []
+
+
+def test_show_database_empty(capsys):
+    fpd._show_database(MockTerm(), {}, [])
+    assert "No fingerprints" in capsys.readouterr().out
+
+
+def test_apply_unicode_borders():
+    from prettytable import PrettyTable
+    tbl = PrettyTable()
+    fpd._apply_unicode_borders(tbl)
+    assert tbl.horizontal_char == "\u2550"
+    assert tbl.vertical_char == "\u2551"
+    assert tbl.junction_char == "\u256c"

@@ -10,7 +10,6 @@ import json
 import logging
 import os
 import textwrap
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .fingerprinting import (
@@ -19,6 +18,7 @@ from .fingerprinting import (
     _UNKNOWN_TERMINAL_HASH,
     _atomic_json_write,
     _cooked_input,
+    _hash_fingerprint,
     _load_fingerprint_names,
     _resolve_hash_name,
     _validate_suggestion,
@@ -28,9 +28,8 @@ __all__ = ("fingerprinting_post_script",)
 
 logger = logging.getLogger("telnetlib3.fingerprint")
 
-# DECSCUSR cursor styles
-_CURSOR_STEADY_BLOCK = "\x1b[2 q"
-_CURSOR_BLINK_UNDERLINE = "\x1b[3 q"
+# DECSCUSR cursor style — only emitted for truecolor terminals
+_CURSOR_BLINKING_BLOCK = "\x1b[1 q"
 
 
 def _run_ucs_detect() -> Optional[Dict[str, Any]]:
@@ -44,7 +43,7 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
         return None
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
-        tmp_path = Path(tmp.name)
+        tmp_path = tmp.name
 
     try:
         result = subprocess.run(
@@ -56,7 +55,7 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
                 "--probe-silently",
                 "--no-final-summary",
                 "--no-languages-test",
-                "--save-json", str(tmp_path),
+                "--save-json", tmp_path,
             ],
             timeout=120,
         )
@@ -64,7 +63,7 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
         if result.returncode != 0:
             return None
 
-        if not tmp_path.exists():
+        if not os.path.exists(tmp_path):
             logger.warning("ucs-detect did not create output file")
             return None
 
@@ -77,7 +76,7 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
         return terminal_data
 
     finally:
-        tmp_path.unlink()
+        os.remove(tmp_path)
 
 
 def _create_terminal_fingerprint(terminal_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -102,16 +101,6 @@ def _create_terminal_fingerprint(terminal_data: Dict[str, Any]) -> Dict[str, Any
     fingerprint["ambiguous_width"] = terminal_data.get("ambiguous_width")
 
     return fingerprint
-
-
-def _hash_terminal_fingerprint(terminal_fingerprint: Dict[str, Any]) -> str:
-    """Create deterministic SHA256 hash of terminal fingerprint."""
-    import hashlib
-
-    canonical = json.dumps(
-        terminal_fingerprint, sort_keys=True, separators=(",", ":")
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
 def _wrap_options(options: List[str], max_width: int = 30) -> str:
@@ -331,6 +320,12 @@ def _build_telnet_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
     if supported := proto_data.get("supported-options"):
         pairs.append(("Options", _wrap_options(supported, wrap_width)))
 
+    if rejected_will := proto_data.get("rejected-will"):
+        pairs.append((
+            "Rejected",
+            _wrap_options(rejected_will, wrap_width),
+        ))
+
     slc_tab = session_data.get("slc_tab", {})
     if slc_tab:
         slc_set = slc_tab.get("set", {})
@@ -393,16 +388,64 @@ def _sync_timeout(data: Dict[str, Any]) -> float:
     return 1.0
 
 
-def _cursor_style(style: str, has_unicode: bool) -> str:
-    """Return DECSCUSR sequence, or empty string for non-unicode terminals."""
-    return style if has_unicode else ""
+def _setup_term_environ(data: Dict[str, Any]) -> None:
+    """Set ``COLORTERM`` based on probe data.
+
+    Sets ``COLORTERM=truecolor`` when 24-bit color was confirmed by the
+    terminal probe, removes it otherwise to prevent the server's own
+    stale value from leaking through.  ``TERM`` is already set correctly
+    by the PTY shell environment.
+    """
+    if _has_truecolor(data):
+        os.environ["COLORTERM"] = "truecolor"
+    else:
+        os.environ.pop("COLORTERM", None)
 
 
-def _cursor_bracket(term, has_unicode: bool) -> str:
-    """Return bold-magenta cursor bracket with steady block cursor."""
+def _has_truecolor(data: Dict[str, Any]) -> bool:
+    """Return whether the terminal supports 24-bit color."""
+    n = (data.get("terminal-probe", {})
+         .get("session-data", {})
+         .get("terminal_results", {})
+         .get("number_of_colors"))
+    return n is not None and n >= 16777216
+
+
+def _cursor_hide(term, truecolor: bool) -> str:
+    """Hide cursor via blessed termcap (empty if unsupported)."""
+    return term.civis
+
+
+def _cursor_show(term, truecolor: bool) -> str:
+    """Show cursor, with blinking block shape for truecolor terminals."""
+    result = term.cnorm
+    if truecolor:
+        result += _CURSOR_BLINKING_BLOCK
+    return result
+
+
+def _cursor_bracket(
+    term, has_unicode: bool, truecolor: bool = False
+) -> str:
+    """Return bold-magenta cursor bracket with blinking block cursor."""
     block = "\u2588" if has_unicode else " "
     return (f"{term.bold_magenta}[{block}]{term.normal}"
-            f"\b\b{_cursor_style(_CURSOR_STEADY_BLOCK, has_unicode)}")
+            f"\b\b{_cursor_show(term, truecolor)}")
+
+
+def _apply_unicode_borders(tbl) -> None:
+    """Apply double-line box-drawing characters to a PrettyTable."""
+    tbl.horizontal_char = "\u2550"
+    tbl.vertical_char = "\u2551"
+    tbl.junction_char = "\u256c"
+    tbl.top_junction_char = "\u2566"
+    tbl.bottom_junction_char = "\u2569"
+    tbl.left_junction_char = "\u2560"
+    tbl.right_junction_char = "\u2563"
+    tbl.top_left_junction_char = "\u2554"
+    tbl.top_right_junction_char = "\u2557"
+    tbl.bottom_left_junction_char = "\u255a"
+    tbl.bottom_right_junction_char = "\u255d"
 
 
 def _display_compact_summary(data: Dict[str, Any], term=None) -> bool:
@@ -424,17 +467,7 @@ def _display_compact_summary(data: Dict[str, Any], term=None) -> bool:
     def make_table(title, pairs):
         tbl = PrettyTable()
         if has_unicode:
-            tbl.horizontal_char = "\u2550"
-            tbl.vertical_char = "\u2551"
-            tbl.junction_char = "\u256c"
-            tbl.top_junction_char = "\u2566"
-            tbl.bottom_junction_char = "\u2569"
-            tbl.left_junction_char = "\u2560"
-            tbl.right_junction_char = "\u2563"
-            tbl.top_left_junction_char = "\u2554"
-            tbl.top_right_junction_char = "\u2557"
-            tbl.bottom_left_junction_char = "\u255a"
-            tbl.bottom_right_junction_char = "\u255d"
+            _apply_unicode_borders(tbl)
         tbl.title = term.magenta(title)
         tbl.field_names = ["Attribute", "Value"]
         tbl.align["Attribute"] = "r"
@@ -461,8 +494,9 @@ def _display_compact_summary(data: Dict[str, Any], term=None) -> bool:
     import sys
     timeout = _sync_timeout(data)
 
+    truecolor = _has_truecolor(data)
     sys.stdout.write(
-        term.normal + _cursor_style(_CURSOR_BLINK_UNDERLINE, has_unicode))
+        term.normal + _cursor_hide(term, truecolor))
 
     widths = [len(s.split("\n", 1)[0]) for s in table_strings]
     side_by_side = len(widths) < 2 or sum(widths) + 1 < (term.width or 80)
@@ -495,22 +529,24 @@ def _display_compact_summary(data: Dict[str, Any], term=None) -> bool:
                     and term.is_a_tty):
                 sys.stdout.write(
                     f"press return to continue: "
-                    f"{_cursor_bracket(term, has_unicode)}")
+                    f"{_cursor_bracket(term, has_unicode, truecolor)}")
                 sys.stdout.flush()
                 with term.cbreak():
                     term.inkey(timeout=None)
                 sys.stdout.write(
                     f"\r{term.clear_eol}"
-                    f"{_cursor_style(_CURSOR_BLINK_UNDERLINE, has_unicode)}")
+                    f"{_cursor_hide(term, truecolor)}")
                 sys.stdout.flush()
     return True
 
 
 def _build_seen_counts(
-    data: Dict[str, Any], names: Optional[Dict[str, str]] = None
+    data: Dict[str, Any],
+    names: Optional[Dict[str, str]] = None,
+    term=None,
 ) -> str:
     """Build friendly "seen before" text from folder and session counts."""
-    if DATA_DIR is None or not DATA_DIR.exists():
+    if DATA_DIR is None or not os.path.exists(DATA_DIR):
         return ""
 
     telnet_probe = data.get("telnet-probe", {})
@@ -524,16 +560,23 @@ def _build_seen_counts(
     telnet_name = _resolve_hash_name(telnet_hash, _names)
     terminal_name = _resolve_hash_name(terminal_hash, _names)
 
-    folder_path = DATA_DIR / f"client-{telnet_hash}-{terminal_hash}"
-    if folder_path.is_dir():
+    if term is not None:
+        g = term.green2
+        telnet_name = g(telnet_name)
+        terminal_name = g(terminal_name)
+
+    folder_path = os.path.join(DATA_DIR, "client", telnet_hash, terminal_hash)
+    if os.path.isdir(folder_path):
         like_count = sum(
-            1 for f in folder_path.iterdir() if f.suffix == ".json"
+            1 for f in os.listdir(folder_path) if f.endswith(".json")
         )
     else:
         like_count = 0
 
     visit_count = len(data.get("sessions", []))
-    client_ip = _client_ip(data)
+
+    extra = telnet_probe.get("session-data", {}).get("extra", {})
+    username = extra.get("USER") or extra.get("LOGNAME")
 
     lines: List[str] = []
     if like_count > 1:
@@ -543,15 +586,19 @@ def _build_seen_counts(
             f"I've seen {others} other {noun} with your configuration."
         )
 
+    who = f" {username}" if username else ""
     if visit_count <= 1:
         lines.append(
-            f"Welcome {client_ip} using {telnet_name}"
-            f" and {terminal_name} - this is the first time we've met!"
+            f"Welcome{who}! Detected {telnet_name}"
+            f" and {terminal_name}."
         )
     else:
+        visit_str = f"#{visit_count}"
+        if term is not None:
+            visit_str = term.green2(visit_str)
         lines.append(
-            f"Welcome back {client_ip} using {telnet_name}"
-            f" and {terminal_name} - this is visit #{visit_count}!"
+            f"Welcome back{who}! Visit {visit_str}"
+            f" with {telnet_name} and {terminal_name}."
         )
 
     if lines:
@@ -559,21 +606,25 @@ def _build_seen_counts(
     return ""
 
 
-def _repl_prompt(term, has_unicode: bool = True) -> None:
+def _repl_prompt(
+    term, has_unicode: bool = True, truecolor: bool = False
+) -> None:
     """Write the REPL prompt with hotkey legend and bracketed cursor."""
     import sys
     bm = term.bold_magenta
     legend = (
-        f"{bm('l-')}logoff, {bm('1-')}terminal, "
-        f"{bm('2-')}telnet, {bm('r-')}refresh, "
-        f"{bm('u-')}update: "
-        f"{_cursor_bracket(term, has_unicode)}"
+        f"{bm('q-')}logoff, {bm('1-')}terminal, "
+        f"{bm('2-')}telnet, {bm('d-')}database, "
+        f"{bm('r-')}refresh, {bm('u-')}update: "
+        f"{_cursor_bracket(term, has_unicode, truecolor)}"
     )
     sys.stdout.write(f"\r\x1b[J{term.normal}{legend}")
     sys.stdout.flush()
 
 
-def _paginate(term, text: str, has_unicode: bool = True) -> None:
+def _paginate(
+    term, text: str, has_unicode: bool = True, truecolor: bool = False
+) -> None:
     """Display text with simple pagination."""
     import sys
     width = term.width or 80
@@ -597,19 +648,28 @@ def _paginate(term, text: str, has_unicode: bool = True) -> None:
             prompt = (
                 f"{bm('s-')}stop {bm('c-')}continue "
                 f"{bm('n-')}nonstop: "
-                f"{_cursor_bracket(term, has_unicode)}")
+                f"{_cursor_bracket(term, has_unicode, truecolor)}")
             sys.stdout.write(prompt)
             sys.stdout.flush()
             key = term.inkey(timeout=None)
             sys.stdout.write(
                 f"{term.normal}\r{term.clear_eol}"
-                f"{_cursor_style(_CURSOR_BLINK_UNDERLINE, has_unicode)}")
+                f"{_cursor_hide(term, truecolor)}")
             sys.stdout.flush()
             if key == "s":
                 return
             elif key == "n":
                 nonstop = True
     sys.stdout.flush()
+
+
+def _strip_empty_features(d: Dict[str, Any]) -> None:
+    """Remove empty kitty/iterm2 feature keys from a dict in-place."""
+    for key in list(d):
+        if key.startswith(("kitty_", "iterm2_")):
+            val = d[key]
+            if not val or (isinstance(val, dict) and not any(val.values())):
+                del d[key]
 
 
 def _normalize_color_hex(hex_color: str) -> str:
@@ -637,11 +697,7 @@ def _filter_terminal_detail(
     if "text_sizing" in result:
         result["kitty_text_sizing"] = result.pop("text_sizing")
 
-    for key in list(result):
-        if key.startswith(("kitty_", "iterm2_")):
-            val = result[key]
-            if not val or (isinstance(val, dict) and not any(val.values())):
-                del result[key]
+    _strip_empty_features(result)
 
     terminal_results = result.get("terminal_results")
     if terminal_results is not None:
@@ -651,12 +707,7 @@ def _filter_terminal_detail(
                 terminal_results.pop("text_sizing"))
         for key in ("foreground_color_rgb", "background_color_rgb"):
             terminal_results.pop(key, None)
-        for key in list(terminal_results):
-            if key.startswith(("kitty_", "iterm2_")):
-                val = terminal_results[key]
-                if not val or (isinstance(val, dict)
-                               and not any(val.values())):
-                    del terminal_results[key]
+        _strip_empty_features(terminal_results)
         modes = terminal_results.pop("modes", None)
         if modes:
             dec_modes = {}
@@ -734,9 +785,10 @@ def _show_detail(term, data: Dict[str, Any], section: str) -> None:
         title = "Telnet Probe Data"
 
     underline = term.cyan("=" * len(title))
+    truecolor = _has_truecolor(data)
     sys.stdout.write(
         term.normal
-        + _cursor_style(_CURSOR_BLINK_UNDERLINE, _has_unicode(data))
+        + _cursor_hide(term, truecolor)
         + term.clear)
     sys.stdout.flush()
     if detail:
@@ -744,7 +796,7 @@ def _show_detail(term, data: Dict[str, Any], section: str) -> None:
                 f"{underline}\n"
                 f"\n"
                 f"{json.dumps(detail, indent=2, sort_keys=True)}")
-        _paginate(term, text, _has_unicode(data))
+        _paginate(term, text, _has_unicode(data), truecolor)
     else:
         sys.stdout.write(f"{term.magenta(title)}\n{underline}\n\n(no data)\n")
         sys.stdout.flush()
@@ -754,33 +806,158 @@ def _client_ip(data: Dict[str, Any]) -> str:
     """Extract client IP from fingerprint data."""
     sessions = data.get("sessions", [])
     if sessions:
-        client = sessions[-1].get("client")
-        if client and len(client) >= 1:
-            return str(client[0])
-    client = data.get("client")
-    if client and len(client) >= 1:
-        return str(client[0])
+        ip = sessions[-1].get("ip")
+        if ip:
+            return str(ip)
     return "unknown"
+
+
+def _build_database_entries(
+    names: Optional[Dict[str, str]] = None,
+) -> List[Tuple[str, str, int]]:
+    """Scan fingerprint directories and build sorted database entries.
+
+    :returns: List of (type, display_name, count) tuples sorted by count descending.
+    """
+    client_dir = os.path.join(DATA_DIR, "client") if DATA_DIR else None
+    if not client_dir or not os.path.isdir(client_dir):
+        return []
+
+    _names = names or {}
+    telnet_counts: Dict[str, int] = {}
+    terminal_counts: Dict[str, int] = {}
+    for telnet_hash in os.listdir(client_dir):
+        telnet_path = os.path.join(client_dir, telnet_hash)
+        if not os.path.isdir(telnet_path):
+            continue
+        for terminal_hash in os.listdir(telnet_path):
+            terminal_path = os.path.join(telnet_path, terminal_hash)
+            if not os.path.isdir(terminal_path):
+                continue
+            n = sum(1 for f in os.listdir(terminal_path) if f.endswith(".json"))
+            telnet_counts[telnet_hash] = telnet_counts.get(telnet_hash, 0) + n
+            terminal_counts[terminal_hash] = terminal_counts.get(terminal_hash, 0) + n
+
+    entries = [
+        ("Telnet", _resolve_hash_name(h, _names), n)
+        for h, n in telnet_counts.items()
+    ] + [
+        ("Terminal",
+         "(unknown)" if h == _UNKNOWN_TERMINAL_HASH
+         else _resolve_hash_name(h, _names), n)
+        for h, n in terminal_counts.items()
+    ]
+    entries.sort(key=lambda e: e[2], reverse=True)
+    return entries
+
+
+def _show_database(
+    term,
+    data: Dict[str, Any],
+    entries: List[Tuple[str, str, int]],
+) -> None:
+    """Display paginated database of all known fingerprints."""
+    import sys
+
+    try:
+        from prettytable import PrettyTable
+    except ImportError:
+        sys.stdout.write("prettytable not installed.\n")
+        sys.stdout.flush()
+        return
+
+    if not entries:
+        sys.stdout.write("No fingerprints in database.\n")
+        sys.stdout.flush()
+        return
+
+    has_unicode = _has_unicode(data)
+    truecolor = _has_truecolor(data)
+
+    page_size = max(1, (term.height or 25) - 6)
+    total_pages = (len(entries) + page_size - 1) // page_size
+
+    for page_num in range(total_pages):
+        start = page_num * page_size
+        end = min(start + page_size, len(entries))
+        page_entries = entries[start:end]
+
+        tbl = PrettyTable()
+        if has_unicode:
+            _apply_unicode_borders(tbl)
+        tbl.title = term.magenta(
+            f"Database ({page_num + 1}/{total_pages},"
+            f" {len(entries)} fingerprints)"
+        )
+        tbl.field_names = ["Type", "Fingerprint", "Matches"]
+        tbl.align["Type"] = "l"
+        tbl.align["Fingerprint"] = "l"
+        tbl.align["Matches"] = "r"
+        tbl.max_table_width = max(40, (term.width or 80) - 1)
+
+        for kind, display_name, count in page_entries:
+            tbl.add_row([kind, term.green2(display_name), str(count)])
+
+        sys.stdout.write(
+            term.clear
+            + _cursor_hide(term, truecolor)
+            + str(tbl) + "\n"
+        )
+        sys.stdout.flush()
+
+        if page_num + 1 < total_pages:
+            bm = term.bold_magenta
+            prompt = (
+                f"{bm('q-')}quit {bm('n-')}next: "
+                f"{_cursor_bracket(term, has_unicode, truecolor)}"
+            )
+            sys.stdout.write(prompt)
+            sys.stdout.flush()
+            with term.cbreak():
+                key = term.inkey(timeout=None)
+            sys.stdout.write(
+                f"{term.normal}\r{term.clear_eol}"
+                f"{_cursor_hide(term, truecolor)}"
+            )
+            sys.stdout.flush()
+            if key == "q" or key.name == "KEY_ESCAPE":
+                return
+        else:
+            sys.stdout.write(
+                f"press return to continue: "
+                f"{_cursor_bracket(term, has_unicode, truecolor)}"
+            )
+            sys.stdout.flush()
+            with term.cbreak():
+                term.inkey(timeout=None)
+            sys.stdout.write(
+                f"{term.normal}\r{term.clear_eol}"
+                f"{_cursor_hide(term, truecolor)}"
+            )
+            sys.stdout.flush()
 
 
 def _fingerprint_repl(
     term,
     data: Dict[str, Any],
     seen_counts: str = "",
-    filepath: Optional[Path] = None,
+    filepath: Optional[str] = None,
     names: Optional[Dict[str, str]] = None,
 ) -> None:
     """Interactive REPL for exploring fingerprint data."""
     import sys
     ip = _client_ip(data)
     _commands = {
-        "l": "logoff", "1": "terminal-detail",
-        "2": "telnet-detail", "r": "refresh",
-        "u": "update", "\x0c": "refresh",
+        "q": "logoff", "1": "terminal-detail",
+        "2": "telnet-detail", "d": "database",
+        "r": "refresh", "u": "update", "\x0c": "refresh",
     }
 
+    truecolor = _has_truecolor(data)
+    db_cache = None
+
     while True:
-        _repl_prompt(term, _has_unicode(data))
+        _repl_prompt(term, _has_unicode(data), truecolor)
         with term.cbreak():
             key = term.inkey(timeout=None)
 
@@ -792,26 +969,30 @@ def _fingerprint_repl(
         elif key_str not in ("KEY_ENTER", "\r", "\n"):
             logger.info("%s: repl unknown key %r", ip, key_str)
 
-        if key == "l" or key.name == "KEY_ESCAPE" or key == "":
+        if key == "q" or key.name == "KEY_ESCAPE" or key == "":
             logger.info("%s: repl logoff", ip)
             sys.stdout.write(
                 f"\n{term.normal}"
-                f"{_cursor_style(_CURSOR_BLINK_UNDERLINE, _has_unicode(data))}")
+                f"{_cursor_show(term, truecolor)}")
             sys.stdout.flush()
             break
         elif key == "1":
             _show_detail(term, data, "terminal")
         elif key == "2":
             _show_detail(term, data, "telnet")
+        elif key == "d":
+            if db_cache is None:
+                db_cache = _build_database_entries(names)
+            _show_database(term, data, db_cache)
         elif key == "u" and filepath is not None:
             _names = names if names is not None else {}
             _prompt_fingerprint_identification(term, data, filepath, _names)
             names = _load_fingerprint_names()
-            seen_counts = _build_seen_counts(data, names)
+            seen_counts = _build_seen_counts(data, names, term)
         elif key == "r" or key == "\x0c":
             sys.stdout.write(
                 term.normal
-                + _cursor_style(_CURSOR_BLINK_UNDERLINE, _has_unicode(data))
+                + _cursor_hide(term, truecolor)
                 + term.clear)
             sys.stdout.flush()
             _display_compact_summary(data, term)
@@ -821,7 +1002,7 @@ def _fingerprint_repl(
 
 
 def _prompt_fingerprint_identification(
-    term, data: Dict[str, Any], filepath: Path, names: Dict[str, str]
+    term, data: Dict[str, Any], filepath: str, names: Dict[str, str]
 ) -> None:
     """Prompt user to identify unknown fingerprint hashes."""
     import sys
@@ -868,13 +1049,13 @@ def _prompt_fingerprint_identification(
         _atomic_json_write(filepath, data)
 
 
-def _process_client_fingerprint(filepath: Path, data: Dict[str, Any]) -> None:
+def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
     """Process client fingerprint: run ucs-detect if available, update file."""
     terminal_data = _run_ucs_detect()
 
     if terminal_data:
         terminal_fp = _create_terminal_fingerprint(terminal_data)
-        terminal_hash = _hash_terminal_fingerprint(terminal_fp)
+        terminal_hash = _hash_fingerprint(terminal_fp)
 
         data["terminal-probe"] = {
             "fingerprint": terminal_hash,
@@ -882,20 +1063,21 @@ def _process_client_fingerprint(filepath: Path, data: Dict[str, Any]) -> None:
             "session-data": terminal_data,
         }
 
-        old_dir = filepath.parent
-        dir_name = old_dir.name
-        if dir_name.endswith(f"-{_UNKNOWN_TERMINAL_HASH}"):
-            telnet_hash = dir_name[: -(len(_UNKNOWN_TERMINAL_HASH) + 1)]
-            new_dir = old_dir.parent / f"{telnet_hash}-{terminal_hash}"
-            if not new_dir.exists():
-                try:
-                    os.rename(str(old_dir), str(new_dir))
-                    filepath = new_dir / filepath.name
-                except OSError as exc:
-                    logger.warning("failed to rename %s -> %s: %s",
-                                   old_dir, new_dir, exc)
+        old_dir = os.path.dirname(filepath)
+        if os.path.basename(old_dir) == _UNKNOWN_TERMINAL_HASH:
+            new_dir = os.path.join(os.path.dirname(old_dir), terminal_hash)
+            try:
+                os.makedirs(new_dir, exist_ok=True)
+                new_filepath = os.path.join(new_dir, os.path.basename(filepath))
+                os.rename(filepath, new_filepath)
+                filepath = new_filepath
+            except OSError as exc:
+                logger.warning("failed to move %s -> %s: %s",
+                               filepath, new_dir, exc)
 
         _atomic_json_write(filepath, data)
+
+    _setup_term_environ(data)
 
     try:
         import blessed  # noqa: F401
@@ -906,10 +1088,10 @@ def _process_client_fingerprint(filepath: Path, data: Dict[str, Any]) -> None:
     import sys
     term = _make_terminal()
     sys.stdout.write(
-        _cursor_style(_CURSOR_BLINK_UNDERLINE, _has_unicode(data)))
+        _cursor_hide(term, _has_truecolor(data)))
     sys.stdout.flush()
     names = _load_fingerprint_names()
-    seen_counts = _build_seen_counts(data, names)
+    seen_counts = _build_seen_counts(data, names, term)
     if not _display_compact_summary(data, term):
         print(json.dumps(data, indent=2, sort_keys=True))
     if seen_counts:
@@ -936,8 +1118,8 @@ def fingerprinting_post_script(filepath):
 
     :param filepath: Path to the saved fingerprint JSON file.
     """
-    filepath = Path(filepath)
-    if not filepath.exists():
+    filepath = str(filepath)
+    if not os.path.exists(filepath):
         logger.warning("Post-script file not found: %s", filepath)
         return
 

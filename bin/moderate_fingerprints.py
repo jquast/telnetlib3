@@ -18,8 +18,28 @@ Example usage::
 import collections
 import json
 import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
+
+
+_JQ = shutil.which("jq")
+
+
+def _print_json(label, data):
+    """Print labeled JSON, colorized through ``jq`` when available."""
+    json_str = json.dumps(data, indent=4, sort_keys=True)
+    if _JQ:
+        result = subprocess.run(
+            [_JQ, "-C", "."],
+            input=json_str,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            json_str = result.stdout.rstrip("\n")
+    print(f"{label} {json_str}")
 
 
 def _atomic_json_write(filepath, data):
@@ -40,7 +60,7 @@ def _load_names(data_dir):
 
 
 def _scan_suggestions(data_dir):
-    """Scan client-*/*.json files for suggestions, grouped by hash.
+    """Scan ``client/{telnet}/{terminal}/*.json`` for suggestions, grouped by hash.
 
     :returns: Dict mapping (hash_type, hash_val) to list of
               (suggestion_text, filepath) tuples, plus a Counter
@@ -49,39 +69,40 @@ def _scan_suggestions(data_dir):
     suggestions = collections.defaultdict(list)
     sample_data = {}
 
-    for client_dir in sorted(data_dir.iterdir()):
-        if not client_dir.is_dir() or not client_dir.name.startswith("client-"):
+    client_base = data_dir / "client"
+    if not client_base.is_dir():
+        return suggestions, sample_data
+
+    for json_file in sorted(client_base.glob("*/*/*.json")):
+        try:
+            with open(json_file) as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
             continue
-        for json_file in sorted(client_dir.glob("*.json")):
-            try:
-                with open(json_file) as f:
-                    data = json.load(f)
-            except (OSError, json.JSONDecodeError):
-                continue
 
-            file_suggestions = data.get("suggestions", {})
-            if not file_suggestions:
-                continue
+        file_suggestions = data.get("suggestions", {})
+        if not file_suggestions:
+            continue
 
-            telnet_hash = data.get("telnet-probe", {}).get("fingerprint")
-            terminal_probe = data.get("terminal-probe", {})
-            terminal_hash = terminal_probe.get("fingerprint")
+        telnet_hash = data.get("telnet-probe", {}).get("fingerprint")
+        terminal_probe = data.get("terminal-probe", {})
+        terminal_hash = terminal_probe.get("fingerprint")
 
-            if telnet_hash and "telnet-client" in file_suggestions:
-                key = ("telnet-client", telnet_hash)
-                suggestions[key].append(file_suggestions["telnet-client"])
-                if key not in sample_data:
-                    sample_data[key] = data.get(
-                        "telnet-probe", {}
-                    ).get("fingerprint-data", {})
+        if telnet_hash and "telnet-client" in file_suggestions:
+            key = ("telnet-client", telnet_hash)
+            suggestions[key].append(file_suggestions["telnet-client"])
+            if key not in sample_data:
+                sample_data[key] = data.get(
+                    "telnet-probe", {}
+                ).get("fingerprint-data", {})
 
-            if terminal_hash and "terminal-emulator" in file_suggestions:
-                key = ("terminal-emulator", terminal_hash)
-                suggestions[key].append(file_suggestions["terminal-emulator"])
-                if key not in sample_data:
-                    sample_data[key] = terminal_probe.get(
-                        "fingerprint-data", {}
-                    )
+        if terminal_hash and "terminal-emulator" in file_suggestions:
+            key = ("terminal-emulator", terminal_hash)
+            suggestions[key].append(file_suggestions["terminal-emulator"])
+            if key not in sample_data:
+                sample_data[key] = terminal_probe.get(
+                    "fingerprint-data", {}
+                )
 
     return suggestions, sample_data
 
@@ -129,7 +150,7 @@ def main():
 
         fp_data = sample_data.get((hash_type, hash_val))
         if fp_data:
-            print(f"  fingerprint-data: {json.dumps(fp_data, indent=4)}")
+            _print_json("  fingerprint-data:", fp_data)
 
         prompt = f"  Name (press return for '{most_common}', Ctrl-D to skip): "
         try:
