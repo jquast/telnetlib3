@@ -572,6 +572,15 @@ def _create_protocol_fingerprint(
     if rejected.get("do"):
         fingerprint["rejected-do"] = rejected["do"]
 
+    linemode_probed = any(
+        name == "LINEMODE" and info["status"] == "WILL"
+        for name, info in probe_results.items()
+    )
+    if linemode_probed:
+        slc_tab = _collect_slc_tab(writer)
+        if slc_tab:
+            fingerprint["slc"] = slc_tab
+
     return fingerprint
 
 
@@ -856,6 +865,16 @@ async def fingerprinting_server_shell(reader, writer):
 
     probe_results, probe_time = await _run_probe(writer, verbose=False)
 
+    # Switch syncterm to Topaz (Amiga) font, just for fun why not
+    if (writer.get_extra_info("TERM") or "").lower() == "syncterm":
+        writer.write("\x1b[0;40 D")
+        await writer.drain()
+
+    # Collect fingerprint data BEFORE disabling LINEMODE, so that
+    # _collect_slc_tab sees remote_option[LINEMODE] as True.
+    session_fp = _build_session_fingerprint(writer, probe_results, probe_time)
+    filepath = _save_fingerprint_data(writer, probe_results, probe_time, session_fp)
+
     # Disable LINEMODE if it was negotiated - stay in kludge mode (SGA+ECHO)
     # for PTY shell. LINEMODE causes echo loops with GNU telnet when running
     # ucs-detect (client's LIT_ECHO + PTY echo = feedback loop).
@@ -863,15 +882,6 @@ async def fingerprinting_server_shell(reader, writer):
         writer.iac(DONT, LINEMODE)
         await writer.drain()
         await asyncio.sleep(0.1)
-
-    # Switch syncterm to Topaz (Amiga) font
-    term_type = (writer.get_extra_info("TERM") or "").lower()
-    if term_type == "syncterm":
-        writer.write("\x1b[0;40 D")
-        await writer.drain()
-
-    session_fp = _build_session_fingerprint(writer, probe_results, probe_time)
-    filepath = _save_fingerprint_data(writer, probe_results, probe_time, session_fp)
 
     if filepath is not None:
         post_script = FINGERPRINT_POST_SCRIPT or "telnetlib3.fingerprinting_display"

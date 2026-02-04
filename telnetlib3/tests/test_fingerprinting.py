@@ -771,6 +771,82 @@ def test_show_database_empty(capsys):
     assert "No fingerprints" in capsys.readouterr().out
 
 
+def test_collect_slc_tab_with_linemode():
+    from telnetlib3 import slc
+
+    w = MockWriter()
+    w.remote_option[fps.LINEMODE] = True
+    w.slctab = slc.generate_slctab(slc.BSD_SLC_TAB)
+    w.slctab[slc.SLC_EC] = slc.SLC(slc.SLC_VARIABLE, b"\x08")
+
+    result = fps._collect_slc_tab(w)
+    assert "set" in result
+    assert result["set"]["SLC_EC"] == 0x08
+
+
+def test_collect_slc_tab_empty_without_linemode():
+    from telnetlib3 import slc
+
+    w = MockWriter()
+    w.remote_option[fps.LINEMODE] = False
+    w.slctab = slc.generate_slctab(slc.BSD_SLC_TAB)
+    w.slctab[slc.SLC_EC] = slc.SLC(slc.SLC_VARIABLE, b"\x08")
+
+    assert fps._collect_slc_tab(w) == {}
+
+
+def test_protocol_fingerprint_includes_slc():
+    from telnetlib3 import slc
+
+    probe = {"LINEMODE": {"status": "WILL", "opt": fps.LINEMODE}}
+    w = MockWriter()
+    w.remote_option[fps.LINEMODE] = True
+    w.slctab = slc.generate_slctab(slc.BSD_SLC_TAB)
+    w.slctab[slc.SLC_EC] = slc.SLC(slc.SLC_VARIABLE, b"\x08")
+
+    fp = fps._create_protocol_fingerprint(w, probe)
+    assert "slc" in fp
+    assert fp["slc"]["set"]["SLC_EC"] == 0x08
+
+
+def test_protocol_fingerprint_no_slc_without_linemode():
+    probe = {"BINARY": {"status": "WILL", "opt": fps.BINARY}}
+    fp = fps._create_protocol_fingerprint(MockWriter(), probe)
+    assert "slc" not in fp
+
+
+def test_protocol_fingerprint_hash_differs_with_slc():
+    from telnetlib3 import slc
+
+    probe = {"LINEMODE": {"status": "WILL", "opt": fps.LINEMODE}}
+    w1 = MockWriter()
+    w1.remote_option[fps.LINEMODE] = True
+    w1.slctab = slc.generate_slctab(slc.BSD_SLC_TAB)
+
+    w2 = MockWriter()
+    w2.remote_option[fps.LINEMODE] = True
+    w2.slctab = slc.generate_slctab(slc.BSD_SLC_TAB)
+    w2.slctab[slc.SLC_EC] = slc.SLC(slc.SLC_VARIABLE, b"\x08")
+
+    h1 = fps._hash_fingerprint(fps._create_protocol_fingerprint(w1, probe))
+    h2 = fps._hash_fingerprint(fps._create_protocol_fingerprint(w2, probe))
+    assert h1 != h2
+
+
+def test_session_fingerprint_includes_slc():
+    from telnetlib3 import slc
+
+    w = MockWriter(extra={"peername": ("127.0.0.1", 12345)})
+    w.remote_option[fps.LINEMODE] = True
+    w.slctab = slc.generate_slctab(slc.BSD_SLC_TAB)
+    w.slctab[slc.SLC_EC] = slc.SLC(slc.SLC_VARIABLE, b"\x08")
+
+    probe = {"LINEMODE": {"status": "WILL", "opt": fps.LINEMODE}}
+    session = fps._build_session_fingerprint(w, probe, 0.5)
+    assert "slc_tab" in session
+    assert session["slc_tab"]["set"]["SLC_EC"] == 0x08
+
+
 def test_apply_unicode_borders():
     from prettytable import PrettyTable
     tbl = PrettyTable()

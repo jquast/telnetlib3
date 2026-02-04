@@ -505,11 +505,9 @@ def _display_compact_summary(data: Dict[str, Any], term=None) -> bool:
         all_lines = _collect_side_by_side_lines(term, table_strings)
         if has_unicode:
             with term.synchronized_output(timeout=timeout):
-                _paginated_write(term, sys.stdout.write, all_lines,
-                                 skip_initial_newline=True)
+                _paginated_write(term, sys.stdout.write, all_lines)
         else:
-            _paginated_write(term, sys.stdout.write, all_lines,
-                             skip_initial_newline=True)
+            _paginated_write(term, sys.stdout.write, all_lines)
     else:
         total_lines = sum(len(s.split("\n")) for s in table_strings)
         height = term.height or 25
@@ -519,11 +517,9 @@ def _display_compact_summary(data: Dict[str, Any], term=None) -> bool:
             if has_unicode:
                 with term.synchronized_output(timeout=timeout):
                     _paginated_write(term, sys.stdout.write,
-                                     lines + [""],
-                                     skip_initial_newline=True)
+                                     lines + [""])
             else:
-                _paginated_write(term, sys.stdout.write, lines + [""],
-                                 skip_initial_newline=True)
+                _paginated_write(term, sys.stdout.write, lines + [""])
             if (needs_paging
                     and idx + 1 < len(table_strings)
                     and term.is_a_tty):
