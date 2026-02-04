@@ -35,6 +35,8 @@ __all__ = ("fingerprinting_post_script",)
 
 logger = logging.getLogger("telnetlib3.fingerprint")
 
+_JQ = shutil.which("jq")
+
 # DECSCUSR cursor style — only emitted for truecolor terminals
 _CURSOR_BLINKING_BLOCK = "\x1b[1 q"
 
@@ -772,19 +774,23 @@ def _build_seen_counts(
     terminal_unknown = (terminal_known
                         and terminal_hash not in _names)
     if (telnet_unknown or terminal_unknown) and _names:
-        _write_nearest_matches(
+        lines.extend(_nearest_match_lines(
             data, _names, term,
             telnet_unknown=telnet_unknown,
             terminal_unknown=terminal_unknown,
-        )
+        ))
 
     if lines:
         return "\n".join(lines) + "\n"
     return ""
 
 
-def _color_match(term, name: str, pct: float) -> str:
-    """Color a nearest-match result by confidence threshold."""
+def _color_match(term, name: str, score: float) -> str:
+    """Color a nearest-match result by confidence threshold.
+
+    :param score: Similarity as a float 0.0-1.0.
+    """
+    pct = score * 100
     label = f"{name} ({pct:.0f}%)"
     if term is None:
         return label
@@ -795,37 +801,35 @@ def _color_match(term, name: str, pct: float) -> str:
     return term.firebrick1(label)
 
 
-def _write_nearest_matches(
+def _nearest_match_lines(
     data: Dict[str, Any],
     names: Dict[str, str],
     term,
     telnet_unknown: bool = False,
     terminal_unknown: bool = False,
-) -> None:
-    """Print nearest-match lines for unknown fingerprints."""
+) -> List[str]:
+    """Build nearest-match text lines for unknown fingerprints."""
+    result_lines: List[str] = []
     if telnet_unknown:
         fp_data = data.get("telnet-probe", {}).get("fingerprint-data")
         if fp_data:
-            sys.stdout.write("Nearest telnet match: ")
-            sys.stdout.flush()
             result = _find_nearest_match(fp_data, "telnet-probe", names)
             if result:
-                sys.stdout.write(_color_match(term, *result) + "\n")
+                result_lines.append(
+                    f"Nearest telnet match: {_color_match(term, *result)}")
             else:
-                sys.stdout.write("(none)\n")
-            sys.stdout.flush()
+                result_lines.append("Nearest telnet match: (none)")
 
     if terminal_unknown:
         fp_data = data.get("terminal-probe", {}).get("fingerprint-data")
         if fp_data:
-            sys.stdout.write("Nearest terminal match: ")
-            sys.stdout.flush()
             result = _find_nearest_match(fp_data, "terminal-probe", names)
             if result:
-                sys.stdout.write(_color_match(term, *result) + "\n")
+                result_lines.append(
+                    f"Nearest terminal match: {_color_match(term, *result)}")
             else:
-                sys.stdout.write("(none)\n")
-            sys.stdout.flush()
+                result_lines.append("Nearest terminal match: (none)")
+    return result_lines
 
 
 def _repl_prompt(
@@ -876,11 +880,35 @@ def _paginate(
                 f"{term.normal}\r{term.clear_eol}"
                 f"{_cursor_hide(term, truecolor)}")
             sys.stdout.flush()
-            if key == "s":
+            if key == "s" or getattr(key, "name", None) == "KEY_UP":
                 return
             elif key == "n":
                 nonstop = True
+            # 'c', KEY_DOWN, KEY_RIGHT, return — all continue
     sys.stdout.flush()
+
+
+def _colorize_json(data: Any, term=None) -> str:
+    """Format JSON with color via ``jq`` when available, plain otherwise.
+
+    :param term: blessed Terminal instance for ``TERM`` kind.
+    """
+    json_str = json.dumps(data, indent=2, sort_keys=True)
+    if _JQ:
+        env = {"TERM": getattr(term, "kind", None) or "dumb"}
+        colorterm = os.environ.get("COLORTERM")
+        if colorterm:
+            env["COLORTERM"] = colorterm
+        result = subprocess.run(
+            [_JQ, "-C", "."],
+            input=json_str,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if result.returncode == 0:
+            return result.stdout.rstrip("\n")
+    return json_str
 
 
 def _strip_empty_features(d: Dict[str, Any]) -> None:
@@ -1013,7 +1041,7 @@ def _show_detail(term, data: Dict[str, Any], section: str) -> None:
         text = (f"{term.magenta(title)}\n"
                 f"{underline}\n"
                 f"\n"
-                f"{json.dumps(detail, indent=2, sort_keys=True)}")
+                f"{_colorize_json(detail, term)}")
         _paginate(term, text, _has_unicode(data), truecolor)
     else:
         sys.stdout.write(f"{term.magenta(title)}\n{underline}\n\n(no data)\n")
