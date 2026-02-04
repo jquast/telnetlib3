@@ -220,7 +220,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         n = len(data)
         i = 0
         out_start = 0
-        feeding_oob = False
+        feeding_oob = bool(writer.is_oob)
 
         while i < n:
             if not feeding_oob:

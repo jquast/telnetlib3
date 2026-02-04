@@ -20,7 +20,7 @@ import logging
 import termios
 
 # local
-from .telopt import NAWS
+from .telopt import NAWS, ECHO, WONT
 
 __all__ = ("make_pty_shell", "pty_shell", "PTYSpawnError")
 
@@ -49,7 +49,7 @@ def _platform_check():
 class PTYSession:
     """Manages a PTY session lifecycle."""
 
-    def __init__(self, reader, writer, program, args, *, preexec_fn=None):
+    def __init__(self, reader, writer, program, args, *, preexec_fn=None, raw_mode=False):
         """
         Initialize PTY session.
 
@@ -60,12 +60,15 @@ class PTYSession:
         :param preexec_fn: Optional callable to run in child before exec. Called with no arguments
             after fork but before _setup_child. Useful for test coverage tracking in the forked
             child process.
+        :param raw_mode: If True, disable PTY echo and canonical mode. Use for programs that
+            handle their own terminal I/O (e.g., blessed, curses, ucs-detect).
         """
         self.reader = reader
         self.writer = writer
         self.program = program
         self.args = args or []
         self.preexec_fn = preexec_fn
+        self.raw_mode = raw_mode
         self.master_fd = None
         self.child_pid = None
         self._closing = False
@@ -194,13 +197,22 @@ class PTYSession:
             winsize = struct.pack("HHHH", rows, cols, 0, 0)
             fcntl.ioctl(sys.stdout.fileno(), termios.TIOCSWINSZ, winsize)
 
-        # Configure PTY for telnet's character-at-a-time mode (WILL SGA, WILL ECHO).
-        # Disable local echo and canonical mode, but keep output processing so
-        # newlines are translated to CR-LF properly.
         attrs = termios.tcgetattr(sys.stdin.fileno())
-        # c_lflag: disable ECHO (telnet handles echo) and ICANON (char-at-a-time)
-        attrs[3] &= ~(termios.ECHO | termios.ICANON)
-        # Keep c_oflag intact - OPOST and ONLCR translate \n to \r\n
+
+        if self.raw_mode:
+            # Raw mode: disable echo and canonical mode for programs that handle
+            # their own terminal I/O (blessed, curses, ucs-detect). This prevents
+            # terminal responses from being echoed back through the PTY.
+            attrs[3] &= ~(termios.ECHO | termios.ICANON)
+        else:
+            # Normal mode: Keep ECHO and ICANON enabled for proper input()
+            # behavior. We sent WONT ECHO to the client, so the PTY handles echo
+            # with proper output translation (ONLCR: \n → \r\n).
+            pass
+
+        # Set VERASE to ^H (0x08) since many telnet clients send ^H for backspace
+        # (default PTY ERASE is often ^? which won't work for those clients).
+        attrs[6][termios.VERASE] = 8  # ^H
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSANOW, attrs)
 
         # Save coverage data before exec replaces the process
@@ -344,12 +356,17 @@ class PTYSession:
                     break
 
     def _write_to_pty(self, data):
-        """Write data from telnet to PTY."""
+        """Write data from telnet to PTY.
+
+        Translates DEL (0x7F) to ``^H`` (0x08) so that both backspace
+        encodings work with the PTY's VERASE setting (``^H``).
+        """
         if self.master_fd is None:
             return
         if isinstance(data, str):
             charset = self.writer.get_extra_info("charset") or "utf-8"
             data = data.encode(charset, errors="replace")
+        data = data.replace(b"\x7f", b"\x08")
         try:
             os.write(self.master_fd, data)
         except OSError:
@@ -502,7 +519,7 @@ async def _wait_for_terminal_info(writer, timeout=2.0):
         await asyncio.sleep(0.1)
 
 
-async def pty_shell(reader, writer, program, args=None, preexec_fn=None):
+async def pty_shell(reader, writer, program, args=None, preexec_fn=None, raw_mode=False):
     """
     PTY shell callback for telnet server.
 
@@ -511,12 +528,25 @@ async def pty_shell(reader, writer, program, args=None, preexec_fn=None):
     :param str program: Path to program to execute.
     :param list args: List of arguments for the program.
     :param preexec_fn: Optional callable to run in child before exec.
+    :param raw_mode: If True, disable PTY echo and canonical mode. Use for programs
+        that handle their own terminal I/O (e.g., blessed, curses, ucs-detect).
     """
     _platform_check()
 
     await _wait_for_terminal_info(writer, timeout=2.0)
 
-    session = PTYSession(reader, writer, program, args, preexec_fn=preexec_fn)
+    # Echo handling depends on raw_mode:
+    # - Normal mode: Send WONT ECHO so client does local echo, PTY handles
+    #   echo with proper ONLCR translation (\n → \r\n) for input() display.
+    # - Raw mode: Keep WILL ECHO so client doesn't local-echo, but PTY echo
+    #   is disabled. This prevents terminal responses (CPR, etc.) from being
+    #   echoed back. The program handles its own output.
+    if not raw_mode and writer.will_echo:
+        writer.iac(WONT, ECHO)
+        await writer.drain()
+
+    session = PTYSession(reader, writer, program, args, preexec_fn=preexec_fn,
+                         raw_mode=raw_mode)
     try:
         session.start()
         await session.run()
@@ -526,7 +556,7 @@ async def pty_shell(reader, writer, program, args=None, preexec_fn=None):
             writer.close()
 
 
-def make_pty_shell(program, args=None, preexec_fn=None):
+def make_pty_shell(program, args=None, preexec_fn=None, raw_mode=False):
     """
     Factory returning a shell callback for PTY execution.
 
@@ -534,6 +564,8 @@ def make_pty_shell(program, args=None, preexec_fn=None):
     :param list args: List of arguments for the program.
     :param preexec_fn: Optional callable to run in child before exec.
         Useful for test coverage tracking in the forked child process.
+    :param raw_mode: If True, disable PTY echo and canonical mode. Use for programs
+        that handle their own terminal I/O (e.g., blessed, curses, ucs-detect).
     :returns: Async shell callback suitable for use with create_server().
 
     Example usage::
@@ -548,6 +580,7 @@ def make_pty_shell(program, args=None, preexec_fn=None):
     """
 
     async def shell(reader, writer):
-        await pty_shell(reader, writer, program, args, preexec_fn=preexec_fn)
+        await pty_shell(reader, writer, program, args, preexec_fn=preexec_fn,
+                        raw_mode=raw_mode)
 
     return shell

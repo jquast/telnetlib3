@@ -470,6 +470,14 @@ def test_handle_sb_forwardmask_assertions_and_do_raises_notimplemented():
         wc._handle_sb_forwardmask(DO, collections.deque([b"x", b"y"]))
 
 
+def test_handle_sb_linemode_mode_empty_buffer():
+    ws, _, _ = new_writer(server=True)
+    ws.local_option[LINEMODE] = True
+    ws.remote_option[LINEMODE] = True
+    with pytest.raises(ValueError, match="missing mode byte"):
+        ws._handle_sb_linemode_mode(collections.deque())
+
+
 def test_handle_sb_linemode_switches():
     ws, ts, _ = new_writer(server=True)
 
@@ -508,3 +516,64 @@ def test_handle_subnegotiation_dispatch_and_unhandled():
     ws._handle_sb_naws(buf)
 
     # unhandled command
+    with pytest.raises(ValueError, match="SB unhandled"):
+        ws.handle_subnegotiation(collections.deque([b"\x99", b"\x00"]))
+
+
+async def test_server_data_received_split_sb_linemode():
+    from telnetlib3.server_base import BaseServer
+
+    class NoNegServer(BaseServer):
+        def begin_negotiation(self):
+            pass
+
+        def _check_negotiation_timer(self):
+            pass
+
+    transport = MockTransport()
+    transport.pause_reading = lambda: None
+    transport.resume_reading = lambda: None
+    server = NoNegServer(encoding=False)
+    server.connection_made(transport)
+
+    server.writer.remote_option[LINEMODE] = True
+    server.writer.local_option[LINEMODE] = True
+
+    transport.writes.clear()
+
+    chunk1 = IAC + SB + LINEMODE + slc.LMODE_MODE
+    server.data_received(chunk1)
+    assert server.writer.is_oob
+
+    mask_byte = b"\x10"
+    chunk2 = mask_byte + IAC + SE
+    server.data_received(chunk2)
+
+    response = b"".join(transport.writes)
+    assert IAC + SB + LINEMODE + slc.LMODE_MODE in response
+
+
+async def test_client_process_chunk_split_sb_linemode():
+    from telnetlib3.client_base import BaseClient
+
+    transport = MockTransport()
+    transport.pause_reading = lambda: None
+    transport.resume_reading = lambda: None
+    client = BaseClient(encoding=False)
+    client.connection_made(transport)
+
+    client.writer.remote_option[LINEMODE] = True
+    client.writer.local_option[LINEMODE] = True
+
+    transport.writes.clear()
+
+    chunk1 = IAC + SB + LINEMODE + slc.LMODE_MODE
+    client._process_chunk(chunk1)
+    assert client.writer.is_oob
+
+    mask_byte = b"\x10"
+    chunk2 = mask_byte + IAC + SE
+    client._process_chunk(chunk2)
+
+    response = b"".join(transport.writes)
+    assert IAC + SB + LINEMODE + slc.LMODE_MODE in response

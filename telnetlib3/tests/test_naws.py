@@ -157,3 +157,34 @@ async def test_telnet_client_send_naws_65534(bind_host, unused_tcp_port):
             recv_cols, recv_rows = await asyncio.wait_for(_waiter, 0.5)
             assert recv_cols == expect_cols
             assert recv_rows == expect_rows
+
+
+async def test_naws_without_will(bind_host, unused_tcp_port):
+    """NAWS subnegotiation received without prior WILL NAWS is tolerated."""
+    from telnetlib3.telopt import SB, SE, IAC, NAWS
+    from telnetlib3.tests.accessories import create_server, asyncio_connection
+
+    _waiter = asyncio.Future()
+    given_cols, given_rows = 132, 43
+
+    class ServerTestNaws(telnetlib3.TelnetServer):
+        def on_naws(self, rows, cols):
+            super().on_naws(rows, cols)
+            _waiter.set_result(self)
+
+    async with create_server(
+        protocol_factory=ServerTestNaws,
+        host=bind_host,
+        port=unused_tcp_port,
+        connect_maxwait=0.05,
+    ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
+            writer.write(
+                IAC + SB + NAWS
+                + struct.pack("!HH", given_cols, given_rows)
+                + IAC + SE
+            )
+
+            srv_instance = await asyncio.wait_for(_waiter, 0.5)
+            assert srv_instance.get_extra_info("cols") == given_cols
+            assert srv_instance.get_extra_info("rows") == given_rows

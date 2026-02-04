@@ -19,6 +19,7 @@ from . import slc
 from . import telnetlib
 from . import guard_shells
 from . import fingerprinting
+from . import fingerprinting_display
 from . import sync
 from .server_base import *  # noqa
 from .server import *  # noqa
@@ -32,6 +33,7 @@ from .slc import *  # noqa
 from .telnetlib import *  # noqa
 from .guard_shells import *  # noqa
 from .fingerprinting import *  # noqa
+from .fingerprinting_display import *  # noqa
 from .sync import *  # noqa
 try:
     from . import server_pty_shell

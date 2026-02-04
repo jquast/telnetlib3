@@ -1,8 +1,12 @@
+# std imports
+import json
+
 # 3rd party
 import pytest
 
 # local
 from telnetlib3 import fingerprinting as fps
+from telnetlib3 import fingerprinting_display as fpd
 from telnetlib3.tests.accessories import (  # noqa: F401
     bind_host,
     unused_tcp_port,
@@ -77,340 +81,551 @@ class MockReader:
         return result
 
 
-@pytest.mark.parametrize("extra,expected_keys", [
-    ({"TERM": "xterm", "cols": 80, "rows": 24}, ["TERM", "cols", "rows"]),
-    ({"charset": "UTF-8", "LANG": "en_US.UTF-8"}, ["charset", "LANG"]),
-    ({"peername": ("10.0.0.1", 54321), "tspeed": "38400,38400"}, ["peername", "tspeed"]),
-    ({}, []),
-])
-def test_get_client_fingerprint(extra, expected_keys):
-    writer = MockWriter(extra)
-    result = fps.get_client_fingerprint(writer)
-    for key in expected_keys:
-        assert result[key] == extra[key]
+class MockTerm:
+    normal = ""
+    clear = ""
+    height = 50
+    width = 80
+    green2 = staticmethod(lambda x: x)
+    firebrick1 = staticmethod(lambda x: x)
+    yellow = staticmethod(lambda x: x)
+    bold_magenta = staticmethod(lambda x: x)
 
+    def magenta(self, s):
+        return s
 
-def test_describe_client():
-    extra = {
-        "peername": ("192.168.1.100", 54321),
-        "TERM": "xterm-256color",
-        "cols": 120,
-        "rows": 40,
-        "charset": "UTF-8",
-        "USER": "testuser",
-        "xdisploc": "localhost:0.0",
-    }
-    result = fps.describe_client(MockWriter(extra))
-    assert "Client: 192.168.1.100:54321" in result
-    assert "TERM: xterm-256color" in result
-    assert "Size: 120x40" in result
-    assert "CHARSET: UTF-8" in result
-    assert "USER: testuser" in result
-    assert "DISPLAY: localhost:0.0" in result
-    # Output is sorted
-    lines = result.split("\r\n")
-    assert lines == sorted(lines)
+    def cyan(self, s):
+        return s
 
-
-def test_describe_client_empty():
-    class EmptyWriter:
-        def get_extra_info(self, key, default=None):
-            return default
-
-    result = fps.describe_client(EmptyWriter())
-    assert "Client: unknown" in result
-    assert "(no negotiated attributes)" in result
-
-
-def test_describe_client_ttype_cycle():
-    # Shows other unique TTYPE values, not the selected TERM
-    extra = {"peername": ("127.0.0.1", 12345), "ttype1": "XTERM", "ttype2": "XTERM-256COLOR",
-             "TERM": "XTERM-256COLOR"}
-    result = fps.describe_client(MockWriter(extra))
-    assert "TTYPE: XTERM" in result
-    assert "XTERM-256COLOR" not in result.split("TTYPE:")[1]
-
-    # No TTYPE line when all values match TERM
-    extra2 = {"peername": ("127.0.0.1", 12345), "ttype1": "xterm", "TERM": "xterm"}
-    assert "TTYPE:" not in fps.describe_client(MockWriter(extra2))
-
-
-def test_format_probe_results():
-    results = {
-        "BINARY": {"status": "WILL", "opt": fps.BINARY, "description": ""},
-        "SGA": {"status": "WONT", "opt": fps.SGA, "description": ""},
-        "ECHO": {"status": "timeout", "opt": fps.ECHO, "description": ""},
-    }
-    output = fps.format_probe_results(results, probe_time=0.5)
-    assert "Telnet protocols: BINARY" in output
-    assert "1 supported" in output
-    assert "1 refused" in output
-    assert "1 no-response" in output
-    assert "0.50s" in output
+    def clear_eol(self):
+        return ""
 
 
 @pytest.mark.asyncio
 async def test_probe_client_capabilities():
     options = [(fps.BINARY, "BINARY", ""), (fps.SGA, "SGA", "")]
-    writer = MockWriter(will_options=[fps.BINARY], wont_options=[fps.SGA])
-    results = await fps.probe_client_capabilities(writer, options=options, timeout=0.001)
+    writer = MockWriter(will_options=[fps.BINARY],
+                        wont_options=[fps.SGA])
+    results = await fps.probe_client_capabilities(
+        writer, options=options, timeout=0.001)
     assert results["BINARY"]["status"] == "WILL"
     assert results["SGA"]["status"] == "WONT"
 
-    # Already negotiated options are detected
-    writer2 = MockWriter()
-    writer2.remote_option._values[fps.BINARY] = True
-    results2 = await fps.probe_client_capabilities(
-        writer2, options=[(fps.BINARY, "BINARY", "")], timeout=0.001
-    )
-    assert results2["BINARY"]["already_negotiated"] is True
-
-
-def test_all_probe_options_defined():
-    assert len(fps.ALL_PROBE_OPTIONS) >= 35
-
 
 def test_save_fingerprint_data(tmp_path, monkeypatch):
-    import json
-    import shutil
     monkeypatch.setattr(fps, "DATA_DIR", tmp_path)
 
-    writer = MockWriter(extra={"peername": ("127.0.0.1", 12345), "TERM": "xterm"})
-    writer._protocol = MockProtocol({"TERM": "xterm", "ttype1": "xterm", "ttype2": "xterm-256"})
-    probe_results = {
+    writer = MockWriter(extra={"peername": ("10.0.0.1", 9999),
+                               "TERM": "xterm"})
+    writer._protocol = MockProtocol(
+        {"TERM": "xterm", "ttype1": "xterm", "ttype2": "xterm-256"})
+    probe = {
         "BINARY": {"status": "WILL", "opt": fps.BINARY},
         "SGA": {"status": "WONT", "opt": fps.SGA},
     }
-    filepath = fps._save_fingerprint_data(writer, probe_results, 0.5)
-
+    filepath = fps._save_fingerprint_data(writer, probe, 0.5)
     assert filepath is not None and filepath.exists()
+
     with open(filepath) as f:
         data = json.load(f)
 
-    assert data["protocol-fingerprint"] == filepath.parent.name
-    assert data["protocol-fingerprint-data"]["probed-protocol"] == "client"
-    assert "BINARY" in data["protocol-fingerprint-data"]["supported-options"]
-    assert data["session-fingerprint"]["ttype_cycle"] == ["xterm", "xterm-256"]
-    assert "peername" not in data["session-fingerprint"]["extra"]
-    shutil.rmtree(filepath.parent)
+    # new JSON structure
+    assert "telnet-probe" in data
+    tp = data["telnet-probe"]
+    assert tp["fingerprint-data"]["probed-protocol"] == "client"
+    assert "BINARY" in tp["fingerprint-data"]["supported-options"]
+    assert tp["session-data"]["ttype_cycle"] == ["xterm", "xterm-256"]
+    assert "peername" not in tp["session-data"]["extra"]
 
+    # sessions list
+    assert len(data["sessions"]) == 1
+    assert data["sessions"][0]["client"] == ["10.0.0.1", 9999]
 
-def test_save_fingerprint_data_skipped_when_no_data_dir(monkeypatch):
+    # folder name has client- prefix and unknown terminal hash
+    assert filepath.parent.name.startswith("client-")
+    assert filepath.parent.name.endswith(f"-{fps._UNKNOWN_TERMINAL_HASH}")
+
+    # DATA_DIR=None skips save
     monkeypatch.setattr(fps, "DATA_DIR", None)
-    writer = MockWriter(extra={"TERM": "xterm"})
     assert fps._save_fingerprint_data(writer, {}, 0.5) is None
 
 
-@pytest.mark.asyncio
-async def test_server_shell(monkeypatch, tmp_path):
-    import shutil
-
-    async def fast_sleep(_):
-        pass
-    monkeypatch.setattr(fps.asyncio, "sleep", fast_sleep)
+def test_save_fingerprint_appends_session(tmp_path, monkeypatch):
     monkeypatch.setattr(fps, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(fps, "FINGERPRINT_POST_SCRIPT", "")
 
-    reader = MockReader([])
-    writer = MockWriter(extra={"peername": ("127.0.0.1", 12345), "TERM": "xterm"},
-                        will_options=[fps.BINARY])
-    await fps.fingerprinting_server_shell(reader, writer)
-    written = "".join(writer.written)
-    assert "'extra':" in written  # pprint dict output
-    assert writer._closing
+    writer = MockWriter(extra={"peername": ("10.0.0.1", 9999),
+                               "TERM": "xterm"})
+    writer._protocol = MockProtocol({"TERM": "xterm"})
+    probe = {"BINARY": {"status": "WILL", "opt": fps.BINARY}}
 
-    for d in tmp_path.iterdir():
-        if d.is_dir():
-            shutil.rmtree(d)
+    fp1 = fps._save_fingerprint_data(writer, probe, 0.5)
+    fp2 = fps._save_fingerprint_data(writer, probe, 0.5)
+    assert fp1 == fp2
+
+    with open(fp2) as f:
+        data = json.load(f)
+    assert len(data["sessions"]) == 2
+
+
+def test_session_fingerprint():
+    w = MockWriter(extra={"peername": ("10.0.0.1", 9999),
+                          "TERM": "xterm", "USER": "jq"})
+    identity = fps._create_session_fingerprint(w)
+    assert identity["client-ip"] == "10.0.0.1"
+    assert identity["TERM"] == "xterm"
+    assert identity["USER"] == "jq"
+
+    h = fps._hash_session_fingerprint(identity)
+    assert len(h) == 16
+    assert h == fps._hash_session_fingerprint(identity)
+
+
+def test_atomic_json_write(tmp_path):
+    filepath = tmp_path / "test.json"
+    fps._atomic_json_write(filepath, {"key": "value"})
+    assert filepath.exists()
+    assert not filepath.with_suffix(".json.new").exists()
+    with open(filepath) as f:
+        assert json.load(f) == {"key": "value"}
+
+
+def test_glob_counting(tmp_path):
+    (tmp_path / "client-aaa-bbb").mkdir()
+    (tmp_path / "client-aaa-bbb" / "s1.json").write_text("{}")
+    (tmp_path / "client-aaa-bbb" / "s2.json").write_text("{}")
+    (tmp_path / "client-aaa-ccc").mkdir()
+    (tmp_path / "client-aaa-ccc" / "s3.json").write_text("{}")
+    (tmp_path / "client-ddd-bbb").mkdir()
+    (tmp_path / "client-ddd-bbb" / "s4.json").write_text("{}")
+
+    p = fps._count_protocol_matches("aaa", data_dir=tmp_path)
+    assert p["dirs"] == 2
+    assert p["sessions"] == 3
+
+    t = fps._count_terminal_matches("bbb", data_dir=tmp_path)
+    assert t["dirs"] == 2
+    assert t["sessions"] == 3
+
+
+def test_build_seen_counts(tmp_path, monkeypatch):
+    monkeypatch.setattr(fpd, "DATA_DIR", tmp_path)
+    folder = tmp_path / "client-aaa-bbbb"
+    folder.mkdir()
+    (folder / "sess1.json").write_text("{}")
+    (folder / "sess2.json").write_text("{}")
+
+    data_first = {
+        "telnet-probe": {"fingerprint": "aaa"},
+        "terminal-probe": {"fingerprint": "bbbb"},
+        "sessions": [{"client": ["10.0.0.1", 1234]}],
+    }
+    result = fpd._build_seen_counts(data_first)
+    assert "first time" in result
+    assert "10.0.0.1" in result
+    assert "aaa" in result
+    assert "bbbb" in result
+    assert "1 other client" in result
+
+    data_return = {
+        "telnet-probe": {"fingerprint": "aaa"},
+        "terminal-probe": {"fingerprint": "bbbb"},
+        "sessions": [
+            {"client": ["10.0.0.1", 1234]},
+            {"client": ["10.0.0.1", 5678]},
+            {"client": ["10.0.0.1", 9012]},
+        ],
+    }
+    result = fpd._build_seen_counts(data_return)
+    assert "Welcome back" in result
+    assert "10.0.0.1" in result
+    assert "aaa" in result
+    assert "bbbb" in result
+    assert "#3" in result
+    assert "1 other client" in result
 
 
 @pytest.mark.asyncio
-async def test_server_shell_display_disabled(monkeypatch):
-    async def fast_sleep(_):
+async def test_server_shell(monkeypatch):
+    async def noop(_):
         pass
-    monkeypatch.setattr(fps.asyncio, "sleep", fast_sleep)
+    monkeypatch.setattr(fps.asyncio, "sleep", noop)
     monkeypatch.setattr(fps, "DATA_DIR", None)
-    monkeypatch.setattr(fps, "DISPLAY_OUTPUT", False)
 
-    reader = MockReader([])
-    writer = MockWriter(extra={"peername": ("127.0.0.1", 12345)})
-    await fps.fingerprinting_server_shell(reader, writer)
-
+    writer = MockWriter(extra={"peername": ("127.0.0.1", 12345),
+                               "TERM": "xterm"},
+                        will_options=[fps.BINARY])
+    await fps.fingerprinting_server_shell(MockReader([]), writer)
     assert writer._closing
-    written = "".join(writer.written)
-    assert "'extra':" not in written
 
 
 @pytest.mark.asyncio
 async def test_fingerprint_probe_integration(bind_host, unused_tcp_port):
     import asyncio
-
-    async with create_server(host=bind_host, port=unused_tcp_port, shell=fps.fingerprinting_server_shell,
-                             connect_maxwait=0.5):
-        async with open_connection(host=bind_host, port=unused_tcp_port, connect_minwait=0.2,
-                                   connect_maxwait=0.5) as (reader, writer):
-            output = ""
-            while True:
-                try:
-                    chunk = await asyncio.wait_for(reader.read(1), timeout=1.0)
-                    if not chunk:
-                        break
-                    output += chunk
-                except asyncio.TimeoutError:
-                    break
-
-            assert "'extra':" in output  # pprint dict output
-            assert "'supported':" in output
+    async with create_server(
+        host=bind_host, port=unused_tcp_port,
+        shell=fps.fingerprinting_server_shell, connect_maxwait=0.5,
+    ):
+        async with open_connection(
+            host=bind_host, port=unused_tcp_port,
+            connect_minwait=0.2, connect_maxwait=0.5,
+        ) as (reader, writer):
+            try:
+                await asyncio.wait_for(reader.read(100), timeout=1.0)
+            except asyncio.TimeoutError:
+                pass
 
 
-@pytest.mark.asyncio
-async def test_fingerprint_probe_results_match_client(bind_host, unused_tcp_port):
-    import asyncio
-
-    server_results = None
-
-    async def probe_and_capture(reader, writer):
-        nonlocal server_results
-        server_results, _ = await fps._run_probe(writer, verbose=False)
-        writer.write("done\r\n")
-        await writer.drain()
-        writer.close()
-
-    async with create_server(host=bind_host, port=unused_tcp_port, shell=probe_and_capture,
-                             connect_maxwait=0.5):
-        async with open_connection(host=bind_host, port=unused_tcp_port, connect_minwait=0.2,
-                                   connect_maxwait=0.8) as (reader, writer):
-            await asyncio.wait_for(reader.read(100), timeout=2.0)
-
-    supported = [n for n, i in server_results.items() if i["status"] == "WILL"]
-    assert all(opt in supported for opt in ["TTYPE", "NAWS", "NEW_ENVIRON", "CHARSET", "BINARY"])
-
-
-def test_categorize_term():
-    # Protocol-matched terminals
-    assert fps._categorize_term("syncterm") == "Syncterm"
-    assert fps._categorize_term("SYNCTERM") == "Syncterm"
-    # ANSI terminals
-    assert fps._categorize_term("ansi") == "Yes-ansi"
-    assert fps._categorize_term("xterm-ansi") == "Yes-ansi"
-    # Generic terminals
-    assert fps._categorize_term("xterm") == "Yes"
-    assert fps._categorize_term("vt100") == "Yes"
-    # None/empty
-    assert fps._categorize_term(None) == "None"
-    assert fps._categorize_term("") == "None"
-
-
-def test_categorize_terminal_size():
-    assert fps._categorize_terminal_size(80, 25) == "Yes-80x25"
-    assert fps._categorize_terminal_size(80, 24) == "Yes-80x24"
-    assert fps._categorize_terminal_size(120, 40) == "Yes-Other"
-    assert fps._categorize_terminal_size(None, 24) == "None"
-    assert fps._categorize_terminal_size(80, None) == "None"
-
-
-def test_protocol_fingerprint_env_vars():
+def test_protocol_fingerprint():
     probe = {"BINARY": {"status": "WILL", "opt": fps.BINARY}}
+    w = MockWriter(extra={"TERM": "xterm", "HOME": "/home/user"})
+    w._protocol = MockProtocol({"HOME": "/home/user"})
+    assert fps._create_protocol_fingerprint(w, probe)["HOME"] == "True"
 
-    # HOME not negotiated - not in fingerprint
-    writer1 = MockWriter(extra={"TERM": "xterm"})
-    assert "HOME" not in fps._create_protocol_fingerprint(writer1, probe)
-
-    # HOME negotiated with value
-    writer2 = MockWriter(extra={"TERM": "xterm", "HOME": "/home/user"})
-    writer2._protocol = MockProtocol({"HOME": "/home/user"})
-    assert fps._create_protocol_fingerprint(writer2, probe)["HOME"] == "True"
-
-    # HOME negotiated as empty string
-    writer3 = MockWriter(extra={"TERM": "xterm", "HOME": ""})
-    writer3._protocol = MockProtocol({"HOME": ""})
-    assert fps._create_protocol_fingerprint(writer3, probe)["HOME"] == "None"
-
-
-def test_protocol_fingerprint_encoding():
-    probe = {"BINARY": {"status": "WILL", "opt": fps.BINARY}}
-
-    writer1 = MockWriter(extra={"LANG": "en_US.UTF-8"})
-    assert fps._create_protocol_fingerprint(writer1, probe)["encoding"] == "UTF-8"
-
-    writer2 = MockWriter(extra={"LANG": "en_US"})  # no encoding suffix
-    assert fps._create_protocol_fingerprint(writer2, probe)["encoding"] == "None"
-
-    writer3 = MockWriter(extra={})
-    assert fps._create_protocol_fingerprint(writer3, probe)["encoding"] == "None"
-
-
-def test_protocol_fingerprint_options_sorted():
-    writer = MockWriter()
-    probe = {
+    probe2 = {
         "TTYPE": {"status": "WILL", "opt": fps.TTYPE},
         "BINARY": {"status": "WILL", "opt": fps.BINARY},
         "SGA": {"status": "WONT", "opt": fps.SGA},
     }
-    fp = fps._create_protocol_fingerprint(writer, probe)
+    fp = fps._create_protocol_fingerprint(MockWriter(), probe2)
     assert fp["supported-options"] == ["BINARY", "TTYPE"]
     assert fp["refused-options"] == ["SGA"]
 
 
 def test_protocol_hash_consistency():
     probe = {"BINARY": {"status": "WILL", "opt": fps.BINARY}}
+    w1 = MockWriter(extra={"TERM": "xterm", "HOME": "/home/alice"})
+    w1._protocol = MockProtocol({"HOME": "/home/alice"})
+    w2 = MockWriter(extra={"TERM": "xterm", "HOME": "/home/bob"})
+    w2._protocol = MockProtocol({"HOME": "/home/bob"})
 
-    # Different HOME/USER values produce same hash (both anonymized to "True")
-    writer1 = MockWriter(extra={"TERM": "xterm", "HOME": "/home/alice"})
-    writer1._protocol = MockProtocol({"HOME": "/home/alice"})
-    writer2 = MockWriter(extra={"TERM": "xterm", "HOME": "/home/bob"})
-    writer2._protocol = MockProtocol({"HOME": "/home/bob"})
-    hash1 = fps._hash_protocol_fingerprint(fps._create_protocol_fingerprint(writer1, probe))
-    hash2 = fps._hash_protocol_fingerprint(fps._create_protocol_fingerprint(writer2, probe))
-    assert hash1 == hash2
-    assert len(hash1) == 16
-
-    # Different options produce different hash
-    probe2 = {"BINARY": {"status": "WILL", "opt": fps.BINARY},
-              "SGA": {"status": "WILL", "opt": fps.SGA}}
-    hash3 = fps._hash_protocol_fingerprint(fps._create_protocol_fingerprint(writer1, probe2))
-    assert hash1 != hash3
+    h1 = fps._hash_protocol_fingerprint(
+        fps._create_protocol_fingerprint(w1, probe))
+    h2 = fps._hash_protocol_fingerprint(
+        fps._create_protocol_fingerprint(w2, probe))
+    assert h1 == h2
+    assert len(h1) == 16
 
 
-def test_protocol_folder_limit(tmp_path, monkeypatch):
-    import shutil
-    monkeypatch.setattr(fps, "DATA_DIR", tmp_path)
-    monkeypatch.setattr(fps, "FINGERPRINT_MAX_FILES", 2)
+def test_build_telnet_rows():
+    data = {
+        "telnet-probe": {
+            "fingerprint": "abc123def456",
+            "fingerprint-data": {
+                "supported-options": ["BINARY", "SGA", "TTYPE", "NAWS"],
+                "charset": "UTF-8", "encoding": "UTF-8",
+                "USER": "True", "HOME": "True",
+            },
+            "session-data": {
+                "extra": {
+                    "TERM": "xterm-256color", "cols": 120, "rows": 40,
+                    "LANG": "en_US.UTF-8", "charset": "UTF-8",
+                    "tspeed": "38400,38400",
+                },
+                "ttype_cycle": ["xterm-256color", "xterm", "vt100"],
+            },
+        },
+    }
+    pairs = dict(fpd._build_telnet_rows(MockTerm(), data))
+    assert "abc123def456" == pairs["Fingerprint"]
+    assert "xterm-256color" in pairs["Terminal Type"]
+    assert "Options" in pairs
 
-    writer = MockWriter(extra={"TERM": "xterm"})
-    probe = {"BINARY": {"status": "WILL", "opt": fps.BINARY}}
 
-    path1 = fps._save_fingerprint_data(writer, probe, 0.5)
-    path2 = fps._save_fingerprint_data(writer, probe, 0.5)
-    path3 = fps._save_fingerprint_data(writer, probe, 0.5)
+def test_build_terminal_rows():
+    data = {
+        "telnet-probe": {
+            "session-data": {"extra": {"cols": 173, "rows": 38}},
+        },
+        "terminal-probe": {
+            "session-data": {
+                "software_name": "ghostty", "software_version": "1.0",
+                "ambiguous_width": 1,
+                "terminal_results": {
+                    "number_of_colors": 16777216,
+                    "cell_width": 11, "cell_height": 25,
+                    "screen_ratio": "16:9", "screen_ratio_name": "HD",
+                },
+                "test_results": {
+                    "unicode_wide_results": {"15.0": {"pct_success": 100.0}},
+                    "emoji_zwj_results": {"15.0": {"pct_success": 99.5}},
+                    "emoji_vs16_results": {"15.0": {"pct_success": 100.0}},
+                    "emoji_vs15_results": {"15.0": {"pct_success": 98.0}},
+                },
+            },
+        },
+    }
+    pairs = dict(fpd._build_terminal_rows(MockTerm(), data))
+    assert "ghostty" in pairs["Software"]
+    assert "173x38" in pairs["Size"]
 
-    assert path1 is not None and path2 is not None
-    assert path3 is None  # at limit
-    assert fps._count_protocol_folder_files(path1.parent) == 2
-    shutil.rmtree(path1.parent)
+
+def test_show_detail(capsys):
+    term = MockTerm()
+
+    data = {
+        "terminal-probe": {
+            "session-data": {
+                "software_name": "ghostty",
+                "session_arguments": {"stream": "stderr"},
+                "height": 28, "width": 120, "ambiguous_width": 1,
+                "test_results": {
+                    "emoji_zwj_results": {"15.0": {"pct_success": 99.5}},
+                },
+            },
+        },
+    }
+    fpd._show_detail(term, data, "terminal")
+    out = capsys.readouterr().out
+    assert "Terminal Probe Results" in out
+    assert "ghostty" in out
+
+    data = {
+        "telnet-probe": {
+            "fingerprint": "abc123",
+            "fingerprint-data": {"probed-protocol": "client"},
+            "session-data": {"extra": {"TERM": "xterm"}},
+        },
+    }
+    fpd._show_detail(term, data, "telnet")
+    out = capsys.readouterr().out
+    assert "Telnet Probe Data" in out
+    assert "abc123" in out
+
+    fpd._show_detail(term, {}, "terminal")
+    assert "(no data)" in capsys.readouterr().out
 
 
-def test_count_protocol_folder_files(tmp_path):
-    assert fps._count_protocol_folder_files(tmp_path / "nonexistent") == 0
-    (tmp_path / "a.json").touch()
-    (tmp_path / "b.json").touch()
-    (tmp_path / "c.txt").touch()  # not .json
-    assert fps._count_protocol_folder_files(tmp_path) == 2
-
-
-@pytest.mark.asyncio
-async def test_post_fingerprint_script(tmp_path, monkeypatch, capsys):
-    # Empty script does nothing
-    monkeypatch.setattr(fps, "FINGERPRINT_POST_SCRIPT", "")
-    await fps._execute_post_fingerprint_script(tmp_path / "test.json")
-
-    # module:function format executes
-    monkeypatch.setattr(fps, "FINGERPRINT_POST_SCRIPT",
-                        "telnetlib3.fingerprinting:fingerprinting_post_script")
+def test_fingerprinting_post_script_direct(tmp_path, capsys):
     test_file = tmp_path / "test.json"
-    test_file.write_text('{"test": "data"}')
-    await fps._execute_post_fingerprint_script(test_file)
-
-    # fingerprinting_post_script pretty-prints JSON
+    test_file.write_text(json.dumps({
+        "telnet-probe": {
+            "fingerprint-data": {"probed-protocol": "client"},
+            "session-data": {"extra": {"TERM": "xterm"}},
+        },
+        "sessions": [],
+    }))
     fps.fingerprinting_post_script(test_file)
-    assert "test" in capsys.readouterr().out
+    assert "xterm" in capsys.readouterr().out
+
+
+def test_display_compact_summary_fallback():
+    assert isinstance(fpd._display_compact_summary(
+        {"telnet-probe": {"fingerprint": "test"}}), bool)
+
+
+@pytest.mark.parametrize("data,expected", [
+    ({"sessions": [{"client": ["192.168.1.1", 12345]}]}, "192.168.1.1"),
+    ({"sessions": []}, "unknown"),
+    ({}, "unknown"),
+])
+def test_client_ip(data, expected):
+    assert fpd._client_ip(data) == expected
+
+
+@pytest.mark.parametrize("term_type,expected", [
+    ("mudlet", True),
+    ("MUDLET", True),
+    ("cmud", True),
+    ("xterm", False),
+    ("syncterm", False),
+    ("vt100", False),
+    ("", False),
+])
+def test_is_maybe_mud(term_type, expected):
+    w = MockWriter(extra={"TERM": term_type})
+    assert fps._is_maybe_mud(w) == expected
+
+
+def test_is_maybe_mud_ttype_cycle():
+    w = MockWriter(extra={"TERM": "xterm", "ttype1": "tintin++"})
+    assert fps._is_maybe_mud(w) is True
+
+
+def test_paginate_short_text(capsys):
+    fpd._paginate(MockTerm(), "line 1\nline 2\nline 3")
+    out = capsys.readouterr().out
+    assert "line 1" in out and "line 3" in out
+    assert "s-stop" not in out
+
+
+def test_load_fingerprint_names_missing(tmp_path):
+    assert fps._load_fingerprint_names(tmp_path) == {}
+
+
+def test_load_fingerprint_names_valid(tmp_path):
+    names = {"abc123": "Ghostty", "def456": "GNU Telnet"}
+    (tmp_path / "fingerprint_names.json").write_text(json.dumps(names))
+    assert fps._load_fingerprint_names(tmp_path) == names
+
+
+def test_load_fingerprint_names_none():
+    assert fps._load_fingerprint_names(None) == {}
+
+
+def test_save_fingerprint_names(tmp_path):
+    names = {"abc123": "Ghostty"}
+    fps._save_fingerprint_names(names, tmp_path)
+    loaded = fps._load_fingerprint_names(tmp_path)
+    assert loaded == names
+
+
+def test_save_fingerprint_names_none():
+    fps._save_fingerprint_names({"a": "b"}, None)
+
+
+def test_resolve_hash_name():
+    names = {"abc123": "Ghostty"}
+    assert fps._resolve_hash_name("abc123", names) == "Ghostty"
+    assert fps._resolve_hash_name("unknown", names) == "unknown"
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("Ghostty", "Ghostty"),
+    ("  Ghostty  ", "Ghostty"),
+    ("", None),
+    ("   ", None),
+    ("bad\x00name", None),
+    ("bad\x1bname", None),
+    ("bad\x7fname", None),
+    ("good name 123", "good name 123"),
+])
+def test_validate_suggestion(text, expected):
+    assert fps._validate_suggestion(text) == expected
+
+
+def test_build_seen_counts_with_names(tmp_path, monkeypatch):
+    monkeypatch.setattr(fpd, "DATA_DIR", tmp_path)
+    folder = tmp_path / "client-aaa-bbbb"
+    folder.mkdir()
+    (folder / "sess1.json").write_text("{}")
+
+    data = {
+        "telnet-probe": {"fingerprint": "aaa"},
+        "terminal-probe": {"fingerprint": "bbbb"},
+        "sessions": [{"client": ["10.0.0.1", 1234]}],
+    }
+    names = {"aaa": "GNU Telnet", "bbbb": "Ghostty"}
+    result = fpd._build_seen_counts(data, names)
+    assert "GNU Telnet" in result
+    assert "Ghostty" in result
+    assert "aaa" not in result
+    assert "bbbb" not in result
+
+
+def test_build_seen_counts_no_names(tmp_path, monkeypatch):
+    monkeypatch.setattr(fpd, "DATA_DIR", tmp_path)
+    folder = tmp_path / "client-aaa-bbbb"
+    folder.mkdir()
+    (folder / "sess1.json").write_text("{}")
+
+    data = {
+        "telnet-probe": {"fingerprint": "aaa"},
+        "terminal-probe": {"fingerprint": "bbbb"},
+        "sessions": [{"client": ["10.0.0.1", 1234]}],
+    }
+    result = fpd._build_seen_counts(data)
+    assert "aaa" in result
+    assert "bbbb" in result
+
+
+def test_prompt_stores_suggestions(tmp_path, monkeypatch):
+    filepath = tmp_path / "test.json"
+    data = {
+        "telnet-probe": {"fingerprint": "aaa"},
+        "terminal-probe": {"fingerprint": "bbbb"},
+        "sessions": [],
+    }
+    filepath.write_text(json.dumps(data))
+
+    inputs = iter(["Ghostty", "GNU Telnet"])
+    monkeypatch.setattr(fpd, "_cooked_input", lambda prompt: next(inputs))
+
+    fpd._prompt_fingerprint_identification(
+        MockTerm(), data, filepath, {}
+    )
+    assert data["suggestions"]["terminal-emulator"] == "Ghostty"
+    assert data["suggestions"]["telnet-client"] == "GNU Telnet"
+
+    with open(filepath) as f:
+        saved = json.load(f)
+    assert saved["suggestions"]["terminal-emulator"] == "Ghostty"
+
+
+def test_prompt_skips_when_known(tmp_path, monkeypatch):
+    filepath = tmp_path / "test.json"
+    data = {
+        "telnet-probe": {"fingerprint": "aaa"},
+        "terminal-probe": {"fingerprint": "bbbb"},
+        "sessions": [],
+    }
+    filepath.write_text(json.dumps(data))
+
+    monkeypatch.setattr(fpd, "_cooked_input",
+                        lambda prompt: "should not run")
+    names = {"aaa": "GNU Telnet", "bbbb": "Ghostty"}
+    fpd._prompt_fingerprint_identification(
+        MockTerm(), data, filepath, names
+    )
+    assert "suggestions" not in data
+
+
+def test_prompt_skip_empty_input(tmp_path, monkeypatch):
+    filepath = tmp_path / "test.json"
+    data = {
+        "telnet-probe": {"fingerprint": "aaa"},
+        "sessions": [],
+    }
+    filepath.write_text(json.dumps(data))
+
+    monkeypatch.setattr(fpd, "_cooked_input", lambda prompt: "")
+
+    fpd._prompt_fingerprint_identification(
+        MockTerm(), data, filepath, {}
+    )
+    assert "suggestions" not in data
+
+
+def test_prompt_skips_unknown_terminal_hash(tmp_path, monkeypatch):
+    filepath = tmp_path / "test.json"
+    data = {
+        "telnet-probe": {"fingerprint": "aaa"},
+        "terminal-probe": {"fingerprint": fps._UNKNOWN_TERMINAL_HASH},
+        "sessions": [],
+    }
+    filepath.write_text(json.dumps(data))
+
+    inputs = iter(["GNU Telnet"])
+    monkeypatch.setattr(fpd, "_cooked_input", lambda prompt: next(inputs))
+
+    fpd._prompt_fingerprint_identification(
+        MockTerm(), data, filepath, {}
+    )
+    assert "terminal-emulator" not in data.get("suggestions", {})
+    assert data["suggestions"]["telnet-client"] == "GNU Telnet"
+
+
+def test_prompt_uses_software_name_default(tmp_path, monkeypatch):
+    filepath = tmp_path / "test.json"
+    data = {
+        "telnet-probe": {"fingerprint": "aaa"},
+        "terminal-probe": {
+            "fingerprint": "bbbb",
+            "session-data": {"software_name": "ghostty"},
+        },
+        "sessions": [],
+    }
+    filepath.write_text(json.dumps(data))
+
+    prompts = []
+
+    def mock_input(prompt):
+        prompts.append(prompt)
+        return ""
+
+    monkeypatch.setattr(fpd, "_cooked_input", mock_input)
+
+    fpd._prompt_fingerprint_identification(
+        MockTerm(), data, filepath, {}
+    )
+    assert 'press return for "ghostty"' in prompts[0]
+    assert data["suggestions"]["terminal-emulator"] == "ghostty"

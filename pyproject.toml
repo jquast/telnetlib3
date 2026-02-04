@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "telnetlib3"
 version = "2.1.0"
-description = "Python 3 asyncio Telnet server and client Protocol library"
+description = " Python Telnet server and client CLI and Protocol library"
 readme = "README.rst"
 license = "ISC"
 license-files = ["LICENSE"]
@@ -49,6 +49,11 @@ requires-python = ">=3.8"
 docs = [
     "Sphinx>3",
     "sphinx_rtd_theme",
+]
+extras = [
+    "ucs-detect>=2",
+    "prettytable",
+    "pyyaml",
 ]
 
 [project.scripts]

@@ -349,7 +349,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         n = len(data)
         i = 0
         out_start = 0
-        feeding_oob = False
+        feeding_oob = bool(writer.is_oob)
 
         # Build set of special bytes for fast lookup
         special_bytes = frozenset({255} | (slc_vals or set()))

@@ -13,6 +13,7 @@ after an idle period.
 
 # std imports
 import codecs
+import os
 import signal
 import asyncio
 import logging
@@ -49,9 +50,10 @@ class CONFIG(NamedTuple):
     encoding: str = "utf8"
     force_binary: bool = False
     timeout: int = 300
-    connect_maxwait: float = 4.0
+    connect_maxwait: float = 1.5
     pty_exec: Optional[str] = None
     pty_args: Optional[str] = None
+    pty_raw: bool = False
     robot_check: bool = False
     pty_fork_limit: int = 0
     status_interval: int = 20
@@ -363,6 +365,10 @@ class TelnetServer(server_base.BaseServer):
         # local
         from .telopt import VAR, USERVAR  # pylint: disable=import-outside-toplevel
 
+        # Parse additional keys from environment variable (comma-delimited)
+        additional = os.environ.get("TELNETLIB3_FINGERPRINT_ENVIRON_ADDITIONAL", "")
+        additional_keys = [k.strip() for k in additional.split(",") if k.strip()]
+
         return [
             # Well-known VAR (RFC 1572)
             "USER",
@@ -375,6 +381,36 @@ class TelnetServer(server_base.BaseServer):
             "COLORTERM",
             "HOME",
             "SHELL",
+            # SSH/remote connection info
+            "SSH_CLIENT",
+            "SSH_TTY",
+            # System info
+            "LOGNAME",
+            "HOSTNAME",
+            "HOSTTYPE",
+            "OSTYPE",
+            "PWD",
+            # Editor preferences
+            "EDITOR",
+            "VISUAL",
+            # Terminal multiplexers
+            "TMUX",
+            "STY",
+            # Locale settings
+            "LC_ALL",
+            "LC_CTYPE",
+            "LC_MESSAGES",
+            "LC_COLLATE",
+            "LC_TIME",
+            # Container/remote
+            "DOCKER_HOST",
+            # Shell history
+            "HISTFILE",
+            # Cloud
+            "AWS_PROFILE",
+            "AWS_REGION",
+            # Additional keys from TELNETLIB3_FINGERPRINT_ENVIRON_ADDITIONAL
+            *additional_keys,
             # Request any other VAR/USERVAR the client wants to send
             VAR,
             USERVAR,
@@ -622,6 +658,7 @@ class StatusLogger:
                     "port": peername[1],
                     "rx": getattr(client, "rx_bytes", 0),
                     "tx": getattr(client, "tx_bytes", 0),
+                    "idle": int(getattr(client, "idle", 0)),
                 }
             )
         client_data.sort(key=lambda x: (x["ip"], x["port"]))
@@ -638,7 +675,8 @@ class StatusLogger:
         if status["count"] == 0:
             return "0 clients connected"
         client_info = ", ".join(
-            f"{c['ip']}:{c['port']} (rx={c['rx']}, tx={c['tx']})" for c in status["clients"]
+            f"{c['ip']}:{c['port']} (rx={c['rx']}, tx={c['tx']}, idle={c['idle']})"
+            for c in status["clients"]
         )
         return f"{status['count']} client(s): {client_info}"
 
@@ -806,6 +844,13 @@ def parse_server_args():
             default=_config.pty_fork_limit,
             help="limit concurrent PTY connections (0 disables)",
         )
+        parser.add_argument(
+            "--pty-raw",
+            action="store_true",
+            default=_config.pty_raw,
+            help="raw mode for --pty-exec: disable PTY echo for programs that "
+                 "handle their own terminal I/O (curses, blessed, ucs-detect)",
+        )
     parser.add_argument(
         "--robot-check",
         action="store_true",
@@ -827,6 +872,7 @@ def parse_server_args():
     if not PTY_SUPPORT:
         result["pty_exec"] = None
         result["pty_fork_limit"] = 0
+        result["pty_raw"] = False
     return result
 
 
@@ -843,6 +889,7 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
     connect_maxwait=_config.connect_maxwait,
     pty_exec=_config.pty_exec,
     pty_args=_config.pty_args,
+    pty_raw=_config.pty_raw,
     robot_check=_config.robot_check,
     pty_fork_limit=_config.pty_fork_limit,
     status_interval=_config.status_interval,
@@ -863,7 +910,7 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
         # local
         from .server_pty_shell import make_pty_shell  # pylint: disable=import-outside-toplevel
 
-        shell = make_pty_shell(pty_exec, pty_args)
+        shell = make_pty_shell(pty_exec, pty_args, raw_mode=pty_raw)
 
     # Wrap shell with guards if enabled
     if robot_check or pty_fork_limit:

@@ -2059,9 +2059,12 @@ class TelnetWriter:
         cmd = buf.popleft()
         assert cmd == NAWS, name_command(cmd)
         assert len(buf) == 4, f"bad NAWS length {len(buf)}: {buf!r}"
-        assert self.remote_option.enabled(
-            NAWS
-        ), "received IAC SB NAWS without receipt of IAC WILL NAWS"
+        if not self.remote_option.enabled(NAWS):
+            self.log.info(
+                "received IAC SB NAWS without receipt of IAC WILL NAWS"
+                " -- assuming NAWS-enabled"
+            )
+            self.remote_option[NAWS] = True
         # note a similar formula:
         #
         #    cols, rows = ((256 * buf[0]) + buf[1],
@@ -2244,6 +2247,8 @@ class TelnetWriter:
         Result of agreement to enter ``mode`` given applied by setting the
         value of ``self.linemode``, and sending acknowledgment if necessary.
         """
+        if not mode:
+            raise ValueError("IAC SB LINEMODE LINEMODE-MODE: missing mode byte")
         suggest_mode = slc.Linemode(mode[0])
 
         self.log.debug("recv IAC SB LINEMODE LINEMODE-MODE %r IAC SE", suggest_mode.mask)

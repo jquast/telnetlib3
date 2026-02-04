@@ -1,29 +1,27 @@
 """
 Fingerprint shell for telnet client identification.
 
-This shell displays all negotiated telnet options and client environment
-information, useful for identifying client capabilities and debugging
-telnet negotiation.
-
-The shell supports active probing of ALL telnet protocol capabilities,
-similar to how ucs-detect probes terminal capabilities.
+This module probes telnet protocol capabilities, collects session data,
+and saves fingerprint files.  Display, REPL, and post-script code live
+in :mod:`telnetlib3.fingerprinting_display`.
 """
 
 # std imports
 import asyncio
+import datetime
+import glob as glob_mod
 import hashlib
 import json
 import logging
 import os
-import pprint
 import time
-import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .accessories import encoding_from_lang
 from .telopt import (
     DO,
+    DONT,
     BINARY,
     SGA,
     ECHO,
@@ -90,15 +88,31 @@ FINGERPRINT_MAX_FINGERPRINTS = int(
 )
 
 # Post-fingerprint Python module to execute with saved file path
-# Example: TELNETLIB3_FINGERPRINT_POST_SCRIPT=telnetlib3.fingerprinting:fingerprinting_post_script
+# Example: TELNETLIB3_FINGERPRINT_POST_SCRIPT=telnetlib3.fingerprinting_display
 FINGERPRINT_POST_SCRIPT = os.environ.get("TELNETLIB3_FINGERPRINT_POST_SCRIPT", "")
 
-# Disable display output to client (still probes and saves)
-DISPLAY_OUTPUT = os.environ.get("TELNETLIB3_FINGERPRINT_DISPLAY", "1") == "1"
 
 # Terminal types that uniquely identify specific telnet clients
 PROTOCOL_MATCHED_TERMINALS = {
     "syncterm",  # SyncTERM BBS client
+}
+
+# Terminal types associated with MUD clients, matched case-insensitively.
+# These clients are likely to support extended options like GMCP.
+MUD_TERMINALS = {
+    "mudlet",
+    "cmud",
+    "zmud",
+    "mushclient",
+    "atlantis",
+    "tintin++",
+    "tt++",
+    "blowtorch",
+    "mudrammer",
+    "kildclient",
+    "portal",
+    "beip",
+    "savitar",
 }
 
 __all__ = (
@@ -134,8 +148,15 @@ CORE_OPTIONS = [
 ]
 
 MUD_OPTIONS = [
-    (GMCP, "GMCP", "Generic MUD Communication Protocol"),
     (COM_PORT_OPTION, "COM_PORT", "Serial port control (RFC 2217)"),
+]
+
+# Options with non-standard byte values (> 140) that crash some clients.
+# icy_term (icy_net) only accepts option bytes 0-49, 138-140, and 255,
+# returning a hard error for anything else. GMCP-capable MUD clients
+# typically self-announce via IAC WILL GMCP, so probing is unnecessary.
+EXTENDED_OPTIONS = [
+    (GMCP, "GMCP", "Generic MUD Communication Protocol"),
 ]
 
 LEGACY_OPTIONS = [
@@ -175,38 +196,36 @@ LEGACY_OPTIONS = [
 
 ALL_PROBE_OPTIONS = CORE_OPTIONS + MUD_OPTIONS + LEGACY_OPTIONS
 
+# All known options including extended, for display/name lookup only
+_ALL_KNOWN_OPTIONS = ALL_PROBE_OPTIONS + EXTENDED_OPTIONS
+
 # Build mapping from hex string (e.g., "0x03") to option name (e.g., "SGA")
 _OPT_BYTE_TO_NAME = {
-    f"0x{opt[0]:02x}": name for opt, name, _ in ALL_PROBE_OPTIONS
+    f"0x{opt[0]:02x}": name for opt, name, _ in _ALL_KNOWN_OPTIONS
 }
 
 
 def _display_fingerprint(session_fp: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Filter session fingerprint for display.
-
-    Only shows enabled/supported values and removes timing information.
-
-    :param session_fp: Raw session fingerprint dict.
-    :returns: Filtered dict suitable for display.
-    """
+    """Filter session fingerprint for display, removing timing and defaults."""
     result = {}
 
-    # Keep extra info as-is
     if session_fp.get("extra"):
-        result["extra"] = session_fp["extra"]
+        extra = dict(session_fp["extra"])
+        extra.pop("timeout", None)
+        cols = extra.get("cols")
+        rows = extra.get("rows")
+        if cols == 80 and rows == 25:
+            extra.pop("cols", None)
+            extra.pop("rows", None)
+        if extra:
+            result["extra"] = extra
 
-    # Keep ttype_cycle as-is
     if session_fp.get("ttype_cycle"):
         result["ttype_cycle"] = session_fp["ttype_cycle"]
 
-    # Filter probe to only WILL (supported), show as list of names
     if session_fp.get("probe"):
-        supported = session_fp["probe"].get("WILL", {})
-        if supported:
+        if supported := session_fp["probe"].get("WILL", {}):
             result["supported"] = sorted(supported.keys())
-
-    # option_states and timing intentionally omitted
 
     return result
 
@@ -216,12 +235,7 @@ CLEAR_EOL = "\x1b[K"
 
 
 def _update_status_line(writer, message: str) -> None:
-    """
-    Update the status line in place.
-
-    :param writer: TelnetWriter instance.
-    :param message: Message to display on the status line.
-    """
+    """Update the status line in place."""
     writer.write(f"\r{message}{CLEAR_EOL}")
 
 
@@ -251,7 +265,6 @@ async def probe_client_capabilities(
     results = {}
     to_probe = []
 
-    # First pass: collect already-negotiated options, queue others for probing
     for opt, name, description in options:
         if writer.remote_option.enabled(opt):
             results[name] = {
@@ -270,28 +283,24 @@ async def probe_client_capabilities(
         else:
             to_probe.append((opt, name, description))
 
-    # Send all DO requests at once
     for opt, name, description in to_probe:
-        try:
-            writer.iac(DO, opt)
-        except Exception as exc:
-            logger.debug("probe %s failed to send: %s", name, exc)
-            results[name] = {
-                "status": "error",
-                "opt": opt,
-                "description": description,
-                "error": str(exc),
-            }
+        writer.iac(DO, opt)
 
-    # Flush all requests
     await writer.drain()
 
-    # Wait for responses
-    await asyncio.sleep(timeout)
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        all_responded = all(
+            writer.remote_option.get(opt) is not None
+            for opt, name, desc in to_probe
+            if name not in results
+        )
+        if all_responded:
+            break
+        await asyncio.sleep(0.05)
 
-    # Collect results
     for idx, (opt, name, description) in enumerate(to_probe, 1):
-        if name in results:  # Already handled (error case)
+        if name in results:
             continue
 
         if progress_callback:
@@ -335,20 +344,16 @@ def format_probe_results(
     """
     lines = []
 
-    # Collect supported option names in probe order
     supported_names = []
     for opt, name, description in ALL_PROBE_OPTIONS:
         if name not in results:
             continue
-        info = results[name]
-        if info["status"] == "WILL":
+        if results[name]["status"] == "WILL":
             supported_names.append(name)
 
-    # Display as comma-separated list
     if supported_names:
         lines.append(f"Telnet protocols: {', '.join(supported_names)}")
 
-    # Summary line
     supported = len(supported_names)
     refused = sum(1 for r in results.values() if r["status"] == "WONT")
     no_response = sum(1 for r in results.values() if r["status"] == "timeout")
@@ -381,7 +386,6 @@ def get_client_fingerprint(writer) -> Dict[str, Any]:
     """
     fingerprint = {}
 
-    # Collect all known keys
     all_keys = (
         _TERMINAL_KEYS + _ENCODING_KEYS + _NETWORK_KEYS + _TTYPE_KEYS + _PROTOCOL_KEYS
     )
@@ -391,8 +395,6 @@ def get_client_fingerprint(writer) -> Dict[str, Any]:
         if value is not None and value != "":
             fingerprint[key] = value
 
-    # Also try to get any uppercase environment variables that may have been
-    # negotiated via NEW_ENVIRON
     for env_key in ("USER", "SHELL", "HOME", "PATH", "LOGNAME", "MAIL"):
         value = writer.get_extra_info(env_key)
         if value is not None and value != "":
@@ -411,19 +413,16 @@ def describe_client(writer) -> str:
     fingerprint = get_client_fingerprint(writer)
     attrs = []
 
-    # Client address
     peername = fingerprint.get("peername")
     if peername:
         attrs.append(f"Client: {peername[0]}:{peername[1]}")
     else:
         attrs.append("Client: unknown")
 
-    # Terminal info - TERM is the selected/final value
     term = fingerprint.get("TERM") or fingerprint.get("term")
     if term:
         attrs.append(f"TERM: {term}")
 
-        # Show other unique TTYPE values from cycle (excluding the selected TERM)
         ttype_values = []
         for key in _TTYPE_KEYS:
             if key in fingerprint:
@@ -435,17 +434,14 @@ def describe_client(writer) -> str:
         if other_types:
             attrs.append(f"TTYPE: {', '.join(other_types)}")
 
-    # Window size
     cols = fingerprint.get("cols") or fingerprint.get("COLUMNS")
     rows = fingerprint.get("rows") or fingerprint.get("LINES")
     if cols and rows:
         attrs.append(f"Size: {cols}x{rows}")
 
-    # Speed
     if "tspeed" in fingerprint:
         attrs.append(f"Speed: {fingerprint['tspeed']}")
 
-    # Encoding
     if "charset" in fingerprint:
         attrs.append(f"CHARSET: {fingerprint['charset']}")
     if "LANG" in fingerprint:
@@ -455,12 +451,10 @@ def describe_client(writer) -> str:
     if "COLORTERM" in fingerprint:
         attrs.append(f"COLORTERM: {fingerprint['COLORTERM']}")
 
-    # Display
     xdisploc = fingerprint.get("xdisploc") or fingerprint.get("DISPLAY")
     if xdisploc:
         attrs.append(f"DISPLAY: {xdisploc}")
 
-    # Environment variables
     for key in ("USER", "LOGNAME", "SHELL", "HOME", "MAIL", "PATH"):
         if key in fingerprint:
             attrs.append(f"{key}: {fingerprint[key]}")
@@ -468,28 +462,28 @@ def describe_client(writer) -> str:
     if len(attrs) <= 1:
         attrs.append("(no negotiated attributes)")
 
-    # Sort alphabetically
     attrs.sort()
 
     return CRLF.join(attrs)
 
 
-async def _run_probe(writer, verbose: bool = True) -> Tuple[Dict[str, Dict[str, Any]], float]:
-    """
-    Run active probe - sends all requests at once, waits, collects results.
-
-    :param writer: TelnetWriter instance.
-    :param verbose: Whether to show progress message.
-    :returns: Tuple of (probe results dict, elapsed time in seconds).
-    """
+async def _run_probe(
+    writer, verbose: bool = True
+) -> Tuple[Dict[str, Dict[str, Any]], float]:
+    """Run active probe, optionally extending to MUD options."""
     total = len(ALL_PROBE_OPTIONS)
     if verbose:
-        # use "clear_eos" sequence to continuously rewrite this line
         writer.write(f"\rProbing {total} telnet options...\x1b[J")
         await writer.drain()
 
     start_time = time.time()
     results = await probe_client_capabilities(writer, timeout=0.5)
+
+    if _is_maybe_mud(writer) and EXTENDED_OPTIONS:
+        ext_results = await probe_client_capabilities(
+            writer, options=EXTENDED_OPTIONS, timeout=0.5)
+        results.update(ext_results)
+
     elapsed = time.time() - start_time
 
     if verbose:
@@ -498,59 +492,37 @@ async def _run_probe(writer, verbose: bool = True) -> Tuple[Dict[str, Dict[str, 
     return results, elapsed
 
 
-def _opt_byte_to_hex(opt: bytes) -> str:
-    """Convert option bytes to hex string."""
+def _opt_byte_to_name(opt: bytes) -> str:
+    """Convert option bytes to name or hex string."""
     if isinstance(opt, bytes) and len(opt) > 0:
-        return f"0x{opt[0]:02x}"
+        hex_key = f"0x{opt[0]:02x}"
+        return _OPT_BYTE_TO_NAME.get(hex_key, hex_key)
     return str(opt)
 
 
 def _collect_option_states(writer) -> Dict[str, Dict[str, Any]]:
-    """
-    Collect all telnet option states from writer.
-
-    :param writer: TelnetWriter instance.
-    :returns: Dict with remote_option, local_option, pending_option states.
-    """
+    """Collect all telnet option states from writer."""
     options = {}
 
-    # Collect remote option states (what the client supports)
     remote = {}
     for opt, enabled in writer.remote_option.items():
-        opt_hex = _opt_byte_to_hex(opt)
-        remote[opt_hex] = enabled
-    options["remote_option"] = remote
+        remote[_opt_byte_to_name(opt)] = enabled
+    if remote:
+        options["remote"] = remote
 
-    # Collect local option states (what the server supports)
     local = {}
     for opt, enabled in writer.local_option.items():
-        opt_hex = _opt_byte_to_hex(opt)
-        local[opt_hex] = enabled
-    options["local_option"] = local
-
-    # Collect pending option states
-    pending = {}
-    for opt, is_pending in writer.pending_option.items():
-        if isinstance(opt, bytes):
-            opt_hex = _opt_byte_to_hex(opt)
-        else:
-            opt_hex = str(opt)
-        pending[opt_hex] = is_pending
-    options["pending_option"] = pending
+        local[_opt_byte_to_name(opt)] = enabled
+    if local:
+        options["local"] = local
 
     return options
 
 
 def _collect_extra_info(writer) -> Dict[str, Any]:
-    """
-    Collect all extra_info from writer, including private _extra dict.
-
-    :param writer: TelnetWriter instance.
-    :returns: Dict of all extra info values.
-    """
+    """Collect all extra_info from writer, including private _extra dict."""
     extra = {}
 
-    # Try to access the protocol's _extra dict directly for complete data
     protocol = getattr(writer, "_protocol", None) or getattr(writer, "protocol", None)
     if protocol and hasattr(protocol, "_extra"):
         for key, value in protocol._extra.items():
@@ -561,31 +533,13 @@ def _collect_extra_info(writer) -> Dict[str, Any]:
             else:
                 extra[key] = value
 
-    # Also collect known keys via public API to catch any we missed
-    known_keys = [
-        # Terminal
-        "TERM", "term", "cols", "rows", "COLUMNS", "LINES",
-        # Encoding
-        "charset", "LANG", "COLORTERM", "encoding",
-        # Network
-        "peername", "sockname", "tspeed", "xdisploc", "DISPLAY",
-        # Environment
-        "USER", "SHELL", "HOME", "PATH", "LOGNAME", "MAIL",
-        # Other
-        "timeout",
-    ]
-    for key in known_keys:
+    # Transport-level keys not in protocol._extra
+    for key in ("peername", "sockname", "timeout"):
         if key not in extra:
-            value = writer.get_extra_info(key)
-            if value is not None:
-                if isinstance(value, tuple):
-                    extra[key] = list(value)
-                elif isinstance(value, bytes):
-                    extra[key] = value.hex()
-                else:
-                    extra[key] = value
+            if (value := writer.get_extra_info(key)) is not None:
+                extra[key] = list(value) if isinstance(value, tuple) else value
 
-    # Clean up: prefer TERM over term, remove redundant lowercase if uppercase exists
+    # Clean up: prefer uppercase over lowercase redundant keys
     if "TERM" in extra and "term" in extra:
         del extra["term"]
     if "COLUMNS" in extra and "cols" in extra:
@@ -593,7 +547,7 @@ def _collect_extra_info(writer) -> Dict[str, Any]:
     if "LINES" in extra and "rows" in extra:
         del extra["rows"]
 
-    # Remove ttype1, ttype2, etc. - these are collected separately in ttype_cycle
+    # Remove ttype1, ttype2, etc. - collected separately in ttype_cycle
     for i in range(1, 20):
         extra.pop(f"ttype{i}", None)
 
@@ -601,34 +555,22 @@ def _collect_extra_info(writer) -> Dict[str, Any]:
 
 
 def _collect_ttype_cycle(writer) -> List[str]:
-    """
-    Collect the full TTYPE cycle responses.
-
-    :param writer: TelnetWriter instance.
-    :returns: List of all TTYPE responses in order.
-    """
+    """Collect the full TTYPE cycle responses."""
     ttype_list = []
 
-    # Try to get from protocol._extra first (most complete data)
     protocol = getattr(writer, "_protocol", None) or getattr(writer, "protocol", None)
     extra_dict = getattr(protocol, "_extra", {}) if protocol else {}
 
-    for i in range(1, 20):  # Check up to 20 ttype responses
-        key = f"ttype{i}"
-        value = extra_dict.get(key) or writer.get_extra_info(key)
-        if value is None:
+    for i in range(1, 20):
+        if value := (extra_dict.get(f"ttype{i}") or writer.get_extra_info(f"ttype{i}")):
+            ttype_list.append(value)
+        else:
             break
-        ttype_list.append(value)
     return ttype_list
 
 
 def _collect_protocol_timing(writer) -> Dict[str, Any]:
-    """
-    Collect timing information from protocol.
-
-    :param writer: TelnetWriter instance.
-    :returns: Dict with timing info.
-    """
+    """Collect timing information from protocol."""
     timing = {}
     protocol = getattr(writer, "_protocol", None) or getattr(writer, "protocol", None)
     if protocol:
@@ -641,41 +583,50 @@ def _collect_protocol_timing(writer) -> Dict[str, Any]:
     return timing
 
 
-def _categorize_term(term: Optional[str]) -> str:
-    """
-    Categorize terminal type for protocol fingerprint.
+def _collect_slc_tab(writer) -> Dict[str, Any]:
+    """Collect non-default SLC entries when LINEMODE was negotiated."""
+    from . import slc
 
-    :param term: Terminal type string.
-    :returns: Categorized value: specific client name, "Yes-ansi", or "Yes".
-    """
-    if not term:
-        return "None"
-    term_lower = term.lower()
-    # Check for protocol-matched terminal identifiers
-    if term_lower in PROTOCOL_MATCHED_TERMINALS:
-        return term_lower.capitalize()
-    # Check for ANSI terminals
-    if "ansi" in term_lower:
-        return "Yes-ansi"
-    # Generic terminal
-    return "Yes"
+    slctab = getattr(writer, "slctab", None)
+    if not slctab:
+        return {}
 
+    if not (hasattr(writer, "remote_option")
+            and writer.remote_option.enabled(LINEMODE)):
+        return {}
 
-def _categorize_terminal_size(cols: Optional[int], rows: Optional[int]) -> str:
-    """
-    Categorize terminal size for protocol fingerprint.
+    defaults = slc.generate_slctab(slc.BSD_SLC_TAB)
 
-    :param cols: Column count.
-    :param rows: Row count.
-    :returns: "Yes-80x25", "Yes-80x24", "Yes-Other", or "None".
-    """
-    if cols is None or rows is None:
-        return "None"
-    if (cols, rows) == (80, 25):
-        return "Yes-80x25"
-    if (cols, rows) == (80, 24):
-        return "Yes-80x24"
-    return "Yes-Other"
+    result = {}
+    slc_set = {}
+    slc_unset = []
+    slc_nosupport = []
+
+    for slc_func, slc_def in slctab.items():
+        default_def = defaults.get(slc_func)
+        if (default_def is not None
+                and slc_def.mask == default_def.mask
+                and slc_def.val == default_def.val):
+            continue
+
+        name = slc.name_slc_command(slc_func)
+        if slc_def.nosupport:
+            slc_nosupport.append(name)
+        elif slc_def.val == slc.theNULL:
+            slc_unset.append(name)
+        else:
+            slc_set[name] = (slc_def.val[0]
+                             if isinstance(slc_def.val, bytes)
+                             else slc_def.val)
+
+    if slc_set:
+        result["set"] = slc_set
+    if slc_unset:
+        result["unset"] = sorted(slc_unset)
+    if slc_nosupport:
+        result["nosupport"] = sorted(slc_nosupport)
+
+    return result
 
 
 def _create_protocol_fingerprint(
@@ -684,9 +635,6 @@ def _create_protocol_fingerprint(
 ) -> Dict[str, Any]:
     """
     Create anonymized/summarized protocol fingerprint from session data.
-
-    This fingerprint produces deterministic hashes for sessions with similar
-    protocol behavior regardless of specific environment values.
 
     Fields are only included if negotiated. Environment variables are summarized
     as "True" (non-empty value) or "None" (empty string).
@@ -699,42 +647,49 @@ def _create_protocol_fingerprint(
         "probed-protocol": "client",
     }
 
-    # Access protocol's _extra dict to check what was actually negotiated
     protocol = getattr(writer, "_protocol", None) or getattr(writer, "protocol", None)
     extra_dict = getattr(protocol, "_extra", {}) if protocol else {}
 
-    # Environment variables - only include if negotiated via NEW_ENVIRON
     for key in ("HOME", "USER", "SHELL"):
         if key in extra_dict:
-            value = extra_dict[key]
-            fingerprint[key] = "True" if value else "None"
+            fingerprint[key] = "True" if extra_dict[key] else "None"
 
-    # Terminal size categorization
+    # Terminal size categorization (inlined)
     cols = writer.get_extra_info("cols")
     rows = writer.get_extra_info("rows")
-    fingerprint["terminal-size"] = _categorize_terminal_size(cols, rows)
+    if cols is None or rows is None:
+        fingerprint["terminal-size"] = "None"
+    elif (cols, rows) == (80, 25):
+        fingerprint["terminal-size"] = "Yes-80x25"
+    elif (cols, rows) == (80, 24):
+        fingerprint["terminal-size"] = "Yes-80x24"
+    else:
+        fingerprint["terminal-size"] = "Yes-Other"
 
     # Encoding extracted from LANG
-    lang = writer.get_extra_info("LANG")
-    if lang:
+    if lang := writer.get_extra_info("LANG"):
         encoding = encoding_from_lang(lang)
         fingerprint["encoding"] = encoding if encoding else "None"
     else:
         fingerprint["encoding"] = "None"
 
-    # TERM categorization
+    # TERM categorization (inlined)
     term = writer.get_extra_info("TERM") or writer.get_extra_info("term")
-    fingerprint["TERM"] = _categorize_term(term)
+    if not term:
+        fingerprint["TERM"] = "None"
+    elif (term_lower := term.lower()) in PROTOCOL_MATCHED_TERMINALS:
+        fingerprint["TERM"] = term_lower.capitalize()
+    elif "ansi" in term_lower:
+        fingerprint["TERM"] = "Yes-ansi"
+    else:
+        fingerprint["TERM"] = "Yes"
 
-    # Charset from negotiation
     charset = writer.get_extra_info("charset")
     fingerprint["charset"] = charset if charset else "None"
 
-    # TTYPE count
     ttype_cycle = _collect_ttype_cycle(writer)
     fingerprint["ttype-count"] = len(ttype_cycle)
 
-    # Probe results - sorted lists of supported and refused options
     supported = sorted([
         name for name, info in probe_results.items()
         if info["status"] == "WILL"
@@ -750,37 +705,149 @@ def _create_protocol_fingerprint(
 
 
 def _hash_protocol_fingerprint(protocol_fingerprint: Dict[str, Any]) -> str:
-    """
-    Create deterministic SHA256 hash of protocol fingerprint.
-
-    :param protocol_fingerprint: Dict from _create_protocol_fingerprint().
-    :returns: Hexadecimal hash string (first 16 chars).
-    """
+    """Create deterministic SHA256 hash of protocol fingerprint."""
     canonical = json.dumps(protocol_fingerprint, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
 def _count_protocol_folder_files(protocol_dir: Path) -> int:
-    """
-    Count JSON files in protocol fingerprint directory.
-
-    :param protocol_dir: Path to protocol fingerprint directory.
-    :returns: Number of .json files in directory.
-    """
+    """Count JSON files in protocol fingerprint directory."""
     if not protocol_dir.exists():
         return 0
     return sum(1 for f in protocol_dir.iterdir() if f.suffix == ".json")
 
 
-def _count_fingerprint_folders() -> int:
-    """
-    Count fingerprint folders in DATA_DIR.
-
-    :returns: Number of fingerprint folders, or 0 if DATA_DIR not configured.
-    """
-    if DATA_DIR is None or not DATA_DIR.exists():
+def _count_fingerprint_folders(data_dir: Optional[Path] = None) -> int:
+    """Count fingerprint folders in DATA_DIR."""
+    _dir = data_dir if data_dir is not None else DATA_DIR
+    if _dir is None or not _dir.exists():
         return 0
-    return sum(1 for f in DATA_DIR.iterdir() if f.is_dir())
+    return sum(1 for f in _dir.iterdir() if f.is_dir())
+
+
+_UNKNOWN_TERMINAL_HASH = "0" * 16
+AMBIGUOUS_WIDTH_UNKNOWN = -1
+
+
+def _create_session_fingerprint(writer) -> Dict[str, Any]:
+    """Create session identity fingerprint from stable client fields."""
+    identity: Dict[str, Any] = {}
+
+    if peername := writer.get_extra_info("peername"):
+        identity["client-ip"] = peername[0]
+
+    if term := (writer.get_extra_info("TERM") or writer.get_extra_info("term")):
+        identity["TERM"] = term
+
+    for key in ("USER", "HOME", "SHELL", "LANG", "charset"):
+        if (value := writer.get_extra_info(key)) is not None and value != "":
+            identity[key] = value
+
+    return identity
+
+
+def _hash_session_fingerprint(session_identity: Dict[str, Any]) -> str:
+    """Create deterministic SHA256 hash of session identity."""
+    canonical = json.dumps(session_identity, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+def _load_fingerprint_names(data_dir: Optional[Path] = None) -> Dict[str, str]:
+    """Load fingerprint hash-to-name mapping from ``fingerprint_names.json``."""
+    _dir = data_dir if data_dir is not None else DATA_DIR
+    if _dir is None:
+        return {}
+    names_file = _dir / "fingerprint_names.json"
+    if not names_file.exists():
+        return {}
+    with open(names_file) as f:
+        return json.load(f)
+
+
+def _save_fingerprint_names(
+    names: Dict[str, str], data_dir: Optional[Path] = None
+) -> None:
+    """Write fingerprint hash-to-name mapping to ``fingerprint_names.json``."""
+    _dir = data_dir if data_dir is not None else DATA_DIR
+    if _dir is None:
+        return
+    _atomic_json_write(_dir / "fingerprint_names.json", names)
+
+
+def _resolve_hash_name(hash_val: str, names: Dict[str, str]) -> str:
+    """Return human-readable name for a hash, falling back to the hash itself."""
+    return names.get(hash_val, hash_val)
+
+
+def _validate_suggestion(text: str) -> Optional[str]:
+    """Validate a user-submitted fingerprint name suggestion."""
+    cleaned = text.strip()
+    if not cleaned:
+        return None
+    for c in cleaned:
+        if ord(c) < 32 or ord(c) == 127:
+            return None
+    return cleaned
+
+
+def _cooked_input(prompt: str) -> str:
+    """Call :func:`input` with echo and canonical mode temporarily enabled."""
+    import sys
+    import termios
+    fd = sys.stdin.fileno()
+    old_attrs = termios.tcgetattr(fd)
+    new_attrs = list(old_attrs)
+    new_attrs[3] |= (termios.ECHO | termios.ICANON)
+    termios.tcsetattr(fd, termios.TCSANOW, new_attrs)
+    try:
+        return input(prompt)
+    finally:
+        termios.tcsetattr(fd, termios.TCSANOW, old_attrs)
+
+
+def _atomic_json_write(filepath: Path, data: dict) -> None:
+    """Atomically write JSON data to file via write-to-new + rename."""
+    tmp_path = filepath.with_suffix(".json.new")
+    with open(tmp_path, "w") as f:
+        json.dump(data, f, indent=2, sort_keys=True)
+    os.rename(str(tmp_path), str(filepath))
+
+
+def _count_matches(
+    hash_val: str,
+    position: str = "protocol",
+    prefix: str = "client",
+    data_dir: Optional[Path] = None,
+) -> Dict[str, int]:
+    """Count directories and session files matching a fingerprint hash."""
+    _dir = data_dir if data_dir is not None else DATA_DIR
+    if _dir is None or not _dir.exists():
+        return {"dirs": 0, "sessions": 0}
+    if position == "protocol":
+        pattern = f"{prefix}-{hash_val}-*"
+    else:
+        pattern = f"{prefix}-*-{hash_val}"
+    dirs = glob_mod.glob(str(_dir / pattern) + os.sep)
+    sessions = glob_mod.glob(str(_dir / pattern / "*.json"))
+    return {"dirs": len(dirs), "sessions": len(sessions)}
+
+
+def _count_protocol_matches(
+    telnet_hash: str,
+    prefix: str = "client",
+    data_dir: Optional[Path] = None,
+) -> Dict[str, int]:
+    """Count directories and session files matching a telnet protocol hash."""
+    return _count_matches(telnet_hash, "protocol", prefix, data_dir)
+
+
+def _count_terminal_matches(
+    terminal_hash: str,
+    prefix: str = "client",
+    data_dir: Optional[Path] = None,
+) -> Dict[str, int]:
+    """Count directories and session files matching a terminal fingerprint hash."""
+    return _count_matches(terminal_hash, "terminal", prefix, data_dir)
 
 
 def _build_session_fingerprint(
@@ -788,14 +855,7 @@ def _build_session_fingerprint(
     probe_results: Dict[str, Dict[str, Any]],
     probe_time: float,
 ) -> Dict[str, Any]:
-    """
-    Build the session fingerprint dict (raw detailed data).
-
-    :param writer: TelnetWriter instance with full protocol access.
-    :param probe_results: Probe results from capability probing.
-    :param probe_time: Time taken for probing.
-    :returns: Session fingerprint dict.
-    """
+    """Build the session fingerprint dict (raw detailed data)."""
     extra = _collect_extra_info(writer)
     extra.pop("peername", None)
     extra.pop("sockname", None)
@@ -804,7 +864,9 @@ def _build_session_fingerprint(
     option_states = _collect_option_states(writer)
     timing = _collect_protocol_timing(writer)
 
-    # Group probe results by status
+    linemode_probed = probe_results.get("LINEMODE", {}).get("status")
+    slc_tab = _collect_slc_tab(writer) if linemode_probed == "WILL" else {}
+
     probe_by_status: Dict[str, Dict[str, int]] = {}
     for name, info in probe_results.items():
         status = info["status"]
@@ -815,13 +877,16 @@ def _build_session_fingerprint(
 
     timing["probe"] = probe_time
 
-    return {
+    result = {
         "extra": extra,
         "ttype_cycle": ttype_cycle,
         "option_states": option_states,
         "probe": probe_by_status,
         "timing": timing,
     }
+    if slc_tab:
+        result["slc_tab"] = slc_tab
+    return result
 
 
 def _save_fingerprint_data(
@@ -842,179 +907,174 @@ def _save_fingerprint_data(
     :param session_fp: Pre-built session fingerprint, or None to build it.
     :returns: Path to saved file, or None if save skipped/failed.
     """
-    # Check if DATA_DIR is configured
     if DATA_DIR is None:
         return None
 
-    # Use pre-built session fingerprint or build it
     if session_fp is None:
         session_fp = _build_session_fingerprint(writer, probe_results, probe_time)
 
-    # Create display-friendly version for logging
     display_fp = _display_fingerprint(session_fp)
 
-    # Create protocol fingerprint and hash
     protocol_fp = _create_protocol_fingerprint(writer, probe_results)
-    protocol_hash = _hash_protocol_fingerprint(protocol_fp)
+    telnet_hash = _hash_protocol_fingerprint(protocol_fp)
 
-    # Check if this is a new fingerprint (folder doesn't exist yet)
-    protocol_dir = DATA_DIR / protocol_hash
-    is_new_fingerprint = not protocol_dir.exists()
+    session_identity = _create_session_fingerprint(writer)
+    session_hash = _hash_session_fingerprint(session_identity)
 
-    if is_new_fingerprint:
-        # Check max fingerprints limit
+    folder_name = f"client-{telnet_hash}-{_UNKNOWN_TERMINAL_HASH}"
+    probe_dir = DATA_DIR / folder_name
+    is_new_dir = not probe_dir.exists()
+
+    if is_new_dir:
         if _count_fingerprint_folders() >= FINGERPRINT_MAX_FINGERPRINTS:
             logger.warning(
-                "max fingerprints (%d) exceeded, not saving new fingerprint %s",
+                "max fingerprints (%d) exceeded, not saving %s",
                 FINGERPRINT_MAX_FINGERPRINTS,
-                protocol_hash,
+                telnet_hash,
             )
             return None
-
-        # Create directory
         try:
-            protocol_dir.mkdir(parents=True, exist_ok=True)
+            probe_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            logger.warning("failed to create directory %s: %s", protocol_dir, exc)
+            logger.warning("failed to create directory %s: %s", probe_dir, exc)
             return None
-
-        logger.info("new fingerprint %s: %r", protocol_hash, display_fp)
+        logger.info("new fingerprint %s: %r", telnet_hash, display_fp)
     else:
-        # Existing fingerprint - check file limit
-        file_count = _count_protocol_folder_files(protocol_dir)
+        file_count = _count_protocol_folder_files(probe_dir)
         if file_count >= FINGERPRINT_MAX_FILES:
             logger.warning(
                 "fingerprint %s at file limit (%d), not saving",
-                protocol_hash,
+                telnet_hash,
                 FINGERPRINT_MAX_FILES,
             )
             return None
-
         logger.info(
             "connection for fingerprint %s: %r",
-            protocol_hash,
+            telnet_hash,
             display_fp.get("extra", {}),
         )
 
-    # Generate unique session filename
-    session_id = str(uuid.uuid4())
-    filepath = protocol_dir / f"{session_id}.json"
+    filepath = probe_dir / f"{session_hash}.json"
 
-    # Build complete data record with both fingerprints
+    peername = writer.get_extra_info("peername")
+    now = datetime.datetime.now(datetime.timezone.utc)
+    session_entry = {
+        "connected": now.isoformat(),
+        "client": list(peername) if peername else None,
+        "duration": session_fp.get("timing", {}).get("duration"),
+    }
+
+    if filepath.exists():
+        try:
+            with open(filepath) as f:
+                data = json.load(f)
+            data["telnet-probe"]["session-data"] = session_fp
+            data["sessions"].append(session_entry)
+        except (OSError, json.JSONDecodeError, KeyError) as exc:
+            logger.warning("failed to read existing %s: %s", filepath, exc)
+            data = None
+
+        if data is not None:
+            try:
+                _atomic_json_write(filepath, data)
+                return filepath
+            except OSError as exc:
+                logger.warning("failed to update fingerprint: %s", exc)
+                return None
+
     data = {
-        "id": session_id,
-        "timestamp": time.time(),
-        "protocol-fingerprint": protocol_hash,
-        "protocol-fingerprint-data": protocol_fp,
-        "session-fingerprint": session_fp,
+        "telnet-probe": {
+            "fingerprint": telnet_hash,
+            "fingerprint-data": protocol_fp,
+            "session-data": session_fp,
+        },
+        "sessions": [session_entry],
     }
 
     try:
-        with open(filepath, "w") as f:
-            json.dump(data, f, indent=2, sort_keys=True)
+        _atomic_json_write(filepath, data)
         return filepath
     except OSError as exc:
         logger.warning("failed to save fingerprint: %s", exc)
         return None
 
 
-async def _execute_post_fingerprint_script(filepath: Path) -> None:
-    """
-    Execute post-fingerprint Python function with saved file path.
-
-    Parses FINGERPRINT_POST_SCRIPT as 'module:function' and calls the function
-    with the filepath as argument.
-
-    :param filepath: Path to saved fingerprint JSON file.
-    """
-    if not FINGERPRINT_POST_SCRIPT:
-        return
-
-    import importlib
-
-    try:
-        if ":" not in FINGERPRINT_POST_SCRIPT:
-            logger.warning(
-                "FINGERPRINT_POST_SCRIPT must be 'module:function' format, got: %s",
-                FINGERPRINT_POST_SCRIPT,
-            )
-            return
-
-        module_path, func_name = FINGERPRINT_POST_SCRIPT.rsplit(":", 1)
-        module = importlib.import_module(module_path)
-        func = getattr(module, func_name)
-
-        # Call the function - run in executor if it's not a coroutine
-        result = func(filepath)
-        if asyncio.iscoroutine(result):
-            await result
-
-        logger.debug("Post-fingerprint script completed: %s", FINGERPRINT_POST_SCRIPT)
-    except Exception as exc:
-        logger.warning("Post-fingerprint script failed: %s", exc)
+def _is_maybe_mud(writer) -> bool:
+    """Return whether the client looks like a MUD client."""
+    term = (writer.get_extra_info("TERM") or "").lower()
+    if term in MUD_TERMINALS:
+        return True
+    for key in ("ttype1", "ttype2", "ttype3"):
+        if (writer.get_extra_info(key) or "").lower() in MUD_TERMINALS:
+            return True
+    return False
 
 
 async def fingerprinting_server_shell(reader, writer):
     """
-    Shell that displays client fingerprint with active probing on connect.
+    Shell that probes client telnet capabilities and runs post-script.
 
-    Immediately probes all telnet options and displays results.
-    If DATA_DIR is configured and a file is saved, executes FINGERPRINT_POST_SCRIPT.
+    Immediately probes all telnet options on connect. If DATA_DIR is configured,
+    saves fingerprint data and runs the post-script through a PTY so it can
+    probe the client's terminal with ucs-detect.
 
     :param reader: TelnetReader instance.
     :param writer: TelnetWriter instance.
     """
-    peername = writer.get_extra_info("peername", ("unknown", 0))
-    logger.info("fingerprint_shell: connection from %s:%s", peername[0], peername[1])
+    import sys
+    from .server_pty_shell import pty_shell
 
-    # Probe immediately on connect
-    probe_results, probe_time = await _run_probe(writer, verbose=DISPLAY_OUTPUT)
+    probe_results, probe_time = await _run_probe(writer, verbose=False)
 
-    # Build session fingerprint once for both display and storage
+    # Disable LINEMODE if it was negotiated - stay in kludge mode (SGA+ECHO)
+    # for PTY shell. LINEMODE causes echo loops with GNU telnet when running
+    # ucs-detect (client's LIT_ECHO + PTY echo = feedback loop).
+    if probe_results.get("LINEMODE", {}).get("status") == "WILL":
+        writer.iac(DONT, LINEMODE)
+        await writer.drain()
+        await asyncio.sleep(0.1)
+
+    # Switch syncterm to Topaz (Amiga) font
+    term_type = (writer.get_extra_info("TERM") or "").lower()
+    if term_type == "syncterm":
+        writer.write("\x1b[0;40 D")
+        await writer.drain()
+
     session_fp = _build_session_fingerprint(writer, probe_results, probe_time)
-
-    if DISPLAY_OUTPUT:
-        # Filter for display: only enabled/supported, translate hex to names
-        display_fp = _display_fingerprint(session_fp)
-        # Use client's terminal width if available, default to 80
-        width = writer.get_extra_info("cols") or 80
-        output = pprint.pformat(display_fp, width=width)
-        # Convert \n to \r\n for telnet
-        writer.write(output.replace("\n", CRLF))
-        writer.write(CRLF)
-
-    # Save comprehensive fingerprint data to file
     filepath = _save_fingerprint_data(writer, probe_results, probe_time, session_fp)
-    logger.info("Client fingerprint: %r", session_fp)
 
-    # Execute post-fingerprint script if file was saved and script is configured
-    if filepath is not None and FINGERPRINT_POST_SCRIPT:
-        await _execute_post_fingerprint_script(filepath)
-
-    await writer.drain()
-    writer.close()
+    if filepath is not None:
+        post_script = FINGERPRINT_POST_SCRIPT or "telnetlib3.fingerprinting_display"
+        await pty_shell(reader, writer, sys.executable,
+                        ["-W", "ignore::RuntimeWarning:runpy",
+                         "-m", post_script, str(filepath)],
+                        raw_mode=True)
+    else:
+        writer.close()
 
 
 def fingerprinting_post_script(filepath):
     """
-    Demonstration post-fingerprint script.
+    Post-fingerprint script that optionally runs ucs-detect for terminal probing.
 
-    Pretty-prints the fingerprint JSON file contents. Can be used as the
-    TELNETLIB3_FINGERPRINT_POST_SCRIPT target::
+    If ucs-detect is available in PATH, runs it to collect terminal capabilities
+    and merges the results into the fingerprint data.
 
-        export TELNETLIB3_FINGERPRINT_POST_SCRIPT=\\
-            telnetlib3.fingerprinting:fingerprinting_post_script
-        export TELNETLIB3_DATA_DIR=./data
-        python -m telnetlib3 --shell telnetlib3.fingerprinting_server_shell
+    Can be used as the TELNETLIB3_FINGERPRINT_POST_SCRIPT target::
+
+        TELNETLIB3_FINGERPRINT_POST_SCRIPT=telnetlib3.fingerprinting
+        TELNETLIB3_DATA_DIR=./data
+        telnetlib3-server --shell fingerprinting_server_shell
 
     :param filepath: Path to the saved fingerprint JSON file.
     """
-    filepath = Path(filepath)
-    if not filepath.exists():
-        logger.warning("Post-script file not found: %s", filepath)
-        return
+    from .fingerprinting_display import fingerprinting_post_script as _fps
+    _fps(filepath)
 
-    with open(filepath) as f:
-        data = json.load(f)
 
-    pprint.pprint(data)
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) != 2:
+        print(f"Usage: python -m {__name__} <filepath>", file=sys.stderr)
+        sys.exit(1)
+    fingerprinting_post_script(sys.argv[1])

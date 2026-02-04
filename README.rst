@@ -92,16 +92,27 @@ To save fingerprint data to JSON files for later analysis, set the data director
     export TELNETLIB3_DATA_DIR=./fingerprints
     telnetlib3-server --shell telnetlib3.fingerprinting_server_shell
 
-Files are organized by protocol fingerprint hash, with a configurable limit per folder
-(default 100, set via ``TELNETLIB3_FINGERPRINT_MAX_FILES``).
+Files are organized by protocol fingerprint hash, with configurable limits:
 
-An optional post-fingerprint hook can process saved files. A built-in script
-pretty-prints the JSON to stdout::
+- ``TELNETLIB3_FINGERPRINT_MAX_FILES``: Max files per fingerprint folder (default 200)
+- ``TELNETLIB3_FINGERPRINT_MAX_FINGERPRINTS``: Max unique fingerprint folders (default 1000)
 
-    export TELNETLIB3_FINGERPRINT_POST_SCRIPT=telnetlib3.fingerprinting:fingerprinting_post_script
+An optional post-fingerprint hook can process saved files. The hook is run as
+``python -m <module> <filepath>``. The built-in post-script pretty-prints the JSON
+and integrates with ucs-detect_ for terminal capability probing::
+
+    export TELNETLIB3_DATA_DIR=./fingerprints
+    export TELNETLIB3_FINGERPRINT_POST_SCRIPT=telnetlib3.fingerprinting
     telnetlib3-server --shell telnetlib3.fingerprinting_server_shell
 
-Custom hooks receive the filepath and can be sync or async.
+If ucs-detect_ is installed and available in PATH, the post-script automatically
+runs it to probe terminal capabilities (colors, sixel, kitty graphics, etc.) and
+adds the results to the fingerprint data as ``terminal-fingerprint-data``.
+
+Custom post-script modules must accept the filepath as ``sys.argv[1]`` in their
+``__main__`` block.
+
+.. _ucs-detect: https://github.com/jquast/ucs-detect
 
 Legacy telnetlib
 ----------------
