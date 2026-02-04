@@ -840,6 +840,8 @@ def _build_database_entries(
             terminal_path = os.path.join(telnet_path, terminal_hash)
             if not os.path.isdir(terminal_path):
                 continue
+            if terminal_hash == _UNKNOWN_TERMINAL_HASH:
+                continue
             n = sum(1 for f in os.listdir(terminal_path) if f.endswith(".json"))
             telnet_counts[telnet_hash] = telnet_counts.get(telnet_hash, 0) + n
             terminal_counts[terminal_hash] = terminal_counts.get(terminal_hash, 0) + n
@@ -848,9 +850,7 @@ def _build_database_entries(
         ("Telnet", _resolve_hash_name(h, _names), n)
         for h, n in telnet_counts.items()
     ] + [
-        ("Terminal",
-         "(unknown)" if h == _UNKNOWN_TERMINAL_HASH
-         else _resolve_hash_name(h, _names), n)
+        ("Terminal", _resolve_hash_name(h, _names), n)
         for h, n in terminal_counts.items()
     ]
     entries.sort(key=lambda e: e[2], reverse=True)
@@ -1044,6 +1044,8 @@ def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
                 new_filepath = os.path.join(new_dir, os.path.basename(filepath))
                 os.rename(filepath, new_filepath)
                 filepath = new_filepath
+                if not os.listdir(old_dir):
+                    os.rmdir(old_dir)
             except OSError as exc:
                 logger.warning("failed to move %s -> %s: %s",
                                filepath, new_dir, exc)

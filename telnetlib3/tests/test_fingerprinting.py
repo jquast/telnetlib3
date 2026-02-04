@@ -765,6 +765,22 @@ def test_build_database_entries(tmp_path, monkeypatch):
     assert terminal_entries["yyy"] == 1
 
 
+def test_build_database_entries_skips_unknown_terminal(tmp_path, monkeypatch):
+    """Unknown terminal hash directories are excluded from database entries."""
+    monkeypatch.setattr(fpd, "DATA_DIR", str(tmp_path))
+    populated = tmp_path / "client" / "aaa" / "xxx"
+    populated.mkdir(parents=True)
+    (populated / "sess.json").write_text("{}")
+    unknown = tmp_path / "client" / "aaa" / fps._UNKNOWN_TERMINAL_HASH
+    unknown.mkdir(parents=True)
+    (unknown / "sess.json").write_text("{}")
+
+    entries = fpd._build_database_entries()
+    terminal_entries = [e for e in entries if e[0] == "Terminal"]
+    assert len(terminal_entries) == 1
+    assert terminal_entries[0][1] == "xxx"
+
+
 def test_build_database_entries_with_names(tmp_path, monkeypatch):
     monkeypatch.setattr(fpd, "DATA_DIR", str(tmp_path))
     d = tmp_path / "client" / "aaa" / "xxx"
@@ -779,6 +795,7 @@ def test_build_database_entries_with_names(tmp_path, monkeypatch):
 
 
 def test_build_database_entries_unknown_terminal(tmp_path, monkeypatch):
+    """Unknown terminal hash is excluded from database entries."""
     monkeypatch.setattr(fpd, "DATA_DIR", str(tmp_path))
     d = tmp_path / "client" / "aaa" / fps._UNKNOWN_TERMINAL_HASH
     d.mkdir(parents=True)
@@ -786,7 +803,7 @@ def test_build_database_entries_unknown_terminal(tmp_path, monkeypatch):
 
     entries = fpd._build_database_entries()
     terminal_entries = [e for e in entries if e[0] == "Terminal"]
-    assert terminal_entries[0][1] == "(unknown)"
+    assert len(terminal_entries) == 0
 
 
 def test_build_database_entries_no_data(tmp_path, monkeypatch):
