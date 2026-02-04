@@ -91,9 +91,9 @@ class MockTerm:
     cnorm = ""
     height = 50
     width = 80
-    green2 = staticmethod(lambda x: x)
+    forestgreen = staticmethod(lambda x: x)
     firebrick1 = staticmethod(lambda x: x)
-    yellow = staticmethod(lambda x: x)
+    darkorange = staticmethod(lambda x: x)
     bold_magenta = staticmethod(lambda x: x)
 
     def magenta(self, s):
@@ -567,6 +567,24 @@ def test_resolve_hash_name():
 ])
 def test_validate_suggestion(text, expected):
     assert fps._validate_suggestion(text) == expected
+
+
+def test_build_seen_counts_unknown_terminal(tmp_path, monkeypatch):
+    """Unknown terminal hash is omitted from welcome message."""
+    monkeypatch.setattr(fpd, "DATA_DIR", str(tmp_path))
+    folder = tmp_path / "client" / "aaa" / fps._UNKNOWN_TERMINAL_HASH
+    folder.mkdir(parents=True)
+    (folder / "sess1.json").write_text("{}")
+
+    data = {
+        "telnet-probe": {"fingerprint": "aaa"},
+        "terminal-probe": {"fingerprint": fps._UNKNOWN_TERMINAL_HASH},
+        "sessions": [{"ip": "10.0.0.1"}],
+    }
+    result = fpd._build_seen_counts(data)
+    assert "aaa" in result
+    assert fps._UNKNOWN_TERMINAL_HASH not in result
+    assert "and" not in result
 
 
 def test_build_seen_counts_with_names(tmp_path, monkeypatch):

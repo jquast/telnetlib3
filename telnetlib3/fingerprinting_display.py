@@ -129,7 +129,7 @@ def _wrap_options(options: List[str], max_width: int = 30) -> str:
 def _color_yes_no(term, value: bool) -> str:
     """Apply green/red coloring to boolean value."""
     if value:
-        return term.green2("Yes")
+        return term.forestgreen("Yes")
     return term.firebrick1("No")
 
 
@@ -226,11 +226,11 @@ def _build_terminal_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
 
     if (n_colors := terminal_results.get("number_of_colors")) is not None:
         if n_colors >= 16777216:
-            color_str = term.green2("24-bit")
+            color_str = term.forestgreen("24-bit")
         elif n_colors <= 256:
             color_str = term.firebrick1(f"{n_colors}")
         else:
-            color_str = term.yellow(f"{n_colors}")
+            color_str = term.darkorange(f"{n_colors}")
         pairs.append(("Colors", color_str))
 
     has_fg = terminal_results.get("foreground_color_hex") is not None
@@ -251,9 +251,9 @@ def _build_terminal_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
             protocols.append("iTerm2")
         if has_sixel:
             protocols.append("Sixel")
-        pairs.append(("Graphics", term.green2(", ".join(protocols))))
+        pairs.append(("Graphics", term.forestgreen(", ".join(protocols))))
     elif has_sixel:
-        pairs.append(("Graphics", term.yellow("Sixel")))
+        pairs.append(("Graphics", term.darkorange("Sixel")))
     elif any(
         k in terminal_results
         for k in ("sixel", "kitty_graphics", "iterm2_features")
@@ -289,7 +289,7 @@ def _build_terminal_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
         gc_value = _color_yes_no(term, mode_2027.get("supported"))
         pairs.append(("Graphemes(2027)", gc_value))
     elif modes:
-        pairs.append(("Graphemes(2027)", term.yellow("N/A")))
+        pairs.append(("Graphemes(2027)", term.darkorange("N/A")))
 
     test_results = terminal_data.get("test_results", {})
     _emoji_keys = (
@@ -304,9 +304,9 @@ def _build_terminal_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
     if all_pcts:
         avg = sum(all_pcts) / len(all_pcts)
         if avg >= 99.0:
-            pairs.append(("Emoji", term.green2("Yes")))
+            pairs.append(("Emoji", term.forestgreen("Yes")))
         elif avg >= 33.3:
-            pairs.append(("Emoji", term.yellow("Partial")))
+            pairs.append(("Emoji", term.darkorange("Partial")))
         else:
             pairs.append(("Emoji", term.firebrick1("No")))
 
@@ -568,12 +568,14 @@ def _build_seen_counts(
 
     _names = names or {}
     telnet_name = _resolve_hash_name(telnet_hash, _names)
-    terminal_name = _resolve_hash_name(terminal_hash, _names)
+    terminal_known = terminal_hash != _UNKNOWN_TERMINAL_HASH
+    terminal_name = _resolve_hash_name(terminal_hash, _names) if terminal_known else None
 
     if term is not None:
-        g = term.green2
+        g = term.forestgreen
         telnet_name = g(telnet_name)
-        terminal_name = g(terminal_name)
+        if terminal_name is not None:
+            terminal_name = g(terminal_name)
 
     folder_path = os.path.join(DATA_DIR, "client", telnet_hash, terminal_hash)
     if os.path.isdir(folder_path):
@@ -597,18 +599,18 @@ def _build_seen_counts(
         )
 
     who = f" {username}" if username else ""
+    terminal_suffix = f" and {terminal_name}" if terminal_name else ""
     if visit_count <= 1:
         lines.append(
-            f"Welcome{who}! Detected {telnet_name}"
-            f" and {terminal_name}."
+            f"Welcome{who}! Detected {telnet_name}{terminal_suffix}."
         )
     else:
         visit_str = f"#{visit_count}"
         if term is not None:
-            visit_str = term.green2(visit_str)
+            visit_str = term.forestgreen(visit_str)
         lines.append(
             f"Welcome back{who}! Visit {visit_str}"
-            f" with {telnet_name} and {terminal_name}."
+            f" with {telnet_name}{terminal_suffix}."
         )
 
     if lines:
@@ -846,13 +848,15 @@ def _build_database_entries(
             telnet_counts[telnet_hash] = telnet_counts.get(telnet_hash, 0) + n
             terminal_counts[terminal_hash] = terminal_counts.get(terminal_hash, 0) + n
 
-    entries = [
-        ("Telnet", _resolve_hash_name(h, _names), n)
-        for h, n in telnet_counts.items()
-    ] + [
-        ("Terminal", _resolve_hash_name(h, _names), n)
-        for h, n in terminal_counts.items()
-    ]
+    merged: Dict[Tuple[str, str], int] = {}
+    for h, n in telnet_counts.items():
+        key = ("Telnet", _resolve_hash_name(h, _names))
+        merged[key] = merged.get(key, 0) + n
+    for h, n in terminal_counts.items():
+        key = ("Terminal", _resolve_hash_name(h, _names))
+        merged[key] = merged.get(key, 0) + n
+
+    entries = [(kind, name, count) for (kind, name), count in merged.items()]
     entries.sort(key=lambda e: e[2], reverse=True)
     return entries
 
@@ -895,7 +899,7 @@ def _show_database(
         tbl.align["Matches"] = "r"
         tbl.max_table_width = max(40, (term.width or 80) - 1)
         for kind, display_name, count in page:
-            tbl.add_row([kind, term.green2(display_name), str(count)])
+            tbl.add_row([kind, term.forestgreen(display_name), str(count)])
 
         write(term.clear + _cursor_hide(term, truecolor) + str(tbl) + "\n")
         if page_num + 1 >= total_pages:
