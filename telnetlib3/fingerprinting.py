@@ -795,7 +795,7 @@ def _save_fingerprint_data(
         try:
             with open(filepath) as f:
                 data = json.load(f)
-            data["telnet-probe"]["session-data"] = session_fp
+            data["telnet-probe"]["session_data"] = session_fp
             data["sessions"].append(session_entry)
         except (OSError, json.JSONDecodeError, KeyError) as exc:
             logger.warning("failed to read existing %s: %s", filepath, exc)
@@ -813,7 +813,7 @@ def _save_fingerprint_data(
         "telnet-probe": {
             "fingerprint": telnet_hash,
             "fingerprint-data": protocol_fp,
-            "session-data": session_fp,
+            "session_data": session_fp,
         },
         "sessions": [session_entry],
     }

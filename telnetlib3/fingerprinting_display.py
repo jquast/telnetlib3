@@ -96,25 +96,73 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
 
 
 def _create_terminal_fingerprint(terminal_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Create anonymized terminal fingerprint for hashing."""
+    """Create anonymized terminal fingerprint for hashing.
+
+    Distills static terminal-identity fields from ucs-detect output,
+    excluding session-variable data (colors, dimensions, timing).
+    """
     fingerprint: Dict[str, Any] = {}
 
     results = terminal_data.get("terminal_results", {})
     fingerprint["software_name"] = terminal_data.get("software_name", "unknown")
-    fingerprint["software_version"] = terminal_data.get("software_version", "unknown")
+    fingerprint["software_version"] = terminal_data.get(
+        "software_version", "unknown"
+    )
 
     fingerprint["number_of_colors"] = results.get("number_of_colors")
     fingerprint["sixel"] = results.get("sixel", False)
+    fingerprint["iterm2_features"] = results.get("iterm2_features", {})
+
     fingerprint["kitty_graphics"] = results.get("kitty_graphics", False)
     fingerprint["kitty_clipboard_protocol"] = results.get(
         "kitty_clipboard_protocol", False
     )
+    fingerprint["kitty_keyboard"] = results.get("kitty_keyboard", {})
+    fingerprint["kitty_notifications"] = results.get(
+        "kitty_notifications", False
+    )
+    fingerprint["kitty_pointer_shapes"] = results.get(
+        "kitty_pointer_shapes", False
+    )
+
+    fingerprint["text_sizing"] = results.get("text_sizing", {})
 
     da = results.get("device_attributes", {})
     fingerprint["da_service_class"] = da.get("service_class")
     fingerprint["da_extensions"] = sorted(da.get("extensions", []))
 
+    raw_modes = results.get("modes", {})
+    distilled_modes = {}
+    for mode_num, mode_data in sorted(
+        raw_modes.items(), key=lambda x: int(x[0])
+    ):
+        if isinstance(mode_data, dict):
+            distilled_modes[str(mode_num)] = {
+                "supported": mode_data.get("supported", False),
+                "changeable": mode_data.get("changeable", False),
+                "enabled": mode_data.get("enabled", False),
+                "value": mode_data.get("value", 0),
+            }
+    fingerprint["modes"] = distilled_modes
+
+    fingerprint["xtgettcap"] = results.get("xtgettcap", {})
     fingerprint["ambiguous_width"] = terminal_data.get("ambiguous_width")
+
+    raw_test_results = terminal_data.get("test_results", {})
+    distilled_tests = {}
+    for category, versions in raw_test_results.items():
+        if not versions or not isinstance(versions, dict):
+            continue
+        for ver, entry in versions.items():
+            if isinstance(entry, dict):
+                distilled_tests[category] = {
+                    "unicode_version": ver,
+                    "n_errors": entry.get("n_errors", 0),
+                    "n_total": entry.get("n_total", 0),
+                }
+                break
+    if distilled_tests:
+        fingerprint["test_results"] = distilled_tests
 
     return fingerprint
 
@@ -199,7 +247,7 @@ def _build_terminal_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
     """Build (key, value) tuples for terminal capabilities table."""
     pairs: List[Tuple[str, str]] = []
     terminal_probe = data.get("terminal-probe", {})
-    terminal_data = terminal_probe.get("session-data", {})
+    terminal_data = terminal_probe.get("session_data", {})
     terminal_results = terminal_data.get("terminal_results", {})
     if not terminal_data:
         return pairs
@@ -212,7 +260,7 @@ def _build_terminal_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
         pairs.append(("Software", software))
 
     telnet_probe = data.get("telnet-probe", {})
-    session_data = telnet_probe.get("session-data", {})
+    session_data = telnet_probe.get("session_data", {})
     extra = session_data.get("extra", {})
     cols = extra.get("cols") or extra.get("COLUMNS")
     rows = extra.get("rows") or extra.get("LINES")
@@ -318,7 +366,7 @@ def _build_telnet_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
     pairs: List[Tuple[str, str]] = []
     telnet_probe = data.get("telnet-probe", {})
     proto_data = telnet_probe.get("fingerprint-data", {})
-    session_data = telnet_probe.get("session-data", {})
+    session_data = telnet_probe.get("session_data", {})
     extra = session_data.get("extra", {})
 
     if fp_hash := telnet_probe.get("fingerprint"):
@@ -329,7 +377,7 @@ def _build_telnet_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
         pairs.append(("Terminal Type", type_str))
 
     terminal_probe = data.get("terminal-probe", {})
-    aw = terminal_probe.get("session-data", {}).get("ambiguous_width")
+    aw = terminal_probe.get("session_data", {}).get("ambiguous_width")
     if encoding_pair := _format_encoding(extra, proto_data, aw):
         pairs.append(encoding_pair)
 
@@ -388,7 +436,7 @@ def _make_terminal(**kwargs):
 def _has_unicode(data: Dict[str, Any]) -> bool:
     """Return whether the terminal supports unicode rendering."""
     aw = (data.get("terminal-probe", {})
-          .get("session-data", {})
+          .get("session_data", {})
           .get("ambiguous_width", AMBIGUOUS_WIDTH_UNKNOWN))
     return aw >= 1
 
@@ -396,7 +444,7 @@ def _has_unicode(data: Dict[str, Any]) -> bool:
 def _sync_timeout(data: Dict[str, Any]) -> float:
     """Return synchronized output timeout based on measured RTT."""
     cps = (data.get("terminal-probe", {})
-           .get("session-data", {})
+           .get("session_data", {})
            .get("cps_summary", {}))
     if (rtt_max := cps.get("rtt_max_ms")) and rtt_max > 0:
         return rtt_max * 1.1 / 1000.0
@@ -420,7 +468,7 @@ def _setup_term_environ(data: Dict[str, Any]) -> None:
 def _has_truecolor(data: Dict[str, Any]) -> bool:
     """Return whether the terminal supports 24-bit color."""
     n = (data.get("terminal-probe", {})
-         .get("session-data", {})
+         .get("session_data", {})
          .get("terminal_results", {})
          .get("number_of_colors"))
     return n is not None and n >= 16777216
@@ -587,7 +635,7 @@ def _build_seen_counts(
 
     visit_count = len(data.get("sessions", []))
 
-    extra = telnet_probe.get("session-data", {}).get("extra", {})
+    extra = telnet_probe.get("session_data", {}).get("extra", {})
     username = extra.get("USER") or extra.get("LOGNAME")
 
     lines: List[str] = []
@@ -772,7 +820,7 @@ def _filter_telnet_detail(
         return detail
     result = copy.deepcopy(detail)
 
-    if session_data := result.get("session-data"):
+    if session_data := result.get("session_data"):
         for key in ("probe", "option_states"):
             session_data.pop(key, None)
 
@@ -786,7 +834,7 @@ def _show_detail(term, data: Dict[str, Any], section: str) -> None:
     """Show detailed JSON for a fingerprint section with pagination."""
     if section == "terminal":
         terminal_probe = data.get("terminal-probe", {})
-        detail = _filter_terminal_detail(terminal_probe.get("session-data"))
+        detail = _filter_terminal_detail(terminal_probe.get("session_data"))
         title = "Terminal Probe Results"
     else:
         detail = _filter_telnet_detail(data.get("telnet-probe"))
@@ -1006,7 +1054,7 @@ def _prompt_fingerprint_identification(
     if terminal_hash != _UNKNOWN_TERMINAL_HASH:
         current_name = names.get(terminal_hash)
         if not terminal_known:
-            software_name = (terminal_probe.get("session-data", {})
+            software_name = (terminal_probe.get("session_data", {})
                              .get("software_name"))
             default = software_name or ""
             if default:
@@ -1064,7 +1112,7 @@ def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
         data["terminal-probe"] = {
             "fingerprint": terminal_hash,
             "fingerprint-data": terminal_fp,
-            "session-data": terminal_data,
+            "session_data": terminal_data,
         }
 
         old_dir = os.path.dirname(filepath)
