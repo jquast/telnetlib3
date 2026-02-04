@@ -1214,7 +1214,6 @@ def _prompt_fingerprint_identification(
     revised = False
 
     if terminal_hash != _UNKNOWN_TERMINAL_HASH:
-        current_name = names.get(terminal_hash)
         if not terminal_known:
             software_name = (terminal_probe.get("session_data", {})
                              .get("software_name"))
@@ -1230,7 +1229,8 @@ def _prompt_fingerprint_identification(
             validated = _validate_suggestion(raw)
             if validated:
                 suggestions["terminal-emulator"] = validated
-        else:
+        elif all_known:
+            current_name = names.get(terminal_hash)
             prompt = (f"Terminal emulator name"
                       f" (press return for \"{current_name}\"): ")
             raw = _cooked_input(prompt).strip()
@@ -1244,7 +1244,7 @@ def _prompt_fingerprint_identification(
         validated = _validate_suggestion(raw)
         if validated:
             suggestions["telnet-client"] = validated
-    else:
+    elif all_known:
         current_name = names.get(telnet_hash)
         prompt = (f"Telnet client name"
                   f" (press return for \"{current_name}\"): ")
