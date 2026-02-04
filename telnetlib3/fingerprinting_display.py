@@ -1278,7 +1278,7 @@ def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
         }
 
         old_dir = os.path.dirname(filepath)
-        if os.path.basename(old_dir) == _UNKNOWN_TERMINAL_HASH:
+        if os.path.basename(old_dir) != terminal_hash:
             new_dir = os.path.join(os.path.dirname(old_dir), terminal_hash)
             try:
                 os.makedirs(new_dir, exist_ok=True)
