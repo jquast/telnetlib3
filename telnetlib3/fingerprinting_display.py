@@ -50,7 +50,7 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
             [
                 ucs_detect,
                 "--limit-category-time=1",
-                "--limit-codepoints=1000",
+                "--limit-codepoints=10",
                 "--limit-errors=2",
                 "--probe-silently",
                 "--no-final-summary",
@@ -873,68 +873,39 @@ def _show_database(
 
     has_unicode = _has_unicode(data)
     truecolor = _has_truecolor(data)
-
+    write = sys.stdout.write
     page_size = max(1, (term.height or 25) - 6)
     total_pages = (len(entries) + page_size - 1) // page_size
 
     for page_num in range(total_pages):
-        start = page_num * page_size
-        end = min(start + page_size, len(entries))
-        page_entries = entries[start:end]
-
+        page = entries[page_num * page_size:(page_num + 1) * page_size]
         tbl = PrettyTable()
         if has_unicode:
             _apply_unicode_borders(tbl)
         tbl.title = term.magenta(
             f"Database ({page_num + 1}/{total_pages},"
-            f" {len(entries)} fingerprints)"
-        )
+            f" {len(entries)} fingerprints)")
         tbl.field_names = ["Type", "Fingerprint", "Matches"]
         tbl.align["Type"] = "l"
         tbl.align["Fingerprint"] = "l"
         tbl.align["Matches"] = "r"
         tbl.max_table_width = max(40, (term.width or 80) - 1)
-
-        for kind, display_name, count in page_entries:
+        for kind, display_name, count in page:
             tbl.add_row([kind, term.green2(display_name), str(count)])
 
-        sys.stdout.write(
-            term.clear
-            + _cursor_hide(term, truecolor)
-            + str(tbl) + "\n"
-        )
+        write(term.clear + _cursor_hide(term, truecolor) + str(tbl) + "\n")
+        if page_num + 1 >= total_pages:
+            return
+        bm = term.bold_magenta
+        write(f"{bm('q-')}quit {bm('n-')}next: "
+              + _cursor_bracket(term, has_unicode, truecolor))
         sys.stdout.flush()
-
-        if page_num + 1 < total_pages:
-            bm = term.bold_magenta
-            prompt = (
-                f"{bm('q-')}quit {bm('n-')}next: "
-                f"{_cursor_bracket(term, has_unicode, truecolor)}"
-            )
-            sys.stdout.write(prompt)
-            sys.stdout.flush()
-            with term.cbreak():
-                key = term.inkey(timeout=None)
-            sys.stdout.write(
-                f"{term.normal}\r{term.clear_eol}"
-                f"{_cursor_hide(term, truecolor)}"
-            )
-            sys.stdout.flush()
-            if key == "q" or key.name == "KEY_ESCAPE":
-                return
-        else:
-            sys.stdout.write(
-                f"press return to continue: "
-                f"{_cursor_bracket(term, has_unicode, truecolor)}"
-            )
-            sys.stdout.flush()
-            with term.cbreak():
-                term.inkey(timeout=None)
-            sys.stdout.write(
-                f"{term.normal}\r{term.clear_eol}"
-                f"{_cursor_hide(term, truecolor)}"
-            )
-            sys.stdout.flush()
+        with term.cbreak():
+            key = term.inkey(timeout=None)
+        write(f"{term.normal}\r{term.clear_eol}{_cursor_hide(term, truecolor)}")
+        sys.stdout.flush()
+        if key == "q" or key.name == "KEY_ESCAPE":
+            return
 
 
 def _fingerprint_repl(
