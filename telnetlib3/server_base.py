@@ -379,7 +379,8 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     def _check_negotiation_timer(self):
         if self._check_later is not None:
             self._check_later.cancel()
-            self._tasks.discard(self._check_later)
+            if self._check_later in self._tasks:
+                self._tasks.remove(self._check_later)
 
         later = self.connect_maxwait - self.duration
         final = bool(later < 0)
