@@ -1,22 +1,6 @@
 #!/usr/bin/env python
-"""
-Moderate fingerprint name suggestions.
+"""Moderate fingerprint name suggestions."""
 
-Scans client fingerprint JSON files for user-submitted name suggestions,
-groups them by hash, and prompts the operator to accept or override names
-for unknown fingerprint hashes.
-
-Reads ``TELNETLIB3_DATA_DIR`` environment variable for the data directory.
-
-Example usage::
-
-    $ export TELNETLIB3_DATA_DIR=./data
-    $ python bin/moderate_fingerprints.py
-    $ python bin/moderate_fingerprints.py --check-revise
-    $ python bin/moderate_fingerprints.py --no-prune
-"""
-
-# std imports
 import collections
 import json
 import os
@@ -27,6 +11,7 @@ from pathlib import Path
 
 
 _JQ = shutil.which("jq")
+_UNKNOWN_TERMINAL_HASH = "0" * 16
 
 _HASH_SOURCES = {
     "telnet-client": "telnet-probe",
@@ -36,91 +21,72 @@ _HASH_SOURCES = {
 }
 
 
+def _iter_client_files(data_dir):
+    """Yield (path, data) for each client JSON file."""
+    client_base = data_dir / "client"
+    if not client_base.is_dir():
+        return
+    for path in sorted(client_base.glob("*/*/*.json")):
+        try:
+            with open(path) as f:
+                yield path, json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+
+
 def _print_json(label, data):
-    """Print labeled JSON, colorized through ``jq`` when available."""
+    """Print labeled JSON, colorized through jq when available."""
     json_str = json.dumps(data, indent=4, sort_keys=True)
     if _JQ:
         result = subprocess.run(
-            [_JQ, "-C", "."],
-            input=json_str,
-            capture_output=True,
-            text=True,
-        )
+            [_JQ, "-C", "."], input=json_str, capture_output=True, text=True)
         if result.returncode == 0:
             json_str = result.stdout.rstrip("\n")
     print(f"{label} {json_str}")
 
 
-def _atomic_json_write(filepath, data):
-    """Atomically write JSON data to file via write-to-new + rename."""
-    tmp_path = filepath.with_suffix(".json.new")
-    with open(tmp_path, "w") as f:
-        json.dump(data, f, indent=2, sort_keys=True)
-    os.rename(str(tmp_path), str(filepath))
-
-
 def _load_names(data_dir):
     """Load existing fingerprint_names.json or return empty dict."""
-    names_file = data_dir / "fingerprint_names.json"
-    if names_file.exists():
-        with open(names_file) as f:
+    try:
+        with open(data_dir / "fingerprint_names.json") as f:
             return json.load(f)
-    return {}
+    except FileNotFoundError:
+        return {}
+
+
+def _save_names(data_dir, names):
+    """Save fingerprint_names.json."""
+    path = data_dir / "fingerprint_names.json"
+    tmp = path.with_suffix(".json.new")
+    with open(tmp, "w") as f:
+        json.dump(names, f, indent=2, sort_keys=True)
+    os.rename(tmp, path)
+    print(f"\nSaved {path}")
 
 
 def _scan_all(data_dir):
-    """Scan all client JSON files for suggestion and revision keys.
-
-    :returns: (suggestions, sample_data) where suggestions maps
-              (suggestion_key, hash_val) to list of suggested names,
-              and sample_data maps the same keys to fingerprint-data dicts.
-    """
+    """Scan all client JSON files for suggestion and revision keys."""
     suggestions = collections.defaultdict(list)
     sample_data = {}
-
-    client_base = data_dir / "client"
-    if not client_base.is_dir():
-        return suggestions, sample_data
-
-    for json_file in sorted(client_base.glob("*/*/*.json")):
-        try:
-            with open(json_file) as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            continue
-
+    for _, data in _iter_client_files(data_dir):
         file_suggestions = data.get("suggestions", {})
         if not file_suggestions:
             continue
-
-        hashes = {
-            "telnet-probe": data.get("telnet-probe", {}).get("fingerprint"),
-            "terminal-probe": data.get("terminal-probe", {}).get("fingerprint"),
-        }
-
         for sug_key, probe_key in _HASH_SOURCES.items():
             if sug_key not in file_suggestions:
                 continue
-            hash_val = hashes.get(probe_key)
-            if not hash_val:
+            if not (hash_val := data.get(probe_key, {}).get("fingerprint")):
                 continue
             key = (sug_key, hash_val)
             suggestions[key].append(file_suggestions[sug_key])
             if key not in sample_data:
                 sample_data[key] = data.get(probe_key, {}).get(
                     "fingerprint-data", {})
-
     return suggestions, sample_data
 
 
 def _review(entries, sample_data, names):
-    """Interactive review loop for a set of suggestion entries.
-
-    :param entries: Dict of (sug_key, hash_val) -> list of suggested names.
-    :param sample_data: Dict of (sug_key, hash_val) -> fingerprint-data.
-    :param names: Mutable names dict, updated in place.
-    :returns: True if any names were updated.
-    """
+    """Interactive review loop for suggestion entries."""
     updated = False
     for (sug_key, hash_val), suggestion_list in sorted(entries.items()):
         current_name = names.get(hash_val)
@@ -128,11 +94,10 @@ def _review(entries, sample_data, names):
         most_common = counter.most_common(1)[0][0]
         total = sum(counter.values())
 
-        print(f"\n{'=' * 60}")
-        print(f"  {sug_key}: {hash_val}")
+        header = f"\n{'=' * 60}\n  {sug_key}: {hash_val}"
         if current_name:
-            print(f"  current name: {current_name}")
-        print(f"  {total} suggestion(s):")
+            header += f"\n  current name: {current_name}"
+        print(f"{header}\n  {total} suggestion(s):")
         for name, count in counter.most_common():
             print(f"    {count}x  {name}")
 
@@ -161,43 +126,50 @@ def _review(entries, sample_data, names):
     return updated
 
 
-def _collect_data_hashes(data_dir):
-    """Collect all fingerprint hashes referenced by data files.
-
-    Scans directory names and JSON file contents, because the internal
-    ``fingerprint`` field may differ from its parent directory name.
-
-    :param data_dir: Path to the data directory.
-    :returns: Set of hash strings found in the data tree.
-    """
+def _relocate(data_dir):
+    """Move misplaced JSON files to match their internal fingerprint hashes."""
     client_base = data_dir / "client"
-    if not client_base.is_dir():
-        return set()
-
-    found = set()
-    for json_file in client_base.glob("*/*/*.json"):
-        found.add(json_file.parent.parent.name)
-        found.add(json_file.parent.name)
-        try:
-            with open(json_file) as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError):
+    moved = 0
+    stale_dirs = set()
+    for path, data in _iter_client_files(data_dir):
+        telnet_hash = data.get("telnet-probe", {}).get("fingerprint")
+        terminal_hash = data.get("terminal-probe", {}).get(
+            "fingerprint", _UNKNOWN_TERMINAL_HASH)
+        if not telnet_hash:
             continue
-        for probe_key in ("telnet-probe", "terminal-probe"):
-            h = data.get(probe_key, {}).get("fingerprint")
-            if h:
-                found.add(h)
-    return found
+        dir_telnet = path.parent.parent.name
+        dir_terminal = path.parent.name
+        if dir_telnet == telnet_hash and dir_terminal == terminal_hash:
+            continue
+        target = client_base / telnet_hash / terminal_hash / path.name
+        if target.exists():
+            print(f"  skip {path.name}: "
+                  f"already exists in {telnet_hash}/{terminal_hash}/")
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        os.rename(path, target)
+        moved += 1
+        print(f"  {path.name}: {dir_telnet}/{dir_terminal}/"
+              f" -> {telnet_hash}/{terminal_hash}/")
+        stale_dirs.add(path.parent)
+
+    for d in stale_dirs:
+        try:
+            d.rmdir()
+            d.parent.rmdir()
+        except OSError:
+            pass
+    return moved
 
 
 def _prune(data_dir, names):
-    """Remove named hashes that have no data files in the client directory.
-
-    :param data_dir: Path to the data directory.
-    :param names: Mutable names dict, updated in place.
-    :returns: True if any names were removed.
-    """
-    data_hashes = _collect_data_hashes(data_dir)
+    """Remove named hashes that have no data files."""
+    data_hashes = set()
+    for path, data in _iter_client_files(data_dir):
+        data_hashes.update({path.parent.parent.name, path.parent.name})
+        for key in ("telnet-probe", "terminal-probe"):
+            if h := data.get(key, {}).get("fingerprint"):
+                data_hashes.add(h)
     orphaned = {h: name for h, name in names.items() if h not in data_hashes}
 
     if not orphaned:
@@ -238,42 +210,38 @@ def main():
 
     check_revise = "--check-revise" in sys.argv
     skip_prune = "--no-prune" in sys.argv
+
+    relocated = _relocate(data_dir)
+    if relocated:
+        print(f"Relocated {relocated} file(s).\n")
+
     names = _load_names(data_dir)
 
-    if not skip_prune:
-        pruned = _prune(data_dir, names)
-        if pruned:
-            _atomic_json_write(data_dir / "fingerprint_names.json", names)
-            print(f"\nSaved {data_dir / 'fingerprint_names.json'}")
+    if not skip_prune and _prune(data_dir, names):
+        _save_names(data_dir, names)
 
     all_suggestions, sample_data = _scan_all(data_dir)
 
     if check_revise:
-        revision_keys = {"telnet-client-revision", "terminal-emulator-revision"}
-        entries = {
-            k: v for k, v in all_suggestions.items()
-            if k[0] in revision_keys and k[1] in names
-        }
-        if not entries:
-            print("No revision suggestions found.")
-            return
+        keys = {"telnet-client-revision", "terminal-emulator-revision"}
+        entries = {k: v for k, v in all_suggestions.items()
+                   if k[0] in keys and k[1] in names}
     else:
-        new_keys = {"telnet-client", "terminal-emulator"}
-        entries = {
-            k: v for k, v in all_suggestions.items()
-            if k[0] in new_keys and k[1] not in names
-        }
-        if not entries:
-            if all_suggestions:
-                print("All suggested hashes are already named.")
-            else:
-                print("No suggestions found.")
-            return
+        keys = {"telnet-client", "terminal-emulator"}
+        entries = {k: v for k, v in all_suggestions.items()
+                   if k[0] in keys and k[1] not in names}
 
-    updated = _review(entries, sample_data, names)
-    if updated:
-        _atomic_json_write(data_dir / "fingerprint_names.json", names)
-        print(f"\nSaved {data_dir / 'fingerprint_names.json'}")
+    if not entries:
+        if check_revise:
+            print("No revision suggestions found.")
+        elif all_suggestions:
+            print("All suggested hashes are already named.")
+        else:
+            print("No suggestions found.")
+        return
+
+    if _review(entries, sample_data, names):
+        _save_names(data_dir, names)
     else:
         print("\nNo changes made.")
 
