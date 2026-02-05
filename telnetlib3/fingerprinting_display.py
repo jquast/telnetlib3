@@ -1340,9 +1340,10 @@ def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
         echo(seen_counts)
 
     if term.is_a_tty:
-        if _has_unknown_hashes(data, names):
-            _prompt_fingerprint_identification(term, data, filepath, names)
-        _fingerprint_repl(term, data, seen_counts, filepath, names)
+        with term.raw():  # use raw mode to prevent ^C
+            if _has_unknown_hashes(data, names):
+                _prompt_fingerprint_identification(term, data, filepath, names)
+            _fingerprint_repl(term, data, seen_counts, filepath, names)
 
 
 def fingerprinting_post_script(filepath):
