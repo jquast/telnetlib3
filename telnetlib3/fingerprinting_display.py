@@ -1165,6 +1165,8 @@ def _fingerprint_repl(
     while True:
         _repl_prompt(term)
         with term.cbreak():
+            while term.inkey(timeout=0):
+                pass  # drain pending input (e.g. \r\n after keypress)
             key = term.inkey(timeout=None)
 
         key_str = key.name or str(key)
