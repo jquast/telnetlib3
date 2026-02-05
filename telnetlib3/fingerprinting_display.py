@@ -764,6 +764,11 @@ def _build_seen_counts(
         lines.append(
             f"I've seen {others} other {noun} with your configuration."
         )
+    if visit_count > 1:
+        times = "time" if visit_count - 1 == 1 else "times"
+        lines.append(
+            f"I've seen your exact fingerprint {visit_count - 1} {times} before."
+        )
 
     who = f" {username}" if username else ""
     terminal_suffix = f" and {terminal_name}" if terminal_name else ""
@@ -772,12 +777,8 @@ def _build_seen_counts(
             f"Welcome{who}! Detected {telnet_name}{terminal_suffix}."
         )
     else:
-        visit_str = f"#{visit_count}"
-        if term is not None:
-            visit_str = term.forestgreen(visit_str)
         lines.append(
-            f"Welcome back{who}! Visit {visit_str}"
-            f" with {telnet_name}{terminal_suffix}."
+            f"Welcome back{who}! Detected {telnet_name}{terminal_suffix}."
         )
 
     telnet_unknown = telnet_hash not in _names
