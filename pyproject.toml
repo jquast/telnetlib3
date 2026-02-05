@@ -49,6 +49,7 @@ requires-python = ">=3.8"
 docs = [
     "Sphinx>3",
     "sphinx_rtd_theme",
+    "sphinx-autodoc-typehints",
 ]
 extras = [
     "ucs-detect>=2",

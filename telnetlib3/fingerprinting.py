@@ -7,68 +7,69 @@ in :mod:`telnetlib3.fingerprinting_display`.
 """
 
 # std imports
-import asyncio
-import datetime
-import hashlib
-import json
-import logging
 import os
+import json
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
+import asyncio
+import hashlib
+import logging
+import datetime
+from typing import Any, Dict, List, Tuple, Callable, Optional
 
-from .accessories import encoding_from_lang
+# local
 from .telopt import (
-    DO,
-    DONT,
-    BINARY,
-    SGA,
-    ECHO,
-    STATUS,
-    TTYPE,
-    TSPEED,
-    LFLOW,
-    XDISPLOC,
-    NAWS,
-    NEW_ENVIRON,
-    CHARSET,
-    LINEMODE,
-    SNDLOC,
-    EOR,
-    GMCP,
-    COM_PORT_OPTION,
-    AUTHENTICATION,
-    ENCRYPT,
-    TN3270E,
-    XAUTH,
-    RSP,
-    SUPPRESS_LOCAL_ECHO,
-    TLS,
-    KERMIT,
-    SEND_URL,
-    FORWARD_X,
-    PRAGMA_LOGON,
-    SSPI_LOGON,
-    PRAGMA_HEARTBEAT,
-    X3PAD,
-    VT3270REGIME,
-    TTYLOC,
-    SUPDUPOUTPUT,
-    SUPDUP,
-    DET,
     BM,
+    DO,
+    DET,
+    EOR,
     RCP,
+    RSP,
+    SGA,
+    TLS,
+    DONT,
+    ECHO,
+    GMCP,
     NAMS,
-    RCTE,
     NAOL,
     NAOP,
+    NAWS,
+    RCTE,
+    LFLOW,
+    TTYPE,
+    X3PAD,
+    XAUTH,
+    BINARY,
+    KERMIT,
     NAOCRD,
-    NAOHTS,
-    NAOHTD,
     NAOFFD,
-    NAOVTS,
-    NAOVTD,
+    NAOHTD,
+    NAOHTS,
     NAOLFD,
+    NAOVTD,
+    NAOVTS,
+    SNDLOC,
+    STATUS,
+    SUPDUP,
+    TSPEED,
+    TTYLOC,
+    CHARSET,
+    ENCRYPT,
+    TN3270E,
+    LINEMODE,
+    SEND_URL,
+    XDISPLOC,
+    FORWARD_X,
+    SSPI_LOGON,
+    NEW_ENVIRON,
+    PRAGMA_LOGON,
+    SUPDUPOUTPUT,
+    VT3270REGIME,
+    AUTHENTICATION,
+    COM_PORT_OPTION,
+    PRAGMA_HEARTBEAT,
+    SUPPRESS_LOCAL_ECHO,
 )
+from .accessories import encoding_from_lang
 
 # Data directory for saving fingerprint data - None when unset (no saves)
 DATA_DIR: Optional[str] = (
@@ -212,13 +213,13 @@ async def probe_client_capabilities(
     Sends IAC DO for ALL options at once, waits for responses, then collects results.
 
     :param writer: TelnetWriter instance.
-    :param options: List of (opt_bytes, name, description) tuples to probe.
-                   Defaults to ALL_PROBE_OPTIONS.
-    :param progress_callback: Optional callback(name, idx, total, status) called
-                             during result collection.
+    :param options: List of (opt_bytes, name, description) tuples to probe. Defaults to
+        ALL_PROBE_OPTIONS.
+    :param progress_callback: Optional callback(name, idx, total, status) called during result
+        collection.
     :param timeout: Timeout in seconds to wait for all responses.
-    :returns: Dict mapping option name to {"status": "WILL"|"WONT"|"timeout",
-              "opt": bytes, "description": str}.
+    :returns: Dict mapping option name to {"status": "WILL"|"WONT"|"timeout", "opt": bytes,
+        "description": str}.
     """
     if options is None:
         options = ALL_PROBE_OPTIONS
@@ -466,6 +467,7 @@ def _collect_protocol_timing(writer) -> Dict[str, Any]:
 
 def _collect_slc_tab(writer) -> Dict[str, Any]:
     """Collect non-default SLC entries when LINEMODE was negotiated."""
+    # local
     from . import slc
 
     slctab = getattr(writer, "slctab", None)
@@ -517,8 +519,8 @@ def _create_protocol_fingerprint(
     """
     Create anonymized/summarized protocol fingerprint from session data.
 
-    Fields are only included if negotiated. Environment variables are summarized
-    as "True" (non-empty value) or "None" (empty string).
+    Fields are only included if negotiated. Environment variables are summarized as "True" (non-
+    empty value) or "None" (empty string).
 
     :param writer: TelnetWriter instance.
     :param probe_results: Probe results from capability probing.
@@ -666,6 +668,7 @@ def _validate_suggestion(text: str) -> Optional[str]:
 
 def _cooked_input(prompt: str) -> str:
     """Call :func:`input` with echo and canonical mode temporarily enabled."""
+    # std imports
     import sys
     import termios
     fd = sys.stdin.fileno()
@@ -856,12 +859,12 @@ def _is_maybe_mud(writer) -> bool:
 
 
 def _is_maybe_ms_telnet(writer) -> bool:
-    """Return whether the client looks like Microsoft Windows telnet.
+    """
+    Return whether the client looks like Microsoft Windows telnet.
 
-    Microsoft telnet reports ttype1="ANSI", ttype2="VT100", refuses
-    CHARSET, and sends unsolicited WILL NAWS.  The ttype cycle stalls
-    after VT100.  Sending a large NEW_ENVIRON sub-negotiation or a
-    burst of legacy IAC DO commands crashes the client.
+    Microsoft telnet reports ttype1="ANSI", ttype2="VT100", refuses CHARSET, and sends unsolicited
+    WILL NAWS.  The ttype cycle stalls after VT100.  Sending a large NEW_ENVIRON sub-negotiation or
+    a burst of legacy IAC DO commands crashes the client.
 
     :param writer: TelnetWriter instance.
     :rtype: bool
@@ -879,14 +882,17 @@ async def fingerprinting_server_shell(reader, writer):
     """
     Shell that probes client telnet capabilities and runs post-script.
 
-    Immediately probes all telnet options on connect. If DATA_DIR is configured,
-    saves fingerprint data and runs the post-script through a PTY so it can
-    probe the client's terminal with ucs-detect.
+    Immediately probes all telnet options on connect. If DATA_DIR is configured, saves fingerprint
+    data and runs the post-script through a PTY so it can probe the client's terminal with ucs-
+    detect.
 
     :param reader: TelnetReader instance.
     :param writer: TelnetWriter instance.
     """
+    # std imports
     import sys
+
+    # local
     from .server_pty_shell import pty_shell
 
     probe_results, probe_time = await _run_probe(writer, verbose=False)
@@ -934,11 +940,13 @@ def fingerprinting_post_script(filepath):
 
     :param filepath: Path to the saved fingerprint JSON file.
     """
+    # local
     from .fingerprinting_display import fingerprinting_post_script as _fps
     _fps(filepath)
 
 
 if __name__ == "__main__":
+    # std imports
     import sys
     if len(sys.argv) != 2:
         print(f"Usage: python -m {__name__} <filepath>", file=sys.stderr)

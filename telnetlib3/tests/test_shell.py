@@ -136,6 +136,7 @@ async def test_telnet_server_given_shell(
         connect_maxwait=0.05,
         timeout=1.25,
         limit=13377,
+        never_send_ga=True,
     ) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             expected = IAC + DO + TTYPE

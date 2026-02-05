@@ -1,6 +1,6 @@
 # std imports
-import json
 import os
+import json
 from pathlib import Path
 
 # 3rd party
@@ -11,9 +11,9 @@ from telnetlib3 import fingerprinting as fps
 from telnetlib3 import fingerprinting_display as fpd
 from telnetlib3.tests.accessories import (  # noqa: F401
     bind_host,
-    unused_tcp_port,
     create_server,
     open_connection,
+    unused_tcp_port,
 )
 
 
@@ -397,6 +397,7 @@ def test_create_terminal_fingerprint():
 
 
 def test_terminal_fingerprint_hash_excludes_session_vars():
+    # std imports
     import copy
     base = {
         "software_name": "foot",
@@ -432,6 +433,7 @@ def test_terminal_fingerprint_hash_excludes_session_vars():
 
 @pytest.mark.asyncio
 async def test_fingerprint_probe_integration(bind_host, unused_tcp_port):
+    # std imports
     import asyncio
     async with create_server(
         host=bind_host, port=unused_tcp_port,

@@ -6,6 +6,7 @@ import asyncio
 # 3rd party
 import pytest
 
+# local
 # local imports
 import telnetlib3
 import telnetlib3.stream_writer
@@ -195,6 +196,7 @@ def _make_server():
 ])
 async def test_negotiate_environ_ms_telnet(ttype1, ttype2, expect_skip):
     """NEW_ENVIRON is skipped for Microsoft telnet (ANSI + VT100)."""
+    # local
     from telnetlib3.telopt import DO, NEW_ENVIRON
 
     server = _make_server()
@@ -209,6 +211,7 @@ async def test_negotiate_environ_ms_telnet(ttype1, ttype2, expect_skip):
 
 async def test_check_negotiation_ttype_refused_triggers_environ():
     """check_negotiation sends DO NEW_ENVIRON when TTYPE is refused."""
+    # local
     from telnetlib3.telopt import DO, TTYPE, NEW_ENVIRON
 
     server = _make_server()
@@ -221,6 +224,7 @@ async def test_check_negotiation_ttype_refused_triggers_environ():
 
 async def test_check_negotiation_final_triggers_environ():
     """check_negotiation sends DO NEW_ENVIRON on final timeout."""
+    # local
     from telnetlib3.telopt import DO, NEW_ENVIRON
 
     server = _make_server()
@@ -232,6 +236,7 @@ async def test_check_negotiation_final_triggers_environ():
 
 async def test_check_negotiation_no_advanced_skips_environ():
     """check_negotiation does not send DO NEW_ENVIRON without advanced."""
+    # local
     from telnetlib3.telopt import DO, TTYPE, NEW_ENVIRON
 
     server = _make_server()
@@ -243,6 +248,7 @@ async def test_check_negotiation_no_advanced_skips_environ():
 
 async def test_on_ttype_non_ansi_triggers_environ():
     """on_ttype sends DO NEW_ENVIRON immediately for non-ANSI ttype1."""
+    # local
     from telnetlib3.telopt import DO, NEW_ENVIRON
 
     server = _make_server()
@@ -253,6 +259,7 @@ async def test_on_ttype_non_ansi_triggers_environ():
 
 async def test_on_ttype_ansi_defers_environ():
     """on_ttype defers DO NEW_ENVIRON when ttype1 is ANSI."""
+    # local
     from telnetlib3.telopt import DO, NEW_ENVIRON
 
     server = _make_server()

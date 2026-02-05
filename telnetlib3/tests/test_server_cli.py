@@ -87,3 +87,17 @@ def test_telnetlib3_pty_shell_exports_conditional():
     else:
         assert "make_pty_shell" not in telnetlib3.__all__
         assert "pty_shell" not in telnetlib3.__all__
+
+
+def test_parse_server_args_never_send_ga():
+    """--never-send-ga flag is parsed correctly."""
+    # local
+    from telnetlib3 import server
+
+    with mock.patch.object(sys, "argv", ["server"]):
+        result = server.parse_server_args()
+        assert result["never_send_ga"] is False
+
+    with mock.patch.object(sys, "argv", ["server", "--never-send-ga"]):
+        result = server.parse_server_args()
+        assert result["never_send_ga"] is True

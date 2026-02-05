@@ -6,32 +6,33 @@ integration, and interactive REPL code split from :mod:`fingerprinting`.
 """
 
 # std imports
-import contextlib
-import copy
-import functools
-import json
-import logging
 import os
+import sys
+import copy
+import json
 import random
 import shutil
-import subprocess
-import sys
-import tempfile
+import logging
 import termios
+import tempfile
 import textwrap
 import warnings
-from typing import Any, Dict, List, Optional, Tuple
+import functools
+import contextlib
+import subprocess
+from typing import Any, Dict, List, Tuple, Optional
 
+# local
 from .fingerprinting import (
-    AMBIGUOUS_WIDTH_UNKNOWN,
     DATA_DIR,
     _UNKNOWN_TERMINAL_HASH,
-    _atomic_json_write,
+    AMBIGUOUS_WIDTH_UNKNOWN,
     _cooked_input,
     _hash_fingerprint,
-    _load_fingerprint_names,
+    _atomic_json_write,
     _resolve_hash_name,
     _validate_suggestion,
+    _load_fingerprint_names,
 )
 
 __all__ = ("fingerprinting_post_script",)
@@ -42,7 +43,6 @@ _BAT = shutil.which("bat") or shutil.which("batcat")
 _JQ = shutil.which("jq")
 
 echo = functools.partial(print, end="", flush=True)
-
 
 
 def _run_ucs_detect() -> Optional[Dict[str, Any]]:
@@ -102,10 +102,11 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
 
 
 def _create_terminal_fingerprint(terminal_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Create anonymized terminal fingerprint for hashing.
+    """
+    Create anonymized terminal fingerprint for hashing.
 
-    Distills static terminal-identity fields from ucs-detect output,
-    excluding session-variable data (colors, dimensions, timing).
+    Distills static terminal-identity fields from ucs-detect output, excluding session-variable data
+    (colors, dimensions, timing).
     """
     fingerprint: Dict[str, Any] = {}
 
@@ -429,6 +430,7 @@ def _build_telnet_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
 
 def _make_terminal(**kwargs):
     """Create a blessed Terminal, falling back to ``ansi`` on setupterm failure."""
+    # 3rd party
     from blessed import Terminal
 
     with warnings.catch_warnings(record=True) as caught:
@@ -475,7 +477,8 @@ def _sync_timeout(data: Dict[str, Any]) -> float:
 
 
 def _setup_term_environ(data: Dict[str, Any]) -> None:
-    """Set ``TERM`` and ``COLORTERM`` based on probe data.
+    """
+    Set ``TERM`` and ``COLORTERM`` based on probe data.
 
     Overrides ``TERM`` to ``ansi`` for Microsoft telnet clients whose
     ``vtnt`` terminfo contains ``$<N>`` padding sequences displayed as
@@ -537,8 +540,9 @@ def _apply_unicode_borders(tbl) -> None:
 def _display_compact_summary(data: Dict[str, Any], term=None) -> bool:
     """Display compact fingerprint summary using prettytable."""
     try:
-        from prettytable import PrettyTable
+        # 3rd party
         from ucs_detect import _collect_side_by_side_lines
+        from prettytable import PrettyTable
     except ImportError:
         return False
 
@@ -606,7 +610,8 @@ def _display_compact_summary(data: Dict[str, Any], term=None) -> bool:
 
 
 def _fingerprint_similarity(a: Dict[str, Any], b: Dict[str, Any]) -> float:
-    """Compute field-by-field similarity score between two fingerprint dicts.
+    """
+    Compute field-by-field similarity score between two fingerprint dicts.
 
     :returns: Similarity as a float 0.0-1.0.
     """
@@ -641,7 +646,8 @@ def _fingerprint_similarity(a: Dict[str, Any], b: Dict[str, Any]) -> float:
 def _load_known_fingerprints(
     probe_type: str,
 ) -> Dict[str, Dict[str, Any]]:
-    """Load one fingerprint-data dict per unique hash from the data directory.
+    """
+    Load one fingerprint-data dict per unique hash from the data directory.
 
     :param probe_type: ``"telnet-probe"`` or ``"terminal-probe"``.
     :returns: Dict mapping hash string to fingerprint-data dict.
@@ -693,7 +699,8 @@ def _find_nearest_match(
     probe_type: str,
     names: Dict[str, str],
 ) -> Optional[Tuple[str, float]]:
-    """Find the most similar named fingerprint.
+    """
+    Find the most similar named fingerprint.
 
     :returns: ``(name, similarity)`` tuple or None if no candidates or best < 50%.
     """
@@ -798,7 +805,8 @@ def _build_seen_counts(
 
 
 def _color_match(term, name: str, score: float) -> str:
-    """Color a nearest-match result by confidence threshold.
+    """
+    Color a nearest-match result by confidence threshold.
 
     :param score: Similarity as a float 0.0-1.0.
     """
@@ -861,7 +869,8 @@ def _paginate(term, text: str, **_kw) -> None:
 
 
 def _colorize_json(data: Any, term=None) -> str:
-    """Format JSON with color, preferring bat/batcat over jq.
+    """
+    Format JSON with color, preferring bat/batcat over jq.
 
     :param term: blessed Terminal instance for ``TERM`` kind.
     """
@@ -902,6 +911,7 @@ def _strip_empty_features(d: Dict[str, Any]) -> None:
 
 def _normalize_color_hex(hex_color: str) -> str:
     """Normalize X11 color hex to standard 6-digit format."""
+    # 3rd party
     from blessed.colorspace import hex_to_rgb, rgb_to_hex
     r, g, b = hex_to_rgb(hex_color)
     return rgb_to_hex(r, g, b)
@@ -1034,10 +1044,11 @@ def _client_ip(data: Dict[str, Any]) -> str:
 def _build_database_entries(
     names: Optional[Dict[str, str]] = None,
 ) -> List[Tuple[str, str, int, int]]:
-    """Scan fingerprint directories and build sorted database entries.
+    """
+    Scan fingerprint directories and build sorted database entries.
 
-    :returns: List of ``(type, display_name, file_count, session_count)``
-        tuples sorted by session count descending.
+    :returns: List of ``(type, display_name, file_count, session_count)`` tuples sorted by session
+        count descending.
     """
     client_dir = os.path.join(DATA_DIR, "client") if DATA_DIR else None
     if not client_dir or not os.path.isdir(client_dir):
@@ -1098,6 +1109,7 @@ def _show_database(
 ) -> None:
     """Display scrollable database of all known fingerprints."""
     try:
+        # 3rd party
         from prettytable import PrettyTable
     except ImportError:
         echo("prettytable not installed.\n")
@@ -1298,6 +1310,7 @@ def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
     _setup_term_environ(data)
 
     try:
+        # 3rd party
         import blessed  # noqa: F401
     except ImportError:
         print(json.dumps(data, indent=2, sort_keys=True))

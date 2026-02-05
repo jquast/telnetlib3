@@ -161,6 +161,7 @@ async def test_telnet_client_send_naws_65534(bind_host, unused_tcp_port):
 
 async def test_naws_without_will(bind_host, unused_tcp_port):
     """NAWS subnegotiation received without prior WILL NAWS is tolerated."""
+    # local
     from telnetlib3.telopt import SB, SE, IAC, NAWS
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 

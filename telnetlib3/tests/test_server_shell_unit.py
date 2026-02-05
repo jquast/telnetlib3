@@ -213,11 +213,18 @@ class SlowReader:
         return ""
 
 
+class _MockProtocol:
+    def __init__(self, never_send_ga=False):
+        self.never_send_ga = never_send_ga
+
+
 class MockWriter:
-    def __init__(self):
+    def __init__(self, protocol=None):
         self.written = []
         self._closing = False
         self._extra = {"peername": ("127.0.0.1", 12345)}
+        self.protocol = protocol or _MockProtocol()
+        self.ga_calls = []
 
     def write(self, data):
         self.written.append(data)
@@ -233,6 +240,13 @@ class MockWriter:
 
     def echo(self, data):
         self.written.append(data)
+
+    def close(self):
+        self._closing = True
+
+    def send_ga(self):
+        self.ga_calls.append(True)
+        return True
 
 
 @pytest.mark.parametrize(
@@ -602,3 +616,24 @@ async def test_busy_shell_timeout_on_second_input(monkeypatch):
     written = "".join(writer.written)
     assert "Machine is busy" in written
     assert "distant explosion" in written
+
+
+@pytest.mark.asyncio
+async def test_telnet_server_shell_sends_ga_after_prompt():
+    """GA is sent after prompt when never_send_ga is False."""
+    reader = MockReader(["q", "u", "i", "t", "\r"])
+    writer = MockWriter(protocol=_MockProtocol(never_send_ga=False))
+    await ss.telnet_server_shell(reader, writer)
+    assert len(writer.ga_calls) >= 1
+    prompt_idx = next(i for i, w in enumerate(writer.written) if "tel:sh> " in w)
+    ga_idx = next(i for i, w in enumerate(writer.written) if w == "tel:sh> ")
+    assert writer.ga_calls
+
+
+@pytest.mark.asyncio
+async def test_telnet_server_shell_no_ga_when_never_send_ga():
+    """GA is not sent when never_send_ga is True."""
+    reader = MockReader(["q", "u", "i", "t", "\r"])
+    writer = MockWriter(protocol=_MockProtocol(never_send_ga=True))
+    await ss.telnet_server_shell(reader, writer)
+    assert len(writer.ga_calls) == 0

@@ -153,6 +153,21 @@ or CHARSET to negotiate about it.
 In this case, use ``--force-binary`` and ``--encoding`` when the encoding of
 the remote end is known.
 
+Go-Ahead (GA)
+--------------
+
+When a client does not negotiate Suppress Go-Ahead (SGA), the server sends
+``IAC GA`` after output to signal that the client may transmit. This is
+correct behavior for MUD clients like Mudlet that expect prompt detection
+via GA.
+
+If GA causes unwanted output for your use case, disable it::
+
+    telnetlib3-server --never-send-ga
+
+For PTY shells, GA is sent after 500ms of output idle time to avoid
+injecting GA in the middle of streaming output.
+
 Quick Example
 =============
 

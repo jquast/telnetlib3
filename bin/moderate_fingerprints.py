@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 """Moderate fingerprint name suggestions."""
 
-import collections
-import json
+# std imports
 import os
+import sys
+import json
 import shutil
 import subprocess
-import sys
+import collections
 from pathlib import Path
 
 _BAT = shutil.which("bat") or shutil.which("batcat")

@@ -57,6 +57,8 @@ async def telnet_server_shell(
         if command:
             writer.write(CR + LF)
         writer.write("tel:sh> ")
+        if not getattr(writer.protocol, "never_send_ga", False):
+            writer.send_ga()
         await writer.drain()
 
         command = None

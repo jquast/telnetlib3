@@ -810,3 +810,86 @@ async def test_pty_session_terminate_scenarios():
         result = session._terminate()
 
     assert result is True
+
+
+async def test_pty_session_ga_timer_fires_after_idle(mock_session):
+    """GA is sent 500ms after _flush_remaining when SGA not negotiated."""
+    from unittest.mock import MagicMock
+
+    session, written = mock_session({"charset": "utf-8"}, capture_writes=True)
+    protocol = MagicMock()
+    protocol.never_send_ga = False
+    session.writer.protocol = protocol
+    session.writer.is_closing = MagicMock(return_value=False)
+    ga_calls = []
+    session.writer.send_ga = lambda: ga_calls.append(True)
+
+    session._output_buffer = b"prompt> "
+    session._flush_remaining()
+    assert session._ga_timer is not None
+    assert len(ga_calls) == 0
+
+    await asyncio.sleep(0.6)
+    assert len(ga_calls) == 1
+    assert session._ga_timer is None
+
+
+async def test_pty_session_ga_timer_cancelled_by_new_output(mock_session):
+    """GA timer is cancelled when new PTY output arrives."""
+    from unittest.mock import MagicMock
+
+    session, written = mock_session({"charset": "utf-8"}, capture_writes=True)
+    protocol = MagicMock()
+    protocol.never_send_ga = False
+    session.writer.protocol = protocol
+    session.writer.is_closing = MagicMock(return_value=False)
+    ga_calls = []
+    session.writer.send_ga = lambda: ga_calls.append(True)
+
+    session._output_buffer = b"prompt> "
+    session._flush_remaining()
+    assert session._ga_timer is not None
+
+    session._write_to_telnet(b"more output\n")
+    assert session._ga_timer is None
+
+    await asyncio.sleep(0.6)
+    assert len(ga_calls) == 0
+
+
+async def test_pty_session_ga_timer_suppressed_by_never_send_ga(mock_session):
+    """GA timer is not scheduled when never_send_ga is set."""
+    from unittest.mock import MagicMock
+
+    session, written = mock_session({"charset": "utf-8"}, capture_writes=True)
+    protocol = MagicMock()
+    protocol.never_send_ga = True
+    session.writer.protocol = protocol
+
+    session._output_buffer = b"prompt> "
+    session._flush_remaining()
+    assert session._ga_timer is None
+
+
+async def test_pty_session_ga_timer_cancelled_on_cleanup(mock_session):
+    """GA timer is cancelled during cleanup."""
+    from unittest.mock import MagicMock, patch
+
+    session, _ = mock_session({"charset": "utf-8"})
+    protocol = MagicMock()
+    protocol.never_send_ga = False
+    session.writer.protocol = protocol
+    session.writer.is_closing = MagicMock(return_value=False)
+    session.writer.send_ga = MagicMock()
+    session.master_fd = 99
+    session.child_pid = 12345
+
+    session._schedule_ga()
+    assert session._ga_timer is not None
+
+    with patch("os.close"), patch("os.kill"), patch("os.waitpid", return_value=(0, 0)):
+        session.cleanup()
+
+    assert session._ga_timer is None
+    await asyncio.sleep(0.6)
+    session.writer.send_ga.assert_not_called()

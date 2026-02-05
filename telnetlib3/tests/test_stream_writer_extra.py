@@ -519,6 +519,7 @@ def test_handle_subnegotiation_dispatch_and_unhandled():
 
 
 async def test_server_data_received_split_sb_linemode():
+    # local
     from telnetlib3.server_base import BaseServer
 
     class NoNegServer(BaseServer):
@@ -552,6 +553,7 @@ async def test_server_data_received_split_sb_linemode():
 
 
 async def test_client_process_chunk_split_sb_linemode():
+    # local
     from telnetlib3.client_base import BaseClient
 
     transport = MockTransport()

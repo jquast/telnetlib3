@@ -171,6 +171,7 @@ async def test_telnet_server_encoding_by_LANG(bind_host, unused_tcp_port):
 
 async def test_telnet_server_encoding_LANG_no_encoding_suffix(bind_host, unused_tcp_port):
     """Server falls back to default when LANG has no encoding suffix."""
+    # local
     from telnetlib3.telopt import DO, IS, SB, SE, IAC, WILL, WONT, TTYPE, BINARY, NEW_ENVIRON
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
@@ -197,6 +198,7 @@ async def test_telnet_server_encoding_LANG_no_encoding_suffix(bind_host, unused_
 
 async def test_telnet_server_encoding_LANG_invalid_encoding(bind_host, unused_tcp_port):
     """Server falls back to default when LANG has unknown encoding."""
+    # local
     from telnetlib3.telopt import DO, IS, SB, SE, IAC, WILL, WONT, TTYPE, BINARY, NEW_ENVIRON
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 

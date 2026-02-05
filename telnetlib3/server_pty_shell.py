@@ -20,7 +20,7 @@ import logging
 import termios
 
 # local
-from .telopt import NAWS, ECHO, WONT
+from .telopt import ECHO, NAWS, WONT
 
 __all__ = ("make_pty_shell", "pty_shell", "PTYSpawnError")
 
@@ -60,8 +60,8 @@ class PTYSession:
         :param preexec_fn: Optional callable to run in child before exec. Called with no arguments
             after fork but before _setup_child. Useful for test coverage tracking in the forked
             child process.
-        :param raw_mode: If True, disable PTY echo and canonical mode. Use for programs that
-            handle their own terminal I/O (e.g., blessed, curses, ucs-detect).
+        :param raw_mode: If True, disable PTY echo and canonical mode. Use for programs that handle
+            their own terminal I/O (e.g., blessed, curses, ucs-detect).
         """
         self.reader = reader
         self.writer = writer
@@ -78,6 +78,7 @@ class PTYSession:
         self._decoder_charset = None
         self._naws_pending = None
         self._naws_timer = None
+        self._ga_timer = None
 
     def start(self):
         """
@@ -356,10 +357,11 @@ class PTYSession:
                     break
 
     def _write_to_pty(self, data):
-        """Write data from telnet to PTY.
+        """
+        Write data from telnet to PTY.
 
-        Translates DEL (0x7F) to ``^H`` (0x08) so that both backspace
-        encodings work with the PTY's VERASE setting (``^H``).
+        Translates DEL (0x7F) to ``^H`` (0x08) so that both backspace encodings work with the PTY's
+        VERASE setting (``^H``).
         """
         if self.master_fd is None:
             return
@@ -374,6 +376,9 @@ class PTYSession:
 
     def _write_to_telnet(self, data):
         """Write data from PTY to telnet, respecting synchronized update boundaries."""
+        if self._ga_timer is not None:
+            self._ga_timer.cancel()
+            self._ga_timer = None
         self._output_buffer += data
 
         # Process buffer, flushing on ESU or newline boundaries
@@ -434,6 +439,23 @@ class PTYSession:
         if self._output_buffer and not self._in_sync_update:
             self._flush_output(self._output_buffer)
             self._output_buffer = b""
+        self._schedule_ga()
+
+    def _schedule_ga(self):
+        """Schedule IAC GA after 500ms idle, for clients that refuse SGA."""
+        if self._ga_timer is not None:
+            self._ga_timer.cancel()
+            self._ga_timer = None
+        if getattr(self.writer.protocol, "never_send_ga", False):
+            return
+        loop = asyncio.get_event_loop()
+        self._ga_timer = loop.call_later(0.5, self._fire_ga)
+
+    def _fire_ga(self):
+        """Send IAC GA if writer is still open."""
+        self._ga_timer = None
+        if not self.writer.is_closing():
+            self.writer.send_ga()
 
     def _isalive(self):
         """Check if child process is still running."""
@@ -474,7 +496,10 @@ class PTYSession:
 
     def cleanup(self):
         """Kill child process and close PTY fd."""
-        # Cancel any pending NAWS timer
+        # Cancel any pending timers
+        if self._ga_timer is not None:
+            self._ga_timer.cancel()
+            self._ga_timer = None
         if self._naws_timer is not None:
             self._naws_timer.cancel()
             self._naws_timer = None
@@ -528,8 +553,8 @@ async def pty_shell(reader, writer, program, args=None, preexec_fn=None, raw_mod
     :param str program: Path to program to execute.
     :param list args: List of arguments for the program.
     :param preexec_fn: Optional callable to run in child before exec.
-    :param raw_mode: If True, disable PTY echo and canonical mode. Use for programs
-        that handle their own terminal I/O (e.g., blessed, curses, ucs-detect).
+    :param raw_mode: If True, disable PTY echo and canonical mode. Use for programs that handle
+        their own terminal I/O (e.g., blessed, curses, ucs-detect).
     """
     _platform_check()
 

@@ -12,8 +12,8 @@ after an idle period.
 """
 
 # std imports
-import codecs
 import os
+import codecs
 import signal
 import asyncio
 import logging
@@ -57,6 +57,7 @@ class CONFIG(NamedTuple):
     robot_check: bool = False
     pty_fork_limit: int = 0
     status_interval: int = 20
+    never_send_ga: bool = False
 
 
 # Default config instance - use this to access default values
@@ -146,7 +147,8 @@ class TelnetServer(server_base.BaseServer):
         self.writer.iac(DO, TTYPE)
 
     def begin_advanced_negotiation(self):
-        """Request advanced telnet options from client.
+        """
+        Request advanced telnet options from client.
 
         ``DO NEW_ENVIRON`` is deferred until the TTYPE cycle completes
         so that Microsoft telnet (ANSI + VT100) can be detected first.
@@ -382,7 +384,6 @@ class TelnetServer(server_base.BaseServer):
 
             ['LANG', 'TERM', 'COLUMNS', 'LINES', 'DISPLAY', 'COLORTERM',
              VAR, USERVAR, 'COLORTERM']
-
         """
         # local
         from .telopt import VAR, USERVAR  # pylint: disable=import-outside-toplevel
@@ -563,7 +564,8 @@ class TelnetServer(server_base.BaseServer):
     # private methods
 
     def _negotiate_environ(self):
-        """Send ``DO NEW_ENVIRON`` unless the client is Microsoft telnet.
+        """
+        Send ``DO NEW_ENVIRON`` unless the client is Microsoft telnet.
 
         Called from :meth:`on_ttype` as soon as we have enough information:
 
@@ -934,6 +936,14 @@ def parse_server_args():
             "status only logged when connected clients has changed."
         ),
     )
+    parser.add_argument(
+        "--never-send-ga",
+        action="store_true",
+        default=_config.never_send_ga,
+        help="never send IAC GA (Go-Ahead). Default sends GA when SGA is "
+             "not negotiated, which is correct for MUD clients but may "
+             "confuse some other clients.",
+    )
     result = vars(parser.parse_args(argv))
     result["pty_args"] = pty_args if PTY_SUPPORT else None
     if not PTY_SUPPORT:
@@ -960,6 +970,7 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
     robot_check=_config.robot_check,
     pty_fork_limit=_config.pty_fork_limit,
     status_interval=_config.status_interval,
+    never_send_ga=_config.never_send_ga,
 ):
     """
     Program entry point for server daemon.
@@ -1036,6 +1047,7 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
         shell=shell,
         encoding=encoding,
         force_binary=force_binary,
+        never_send_ga=never_send_ga,
         timeout=timeout,
         connect_maxwait=connect_maxwait,
     )
