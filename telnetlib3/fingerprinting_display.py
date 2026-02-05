@@ -470,13 +470,25 @@ def _sync_timeout(data: Dict[str, Any]) -> float:
 
 
 def _setup_term_environ(data: Dict[str, Any]) -> None:
-    """Set ``COLORTERM`` based on probe data.
+    """Set ``TERM`` and ``COLORTERM`` based on probe data.
 
-    Sets ``COLORTERM=truecolor`` when 24-bit color was confirmed by the
-    terminal probe, removes it otherwise to prevent the server's own
-    stale value from leaking through.  ``TERM`` is already set correctly
-    by the PTY shell environment.
+    Overrides ``TERM`` to ``ansi`` for Microsoft telnet clients whose
+    ``vtnt`` terminfo contains ``$<N>`` padding sequences displayed as
+    literal text.  Sets ``COLORTERM=truecolor`` when 24-bit color was
+    confirmed by the terminal probe, removes it otherwise to prevent the
+    server's own stale value from leaking through.
     """
+    ttype_cycle = (
+        data.get("telnet-probe", {})
+        .get("session_data", {})
+        .get("ttype_cycle", [])
+    )
+    # Microsoft telnet cycles ANSI -> VT100 -> VT52 -> VTNT -> VTNT.
+    # The "vtnt" terminfo contains $<N> padding sequences that MS telnet
+    # displays as literal text.  Override to "ansi" which has no padding.
+    if ttype_cycle == ["ANSI", "VT100", "VT52", "VTNT", "VTNT"]:
+        os.environ["TERM"] = "ansi"
+
     if _has_truecolor(data):
         os.environ["COLORTERM"] = "truecolor"
     else:
@@ -751,7 +763,9 @@ def _build_seen_counts(
         )
 
     who = f" {username}" if username else ""
-    terminal_suffix = f" and {terminal_name}" if terminal_name else ""
+    terminal_suffix = (f" and {terminal_name}"
+                       if terminal_name and terminal_name != telnet_name
+                       else "")
     if visit_count <= 1:
         lines.append(
             f"Welcome{who}! Detected {telnet_name}{terminal_suffix}."

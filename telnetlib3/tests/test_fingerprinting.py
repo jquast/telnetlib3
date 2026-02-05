@@ -1,5 +1,6 @@
 # std imports
 import json
+import os
 from pathlib import Path
 
 # 3rd party
@@ -498,3 +499,27 @@ async def test_run_probe_normal_client_full():
     legacy_names = {name for _, name, _ in fps.LEGACY_OPTIONS}
     assert probed_names.issuperset(legacy_names)
     assert "NEW_ENVIRON" in probed_names
+
+
+def _make_ttype_data(ttype_cycle):
+    return {"telnet-probe": {"session_data": {"ttype_cycle": ttype_cycle}}}
+
+
+@pytest.mark.parametrize("ttype_cycle,expected_term", [
+    (["ANSI", "VT100", "VT52", "VTNT", "VTNT"], "ansi"),
+    (["ANSI", "ANSI"], "xterm-256color"),
+    (["xterm-256color", "xterm-256color"], "xterm-256color"),
+    ([], "xterm-256color"),
+])
+def test_setup_term_environ_ms_telnet(ttype_cycle, expected_term, monkeypatch):
+    """_setup_term_environ overrides TERM to 'ansi' for MS telnet."""
+    monkeypatch.setenv("TERM", "xterm-256color")
+    fpd._setup_term_environ(_make_ttype_data(ttype_cycle))
+    assert os.environ["TERM"] == expected_term
+
+
+def test_setup_term_environ_no_ttype_cycle(monkeypatch):
+    """_setup_term_environ leaves TERM alone when ttype_cycle is absent."""
+    monkeypatch.setenv("TERM", "vt220")
+    fpd._setup_term_environ({})
+    assert os.environ["TERM"] == "vt220"
