@@ -986,7 +986,6 @@ def _show_detail(term, data: Dict[str, Any], section: str) -> None:
         title = "Telnet Probe Data"
 
     underline = term.cyan("=" * len(title))
-    echo(term.normal + term.clear)
     if detail:
         text = (f"{term.magenta(title)}\n"
                 f"{underline}\n"
@@ -1106,7 +1105,7 @@ def _fingerprint_repl(
 
         key_str = key.name or str(key)
         if key_str in _commands:
-            echo(str(key))
+            echo(str(key) + "\n")
             logger.info("%s: repl %s", ip, _commands[key_str])
         elif key_str not in ("KEY_ENTER", "\r", "\n"):
             logger.info("%s: repl unknown key %r", ip, key_str)
