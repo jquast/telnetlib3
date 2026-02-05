@@ -871,6 +871,21 @@ async def test_pty_session_ga_timer_suppressed_by_never_send_ga(mock_session):
     assert session._ga_timer is None
 
 
+async def test_pty_session_ga_timer_suppressed_in_raw_mode(mock_session):
+    """GA timer is not scheduled in raw_mode (e.g. fingerprinting display)."""
+    from unittest.mock import MagicMock
+
+    session, _ = mock_session({"charset": "utf-8"}, capture_writes=True)
+    protocol = MagicMock()
+    protocol.never_send_ga = False
+    session.writer.protocol = protocol
+    session.raw_mode = True
+
+    session._output_buffer = b"prompt> "
+    session._flush_remaining()
+    assert session._ga_timer is None
+
+
 async def test_pty_session_ga_timer_cancelled_on_cleanup(mock_session):
     """GA timer is cancelled during cleanup."""
     from unittest.mock import MagicMock, patch

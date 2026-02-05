@@ -446,6 +446,8 @@ class PTYSession:
         if self._ga_timer is not None:
             self._ga_timer.cancel()
             self._ga_timer = None
+        if self.raw_mode:
+            return
         if getattr(self.writer.protocol, "never_send_ga", False):
             return
         loop = asyncio.get_event_loop()
