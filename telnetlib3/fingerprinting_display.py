@@ -6,6 +6,7 @@ integration, and interactive REPL code split from :mod:`fingerprinting`.
 """
 
 # std imports
+import contextlib
 import copy
 import functools
 import json
@@ -16,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import termios
 import textwrap
 import warnings
 from typing import Any, Dict, List, Optional, Tuple
@@ -433,6 +435,20 @@ def _make_terminal(**kwargs):
             warnings.simplefilter("ignore")
             term = Terminal(**kwargs)
     return term
+
+
+@contextlib.contextmanager
+def _disable_isig():
+    """Disable ``ISIG`` so that ``^C`` and ``^Z`` are ignored."""
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    new = list(old)
+    new[3] &= ~termios.ISIG
+    termios.tcsetattr(fd, termios.TCSANOW, new)
+    try:
+        yield
+    finally:
+        termios.tcsetattr(fd, termios.TCSANOW, old)
 
 
 def _has_unicode(data: Dict[str, Any]) -> bool:
@@ -1340,7 +1356,7 @@ def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
         echo(seen_counts)
 
     if term.is_a_tty:
-        with term.raw():  # use raw mode to prevent ^C
+        with term.cbreak(), _disable_isig():
             if _has_unknown_hashes(data, names):
                 _prompt_fingerprint_identification(term, data, filepath, names)
             _fingerprint_repl(term, data, seen_counts, filepath, names)
