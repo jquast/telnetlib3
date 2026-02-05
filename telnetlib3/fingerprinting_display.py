@@ -67,20 +67,24 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
         tmp_path = tmp.name
 
     try:
-        result = subprocess.run(
-            [
-                ucs_detect,
-                "--limit-category-time=1",
-                "--limit-codepoints=10",
-                "--timeout-cps=2",
-                "--limit-errors=2",
-                "--probe-silently",
-                "--no-final-summary",
-                "--no-languages-test",
-                "--save-json", tmp_path,
-            ],
-            timeout=120,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    ucs_detect,
+                    "--limit-category-time=1",
+                    "--limit-codepoints=10",
+                    "--timeout-cps=2",
+                    "--limit-errors=2",
+                    "--probe-silently",
+                    "--no-final-summary",
+                    "--no-languages-test",
+                    "--save-json", tmp_path,
+                ],
+                timeout=20,
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning("ucs-detect timed out (client unresponsive to probes)")
+            return None
 
         if result.returncode != 0:
             return None
@@ -98,7 +102,8 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
         return terminal_data
 
     finally:
-        os.remove(tmp_path)
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
 
 
 def _create_terminal_fingerprint(terminal_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -1277,9 +1282,19 @@ def _prompt_fingerprint_identification(
     echo("\n")
 
 
+def _client_requires_ga(data: Dict[str, Any]) -> bool:
+    """Return True when the client refused SGA (e.g. MUD clients like Mudlet)."""
+    probe = data.get("telnet-probe", {}).get("session_data", {}).get("probe", {})
+    return "SGA" not in probe.get("WILL", {})
+
+
 def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
     """Process client fingerprint: run ucs-detect if available, update file."""
-    terminal_data = _run_ucs_detect()
+    if _client_requires_ga(data):
+        logger.info("skipping ucs-detect: client requires GA (MUD client)")
+        terminal_data = None
+    else:
+        terminal_data = _run_ucs_detect()
 
     if terminal_data:
         terminal_fp = _create_terminal_fingerprint(terminal_data)

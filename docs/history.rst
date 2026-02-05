@@ -13,6 +13,9 @@ History
     CLI arguments for connection limiting and bot detection.
   * new: ``fingerprinting`` module for telnet client identification and
     capability probing.
+  * new: send IAC GA (Go-Ahead) after prompts when SGA is not negotiated.
+    Fixes hanging for MUD clients like Mudlet. PTY shell uses a 500ms idle
+    timer. Use ``--never-send-ga`` to suppress.
   * bugfix: in handling of LINEMODE FORWARDMASK command bytes.
   * bugfix: SLC fingerprinting byte handling.
   * performance: both client and server protocol data_received methods were

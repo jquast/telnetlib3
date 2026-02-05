@@ -4,7 +4,6 @@
 import asyncio
 
 # local
-# local imports
 import telnetlib3
 import telnetlib3.stream_writer
 from telnetlib3.tests.accessories import (  # pylint: disable=unused-import

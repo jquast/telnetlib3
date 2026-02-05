@@ -10,7 +10,6 @@ import asyncio
 import argparse
 
 # local
-# local imports
 from telnetlib3 import accessories, client_base
 
 __all__ = ("TelnetClient", "TelnetTerminalClient", "open_connection")

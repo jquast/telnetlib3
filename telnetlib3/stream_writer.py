@@ -10,7 +10,6 @@ import logging
 import collections
 
 # local
-# local imports
 from . import slc
 from .telopt import (
     AO,

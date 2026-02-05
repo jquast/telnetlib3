@@ -5,7 +5,6 @@ import time
 import asyncio
 
 # local
-# local imports
 from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
     bind_host,
     unused_tcp_port,

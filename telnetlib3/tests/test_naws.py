@@ -15,7 +15,6 @@ import pytest
 import pexpect
 
 # local
-# local imports
 import telnetlib3
 from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
     bind_host,

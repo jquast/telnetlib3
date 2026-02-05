@@ -25,7 +25,6 @@ from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
     unused_tcp_port,
 )
 
-# local imports
 
 # --- Common Mock Classes ---
 

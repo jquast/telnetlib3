@@ -525,3 +525,52 @@ def test_setup_term_environ_no_ttype_cycle(monkeypatch):
     monkeypatch.setenv("TERM", "vt220")
     fpd._setup_term_environ({})
     assert os.environ["TERM"] == "vt220"
+
+
+@pytest.mark.parametrize("probe,expected", [
+    ({"WILL": {"SGA": 3}}, False),
+    ({"WONT": {"SGA": 3}}, True),
+    ({"timeout": {"SGA": 3}}, True),
+    ({}, True),
+])
+def test_client_requires_ga(probe, expected):
+    """_client_requires_ga detects MUD clients that refused SGA."""
+    data = {"telnet-probe": {"session_data": {"probe": probe}}}
+    assert fpd._client_requires_ga(data) is expected
+
+
+def test_client_requires_ga_missing_keys():
+    """_client_requires_ga returns True when probe data is absent."""
+    assert fpd._client_requires_ga({}) is True
+    assert fpd._client_requires_ga({"telnet-probe": {}}) is True
+
+
+def test_run_ucs_detect_timeout(monkeypatch):
+    """_run_ucs_detect returns None on subprocess timeout."""
+    import subprocess as sp
+
+    def fake_run(*args, **kwargs):
+        raise sp.TimeoutExpired(cmd="ucs-detect", timeout=20)
+
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/ucs-detect")
+    monkeypatch.setattr("subprocess.run", fake_run)
+    assert fpd._run_ucs_detect() is None
+
+
+def test_process_client_fingerprint_skips_ucs_detect_for_mud(monkeypatch, tmp_path):
+    """_process_client_fingerprint skips ucs-detect when client requires GA."""
+    ucs_called = []
+    monkeypatch.setattr(fpd, "_run_ucs_detect", lambda: ucs_called.append(1) or None)
+
+    data = {"telnet-probe": {"session_data": {"probe": {"WONT": {"SGA": 3}}}}}
+    filepath = str(tmp_path / "test.json")
+    with open(filepath, "w") as f:
+        json.dump(data, f)
+
+    monkeypatch.setattr(fpd, "_setup_term_environ", lambda d: None)
+    monkeypatch.setattr(fpd, "_make_terminal", lambda: None)
+    try:
+        fpd._process_client_fingerprint(filepath, data)
+    except (ImportError, AttributeError, TypeError):
+        pass
+    assert ucs_called == []
