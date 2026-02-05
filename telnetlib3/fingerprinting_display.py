@@ -937,7 +937,7 @@ def _colorize_json(data: Any, term=None) -> str:
     json_str = json.dumps(data, indent=2, sort_keys=True)
     if _JQ:
         env = {"TERM": getattr(term, "kind", None) or "dumb",
-               "COLUMNS": term.width, "LINES", term.height}
+               "COLUMNS": term.width, "LINES": term.height}
         if term.number_of_colors == 1 << 24:
             env["COLORTERM"] = 'truecolor'
         result = subprocess.run(
