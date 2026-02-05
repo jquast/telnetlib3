@@ -40,6 +40,66 @@ def _print_json(label, data):
     print(f"{label} {raw}")
 
 
+def _print_telnet_context(session_data):
+    """Print key telnet session fields for moderation context."""
+    ttype_cycle = session_data.get("ttype_cycle", [])
+    if ttype_cycle:
+        print(f"  ttype cycle: {' -> '.join(ttype_cycle)}")
+
+    extra = session_data.get("extra", {})
+    term_val = extra.get("TERM") or extra.get("term")
+    if term_val:
+        print(f"  TERM: {term_val}")
+
+    lang = extra.get("LANG")
+    charset = extra.get("charset")
+    if lang and charset:
+        print(f"  LANG (charset): {lang} ({charset})")
+    elif lang:
+        print(f"  LANG: {lang}")
+    elif charset:
+        print(f"  charset: {charset}")
+
+    cols = extra.get("cols") or extra.get("COLUMNS")
+    rows = extra.get("rows") or extra.get("LINES")
+    if cols and rows:
+        print(f"  size: {cols}x{rows}")
+
+    tspeed = extra.get("tspeed")
+    if tspeed:
+        print(f"  tspeed: {tspeed}")
+
+
+def _print_terminal_context(session_data):
+    """Print key terminal session fields for moderation context."""
+    software = session_data.get("software_name")
+    version = session_data.get("software_version")
+    if software:
+        sw_str = software
+        if version:
+            sw_str += f" {version}"
+        print(f"  software: {sw_str}")
+
+    aw = session_data.get("ambiguous_width")
+    if aw is not None:
+        print(f"  ambiguous_width: {aw}")
+
+
+def _print_paired(paired_hashes, label, names):
+    """Print paired fingerprint hashes with names when known."""
+    if not paired_hashes:
+        return
+    other_label = "terminal" if label == "telnet" else "telnet"
+    parts = []
+    for ph in sorted(paired_hashes):
+        name = names.get(ph)
+        if name:
+            parts.append(f"{name} ({ph[:8]})")
+        else:
+            parts.append(ph[:12])
+    print(f"  paired {other_label}: {', '.join(parts)}")
+
+
 def _load_names(data_dir):
     try:
         with open(data_dir / "fingerprint_names.json") as f:
@@ -58,10 +118,15 @@ def _save_names(data_dir, names):
 
 
 def _scan(data_dir, names, revise=False):
-    """Return list of (label, hash, suggestions, fp_data) for review."""
+    """Return entries for review.
+
+    Each entry is ``(label, hash, suggestions, fp_data, session, paired)``.
+    """
     suggestions = collections.defaultdict(list)
     fp_data = {}
     labels = {}
+    sessions = {}
+    paired = collections.defaultdict(set)
 
     for _, data in _iter_files(data_dir):
         file_sug = data.get("suggestions", {})
@@ -72,12 +137,20 @@ def _scan(data_dir, names, revise=False):
             labels.setdefault(h, probe_key.split("-")[0])
             fp_data.setdefault(
                 h, data.get(probe_key, {}).get("fingerprint-data", {}))
+            sessions.setdefault(
+                h, data.get(probe_key, {}).get("session_data", {}))
+            other = ("terminal-probe" if probe_key == "telnet-probe"
+                     else "telnet-probe")
+            other_h = data.get(other, {}).get("fingerprint")
+            if other_h and other_h != _UNKNOWN:
+                paired[h].add(other_h)
             look = rev_key if revise else sug_key
             if look in file_sug:
                 suggestions[h].append(file_sug[look])
 
     return [
-        (labels[h], h, suggestions.get(h, []), fp_data[h])
+        (labels[h], h, suggestions.get(h, []), fp_data[h],
+         sessions.get(h, {}), paired.get(h, set()))
         for h in sorted(fp_data)
         if (h in names) == revise
     ]
@@ -86,11 +159,17 @@ def _scan(data_dir, names, revise=False):
 def _review(entries, names):
     """Interactive review loop. Return True if any names were added."""
     updated = False
-    for label, h, sug_list, fpd in entries:
+    for label, h, sug_list, fpd, session_data, paired_hashes in entries:
         current = names.get(h)
         print(f"\n{'=' * 60}\n  {label}: {h}")
         if current:
             print(f"  current name: {current}")
+
+        if label == "telnet" and session_data:
+            _print_telnet_context(session_data)
+        elif label == "terminal" and session_data:
+            _print_terminal_context(session_data)
+        _print_paired(paired_hashes, label, names)
 
         default = ""
         if sug_list:

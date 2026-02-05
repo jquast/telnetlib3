@@ -256,6 +256,9 @@ def _build_terminal_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
     if not terminal_data:
         return pairs
 
+    if fp_hash := terminal_probe.get("fingerprint"):
+        pairs.append(("Fingerprint", fp_hash))
+
     if software := terminal_data.get("software_name"):
         if ver := terminal_data.get("software_version"):
             software += f" {ver}"
@@ -1022,18 +1025,19 @@ def _client_ip(data: Dict[str, Any]) -> str:
 
 def _build_database_entries(
     names: Optional[Dict[str, str]] = None,
-) -> List[Tuple[str, str, int]]:
+) -> List[Tuple[str, str, int, int]]:
     """Scan fingerprint directories and build sorted database entries.
 
-    :returns: List of (type, display_name, count) tuples sorted by count descending.
+    :returns: List of ``(type, display_name, file_count, session_count)``
+        tuples sorted by session count descending.
     """
     client_dir = os.path.join(DATA_DIR, "client") if DATA_DIR else None
     if not client_dir or not os.path.isdir(client_dir):
         return []
 
     _names = names or {}
-    telnet_counts: Dict[str, int] = {}
-    terminal_counts: Dict[str, int] = {}
+    telnet_counts: Dict[str, List[int]] = {}
+    terminal_counts: Dict[str, List[int]] = {}
     for telnet_hash in os.listdir(client_dir):
         telnet_path = os.path.join(client_dir, telnet_hash)
         if not os.path.isdir(telnet_path):
@@ -1042,30 +1046,47 @@ def _build_database_entries(
             terminal_path = os.path.join(telnet_path, terminal_hash)
             if not os.path.isdir(terminal_path):
                 continue
-            n = sum(1 for f in os.listdir(terminal_path) if f.endswith(".json"))
-            telnet_counts[telnet_hash] = telnet_counts.get(telnet_hash, 0) + n
-            if terminal_hash != _UNKNOWN_TERMINAL_HASH:
-                terminal_counts[terminal_hash] = (
-                    terminal_counts.get(terminal_hash, 0) + n
-                )
+            for fname in os.listdir(terminal_path):
+                if not fname.endswith(".json"):
+                    continue
+                n_sessions = 1
+                fpath = os.path.join(terminal_path, fname)
+                try:
+                    with open(fpath) as f:
+                        fdata = json.load(f)
+                    n_sessions = len(fdata.get("sessions", [1]))
+                except (OSError, json.JSONDecodeError):
+                    pass
+                telnet_counts.setdefault(telnet_hash, [0, 0])
+                telnet_counts[telnet_hash][0] += 1
+                telnet_counts[telnet_hash][1] += n_sessions
+                if terminal_hash != _UNKNOWN_TERMINAL_HASH:
+                    terminal_counts.setdefault(terminal_hash, [0, 0])
+                    terminal_counts[terminal_hash][0] += 1
+                    terminal_counts[terminal_hash][1] += n_sessions
 
-    merged: Dict[Tuple[str, str], int] = {}
-    for h, n in telnet_counts.items():
+    merged: Dict[Tuple[str, str], List[int]] = {}
+    for h, (files, sessions) in telnet_counts.items():
         key = ("Telnet", _resolve_hash_name(h, _names))
-        merged[key] = merged.get(key, 0) + n
-    for h, n in terminal_counts.items():
+        prev = merged.get(key, [0, 0])
+        merged[key] = [prev[0] + files, prev[1] + sessions]
+    for h, (files, sessions) in terminal_counts.items():
         key = ("Terminal", _resolve_hash_name(h, _names))
-        merged[key] = merged.get(key, 0) + n
+        prev = merged.get(key, [0, 0])
+        merged[key] = [prev[0] + files, prev[1] + sessions]
 
-    entries = [(kind, name, count) for (kind, name), count in merged.items()]
-    entries.sort(key=lambda e: e[2], reverse=True)
+    entries = [
+        (kind, name, files, sessions)
+        for (kind, name), (files, sessions) in merged.items()
+    ]
+    entries.sort(key=lambda e: e[3], reverse=True)
     return entries
 
 
 def _show_database(
     term,
     data: Dict[str, Any],
-    entries: List[Tuple[str, str, int]],
+    entries: List[Tuple[str, str, int, int]],
 ) -> None:
     """Display scrollable database of all known fingerprints."""
     try:
@@ -1084,13 +1105,17 @@ def _show_database(
     if has_unicode:
         _apply_unicode_borders(tbl)
     tbl.title = term.magenta(f"Database ({len(entries)} fingerprints)")
-    tbl.field_names = ["Type", "Fingerprint", "Matches"]
+    tbl.field_names = ["Type", "Fingerprint", "Clients", "Calls"]
     tbl.align["Type"] = "l"
     tbl.align["Fingerprint"] = "l"
-    tbl.align["Matches"] = "r"
+    tbl.align["Clients"] = "r"
+    tbl.align["Calls"] = "r"
     tbl.max_table_width = max(40, (term.width or 80) - 1)
-    for kind, display_name, count in entries:
-        tbl.add_row([kind, term.forestgreen(display_name), str(count)])
+    for kind, display_name, files, sessions in entries:
+        tbl.add_row([
+            kind, term.forestgreen(display_name),
+            str(files), str(sessions),
+        ])
 
     _paginate(term, str(tbl))
 
