@@ -791,7 +791,7 @@ def _build_seen_counts(
             lines.extend(match_lines)
 
     if lines:
-        return "\n".join(lines) + "\n"
+        return "\n".join(lines) + "\n\n"
     return ""
 
 
@@ -852,7 +852,7 @@ def _repl_prompt(
         f"{bk(term, 's')}ummarize or {bk(term, 'u')}pdate database: "
         f"{_cursor_bracket(term, has_unicode, truecolor)}"
     )
-    echo(f"\n\r{term.clear_eos}{term.normal}{legend}")
+    echo(f"\r{term.clear_eos}{term.normal}{legend}")
 
 
 def _page_status(term, title: str, top: int, total: int, truecolor: bool):
