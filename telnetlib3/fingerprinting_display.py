@@ -71,6 +71,7 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
                 ucs_detect,
                 "--limit-category-time=1",
                 "--limit-codepoints=10",
+                "--timeout-cps=2",
                 "--limit-errors=2",
                 "--probe-silently",
                 "--no-final-summary",
