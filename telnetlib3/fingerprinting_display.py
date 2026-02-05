@@ -258,7 +258,7 @@ def _build_terminal_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
         if ver := terminal_data.get("software_version"):
             software += f" {ver}"
         if len(software) > 15:
-            software = software[:14] + "\u2026"
+            software = software[:14] + ("\u2026" if _has_unicode(data) else "..")
         pairs.append(("Software", software))
 
     telnet_probe = data.get("telnet-probe", {})
@@ -846,37 +846,29 @@ def _repl_prompt(
 ) -> None:
     """Write the REPL prompt with hotkey legend and bracketed cursor."""
     bk = _bracket_key
-    m = term.bold_magenta
     legend = (
-        f"{bk(term, 't')} terminal or {bk(term, 'l')} telnet details"
-        f"  {m('-')}  "
-        f"{bk(term, 's')} summarize or {bk(term, 'u')} update database: "
+        f"{bk(term, 't')}erminal or te{bk(term, 'l')}net details, "
+        f"{bk(term, 's')}ummarize or {bk(term, 'u')}pdate database: "
         f"{_cursor_bracket(term, has_unicode, truecolor)}"
     )
     echo(f"\r{term.clear_eos}{term.normal}{legend}")
 
 
-def _page_prompt(term, has_unicode: bool, truecolor: bool):
-    """Display s-stop/c-continue/n-nonstop prompt, return the raw keystroke."""
-    hk = _hotkey
-    prompt = (
-        f"{hk(term, 's')}stop {hk(term, 'c')}continue "
-        f"{hk(term, 'n')}nonstop: "
-        f"{_cursor_bracket(term, has_unicode, truecolor)}")
-    echo(prompt)
-    key = term.inkey(timeout=None)
-    echo(f"{term.normal}\r{term.clear_eol}"
-         f"{_cursor_hide(term, truecolor)}")
-    return key
+def _page_status(term, title: str, top: int, total: int, truecolor: bool):
+    """Display a ``less``-like status line showing position in content."""
+    pct = min(100, (top * 100) // max(1, total - 1))
+    status = f":{title} ({pct}%)"
+    echo(f"\r{term.bold_cyan(status)}{term.clear_eol}"
+         f"{_cursor_show(term, truecolor)}")
 
 
 def _paginate(
-    term, text: str, has_unicode: bool = True, truecolor: bool = False
+    term, text: str, has_unicode: bool = True, truecolor: bool = False,
+    title: str = "",
 ) -> None:
-    """Display text with scrollable pagination.
+    """Display text with ``less``-like scrollable pagination.
 
-    Supports arrow-key scrolling: down advances one line efficiently,
-    up redraws the visible page via relative cursor movement.
+    :param title: Label shown in the status line, e.g. "terminal details".
     """
     width = term.width or 80
     lines = []
@@ -899,28 +891,33 @@ def _paginate(
         echo(lines[i] + "\n")
 
     while True:
-        key = _page_prompt(term, has_unicode, truecolor)
+        _page_status(term, title or "viewing", top, len(lines), truecolor)
+        key = term.inkey(timeout=None)
+        echo(f"{term.normal}\r{term.clear_eol}"
+             f"{_cursor_hide(term, truecolor)}")
 
-        if key == "s":
+        if key == "q":
             return
-        elif key == "n":
-            for i in range(end, len(lines)):
-                echo(lines[i] + "\n")
-            return
-        elif key.name == "KEY_DOWN":
+        elif key.name == "KEY_DOWN" or key == "j":
             if end >= len(lines):
                 return
             echo(f"{lines[end]}{term.clear_eos}\n")
             top += 1
             end += 1
-        elif key.name == "KEY_UP":
+        elif key.name == "KEY_ENTER":
+            if end >= len(lines):
+                return
+            echo(f"{lines[end]}{term.clear_eos}\n")
+            top += 1
+            end += 1
+        elif key.name == "KEY_UP" or key == "k":
             if top > 0:
                 top -= 1
                 end -= 1
                 echo(term.move_up * page_size)
                 for i in range(top, end):
                     echo(f"\r{lines[i]}{term.clear_eol}\n")
-        else:
+        elif key == " ":
             if end >= len(lines):
                 return
             new_end = min(end + page_size, len(lines))
@@ -929,6 +926,7 @@ def _paginate(
                 echo(lines[i] + "\n")
             top += n
             end = new_end
+        # ignore unbound keys
 
 
 def _colorize_json(data: Any, term=None) -> str:
@@ -938,12 +936,14 @@ def _colorize_json(data: Any, term=None) -> str:
     """
     json_str = json.dumps(data, indent=2, sort_keys=True)
     if _JQ:
-        env = {"TERM": getattr(term, "kind", None) or "dumb"}
-        colorterm = os.environ.get("COLORTERM")
-        if colorterm:
-            env["COLORTERM"] = colorterm
+        env = {"TERM": getattr(term, "kind", None) or "dumb",
+               "COLUMNS": term.width, "LINES", term.height}
+        if term.number_of_colors == 1 << 24:
+            env["COLORTERM"] = 'truecolor'
         result = subprocess.run(
-            [_JQ, "-C", "."],
+            [_JQ, "-C",
+             # a very stupid hack to round pct_success 83.33333333334 to 83.34
+             "walk(if type==\"number\" then (.*100|round)/100 else . end)"],
             input=json_str,
             capture_output=True,
             text=True,
@@ -1081,7 +1081,10 @@ def _show_detail(term, data: Dict[str, Any], section: str) -> None:
                 f"{underline}\n"
                 f"\n"
                 f"{_colorize_json(detail, term)}")
-        _paginate(term, text, _has_unicode(data), truecolor)
+        status_title = ("terminal details" if section == "terminal"
+                        else "telnet details")
+        _paginate(term, text, _has_unicode(data), truecolor,
+                  title=status_title)
     else:
         echo(f"{term.magenta(title)}\n{underline}\n\n(no data)\n")
 
@@ -1169,7 +1172,7 @@ def _show_database(
         tbl.add_row([kind, term.forestgreen(display_name), str(count)])
 
     echo(_cursor_hide(term, truecolor))
-    _paginate(term, str(tbl), has_unicode, truecolor)
+    _paginate(term, str(tbl), has_unicode, truecolor, title="seen counts")
 
 
 def _fingerprint_repl(

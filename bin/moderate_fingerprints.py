@@ -165,11 +165,8 @@ def _relocate(data_dir):
 def _prune(data_dir, names):
     """Remove named hashes that have no data files."""
     data_hashes = set()
-    for path, data in _iter_client_files(data_dir):
+    for path, _ in _iter_client_files(data_dir):
         data_hashes.update({path.parent.parent.name, path.parent.name})
-        for key in ("telnet-probe", "terminal-probe"):
-            if h := data.get(key, {}).get("fingerprint"):
-                data_hashes.add(h)
     orphaned = {h: name for h, name in names.items() if h not in data_hashes}
 
     if not orphaned:
