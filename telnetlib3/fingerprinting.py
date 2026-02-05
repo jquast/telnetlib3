@@ -325,7 +325,10 @@ async def _run_probe(
 ) -> Tuple[Dict[str, Dict[str, Any]], float]:
     """Run active probe, optionally extending to MUD options."""
     if _is_maybe_ms_telnet(writer):
-        probe_options = CORE_OPTIONS + MUD_OPTIONS
+        probe_options = [
+            opt for opt in CORE_OPTIONS + MUD_OPTIONS
+            if opt[0] != NEW_ENVIRON
+        ]
         logger.info(
             "reduced probe for suspected MS telnet"
             " (ttype1=%r, ttype2=%r)",

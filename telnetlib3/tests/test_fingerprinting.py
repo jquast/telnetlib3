@@ -480,6 +480,7 @@ async def test_run_probe_ms_telnet_reduced():
     probed_names = set(results.keys())
     legacy_names = {name for _, name, _ in fps.LEGACY_OPTIONS}
     assert not probed_names.intersection(legacy_names)
+    assert "NEW_ENVIRON" not in probed_names
 
 
 @pytest.mark.asyncio
@@ -496,3 +497,4 @@ async def test_run_probe_normal_client_full():
     probed_names = set(results.keys())
     legacy_names = {name for _, name, _ in fps.LEGACY_OPTIONS}
     assert probed_names.issuperset(legacy_names)
+    assert "NEW_ENVIRON" in probed_names
