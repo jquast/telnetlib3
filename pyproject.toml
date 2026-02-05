@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "telnetlib3"
-version = "2.1.0"
+version = "2.2.0"
 description = " Python Telnet server and client CLI and Protocol library"
 readme = "README.rst"
 license = "ISC"

@@ -1,6 +1,16 @@
 History
 =======
 2.2.0
+  * bugfix: workaround for Microsoft Telnet client crash on
+    ``SB NEW_ENVIRON SEND``, :ghissue:`24`. Server now defers ``DO
+    NEW_ENVIRON`` until TTYPE cycling identifies the client, skipping it
+    entirely for MS Telnet (ANSI/VT100).
+  * bugfix: in handling of LINEMODE FORWARDMASK command bytes.
+  * bugfix: SLC fingerprinting byte handling.
+  * performance: with 'smarter' negotiation, default ``connect_maxwait``
+    reduced from 4.0s to 1.5s.
+  * performance: both client and server protocol data_received methods
+    have approximately ~50x throughput improvement in bulk data transfers.
   * new: ``Server`` class returned by ``create_server()`` with
     ``wait_for_client()`` method and ``clients`` property for tracking
     connected clients.
@@ -9,6 +19,8 @@ History
   * new: ``telnetlib3.sync`` module with blocking (non-asyncio) APIs:
     ``TelnetConnection`` for clients, ``BlockingTelnetServer`` for servers.
   * new: ``pty_shell`` module and demonstrating ``telnetlib3-server --pty-exec`` CLI argument
+    and related ``--pty-raw`` server CLI option for raw PTY mode, used by most
+    programs that handle their own terminal I/O.
   * new: ``guard_shells`` module with ``--robot-check`` and ``--pty-fork-limit``
     CLI arguments for connection limiting and bot detection.
   * new: ``fingerprinting`` module for telnet client identification and
@@ -16,10 +28,9 @@ History
   * new: send IAC GA (Go-Ahead) after prompts when SGA is not negotiated.
     Fixes hanging for MUD clients like Mudlet. PTY shell uses a 500ms idle
     timer. Use ``--never-send-ga`` to suppress.
-  * bugfix: in handling of LINEMODE FORWARDMASK command bytes.
-  * bugfix: SLC fingerprinting byte handling.
-  * performance: both client and server protocol data_received methods were
-    optimized for ~50x throughput improvement in bulk data transfers.
+  * new: ``--send-environ`` client CLI option to control which environment
+    variables are sent via NEW_ENVIRON. Default no longer includes HOME or
+    SHELL.
 
 2.0.8
  * bugfix: object has no attribute '_extra' :ghissue:`100`
