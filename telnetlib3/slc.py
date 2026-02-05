@@ -1,5 +1,8 @@
 """Special Line Character support for Telnet Linemode Option (:rfc:`1184`)."""
 
+# std imports
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+
 # local
 from .telopt import theNULL
 from .accessories import eightbits, name_unicode
@@ -91,7 +94,7 @@ LMODE_MODE_ACK, LMODE_MODE_SOFT_TAB, LMODE_MODE_LIT_ECHO = (
 class SLC:
     """Defines the willingness to support a Special Linemode Character."""
 
-    def __init__(self, mask=SLC_DEFAULT, value=theNULL):
+    def __init__(self, mask: bytes = SLC_DEFAULT, value: bytes = theNULL) -> None:
         """
         Initialize SLC with the given mask and value.
 
@@ -107,61 +110,61 @@ class SLC:
         self.val = value
 
     @property
-    def level(self):
+    def level(self) -> bytes:
         """Returns SLC level of support."""
         return bytes([ord(self.mask) & SLC_LEVELBITS])
 
     @property
-    def nosupport(self):
+    def nosupport(self) -> bool:
         """Returns True if SLC level is SLC_NOSUPPORT."""
         return self.level == SLC_NOSUPPORT
 
     @property
-    def cantchange(self):
+    def cantchange(self) -> bool:
         """Returns True if SLC level is SLC_CANTCHANGE."""
         return self.level == SLC_CANTCHANGE
 
     @property
-    def variable(self):
+    def variable(self) -> bool:
         """Returns True if SLC level is SLC_VARIABLE."""
         return self.level == SLC_VARIABLE
 
     @property
-    def default(self):
+    def default(self) -> bool:
         """Returns True if SLC level is SLC_DEFAULT."""
         return self.level == SLC_DEFAULT
 
     @property
-    def ack(self):
+    def ack(self) -> int:
         """Returns True if SLC_ACK bit is set."""
         return ord(self.mask) & ord(SLC_ACK)
 
     @property
-    def flushin(self):
+    def flushin(self) -> int:
         """Returns True if SLC_FLUSHIN bit is set."""
         return ord(self.mask) & ord(SLC_FLUSHIN)
 
     @property
-    def flushout(self):
+    def flushout(self) -> int:
         """Returns True if SLC_FLUSHIN bit is set."""
         return ord(self.mask) & ord(SLC_FLUSHOUT)
 
-    def set_value(self, value):
+    def set_value(self, value: bytes) -> None:
         """Set SLC keyboard ascii value to ``byte``."""
         assert isinstance(value, bytes) and len(value) == 1, value
         self.val = value
 
-    def set_mask(self, mask):
+    def set_mask(self, mask: bytes) -> None:
         """Set SLC option mask, ``mask``."""
         assert isinstance(mask, bytes) and len(mask) == 1
         self.mask = mask
 
-    def set_flag(self, flag):
+    def set_flag(self, flag: bytes) -> None:
         """Set SLC option flag, ``flag``."""
         assert isinstance(flag, bytes) and len(flag) == 1
         self.mask = bytes([ord(self.mask) | ord(flag)])
 
-    def __str__(self):
+    def __str__(self) -> str:
         """SLC definition as string '(value, flag(|s))'."""
         flags = []
         for flag in (
@@ -182,7 +185,7 @@ class SLC:
 class SLC_nosupport(SLC):  # pylint: disable=invalid-name
     """SLC definition inferring our unwillingness to support the option."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize SLC_nosupport with NOSUPPORT level and disabled value."""
         SLC.__init__(self, SLC_NOSUPPORT, _POSIX_VDISABLE)
 
@@ -222,7 +225,9 @@ BSD_SLC_TAB = {
 }
 
 
-def generate_slctab(tabset=None):
+def generate_slctab(
+    tabset: Optional[Dict[bytes, SLC]] = None,
+) -> Dict[bytes, SLC]:
     """
     Returns full 'SLC Tab' for definitions found using ``tabset``.
 
@@ -238,7 +243,9 @@ def generate_slctab(tabset=None):
     return _slctab
 
 
-def generate_forwardmask(binary_mode, tabset, ack=False):
+def generate_forwardmask(
+    binary_mode: bool, tabset: Dict[bytes, SLC], ack: bool = False,
+) -> "Forwardmask":
     """
     Generate a Forwardmask instance.
 
@@ -267,7 +274,11 @@ def generate_forwardmask(binary_mode, tabset, ack=False):
     return Forwardmask(b"".join(mask32), ack)
 
 
-def snoop(byte, slctab, slc_callbacks):
+def snoop(
+    byte: bytes,
+    slctab: Dict[bytes, SLC],
+    slc_callbacks: Dict[bytes, Callable[..., Any]],
+) -> Tuple[Optional[Callable[..., Any]], Optional[bytes], Optional[SLC]]:
     """
     Scan ``slctab`` for matching ``byte`` values.
 
@@ -289,7 +300,7 @@ class Linemode:
     that editing is performed on the remote side.
     """
 
-    def __init__(self, mask=b"\x00"):
+    def __init__(self, mask: bytes = b"\x00") -> None:
         """
         Initialize Linemode with the given mask.
 
@@ -299,7 +310,7 @@ class Linemode:
         assert isinstance(mask, bytes) and len(mask) == 1, (repr(mask), mask)
         self.mask = mask
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         """Compare by another Linemode (LMODE_MODE_ACK ignored)."""
         # the inverse OR(|) of acknowledge bit UNSET in comparator,
         # would be the AND OR(& ~) to compare modes without acknowledge
@@ -307,40 +318,40 @@ class Linemode:
         return (ord(self.mask) | ord(LMODE_MODE_ACK)) == (ord(other.mask) | ord(LMODE_MODE_ACK))
 
     @property
-    def local(self):
+    def local(self) -> bool:
         """True if linemode is local."""
         return bool(ord(self.mask) & ord(LMODE_MODE_LOCAL))
 
     @property
-    def remote(self):
+    def remote(self) -> bool:
         """True if linemode is remote."""
         return not self.local
 
     @property
-    def trapsig(self):
+    def trapsig(self) -> bool:
         """True if signals are trapped by client."""
         return bool(ord(self.mask) & ord(LMODE_MODE_TRAPSIG))
 
     @property
-    def ack(self):
+    def ack(self) -> bool:
         """Returns True if mode has been acknowledged."""
         return bool(ord(self.mask) & ord(LMODE_MODE_ACK))
 
     @property
-    def soft_tab(self):
+    def soft_tab(self) -> bool:
         r"""Returns True if client will expand horizontal tab (``\x09``)."""
         return bool(ord(self.mask) & ord(LMODE_MODE_SOFT_TAB))
 
     @property
-    def lit_echo(self):
+    def lit_echo(self) -> bool:
         """Returns True if non-printable characters are displayed as-is."""
         return bool(ord(self.mask) & ord(LMODE_MODE_LIT_ECHO))
 
-    def __str__(self):
+    def __str__(self) -> str:
         """Returns string representation of line mode, for debugging."""
         return "remote" if self.remote else "local"
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         props = ", ".join(
             f"{prop}:{getattr(self, prop)}"
             for prop in ("lit_echo", "soft_tab", "ack", "trapsig", "remote", "local")
@@ -351,7 +362,7 @@ class Linemode:
 class Forwardmask:
     """Forwardmask object using the bytemask value received by server."""
 
-    def __init__(self, value, ack=False):
+    def __init__(self, value: Union[bytes, bytearray], ack: bool = False) -> None:
         """
         Initialize Forwardmask with the given value.
 
@@ -363,7 +374,7 @@ class Forwardmask:
         self.value = value
         self.ack = ack
 
-    def description_table(self):
+    def description_table(self) -> List[str]:
         """Returns list of strings describing obj as a tabular ASCII map."""
         result = []
         mrk_cont = "(...)"
@@ -395,12 +406,12 @@ class Forwardmask:
                 result.append(f"[{mask:2d}] {eightbits(byte)} {characters}")
         return result
 
-    def __str__(self):
+    def __str__(self) -> str:
         """Returns single string of binary 0 and 1 describing obj."""
         bits = "".join(value for (_, value) in [eightbits(byte).split("b") for byte in self.value])
         return f"0b{bits}"
 
-    def __contains__(self, number):
+    def __contains__(self, number: int) -> bool:
         """Whether forwardmask contains keycode ``number``."""
         mask, flag = number // 8, 2 ** (7 - (number % 8))
         return bool(self.value[mask] & flag)
@@ -446,6 +457,6 @@ _DEBUG_SLC_OPTS = {
 }
 
 
-def name_slc_command(byte):
+def name_slc_command(byte: bytes) -> str:
     """Given an SLC ``byte``, return global mnemonic as string."""
     return repr(byte) if byte not in _DEBUG_SLC_OPTS else _DEBUG_SLC_OPTS[byte]

@@ -18,9 +18,12 @@ import struct
 import asyncio
 import logging
 import termios
+from typing import Awaitable, Callable, List, Optional, Union
 
 # local
 from .telopt import ECHO, NAWS, WONT
+from .stream_reader import TelnetReader, TelnetReaderUnicode
+from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
 __all__ = ("make_pty_shell", "pty_shell", "PTYSpawnError")
 
@@ -546,7 +549,14 @@ async def _wait_for_terminal_info(writer, timeout=2.0):
         await asyncio.sleep(0.1)
 
 
-async def pty_shell(reader, writer, program, args=None, preexec_fn=None, raw_mode=False):
+async def pty_shell(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    program: str,
+    args: Optional[List[str]] = None,
+    preexec_fn: Optional[Callable[[], None]] = None,
+    raw_mode: bool = False,
+) -> None:
     """
     PTY shell callback for telnet server.
 
@@ -583,7 +593,18 @@ async def pty_shell(reader, writer, program, args=None, preexec_fn=None, raw_mod
             writer.close()
 
 
-def make_pty_shell(program, args=None, preexec_fn=None, raw_mode=False):
+def make_pty_shell(
+    program: str,
+    args: Optional[List[str]] = None,
+    preexec_fn: Optional[Callable[[], None]] = None,
+    raw_mode: bool = False,
+) -> Callable[
+    [
+        Union[TelnetReader, TelnetReaderUnicode],
+        Union[TelnetWriter, TelnetWriterUnicode],
+    ],
+    Awaitable[None],
+]:
     """
     Factory returning a shell callback for PTY execution.
 

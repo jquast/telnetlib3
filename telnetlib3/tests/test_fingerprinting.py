@@ -547,6 +547,7 @@ def test_client_requires_ga_missing_keys():
 
 def test_run_ucs_detect_timeout(monkeypatch):
     """_run_ucs_detect returns None on subprocess timeout."""
+    # std imports
     import subprocess as sp
 
     def fake_run(*args, **kwargs):

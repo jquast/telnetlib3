@@ -8,9 +8,22 @@ import codecs
 import struct
 import asyncio
 import argparse
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    Union,
+)
 
 # local
 from telnetlib3 import accessories, client_base
+from telnetlib3.stream_reader import TelnetReader, TelnetReaderUnicode
+from telnetlib3.stream_writer import TelnetWriter, TelnetWriterUnicode
 
 __all__ = ("TelnetClient", "TelnetTerminalClient", "open_connection")
 
@@ -32,23 +45,40 @@ class TelnetClient(client_base.BaseClient):
     #: Default environment variables to send via NEW_ENVIRON
     DEFAULT_SEND_ENVIRON = ("TERM", "LANG", "COLUMNS", "LINES", "COLORTERM")
 
-    def __init__(  # pylint: disable=too-many-positional-arguments,keyword-arg-before-vararg
+    def __init__(  # pylint: disable=too-many-positional-arguments
         self,
-        term="unknown",
-        cols=80,
-        rows=25,
-        tspeed=(38400, 38400),
-        xdisploc="",
-        send_environ=None,
-        *args,
-        **kwargs,
-    ):
+        term: str = "unknown",
+        cols: int = 80,
+        rows: int = 25,
+        tspeed: Tuple[int, int] = (38400, 38400),
+        xdisploc: str = "",
+        send_environ: Optional[Sequence[str]] = None,
+        shell: Optional[Callable[..., Any]] = None,
+        encoding: Union[str, bool] = "utf8",
+        encoding_errors: str = "strict",
+        force_binary: bool = False,
+        connect_minwait: float = 1.0,
+        connect_maxwait: float = 4.0,
+        limit: Optional[int] = None,
+        waiter_closed: Optional[asyncio.Future[Any]] = None,
+        _waiter_connected: Optional[asyncio.Future[None]] = None,
+    ) -> None:
         """Initialize TelnetClient with terminal parameters."""
-        super().__init__(*args, **kwargs)
+        super().__init__(
+            shell=shell,
+            encoding=encoding,
+            encoding_errors=encoding_errors,
+            force_binary=force_binary,
+            connect_minwait=connect_minwait,
+            connect_maxwait=connect_maxwait,
+            limit=limit,
+            waiter_closed=waiter_closed,
+            _waiter_connected=_waiter_connected,
+        )
         self._send_environ = set(send_environ or self.DEFAULT_SEND_ENVIRON)
         self._extra.update(
             {
-                "charset": kwargs["encoding"] or "",
+                "charset": encoding or "",
                 # for our purposes, we only send the second part (encoding) of our
                 # 'lang' variable, CHARSET negotiation does not provide locale
                 # negotiation; this is better left to the real LANG variable
@@ -59,8 +89,8 @@ class TelnetClient(client_base.BaseClient):
                 # class value DEFAULT_LOCALE (en_US), derive and modify as needed.
                 "lang": (
                     "C"
-                    if not kwargs["encoding"]
-                    else self.DEFAULT_LOCALE + "." + kwargs["encoding"]
+                    if not encoding
+                    else self.DEFAULT_LOCALE + "." + str(encoding)
                 ),
                 "cols": cols,
                 "rows": rows,
@@ -114,19 +144,19 @@ class TelnetClient(client_base.BaseClient):
 
         self.writer.handle_will = enhanced_handle_will
 
-    def send_ttype(self):
+    def send_ttype(self) -> str:
         """Callback for responding to TTYPE requests."""
         return self._extra["term"]
 
-    def send_tspeed(self):
+    def send_tspeed(self) -> Tuple[int, int]:
         """Callback for responding to TSPEED requests."""
         return tuple(map(int, self._extra["tspeed"].split(",")))
 
-    def send_xdisploc(self):
+    def send_xdisploc(self) -> str:
         """Callback for responding to XDISPLOC requests."""
         return self._extra["xdisploc"]
 
-    def send_env(self, keys):
+    def send_env(self, keys: Sequence[str]) -> Dict[str, Any]:
         """
         Callback for responding to NEW_ENVIRON requests.
 
@@ -157,7 +187,7 @@ class TelnetClient(client_base.BaseClient):
         env = {k: v for k, v in all_env.items() if k in self._send_environ}
         return {key: env.get(key, "") for key in keys} or env
 
-    def send_charset(self, offered):
+    def send_charset(self, offered: List[str]) -> str:
         """
         Callback for responding to CHARSET requests.
 
@@ -246,7 +276,7 @@ class TelnetClient(client_base.BaseClient):
         self.log.warning("No suitable encoding offered by server: %s", offered)
         return ""
 
-    def send_naws(self):
+    def send_naws(self) -> Tuple[int, int]:
         """
         Callback for responding to NAWS requests.
 
@@ -255,7 +285,11 @@ class TelnetClient(client_base.BaseClient):
         """
         return (self._extra["rows"], self._extra["cols"])
 
-    def encoding(self, outgoing=None, incoming=None):
+    def encoding(
+        self,
+        outgoing: Optional[bool] = None,
+        incoming: Optional[bool] = None,
+    ) -> str:
         """
         Return encoding for the given stream direction.
 
@@ -297,7 +331,7 @@ class TelnetClient(client_base.BaseClient):
 class TelnetTerminalClient(TelnetClient):
     """Telnet client for sessions with a network virtual terminal (NVT)."""
 
-    def send_naws(self):
+    def send_naws(self) -> Tuple[int, int]:
         """
         Callback replies to request for window size, NAWS :rfc:`1073`.
 
@@ -306,7 +340,7 @@ class TelnetTerminalClient(TelnetClient):
         """
         return self._winsize()
 
-    def send_env(self, keys):
+    def send_env(self, keys: Sequence[str]) -> Dict[str, Any]:
         """
         Callback replies to request for env values, NEW_ENVIRON :rfc:`1572`.
 
@@ -338,29 +372,32 @@ class TelnetTerminalClient(TelnetClient):
 
 
 async def open_connection(  # pylint: disable=too-many-locals
-    host=None,
-    port=23,
+    host: Optional[str] = None,
+    port: int = 23,
     *,
-    client_factory=None,
-    family=0,
-    flags=0,
-    local_addr=None,
-    encoding="utf8",
-    encoding_errors="replace",
-    force_binary=False,
-    term="unknown",
-    cols=80,
-    rows=25,
-    tspeed=(38400, 38400),
-    xdisploc="",
-    shell=None,
-    connect_minwait=2.0,
-    connect_maxwait=3.0,
-    waiter_closed=None,
-    _waiter_connected=None,
-    limit=None,
-    send_environ=None,
-):
+    client_factory: Optional[Callable[..., client_base.BaseClient]] = None,
+    family: int = 0,
+    flags: int = 0,
+    local_addr: Optional[Tuple[str, int]] = None,
+    encoding: Union[str, bool] = "utf8",
+    encoding_errors: str = "replace",
+    force_binary: bool = False,
+    term: str = "unknown",
+    cols: int = 80,
+    rows: int = 25,
+    tspeed: Tuple[int, int] = (38400, 38400),
+    xdisploc: str = "",
+    shell: Optional[Callable] = None,
+    connect_minwait: float = 2.0,
+    connect_maxwait: float = 3.0,
+    waiter_closed: Optional[asyncio.Future] = None,
+    _waiter_connected: Optional[asyncio.Future] = None,
+    limit: Optional[int] = None,
+    send_environ: Optional[Sequence[str]] = None,
+) -> Tuple[
+    Union[TelnetReader, TelnetReaderUnicode],
+    Union[TelnetWriter, TelnetWriterUnicode],
+]:
     """
     Connect to a TCP Telnet server as a Telnet client.
 
@@ -550,7 +587,7 @@ def _transform_args(args):
     }
 
 
-def main():
+def main() -> None:
     """Entry point for telnetlib3-client command."""
     asyncio.run(run_client())
 

@@ -7,6 +7,7 @@ import codecs
 import asyncio
 import logging
 import warnings
+from typing import Callable, Optional, Union
 from asyncio import format_helpers
 
 __all__ = (
@@ -26,7 +27,7 @@ class TelnetReader:
 
     _source_traceback = None
 
-    def __init__(self, limit=_DEFAULT_LIMIT):
+    def __init__(self, limit: int = _DEFAULT_LIMIT) -> None:
         """Initialize TelnetReader with optional buffer size limit."""
         self.log = logging.getLogger(__name__)
         # The line length limit is  a security feature;
@@ -49,7 +50,7 @@ class TelnetReader:
         except RuntimeError:
             pass
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Description of stream encoding state."""
         info = [type(self).__name__]
         if self._buffer:
@@ -69,11 +70,11 @@ class TelnetReader:
         info.append("encoding=False")
         return f"<{' '.join(info)}>"
 
-    def exception(self):
+    def exception(self) -> Optional[Exception]:
         """Return the exception if set, otherwise None."""
         return self._exception
 
-    def set_exception(self, exc):
+    def set_exception(self, exc: Exception) -> None:
         """Set the exception and wake up any waiting coroutine."""
         self._exception = exc
 
@@ -91,7 +92,7 @@ class TelnetReader:
             if not waiter.cancelled():
                 waiter.set_result(None)
 
-    def set_transport(self, transport):
+    def set_transport(self, transport: asyncio.BaseTransport) -> None:
         """Set the transport for flow control."""
         assert self._transport is None, "Transport already set"
         self._transport = transport
@@ -101,7 +102,7 @@ class TelnetReader:
             self._paused = False
             self._transport.resume_reading()
 
-    def feed_eof(self):
+    def feed_eof(self) -> None:
         """
         Mark EOF on the reader and wake any pending readers.
 
@@ -119,11 +120,11 @@ class TelnetReader:
         self._eof = True
         self._wakeup_waiter()
 
-    def at_eof(self):
+    def at_eof(self) -> bool:
         """Return True if the buffer is empty and 'feed_eof' was called."""
         return self._eof and not self._buffer
 
-    def feed_data(self, data):
+    def feed_data(self, data: bytes) -> None:
         """Feed data bytes to the reader buffer."""
         assert not self._eof, "feed_data after feed_eof"
 
@@ -174,7 +175,7 @@ class TelnetReader:
         finally:
             self._waiter = None
 
-    async def readuntil(self, separator=b"\n"):
+    async def readuntil(self, separator: bytes = b"\n") -> bytes:
         """
         Read data from the stream until ``separator`` is found.
 
@@ -337,7 +338,7 @@ class TelnetReader:
             # we are not at EOF.
             await self._wait_for_data("readuntil_pattern")
 
-    async def read(self, n=-1):
+    async def read(self, n: int = -1) -> bytes:
         """
         Read up to `n` bytes from the stream.
 
@@ -387,7 +388,7 @@ class TelnetReader:
         self._maybe_resume_transport()
         return data
 
-    async def readexactly(self, n):
+    async def readexactly(self, n: int) -> bytes:
         """
         Read exactly `n` bytes.
 
@@ -432,10 +433,10 @@ class TelnetReader:
         self._maybe_resume_transport()
         return data
 
-    def __aiter__(self):
+    def __aiter__(self) -> "TelnetReader":
         return self
 
-    async def __anext__(self):
+    async def __anext__(self) -> bytes:
         val = await self.readline()
         if val == b"":
             raise StopAsyncIteration
@@ -445,7 +446,7 @@ class TelnetReader:
     # instead of the commit 260dd63a that introduced a close() method on a
     # reader.
     @property
-    def connection_closed(self):
+    def connection_closed(self) -> bool:
         """Deprecated: use at_eof() instead."""
         warnings.warn(
             "connection_closed property removed, use at_eof() instead",
@@ -454,7 +455,7 @@ class TelnetReader:
         )
         return self._eof
 
-    def close(self):
+    def close(self) -> None:
         """
         Deprecated: use feed_eof() instead.
 
@@ -471,7 +472,7 @@ class TelnetReader:
         )
         self.feed_eof()
 
-    async def readline(self):
+    async def readline(self) -> bytes:
         r"""
         Read one line.
 
@@ -567,7 +568,13 @@ class TelnetReaderUnicode(TelnetReader):
     #: practice, however.
     _decoder = None
 
-    def __init__(self, fn_encoding, *, limit=_DEFAULT_LIMIT, encoding_errors="replace"):
+    def __init__(
+        self,
+        fn_encoding: Callable[..., str],
+        *,
+        limit: int = _DEFAULT_LIMIT,
+        encoding_errors: str = "replace",
+    ) -> None:
         """
         A Unicode StreamReader interface for Telnet protocol.
 
@@ -581,7 +588,7 @@ class TelnetReaderUnicode(TelnetReader):
         self.fn_encoding = fn_encoding
         self.encoding_errors = encoding_errors
 
-    def decode(self, buf, final=False):
+    def decode(self, buf: bytes, final: bool = False) -> str:
         """Decode bytes ``buf`` using preferred encoding."""
         if buf == b"":
             return ""  # EOF
@@ -596,7 +603,7 @@ class TelnetReaderUnicode(TelnetReader):
 
         return self._decoder.decode(buf, final)
 
-    async def readline(self):
+    async def readline(self) -> str:  # type: ignore[override]
         """
         Read one line.
 
@@ -605,7 +612,7 @@ class TelnetReaderUnicode(TelnetReader):
         buf = await super().readline()
         return self.decode(buf)
 
-    async def read(self, n=-1):
+    async def read(self, n: int = -1) -> str:  # type: ignore[override]
         """
         Read up to *n* bytes.
 
@@ -650,7 +657,7 @@ class TelnetReaderUnicode(TelnetReader):
         self._maybe_resume_transport()
         return u_data
 
-    async def readexactly(self, n):
+    async def readexactly(self, n: int) -> str:  # type: ignore[override]
         """
         Read exactly *n* unicode characters.
 
@@ -674,7 +681,7 @@ class TelnetReaderUnicode(TelnetReader):
 
         return "".join(blocks)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Description of stream encoding state."""
         encoding = None
         if callable(self.fn_encoding):

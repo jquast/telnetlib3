@@ -5,6 +5,10 @@ import shlex
 import asyncio
 import logging
 import importlib
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Union
+
+if TYPE_CHECKING:  # pragma: no cover
+    from .stream_reader import TelnetReader, TelnetReaderUnicode
 
 __all__ = (
     "encoding_from_lang",
@@ -17,12 +21,12 @@ __all__ = (
 )
 
 
-def get_version():
+def get_version() -> str:
     """Return the current version of telnetlib3."""
     return "2.1.0"  # keep in sync with setup.py and docs/conf.py !!
 
 
-def encoding_from_lang(lang):
+def encoding_from_lang(lang: str) -> Optional[str]:
     """
     Parse encoding from LANG environment value.
 
@@ -48,7 +52,7 @@ def encoding_from_lang(lang):
     return encoding
 
 
-def name_unicode(ucs):
+def name_unicode(ucs: str) -> str:
     """Return 7-bit ascii printable of any string."""
     # more or less the same as curses.ascii.unctrl -- but curses
     # module is conditionally excluded from many python distributions!
@@ -65,7 +69,7 @@ def name_unicode(ucs):
     return rep
 
 
-def eightbits(number):
+def eightbits(number: int) -> str:
     """
     Binary representation of ``number`` padded to 8 bits.
 
@@ -84,7 +88,12 @@ _DEFAULT_LOGFMT = " ".join(
 )
 
 
-def make_logger(name, loglevel="info", logfile=None, logfmt=_DEFAULT_LOGFMT):
+def make_logger(
+    name: str,
+    loglevel: str = "info",
+    logfile: Optional[str] = None,
+    logfmt: str = _DEFAULT_LOGFMT,
+) -> logging.Logger:
     """Create and return simple logger for given arguments."""
     lvl = getattr(logging, loglevel.upper())
 
@@ -97,12 +106,12 @@ def make_logger(name, loglevel="info", logfile=None, logfmt=_DEFAULT_LOGFMT):
     return logging.getLogger(name)
 
 
-def repr_mapping(mapping):
+def repr_mapping(mapping: Mapping[str, Any]) -> str:
     """Return printable string, 'key=value [key=value ...]' for mapping."""
     return " ".join(f"{key}={shlex.quote(str(value))}" for key, value in mapping.items())
 
 
-def function_lookup(pymod_path):
+def function_lookup(pymod_path: str) -> Callable[..., Any]:
     """Return callable function target from standard module.function path."""
     module_name, func_name = pymod_path.rsplit(".", 1)
     module = importlib.import_module(module_name)
@@ -111,6 +120,9 @@ def function_lookup(pymod_path):
     return shell_function
 
 
-def make_reader_task(reader, size=2**12):
+def make_reader_task(
+    reader: "Union[TelnetReader, TelnetReaderUnicode]",
+    size: int = 2**12,
+) -> "asyncio.Task[Any]":
     """Return asyncio task wrapping coroutine of reader.read(size)."""
     return asyncio.ensure_future(reader.read(size))

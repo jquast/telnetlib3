@@ -8,6 +8,7 @@ import weakref
 import datetime
 import traceback
 import collections
+from typing import Any, Callable, Optional, Union
 
 # local
 from .telopt import theNULL, name_commands
@@ -35,16 +36,16 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     def __init__(  # pylint: disable=too-many-positional-arguments
         self,
-        shell=None,
-        encoding="utf8",
-        encoding_errors="strict",
-        force_binary=False,
-        connect_minwait=1.0,
-        connect_maxwait=4.0,
-        limit=None,
-        waiter_closed=None,
-        _waiter_connected=None,
-    ):
+        shell: Optional[Callable] = None,
+        encoding: Union[str, bool] = "utf8",
+        encoding_errors: str = "strict",
+        force_binary: bool = False,
+        connect_minwait: float = 1.0,
+        connect_maxwait: float = 4.0,
+        limit: Optional[int] = None,
+        waiter_closed: Optional[asyncio.Future] = None,
+        _waiter_connected: Optional[asyncio.Future] = None,
+    ) -> None:
         """Class initializer."""
         super().__init__()
         self.log = logging.getLogger("telnetlib3.client")
@@ -78,12 +79,12 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     # Base protocol methods
 
-    def eof_received(self):
+    def eof_received(self) -> None:
         """Called when the other end calls write_eof() or equivalent."""
         self.log.debug("EOF from server, closing.")
         self.connection_lost(None)
 
-    def connection_lost(self, exc):
+    def connection_lost(self, exc: Optional[Exception]) -> None:
         """
         Called when the connection is lost or closed.
 
@@ -124,7 +125,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         # break circular references.
         self._transport = None
 
-    def connection_made(self, transport):
+    def connection_made(self, transport: asyncio.Transport) -> None:
         """
         Called when a connection is made.
 
@@ -172,7 +173,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._waiter_connected.add_done_callback(self.begin_shell)
         asyncio.get_event_loop().call_soon(self.begin_negotiation)
 
-    def begin_shell(self, future):
+    def begin_shell(self, future: asyncio.Future) -> None:
         """Start the shell coroutine after negotiation completes."""
         # Don't start shell if the connection was cancelled or errored
         if future.cancelled() or future.exception() is not None:
@@ -199,7 +200,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                     )
                 )
 
-    def data_received(self, data):
+    def data_received(self, data: bytes) -> None:
         """
         Process bytes received by transport.
 
@@ -229,28 +230,28 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     # public properties
 
     @property
-    def duration(self):
+    def duration(self) -> float:
         """Time elapsed since client connected, in seconds as float."""
         return (datetime.datetime.now() - self._when_connected).total_seconds()
 
     @property
-    def idle(self):
+    def idle(self) -> float:
         """Time elapsed since data last received, in seconds as float."""
         return (datetime.datetime.now() - self._last_received).total_seconds()
 
     # public protocol methods
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         hostport = self.get_extra_info("peername", ["-", "closing"])[:2]
         return f"<Peer {hostport[0]} {hostport[1]}>"
 
-    def get_extra_info(self, name, default=None):
+    def get_extra_info(self, name: str, default: Any = None) -> Any:
         """Get optional client protocol or transport information."""
         if self._transport:
             default = self._transport.get_extra_info(name, default)
         return self._extra.get(name, default)
 
-    def begin_negotiation(self):
+    def begin_negotiation(self) -> None:
         """
         Begin on-connect negotiation.
 
@@ -264,7 +265,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._check_later = asyncio.get_event_loop().call_soon(self._check_negotiation_timer)
         self._tasks.append(self._check_later)
 
-    def encoding(self, outgoing=False, incoming=False):
+    def encoding(self, outgoing: bool = False, incoming: bool = False) -> str:
         """
         Encoding that should be used for the direction indicated.
 
@@ -274,7 +275,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         # pylint: disable=unused-argument
         return self.default_encoding or "US-ASCII"  # pragma: no cover
 
-    def check_negotiation(self, final=False):
+    def check_negotiation(self, final: bool = False) -> bool:
         """
         Callback, return whether negotiation is complete.
 

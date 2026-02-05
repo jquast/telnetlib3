@@ -6,16 +6,22 @@
 import sys
 import asyncio
 import collections
+from typing import Union
 
 # local
 from . import accessories
+from .stream_reader import TelnetReader, TelnetReaderUnicode
+from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
 __all__ = ("telnet_client_shell",)
 
 
 if sys.platform == "win32":
 
-    async def telnet_client_shell(telnet_reader, telnet_writer):
+    async def telnet_client_shell(
+        telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
+        telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
+    ) -> None:
         """Win32 telnet client shell (not implemented)."""
         raise NotImplementedError("win32 not yet supported as telnet client. Please contribute!")
 
@@ -146,7 +152,10 @@ else:
             return reader, writer
 
     # pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-many-nested-blocks
-    async def telnet_client_shell(telnet_reader, telnet_writer):
+    async def telnet_client_shell(
+        telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
+        telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
+    ) -> None:
         """
         Minimal telnet client shell for POSIX terminals.
 

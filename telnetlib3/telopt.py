@@ -1,5 +1,8 @@
 """Telnet option constants exported from the deprecated telnetlib module."""
 
+# std imports
+from typing import Dict
+
 # Exported from the telnetlib module, which is marked for deprecation in version
 # 3.11 and removal in 3.13
 LINEMODE = b'"'
@@ -181,7 +184,7 @@ MCCP_COMPRESS, MCCP2_COMPRESS = (bytes([85]), bytes([86]))
 GMCP = bytes([201])
 
 #: List of globals that may match an iac command option bytes
-_DEBUG_OPTS = {
+_DEBUG_OPTS: Dict[bytes, str] = {
     value: key
     for key, value in globals().items()
     if key
@@ -268,10 +271,10 @@ _DEBUG_OPTS = {
 }
 
 #: Reverse mapping of option names to option bytes
-_NAME_TO_OPT = {name: opt for opt, name in _DEBUG_OPTS.items()}
+_NAME_TO_OPT: Dict[str, bytes] = {name: opt for opt, name in _DEBUG_OPTS.items()}
 
 
-def option_from_name(name):
+def option_from_name(name: str) -> bytes:
     """
     Return option bytes for a given option name.
 
@@ -282,11 +285,11 @@ def option_from_name(name):
     return _NAME_TO_OPT[name.upper()]
 
 
-def name_command(byte):
+def name_command(byte: bytes) -> str:
     """Return string description for (maybe) telnet command byte."""
     return _DEBUG_OPTS.get(byte, repr(byte))
 
 
-def name_commands(cmds, sep=" "):
+def name_commands(cmds: bytes, sep: str = " ") -> str:
     """Return string description for array of (maybe) telnet command bytes."""
     return sep.join([name_command(bytes([byte])) for byte in cmds])

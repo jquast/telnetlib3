@@ -3,9 +3,12 @@
 # std imports
 import types
 import asyncio
+from typing import Union
 
 # local
 from . import slc, telopt, accessories
+from .stream_reader import TelnetReader, TelnetReaderUnicode
+from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
 CR, LF, NUL = ("\r", "\n", "\x00")
 ESC = "\x1b"
@@ -39,8 +42,9 @@ __all__ = ("telnet_server_shell",)
 
 
 async def telnet_server_shell(
-    reader, writer
-):  # pylint: disable=too-complex,too-many-branches,too-many-statements
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> None:  # pylint: disable=too-complex,too-many-branches,too-many-statements
     """
     A default telnet shell, appropriate for use with telnetlib3.create_server.
 

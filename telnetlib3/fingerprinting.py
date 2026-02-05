@@ -14,9 +14,11 @@ import asyncio
 import hashlib
 import logging
 import datetime
-from typing import Any, Dict, List, Tuple, Callable, Optional
+from typing import Any, Dict, List, Tuple, Union, Callable, Optional
 
 # local
+from .stream_reader import TelnetReader, TelnetReaderUnicode
+from .stream_writer import TelnetWriter, TelnetWriterUnicode
 from .telopt import (
     BM,
     DO,
@@ -202,9 +204,11 @@ _OPT_BYTE_TO_NAME = {
 
 
 async def probe_client_capabilities(
-    writer,
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
     options: Optional[List[Tuple[bytes, str, str]]] = None,
-    progress_callback: Optional[Callable[[str, int, int, str], None]] = None,
+    progress_callback: Optional[
+        Callable[[str, int, int, str], None]
+    ] = None,
     timeout: float = 0.5,
 ) -> Dict[str, Dict[str, Any]]:
     """
@@ -299,7 +303,9 @@ _EXTRA_INFO_KEYS = (
 ) + tuple(f"ttype{n}" for n in range(1, 9))
 
 
-def get_client_fingerprint(writer) -> Dict[str, Any]:
+def get_client_fingerprint(
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> Dict[str, Any]:
     """
     Collect all available client information from writer.
 
@@ -878,7 +884,10 @@ def _is_maybe_ms_telnet(writer) -> bool:
     return True
 
 
-async def fingerprinting_server_shell(reader, writer):
+async def fingerprinting_server_shell(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> None:
     """
     Shell that probes client telnet capabilities and runs post-script.
 
@@ -925,7 +934,7 @@ async def fingerprinting_server_shell(reader, writer):
         writer.close()
 
 
-def fingerprinting_post_script(filepath):
+def fingerprinting_post_script(filepath: str) -> None:
     """
     Post-fingerprint script that optionally runs ucs-detect for terminal probing.
 

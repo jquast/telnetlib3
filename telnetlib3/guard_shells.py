@@ -16,9 +16,12 @@ failed robot checks.
 import re
 import asyncio
 import logging
+from typing import Union
 
 # local
 from .server_shell import readline2
+from .stream_reader import TelnetReader, TelnetReaderUnicode
+from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
 __all__ = ("robot_check", "robot_shell", "busy_shell", "ConnectionCounter")
 
@@ -37,7 +40,7 @@ _CPR_PATTERN = re.compile(rb"\x1b\[(\d+);(\d+)R")
 class ConnectionCounter:
     """Simple shared counter for limiting concurrent connections."""
 
-    def __init__(self, limit):
+    def __init__(self, limit: int) -> None:
         """
         Initialize connection counter.
 
@@ -46,7 +49,7 @@ class ConnectionCounter:
         self.limit = limit
         self._count = 0
 
-    def try_acquire(self):
+    def try_acquire(self) -> bool:
         """
         Try to acquire a connection slot.
 
@@ -57,13 +60,13 @@ class ConnectionCounter:
             return True
         return False
 
-    def release(self):
+    def release(self) -> None:
         """Release a connection slot."""
         if self._count > 0:
             self._count -= 1
 
     @property
-    def count(self):
+    def count(self) -> int:
         """Current connection count."""
         return self._count
 
@@ -159,7 +162,11 @@ async def _measure_width(reader, writer, text, timeout=2.0):
     return x2 - x1
 
 
-async def robot_check(reader, writer, timeout=5.0):
+async def robot_check(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    timeout: float = 5.0,
+) -> bool:
     """
     Check if client can render wide characters.
 
@@ -185,7 +192,10 @@ async def _ask_question(reader, writer, prompt, timeout=10.0):
         writer.write('\r\n')
 
 
-async def robot_shell(reader, writer):
+async def robot_shell(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> None:
     """
     Shell for failed robot checks.
 
@@ -219,7 +229,10 @@ async def robot_shell(reader, writer):
             logger.info("robot denied, answers=%r", answers)
 
 
-async def busy_shell(reader, writer):
+async def busy_shell(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> None:
     """
     Shell for when connection limit is reached.
 

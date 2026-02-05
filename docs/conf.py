@@ -244,6 +244,8 @@ intersphinx_mapping = {"python": ("https://docs.python.org/3", None)}
 # Ignore these references that can't be resolved (internal asyncio paths, etc.)
 nitpick_ignore = [
     ("py:class", "asyncio.events.AbstractEventLoop"),
+    ("py:class", "_asyncio.Task"),
+    ("py:data", "typing.Union"),
 ]
 
 # Both the class’ and the __init__ method’s docstring are concatenated and

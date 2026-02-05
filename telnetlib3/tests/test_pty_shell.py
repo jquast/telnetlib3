@@ -814,6 +814,7 @@ async def test_pty_session_terminate_scenarios():
 
 async def test_pty_session_ga_timer_fires_after_idle(mock_session):
     """GA is sent 500ms after _flush_remaining when SGA not negotiated."""
+    # std imports
     from unittest.mock import MagicMock
 
     session, written = mock_session({"charset": "utf-8"}, capture_writes=True)
@@ -836,6 +837,7 @@ async def test_pty_session_ga_timer_fires_after_idle(mock_session):
 
 async def test_pty_session_ga_timer_cancelled_by_new_output(mock_session):
     """GA timer is cancelled when new PTY output arrives."""
+    # std imports
     from unittest.mock import MagicMock
 
     session, written = mock_session({"charset": "utf-8"}, capture_writes=True)
@@ -859,6 +861,7 @@ async def test_pty_session_ga_timer_cancelled_by_new_output(mock_session):
 
 async def test_pty_session_ga_timer_suppressed_by_never_send_ga(mock_session):
     """GA timer is not scheduled when never_send_ga is set."""
+    # std imports
     from unittest.mock import MagicMock
 
     session, written = mock_session({"charset": "utf-8"}, capture_writes=True)
@@ -873,6 +876,7 @@ async def test_pty_session_ga_timer_suppressed_by_never_send_ga(mock_session):
 
 async def test_pty_session_ga_timer_suppressed_in_raw_mode(mock_session):
     """GA timer is not scheduled in raw_mode (e.g. fingerprinting display)."""
+    # std imports
     from unittest.mock import MagicMock
 
     session, _ = mock_session({"charset": "utf-8"}, capture_writes=True)
@@ -888,6 +892,7 @@ async def test_pty_session_ga_timer_suppressed_in_raw_mode(mock_session):
 
 async def test_pty_session_ga_timer_cancelled_on_cleanup(mock_session):
     """GA timer is cancelled during cleanup."""
+    # std imports
     from unittest.mock import MagicMock, patch
 
     session, _ = mock_session({"charset": "utf-8"})

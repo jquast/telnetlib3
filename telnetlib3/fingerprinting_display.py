@@ -1348,7 +1348,7 @@ def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
             _fingerprint_repl(term, data, seen_counts, filepath, names)
 
 
-def fingerprinting_post_script(filepath):
+def fingerprinting_post_script(filepath: str) -> None:
     """
     Post-fingerprint script that optionally runs ucs-detect for terminal probing.
 

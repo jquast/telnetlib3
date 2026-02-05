@@ -8,6 +8,7 @@ import struct
 import asyncio
 import logging
 import collections
+from typing import Any, Callable, Dict, Optional, Sequence, Set
 
 # local
 from . import slc
@@ -125,13 +126,13 @@ class TelnetWriter:
 
     def __init__(
         self,
-        transport,
-        protocol,
+        transport: asyncio.BaseTransport,
+        protocol: asyncio.Protocol,
         *,
-        client=False,
-        server=False,
-        reader=None,
-    ):
+        client: bool = False,
+        server: bool = False,
+        reader: Optional["TelnetReader"] = None,
+    ) -> None:
         """
         Initialize TelnetWriter.
 
@@ -284,18 +285,18 @@ class TelnetWriter:
             self.set_ext_send_callback(cmd=ext_cmd, func=getattr(self, _cbname + key))
 
     @property
-    def connection_closed(self):
+    def connection_closed(self) -> bool:
         """Return True if connection has been closed."""
         return self._connection_closed
 
     # Base protocol methods
 
     @property
-    def transport(self):
+    def transport(self) -> Optional[asyncio.BaseTransport]:
         """Return the underlying transport."""
         return self._transport
 
-    def close(self):
+    def close(self) -> None:
         """Close the connection and release resources."""
         if self.connection_closed:
             return
@@ -323,7 +324,7 @@ class TelnetWriter:
         if self._closed_fut is not None and not self._closed_fut.done():
             self._closed_fut.set_result(None)
 
-    def is_closing(self):
+    def is_closing(self) -> bool:
         """Return True if the connection is closing or already closed."""
         if self._transport is not None:
             if self._transport.is_closing():
@@ -332,7 +333,7 @@ class TelnetWriter:
             return True
         return False
 
-    async def wait_closed(self):
+    async def wait_closed(self) -> None:
         """
         Wait until the underlying connection has completed closing.
 
@@ -360,7 +361,13 @@ class TelnetWriter:
                 fut.cancel()
         self._waiters.clear()
 
-    async def wait_for(self, *, remote=None, local=None, pending=None):
+    async def wait_for(
+        self,
+        *,
+        remote: Optional[Dict[str, bool]] = None,
+        local: Optional[Dict[str, bool]] = None,
+        pending: Optional[Dict[str, bool]] = None,
+    ) -> bool:
         """
         Wait for negotiation state conditions to be met.
 
@@ -410,7 +417,9 @@ class TelnetWriter:
         finally:
             self._waiters = [(c, f) for c, f in self._waiters if f is not fut]
 
-    async def wait_for_condition(self, predicate):
+    async def wait_for_condition(
+        self, predicate: Callable[["TelnetWriter"], bool]
+    ) -> bool:
         """
         Wait for a custom condition to be met.
 
@@ -436,7 +445,7 @@ class TelnetWriter:
         finally:
             self._waiters = [(c, f) for c, f in self._waiters if f is not fut]
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Description of stream encoding state."""
         info = ["TelnetWriter"]
         if self.server:
@@ -483,14 +492,14 @@ class TelnetWriter:
 
         return f"<{' '.join(info)}>"
 
-    def write(self, data):
+    def write(self, data: bytes) -> None:
         """Write a bytes object to the protocol transport."""
         if self.connection_closed:
             self.log.debug("write after close, ignored %s bytes", len(data))
             return
         self._write(data)
 
-    def writelines(self, lines):
+    def writelines(self, lines: Sequence[bytes]) -> None:
         """
         Write unicode strings to transport.
 
@@ -499,15 +508,15 @@ class TelnetWriter:
         """
         self.write(b"".join(lines))
 
-    def write_eof(self):
+    def write_eof(self) -> None:
         """Write EOF to the transport."""
         return self._transport.write_eof()
 
-    def can_write_eof(self):
+    def can_write_eof(self) -> bool:
         """Return True if the transport supports write_eof()."""
         return self._transport.can_write_eof()
 
-    async def drain(self):
+    async def drain(self) -> None:
         """
         Flush the write buffer.
 
@@ -536,7 +545,7 @@ class TelnetWriter:
     # proprietary write helper
 
     # pylint: disable=too-many-branches,too-many-statements,too-complex
-    def feed_byte(self, byte):
+    def feed_byte(self, byte: bytes) -> bool:
         """
         Feed a single byte into Telnet option state machine.
 
@@ -666,7 +675,7 @@ class TelnetWriter:
 
     # Our protocol methods
 
-    def get_extra_info(self, name, default=None):
+    def get_extra_info(self, name: str, default: Any = None) -> Any:
         """Get optional server protocol information."""
         # StreamWriter uses self._transport.get_extra_info, so we mix it in
         # here, but _protocol has all of the interesting telnet effects.
@@ -681,31 +690,31 @@ class TelnetWriter:
         return default
 
     @property
-    def protocol(self):
+    def protocol(self) -> Optional[asyncio.Protocol]:
         """The (Telnet) protocol attached to this stream."""
         return self._protocol
 
     @property
-    def server(self):
+    def server(self) -> bool:
         """Whether this stream is of the server's point of view."""
         return bool(self._server)
 
     @property
-    def client(self):
+    def client(self) -> bool:
         """Whether this stream is of the client's point of view."""
         return bool(not self._server)
 
     @property
-    def inbinary(self):
+    def inbinary(self) -> bool:
         """Whether binary data is expected to be received on reader, :rfc:`856`."""
         return self.remote_option.enabled(BINARY)
 
     @property
-    def outbinary(self):
+    def outbinary(self) -> bool:
         """Whether binary data may be written to the writer, :rfc:`856`."""
         return self.local_option.enabled(BINARY)
 
-    def echo(self, data):
+    def echo(self, data: bytes) -> None:
         """
         Conditionally write ``data`` to transport when "remote echo" enabled.
 
@@ -718,7 +727,7 @@ class TelnetWriter:
             self.write(data=data)
 
     @property
-    def will_echo(self):
+    def will_echo(self) -> bool:
         """
         Whether Server end is expected to echo back input sent by client.
 
@@ -734,7 +743,7 @@ class TelnetWriter:
         )
 
     @property
-    def mode(self):
+    def mode(self) -> str:
         """
         String describing NVT mode.
 
@@ -764,12 +773,12 @@ class TelnetWriter:
         return "local"
 
     @property
-    def is_oob(self):
+    def is_oob(self) -> bool:
         """The previous byte should not be received by the API stream."""
         return self.iac_received or self.cmd_received
 
     @property
-    def linemode(self):
+    def linemode(self) -> slc.Linemode:
         """
         Linemode instance for stream.
 
@@ -782,7 +791,7 @@ class TelnetWriter:
         """
         return self._linemode
 
-    def send_iac(self, buf):
+    def send_iac(self, buf: bytes) -> None:
         """
         Send a command starting with IAC (base 10 byte value 255).
 
@@ -797,7 +806,7 @@ class TelnetWriter:
             if hasattr(self._protocol, "_tx_bytes"):
                 self._protocol._tx_bytes += len(buf)
 
-    def iac(self, cmd, opt=b""):
+    def iac(self, cmd: bytes, opt: bytes = b"") -> bool:
         """
         Send Is-A-Command 3-byte negotiation command.
 
@@ -853,7 +862,7 @@ class TelnetWriter:
     # Public methods for transmission signaling
     #
 
-    def send_ga(self):
+    def send_ga(self) -> bool:
         """
         Transmit IAC GA (Go-Ahead).
 
@@ -868,7 +877,7 @@ class TelnetWriter:
         self.send_iac(IAC + GA)
         return True
 
-    def send_eor(self):
+    def send_eor(self) -> bool:
         """
         Transmit IAC CMD_EOR (End-of-Record), :rfc:`885`.
 
@@ -886,7 +895,7 @@ class TelnetWriter:
     # Public methods for notifying about, or soliciting state options.
     #
 
-    def request_status(self):
+    def request_status(self) -> bool:
         """
         Send ``IAC-SB-STATUS-SEND`` sub-negotiation (:rfc:`859`).
 
@@ -905,7 +914,7 @@ class TelnetWriter:
             self.log.info("cannot send SB STATUS SEND, request pending.")
         return False
 
-    def request_tspeed(self):
+    def request_tspeed(self) -> bool:
         """
         Send IAC-SB-TSPEED-SEND sub-negotiation, :rfc:`1079`.
 
@@ -925,7 +934,7 @@ class TelnetWriter:
             self.log.debug("cannot send SB TSPEED SEND, request pending.")
         return False
 
-    def request_charset(self):
+    def request_charset(self) -> bool:
         """
         Request sub-negotiation CHARSET, :rfc:`2066`.
 
@@ -961,7 +970,7 @@ class TelnetWriter:
         self.pending_option[SB + CHARSET] = True
         return True
 
-    def request_environ(self):
+    def request_environ(self) -> bool:
         """
         Request sub-negotiation NEW_ENVIRON, :rfc:`1572`.
 
@@ -1003,7 +1012,7 @@ class TelnetWriter:
         self.send_iac(b"".join(response))
         return True
 
-    def request_xdisploc(self):
+    def request_xdisploc(self) -> bool:
         """
         Send XDISPLOC, SEND sub-negotiation, :rfc:`1086`.
 
@@ -1023,7 +1032,7 @@ class TelnetWriter:
         self.log.debug("cannot send SB XDISPLOC SEND, request pending.")
         return False
 
-    def request_ttype(self):
+    def request_ttype(self) -> bool:
         """
         Send TTYPE SEND sub-negotiation, :rfc:`930`.
 
@@ -1042,7 +1051,9 @@ class TelnetWriter:
         self.log.debug("cannot send SB TTYPE SEND, request pending.")
         return False
 
-    def request_forwardmask(self, fmask=None):
+    def request_forwardmask(
+        self, fmask: Optional[slc.Forwardmask] = None
+    ) -> bool:
         """
         Request the client forward their terminal control characters.
 
@@ -1079,7 +1090,7 @@ class TelnetWriter:
             return True
         return False
 
-    def send_lineflow_mode(self):
+    def send_lineflow_mode(self) -> None:
         """
         Send LFLOW mode sub-negotiation, :rfc:`1372`.
 
@@ -1099,7 +1110,7 @@ class TelnetWriter:
             return True
         return False
 
-    def send_linemode(self, linemode=None):
+    def send_linemode(self, linemode: Optional[slc.Linemode] = None) -> None:
         """
         Set and Inform other end to agree to change to linemode, ``linemode``.
 
@@ -1124,7 +1135,7 @@ class TelnetWriter:
 
     # Public is-a-command (IAC) callbacks
     #
-    def set_iac_callback(self, cmd, func):
+    def set_iac_callback(self, cmd: bytes, func: Callable[..., Any]) -> None:
         """
         Register callable ``func`` as callback for IAC ``cmd``.
 
@@ -1259,7 +1270,9 @@ class TelnetWriter:
 
     # public Special Line Mode (SLC) callbacks
     #
-    def set_slc_callback(self, slc_byte, func):
+    def set_slc_callback(
+        self, slc_byte: bytes, func: Callable[..., Any]
+    ) -> None:
         """
         Register ``func`` as callable for receipt of ``slc_byte``.
 
@@ -1304,7 +1317,9 @@ class TelnetWriter:
 
     # public Telnet extension callbacks
     #
-    def set_ext_send_callback(self, cmd, func):
+    def set_ext_send_callback(
+        self, cmd: bytes, func: Callable[..., Any]
+    ) -> None:
         """
         Register callback for inquires of sub-negotiation of ``cmd``.
 
@@ -1340,7 +1355,9 @@ class TelnetWriter:
         assert callable(func), "Argument func must be callable"
         self._ext_send_callback[cmd] = func
 
-    def set_ext_callback(self, cmd, func):
+    def set_ext_callback(
+        self, cmd: bytes, func: Callable[..., Any]
+    ) -> None:
         """
         Register ``func`` as callback for receipt of ``cmd`` negotiation.
 
@@ -2588,13 +2605,26 @@ class TelnetWriterUnicode(TelnetWriter):  # pylint: disable=abstract-method
     discovered by ``LANG`` environment variables by NEW_ENVIRON, :rfc:`1572`.
     """
 
-    def __init__(self, transport, protocol, fn_encoding, *, encoding_errors="strict", **kwds):
+    def __init__(
+        self,
+        transport: asyncio.BaseTransport,
+        protocol: asyncio.Protocol,
+        fn_encoding: Callable[..., str],
+        *,
+        encoding_errors: str = "strict",
+        client: bool = False,
+        server: bool = False,
+        reader: Optional["TelnetReader"] = None,
+    ) -> None:
         """Initialize TelnetWriterUnicode with encoding callback."""
         self.fn_encoding = fn_encoding
         self.encoding_errors = encoding_errors
-        super().__init__(transport, protocol, **kwds)
+        super().__init__(
+            transport, protocol,
+            client=client, server=server, reader=reader,
+        )
 
-    def encode(self, string, errors):
+    def encode(self, string: str, errors: Optional[str] = None) -> bytes:
         """
         Encode ``string`` using protocol-preferred encoding.
 
@@ -2611,7 +2641,9 @@ class TelnetWriterUnicode(TelnetWriter):  # pylint: disable=abstract-method
         encoding = self.fn_encoding(outgoing=True)
         return bytes(string, encoding, errors or self.encoding_errors)
 
-    def write(self, string, errors=None):  # pylint: disable=arguments-renamed
+    def write(  # type: ignore[override]
+        self, string: str, errors: Optional[str] = None
+    ) -> None:  # pylint: disable=arguments-renamed
         """
         Write unicode string to transport, using protocol-preferred encoding.
 
@@ -2630,7 +2662,9 @@ class TelnetWriterUnicode(TelnetWriter):  # pylint: disable=abstract-method
         errors = errors or self.encoding_errors
         self._write(self.encode(string, errors))
 
-    def writelines(self, lines, errors=None):
+    def writelines(  # type: ignore[override]
+        self, lines: Sequence[str], errors: Optional[str] = None
+    ) -> None:
         """
         Write unicode strings to transport.
 
@@ -2639,7 +2673,9 @@ class TelnetWriterUnicode(TelnetWriter):  # pylint: disable=abstract-method
         """
         self.write(string="".join(lines), errors=errors)
 
-    def echo(self, string, errors=None):  # pylint: disable=arguments-renamed
+    def echo(  # type: ignore[override]
+        self, string: str, errors: Optional[str] = None
+    ) -> None:  # pylint: disable=arguments-renamed
         """
         Conditionally write ``string`` to transport when "remote echo" enabled.
 
@@ -2664,7 +2700,12 @@ class Option(dict):
     telnet option negotiation.
     """
 
-    def __init__(self, name, log, on_change=None):
+    def __init__(
+        self,
+        name: str,
+        log: logging.Logger,
+        on_change: Optional[Callable[[], None]] = None,
+    ) -> None:
         """
         Class initializer.
 
@@ -2676,7 +2717,7 @@ class Option(dict):
         self._on_change = on_change
         dict.__init__(self)
 
-    def enabled(self, key):
+    def enabled(self, key: bytes) -> bool:
         """
         Return True if option is enabled.
 
