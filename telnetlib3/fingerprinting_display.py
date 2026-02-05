@@ -742,13 +742,15 @@ def _build_seen_counts(
         if terminal_name is not None:
             terminal_name = g(terminal_name)
 
-    folder_path = os.path.join(DATA_DIR, "client", telnet_hash, terminal_hash)
-    if os.path.isdir(folder_path):
-        like_count = sum(
-            1 for f in os.listdir(folder_path) if f.endswith(".json")
-        )
-    else:
-        like_count = 0
+    telnet_dir = os.path.join(DATA_DIR, "client", telnet_hash)
+    like_count = 0
+    if os.path.isdir(telnet_dir):
+        for sub in os.listdir(telnet_dir):
+            sub_path = os.path.join(telnet_dir, sub)
+            if os.path.isdir(sub_path):
+                like_count += sum(
+                    1 for f in os.listdir(sub_path) if f.endswith(".json")
+                )
 
     visit_count = len(data.get("sessions", []))
 
@@ -897,18 +899,14 @@ def _paginate(
 
         if key == "q":
             return
-        elif key.name == "KEY_DOWN" or key == "j":
+
+        elif key.name == "KEY_DOWN" or key == "j" or key.name == "KEY_ENTER":
             if end >= len(lines):
                 return
             echo(f"{lines[end]}{term.clear_eos}\n")
             top += 1
             end += 1
-        elif key.name == "KEY_ENTER":
-            if end >= len(lines):
-                return
-            echo(f"{lines[end]}{term.clear_eos}\n")
-            top += 1
-            end += 1
+
         elif key.name == "KEY_UP" or key == "k":
             if top > 0:
                 top -= 1
@@ -916,7 +914,9 @@ def _paginate(
                 echo(term.move_up * page_size)
                 for i in range(top, end):
                     echo(f"\r{lines[i]}{term.clear_eol}\n")
-        elif key == " ":
+
+        elif (key == " " or key == "f"
+              or key.name in ("KEY_PGDOWN", "KEY_RIGHT")):
             if end >= len(lines):
                 return
             new_end = min(end + page_size, len(lines))
@@ -925,7 +925,32 @@ def _paginate(
                 echo(lines[i] + "\n")
             top += n
             end = new_end
-        # ignore unbound keys
+
+        elif (key == "b"
+              or key.name in ("KEY_PGUP", "KEY_LEFT")):
+            if top > 0:
+                new_top = max(0, top - page_size)
+                top = new_top
+                end = min(top + page_size, len(lines))
+                echo(term.move_up * page_size)
+                for i in range(top, end):
+                    echo(f"\r{lines[i]}{term.clear_eol}\n")
+
+        elif key.name == "KEY_HOME":
+            if top > 0:
+                top = 0
+                end = min(page_size, len(lines))
+                echo(term.move_up * page_size)
+                for i in range(top, end):
+                    echo(f"\r{lines[i]}{term.clear_eol}\n")
+
+        elif key.name == "KEY_END":
+            if end < len(lines):
+                top = max(0, len(lines) - page_size)
+                end = len(lines)
+                echo(term.move_up * page_size)
+                for i in range(top, end):
+                    echo(f"\r{lines[i]}{term.clear_eol}\n")
 
 
 def _colorize_json(data: Any, term=None) -> str:
@@ -1120,11 +1145,12 @@ def _build_database_entries(
             terminal_path = os.path.join(telnet_path, terminal_hash)
             if not os.path.isdir(terminal_path):
                 continue
-            if terminal_hash == _UNKNOWN_TERMINAL_HASH:
-                continue
             n = sum(1 for f in os.listdir(terminal_path) if f.endswith(".json"))
             telnet_counts[telnet_hash] = telnet_counts.get(telnet_hash, 0) + n
-            terminal_counts[terminal_hash] = terminal_counts.get(terminal_hash, 0) + n
+            if terminal_hash != _UNKNOWN_TERMINAL_HASH:
+                terminal_counts[terminal_hash] = (
+                    terminal_counts.get(terminal_hash, 0) + n
+                )
 
     merged: Dict[Tuple[str, str], int] = {}
     for h, n in telnet_counts.items():
