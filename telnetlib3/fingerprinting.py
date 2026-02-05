@@ -675,6 +675,8 @@ def _cooked_input(prompt: str) -> str:
     termios.tcsetattr(fd, termios.TCSANOW, new_attrs)
     try:
         return input(prompt)
+    except EOFError:
+        return ""
     finally:
         termios.tcsetattr(fd, termios.TCSANOW, old_attrs)
 
