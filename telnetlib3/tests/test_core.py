@@ -165,7 +165,7 @@ async def test_telnet_server_advanced_negotiation(bind_host, unused_tcp_port):
                 # server's request for TTYPE value unreplied
                 SB + TTYPE: True,
                 # remaining unreplied values from begin_advanced_negotiation()
-                DO + NEW_ENVIRON: True,
+                # DO NEW_ENVIRON is deferred until TTYPE cycle completes
                 DO + CHARSET: True,
                 DO + NAWS: True,
                 WILL + SGA: True,

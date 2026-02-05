@@ -502,16 +502,6 @@ def _bracket_key(term, key: str) -> str:
     return f"{term.cyan('[')}{term.bold_magenta(key)}{term.cyan(']')}"
 
 
-def _cursor_bracket(
-    term, has_unicode: bool, truecolor: bool = False
-) -> str:
-    """Return cursor bracket with block cursor, positioned on the block."""
-    block = "\u2588" if has_unicode else " "
-    return (f"{term.cyan('[')}{term.bold_magenta(block)}"
-            f"{term.cyan(']')}{term.normal}"
-            f"\b\b")
-
-
 def _apply_unicode_borders(tbl) -> None:
     """Apply double-line box-drawing characters to a PrettyTable."""
     tbl.horizontal_char = "\u2550"
@@ -531,10 +521,7 @@ def _display_compact_summary(data: Dict[str, Any], term=None) -> bool:
     """Display compact fingerprint summary using prettytable."""
     try:
         from prettytable import PrettyTable
-        from ucs_detect import (
-            _collect_side_by_side_lines,
-            _paginated_write,
-        )
+        from ucs_detect import _collect_side_by_side_lines
     except ImportError:
         return False
 
@@ -572,7 +559,6 @@ def _display_compact_summary(data: Dict[str, Any], term=None) -> bool:
 
     timeout = _sync_timeout(data)
 
-    truecolor = _has_truecolor(data)
     echo(term.normal)
 
     widths = [len(s.split("\n", 1)[0]) for s in table_strings]
@@ -582,29 +568,23 @@ def _display_compact_summary(data: Dict[str, Any], term=None) -> bool:
         all_lines = _collect_side_by_side_lines(term, table_strings)
         if has_unicode:
             with term.synchronized_output(timeout=timeout):
-                _paginated_write(term, sys.stdout.write, all_lines)
+                for line in all_lines:
+                    echo(line + "\n")
         else:
-            _paginated_write(term, sys.stdout.write, all_lines)
+            for line in all_lines:
+                echo(line + "\n")
     else:
-        total_lines = sum(len(s.split("\n")) for s in table_strings)
-        height = term.height or 25
-        needs_paging = total_lines + len(table_strings) > height
-        for idx, tbl in enumerate(table_strings):
+        for tbl in table_strings:
             lines = tbl.split("\n")
             if has_unicode:
                 with term.synchronized_output(timeout=timeout):
-                    _paginated_write(term, sys.stdout.write,
-                                     lines + [""])
+                    for line in lines:
+                        echo(line + "\n")
+                    echo("\n")
             else:
-                _paginated_write(term, sys.stdout.write, lines + [""])
-            if (needs_paging
-                    and idx + 1 < len(table_strings)
-                    and term.is_a_tty):
-                echo(f"press return to continue: "
-                     f"{_cursor_bracket(term, has_unicode, truecolor)}")
-                with term.cbreak():
-                    term.inkey(timeout=None)
-                echo(f"\r{term.clear_eol}")
+                for line in lines:
+                    echo(line + "\n")
+                echo("\n")
     return True
 
 
@@ -845,113 +825,20 @@ def _nearest_match_lines(
     return result_lines
 
 
-def _repl_prompt(
-    term, has_unicode: bool = True, truecolor: bool = False
-) -> None:
-    """Write the REPL prompt with hotkey legend and bracketed cursor."""
+def _repl_prompt(term) -> None:
+    """Write the REPL prompt with hotkey legend."""
     bk = _bracket_key
     legend = (
         f"{bk(term, 't')}erminal or te{bk(term, 'l')}net details, "
         f"{bk(term, 's')}ummarize or {bk(term, 'u')}pdate database: "
-        f"{_cursor_bracket(term, has_unicode, truecolor)}"
     )
     echo(f"\r{term.clear_eos}{term.normal}{legend}")
 
 
-def _page_status(term, title: str, top: int, total: int, truecolor: bool):
-    """Display a ``less``-like status line showing position in content."""
-    pct = min(100, (top * 100) // max(1, total - 1))
-    status = f":{title} ({pct}%)"
-    echo(f"\r{status}{term.clear_eol}")
-
-
-def _paginate(
-    term, text: str, has_unicode: bool = True, truecolor: bool = False,
-    title: str = "",
-) -> None:
-    """Display text with ``less``-like scrollable pagination.
-
-    :param title: Label shown in the status line, e.g. "terminal details".
-    """
-    width = term.width or 80
-    lines = []
-    for raw in text.split("\n"):
-        wrapped = textwrap.wrap(
-            raw, width=width,
-            break_long_words=True, break_on_hyphens=False,
-        )
-        lines.extend(wrapped if wrapped else [raw])
-    page_size = max(1, (term.height or 25) - 1)
-
-    if len(lines) <= page_size:
-        for line in lines:
-            echo(line + "\n")
-        return
-
-    top = 0
-    end = page_size
-    for i in range(top, end):
-        echo(lines[i] + "\n")
-
-    while True:
-        _page_status(term, title or "viewing", top, len(lines), truecolor)
-        key = term.inkey(timeout=None)
-        echo(f"{term.normal}\r{term.clear_eol}")
-
-        if key == "q":
-            return
-
-        elif key.name == "KEY_DOWN" or key == "j" or key.name == "KEY_ENTER":
-            if end >= len(lines):
-                return
-            echo(f"{lines[end]}{term.clear_eos}\n")
-            top += 1
-            end += 1
-
-        elif key.name == "KEY_UP" or key == "k":
-            if top > 0:
-                top -= 1
-                end -= 1
-                echo(term.move_up * page_size)
-                for i in range(top, end):
-                    echo(f"\r{lines[i]}{term.clear_eol}\n")
-
-        elif (key == " " or key == "f"
-              or key.name in ("KEY_PGDOWN", "KEY_RIGHT")):
-            if end >= len(lines):
-                return
-            new_end = min(end + page_size, len(lines))
-            n = new_end - end
-            for i in range(end, new_end):
-                echo(lines[i] + "\n")
-            top += n
-            end = new_end
-
-        elif (key == "b"
-              or key.name in ("KEY_PGUP", "KEY_LEFT")):
-            if top > 0:
-                new_top = max(0, top - page_size)
-                top = new_top
-                end = min(top + page_size, len(lines))
-                echo(term.move_up * page_size)
-                for i in range(top, end):
-                    echo(f"\r{lines[i]}{term.clear_eol}\n")
-
-        elif key.name == "KEY_HOME":
-            if top > 0:
-                top = 0
-                end = min(page_size, len(lines))
-                echo(term.move_up * page_size)
-                for i in range(top, end):
-                    echo(f"\r{lines[i]}{term.clear_eol}\n")
-
-        elif key.name == "KEY_END":
-            if end < len(lines):
-                top = max(0, len(lines) - page_size)
-                end = len(lines)
-                echo(term.move_up * page_size)
-                for i in range(top, end):
-                    echo(f"\r{lines[i]}{term.clear_eol}\n")
+def _paginate(term, text: str, **_kw) -> None:
+    """Display text."""
+    for line in text.split("\n"):
+        echo(line + "\n")
 
 
 def _colorize_json(data: Any, term=None) -> str:
@@ -1099,17 +986,13 @@ def _show_detail(term, data: Dict[str, Any], section: str) -> None:
         title = "Telnet Probe Data"
 
     underline = term.cyan("=" * len(title))
-    truecolor = _has_truecolor(data)
     echo(term.normal + term.clear)
     if detail:
         text = (f"{term.magenta(title)}\n"
                 f"{underline}\n"
                 f"\n"
                 f"{_colorize_json(detail, term)}")
-        status_title = ("viewing terminal details" if section == "terminal"
-                        else "viewing telnet details")
-        _paginate(term, text, _has_unicode(data), truecolor,
-                  title=status_title)
+        _paginate(term, text)
     else:
         echo(f"{term.magenta(title)}\n{underline}\n\n(no data)\n")
 
@@ -1183,7 +1066,6 @@ def _show_database(
         return
 
     has_unicode = _has_unicode(data)
-    truecolor = _has_truecolor(data)
 
     tbl = PrettyTable()
     if has_unicode:
@@ -1197,7 +1079,7 @@ def _show_database(
     for kind, display_name, count in entries:
         tbl.add_row([kind, term.forestgreen(display_name), str(count)])
 
-    _paginate(term, str(tbl), has_unicode, truecolor, title="seen counts")
+    _paginate(term, str(tbl))
 
 
 def _fingerprint_repl(
@@ -1215,11 +1097,10 @@ def _fingerprint_repl(
         "u": "update", "\x0c": "refresh",
     }
 
-    truecolor = _has_truecolor(data)
     db_cache = None
 
     while True:
-        _repl_prompt(term, _has_unicode(data), truecolor)
+        _repl_prompt(term)
         with term.cbreak():
             key = term.inkey(timeout=None)
 
@@ -1282,7 +1163,7 @@ def _prompt_fingerprint_identification(
     if all_known:
         echo(f"\n{term.bold_magenta}Suggest a revision{term.normal}\n")
     else:
-        echo(f"\n{term.bold_magenta}Help our database!{term.normal}\n")
+        echo(f"{term.bold_magenta}Help our database!{term.normal}\n")
 
     suggestions: Dict[str, str] = data.get("suggestions", {})
     revised = False
@@ -1334,6 +1215,8 @@ def _prompt_fingerprint_identification(
 
     if revised:
         echo("Your submission is under review.\n")
+
+    echo("\n")
 
 
 def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:

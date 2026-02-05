@@ -3,7 +3,9 @@
 # std imports
 import asyncio
 
-# local
+# 3rd party
+import pytest
+
 # local imports
 import telnetlib3
 import telnetlib3.stream_writer
@@ -140,7 +142,6 @@ async def test_telnet_server_reject_environ(bind_host, unused_tcp_port):
 
     given_cols = 19
     given_rows = 84
-    given_encoding = "cp437"
     given_term = "vt220"
 
     class ServerTestEnviron(telnetlib3.TelnetServer):
@@ -151,16 +152,110 @@ async def test_telnet_server_reject_environ(bind_host, unused_tcp_port):
         protocol_factory=ServerTestEnviron,
         host=bind_host,
         port=unused_tcp_port,
+        encoding=False,
+        connect_maxwait=0.5,
     ):
         async with open_connection(
             host=bind_host,
             port=unused_tcp_port,
             cols=given_cols,
             rows=given_rows,
-            encoding=given_encoding,
+            encoding=False,
             term=given_term,
-            connect_minwait=0.05,
-            connect_maxwait=0.05,
+            connect_minwait=0.3,
+            connect_maxwait=0.5,
         ) as (reader, writer):
             _failed = {key: val for key, val in writer.pending_option.items() if val}
             assert _failed == {SB + NEW_ENVIRON: True}
+
+
+class _MockTransport:
+    def get_extra_info(self, key, default=None):
+        return default
+
+    def write(self, data):
+        pass
+
+    def is_closing(self):
+        return False
+
+
+def _make_server():
+    server = telnetlib3.TelnetServer()
+    server.connection_made(_MockTransport())
+    return server
+
+
+@pytest.mark.parametrize("ttype1,ttype2,expect_skip", [
+    ("ANSI", "VT100", True),
+    ("ANSI", "ANSI", False),
+    ("ansi", "vt100", False),
+    ("xterm", "xterm", False),
+    ("xterm", "xterm-256color", False),
+])
+async def test_negotiate_environ_ms_telnet(ttype1, ttype2, expect_skip):
+    """NEW_ENVIRON is skipped for Microsoft telnet (ANSI + VT100)."""
+    from telnetlib3.telopt import DO, NEW_ENVIRON
+
+    server = _make_server()
+    server._extra["ttype1"] = ttype1
+    server._extra["ttype2"] = ttype2
+    server._negotiate_environ()
+    if expect_skip:
+        assert not server.writer.pending_option.get(DO + NEW_ENVIRON)
+    else:
+        assert server.writer.pending_option.get(DO + NEW_ENVIRON)
+
+
+async def test_check_negotiation_ttype_refused_triggers_environ():
+    """check_negotiation sends DO NEW_ENVIRON when TTYPE is refused."""
+    from telnetlib3.telopt import DO, TTYPE, NEW_ENVIRON
+
+    server = _make_server()
+    server._advanced = True
+    server.writer.remote_option[TTYPE] = False
+    server.check_negotiation(final=False)
+    assert server._environ_requested
+    assert server.writer.pending_option.get(DO + NEW_ENVIRON)
+
+
+async def test_check_negotiation_final_triggers_environ():
+    """check_negotiation sends DO NEW_ENVIRON on final timeout."""
+    from telnetlib3.telopt import DO, NEW_ENVIRON
+
+    server = _make_server()
+    server._advanced = True
+    server.check_negotiation(final=True)
+    assert server._environ_requested
+    assert server.writer.pending_option.get(DO + NEW_ENVIRON)
+
+
+async def test_check_negotiation_no_advanced_skips_environ():
+    """check_negotiation does not send DO NEW_ENVIRON without advanced."""
+    from telnetlib3.telopt import DO, TTYPE, NEW_ENVIRON
+
+    server = _make_server()
+    server.writer.remote_option[TTYPE] = False
+    server.check_negotiation(final=True)
+    assert not server._environ_requested
+    assert not server.writer.pending_option.get(DO + NEW_ENVIRON)
+
+
+async def test_on_ttype_non_ansi_triggers_environ():
+    """on_ttype sends DO NEW_ENVIRON immediately for non-ANSI ttype1."""
+    from telnetlib3.telopt import DO, NEW_ENVIRON
+
+    server = _make_server()
+    server.on_ttype("xterm")
+    assert server._environ_requested
+    assert server.writer.pending_option.get(DO + NEW_ENVIRON)
+
+
+async def test_on_ttype_ansi_defers_environ():
+    """on_ttype defers DO NEW_ENVIRON when ttype1 is ANSI."""
+    from telnetlib3.telopt import DO, NEW_ENVIRON
+
+    server = _make_server()
+    server.on_ttype("ANSI")
+    assert not server._environ_requested
+    assert not server.writer.pending_option.get(DO + NEW_ENVIRON)

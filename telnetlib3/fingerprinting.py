@@ -324,13 +324,26 @@ async def _run_probe(
     writer, verbose: bool = True
 ) -> Tuple[Dict[str, Dict[str, Any]], float]:
     """Run active probe, optionally extending to MUD options."""
-    total = len(ALL_PROBE_OPTIONS)
+    if _is_maybe_ms_telnet(writer):
+        probe_options = CORE_OPTIONS + MUD_OPTIONS
+        logger.info(
+            "reduced probe for suspected MS telnet"
+            " (ttype1=%r, ttype2=%r)",
+            writer.get_extra_info("ttype1"),
+            writer.get_extra_info("ttype2"),
+        )
+    else:
+        probe_options = ALL_PROBE_OPTIONS
+
+    total = len(probe_options)
     if verbose:
         writer.write(f"\rProbing {total} telnet options...\x1b[J")
         await writer.drain()
 
     start_time = time.time()
-    results = await probe_client_capabilities(writer, timeout=0.5)
+    results = await probe_client_capabilities(
+        writer, options=probe_options, timeout=0.5
+    )
 
     if _is_maybe_mud(writer) and EXTENDED_OPTIONS:
         ext_results = await probe_client_capabilities(
@@ -835,6 +848,26 @@ def _is_maybe_mud(writer) -> bool:
         if (writer.get_extra_info(key) or "").lower() in MUD_TERMINALS:
             return True
     return False
+
+
+def _is_maybe_ms_telnet(writer) -> bool:
+    """Return whether the client looks like Microsoft Windows telnet.
+
+    Microsoft telnet reports ttype1="ANSI", ttype2="VT100", refuses
+    CHARSET, and sends unsolicited WILL NAWS.  The ttype cycle stalls
+    after VT100.  Sending a large NEW_ENVIRON sub-negotiation or a
+    burst of legacy IAC DO commands crashes the client.
+
+    :param writer: TelnetWriter instance.
+    :rtype: bool
+    """
+    ttype1 = (writer.get_extra_info("ttype1") or "").upper()
+    if ttype1 != "ANSI":
+        return False
+    ttype2 = (writer.get_extra_info("ttype2") or "").upper()
+    if ttype2 and ttype2 != "VT100":
+        return False
+    return True
 
 
 async def fingerprinting_server_shell(reader, writer):

@@ -81,6 +81,7 @@ class TelnetServer(server_base.BaseServer):
     ):  # pylint: disable=keyword-arg-before-vararg
         """Initialize TelnetServer with terminal parameters."""
         super().__init__(*args, **kwargs)
+        self._environ_requested = False
         self.waiter_encoding = asyncio.Future()
         self._tasks.append(self.waiter_encoding)
         self._ttype_count = 1
@@ -145,7 +146,12 @@ class TelnetServer(server_base.BaseServer):
         self.writer.iac(DO, TTYPE)
 
     def begin_advanced_negotiation(self):
-        """Request advanced telnet options from client."""
+        """Request advanced telnet options from client.
+
+        ``DO NEW_ENVIRON`` is deferred until the TTYPE cycle completes
+        so that Microsoft telnet (ANSI + VT100) can be detected first.
+        See :meth:`_negotiate_environ` and GitHub issue #24.
+        """
         # local
         from .telopt import (  # pylint: disable=import-outside-toplevel
             DO,
@@ -155,28 +161,42 @@ class TelnetServer(server_base.BaseServer):
             WILL,
             BINARY,
             CHARSET,
-            NEW_ENVIRON,
         )
 
         super().begin_advanced_negotiation()
         self.writer.iac(WILL, SGA)
         self.writer.iac(WILL, ECHO)
         self.writer.iac(WILL, BINARY)
-        self.writer.iac(DO, NEW_ENVIRON)
+        # DO NEW_ENVIRON is deferred -- see _negotiate_environ()
         self.writer.iac(DO, NAWS)
         if self.default_encoding:
-            # Request client capability to negotiate character set
             self.writer.iac(DO, CHARSET)
 
     def check_negotiation(self, final=False):
         """Check if negotiation is complete including encoding."""
         # local
         from .telopt import (  # pylint: disable=import-outside-toplevel
+            DO,
             SB,
             TTYPE,
             CHARSET,
             NEW_ENVIRON,
         )
+
+        # If TTYPE cycle stalled or client refused TTYPE, trigger
+        # deferred NEW_ENVIRON negotiation now.  Only when advanced
+        # negotiation is active -- a raw TCP client that WONTs TTYPE
+        # should not be sent DO NEW_ENVIRON.
+        if not self._environ_requested and self._advanced:
+            ttype_refused = self.writer.remote_option.get(TTYPE) is False
+            ttype_do_pending = self.writer.pending_option.get(DO + TTYPE)
+            ttype_sb_pending = self.writer.pending_option.get(SB + TTYPE)
+            if ttype_refused or final:
+                self._negotiate_environ()
+            elif not ttype_do_pending and not ttype_sb_pending:
+                # TTYPE fully resolved but on_ttype never called
+                # _negotiate_environ (shouldn't happen, but be safe)
+                self._negotiate_environ()
 
         # Debug log to see which options are still pending
         pending = [
@@ -185,20 +205,21 @@ class TelnetServer(server_base.BaseServer):
         if pending:
             logger.debug("Pending options: %r", pending)
 
-        # Check if we're waiting for important subnegotiations -- environment or charset information
-        # These are critical for proper encoding determination
+        # Check if we're waiting for important subnegotiations
         waiting_for_environ = (
             SB + NEW_ENVIRON in self.writer.pending_option
             and self.writer.pending_option[SB + NEW_ENVIRON]
         )
         waiting_for_charset = (
-            SB + CHARSET in self.writer.pending_option and self.writer.pending_option[SB + CHARSET]
+            SB + CHARSET in self.writer.pending_option
+            and self.writer.pending_option[SB + CHARSET]
         )
 
         if waiting_for_environ or waiting_for_charset:
             if final:
                 logger.warning(
-                    "Waiting for critical subnegotiation: environ=%s, charset=%s",
+                    "Waiting for critical subnegotiation:"
+                    " environ=%s, charset=%s",
                     waiting_for_environ,
                     waiting_for_charset,
                 )
@@ -361,6 +382,7 @@ class TelnetServer(server_base.BaseServer):
 
             ['LANG', 'TERM', 'COLUMNS', 'LINES', 'DISPLAY', 'COLORTERM',
              VAR, USERVAR, 'COLORTERM']
+
         """
         # local
         from .telopt import VAR, USERVAR  # pylint: disable=import-outside-toplevel
@@ -498,21 +520,36 @@ class TelnetServer(server_base.BaseServer):
 
         _lastval = self.get_extra_info(f"ttype{self._ttype_count - 1}")
 
+        # After ttype1: send DO NEW_ENVIRON now unless ttype1 is "ANSI",
+        # in which case we defer until ttype2 to detect Microsoft telnet
+        # (ANSI + VT100) which crashes on NEW_ENVIRON (issue #24).
+        if key == "ttype1" and ttype != "ANSI":
+            self._negotiate_environ()
+        elif key == "ttype2" and not self._environ_requested:
+            self._negotiate_environ()
+
         if key != "ttype1" and ttype == self.get_extra_info("ttype1", None):
             # cycle has looped, stop
             logger.debug("ttype cycle stop at %s: %s, looped.", key, ttype)
+            self._negotiate_environ()
 
         elif not ttype or self._ttype_count > self.TTYPE_LOOPMAX:
             # empty reply string or too many responses!
             logger.warning("ttype cycle stop at %s: %s.", key, ttype)
+            self._negotiate_environ()
 
         elif self._ttype_count == 3 and ttype.upper().startswith("MTTS "):
             val = self.get_extra_info("ttype2")
-            logger.debug("ttype cycle stop at %s: %s, using %s from ttype2.", key, ttype, val)
+            logger.debug(
+                "ttype cycle stop at %s: %s, using %s from ttype2.",
+                key, ttype, val,
+            )
             self._extra["TERM"] = val
+            self._negotiate_environ()
 
         elif ttype == _lastval:
             logger.debug("ttype cycle stop at %s: %s, repeated.", key, ttype)
+            self._negotiate_environ()
 
         else:
             logger.debug("ttype cycle cont at %s: %s.", key, ttype)
@@ -524,6 +561,36 @@ class TelnetServer(server_base.BaseServer):
         self._extra["xdisploc"] = xdisploc
 
     # private methods
+
+    def _negotiate_environ(self):
+        """Send ``DO NEW_ENVIRON`` unless the client is Microsoft telnet.
+
+        Called from :meth:`on_ttype` as soon as we have enough information:
+
+        - After ``ttype1`` when it is not ``"ANSI"``.
+        - After ``ttype2`` when ``ttype1`` *is* ``"ANSI"`` -- if ``ttype2``
+          is ``"VT100"`` the client is Microsoft Windows telnet and
+          ``NEW_ENVIRON`` is skipped entirely (GitHub issue #24).
+        - From :meth:`check_negotiation` when TTYPE stalls or is refused.
+        """
+        if self._environ_requested:
+            return
+        self._environ_requested = True
+
+        # local
+        from .telopt import DO, NEW_ENVIRON  # pylint: disable=import-outside-toplevel
+
+        ttype1 = self.get_extra_info("ttype1") or ""
+        ttype2 = self.get_extra_info("ttype2") or ""
+
+        if ttype1 == "ANSI" and ttype2 == "VT100":
+            logger.info(
+                "skipping NEW_ENVIRON for Microsoft telnet"
+                " (ttype1=%r, ttype2=%r)", ttype1, ttype2,
+            )
+            return
+
+        self.writer.iac(DO, NEW_ENVIRON)
 
     def _check_encoding(self):
         # Periodically check for completion of ``waiter_encoding``.

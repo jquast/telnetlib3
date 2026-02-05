@@ -444,3 +444,55 @@ async def test_fingerprint_probe_integration(bind_host, unused_tcp_port):
                 await asyncio.wait_for(reader.read(100), timeout=1.0)
             except asyncio.TimeoutError:
                 pass
+
+
+@pytest.mark.parametrize("ttype1,ttype2,expected", [
+    ("ANSI", "VT100", True),
+    ("ANSI", "", True),
+    ("ANSI", None, True),
+    ("ansi", "vt100", True),
+    ("xterm", "xterm-256color", False),
+    ("ANSI", "xterm", False),
+    ("VT100", "ANSI", False),
+    ("TINTIN++", "xterm-ghostty", False),
+])
+def test_is_maybe_ms_telnet(ttype1, ttype2, expected):
+    extra = {"peername": ("127.0.0.1", 12345)}
+    if ttype1 is not None:
+        extra["ttype1"] = ttype1
+    if ttype2 is not None:
+        extra["ttype2"] = ttype2
+    writer = MockWriter(extra=extra)
+    assert fps._is_maybe_ms_telnet(writer) is expected
+
+
+@pytest.mark.asyncio
+async def test_run_probe_ms_telnet_reduced():
+    writer = MockWriter(
+        extra={
+            "peername": ("127.0.0.1", 12345),
+            "ttype1": "ANSI",
+            "ttype2": "VT100",
+        },
+        wont_options=[fps.BINARY, fps.SGA],
+    )
+    results, elapsed = await fps._run_probe(writer, verbose=False)
+    probed_names = set(results.keys())
+    legacy_names = {name for _, name, _ in fps.LEGACY_OPTIONS}
+    assert not probed_names.intersection(legacy_names)
+
+
+@pytest.mark.asyncio
+async def test_run_probe_normal_client_full():
+    writer = MockWriter(
+        extra={
+            "peername": ("127.0.0.1", 12345),
+            "ttype1": "xterm",
+            "ttype2": "xterm-256color",
+        },
+        wont_options=[fps.BINARY, fps.SGA],
+    )
+    results, elapsed = await fps._run_probe(writer, verbose=False)
+    probed_names = set(results.keys())
+    legacy_names = {name for _, name, _ in fps.LEGACY_OPTIONS}
+    assert probed_names.issuperset(legacy_names)
