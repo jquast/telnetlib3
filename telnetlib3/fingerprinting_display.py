@@ -787,10 +787,9 @@ def _build_seen_counts(
         )
         if match_lines:
             lines.extend(match_lines)
-            lines.append("")
 
     if lines:
-        return "\n".join(lines) + "\n\n"
+        return "\n".join(lines) + "\n"
     return ""
 
 
@@ -937,7 +936,7 @@ def _colorize_json(data: Any, term=None) -> str:
     json_str = json.dumps(data, indent=2, sort_keys=True)
     if _JQ:
         env = {"TERM": getattr(term, "kind", None) or "dumb",
-               "COLUMNS": term.width, "LINES": term.height}
+               "COLUMNS": str(term.width or 80), "LINES": str(term.height or 25)}
         if term.number_of_colors == 1 << 24:
             env["COLORTERM"] = 'truecolor'
         result = subprocess.run(
