@@ -476,19 +476,6 @@ def _has_truecolor(data: Dict[str, Any]) -> bool:
     return n is not None and n >= 16777216
 
 
-def _cursor_hide(term, truecolor: bool) -> str:
-    """Hide cursor via blessed termcap (empty if unsupported)."""
-    return term.civis
-
-
-def _cursor_show(term, truecolor: bool) -> str:
-    """Show cursor, with blinking block shape for truecolor terminals."""
-    result = term.cnorm
-    if truecolor:
-        result += term.Ss(1)
-    return result
-
-
 def _hotkey(term, key: str) -> str:
     """Format a hotkey as ``key-`` with key and dash in magenta."""
     return f"{term.bold_magenta(key)}{term.bold_magenta('-')}"
@@ -506,7 +493,7 @@ def _cursor_bracket(
     block = "\u2588" if has_unicode else " "
     return (f"{term.cyan('[')}{term.bold_magenta(block)}"
             f"{term.cyan(']')}{term.normal}"
-            f"\b\b{_cursor_show(term, truecolor)}")
+            f"\b\b")
 
 
 def _apply_unicode_borders(tbl) -> None:
@@ -570,7 +557,7 @@ def _display_compact_summary(data: Dict[str, Any], term=None) -> bool:
     timeout = _sync_timeout(data)
 
     truecolor = _has_truecolor(data)
-    echo(term.normal + _cursor_hide(term, truecolor))
+    echo(term.normal)
 
     widths = [len(s.split("\n", 1)[0]) for s in table_strings]
     side_by_side = len(widths) < 2 or sum(widths) + 1 < (term.width or 80)
@@ -601,8 +588,7 @@ def _display_compact_summary(data: Dict[str, Any], term=None) -> bool:
                      f"{_cursor_bracket(term, has_unicode, truecolor)}")
                 with term.cbreak():
                     term.inkey(timeout=None)
-                echo(f"\r{term.clear_eol}"
-                     f"{_cursor_hide(term, truecolor)}")
+                echo(f"\r{term.clear_eol}")
     return True
 
 
@@ -850,15 +836,14 @@ def _repl_prompt(
         f"{bk(term, 's')}ummarize or {bk(term, 'u')}pdate database: "
         f"{_cursor_bracket(term, has_unicode, truecolor)}"
     )
-    echo(f"\r{term.clear_eos}{term.normal}{legend}")
+    echo(f"\n\r{term.clear_eos}{term.normal}{legend}")
 
 
 def _page_status(term, title: str, top: int, total: int, truecolor: bool):
     """Display a ``less``-like status line showing position in content."""
     pct = min(100, (top * 100) // max(1, total - 1))
     status = f":{title} ({pct}%)"
-    echo(f"\r{term.bold_cyan(status)}{term.clear_eol}"
-         f"{_cursor_show(term, truecolor)}")
+    echo(f"\r{status}{term.clear_eol}")
 
 
 def _paginate(
@@ -892,8 +877,7 @@ def _paginate(
     while True:
         _page_status(term, title or "viewing", top, len(lines), truecolor)
         key = term.inkey(timeout=None)
-        echo(f"{term.normal}\r{term.clear_eol}"
-             f"{_cursor_hide(term, truecolor)}")
+        echo(f"{term.normal}\r{term.clear_eol}")
 
         if key == "q":
             return
@@ -1074,14 +1058,14 @@ def _show_detail(term, data: Dict[str, Any], section: str) -> None:
 
     underline = term.cyan("=" * len(title))
     truecolor = _has_truecolor(data)
-    echo(term.normal + _cursor_hide(term, truecolor) + term.clear)
+    echo(term.normal + term.clear)
     if detail:
         text = (f"{term.magenta(title)}\n"
                 f"{underline}\n"
                 f"\n"
                 f"{_colorize_json(detail, term)}")
-        status_title = ("terminal details" if section == "terminal"
-                        else "telnet details")
+        status_title = ("viewing terminal details" if section == "terminal"
+                        else "viewing telnet details")
         _paginate(term, text, _has_unicode(data), truecolor,
                   title=status_title)
     else:
@@ -1170,7 +1154,6 @@ def _show_database(
     for kind, display_name, count in entries:
         tbl.add_row([kind, term.forestgreen(display_name), str(count)])
 
-    echo(_cursor_hide(term, truecolor))
     _paginate(term, str(tbl), has_unicode, truecolor, title="seen counts")
 
 
@@ -1206,8 +1189,7 @@ def _fingerprint_repl(
 
         if key == "q" or key.name == "KEY_ESCAPE" or key == "":
             logger.info("%s: repl logoff", ip)
-            echo(f"\n{term.normal}"
-                 f"{_cursor_show(term, truecolor)}")
+            echo(f"\n{term.normal}")
             break
         elif key == "t":
             _show_detail(term, data, "terminal")
@@ -1223,7 +1205,7 @@ def _fingerprint_repl(
             names = _load_fingerprint_names()
             seen_counts = _build_seen_counts(data, names, term)
         elif key == "\x0c":
-            echo(term.normal + _cursor_hide(term, truecolor) + term.clear)
+            echo(term.normal + term.clear)
             _display_compact_summary(data, term)
             if seen_counts:
                 echo(seen_counts)
@@ -1350,7 +1332,6 @@ def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
         return
 
     term = _make_terminal()
-    echo(_cursor_hide(term, _has_truecolor(data)))
     names = _load_fingerprint_names()
     seen_counts = _build_seen_counts(data, names, term)
     if not _display_compact_summary(data, term):
