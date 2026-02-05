@@ -924,30 +924,34 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
         inner_shell = shell
 
         async def guarded_shell(reader, writer):
-            # Check connection limit first
-            if counter and not counter.try_acquire():
-                try:
-                    await busy_shell(reader, writer)
-                finally:
-                    if not writer.is_closing():
-                        writer.close()
-                return
-
             try:
-                # Check robot if enabled
-                if robot_check:
-                    passed = await do_robot_check(reader, writer)
-                    if not passed:
-                        await robot_shell(reader, writer)
+                # Check connection limit first
+                if counter and not counter.try_acquire():
+                    try:
+                        await busy_shell(reader, writer)
+                    finally:
                         if not writer.is_closing():
                             writer.close()
-                        return
+                    return
 
-                # Run actual shell
-                await inner_shell(reader, writer)
-            finally:
-                if counter:
-                    counter.release()
+                try:
+                    # Check robot if enabled
+                    if robot_check:
+                        passed = await do_robot_check(reader, writer)
+                        if not passed:
+                            await robot_shell(reader, writer)
+                            if not writer.is_closing():
+                                writer.close()
+                            return
+
+                    # Run actual shell
+                    await inner_shell(reader, writer)
+                finally:
+                    if counter:
+                        counter.release()
+            except (ConnectionResetError, BrokenPipeError, EOFError):
+                logger.debug("Connection lost in guarded_shell: %s",
+                             writer.get_extra_info("peername", "unknown"))
 
         shell = guarded_shell
 
