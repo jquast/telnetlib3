@@ -9,6 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+_BAT = shutil.which("bat") or shutil.which("batcat")
 _JQ = shutil.which("jq")
 _UNKNOWN = "0" * 16
 _PROBES = {
@@ -30,9 +31,15 @@ def _iter_files(data_dir):
 
 
 def _print_json(label, data):
-    """Print labeled JSON, colorized through jq when available."""
+    """Print labeled JSON, colorized through bat or jq when available."""
     raw = json.dumps(data, indent=4, sort_keys=True)
-    if _JQ:
+    if _BAT:
+        r = subprocess.run(
+            [_BAT, "-l", "json", "--style=plain", "--color=always"],
+            input=raw, capture_output=True, text=True)
+        if r.returncode == 0:
+            raw = r.stdout.rstrip("\n")
+    elif _JQ:
         r = subprocess.run(
             [_JQ, "-C", "."], input=raw, capture_output=True, text=True)
         if r.returncode == 0:
@@ -47,27 +54,9 @@ def _print_telnet_context(session_data):
         print(f"  ttype cycle: {' -> '.join(ttype_cycle)}")
 
     extra = session_data.get("extra", {})
-    term_val = extra.get("TERM") or extra.get("term")
-    if term_val:
-        print(f"  TERM: {term_val}")
-
-    lang = extra.get("LANG")
-    charset = extra.get("charset")
-    if lang and charset:
-        print(f"  LANG (charset): {lang} ({charset})")
-    elif lang:
-        print(f"  LANG: {lang}")
-    elif charset:
-        print(f"  charset: {charset}")
-
-    cols = extra.get("cols") or extra.get("COLUMNS")
-    rows = extra.get("rows") or extra.get("LINES")
-    if cols and rows:
-        print(f"  size: {cols}x{rows}")
-
-    tspeed = extra.get("tspeed")
-    if tspeed:
-        print(f"  tspeed: {tspeed}")
+    if extra:
+        for key in sorted(extra):
+            print(f"  {key}: {extra[key]}")
 
 
 def _print_terminal_context(session_data):
@@ -165,6 +154,9 @@ def _review(entries, names):
         if current:
             print(f"  current name: {current}")
 
+        if fpd:
+            _print_json("  fingerprint-data:", fpd)
+
         if label == "telnet" and session_data:
             _print_telnet_context(session_data)
         elif label == "terminal" and session_data:
@@ -180,9 +172,6 @@ def _review(entries, names):
                 print(f"    {count}x  {name}")
         else:
             print("  (no client suggestions)")
-
-        if fpd:
-            _print_json("  fingerprint-data:", fpd)
 
         suffix = f"for '{default}'" if default else "to skip"
         try:

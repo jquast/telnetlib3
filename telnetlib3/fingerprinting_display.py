@@ -38,6 +38,7 @@ __all__ = ("fingerprinting_post_script",)
 
 logger = logging.getLogger("telnetlib3.fingerprint")
 
+_BAT = shutil.which("bat") or shutil.which("batcat")
 _JQ = shutil.which("jq")
 
 echo = functools.partial(print, end="", flush=True)
@@ -860,19 +861,25 @@ def _paginate(term, text: str, **_kw) -> None:
 
 
 def _colorize_json(data: Any, term=None) -> str:
-    """Format JSON with color via ``jq`` when available, plain otherwise.
+    """Format JSON with color, preferring bat/batcat over jq.
 
     :param term: blessed Terminal instance for ``TERM`` kind.
     """
     json_str = json.dumps(data, indent=2, sort_keys=True)
+    if _BAT:
+        result = subprocess.run(
+            [_BAT, "-l", "json", "--style=plain", "--color=always"],
+            input=json_str, capture_output=True, text=True)
+        if result.returncode == 0:
+            return result.stdout.rstrip("\n")
     if _JQ:
         env = {"TERM": getattr(term, "kind", None) or "dumb",
-               "COLUMNS": str(term.width or 80), "LINES": str(term.height or 25)}
+               "COLUMNS": str(term.width or 80),
+               "LINES": str(term.height or 25)}
         if term.number_of_colors == 1 << 24:
             env["COLORTERM"] = 'truecolor'
         result = subprocess.run(
             [_JQ, "-C",
-             # a very stupid hack to round pct_success 83.33333333334 to 83.34
              "walk(if type==\"number\" then (.*100|round)/100 else . end)"],
             input=json_str,
             capture_output=True,
