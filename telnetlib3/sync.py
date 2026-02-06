@@ -126,11 +126,18 @@ class TelnetConnection:
 
     async def _async_connect(self) -> None:
         """Async connection coroutine."""
+        kwargs = dict(self._kwargs)
+        # Default to TelnetClient (not TelnetTerminalClient) — the blocking API
+        # is programmatic, not a terminal app, so it should use the cols/rows
+        # parameters rather than reading the real terminal size.
+        if "client_factory" not in kwargs:
+            from .client import TelnetClient  # pylint: disable=import-outside-toplevel
+            kwargs["client_factory"] = TelnetClient
         self._reader, self._writer = await _open_connection(
             self._host,
             self._port,
             encoding=self._encoding,
-            **self._kwargs,
+            **kwargs,
         )
         self._connected.set()
 
