@@ -77,25 +77,14 @@ program.
 Fingerprinting Server
 ---------------------
 
-A built-in fingerprinting shell is provided for identifying telnet client capabilities.
-This is useful for debugging client negotiation, collecting telnet client diversity
-data, or understanding what protocols a client supports::
+A built-in fingerprinting server shell is provided to uniquely identify telnet clients::
 
+    export TELNETLIB3_DATA_DIR=./data
     telnetlib3-server --shell telnetlib3.fingerprinting_server_shell
 
-The fingerprinting shell probes all telnet protocol options and displays the session
-fingerprint as a Python dict (via pprint), including negotiated attributes, TTYPE
-cycle, option states, and probe results.
+A public fingerprinting server you can try out yourself::
 
-To save fingerprint data to JSON files for later analysis, set the data directory::
-
-    export TELNETLIB3_DATA_DIR=./fingerprints
-    telnetlib3-server --shell telnetlib3.fingerprinting_server_shell
-
-Files are organized by protocol fingerprint hash, with configurable limits:
-
-- ``TELNETLIB3_FINGERPRINT_MAX_FILES``: Max files per fingerprint folder (default 200)
-- ``TELNETLIB3_FINGERPRINT_MAX_FINGERPRINTS``: Max unique fingerprint folders (default 1000)
+    telnet 1984.ws 555
 
 An optional post-fingerprint hook can process saved files. The hook is run as
 ``python -m <module> <filepath>``. The built-in post-script pretty-prints the JSON
@@ -108,9 +97,6 @@ and integrates with ucs-detect_ for terminal capability probing::
 If ucs-detect_ is installed and available in PATH, the post-script automatically
 runs it to probe terminal capabilities (colors, sixel, kitty graphics, etc.) and
 adds the results to the fingerprint data as ``terminal-fingerprint-data``.
-
-Custom post-script modules must accept the filepath as ``sys.argv[1]`` in their
-``__main__`` block.
 
 .. _ucs-detect: https://github.com/jquast/ucs-detect
 

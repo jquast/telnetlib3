@@ -32,6 +32,15 @@ __all__ = ("make_pty_shell", "pty_shell", "PTYSpawnError")
 # Delay between termination signals (seconds)
 _TERMINATE_DELAY = 0.1
 
+# Debounce delay for NAWS updates (seconds)
+_NAWS_DEBOUNCE = 0.2
+
+# Idle delay before sending IAC GA (seconds)
+_GA_IDLE = 0.5
+
+# Polling interval for _wait_for_terminal_info (seconds)
+_TERMINAL_INFO_POLL = 0.05
+
 
 class PTYSpawnError(Exception):
     """Raised when PTY child process fails to exec."""
@@ -250,7 +259,7 @@ class PTYSession:
         if self._naws_timer is not None:
             self._naws_timer.cancel()
         loop = asyncio.get_event_loop()
-        self._naws_timer = loop.call_later(0.2, self._fire_naws_update)
+        self._naws_timer = loop.call_later(_NAWS_DEBOUNCE, self._fire_naws_update)
 
     def _fire_naws_update(self):
         """Fire the pending NAWS update after debounce delay."""
@@ -456,7 +465,7 @@ class PTYSession:
         if getattr(self.writer.protocol, "never_send_ga", False):
             return
         loop = asyncio.get_event_loop()
-        self._ga_timer = loop.call_later(0.5, self._fire_ga)
+        self._ga_timer = loop.call_later(_GA_IDLE, self._fire_ga)
 
     def _fire_ga(self):
         """Send IAC GA if writer is still open."""
@@ -548,7 +557,7 @@ async def _wait_for_terminal_info(writer, timeout=2.0):
         rows = writer.get_extra_info("rows")
         if term and rows:
             return
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(_TERMINAL_INFO_POLL)
 
 
 async def pty_shell(  # pylint: disable=too-many-positional-arguments

@@ -153,7 +153,7 @@ async def test_telnet_server_reject_environ(bind_host, unused_tcp_port):
         host=bind_host,
         port=unused_tcp_port,
         encoding=False,
-        connect_maxwait=0.5,
+        connect_maxwait=0.15,
     ):
         async with open_connection(
             host=bind_host,
@@ -162,8 +162,8 @@ async def test_telnet_server_reject_environ(bind_host, unused_tcp_port):
             rows=given_rows,
             encoding=False,
             term=given_term,
-            connect_minwait=0.3,
-            connect_maxwait=0.5,
+            connect_minwait=0.1,
+            connect_maxwait=0.15,
         ) as (reader, writer):
             _failed = {key: val for key, val in writer.pending_option.items() if val}
             assert _failed == {SB + NEW_ENVIRON: True}

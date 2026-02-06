@@ -89,7 +89,7 @@ async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capt
         shell=make_pty_shell(
             sys.executable, [PTY_HELPER, "cat"], preexec_fn=make_preexec_coverage()
         ),
-        connect_maxwait=0.5,
+        connect_maxwait=0.15,
     ):
         async with open_connection(
             host=bind_host,
@@ -99,7 +99,7 @@ async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capt
             connect_minwait=0.05,
         ) as (reader, writer):
             await asyncio.wait_for(_waiter, 2.0)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.1)
 
             writer.write("hello world\n")
             await writer.drain()
@@ -113,7 +113,7 @@ async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capt
 
     async def client_shell(reader, writer):
         await _waiter
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.15)
         output = await asyncio.wait_for(reader.read(100), 2.0)
         _output.set_result(output)
 
@@ -124,7 +124,7 @@ async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capt
         shell=make_pty_shell(
             sys.executable, [PTY_HELPER, "env", "TERM"], preexec_fn=make_preexec_coverage()
         ),
-        connect_maxwait=0.5,
+        connect_maxwait=0.15,
     ):
         async with open_connection(
             host=bind_host,
@@ -148,7 +148,7 @@ async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capt
         shell=make_pty_shell(
             sys.executable, [PTY_HELPER, "stty_size"], preexec_fn=make_preexec_coverage()
         ),
-        connect_maxwait=0.5,
+        connect_maxwait=0.15,
     ):
         async with open_connection(
             host=bind_host,
@@ -158,7 +158,7 @@ async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capt
             connect_minwait=0.05,
         ) as (reader, writer):
             await asyncio.wait_for(_waiter, 2.0)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.1)
 
             output = await asyncio.wait_for(reader.read(50), 2.0)
             assert "25 80" in output
@@ -187,7 +187,7 @@ async def test_pty_shell_lifecycle(bind_host, unused_tcp_port, require_no_captur
         shell=make_pty_shell(
             sys.executable, [PTY_HELPER, "exit_code", "0"], preexec_fn=make_preexec_coverage()
         ),
-        connect_maxwait=0.5,
+        connect_maxwait=0.15,
     ):
         async with open_connection(
             host=bind_host,
@@ -197,7 +197,7 @@ async def test_pty_shell_lifecycle(bind_host, unused_tcp_port, require_no_captur
             connect_minwait=0.05,
         ) as (reader, writer):
             await asyncio.wait_for(_waiter, 2.0)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.1)
 
             result = await asyncio.wait_for(reader.read(100), 3.0)
             assert "done" in result
@@ -227,7 +227,7 @@ async def test_pty_shell_lifecycle(bind_host, unused_tcp_port, require_no_captur
         shell=make_pty_shell(
             sys.executable, [PTY_HELPER, "cat"], preexec_fn=make_preexec_coverage()
         ),
-        connect_maxwait=0.5,
+        connect_maxwait=0.15,
     ):
         async with open_connection(
             host=bind_host,
@@ -237,7 +237,7 @@ async def test_pty_shell_lifecycle(bind_host, unused_tcp_port, require_no_captur
             connect_minwait=0.05,
         ) as (reader, writer):
             await asyncio.wait_for(_waiter, 2.0)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.1)
 
         await asyncio.wait_for(_closed, 3.0)
 
@@ -302,11 +302,16 @@ async def test_pty_session_build_environment(mock_session):
     assert env["LANG"] == "en_US.ISO-8859-1"
 
 
-async def test_pty_session_naws_behavior(mock_session):
+async def test_pty_session_naws_behavior(mock_session, monkeypatch):
     """Test NAWS debouncing, latest value usage, and cleanup cancellation."""
     # std imports
     import struct
     from unittest.mock import MagicMock, patch
+
+    # local
+    from telnetlib3 import server_pty_shell as sps
+
+    monkeypatch.setattr(sps, "_NAWS_DEBOUNCE", 0.05)
 
     session, _ = mock_session()
     session.master_fd = 1
@@ -331,7 +336,7 @@ async def test_pty_session_naws_behavior(mock_session):
         session._on_naws(50, 150)
         assert len(signal_calls) == 0
 
-        await asyncio.sleep(0.25)
+        await asyncio.sleep(0.1)
         assert len(signal_calls) == 1
         assert len(ioctl_calls) == 1
 
@@ -357,10 +362,10 @@ async def test_pty_session_naws_behavior(mock_session):
         "os.killpg", side_effect=mock_killpg_winch
     ), patch("os.kill"), patch("os.waitpid", return_value=(0, 0)), patch("os.close"), patch(
         "fcntl.ioctl"
-    ):
+    ), patch("time.sleep"):
         session._on_naws(25, 80)
         session.cleanup()
-        await asyncio.sleep(0.25)
+        await asyncio.sleep(0.1)
         assert len(winch_calls) == 0
 
 
@@ -495,7 +500,9 @@ async def test_pty_session_cleanup_flushes_remaining_buffer():
     session.master_fd = 99
     session.child_pid = 12345
 
-    with patch("os.close"), patch("os.kill"), patch("os.waitpid", return_value=(0, 0)):
+    with patch("os.close"), patch("os.kill"), patch("os.waitpid", return_value=(0, 0)), patch(
+        "time.sleep"
+    ):
         session.cleanup()
 
     assert len(written) == 1
@@ -503,13 +510,14 @@ async def test_pty_session_cleanup_flushes_remaining_buffer():
     assert session._output_buffer == b""
 
 
-async def test_wait_for_terminal_info_behavior():
+async def test_wait_for_terminal_info_behavior(monkeypatch):
     """Test _wait_for_terminal_info early return, timeout, and polling behavior."""
     # std imports
     import time
     from unittest.mock import MagicMock
 
     # local
+    from telnetlib3 import server_pty_shell as sps
     from telnetlib3.server_pty_shell import _wait_for_terminal_info
 
     # Returns early when TERM and rows available
@@ -521,8 +529,8 @@ async def test_wait_for_terminal_info_behavior():
     writer = MagicMock()
     writer.get_extra_info = MagicMock(return_value=None)
     start = time.time()
-    await _wait_for_terminal_info(writer, timeout=0.3)
-    assert time.time() - start >= 0.25
+    await _wait_for_terminal_info(writer, timeout=0.05)
+    assert time.time() - start >= 0.04
 
     # Polls until rows become available
     call_count = [0]
@@ -601,7 +609,7 @@ async def test_pty_session_cleanup_error_recovery(
     waitpid_return = None if isinstance(waitpid_effect, Exception) else waitpid_effect
     waitpid_patch = patch("os.waitpid", side_effect=waitpid_side, return_value=waitpid_return)
 
-    with close_patch, kill_patch, waitpid_patch:
+    with close_patch, kill_patch, waitpid_patch, patch("time.sleep"):
         session.cleanup()
 
     assert getattr(session, check_attr) is None
@@ -812,10 +820,15 @@ async def test_pty_session_terminate_scenarios():
     assert result is True
 
 
-async def test_pty_session_ga_timer_fires_after_idle(mock_session):
-    """GA is sent 500ms after _flush_remaining when SGA not negotiated."""
+async def test_pty_session_ga_timer_fires_after_idle(mock_session, monkeypatch):
+    """GA is sent after _flush_remaining when SGA not negotiated."""
     # std imports
     from unittest.mock import MagicMock
+
+    # local
+    from telnetlib3 import server_pty_shell as sps
+
+    monkeypatch.setattr(sps, "_GA_IDLE", 0.05)
 
     session, written = mock_session({"charset": "utf-8"}, capture_writes=True)
     protocol = MagicMock()
@@ -830,15 +843,20 @@ async def test_pty_session_ga_timer_fires_after_idle(mock_session):
     assert session._ga_timer is not None
     assert len(ga_calls) == 0
 
-    await asyncio.sleep(0.6)
+    await asyncio.sleep(0.1)
     assert len(ga_calls) == 1
     assert session._ga_timer is None
 
 
-async def test_pty_session_ga_timer_cancelled_by_new_output(mock_session):
+async def test_pty_session_ga_timer_cancelled_by_new_output(mock_session, monkeypatch):
     """GA timer is cancelled when new PTY output arrives."""
     # std imports
     from unittest.mock import MagicMock
+
+    # local
+    from telnetlib3 import server_pty_shell as sps
+
+    monkeypatch.setattr(sps, "_GA_IDLE", 0.05)
 
     session, written = mock_session({"charset": "utf-8"}, capture_writes=True)
     protocol = MagicMock()
@@ -855,7 +873,7 @@ async def test_pty_session_ga_timer_cancelled_by_new_output(mock_session):
     session._write_to_telnet(b"more output\n")
     assert session._ga_timer is None
 
-    await asyncio.sleep(0.6)
+    await asyncio.sleep(0.1)
     assert len(ga_calls) == 0
 
 
@@ -890,10 +908,15 @@ async def test_pty_session_ga_timer_suppressed_in_raw_mode(mock_session):
     assert session._ga_timer is None
 
 
-async def test_pty_session_ga_timer_cancelled_on_cleanup(mock_session):
+async def test_pty_session_ga_timer_cancelled_on_cleanup(mock_session, monkeypatch):
     """GA timer is cancelled during cleanup."""
     # std imports
     from unittest.mock import MagicMock, patch
+
+    # local
+    from telnetlib3 import server_pty_shell as sps
+
+    monkeypatch.setattr(sps, "_GA_IDLE", 0.05)
 
     session, _ = mock_session({"charset": "utf-8"})
     protocol = MagicMock()
@@ -907,9 +930,11 @@ async def test_pty_session_ga_timer_cancelled_on_cleanup(mock_session):
     session._schedule_ga()
     assert session._ga_timer is not None
 
-    with patch("os.close"), patch("os.kill"), patch("os.waitpid", return_value=(0, 0)):
+    with patch("os.close"), patch("os.kill"), patch("os.waitpid", return_value=(0, 0)), patch(
+        "time.sleep"
+    ):
         session.cleanup()
 
     assert session._ga_timer is None
-    await asyncio.sleep(0.6)
+    await asyncio.sleep(0.1)
     session.writer.send_ga.assert_not_called()

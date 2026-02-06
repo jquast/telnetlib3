@@ -274,6 +274,7 @@ async def test_server_shell(monkeypatch):
 
     monkeypatch.setattr(fps.asyncio, "sleep", noop)
     monkeypatch.setattr(fps, "DATA_DIR", None)
+    monkeypatch.setattr(fps, "_PROBE_TIMEOUT", 0.05)
 
     writer = MockWriter(
         extra={"peername": ("127.0.0.1", 12345), "TERM": "xterm"}, will_options=[fps.BINARY]
@@ -492,7 +493,8 @@ def test_is_maybe_ms_telnet(ttype1, ttype2, expected):
 
 
 @pytest.mark.asyncio
-async def test_run_probe_ms_telnet_reduced():
+async def test_run_probe_ms_telnet_reduced(monkeypatch):
+    monkeypatch.setattr(fps, "_PROBE_TIMEOUT", 0.05)
     writer = MockWriter(
         extra={
             "peername": ("127.0.0.1", 12345),
@@ -509,7 +511,8 @@ async def test_run_probe_ms_telnet_reduced():
 
 
 @pytest.mark.asyncio
-async def test_run_probe_normal_client_full():
+async def test_run_probe_normal_client_full(monkeypatch):
+    monkeypatch.setattr(fps, "_PROBE_TIMEOUT", 0.05)
     writer = MockWriter(
         extra={
             "peername": ("127.0.0.1", 12345),

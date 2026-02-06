@@ -125,6 +125,9 @@ __all__ = (
 
 logger = logging.getLogger("telnetlib3.fingerprint")
 
+# Timeout for probe_client_capabilities in _run_probe (seconds)
+_PROBE_TIMEOUT = 0.5
+
 # Telnet options to probe, grouped by category
 # Each entry is (option_bytes, name, description)
 CORE_OPTIONS = [
@@ -352,10 +355,12 @@ async def _run_probe(writer, verbose: bool = True) -> Tuple[Dict[str, Dict[str, 
         await writer.drain()
 
     start_time = time.time()
-    results = await probe_client_capabilities(writer, options=probe_options, timeout=0.5)
+    results = await probe_client_capabilities(writer, options=probe_options, timeout=_PROBE_TIMEOUT)
 
     if _is_maybe_mud(writer) and EXTENDED_OPTIONS:
-        ext_results = await probe_client_capabilities(writer, options=EXTENDED_OPTIONS, timeout=0.5)
+        ext_results = await probe_client_capabilities(
+            writer, options=EXTENDED_OPTIONS, timeout=_PROBE_TIMEOUT
+        )
         results.update(ext_results)
 
     elapsed = time.time() - start_time
