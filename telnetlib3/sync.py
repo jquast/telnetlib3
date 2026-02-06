@@ -55,10 +55,10 @@ class TelnetConnection:
     Wraps async ``telnetlib3.open_connection()`` with blocking methods.
     The asyncio event loop runs in a daemon thread.
 
-    :param str host: Remote server hostname or IP address.
-    :param int port: Remote server port (default 23).
-    :param float timeout: Default timeout for operations in seconds.
-    :param str encoding: Character encoding (default 'utf8').
+    :param host: Remote server hostname or IP address.
+    :param port: Remote server port (default 23).
+    :param timeout: Default timeout for operations in seconds.
+    :param encoding: Character encoding (default 'utf8').
     :param kwargs: Additional arguments passed to ``telnetlib3.open_connection()``.
 
     Example::
@@ -147,8 +147,8 @@ class TelnetConnection:
 
         Blocks until data is available or timeout expires.
 
-        :param int n: Maximum bytes to read (-1 for any available data).
-        :param float timeout: Timeout in seconds (uses default if None).
+        :param n: Maximum bytes to read (-1 for any available data).
+        :param timeout: Timeout in seconds (uses default if None).
         :returns: Data read from connection.
         :raises TimeoutError: If timeout expires before data available.
         :raises EOFError: If connection closed.
@@ -172,7 +172,7 @@ class TelnetConnection:
 
         Alias for :meth:`read` for compatibility with old telnetlib.
 
-        :param float timeout: Timeout in seconds.
+        :param timeout: Timeout in seconds.
         :returns: Data read from connection.
         """
         return self.read(-1, timeout=timeout)
@@ -183,7 +183,7 @@ class TelnetConnection:
 
         Blocks until a complete line is received or timeout expires.
 
-        :param float timeout: Timeout in seconds (uses default if None).
+        :param timeout: Timeout in seconds (uses default if None).
         :returns: Line including terminator.
         :raises TimeoutError: If timeout expires.
         :raises EOFError: If connection closed before line complete.
@@ -210,7 +210,7 @@ class TelnetConnection:
         Like old telnetlib's read_until method.
 
         :param match: String or bytes to match.
-        :param float timeout: Timeout in seconds (uses default if None).
+        :param timeout: Timeout in seconds (uses default if None).
         :returns: Data up to and including match.
         :raises TimeoutError: If timeout expires before match found.
         :raises EOFError: If connection closed before match found.
@@ -250,7 +250,7 @@ class TelnetConnection:
 
         Blocks until all buffered data has been sent.
 
-        :param float timeout: Timeout in seconds (uses default if None).
+        :param timeout: Timeout in seconds (uses default if None).
         :raises TimeoutError: If timeout expires.
         """
         self._ensure_connected()
@@ -308,7 +308,7 @@ class TelnetConnection:
         - ``'peername'``: Remote address tuple (host, port)
         - ``'LANG'``: Language/locale setting
 
-        :param str name: Information key.
+        :param name: Information key.
         :param default: Default value if key not found.
         :returns: Information value or default.
         """
@@ -399,8 +399,8 @@ class BlockingTelnetServer:
     Wraps async ``telnetlib3.create_server()`` with a blocking interface.
     Each client connection can be handled in a separate thread.
 
-    :param str host: Address to bind to.
-    :param int port: Port to bind to (default 6023).
+    :param host: Address to bind to.
+    :param port: Port to bind to (default 6023).
     :param handler: Function called for each client connection.
         Receives a :class:`TelnetConnection`-like object as argument.
     :param kwargs: Additional arguments passed to ``telnetlib3.create_server()``.
@@ -496,7 +496,7 @@ class BlockingTelnetServer:
 
         Blocks until a client connects.
 
-        :param float timeout: Timeout in seconds (None for no timeout).
+        :param timeout: Timeout in seconds (None for no timeout).
         :returns: Connection object for the client.
         :raises TimeoutError: If timeout expires.
         :raises RuntimeError: If server not started.
@@ -620,8 +620,8 @@ class ServerConnection:
         """
         Read up to n bytes/characters from the connection.
 
-        :param int n: Maximum bytes to read (-1 for any available data).
-        :param float timeout: Timeout in seconds.
+        :param n: Maximum bytes to read (-1 for any available data).
+        :param timeout: Timeout in seconds.
         :returns: Data read from connection.
         :raises RuntimeError: If connection already closed.
         :raises TimeoutError: If timeout expires.
@@ -646,7 +646,7 @@ class ServerConnection:
 
         Alias for :meth:`read` for compatibility with old telnetlib.
 
-        :param float timeout: Timeout in seconds.
+        :param timeout: Timeout in seconds.
         :returns: Data read from connection.
         """
         return self.read(-1, timeout=timeout)
@@ -655,7 +655,7 @@ class ServerConnection:
         """
         Read one line from the connection.
 
-        :param float timeout: Timeout in seconds.
+        :param timeout: Timeout in seconds.
         :returns: Line including terminator.
         :raises RuntimeError: If connection already closed.
         :raises TimeoutError: If timeout expires.
@@ -681,7 +681,7 @@ class ServerConnection:
         Read until match is found.
 
         :param match: String or bytes to match.
-        :param float timeout: Timeout in seconds.
+        :param timeout: Timeout in seconds.
         :returns: Data up to and including match.
         :raises RuntimeError: If connection already closed.
         :raises TimeoutError: If timeout expires.
@@ -718,7 +718,7 @@ class ServerConnection:
         """
         Flush buffered data to the connection.
 
-        :param float timeout: Timeout in seconds.
+        :param timeout: Timeout in seconds.
         :raises RuntimeError: If connection already closed.
         :raises TimeoutError: If timeout expires.
         """
@@ -750,7 +750,7 @@ class ServerConnection:
         - ``'rows'``: Terminal height in rows
         - ``'peername'``: Remote address tuple (host, port)
 
-        :param str name: Information key.
+        :param name: Information key.
         :param default: Default value if key not found.
         :returns: Information value or default.
         """

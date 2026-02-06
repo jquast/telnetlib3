@@ -619,9 +619,8 @@ class TelnetReaderUnicode(TelnetReader):
 
         If the EOF was received and the internal buffer is empty, return an empty string.
 
-        :param int n: If *n* is not provided, or set to -1, read until EOF and return all characters
-            as one large string.
-        :rtype: str
+        :param n: If *n* is not provided, or set to -1, read until EOF and return all characters as
+            one large string.
         """
         if self._exception is not None:
             raise self._exception
@@ -663,10 +662,9 @@ class TelnetReaderUnicode(TelnetReader):
         Read exactly *n* unicode characters.
 
         :raises asyncio.IncompleteReadError: if the end of the stream is
-            reached before *n* can be read. the
+            reached before *n* can be read. The
             :attr:`asyncio.IncompleteReadError.partial` attribute of the
             exception contains the partial read characters.
-        :rtype: str
         """
         if self._exception is not None:
             raise self._exception

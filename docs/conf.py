@@ -247,6 +247,7 @@ nitpick_ignore = [
     ("py:class", "asyncio.transports.BaseTransport"),
     ("py:class", "asyncio.protocols.Protocol"),
     ("py:class", "_asyncio.Task"),
+    ("py:class", "_asyncio.Future"),
     ("py:data", "typing.Union"),
 ]
 

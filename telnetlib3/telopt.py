@@ -278,7 +278,7 @@ def option_from_name(name: str) -> bytes:
     """
     Return option bytes for a given option name.
 
-    :param str name: Option name (e.g., "NAWS", "TTYPE")
+    :param name: Option name (e.g., "NAWS", "TTYPE")
     :returns: Option bytes
     :raises KeyError: If name is not a known telnet option
     """

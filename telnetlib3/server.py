@@ -320,16 +320,15 @@ class TelnetServer(server_base.BaseServer):
         """
         Return encoding for the given stream direction.
 
-        :param bool outgoing: Whether the return value is suitable for
+        :param outgoing: Whether the return value is suitable for
             encoding bytes for transmission to client end.
-        :param bool incoming: Whether the return value is suitable for
+        :param incoming: Whether the return value is suitable for
             decoding bytes received from the client.
         :raises TypeError: when a direction argument, either ``outgoing``
             or ``incoming``, was not set ``True``.
         :returns: ``'US-ASCII'`` for the directions indicated, unless
             ``BINARY`` :rfc:`856` has been negotiated for the direction
-            indicated or :attr`force_binary` is set ``True``.
-        :rtype: str
+            indicated or ``force_binary`` is set ``True``.
         """
         if not (outgoing or incoming):
             raise TypeError(
@@ -370,7 +369,7 @@ class TelnetServer(server_base.BaseServer):
         """
         Restart or unset timeout for client.
 
-        :param int duration: When specified as a positive integer,
+        :param duration: When specified as a positive integer,
             schedules Future for callback of :meth:`on_timeout`.  When ``-1``,
             the value of ``self.get_extra_info('timeout')`` is used.  When
             non-True, it is canceled.
@@ -396,7 +395,7 @@ class TelnetServer(server_base.BaseServer):
         Default implementation writes "Timeout." bound by CRLF and closes.
 
         This can be disabled by calling :meth:`set_timeout` with
-        ``duration` value of ``0``.
+        ``duration`` value of ``0``.
         """
         logger.debug("Timeout after %1.2fs", self.idle)
         assert self.writer is not None
@@ -410,8 +409,8 @@ class TelnetServer(server_base.BaseServer):
         """
         Callback receives NAWS response, :rfc:`1073`.
 
-        :param int rows: screen size, by number of cells in height.
-        :param int cols: screen size, by number of cells in width.
+        :param rows: screen size, by number of cells in height.
+        :param cols: screen size, by number of cells in width.
         """
         self._extra.update({"rows": rows, "cols": cols})
 
@@ -423,13 +422,12 @@ class TelnetServer(server_base.BaseServer):
         first entered on receipt of (WILL, NEW_ENVIRON) by server.  The return
         value *defines the request made to the client* for environment values.
 
-        :rtype list: a list of unicode character strings of US-ASCII
-            characters, indicating the environment keys the server requests
-            of the client.  If this list contains the special byte constants,
-            ``USERVAR`` or ``VAR``, the client is allowed to volunteer any
-            other additional user or system values.
-
-            Any empty return value indicates that no request should be made.
+        :returns: A list of US-ASCII character strings indicating the
+            environment keys the server requests of the client.  If this list
+            contains the special byte constants, ``USERVAR`` or ``VAR``, the
+            client is allowed to volunteer any other additional user or system
+            values.  An empty return value indicates that no request should be
+            made.
 
         The default return value is::
 
@@ -517,11 +515,9 @@ class TelnetServer(server_base.BaseServer):
         first entered on receipt of (WILL, CHARSET) by server.  The return
         value *defines the request made to the client* for encodings.
 
-        :rtype list: a list of unicode character strings of US-ASCII
-            characters, indicating the encodings offered by the server in
-            its preferred order.
-
-            Any empty return value indicates that no encodings are offered.
+        :returns: A list of US-ASCII character strings indicating the
+            encodings offered by the server in its preferred order.  An empty
+            return value indicates that no encodings are offered.
 
         The default return value includes common encodings for both Western and Eastern scripts::
 
@@ -849,31 +845,30 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
     """
     Create a TCP Telnet server.
 
-    :param str host: The host parameter can be a string, in that case the TCP
+    :param host: The host parameter can be a string, in that case the TCP
         server is bound to host and port. The host parameter can also be a
         sequence of strings, and in that case the TCP server is bound to all
         hosts of the sequence.
-    :param int port: listen port for TCP Server.
-    :param server_base.BaseServer protocol_factory: An alternate protocol
-        factory for the server, when unspecified, :class:`TelnetServer` is
-        used.
+    :param port: Listen port for TCP server.
+    :param protocol_factory: An alternate protocol factory for the server.
+        When unspecified, :class:`TelnetServer` is used.
     :param shell: An async function that is called after negotiation
         completes, receiving arguments ``(reader, writer)``.
         Default is :func:`~.telnet_server_shell`.  The reader is a
         :class:`~.TelnetReader` instance, the writer is a
         :class:`~.TelnetWriter` instance.
-    :param str encoding: The default assumed encoding, or ``False`` to disable
-        unicode support.  Encoding may be negotiation to another value by
+    :param encoding: The default assumed encoding, or ``False`` to disable
+        unicode support.  Encoding may be negotiated to another value by
         the client through NEW_ENVIRON :rfc:`1572` by sending environment value
         of ``LANG``, or by any legal value for CHARSET :rfc:`2066` negotiation.
 
         The server's attached ``reader, writer`` streams accept and return
-        unicode, or natural strings, "hello world", unless this value explicitly
-        set ``False``.  In that case, the attached streams interfaces are
-        bytes-only, b"hello world".
-    :param str encoding_errors: Same meaning as :meth:`codecs.Codec.encode`.
+        unicode, or natural strings, "hello world", unless this value is
+        explicitly set to ``False``.  In that case, the attached stream
+        interfaces are bytes-only, b"hello world".
+    :param encoding_errors: Same meaning as :meth:`codecs.Codec.encode`.
         Default value is ``strict``.
-    :param bool force_binary: When ``True``, the encoding specified is
+    :param force_binary: When ``True``, the encoding specified is
         used for both directions even when BINARY mode, :rfc:`856`, is not
         negotiated for the direction specified.  This parameter has no effect
         when ``encoding=False``.
@@ -887,24 +882,24 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
         may be no problem at all. If an encoding is assumed, as in many MUD and
         BBS systems, the combination of ``force_binary`` with a default
         ``encoding`` is often preferred.
-    :param str term: Value returned for ``writer.get_extra_info('term')``
+    :param term: Value returned for ``writer.get_extra_info('term')``
         until negotiated by TTYPE :rfc:`930`, or NAWS :rfc:`1572`.  Default value
         is ``'unknown'``.
-    :param int cols: Value returned for ``writer.get_extra_info('cols')``
+    :param cols: Value returned for ``writer.get_extra_info('cols')``
         until negotiated by NAWS :rfc:`1572`. Default value is 80 columns.
-    :param int rows: Value returned for ``writer.get_extra_info('rows')``
+    :param rows: Value returned for ``writer.get_extra_info('rows')``
         until negotiated by NAWS :rfc:`1572`. Default value is 25 rows.
-    :param int timeout: Causes clients to disconnect if idle for this duration,
+    :param timeout: Causes clients to disconnect if idle for this duration,
         in seconds.  This ensures resources are freed on busy servers.  When
         explicitly set to ``False``, clients will not be disconnected for
         timeout. Default value is 300 seconds (5 minutes).
-    :param float connect_maxwait: If the remote end is not complaint, or
+    :param connect_maxwait: If the remote end is not compliant, or
         otherwise confused by our demands, the shell continues anyway after the
         greater of this value has elapsed.  A client that is not answering
         option negotiation will delay the start of the shell by this amount.
-    :param int limit: The buffer limit for the reader stream.
+    :param limit: The buffer limit for the reader stream.
 
-    :return Server: A :class:`Server` instance that wraps the asyncio.Server
+    :return: A :class:`Server` instance that wraps the asyncio.Server
         and provides access to connected client protocols via
         :meth:`Server.wait_for_client` and :attr:`Server.clients`.
     """

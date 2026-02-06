@@ -562,10 +562,10 @@ async def pty_shell(  # pylint: disable=too-many-positional-arguments
     """
     PTY shell callback for telnet server.
 
-    :param TelnetReader reader: TelnetReader instance.
-    :param TelnetWriter writer: TelnetWriter instance.
-    :param str program: Path to program to execute.
-    :param list args: List of arguments for the program.
+    :param reader: TelnetReader instance.
+    :param writer: TelnetWriter instance.
+    :param program: Path to program to execute.
+    :param args: List of arguments for the program.
     :param preexec_fn: Optional callable to run in child before exec.
     :param raw_mode: If True, disable PTY echo and canonical mode. Use for programs that handle
         their own terminal I/O (e.g., blessed, curses, ucs-detect).
@@ -609,8 +609,8 @@ def make_pty_shell(
     """
     Factory returning a shell callback for PTY execution.
 
-    :param str program: Path to program to execute.
-    :param list args: List of arguments for the program.
+    :param program: Path to program to execute.
+    :param args: List of arguments for the program.
     :param preexec_fn: Optional callable to run in child before exec.
         Useful for test coverage tracking in the forked child process.
     :param raw_mode: If True, disable PTY echo and canonical mode. Use for programs

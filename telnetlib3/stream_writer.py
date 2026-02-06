@@ -157,9 +157,9 @@ class TelnetWriter:
         :meth:`~.feed_byte`, which returns True to indicate the given byte should be
         forwarded to a Protocol reader method.
 
-        :param bool client: Whether the IAC interpreter should react from
+        :param client: Whether the IAC interpreter should react from
             the client point of view.
-        :param bool server: Whether the IAC interpreter should react from
+        :param server: Whether the IAC interpreter should react from
             the server point of view.
         """
         self._transport = transport
@@ -377,9 +377,9 @@ class TelnetWriter:
         """
         Wait for negotiation state conditions to be met.
 
-        :param dict remote: Dict of option_name -> bool for remote_option checks.
-        :param dict local: Dict of option_name -> bool for local_option checks.
-        :param dict pending: Dict of option_name -> bool for pending_option checks.
+        :param remote: Dict of option_name -> bool for remote_option checks.
+        :param local: Dict of option_name -> bool for local_option checks.
+        :param pending: Dict of option_name -> bool for pending_option checks.
         :returns: True when all conditions are met.
         :raises KeyError: If an option name is not recognized.
         :raises asyncio.CancelledError: If connection closes while waiting.
@@ -553,10 +553,10 @@ class TelnetWriter:
         """
         Feed a single byte into Telnet option state machine.
 
-        :param int byte: an 8-bit byte value as integer (0-255), or
+        :param byte: an 8-bit byte value as integer (0-255), or
             a bytes array.  When a bytes array, it must be of length
             1.
-        :rtype bool: Whether the given ``byte`` is "in band", that is, should
+        :returns: Whether the given ``byte`` is "in band", that is, should
             be duplicated to a connected terminal or device.  ``False`` is
             returned for an ``IAC`` command for each byte until its completion.
         :raises ValueError: When an illegal IAC command is received.
@@ -724,9 +724,9 @@ class TelnetWriter:
         """
         Conditionally write ``data`` to transport when "remote echo" enabled.
 
-        :param bytes data: string received as input, conditionally written. The default
-            implementation depends on telnet negotiation willingness for local echo, only an RFC-
-            compliant telnet client will correctly set or unset echo accordingly by demand.
+        :param data: bytes received as input, conditionally written. The default implementation
+            depends on telnet negotiation willingness for local echo, only an RFC- compliant telnet
+            client will correctly set or unset echo accordingly by demand.
         """
         assert self.server, "Client never performs echo of input received."
         if self.will_echo:
@@ -742,7 +742,7 @@ class TelnetWriter:
         their input has been received.
 
         From client perspective: the server will not echo our input, we should
-        chose to duplicate our input to standard out ourselves.
+        choose to duplicate our input to standard out ourselves.
         """
         return (self.server and self.local_option.enabled(ECHO)) or (
             self.client and self.remote_option.enabled(ECHO)
@@ -753,18 +753,18 @@ class TelnetWriter:
         """
         String describing NVT mode.
 
-        :rtype str: One of:
+        One of:
 
-            ``kludge``: Client acknowledges WILL-ECHO, WILL-SGA. character-at-
-                a-time and remote line editing may be provided.
+        ``kludge``: Client acknowledges WILL-ECHO, WILL-SGA. Character-at-
+            a-time and remote line editing may be provided.
 
-            ``local``: Default NVT half-duplex mode, client performs line
-                editing and transmits only after pressing send (usually CR)
+        ``local``: Default NVT half-duplex mode, client performs line
+            editing and transmits only after pressing send (usually CR).
 
-            ``remote``: Client supports advanced remote line editing, using
-                mixed-mode local line buffering (optionally, echoing) until
-                send, but also transmits buffer up to and including special
-                line characters (SLCs).
+        ``remote``: Client supports advanced remote line editing, using
+            mixed-mode local line buffering (optionally, echoing) until
+            send, but also transmits buffer up to and including special
+            line characters (SLCs).
         """
         if self.remote_option.enabled(LINEMODE):
             if self._linemode.local:
@@ -803,7 +803,7 @@ class TelnetWriter:
 
         No transformations of bytes are performed.  Normally, if the
         byte value 255 is sent, it is escaped as ``IAC + IAC``.  This
-        method ensures it is not escaped,.
+        method ensures it is not escaped.
         """
         assert isinstance(buf, (bytes, bytearray)), buf
         assert buf and buf.startswith(IAC), buf
@@ -1224,7 +1224,7 @@ class TelnetWriter:
         Handle IAC Break (BRK, SLC_BRK).
 
         Sent by clients to indicate BREAK keypress. This is not the same as IP (^c), but a means to
-        map sysystem-dependent break key such as found on an IBM Systems.
+        map system-dependent break key such as found on an IBM Systems.
         """
         self.log.debug("IAC BRK: Break (unhandled).")
 
@@ -1278,7 +1278,7 @@ class TelnetWriter:
         """
         Register ``func`` as callable for receipt of ``slc_byte``.
 
-        :param bytes slc_byte: any of SLC_SYNCH, SLC_BRK, SLC_IP, SLC_AO,
+        :param slc_byte: any of SLC_SYNCH, SLC_BRK, SLC_IP, SLC_AO,
             SLC_AYT, SLC_EOR, SLC_ABORT, SLC_EOF, SLC_SUSP, SLC_EC, SLC_EL,
             SLC_EW, SLC_RP, SLC_XON, SLC_XOFF ...
         :param func: Callback receiving a single argument: the SLC function byte
@@ -1321,11 +1321,11 @@ class TelnetWriter:
     #
     def set_ext_send_callback(self, cmd: bytes, func: Callable[..., Any]) -> None:
         """
-        Register callback for inquires of sub-negotiation of ``cmd``.
+        Register callback for inquiries of sub-negotiation of ``cmd``.
 
         :param func: A callable function for the given ``cmd`` byte.
             Note that the return type must match those documented.
-        :param bytes cmd: These callbacks must return any number of arguments,
+        :param cmd: These callbacks must return any number of arguments,
             for each registered ``cmd`` byte, respectively:
 
             * SNDLOC: for clients, returning one argument: the string
@@ -1359,12 +1359,12 @@ class TelnetWriter:
         """
         Register ``func`` as callback for receipt of ``cmd`` negotiation.
 
-        :param bytes cmd: One of the following listed bytes:
+        :param cmd: One of the following listed bytes:
 
         * ``LOGOUT``: for servers and clients, receiving one argument.
           Server end may receive DO or DONT as argument ``cmd``, indicating
           client's wish to disconnect, or a response to WILL, LOGOUT,
-          indicating it's wish not to be automatically disconnected.  Client
+          indicating its wish not to be automatically disconnected.  Client
           end may receive WILL or WONT, indicating server's wish to disconnect,
           or acknowledgment that the client will not be disconnected.
 
@@ -1652,7 +1652,7 @@ class TelnetWriter:
     # pylint: disable=too-many-branches,too-complex
     def handle_will(self, opt):
         """
-        Process byte 3 of series (IAC, DONT, opt) received by remote end.
+        Process byte 3 of series (IAC, WILL, opt) received by remote end.
 
         The remote end requests we perform any number of capabilities. Most
         implementations require an answer in the affirmative with DO, unless
@@ -1843,8 +1843,8 @@ class TelnetWriter:
         """
         Write bytes to transport, conditionally escaping IAC.
 
-        :param bytes buf: bytes to write to transport.
-        :param bool escape_iac: whether bytes in buffer ``buf`` should be
+        :param buf: bytes to write to transport.
+        :param escape_iac: whether bytes in buffer ``buf`` should be
             escaped of byte ``IAC``.  This should be set ``False`` for direct
             writes of ``IAC`` commands.
         """
@@ -1952,7 +1952,7 @@ class TelnetWriter:
                 self.pending_option[WILL + TSPEED] = False
 
     def _handle_sb_xdisploc(self, buf):
-        """Callback handles IAC-SB-XIDISPLOC-<buf>-SE."""
+        """Callback handles IAC-SB-XDISPLOC-<buf>-SE."""
         cmd = buf.popleft()
         opt = buf.popleft()
 
@@ -2137,11 +2137,11 @@ class TelnetWriter:
         """
         Callback responds to IAC SB STATUS IS, :rfc:`859`.
 
-        :param bytes buf: sub-negotiation byte buffer containing status data. This implementation
-            does its best to analyze our perspective's state to the state options given. Any
-            discrepancies are reported to the error log, but no action is taken. This implementation
-            handles malformed STATUS data gracefully by skipping invalid command bytes and
-            continuing to process the remaining data.
+        :param buf: sub-negotiation byte buffer containing status data. This implementation does its
+            best to analyze our perspective's state to the state options given. Any discrepancies
+            are reported to the error log, but no action is taken. This implementation handles
+            malformed STATUS data gracefully by skipping invalid command bytes and continuing to
+            process the remaining data.
         """
         # Convert deque to list for processing
         buf_list = list(buf)
@@ -2262,7 +2262,7 @@ class TelnetWriter:
         """
         Callback handles mode following IAC SB LINEMODE LINEMODE_MODE.
 
-        :param bytes mode: a single byte
+        :param mode: a single byte
 
         Result of agreement to enter ``mode`` given applied by setting the
         value of ``self.linemode``, and sending acknowledgment if necessary.
@@ -2360,7 +2360,7 @@ class TelnetWriter:
         """
         Send supported SLC characters of current tabset, or specified tabset.
 
-        :param dict slctab: SLC byte tabset as dictionary, such as slc.BSD_SLC_TAB.
+        :param slctab: SLC byte tabset as dictionary, such as slc.BSD_SLC_TAB.
         """
         send_count = 0
         slctab = slctab or self.slctab
@@ -2511,8 +2511,8 @@ class TelnetWriter:
         """
         Callback handles request for LINEMODE <cmd> LMODE_FORWARDMASK.
 
-        :param bytes cmd: one of DO, DONT, WILL, WONT.
-        :param bytes buf: bytes following IAC SB LINEMODE DO FORWARDMASK.
+        :param cmd: one of DO, DONT, WILL, WONT.
+        :param buf: bytes following IAC SB LINEMODE DO FORWARDMASK.
         """
         # set and report about pending options by 2-byte opt,
         # not well tested, no known implementations exist !
@@ -2565,7 +2565,7 @@ class TelnetWriter:
 
         This callback simply logs the subnegotiation but does not perform any action.
 
-        :param bytes buf: bytes following IAC SB LINEMODE DO FORWARDMASK.
+        :param buf: bytes following IAC SB COM-PORT-OPTION.
         """
         self.log.debug("SB unhandled: cmd=%s, buf=%r", name_command(COM_PORT_OPTION), buf)
 
@@ -2575,7 +2575,7 @@ class TelnetWriter:
 
         This callback simply logs the subnegotiation but does not perform any action.
 
-        :param bytes buf: bytes following IAC SB GMCP.
+        :param buf: bytes following IAC SB GMCP.
         """
         self.log.debug("SB unhandled: cmd=%s, buf=%r", name_command(GMCP), b"".join(buf))
 
@@ -2583,8 +2583,8 @@ class TelnetWriter:
         """
         Callback handles request for LINEMODE DO FORWARDMASK.
 
-        :param bytes buf: bytes following IAC SB LINEMODE DO FORWARDMASK. :raises
-            NotImplementedError
+        :param buf: bytes following IAC SB LINEMODE DO FORWARDMASK.
+        :raises NotImplementedError:
         """
         raise NotImplementedError
 
@@ -2629,8 +2629,8 @@ class TelnetWriterUnicode(TelnetWriter):  # pylint: disable=abstract-method
         """
         Encode ``string`` using protocol-preferred encoding.
 
-        :param str string: unicode string to encode.
-        :param str errors: same as meaning in :meth:`codecs.Codec.encode`, when
+        :param string: unicode string to encode.
+        :param errors: same as meaning in :meth:`codecs.Codec.encode`, when
             ``None`` (default), value of class initializer keyword argument,
             ``encoding_errors``.
 
@@ -2652,11 +2652,11 @@ class TelnetWriterUnicode(TelnetWriter):  # pylint: disable=abstract-method
 
         If the connection is closed, nothing is done.
 
-        :param str string: unicode string text to write to endpoint using the
+        :param string: unicode string text to write to endpoint using the
             protocol's preferred encoding.  When the protocol ``encoding``
             keyword is explicitly set to ``False``, the given string should be
             only raw ``b'bytes'``.
-        :param str errors: same as meaning in :meth:`codecs.Codec.encode`, when
+        :param errors: same as meaning in :meth:`codecs.Codec.encode`, when
             ``None`` (default), value of class initializer keyword argument,
             ``encoding_errors``.
         """
@@ -2682,8 +2682,8 @@ class TelnetWriterUnicode(TelnetWriter):  # pylint: disable=abstract-method
         """
         Conditionally write ``string`` to transport when "remote echo" enabled.
 
-        :param str string: string received as input, conditionally written.
-        :param str errors: same as meaning in :meth:`codecs.Codec.encode`.
+        :param string: string received as input, conditionally written.
+        :param errors: same as meaning in :meth:`codecs.Codec.encode`.
 
         This method may only be called from the server perspective.  The
         default implementation depends on telnet negotiation willingness for
@@ -2712,7 +2712,7 @@ class Option(dict):
         """
         Class initializer.
 
-        :param str name: decorated name representing option class, such as 'local', 'remote', or
+        :param name: decorated name representing option class, such as 'local', 'remote', or
             'pending'.
         :param on_change: optional callback invoked when option state changes.
         """
@@ -2724,8 +2724,7 @@ class Option(dict):
         """
         Return True if option is enabled.
 
-        :param bytes key: telnet option
-        :rtype: bool
+        :param key: telnet option byte(s).
         """
         return bool(self.get(key, None) is True)
 
@@ -2745,9 +2744,8 @@ def _escape_environ(buf):
     """
     Return new buffer with VAR and USERVAR escaped, if present in ``buf``.
 
-    :param bytes buf: given bytes buffer
-    :returns: bytes buffer with escape characters inserted.
-    :rtype: bytes
+    :param buf: given bytes buffer.
+    :returns: buffer with escape characters inserted.
     """
     return buf.replace(VAR, ESC + VAR).replace(USERVAR, ESC + USERVAR)
 
@@ -2756,9 +2754,8 @@ def _unescape_environ(buf):
     """
     Return new buffer with escape characters removed for VAR and USERVAR.
 
-    :param bytes buf: given bytes buffer
-    :returns: bytes buffer with escape characters removed.
-    :rtype: bytes
+    :param buf: given bytes buffer.
+    :returns: buffer with escape characters removed.
     """
     return buf.replace(ESC + VAR, VAR).replace(ESC + USERVAR, USERVAR)
 
@@ -2767,10 +2764,9 @@ def _encode_env_buf(env):
     """
     Encode dictionary for transmission as environment variables, :rfc:`1572`.
 
-    :param bytes buf: dictionary of environment values.
-    :returns: bytes buffer meant to follow sequence IAC SB NEW_ENVIRON IS.
+    :param env: dictionary of environment values.
+    :returns: buffer meant to follow sequence IAC SB NEW_ENVIRON IS.
         It is not terminated by IAC SE.
-    :rtype: bytes
 
     Returns bytes array ``buf`` for use in sequence (IAC, SB,
     NEW_ENVIRON, IS, <buf>, IAC, SE) as set forth in :rfc:`1572`.
@@ -2788,10 +2784,9 @@ def _decode_env_buf(buf):
     """
     Decode environment values to dictionary, :rfc:`1572`.
 
-    :param bytes buf: bytes array following sequence IAC SB NEW_ENVIRON
+    :param buf: bytes array following sequence IAC SB NEW_ENVIRON
         SEND or IS up to IAC SE.
     :returns: dictionary representing the environment values decoded from buf.
-    :rtype: dict
 
     This implementation does not distinguish between ``USERVAR`` and ``VAR``.
     """

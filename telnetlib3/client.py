@@ -161,11 +161,10 @@ class TelnetClient(client_base.BaseClient):
         Only sends variables listed in ``_send_environ`` (set via ``send_environ``
         parameter or ``--send-environ`` CLI option).
 
-        :param dict keys: Values are requested for the keys specified. When empty, all environment
+        :param keys: Values are requested for the keys specified. When empty, all environment
             values that wish to be volunteered should be returned.
-        :returns: dictionary of environment values requested, or an empty string for keys not
+        :returns: Environment values requested, or an empty string for keys not
             available. A return value must be given for each key requested.
-        :rtype: dict
         """
         # All available values
         all_env = {
@@ -203,9 +202,8 @@ class TelnetClient(client_base.BaseClient):
 
         - If no viable encodings found, reject
 
-        :param list offered: list of CHARSET options offered by server.
-        :returns: character encoding agreed to be used, or "" to reject.
-        :rtype: str
+        :param offered: CHARSET options offered by server.
+        :returns: Character encoding agreed to be used, or empty string to reject.
         """
         # Get client's desired encoding canonical name
         desired_name = None
@@ -279,8 +277,7 @@ class TelnetClient(client_base.BaseClient):
         """
         Callback for responding to NAWS requests.
 
-        :rtype: (int, int)
-        :returns: client window size as (rows, columns).
+        :returns: Client window size as (rows, columns).
         """
         return (self._extra["rows"], self._extra["cols"])
 
@@ -292,16 +289,15 @@ class TelnetClient(client_base.BaseClient):
         """
         Return encoding for the given stream direction.
 
-        :param bool outgoing: Whether the return value is suitable for
+        :param outgoing: Whether the return value is suitable for
             encoding bytes for transmission to server.
-        :param bool incoming: Whether the return value is suitable for
+        :param incoming: Whether the return value is suitable for
             decoding bytes received by the client.
-        :raises TypeError: when a direction argument, either ``outgoing``
+        :raises TypeError: When a direction argument, either ``outgoing``
             or ``incoming``, was not set ``True``.
         :returns: ``'US-ASCII'`` for the directions indicated, unless
             ``BINARY`` :rfc:`856` has been negotiated for the direction
-            indicated or :attr`force_binary` is set ``True``.
-        :rtype: str
+            indicated or ``force_binary`` is set ``True``.
         """
         if not (outgoing or incoming):
             raise TypeError(
@@ -335,8 +331,7 @@ class TelnetTerminalClient(TelnetClient):
         """
         Callback replies to request for window size, NAWS :rfc:`1073`.
 
-        :rtype: (int, int)
-        :returns: window dimensions by lines and columns
+        :returns: Window dimensions by lines and columns.
         """
         return self._winsize()
 
@@ -344,8 +339,7 @@ class TelnetTerminalClient(TelnetClient):
         """
         Callback replies to request for env values, NEW_ENVIRON :rfc:`1572`.
 
-        :rtype: dict
-        :returns: super class value updated with window LINES and COLUMNS.
+        :returns: Super class value updated with window LINES and COLUMNS.
         """
         env = super().send_env(keys)
         env["LINES"], env["COLUMNS"] = self._winsize()
@@ -401,61 +395,59 @@ async def open_connection(  # pylint: disable=too-many-locals
     """
     Connect to a TCP Telnet server as a Telnet client.
 
-    :param str host: Remote Internet TCP Server host.
-    :param int port: Remote Internet host TCP port.
-    :param client_base.BaseClient client_factory: Client connection class
-        factory.  When ``None``, :class:`TelnetTerminalClient` is used when
-        *stdin* is attached to a terminal, :class:`TelnetClient` otherwise.
-    :param int family: Same meaning as
+    :param host: Remote Internet TCP Server host.
+    :param port: Remote Internet host TCP port.
+    :param client_factory: Client connection class factory.  When ``None``,
+        :class:`TelnetTerminalClient` is used when *stdin* is attached to a
+        terminal, :class:`TelnetClient` otherwise.
+    :param family: Same meaning as
         :meth:`asyncio.loop.create_connection`.
-    :param int flags: Same meaning as
+    :param flags: Same meaning as
         :meth:`asyncio.loop.create_connection`.
-    :param tuple local_addr: Same meaning as
+    :param local_addr: Same meaning as
         :meth:`asyncio.loop.create_connection`.
-    :param str encoding: The default assumed encoding, or ``False`` to disable
+    :param encoding: The default assumed encoding, or ``False`` to disable
         unicode support.  This value is used for decoding bytes received by and
         encoding bytes transmitted to the Server.  These values are preferred
         in response to NEW_ENVIRON :rfc:`1572` as environment value ``LANG``,
         and by CHARSET :rfc:`2066` negotiation.
 
         The server's attached ``reader, writer`` streams accept and return
-        unicode, unless this value explicitly set ``False``.  In that case, the
-        attached streams interfaces are bytes-only.
-    :param str encoding_errors: Same meaning as :meth:`codecs.Codec.encode`.
+        unicode, unless this value is explicitly set ``False``.  In that case,
+        the attached streams interfaces are bytes-only.
+    :param encoding_errors: Same meaning as :meth:`codecs.Codec.encode`.
 
-    :param str term: Terminal type sent for requests of TTYPE, :rfc:`930` or as
+    :param term: Terminal type sent for requests of TTYPE, :rfc:`930` or as
         Environment value TERM by NEW_ENVIRON negotiation, :rfc:`1672`.
-    :param int cols: Client window dimension sent as Environment value COLUMNS
+    :param cols: Client window dimension sent as Environment value COLUMNS
         by NEW_ENVIRON negotiation, :rfc:`1672` or NAWS :rfc:`1073`.
-    :param int rows: Client window dimension sent as Environment value LINES by
+    :param rows: Client window dimension sent as Environment value LINES by
         NEW_ENVIRON negotiation, :rfc:`1672` or NAWS :rfc:`1073`.
-    :param tuple tspeed: Tuple of client BPS line speed in form ``(rx, tx``)
-        for receive and transmit, respectively.  Sent when requested by TSPEED,
-        :rfc:`1079`.
-    :param str xdisploc: String transmitted in response for request of
+    :param tspeed: Client BPS line speed in form ``(rx, tx)`` for receive and
+        transmit, respectively.  Sent when requested by TSPEED, :rfc:`1079`.
+    :param xdisploc: String transmitted in response for request of
         XDISPLOC, :rfc:`1086` by server (X11).
-    :param float connect_minwait: The client allows any additional telnet
+    :param connect_minwait: The client allows any additional telnet
         negotiations to be demanded by the server within this period of time
         before launching the shell.  Servers should assert desired negotiation
         on-connect and in response to 1 or 2 round trips.
 
         A server that does not make any telnet demands, such as a TCP server
-        that is not a telnet server will delay the execution of ``shell`` for
+        that is not a telnet server, will delay the execution of ``shell`` for
         exactly this amount of time.
-    :param float connect_maxwait: If the remote end is not complaint, or
+    :param connect_maxwait: If the remote end is not compliant, or
         otherwise confused by our demands, the shell continues anyway after the
         greater of this value has elapsed.  A client that is not answering
         option negotiation will delay the start of the shell by this amount.
 
-    :param bool force_binary: When ``True``, the encoding is used regardless
+    :param force_binary: When ``True``, the encoding is used regardless
         of BINARY mode negotiation.
-    :param asyncio.Future waiter_closed: Future that completes when the
-        connection is closed.
+    :param waiter_closed: Future that completes when the connection is closed.
     :param shell: An async function that is called after negotiation completes,
         receiving arguments ``(reader, writer)``.
-    :param int limit: The buffer limit for reader stream.
-    :return (reader, writer): The reader is a :class:`~.TelnetReader`
-        instance, the writer is a :class:`~.TelnetWriter` instance.
+    :param limit: The buffer limit for reader stream.
+    :return: The reader is a :class:`~.TelnetReader` instance, the writer is a
+        :class:`~.TelnetWriter` instance.
     """
     if client_factory is None:
         client_factory = TelnetClient

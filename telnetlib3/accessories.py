@@ -36,9 +36,8 @@ def encoding_from_lang(lang: str) -> Optional[str]:
     Returns the encoding portion if present, or None if the LANG value
     does not contain an encoding suffix (no '.' separator).
 
-    :param str lang: LANG environment value (e.g., 'en_US.UTF-8@misc')
-    :returns: Encoding string (e.g., 'UTF-8') or None if no encoding found
-    :rtype: str or None
+    :param lang: LANG environment value (e.g., 'en_US.UTF-8@misc')
+    :returns: Encoding string (e.g., 'UTF-8') or None if no encoding found.
 
     Example::
 

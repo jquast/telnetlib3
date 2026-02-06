@@ -148,7 +148,7 @@ class SLC:
 
     @property
     def flushout(self) -> int:
-        """Returns True if SLC_FLUSHIN bit is set."""
+        """Returns True if SLC_FLUSHOUT bit is set."""
         return ord(self.mask) & ord(SLC_FLUSHOUT)
 
     def set_value(self, value: bytes) -> None:
@@ -374,7 +374,7 @@ class Forwardmask:
         """
         Initialize Forwardmask with the given value.
 
-        :param bytes value: bytemask ``value`` received by server after ``IAC SB
+        :param value: Bytemask ``value`` received by server after ``IAC SB
             LINEMODE DO FORWARDMASK``. It must be a bytearray of length 16 or 32.
         """
         assert isinstance(value, (bytes, bytearray)), value

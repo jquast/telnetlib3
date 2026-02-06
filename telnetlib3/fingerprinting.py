@@ -859,7 +859,6 @@ def _is_maybe_ms_telnet(writer) -> bool:
     a burst of legacy IAC DO commands crashes the client.
 
     :param writer: TelnetWriter instance.
-    :rtype: bool
     """
     ttype1 = (writer.get_extra_info("ttype1") or "").upper()
     if ttype1 != "ANSI":

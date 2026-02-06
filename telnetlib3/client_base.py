@@ -90,7 +90,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         """
         Called when the connection is lost or closed.
 
-        :param Exception exc: exception.  ``None`` indicates
+        :param exc: Exception instance, or ``None`` to indicate
             a closing EOF sent by this end.
         """
         if self._closing:
@@ -287,10 +287,9 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         """
         Callback, return whether negotiation is complete.
 
-        :param bool final: Whether this is the final time this callback
+        :param final: Whether this is the final time this callback
             will be requested to answer regarding protocol negotiation.
         :returns: Whether negotiation is over (client end is satisfied).
-        :rtype: bool
 
         Method is called on each new command byte processed until negotiation is
         considered final, or after :attr:`connect_maxwait` has elapsed, setting
