@@ -15,6 +15,7 @@ from __future__ import annotations
 
 # std imports
 import os
+import sys
 import codecs
 import signal
 import socket
@@ -955,9 +956,6 @@ async def _sigterm_handler(server, _log):
 
 def parse_server_args() -> Dict[str, Any]:
     """Parse command-line arguments for telnet server."""
-    # std imports
-    import sys  # pylint: disable=import-outside-toplevel
-
     # Extract arguments after '--' for PTY program before argparse sees them
     argv = sys.argv[1:]
     pty_args = []
@@ -1179,5 +1177,5 @@ def main():
     asyncio.run(run_server(**parse_server_args()))
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 # std imports
 import os
+import sys
 import json
 import time
 import asyncio
@@ -951,11 +952,13 @@ def fingerprinting_post_script(filepath: str) -> None:
     _fps(filepath)
 
 
-if __name__ == "__main__":
-    # std imports
-    import sys
-
+def main() -> None:
+    """CLI entry point for fingerprinting post-processing."""
     if len(sys.argv) != 2:
         print(f"Usage: python -m {__name__} <filepath>", file=sys.stderr)
         sys.exit(1)
     fingerprinting_post_script(sys.argv[1])
+
+
+if __name__ == "__main__":  # pragma: no cover
+    main()

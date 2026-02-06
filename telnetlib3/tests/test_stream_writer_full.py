@@ -14,9 +14,11 @@ from telnetlib3.telopt import (
     SB,
     SE,
     TM,
+    ESC,
     IAC,
     NOP,
     SGA,
+    VAR,
     DONT,
     ECHO,
     GMCP,
@@ -34,6 +36,7 @@ from telnetlib3.telopt import (
     TSPEED,
     CHARSET,
     REQUEST,
+    USERVAR,
     ACCEPTED,
     LINEMODE,
     REJECTED,
@@ -508,8 +511,6 @@ def test_option_enabled_and_setitem_debug_path():
 def test_escape_unescape_and_env_encode_decode_roundtrip():
     # escaping VAR/USERVAR
     # local
-    from telnetlib3.telopt import ESC, VAR, USERVAR
-
     buf = b"A" + VAR + b"B" + USERVAR + b"C"
     esc = _escape_environ(buf)
     assert VAR in esc and USERVAR in esc and esc.count(ESC) == 2

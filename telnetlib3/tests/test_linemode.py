@@ -6,9 +6,13 @@ import asyncio
 # local
 import telnetlib3
 import telnetlib3.stream_writer
+from telnetlib3.slc import LMODE_MODE, LMODE_MODE_ACK, LMODE_MODE_LOCAL
+from telnetlib3.telopt import DO, SB, SE, IAC, WILL, LINEMODE
 from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
     bind_host,
+    create_server,
     unused_tcp_port,
+    asyncio_connection,
 )
 
 
@@ -16,10 +20,6 @@ async def test_server_demands_remote_linemode_client_agrees(  # pylint: disable=
     bind_host, unused_tcp_port
 ):
     # local
-    from telnetlib3.slc import LMODE_MODE, LMODE_MODE_ACK
-    from telnetlib3.telopt import DO, SB, SE, IAC, WILL, LINEMODE
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
-
     class ServerTestLinemode(telnetlib3.BaseServer):
         def begin_negotiation(self):
             super().begin_negotiation()
@@ -75,10 +75,6 @@ async def test_server_demands_remote_linemode_client_demands_local(  # pylint: d
     bind_host, unused_tcp_port
 ):
     # local
-    from telnetlib3.slc import LMODE_MODE, LMODE_MODE_ACK, LMODE_MODE_LOCAL
-    from telnetlib3.telopt import DO, SB, SE, IAC, WILL, LINEMODE
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
-
     class ServerTestLinemode(telnetlib3.BaseServer):
         def begin_negotiation(self):
             super().begin_negotiation()

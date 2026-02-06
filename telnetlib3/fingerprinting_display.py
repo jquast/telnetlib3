@@ -1370,8 +1370,13 @@ def fingerprinting_post_script(filepath: str) -> None:
         logger.warning("Unknown probed-protocol: %s", probed_protocol)
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """CLI entry point for fingerprinting display post-processing."""
     if len(sys.argv) != 2:
         print(f"Usage: python -m {__name__} <filepath>", file=sys.stderr)
         sys.exit(1)
     fingerprinting_post_script(sys.argv[1])
+
+
+if __name__ == "__main__":  # pragma: no cover
+    main()

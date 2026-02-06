@@ -6,7 +6,7 @@ import collections
 import pytest
 
 # local
-from telnetlib3 import slc
+from telnetlib3 import slc, client_base
 from telnetlib3.telopt import (
     DO,
     IS,
@@ -35,7 +35,9 @@ from telnetlib3.telopt import (
     LFLOW_RESTART_ANY,
     LFLOW_RESTART_XON,
 )
-from telnetlib3.stream_writer import TelnetWriter
+from telnetlib3.client_base import BaseClient
+from telnetlib3.server_base import BaseServer
+from telnetlib3.stream_writer import TelnetWriter, _encode_env_buf
 
 
 class MockTransport:
@@ -291,8 +293,6 @@ def test_handle_sb_ttype_is_and_send():
 def _encode_env(env):
     """Helper to encode env dict like _encode_env_buf would, for tests."""
     # local
-    from telnetlib3.stream_writer import _encode_env_buf
-
     return _encode_env_buf(env)
 
 
@@ -526,8 +526,6 @@ def test_handle_subnegotiation_dispatch_and_unhandled():
 
 async def test_server_data_received_split_sb_linemode():
     # local
-    from telnetlib3.server_base import BaseServer
-
     class NoNegServer(BaseServer):
         def begin_negotiation(self):
             pass
@@ -558,8 +556,6 @@ async def test_server_data_received_split_sb_linemode():
 
 async def test_client_process_chunk_split_sb_linemode():
     # local
-    from telnetlib3.client_base import BaseClient
-
     transport = MockTransport()
     client = BaseClient(encoding=False)
     client.connection_made(transport)

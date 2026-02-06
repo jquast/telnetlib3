@@ -3,15 +3,29 @@
 # std imports
 import os
 import sys
+import time
 import asyncio
+from unittest.mock import MagicMock, patch
 
 # 3rd party
 import pytest
 
 # local
 import telnetlib3
+from telnetlib3 import make_pty_shell
+from telnetlib3 import server_pty_shell as sps
+from telnetlib3.server_pty_shell import (
+    _BSU,
+    _ESU,
+    PTYSession,
+    PTYSpawnError,
+    _platform_check,
+    _wait_for_terminal_info,
+)
 from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
     bind_host,
+    create_server,
+    open_connection,
     unused_tcp_port,
     make_preexec_coverage,
 )
@@ -42,12 +56,9 @@ def require_no_capture(request):
 @pytest.fixture
 def mock_session():
     """Create a mock PTYSession for unit testing."""
+
     # std imports
-    from unittest.mock import MagicMock
-
     # local
-    from telnetlib3.server_pty_shell import PTYSession
-
     def _create(extra_info=None, capture_writes=False):
         reader = MagicMock()
         writer = MagicMock()
@@ -70,9 +81,6 @@ def mock_session():
 async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capture):
     """Test PTY shell with various helper modes: cat, env, stty_size."""
     # local
-    from telnetlib3 import make_pty_shell
-    from telnetlib3.tests.accessories import create_server, open_connection
-
     # Test 1: cat mode - echo input back
     _waiter = asyncio.Future()
 
@@ -168,9 +176,6 @@ async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capt
 async def test_pty_shell_lifecycle(bind_host, unused_tcp_port, require_no_capture):
     """Test PTY shell lifecycle: child exit and client disconnect."""
     # local
-    from telnetlib3 import make_pty_shell
-    from telnetlib3.tests.accessories import create_server, open_connection
-
     # Test 1: child exit closes connection gracefully
     _waiter = asyncio.Future()
 
@@ -245,8 +250,6 @@ async def test_pty_shell_lifecycle(bind_host, unused_tcp_port, require_no_captur
 def test_platform_check_not_windows():
     """Test that platform check raises on Windows."""
     # local
-    from telnetlib3.server_pty_shell import _platform_check
-
     original_platform = sys.platform
     try:
         sys.platform = "win32"
@@ -259,8 +262,6 @@ def test_platform_check_not_windows():
 def test_make_pty_shell_returns_callable():
     """Test that make_pty_shell returns a callable."""
     # local
-    from telnetlib3 import make_pty_shell
-
     shell = make_pty_shell(sys.executable)
     assert callable(shell)
 
@@ -306,10 +307,6 @@ async def test_pty_session_naws_behavior(mock_session, monkeypatch):
     """Test NAWS debouncing, latest value usage, and cleanup cancellation."""
     # std imports
     import struct
-    from unittest.mock import MagicMock, patch
-
-    # local
-    from telnetlib3 import server_pty_shell as sps
 
     monkeypatch.setattr(sps, "_NAWS_DEBOUNCE", 0.05)
 
@@ -362,7 +359,9 @@ async def test_pty_session_naws_behavior(mock_session, monkeypatch):
         "os.killpg", side_effect=mock_killpg_winch
     ), patch("os.kill"), patch("os.waitpid", return_value=(0, 0)), patch("os.close"), patch(
         "fcntl.ioctl"
-    ), patch("time.sleep"):
+    ), patch(
+        "time.sleep"
+    ):
         session._on_naws(25, 80)
         session.cleanup()
         await asyncio.sleep(0.1)
@@ -372,8 +371,6 @@ async def test_pty_session_naws_behavior(mock_session, monkeypatch):
 async def test_pty_session_write_to_telnet_buffering(mock_session):
     """Test _write_to_telnet line buffering, BSU/ESU handling, and overflow protection."""
     # local
-    from telnetlib3.server_pty_shell import _BSU, _ESU
-
     # Line buffering: buffers until newline
     session, written = mock_session({"charset": "utf-8"}, capture_writes=True)
     session._write_to_telnet(b"hello")
@@ -413,11 +410,7 @@ async def test_pty_session_write_to_telnet_buffering(mock_session):
 async def test_pty_session_flush_output_behavior(mock_session):
     """Test flush_output charset handling and incomplete UTF-8 buffering."""
     # std imports
-    from unittest.mock import MagicMock
-
     # local
-    from telnetlib3.server_pty_shell import PTYSession
-
     # Charset change recreates decoder
     reader = MagicMock()
     writer = MagicMock()
@@ -449,8 +442,6 @@ async def test_pty_session_flush_output_behavior(mock_session):
 async def test_pty_session_write_to_pty_behavior(mock_session):
     """Test _write_to_pty encoding, error handling, and None fd guard."""
     # std imports
-    from unittest.mock import patch
-
     # String encoding
     session, _ = mock_session({"charset": "utf-8"})
     session.master_fd = 99
@@ -484,11 +475,7 @@ async def test_pty_session_write_to_pty_behavior(mock_session):
 async def test_pty_session_cleanup_flushes_remaining_buffer():
     """Test that cleanup flushes remaining buffer with final=True."""
     # std imports
-    from unittest.mock import MagicMock, patch
-
     # local
-    from telnetlib3.server_pty_shell import PTYSession
-
     reader = MagicMock()
     writer = MagicMock()
     written = []
@@ -513,13 +500,7 @@ async def test_pty_session_cleanup_flushes_remaining_buffer():
 async def test_wait_for_terminal_info_behavior(monkeypatch):
     """Test _wait_for_terminal_info early return, timeout, and polling behavior."""
     # std imports
-    import time
-    from unittest.mock import MagicMock
-
     # local
-    from telnetlib3 import server_pty_shell as sps
-    from telnetlib3.server_pty_shell import _wait_for_terminal_info
-
     # Returns early when TERM and rows available
     writer = MagicMock()
     writer.get_extra_info = MagicMock(side_effect={"TERM": "xterm", "rows": 25}.get)
@@ -554,8 +535,6 @@ async def test_wait_for_terminal_info_behavior(monkeypatch):
 async def test_pty_session_set_window_size_behavior(mock_session):
     """Test _set_window_size guards and error handling."""
     # std imports
-    from unittest.mock import patch
-
     # No fd does nothing
     session, _ = mock_session()
     session.master_fd = None
@@ -590,11 +569,7 @@ async def test_pty_session_cleanup_error_recovery(
 ):
     """Test cleanup handles various error conditions gracefully."""
     # std imports
-    from unittest.mock import MagicMock, patch
-
     # local
-    from telnetlib3.server_pty_shell import PTYSession
-
     reader = MagicMock()
     writer = MagicMock()
     writer.get_extra_info = MagicMock(return_value="utf-8")
@@ -627,11 +602,7 @@ async def test_pty_session_flush_remaining_scenarios(
 ):
     """Test _flush_remaining behavior based on sync update state."""
     # std imports
-    from unittest.mock import MagicMock
-
     # local
-    from telnetlib3.server_pty_shell import PTYSession
-
     reader = MagicMock()
     writer = MagicMock()
     written = []
@@ -653,11 +624,7 @@ async def test_pty_session_flush_remaining_scenarios(
 async def test_pty_session_flush_output_empty_data():
     """Test _flush_output does nothing with empty data."""
     # std imports
-    from unittest.mock import MagicMock
-
     # local
-    from telnetlib3.server_pty_shell import PTYSession
-
     reader = MagicMock()
     writer = MagicMock()
     written = []
@@ -675,11 +642,7 @@ async def test_pty_session_flush_output_empty_data():
 async def test_pty_session_write_to_telnet_pre_bsu_content():
     """Test content before BSU is flushed."""
     # std imports
-    from unittest.mock import MagicMock
-
     # local
-    from telnetlib3.server_pty_shell import _BSU, _ESU, PTYSession
-
     reader = MagicMock()
     writer = MagicMock()
     written = []
@@ -697,8 +660,6 @@ async def test_pty_session_write_to_telnet_pre_bsu_content():
 async def test_pty_spawn_error():
     """Test PTYSpawnError exception class."""
     # local
-    from telnetlib3.server_pty_shell import PTYSpawnError
-
     err = PTYSpawnError("test error")
     assert str(err) == "test error"
     assert isinstance(err, Exception)
@@ -714,11 +675,7 @@ async def test_pty_spawn_error():
 async def test_pty_session_exec_error_parsing(error_data, expected_substrings):
     """Test _handle_exec_error parses various error formats."""
     # std imports
-    from unittest.mock import MagicMock
-
     # local
-    from telnetlib3.server_pty_shell import PTYSession, PTYSpawnError
-
     reader = MagicMock()
     writer = MagicMock()
     writer.get_extra_info = MagicMock(return_value=None)
@@ -743,11 +700,7 @@ async def test_pty_session_exec_error_parsing(error_data, expected_substrings):
 async def test_pty_session_isalive_scenarios(child_pid, waitpid_behavior, expected):
     """Test _isalive returns correct values for various child states."""
     # std imports
-    from unittest.mock import MagicMock, patch
-
     # local
-    from telnetlib3.server_pty_shell import PTYSession
-
     reader = MagicMock()
     writer = MagicMock()
     writer.get_extra_info = MagicMock(return_value=None)
@@ -769,10 +722,6 @@ async def test_pty_session_terminate_scenarios():
     """Test _terminate handles various termination scenarios."""
     # std imports
     import signal
-    from unittest.mock import MagicMock, patch
-
-    # local
-    from telnetlib3.server_pty_shell import PTYSession
 
     reader = MagicMock()
     writer = MagicMock()
@@ -823,11 +772,7 @@ async def test_pty_session_terminate_scenarios():
 async def test_pty_session_ga_timer_fires_after_idle(mock_session, monkeypatch):
     """GA is sent after _flush_remaining when SGA not negotiated."""
     # std imports
-    from unittest.mock import MagicMock
-
     # local
-    from telnetlib3 import server_pty_shell as sps
-
     monkeypatch.setattr(sps, "_GA_IDLE", 0.05)
 
     session, written = mock_session({"charset": "utf-8"}, capture_writes=True)
@@ -851,11 +796,7 @@ async def test_pty_session_ga_timer_fires_after_idle(mock_session, monkeypatch):
 async def test_pty_session_ga_timer_cancelled_by_new_output(mock_session, monkeypatch):
     """GA timer is cancelled when new PTY output arrives."""
     # std imports
-    from unittest.mock import MagicMock
-
     # local
-    from telnetlib3 import server_pty_shell as sps
-
     monkeypatch.setattr(sps, "_GA_IDLE", 0.05)
 
     session, written = mock_session({"charset": "utf-8"}, capture_writes=True)
@@ -880,8 +821,6 @@ async def test_pty_session_ga_timer_cancelled_by_new_output(mock_session, monkey
 async def test_pty_session_ga_timer_suppressed_by_never_send_ga(mock_session):
     """GA timer is not scheduled when never_send_ga is set."""
     # std imports
-    from unittest.mock import MagicMock
-
     session, written = mock_session({"charset": "utf-8"}, capture_writes=True)
     protocol = MagicMock()
     protocol.never_send_ga = True
@@ -895,8 +834,6 @@ async def test_pty_session_ga_timer_suppressed_by_never_send_ga(mock_session):
 async def test_pty_session_ga_timer_suppressed_in_raw_mode(mock_session):
     """GA timer is not scheduled in raw_mode (e.g. fingerprinting display)."""
     # std imports
-    from unittest.mock import MagicMock
-
     session, _ = mock_session({"charset": "utf-8"}, capture_writes=True)
     protocol = MagicMock()
     protocol.never_send_ga = False
@@ -911,11 +848,7 @@ async def test_pty_session_ga_timer_suppressed_in_raw_mode(mock_session):
 async def test_pty_session_ga_timer_cancelled_on_cleanup(mock_session, monkeypatch):
     """GA timer is cancelled during cleanup."""
     # std imports
-    from unittest.mock import MagicMock, patch
-
     # local
-    from telnetlib3 import server_pty_shell as sps
-
     monkeypatch.setattr(sps, "_GA_IDLE", 0.05)
 
     session, _ = mock_session({"charset": "utf-8"})

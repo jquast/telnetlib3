@@ -6,18 +6,18 @@ import asyncio
 # local
 import telnetlib3
 import telnetlib3.stream_writer
-from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+from telnetlib3.telopt import IS, SB, SE, IAC, WILL, TTYPE
+from telnetlib3.tests.accessories import (  # pylint: disable=unused-import; pylint: disable=unused-import,
     bind_host,
+    create_server,
     unused_tcp_port,
+    asyncio_connection,
 )
 
 
 async def test_telnet_server_on_ttype(bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype()."""
     # local
-    from telnetlib3.telopt import IS, SB, SE, IAC, WILL, TTYPE
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
-
     _waiter = asyncio.Future()
 
     class ServerTestTtype(telnetlib3.TelnetServer):
@@ -42,9 +42,6 @@ async def test_telnet_server_on_ttype(bind_host, unused_tcp_port):
 async def test_telnet_server_on_ttype_beyond_max(bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype() with long list."""
     # local
-    from telnetlib3.telopt import IS, SB, SE, IAC, WILL, TTYPE
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
-
     _waiter = asyncio.Future()
     given_ttypes = (
         "ALPHA",
@@ -90,9 +87,6 @@ async def test_telnet_server_on_ttype_beyond_max(bind_host, unused_tcp_port):
 async def test_telnet_server_on_ttype_empty(bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype(): empty value is ignored."""
     # local
-    from telnetlib3.telopt import IS, SB, SE, IAC, WILL, TTYPE
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
-
     _waiter = asyncio.Future()
     given_ttypes = ("ALPHA", "", "BETA")
 
@@ -119,9 +113,6 @@ async def test_telnet_server_on_ttype_empty(bind_host, unused_tcp_port):
 async def test_telnet_server_on_ttype_looped(bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype() when value looped."""
     # local
-    from telnetlib3.telopt import IS, SB, SE, IAC, WILL, TTYPE
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
-
     _waiter = asyncio.Future()
     given_ttypes = ("ALPHA", "BETA", "GAMMA", "ALPHA")
 
@@ -153,9 +144,6 @@ async def test_telnet_server_on_ttype_looped(bind_host, unused_tcp_port):
 async def test_telnet_server_on_ttype_repeated(bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype() when value repeats."""
     # local
-    from telnetlib3.telopt import IS, SB, SE, IAC, WILL, TTYPE
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
-
     _waiter = asyncio.Future()
     given_ttypes = ("ALPHA", "BETA", "GAMMA", "GAMMA")
 
@@ -187,9 +175,6 @@ async def test_telnet_server_on_ttype_repeated(bind_host, unused_tcp_port):
 async def test_telnet_server_on_ttype_mud(bind_host, unused_tcp_port):
     """Test Server's callback method on_ttype() for MUD clients (MTTS)."""
     # local
-    from telnetlib3.telopt import IS, SB, SE, IAC, WILL, TTYPE
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
-
     _waiter = asyncio.Future()
     given_ttypes = ("ALPHA", "BETA", "MTTS 137")
 
