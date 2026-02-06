@@ -9,17 +9,12 @@ from __future__ import annotations
 
 # std imports
 import os
-import pty
 import sys
 import time
-import errno
-import fcntl
 import codecs
-import signal
 import struct
 import asyncio
 import logging
-import termios
 from typing import List, Union, Callable, Optional, Awaitable
 
 # local
@@ -100,6 +95,10 @@ class PTYSession:
 
         :raises PTYSpawnError: If the child process fails to exec.
         """
+        # std imports
+        import pty
+        import fcntl
+
         _platform_check()
 
         env = self._build_environment()
@@ -207,6 +206,9 @@ class PTYSession:
     def _setup_child(self, env, rows, cols, exec_err_pipe, *, child_cov=None):
         """Child process setup before exec."""
         # Note: pty.fork() already calls setsid() for the child, so we don't need to
+        # std imports
+        import termios
+        import fcntl
 
         if rows and cols:
             winsize = struct.pack("HHHH", rows, cols, 0, 0)
@@ -244,6 +246,9 @@ class PTYSession:
 
     def _setup_parent(self):
         """Parent process setup after fork."""
+        # std imports
+        import fcntl
+
         flags = fcntl.fcntl(self.master_fd, fcntl.F_GETFL)
         fcntl.fcntl(self.master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
         self.writer.set_ext_callback(NAWS, self._on_naws)
@@ -271,6 +276,11 @@ class PTYSession:
 
     def _set_window_size(self, rows, cols):
         """Set PTY window size and send SIGWINCH to child."""
+        # std imports
+        import termios
+        import signal
+        import fcntl
+
         if self.master_fd is None or self.child_pid is None:
             return
         winsize = struct.pack("HHHH", rows, cols, 0, 0)
@@ -282,6 +292,9 @@ class PTYSession:
 
     async def run(self):
         """Bridge loop between telnet and PTY."""
+        # std imports
+        import errno
+
         loop = asyncio.get_event_loop()
         pty_read_event = asyncio.Event()
         pty_data_queue = asyncio.Queue()
@@ -492,6 +505,9 @@ class PTYSession:
         :param force: If True, use SIGKILL as last resort.
         :returns: True if child was terminated, False otherwise.
         """
+        # std imports
+        import signal
+
         if not self._isalive():
             return True
 
