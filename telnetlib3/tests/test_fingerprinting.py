@@ -1,5 +1,6 @@
 # std imports
 import os
+import sys
 import json
 from pathlib import Path
 
@@ -8,13 +9,19 @@ import pytest
 
 # local
 from telnetlib3 import fingerprinting as fps
-from telnetlib3 import fingerprinting_display as fpd
+
+if sys.platform != "win32":
+    from telnetlib3 import fingerprinting_display as fpd
+
+# local
 from telnetlib3.tests.accessories import (  # noqa: F401  # pylint: disable=unused-import
     bind_host,
     create_server,
     open_connection,
     unused_tcp_port,
 )
+
+requires_unix = pytest.mark.skipif(sys.platform == "win32", reason="requires termios (Unix only)")
 
 
 class MockOption(dict):
@@ -207,6 +214,7 @@ def test_validate_suggestion(text, expected):
     assert fps._validate_suggestion(text) == expected
 
 
+@requires_unix
 def test_prompt_stores_suggestions(tmp_path, monkeypatch):
     filepath = tmp_path / "test.json"
     data = {
@@ -228,6 +236,7 @@ def test_prompt_stores_suggestions(tmp_path, monkeypatch):
     assert saved["suggestions"]["terminal-emulator"] == "Ghostty"
 
 
+@requires_unix
 def test_prompt_stores_revision(tmp_path, monkeypatch):
     filepath = tmp_path / "test.json"
     data = {
@@ -264,6 +273,7 @@ async def test_server_shell(monkeypatch):
     assert writer._closing
 
 
+@requires_unix
 def test_create_terminal_fingerprint():
     terminal_data = {
         "software_name": "foot",
@@ -389,6 +399,7 @@ def test_create_terminal_fingerprint():
     assert "height" not in fp
 
 
+@requires_unix
 def test_terminal_fingerprint_hash_excludes_session_vars():
     # std imports
     import copy
@@ -509,6 +520,7 @@ def _make_ttype_data(ttype_cycle):
     return {"telnet-probe": {"session_data": {"ttype_cycle": ttype_cycle}}}
 
 
+@requires_unix
 @pytest.mark.parametrize(
     "ttype_cycle,expected_term",
     [
@@ -525,6 +537,7 @@ def test_setup_term_environ_ms_telnet(ttype_cycle, expected_term, monkeypatch):
     assert os.environ["TERM"] == expected_term
 
 
+@requires_unix
 def test_setup_term_environ_no_ttype_cycle(monkeypatch):
     """_setup_term_environ leaves TERM alone when ttype_cycle is absent."""
     monkeypatch.setenv("TERM", "vt220")
@@ -532,6 +545,7 @@ def test_setup_term_environ_no_ttype_cycle(monkeypatch):
     assert os.environ["TERM"] == "vt220"
 
 
+@requires_unix
 @pytest.mark.parametrize(
     "probe,expected",
     [
@@ -547,12 +561,14 @@ def test_client_requires_ga(probe, expected):
     assert fpd._client_requires_ga(data) is expected
 
 
+@requires_unix
 def test_client_requires_ga_missing_keys():
     """_client_requires_ga returns True when probe data is absent."""
     assert fpd._client_requires_ga({}) is True
     assert fpd._client_requires_ga({"telnet-probe": {}}) is True
 
 
+@requires_unix
 def test_run_ucs_detect_timeout(monkeypatch):
     """_run_ucs_detect returns None on subprocess timeout."""
     # std imports
@@ -566,6 +582,7 @@ def test_run_ucs_detect_timeout(monkeypatch):
     assert fpd._run_ucs_detect() is None
 
 
+@requires_unix
 def test_process_client_fingerprint_skips_ucs_detect_for_mud(monkeypatch, tmp_path):
     """_process_client_fingerprint skips ucs-detect when client requires GA."""
     ucs_called = []

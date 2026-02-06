@@ -51,7 +51,8 @@ async def test_uvloop_telnet_integration(bind_host, unused_tcp_port):
 
     # Connect client
     reader, writer = await telnetlib3.open_connection(
-        host=bind_host, port=unused_tcp_port,
+        host=bind_host,
+        port=unused_tcp_port,
         client_factory=telnetlib3.TelnetClient,
     )
 

@@ -850,7 +850,7 @@ def _repl_prompt(term) -> None:
     """Write the REPL prompt with hotkey legend."""
     bk = _bracket_key
     legend = (
-        f"{bk(term, 't')}erminal or te{bk(term, 'l')}net details, "
+        f"{bk(term, 't')}erminal or te{bk(term, 'l')}net details, "  # codespell:ignore te
         f"{bk(term, 's')}ummarize or {bk(term, 'u')}pdate database: "
     )
     echo(f"\r{term.clear_eos}{term.normal}{legend}")

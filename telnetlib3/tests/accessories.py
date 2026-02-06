@@ -98,7 +98,9 @@ async def open_connection(*args, **kwargs):
     # size via TIOCGWINSZ, ignoring cols/rows parameters. Use TelnetClient so
     # tests get consistent behavior regardless of whether stdin is a TTY.
     if "client_factory" not in kwargs:
+        # local
         from telnetlib3.client import TelnetClient
+
         kwargs["client_factory"] = TelnetClient
 
     reader, writer = await telnetlib3.open_connection(*args, **kwargs)

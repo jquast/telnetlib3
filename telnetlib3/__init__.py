@@ -37,7 +37,8 @@ from .slc import *  # noqa
 from .telnetlib import *  # noqa
 from .guard_shells import *  # noqa
 from .fingerprinting import *  # noqa
-from .fingerprinting_display import *  # noqa
+if sys.platform != "win32":
+    from .fingerprinting_display import *  # noqa
 from .sync import *  # noqa
 try:
     from . import server_pty_shell
