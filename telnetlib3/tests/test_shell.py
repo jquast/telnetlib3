@@ -19,7 +19,6 @@ from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
 
 async def test_telnet_server_shell_as_coroutine(bind_host, unused_tcp_port):
     """Test callback shell(reader, writer) as coroutine of create_server()."""
-    # local
     _waiter = asyncio.Future()
     send_input = "Alpha"
     expect_output = "Beta"
@@ -60,7 +59,6 @@ async def test_telnet_server_shell_as_coroutine(bind_host, unused_tcp_port):
 
 async def test_telnet_client_shell_as_coroutine(bind_host, unused_tcp_port):
     """Test callback shell(reader, writer) as coroutine of create_server()."""
-    # local
     _waiter = asyncio.Future()
 
     async def shell(reader, writer):
@@ -80,7 +78,6 @@ async def test_telnet_client_shell_as_coroutine(bind_host, unused_tcp_port):
 
 async def test_telnet_server_shell_make_coro_by_function(bind_host, unused_tcp_port):
     """Test callback shell(reader, writer) as function, for create_server()."""
-    # local
     _waiter = asyncio.Future()
 
     def shell(reader, writer):
@@ -96,7 +93,6 @@ async def test_telnet_server_shell_make_coro_by_function(bind_host, unused_tcp_p
 
 async def test_telnet_server_no_shell(bind_host, unused_tcp_port):
     """Test telnetlib3.TelnetServer() instantiation and connection_made()."""
-    # local
     client_expected = IAC + DO + TTYPE + b"beta"
 
     async with create_server(host=bind_host, port=unused_tcp_port) as server:
@@ -118,7 +114,6 @@ async def test_telnet_server_given_shell(
     bind_host, unused_tcp_port
 ):  # pylint: disable=too-many-locals
     """Iterate all state-reading commands of default telnet_server_shell."""
-    # local
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
@@ -288,7 +283,6 @@ async def test_telnet_server_given_shell(
 
 async def test_telnet_server_shell_eof(bind_host, unused_tcp_port):
     """Test EOF in telnet_server_shell()."""
-    # local
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
@@ -305,7 +299,6 @@ async def test_telnet_server_shell_eof(bind_host, unused_tcp_port):
 
 async def test_telnet_server_shell_version_command(bind_host, unused_tcp_port):
     """Test version command in telnet_server_shell."""
-    # local
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
@@ -344,7 +337,6 @@ async def test_telnet_server_shell_version_command(bind_host, unused_tcp_port):
 
 async def test_telnet_server_shell_dump_with_kb_limit(bind_host, unused_tcp_port):
     """Test dump command with explicit kb_limit."""
-    # local
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
@@ -380,7 +372,6 @@ async def test_telnet_server_shell_dump_with_kb_limit(bind_host, unused_tcp_port
 
 async def test_telnet_server_shell_dump_with_all_options(bind_host, unused_tcp_port):
     """Test dump command with all options including close."""
-    # local
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
@@ -415,7 +406,6 @@ async def test_telnet_server_shell_dump_with_all_options(bind_host, unused_tcp_p
 
 async def test_telnet_server_shell_dump_nodrain(bind_host, unused_tcp_port):
     """Test dump command with nodrain option."""
-    # local
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
@@ -451,7 +441,6 @@ async def test_telnet_server_shell_dump_nodrain(bind_host, unused_tcp_port):
 
 async def test_telnet_server_shell_dump_large_output(bind_host, unused_tcp_port):
     """Test dump command with larger output."""
-    # local
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,

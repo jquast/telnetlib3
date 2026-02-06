@@ -97,7 +97,6 @@ class CustomTelnetClient(telnetlib3.TelnetClient):
 
 async def test_telnet_server_on_charset(bind_host, unused_tcp_port):
     """Test Server's callback method on_charset()."""
-    # local
     _waiter = asyncio.Future()
     given_charset = "KOI8-U"
 
@@ -124,7 +123,6 @@ async def test_telnet_server_on_charset(bind_host, unused_tcp_port):
 
 async def test_telnet_client_send_charset(bind_host, unused_tcp_port):
     """Test Client's callback method send_charset() selection for illegals."""
-    # local
     _waiter = asyncio.Future()
     server_instance = {"protocol": None}
 
@@ -163,7 +161,6 @@ async def test_telnet_client_send_charset(bind_host, unused_tcp_port):
 
 async def test_telnet_client_no_charset(bind_host, unused_tcp_port):
     """Test Client's callback method send_charset() does not select."""
-    # local
     _waiter = asyncio.Future()
     server_instance = {"protocol": None}
 
@@ -414,7 +411,6 @@ def test_unit_charset_negotiation_sequence():
 
 async def test_charset_send_unknown_encoding(bind_host, unused_tcp_port):
     """Test client with unknown encoding value."""
-    # local
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
         async with open_connection(
             client_factory=lambda **kwargs: CustomTelnetClient(
@@ -429,7 +425,6 @@ async def test_charset_send_unknown_encoding(bind_host, unused_tcp_port):
 
 async def test_charset_send_no_viable_offers(bind_host, unused_tcp_port):
     """Test client with no viable encoding offers."""
-    # local
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
         async with open_connection(
             client_factory=lambda **kwargs: CustomTelnetClient(
@@ -445,7 +440,6 @@ async def test_charset_send_no_viable_offers(bind_host, unused_tcp_port):
 
 async def test_charset_explicit_non_latin1_encoding(bind_host, unused_tcp_port):
     """Test client rejecting offered encodings when explicit non-latin1 is set."""
-    # local
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
         async with open_connection(
             client_factory=lambda **kwargs: CustomTelnetClient(

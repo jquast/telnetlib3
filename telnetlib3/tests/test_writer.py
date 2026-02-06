@@ -95,7 +95,6 @@ def test_repr():
 def test_illegal_2byte_iac():
     """Given an illegal 2byte IAC command, raise ValueError."""
     writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
-    # local
     writer.feed_byte(IAC)
     with pytest.raises(ValueError):
         # IAC SGA(b'\x03'): not a legal 2-byte cmd
@@ -104,7 +103,6 @@ def test_illegal_2byte_iac():
 
 def test_legal_2byte_iac():
     """Nothing special about a 2-byte IAC, test wiring a callback."""
-    # local
     called = threading.Event()
 
     def callback(cmd):
@@ -132,7 +130,6 @@ def test_sb_interrupted():
     # instead of awaiting the unlikely SE, and throwing all intermediary bytes
     # out, we just clear what we have received so far within this so called
     # 'SB', and exit the sb buffering state.
-    # local
     writer = telnetlib3.TelnetWriter(
         transport=None,
         protocol=None,
@@ -167,7 +164,6 @@ def test_sb_interrupted():
 async def test_iac_do_twice_replies_once(bind_host, unused_tcp_port):
     """WILL/WONT replied only once for repeated DO."""
 
-    # local
     async def shell(reader, writer):
         writer.close()
         await writer.wait_closed()
@@ -194,7 +190,6 @@ async def test_iac_do_twice_replies_once(bind_host, unused_tcp_port):
 async def test_iac_dont_dont(bind_host, unused_tcp_port):
     """WILL/WONT replied only once for repeated DO."""
 
-    # local
     async def shell(reader, writer):
         writer.close()
         await writer.wait_closed()
@@ -220,7 +215,6 @@ async def test_iac_dont_dont(bind_host, unused_tcp_port):
 
 async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
     """Try a DONT and ensure it cannot be sent twice."""
-    # local
     async with create_server(
         protocol_factory=telnetlib3.BaseServer,
         host=bind_host,
@@ -251,7 +245,7 @@ async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
 async def test_slc_simul(bind_host, unused_tcp_port):
     """Test SLC control characters are simulated in kludge mode."""
     # For example, ^C is simulated as IP (Interrupt Process) callback.
-    # local
+    #
     # First, change server state into kludge mode -- Then, send all control
     # characters.  We ensure all of our various callbacks that are simulated
     # by control characters were 'fired', as well as the raw bytes received
@@ -304,7 +298,6 @@ async def test_slc_simul(bind_host, unused_tcp_port):
 
 async def test_unhandled_do_sends_wont(bind_host, unused_tcp_port):
     """An unhandled DO is denied by WONT."""
-    # local
     given_input_outband = IAC + DO + NOP
     expected_output = IAC + WONT + NOP
 
@@ -326,7 +319,6 @@ async def test_unhandled_do_sends_wont(bind_host, unused_tcp_port):
 
 async def test_writelines_bytes(bind_host, unused_tcp_port):
     """Exercise bytes-only interface of writer.writelines() function."""
-    # local
     given = (b"a", b"b", b"c", b"d")
     expected = b"abcd"
 
@@ -353,7 +345,6 @@ async def test_writelines_bytes(bind_host, unused_tcp_port):
 
 async def test_writelines_unicode(bind_host, unused_tcp_port):
     """Exercise unicode interface of writer.writelines() function."""
-    # local
     given = ("a", "b", "c", "d")
     expected = b"abcd"
 
@@ -380,7 +371,6 @@ async def test_writelines_unicode(bind_host, unused_tcp_port):
 
 def test_bad_iac():
     """Test using writer.iac for something outside of DO/DONT/WILL/WONT."""
-    # local
     writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
     with pytest.raises(ValueError):
         writer.iac(NOP)
@@ -388,7 +378,6 @@ def test_bad_iac():
 
 async def test_send_ga(bind_host, unused_tcp_port):
     """Writer sends IAC + GA when SGA is not negotiated."""
-    # local
     expected = IAC + GA
 
     async def shell(reader, writer):
@@ -414,7 +403,6 @@ async def test_send_ga(bind_host, unused_tcp_port):
 
 async def test_not_send_ga(bind_host, unused_tcp_port):
     """Writer does not send IAC + GA when SGA is negotiated."""
-    # local
     # we require IAC + DO + SGA, and expect a confirming reply.  We also
     # call writer.send_ga() from the shell, whose result should be False
     # (not sent).  The reader never receives an IAC + GA.
@@ -444,7 +432,6 @@ async def test_not_send_ga(bind_host, unused_tcp_port):
 
 async def test_not_send_eor(bind_host, unused_tcp_port):
     """Writer does not send IAC + EOR when un-negotiated."""
-    # local
     expected = b""
 
     async def shell(reader, writer):
@@ -470,7 +457,6 @@ async def test_not_send_eor(bind_host, unused_tcp_port):
 
 async def test_send_eor(bind_host, unused_tcp_port):
     """Writer sends IAC + EOR if client requests by DO."""
-    # local
     given = IAC + DO + EOR
     expected = IAC + WILL + EOR + b"<" + IAC + CMD_EOR + b">"
 
@@ -560,7 +546,6 @@ async def test_wait_closed():
 
 def test_option_from_name():
     """Test option_from_name returns correct option bytes."""
-    # local
     assert option_from_name("NAWS") == NAWS
     assert option_from_name("naws") == NAWS
     assert option_from_name("TTYPE") == TTYPE
@@ -572,7 +557,6 @@ def test_option_from_name():
 
 async def test_wait_for_immediate_return():
     """Test wait_for returns immediately when conditions already met."""
-    # local
     writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
     writer.remote_option[ECHO] = True
 
@@ -582,7 +566,6 @@ async def test_wait_for_immediate_return():
 
 async def test_wait_for_remote_option():
     """Test wait_for waits for remote option to become true."""
-    # local
     writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
 
     async def set_option_later():
@@ -597,7 +580,6 @@ async def test_wait_for_remote_option():
 
 async def test_wait_for_local_option():
     """Test wait_for waits for local option to become true."""
-    # local
     writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
 
     async def set_option_later():
@@ -612,7 +594,6 @@ async def test_wait_for_local_option():
 
 async def test_wait_for_pending_false():
     """Test wait_for waits for pending option to become false."""
-    # local
     writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
     writer.pending_option[DO + TTYPE] = True
 
@@ -628,7 +609,6 @@ async def test_wait_for_pending_false():
 
 async def test_wait_for_combined_conditions():
     """Test wait_for with multiple conditions."""
-    # local
     writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
 
     async def set_options_later():
@@ -677,7 +657,6 @@ async def test_wait_for_condition_immediate():
 
 async def test_wait_for_condition_waits():
     """Test wait_for_condition waits for condition to become true."""
-    # local
     writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
 
     async def set_option_later():
@@ -694,7 +673,6 @@ async def test_wait_for_condition_waits():
 
 async def test_wait_for_cleanup_on_success():
     """Test that waiters are cleaned up after successful completion."""
-    # local
     writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
 
     async def set_option_later():

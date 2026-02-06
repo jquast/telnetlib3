@@ -18,7 +18,6 @@ from telnetlib3.tests.accessories import (  # pylint: disable=unused-import; pyl
 
 async def test_telnet_server_on_tspeed(bind_host, unused_tcp_port):
     """Test Server's callback method on_tspeed()."""
-    # local
     _waiter = asyncio.Future()
 
     class ServerTestTspeed(telnetlib3.TelnetServer):
@@ -39,7 +38,6 @@ async def test_telnet_server_on_tspeed(bind_host, unused_tcp_port):
 
 async def test_telnet_client_send_tspeed(bind_host, unused_tcp_port):
     """Test Client's callback method send_tspeed()."""
-    # local
     _waiter = asyncio.Future()
     given_rx, given_tx = 1337, 1919
 

@@ -510,7 +510,6 @@ def test_option_enabled_and_setitem_debug_path():
 
 def test_escape_unescape_and_env_encode_decode_roundtrip():
     # escaping VAR/USERVAR
-    # local
     buf = b"A" + VAR + b"B" + USERVAR + b"C"
     esc = _escape_environ(buf)
     assert VAR in esc and USERVAR in esc and esc.count(ESC) == 2

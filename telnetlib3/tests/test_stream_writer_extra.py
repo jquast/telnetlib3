@@ -292,7 +292,6 @@ def test_handle_sb_ttype_is_and_send():
 
 def _encode_env(env):
     """Helper to encode env dict like _encode_env_buf would, for tests."""
-    # local
     return _encode_env_buf(env)
 
 
@@ -525,7 +524,6 @@ def test_handle_subnegotiation_dispatch_and_unhandled():
 
 
 async def test_server_data_received_split_sb_linemode():
-    # local
     class NoNegServer(BaseServer):
         def begin_negotiation(self):
             pass
@@ -555,7 +553,6 @@ async def test_server_data_received_split_sb_linemode():
 
 
 async def test_client_process_chunk_split_sb_linemode():
-    # local
     transport = MockTransport()
     client = BaseClient(encoding=False)
     client.connection_made(transport)

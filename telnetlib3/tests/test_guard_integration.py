@@ -6,7 +6,6 @@ from telnetlib3.guard_shells import ConnectionCounter, busy_shell, robot_shell
 
 
 async def test_connection_counter_integration():
-    # local
     counter = ConnectionCounter(2)
 
     assert counter.try_acquire()
@@ -26,7 +25,6 @@ async def test_connection_counter_integration():
 
 
 async def test_counter_release_on_completion():
-    # local
     counter = ConnectionCounter(1)
 
     async def shell_with_finally():
@@ -48,7 +46,6 @@ async def test_counter_release_on_completion():
 
 
 async def test_counter_release_in_guarded_pattern():
-    # local
     counter = ConnectionCounter(2)
 
     results = []
@@ -82,7 +79,6 @@ async def test_counter_release_in_guarded_pattern():
 
 
 async def test_guarded_shell_pattern_busy_shell():
-    # local
     counter = ConnectionCounter(1)
     shell_calls = []
     busy_shell_calls = []
@@ -156,7 +152,6 @@ async def test_guarded_shell_pattern_busy_shell():
 
 
 async def test_guarded_shell_pattern_robot_check():  # pylint: disable=too-complex
-    # local
     counter = ConnectionCounter(5)
     shell_calls = []
     robot_shell_calls = []
@@ -236,7 +231,6 @@ async def test_guarded_shell_pattern_robot_check():  # pylint: disable=too-compl
 
 
 async def test_full_guarded_shell_flow():  # pylint: disable=too-complex
-    # local
     counter = ConnectionCounter(2)
     shell_calls = []
     busy_calls = []

@@ -19,7 +19,6 @@ from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
 async def test_server_demands_remote_linemode_client_agrees(  # pylint: disable=too-many-locals
     bind_host, unused_tcp_port
 ):
-    # local
     class ServerTestLinemode(telnetlib3.BaseServer):
         def begin_negotiation(self):
             super().begin_negotiation()
@@ -74,7 +73,6 @@ async def test_server_demands_remote_linemode_client_agrees(  # pylint: disable=
 async def test_server_demands_remote_linemode_client_demands_local(  # pylint: disable=too-many-locals
     bind_host, unused_tcp_port
 ):
-    # local
     class ServerTestLinemode(telnetlib3.BaseServer):
         def begin_negotiation(self):
             super().begin_negotiation()

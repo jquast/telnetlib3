@@ -21,7 +21,6 @@ from telnetlib3.tests.accessories import (  # pylint: disable=unused-import; pyl
 
 async def test_telnet_server_on_environ(bind_host, unused_tcp_port):
     """Test Server's callback method on_environ()."""
-    # local
     _waiter = asyncio.Future()
 
     class ServerTestEnviron(telnetlib3.TelnetServer):
@@ -58,7 +57,6 @@ async def test_telnet_server_on_environ(bind_host, unused_tcp_port):
 
 async def test_telnet_client_send_environ(bind_host, unused_tcp_port):
     """Test Client's callback method send_environ() for specific requests."""
-    # local
     _waiter = asyncio.Future()
     given_cols = 19
     given_rows = 84
@@ -94,7 +92,6 @@ async def test_telnet_client_send_environ(bind_host, unused_tcp_port):
 
 async def test_telnet_client_send_var_uservar_environ(bind_host, unused_tcp_port):
     """Test Client's callback method send_environ() for VAR/USERVAR request."""
-    # local
     _waiter = asyncio.Future()
     given_cols = 19
     given_rows = 84
@@ -107,9 +104,6 @@ async def test_telnet_client_send_var_uservar_environ(bind_host, unused_tcp_port
             _waiter.set_result(mapping)
 
         def on_request_environ(self):
-            # local
-            from telnetlib3.telopt import VAR, USERVAR
-
             return [VAR, USERVAR]
 
     async with create_server(
@@ -133,7 +127,6 @@ async def test_telnet_client_send_var_uservar_environ(bind_host, unused_tcp_port
 
 async def test_telnet_server_reject_environ(bind_host, unused_tcp_port):
     """Test Client's callback method send_environ() for specific requests."""
-    # local
     given_cols = 19
     given_rows = 84
     given_term = "vt220"
@@ -192,7 +185,6 @@ def _make_server():
 )
 async def test_negotiate_environ_ms_telnet(ttype1, ttype2, expect_skip):
     """NEW_ENVIRON is skipped for Microsoft telnet (ANSI + VT100)."""
-    # local
     server = _make_server()
     server._extra["ttype1"] = ttype1
     server._extra["ttype2"] = ttype2
@@ -205,7 +197,6 @@ async def test_negotiate_environ_ms_telnet(ttype1, ttype2, expect_skip):
 
 async def test_check_negotiation_ttype_refused_triggers_environ():
     """check_negotiation sends DO NEW_ENVIRON when TTYPE is refused."""
-    # local
     server = _make_server()
     server._advanced = True
     server.writer.remote_option[TTYPE] = False
@@ -216,7 +207,6 @@ async def test_check_negotiation_ttype_refused_triggers_environ():
 
 async def test_check_negotiation_final_triggers_environ():
     """check_negotiation sends DO NEW_ENVIRON on final timeout."""
-    # local
     server = _make_server()
     server._advanced = True
     server.check_negotiation(final=True)
@@ -226,7 +216,6 @@ async def test_check_negotiation_final_triggers_environ():
 
 async def test_check_negotiation_no_advanced_skips_environ():
     """check_negotiation does not send DO NEW_ENVIRON without advanced."""
-    # local
     server = _make_server()
     server.writer.remote_option[TTYPE] = False
     server.check_negotiation(final=True)
@@ -236,7 +225,6 @@ async def test_check_negotiation_no_advanced_skips_environ():
 
 async def test_on_ttype_non_ansi_triggers_environ():
     """on_ttype sends DO NEW_ENVIRON immediately for non-ANSI ttype1."""
-    # local
     server = _make_server()
     server.on_ttype("xterm")
     assert server._environ_requested
@@ -245,7 +233,6 @@ async def test_on_ttype_non_ansi_triggers_environ():
 
 async def test_on_ttype_ansi_defers_environ():
     """on_ttype defers DO NEW_ENVIRON when ttype1 is ANSI."""
-    # local
     server = _make_server()
     server.on_ttype("ANSI")
     assert not server._environ_requested

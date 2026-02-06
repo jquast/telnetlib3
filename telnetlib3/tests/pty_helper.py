@@ -44,6 +44,7 @@ def echo_mode(args):
 
 def stty_size_mode():
     """Print terminal size."""
+    # imported locally to avoid error on import with windows systems
     # std imports
     import fcntl
     import struct

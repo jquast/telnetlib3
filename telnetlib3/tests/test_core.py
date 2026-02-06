@@ -42,14 +42,12 @@ from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
 
 async def test_create_server(bind_host, unused_tcp_port):
     """Test telnetlib3.create_server basic instantiation."""
-    # local
     async with create_server(host=bind_host, port=unused_tcp_port):
         pass
 
 
 async def test_create_server_conditionals(bind_host, unused_tcp_port):
     """Test telnetlib3.create_server conditionals."""
-    # local
     async with create_server(
         protocol_factory=lambda: telnetlib3.TelnetServer,
         host=bind_host,
@@ -60,7 +58,6 @@ async def test_create_server_conditionals(bind_host, unused_tcp_port):
 
 async def test_create_server_on_connect(bind_host, unused_tcp_port):
     """Test on_connect() anonymous function callback of create_server."""
-    # local
     call_tracker = {"called": False, "transport": None}
 
     class TrackingProtocol(asyncio.Protocol):
@@ -84,7 +81,6 @@ async def test_create_server_on_connect(bind_host, unused_tcp_port):
 
 async def test_telnet_server_open_close(bind_host, unused_tcp_port):
     """Test telnetlib3.TelnetServer() instantiation and connection_made()."""
-    # local
     async with create_server(host=bind_host, port=unused_tcp_port) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (
             stream_reader,
@@ -102,7 +98,6 @@ async def test_telnet_server_open_close(bind_host, unused_tcp_port):
 
 async def test_telnet_client_open_close_by_write(bind_host, unused_tcp_port):
     """Exercise BaseClient.connection_lost() on writer closed."""
-    # local
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
         async with open_connection(host=bind_host, port=unused_tcp_port, connect_minwait=0.05) as (
             reader,
@@ -117,7 +112,6 @@ async def test_telnet_client_open_close_by_write(bind_host, unused_tcp_port):
 async def test_telnet_client_open_closed_by_peer(bind_host, unused_tcp_port):
     """Exercise BaseClient.connection_lost()."""
 
-    # local
     class DisconnecterProtocol(asyncio.Protocol):
         def connection_made(self, transport):
             # disconnect on connect
@@ -167,7 +161,6 @@ async def test_telnet_server_advanced_negotiation(bind_host, unused_tcp_port):
 
 async def test_telnet_server_closed_by_client(bind_host, unused_tcp_port):
     """Exercise TelnetServer.connection_lost."""
-    # local
     async with create_server(host=bind_host, port=unused_tcp_port) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             # Read server's negotiation request and send minimal reply
@@ -192,7 +185,6 @@ async def test_telnet_server_closed_by_client(bind_host, unused_tcp_port):
 
 async def test_telnet_server_eof_by_client(bind_host, unused_tcp_port):
     """Exercise TelnetServer.eof_received()."""
-    # local
     async with create_server(host=bind_host, port=unused_tcp_port) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             # Read server's negotiation request and send minimal reply
@@ -216,7 +208,6 @@ async def test_telnet_server_eof_by_client(bind_host, unused_tcp_port):
 
 async def test_telnet_server_closed_by_server(bind_host, unused_tcp_port):
     """Exercise TelnetServer.connection_lost by close()."""
-    # local
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
@@ -249,7 +240,6 @@ async def test_telnet_server_closed_by_server(bind_host, unused_tcp_port):
 
 async def test_telnet_server_idle_duration(bind_host, unused_tcp_port):
     """Exercise TelnetServer.idle property."""
-    # local
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
@@ -264,7 +254,6 @@ async def test_telnet_server_idle_duration(bind_host, unused_tcp_port):
 
 async def test_telnet_client_idle_duration_minwait(bind_host, unused_tcp_port):
     """Exercise TelnetClient.idle property and minimum connection time."""
-    # local
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
         given_minwait = 0.100
 
@@ -285,7 +274,6 @@ async def test_telnet_client_idle_duration_minwait(bind_host, unused_tcp_port):
 
 async def test_telnet_server_closed_by_error(bind_host, unused_tcp_port):
     """Exercise TelnetServer.connection_lost by exception."""
-    # local
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
@@ -307,7 +295,6 @@ async def test_telnet_server_closed_by_error(bind_host, unused_tcp_port):
 async def test_telnet_client_open_close_by_error(bind_host, unused_tcp_port):
     """Exercise BaseClient.connection_lost() on error."""
 
-    # local
     class GivenException(Exception):
         pass
 
@@ -323,7 +310,6 @@ async def test_telnet_client_open_close_by_error(bind_host, unused_tcp_port):
 
 async def test_telnet_server_negotiation_fail(bind_host, unused_tcp_port):
     """Test telnetlib3.TelnetServer() negotiation failure with client."""
-    # local
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
@@ -347,12 +333,8 @@ async def test_telnet_server_negotiation_fail(bind_host, unused_tcp_port):
 async def test_telnet_client_negotiation_fail(bind_host, unused_tcp_port):
     """Test telnetlib3.TelnetCLient() negotiation failure with server."""
 
-    # local
     class ClientNegotiationFail(telnetlib3.TelnetClient):
         def connection_made(self, transport):
-            # local
-            from telnetlib3.telopt import WILL, TTYPE
-
             super().connection_made(transport)
             self.writer.iac(WILL, TTYPE)
 
@@ -390,7 +372,6 @@ async def test_telnet_server_as_module():
 @pytest.mark.skipif(sys.platform == "win32", reason="Signal handlers not supported on Windows")
 async def test_telnet_server_cmdline(bind_host, unused_tcp_port):
     """Test executing telnetlib3/server.py as server."""
-    # local
     prog = pexpect.which("telnetlib3-server")
     args = [
         prog,
@@ -443,7 +424,6 @@ async def test_telnet_client_as_module():
 @pytest.mark.skipif(sys.platform == "win32", reason="Client shell not implemented on Windows")
 async def test_telnet_client_cmdline(bind_host, unused_tcp_port):
     """Test executing telnetlib3/client.py as client."""
-    # local
     prog = pexpect.which("telnetlib3-client")
     args = [
         prog,
@@ -491,7 +471,6 @@ async def test_telnet_client_cmdline(bind_host, unused_tcp_port):
 )
 async def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port):
     """Test executing telnetlib3/client.py as client using a tty (pexpect)"""
-    # local
     prog, args = "telnetlib3-client", [
         bind_host,
         str(unused_tcp_port),
@@ -520,7 +499,6 @@ async def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port):
 @pytest.mark.skipif(sys.platform == "win32", reason="Client shell not implemented on Windows")
 async def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port):
     """Test sending data through command-line client (by os PIPE)."""
-    # local
     prog = pexpect.which("telnetlib3-client")
     fd, logfile = tempfile.mkstemp(prefix="telnetlib3", suffix=".log")
     os.close(fd)
