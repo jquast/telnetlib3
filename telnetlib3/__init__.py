@@ -1,5 +1,8 @@
 """telnetlib3: an asyncio Telnet Protocol implemented in python."""
 
+# std imports
+import sys
+
 # flake8: noqa: F405
 # fmt: off
 # isort: off
@@ -18,6 +21,9 @@ from . import telopt
 from . import slc
 from . import telnetlib
 from . import guard_shells
+from . import fingerprinting
+if sys.platform != "win32":
+    from . import fingerprinting_display  # noqa: F401
 from . import sync
 from .server_base import *  # noqa
 from .server import *  # noqa
@@ -30,6 +36,9 @@ from .telopt import *  # noqa
 from .slc import *  # noqa
 from .telnetlib import *  # noqa
 from .guard_shells import *  # noqa
+from .fingerprinting import *  # noqa
+if sys.platform != "win32":
+    from .fingerprinting_display import *  # noqa
 from .sync import *  # noqa
 try:
     from . import server_pty_shell
@@ -49,6 +58,7 @@ __all__ = tuple(
         + server.__all__
         + server_shell.__all__
         + guard_shells.__all__
+        + fingerprinting.__all__
         + (server_pty_shell.__all__ if PTY_SUPPORT else ())
         # client,
         + client_base.__all__

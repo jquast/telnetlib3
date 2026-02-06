@@ -22,10 +22,12 @@ from telnetlib3.telopt import (
 from telnetlib3.stream_writer import TelnetWriter
 from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
     bind_host,
+    create_server,
+    asyncio_server,
+    open_connection,
     unused_tcp_port,
+    asyncio_connection,
 )
-
-# local imports
 
 # --- Common Mock Classes ---
 
@@ -95,9 +97,6 @@ class CustomTelnetClient(telnetlib3.TelnetClient):
 
 async def test_telnet_server_on_charset(bind_host, unused_tcp_port):
     """Test Server's callback method on_charset()."""
-    # local
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
-
     _waiter = asyncio.Future()
     given_charset = "KOI8-U"
 
@@ -124,9 +123,6 @@ async def test_telnet_server_on_charset(bind_host, unused_tcp_port):
 
 async def test_telnet_client_send_charset(bind_host, unused_tcp_port):
     """Test Client's callback method send_charset() selection for illegals."""
-    # local
-    from telnetlib3.tests.accessories import create_server, open_connection
-
     _waiter = asyncio.Future()
     server_instance = {"protocol": None}
 
@@ -165,9 +161,6 @@ async def test_telnet_client_send_charset(bind_host, unused_tcp_port):
 
 async def test_telnet_client_no_charset(bind_host, unused_tcp_port):
     """Test Client's callback method send_charset() does not select."""
-    # local
-    from telnetlib3.tests.accessories import create_server, open_connection
-
     _waiter = asyncio.Future()
     server_instance = {"protocol": None}
 
@@ -418,9 +411,6 @@ def test_unit_charset_negotiation_sequence():
 
 async def test_charset_send_unknown_encoding(bind_host, unused_tcp_port):
     """Test client with unknown encoding value."""
-    # local
-    from telnetlib3.tests.accessories import asyncio_server, open_connection
-
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
         async with open_connection(
             client_factory=lambda **kwargs: CustomTelnetClient(
@@ -435,9 +425,6 @@ async def test_charset_send_unknown_encoding(bind_host, unused_tcp_port):
 
 async def test_charset_send_no_viable_offers(bind_host, unused_tcp_port):
     """Test client with no viable encoding offers."""
-    # local
-    from telnetlib3.tests.accessories import asyncio_server, open_connection
-
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
         async with open_connection(
             client_factory=lambda **kwargs: CustomTelnetClient(
@@ -453,9 +440,6 @@ async def test_charset_send_no_viable_offers(bind_host, unused_tcp_port):
 
 async def test_charset_explicit_non_latin1_encoding(bind_host, unused_tcp_port):
     """Test client rejecting offered encodings when explicit non-latin1 is set."""
-    # local
-    from telnetlib3.tests.accessories import asyncio_server, open_connection
-
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
         async with open_connection(
             client_factory=lambda **kwargs: CustomTelnetClient(

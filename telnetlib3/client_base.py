@@ -1,15 +1,20 @@
 """Module provides class BaseClient."""
 
+from __future__ import annotations
+
 # std imports
 import sys
+import types
 import asyncio
 import logging
 import weakref
 import datetime
 import traceback
 import collections
+from typing import Any, Type, Union, Callable, Optional, cast
 
 # local
+from ._types import ShellCallback
 from .telopt import theNULL, name_commands
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
@@ -23,28 +28,28 @@ _ONE_BYTE = [bytes([i]) for i in range(256)]
 class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     """Base Telnet Client Protocol."""
 
-    _when_connected = None
-    _last_received = None
-    _transport = None
+    _when_connected: Optional[datetime.datetime] = None
+    _last_received: Optional[datetime.datetime] = None
+    _transport: Optional[asyncio.Transport] = None
     _closing = False
     _reader_factory = TelnetReader
     _reader_factory_encoding = TelnetReaderUnicode
     _writer_factory = TelnetWriter
     _writer_factory_encoding = TelnetWriterUnicode
-    _check_later = None
+    _check_later: Optional[asyncio.Handle] = None
 
     def __init__(  # pylint: disable=too-many-positional-arguments
         self,
-        shell=None,
-        encoding="utf8",
-        encoding_errors="strict",
-        force_binary=False,
-        connect_minwait=1.0,
-        connect_maxwait=4.0,
-        limit=None,
-        waiter_closed=None,
-        _waiter_connected=None,
-    ):
+        shell: Optional[ShellCallback] = None,
+        encoding: Union[str, bool] = "utf8",
+        encoding_errors: str = "strict",
+        force_binary: bool = False,
+        connect_minwait: float = 1.0,
+        connect_maxwait: float = 4.0,
+        limit: Optional[int] = None,
+        waiter_closed: Optional[asyncio.Future[None]] = None,
+        _waiter_connected: Optional[asyncio.Future[None]] = None,
+    ) -> None:
         """Class initializer."""
         super().__init__()
         self.log = logging.getLogger("telnetlib3.client")
@@ -53,24 +58,24 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self.default_encoding = encoding
         self._encoding_errors = encoding_errors
         self.force_binary = force_binary
-        self._extra = {}
+        self._extra: dict[str, Any] = {}
         self.waiter_closed = waiter_closed or asyncio.Future()
         #: a future used for testing
         self._waiter_connected = _waiter_connected or asyncio.Future()
-        self._tasks = []
+        self._tasks: list[Any] = []
         self.shell = shell
         #: minimum duration for :meth:`check_negotiation`.
         self.connect_minwait = connect_minwait
         #: maximum duration for :meth:`check_negotiation`.
         self.connect_maxwait = connect_maxwait
-        self.reader = None
-        self.writer = None
+        self.reader: Optional[Union[TelnetReader, TelnetReaderUnicode]] = None
+        self.writer: Optional[Union[TelnetWriter, TelnetWriterUnicode]] = None
         self._limit = limit
 
         # High-throughput receive pipeline
-        self._rx_queue = collections.deque()
+        self._rx_queue: collections.deque[bytes] = collections.deque()
         self._rx_bytes = 0
-        self._rx_task = None
+        self._rx_task: Optional[asyncio.Task[Any]] = None
         self._reading_paused = False
         # Apply backpressure to transport when our queue grows too large
         self._read_high = 512 * 1024  # pause_reading() above this many buffered bytes
@@ -78,16 +83,16 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     # Base protocol methods
 
-    def eof_received(self):
+    def eof_received(self) -> None:
         """Called when the other end calls write_eof() or equivalent."""
         self.log.debug("EOF from server, closing.")
         self.connection_lost(None)
 
-    def connection_lost(self, exc):
+    def connection_lost(self, exc: Optional[Exception]) -> None:
         """
         Called when the connection is lost or closed.
 
-        :param Exception exc: exception.  ``None`` indicates
+        :param exc: Exception instance, or ``None`` to indicate
             a closing EOF sent by this end.
         """
         if self._closing:
@@ -95,6 +100,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._closing = True
 
         # inform yielding readers about closed connection
+        assert self.reader is not None
         if exc is None:
             self.log.info("Connection closed to %s", self)
             self.reader.feed_eof()
@@ -108,6 +114,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         # close transport (may already be closed), set waiter_closed and
         # cancel Future _waiter_connected.
+        assert self._transport is not None
         self._transport.close()
         if not self._waiter_connected.done():
             # strangely, for symmetry, our '_waiter_connected' must be set if
@@ -124,21 +131,22 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         # break circular references.
         self._transport = None
 
-    def connection_made(self, transport):
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
         """
         Called when a connection is made.
 
         Ensure ``super().connection_made(transport)`` is called when derived.
         """
-        self._transport = transport
+        _transport = cast(asyncio.Transport, transport)
+        self._transport = _transport
         self._when_connected = datetime.datetime.now()
         self._last_received = datetime.datetime.now()
 
-        reader_factory = self._reader_factory
-        writer_factory = self._writer_factory
+        reader_factory: type[TelnetReader] | type[TelnetReaderUnicode] = self._reader_factory
+        writer_factory: type[TelnetWriter] | type[TelnetWriterUnicode] = self._writer_factory
 
-        reader_kwds = {}
-        writer_kwds = {}
+        reader_kwds: dict[str, Any] = {}
+        writer_kwds: dict[str, Any] = {}
 
         if self.default_encoding:
             reader_kwds["fn_encoding"] = self.encoding
@@ -154,13 +162,13 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self.reader = reader_factory(**reader_kwds)
         # Attach transport so TelnetReader can apply pause_reading/resume_reading
         try:
-            self.reader.set_transport(transport)
+            self.reader.set_transport(_transport)
         except Exception:  # pylint: disable=broad-exception-caught
             # Reader may not support transport coupling; ignore.
             pass
 
         self.writer = writer_factory(
-            transport=transport,
+            transport=_transport,
             protocol=self,
             reader=self.reader,
             client=True,
@@ -172,12 +180,13 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._waiter_connected.add_done_callback(self.begin_shell)
         asyncio.get_event_loop().call_soon(self.begin_negotiation)
 
-    def begin_shell(self, future):
+    def begin_shell(self, future: asyncio.Future[None]) -> None:
         """Start the shell coroutine after negotiation completes."""
         # Don't start shell if the connection was cancelled or errored
         if future.cancelled() or future.exception() is not None:
             return
         if self.shell is not None:
+            assert self.reader is not None and self.writer is not None
             coro = self.shell(self.reader, self.writer)
             if asyncio.iscoroutine(coro):
                 # When a shell is defined as a coroutine, we must ensure
@@ -199,7 +208,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                     )
                 )
 
-    def data_received(self, data):
+    def data_received(self, data: bytes) -> None:
         """
         Process bytes received by transport.
 
@@ -219,38 +228,41 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         # Pause reading if buffered bytes exceed high watermark
         if not self._reading_paused and self._rx_bytes >= self._read_high:
-            try:
-                self._transport.pause_reading()
-                self._reading_paused = True
-            except Exception:  # pylint: disable=broad-exception-caught
-                # Some transports may not support pause_reading; ignore.
-                pass
+            if self._transport is not None:
+                try:
+                    self._transport.pause_reading()
+                    self._reading_paused = True
+                except Exception:  # pylint: disable=broad-exception-caught
+                    # Some transports may not support pause_reading; ignore.
+                    pass
 
     # public properties
 
     @property
-    def duration(self):
+    def duration(self) -> float:
         """Time elapsed since client connected, in seconds as float."""
+        assert self._when_connected is not None
         return (datetime.datetime.now() - self._when_connected).total_seconds()
 
     @property
-    def idle(self):
+    def idle(self) -> float:
         """Time elapsed since data last received, in seconds as float."""
+        assert self._last_received is not None
         return (datetime.datetime.now() - self._last_received).total_seconds()
 
     # public protocol methods
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         hostport = self.get_extra_info("peername", ["-", "closing"])[:2]
         return f"<Peer {hostport[0]} {hostport[1]}>"
 
-    def get_extra_info(self, name, default=None):
+    def get_extra_info(self, name: str, default: Any = None) -> Any:
         """Get optional client protocol or transport information."""
         if self._transport:
             default = self._transport.get_extra_info(name, default)
         return self._extra.get(name, default)
 
-    def begin_negotiation(self):
+    def begin_negotiation(self) -> None:
         """
         Begin on-connect negotiation.
 
@@ -264,7 +276,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._check_later = asyncio.get_event_loop().call_soon(self._check_negotiation_timer)
         self._tasks.append(self._check_later)
 
-    def encoding(self, outgoing=False, incoming=False):
+    def encoding(self, outgoing: bool = False, incoming: bool = False) -> Union[str, bool]:
         """
         Encoding that should be used for the direction indicated.
 
@@ -274,14 +286,13 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         # pylint: disable=unused-argument
         return self.default_encoding or "US-ASCII"  # pragma: no cover
 
-    def check_negotiation(self, final=False):
+    def check_negotiation(self, final: bool = False) -> bool:
         """
         Callback, return whether negotiation is complete.
 
-        :param bool final: Whether this is the final time this callback
+        :param final: Whether this is the final time this callback
             will be requested to answer regarding protocol negotiation.
         :returns: Whether negotiation is over (client end is satisfied).
-        :rtype: bool
 
         Method is called on each new command byte processed until negotiation is
         considered final, or after :attr:`connect_maxwait` has elapsed, setting
@@ -301,6 +312,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         from .telopt import TTYPE, CHARSET, NEW_ENVIRON
 
         # First check if there are any pending options
+        assert self.writer is not None
         if any(self.writer.pending_option.values()):
             return False
 
@@ -324,11 +336,13 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     # private methods
 
-    def _process_chunk(self, data):  # pylint: disable=too-many-branches,too-complex
+    def _process_chunk(self, data: bytes) -> bool:  # pylint: disable=too-many-branches,too-complex
         """Process a chunk of received bytes; return True if any IAC/SB cmd observed."""
         # This mirrors the previous optimized logic, but is called from an async task.
         self._last_received = datetime.datetime.now()
 
+        assert self.writer is not None
+        assert self.reader is not None
         writer = self.writer
         reader = self.reader
 
@@ -349,7 +363,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         n = len(data)
         i = 0
         out_start = 0
-        feeding_oob = False
+        feeding_oob = bool(writer.is_oob)
 
         # Build set of special bytes for fast lookup
         special_bytes = frozenset({255} | (slc_vals or set()))
@@ -399,7 +413,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         return cmd_received
 
-    async def _process_rx(self):
+    async def _process_rx(self) -> None:
         """Async processor for receive queue that yields control and applies backpressure."""
         processed = 0
         any_cmd = False
@@ -414,11 +428,12 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
                 # Resume reading when we've drained below low watermark
                 if self._reading_paused and self._rx_bytes <= self._read_low:
-                    try:
-                        self._transport.resume_reading()
-                        self._reading_paused = False
-                    except Exception:  # pylint: disable=broad-exception-caught
-                        pass
+                    if self._transport is not None:
+                        try:
+                            self._transport.resume_reading()
+                            self._reading_paused = False
+                        except Exception:  # pylint: disable=broad-exception-caught
+                            pass
 
                 # Yield periodically to keep loop responsive without excessive context switching
                 if processed >= 128 * 1024:
@@ -430,7 +445,8 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             if any_cmd and not self._waiter_connected.done():
                 self._check_negotiation_timer()
 
-    def _check_negotiation_timer(self):
+    def _check_negotiation_timer(self) -> None:
+        assert self._check_later is not None
         self._check_later.cancel()
         self._tasks.remove(self._check_later)
 
@@ -442,6 +458,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             self._waiter_connected.set_result(None)
         elif final:
             self.log.debug("negotiation failed after %1.2fs.", self.duration)
+            assert self.writer is not None
             _failed = [
                 name_commands(cmd_option)
                 for (cmd_option, pending) in self.writer.pending_option.items()
@@ -462,7 +479,12 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             self._tasks.append(self._check_later)
 
     @staticmethod
-    def _log_exception(logger, e_type, e_value, e_tb):
+    def _log_exception(
+        logger: Callable[..., Any],
+        e_type: Optional[Type[BaseException]],
+        e_value: Optional[BaseException],
+        e_tb: Optional[types.TracebackType],
+    ) -> None:
         rows_tbk = [line for line in "\n".join(traceback.format_tb(e_tb)).split("\n") if line]
         rows_exc = [line.rstrip() for line in traceback.format_exception_only(e_type, e_value)]
 

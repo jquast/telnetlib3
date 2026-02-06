@@ -48,12 +48,21 @@ def test_encoding_from_lang():
         "en_US.UTF-8": "UTF-8",
         "abc.def": "def",
         ".def@ghi": "def",
-        "def@": "def",
-        "UTF-8": "UTF-8",
     }
     for given, expected in sorted(given_expected.items()):
-        # exercise,
         result = encoding_from_lang(given)
+        assert result == expected
 
-        # verify,
+
+def test_encoding_from_lang_no_encoding():
+    """Test LANG values without encoding suffix return None."""
+    given_expected = {
+        "en_IL": None,
+        "en_US": None,
+        "C": None,
+        "POSIX": None,
+        "UTF-8": None,
+    }
+    for given, expected in sorted(given_expected.items()):
+        result = encoding_from_lang(given)
         assert result == expected

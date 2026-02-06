@@ -20,6 +20,7 @@ Modes:
 # std imports
 import os
 import sys
+import time
 
 
 def cat_mode():
@@ -43,6 +44,7 @@ def echo_mode(args):
 
 def stty_size_mode():
     """Print terminal size."""
+    # imported locally to avoid error on import with windows systems
     # std imports
     import fcntl
     import struct
@@ -75,9 +77,6 @@ def env_mode(args):
 
 def sleep_mode(args):
     """Sleep for specified seconds."""
-    # std imports
-    import time
-
     seconds = float(args[0]) if args else 60
     time.sleep(seconds)
 
@@ -103,9 +102,6 @@ def partial_utf8_mode():
     """Output incomplete UTF-8 then complete it."""
     sys.stdout.buffer.write(b"hello\xc3")
     sys.stdout.buffer.flush()
-    # std imports
-    import time
-
     time.sleep(0.1)
     sys.stdout.buffer.write(b"\xa9world\n")
     sys.stdout.buffer.flush()
@@ -140,5 +136,5 @@ def main():
     modes[mode]()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()

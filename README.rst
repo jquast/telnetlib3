@@ -29,7 +29,7 @@
 Introduction
 ============
 
-``telnetlib3`` is a full-featured Telnet Client and Server library for python3.8 and newer.
+``telnetlib3`` is a full-featured Telnet Client and Server library for python3.9 and newer.
 
 Modern asyncio_ and legacy blocking API's are provided.
 
@@ -74,6 +74,32 @@ program.
     telnetlib3-server 0.0.0.0 1984 --shell=bin.server_wargame.shell
     telnetlib3-server --pty-exec /bin/bash -- --login
 
+Fingerprinting Server
+---------------------
+
+A built-in fingerprinting server shell is provided to uniquely identify telnet clients::
+
+    export TELNETLIB3_DATA_DIR=./data
+    telnetlib3-server --shell telnetlib3.fingerprinting_server_shell
+
+A public fingerprinting server you can try out yourself::
+
+    telnet 1984.ws 555
+
+An optional post-fingerprint hook can process saved files. The hook is run as
+``python -m <module> <filepath>``. The built-in post-script pretty-prints the JSON
+and integrates with ucs-detect_ for terminal capability probing::
+
+    export TELNETLIB3_DATA_DIR=./fingerprints
+    export TELNETLIB3_FINGERPRINT_POST_SCRIPT=telnetlib3.fingerprinting
+    telnetlib3-server --shell telnetlib3.fingerprinting_server_shell
+
+If ucs-detect_ is installed and available in PATH, the post-script automatically
+runs it to probe terminal capabilities (colors, sixel, kitty graphics, etc.) and
+adds the results to the fingerprint data as ``terminal-fingerprint-data``.
+
+.. _ucs-detect: https://github.com/jquast/ucs-detect
+
 Legacy telnetlib
 ----------------
 
@@ -112,6 +138,21 @@ or CHARSET to negotiate about it.
 
 In this case, use ``--force-binary`` and ``--encoding`` when the encoding of
 the remote end is known.
+
+Go-Ahead (GA)
+--------------
+
+When a client does not negotiate Suppress Go-Ahead (SGA), the server sends
+``IAC GA`` after output to signal that the client may transmit. This is
+correct behavior for MUD clients like Mudlet that expect prompt detection
+via GA.
+
+If GA causes unwanted output for your use case, disable it::
+
+    telnetlib3-server --never-send-ga
+
+For PTY shells, GA is sent after 500ms of output idle time to avoid
+injecting GA in the middle of streaming output.
 
 Quick Example
 =============

@@ -1,17 +1,25 @@
 """Telnet server shell implementations."""
 
+from __future__ import annotations
+
 # std imports
 import types
 import asyncio
+from typing import Union, Optional, Generator, cast
 
 # local
 from . import slc, telopt, accessories
+from .stream_reader import TelnetReader, TelnetReaderUnicode
+from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
 CR, LF, NUL = ("\r", "\n", "\x00")
 ESC = "\x1b"
 
 
-async def filter_ansi(reader, _writer):
+async def filter_ansi(
+    reader: TelnetReaderUnicode,
+    _writer: TelnetWriterUnicode,
+) -> str:
     """
     Read and return the next non-ANSI-escape character from reader.
 
@@ -38,17 +46,20 @@ async def filter_ansi(reader, _writer):
 __all__ = ("telnet_server_shell",)
 
 
-async def telnet_server_shell(
-    reader, writer
-):  # pylint: disable=too-complex,too-many-branches,too-many-statements
+async def telnet_server_shell(  # pylint: disable=too-complex,too-many-branches,too-many-statements
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> None:
     """
     A default telnet shell, appropriate for use with telnetlib3.create_server.
 
     This shell provides a very simple REPL, allowing introspection and state toggling of the
     connected client session.
     """
-    linereader = readline(reader, writer)
-    linereader.send(None)
+    _reader = cast(TelnetReaderUnicode, reader)
+    writer = cast(TelnetWriterUnicode, writer)
+    linereader = readline(_reader, writer)
+    next(linereader)
 
     writer.write("Ready." + CR + LF)
 
@@ -57,12 +68,14 @@ async def telnet_server_shell(
         if command:
             writer.write(CR + LF)
         writer.write("tel:sh> ")
+        if not getattr(writer.protocol, "never_send_ga", False):
+            writer.send_ga()
         await writer.drain()
 
         command = None
         while command is None:
             await writer.drain()
-            inp = await reader.read(1)
+            inp = await _reader.read(1)
             if not inp:
                 # close/eof by client at prompt
                 return
@@ -117,9 +130,8 @@ async def telnet_server_shell(
                 do_close = command.split()[4].lower() == "close"
             except IndexError:
                 do_close = False
-            writer.write(
-                f"kb_limit={kb_limit}, delay={delay}, drain={drain}, do_close={do_close}:\r\n"
-            )
+            msg = f"kb_limit={kb_limit}, delay={delay}, drain={drain}, do_close={do_close}:\r\n"
+            writer.write(msg)
             for lineout in character_dump(kb_limit):
                 if writer.is_closing():
                     break
@@ -138,7 +150,7 @@ async def telnet_server_shell(
     writer.close()
 
 
-def character_dump(kb_limit):
+def character_dump(kb_limit: int) -> Generator[str, None, None]:
     """Generate character dump output up to kb_limit kilobytes."""
     num_bytes = 0
     while (num_bytes) < (kb_limit * 1024):
@@ -149,11 +161,15 @@ def character_dump(kb_limit):
     yield "\033[1G" + "wrote " + str(num_bytes) + " bytes"
 
 
-async def get_next_ascii(reader, writer):
+async def get_next_ascii(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> Optional[str]:
     """Accept the next non-ANSI-escape character from reader."""
+    _reader = cast(TelnetReaderUnicode, reader)
     escape_sequence = False
     while not writer.is_closing():
-        next_char = await reader.read(1)
+        next_char = await _reader.read(1)
         if next_char == "\x1b":
             escape_sequence = True
         elif escape_sequence:
@@ -165,7 +181,10 @@ async def get_next_ascii(reader, writer):
 
 
 @types.coroutine
-def readline(_reader, writer):
+def readline(
+    _reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> Generator[Optional[str], str, None]:
     """
     A very crude readline coroutine interface.
 
@@ -173,6 +192,7 @@ def readline(_reader, writer):
     designed for Python 3.4 and remains here for compatibility, superseded by
     :func:`~.readline2`
     """
+    _writer = cast(TelnetWriterUnicode, writer)
     command, inp, last_inp = "", "", ""
     inp = yield None
     while True:
@@ -190,19 +210,22 @@ def readline(_reader, writer):
             # backspace over input
             if command:
                 command = command[:-1]
-                writer.echo("\b \b")
+                _writer.echo("\b \b")
             last_inp = inp
             inp = yield None
 
         else:
             # buffer and echo input
             command += inp
-            writer.echo(inp)
+            _writer.echo(inp)
             last_inp = inp
             inp = yield None
 
 
-async def readline2(reader, writer):
+async def readline2(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> Optional[str]:
     """
     Async readline interface that filters ANSI escape sequences.
 
@@ -212,9 +235,11 @@ async def readline2(reader, writer):
     However, this function does not handle all possible types of carriage
     returns and so it is not used by default shell, :func:`telnet_server_shell`.
     """
+    _reader = cast(TelnetReaderUnicode, reader)
+    _writer = cast(TelnetWriterUnicode, writer)
     command = ""
     while True:
-        next_char = await filter_ansi(reader, writer)
+        next_char = await filter_ansi(_reader, _writer)
 
         if next_char == CR:
             return command
@@ -226,17 +251,17 @@ async def readline2(reader, writer):
             # backspace over input
             if len(command) > 0:
                 command = command[:-1]
-                writer.echo("\b \b")
+                _writer.echo("\b \b")
 
         elif not next_char:
             return None
 
         else:
             command += next_char
-            writer.echo(next_char)
+            _writer.echo(next_char)
 
 
-def get_slcdata(writer):
+def get_slcdata(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> str:
     """Display Special Line Editing (SLC) characters."""
     _slcs = sorted(
         [
@@ -270,7 +295,10 @@ def get_slcdata(writer):
     )
 
 
-def do_toggle(writer, option):
+def do_toggle(
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    option: Optional[str],
+) -> str:
     """Display or toggle telnet session parameters."""
     tbl_opt = {
         "echo": writer.local_option.enabled(telopt.ECHO),

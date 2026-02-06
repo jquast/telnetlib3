@@ -49,7 +49,7 @@ def test_client_read_write(bind_host, unused_tcp_port):
     server = BlockingTelnetServer(bind_host, unused_tcp_port, handler=handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    time.sleep(0.1)
+    server._started.wait(timeout=5)
 
     with TelnetConnection(bind_host, unused_tcp_port, timeout=5) as conn:
         conn.write("hello")
@@ -69,7 +69,7 @@ def test_client_readline(bind_host, unused_tcp_port):
     server = BlockingTelnetServer(bind_host, unused_tcp_port, handler=handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    time.sleep(0.1)
+    server._started.wait(timeout=5)
 
     with TelnetConnection(bind_host, unused_tcp_port, timeout=5) as conn:
         line = conn.readline(timeout=5)
@@ -88,7 +88,7 @@ def test_client_read_until(bind_host, unused_tcp_port):
     server = BlockingTelnetServer(bind_host, unused_tcp_port, handler=handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    time.sleep(0.1)
+    server._started.wait(timeout=5)
 
     with TelnetConnection(bind_host, unused_tcp_port, timeout=5) as conn:
         data = conn.read_until(">>> ", timeout=5)
@@ -107,7 +107,7 @@ def test_client_read_some_alias(bind_host, unused_tcp_port):
     server = BlockingTelnetServer(bind_host, unused_tcp_port, handler=handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    time.sleep(0.1)
+    server._started.wait(timeout=5)
 
     with TelnetConnection(bind_host, unused_tcp_port, timeout=5) as conn:
         assert "test" in conn.read_some(timeout=5)
@@ -150,7 +150,7 @@ def test_server_accept(bind_host, unused_tcp_port):
     server.start()
 
     def client_thread():
-        time.sleep(0.1)
+        time.sleep(0.05)
         with TelnetConnection(bind_host, unused_tcp_port, timeout=5):
             time.sleep(0.5)
 
@@ -175,7 +175,7 @@ def test_server_serve_forever(bind_host, unused_tcp_port):
     server = BlockingTelnetServer(bind_host, unused_tcp_port, handler=handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    time.sleep(0.2)
+    server._started.wait(timeout=5)
 
     with TelnetConnection(bind_host, unused_tcp_port, timeout=5) as conn:
         conn.write("test")
@@ -215,7 +215,7 @@ def test_server_connection_read_write(bind_host, unused_tcp_port):
     server.start()
 
     def client_thread():
-        time.sleep(0.1)
+        time.sleep(0.05)
         with TelnetConnection(bind_host, unused_tcp_port, timeout=5) as conn:
             conn.write("hello")
             conn.flush()
@@ -264,7 +264,7 @@ def test_server_connection_miniboa_properties(bind_host, unused_tcp_port):
     server.start()
 
     def client_thread():
-        time.sleep(0.1)
+        time.sleep(0.05)
         with TelnetConnection(bind_host, unused_tcp_port, timeout=5):
             time.sleep(0.5)
 
@@ -293,7 +293,7 @@ def test_server_connection_miniboa_methods(bind_host, unused_tcp_port):
     server.start()
 
     def client_thread():
-        time.sleep(0.1)
+        time.sleep(0.05)
         with TelnetConnection(bind_host, unused_tcp_port, timeout=5) as conn:
             conn.write("test\r\n")
             conn.flush()
@@ -327,7 +327,7 @@ def test_server_connection_send_converts_newlines(bind_host, unused_tcp_port):
     received = []
 
     def client_thread():
-        time.sleep(0.1)
+        time.sleep(0.05)
         with TelnetConnection(bind_host, unused_tcp_port, timeout=5) as conn:
             received.append(conn.read(20, timeout=5))
 
@@ -367,7 +367,7 @@ def test_server_connection_writer_property(bind_host, unused_tcp_port):
     server.start()
 
     def client_thread():
-        time.sleep(0.1)
+        time.sleep(0.05)
         with TelnetConnection(bind_host, unused_tcp_port, timeout=5):
             time.sleep(0.5)
 
@@ -437,7 +437,7 @@ def test_client_read_timeout(bind_host, unused_tcp_port):
     server = BlockingTelnetServer(bind_host, unused_tcp_port, handler=handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    time.sleep(0.1)
+    server._started.wait(timeout=5)
 
     with TelnetConnection(bind_host, unused_tcp_port, timeout=5) as conn:
         with pytest.raises(TimeoutError, match="Read timed out"):
@@ -457,11 +457,11 @@ def test_client_readline_timeout(bind_host, unused_tcp_port):
     server = BlockingTelnetServer(bind_host, unused_tcp_port, handler=handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    time.sleep(0.1)
+    server._started.wait(timeout=5)
 
     with TelnetConnection(bind_host, unused_tcp_port, timeout=5) as conn:
         with pytest.raises(TimeoutError, match="Readline timed out"):
-            conn.readline(timeout=0.2)
+            conn.readline(timeout=0.1)
 
     server.shutdown()
 
@@ -479,7 +479,7 @@ def test_server_connection_timeout(bind_host, unused_tcp_port, method, args, err
     server.start()
 
     def client_thread():
-        time.sleep(0.1)
+        time.sleep(0.05)
         with TelnetConnection(bind_host, unused_tcp_port, timeout=5):
             time.sleep(2)
 
@@ -499,7 +499,7 @@ def test_server_connection_read_until_timeout(bind_host, unused_tcp_port):
     server.start()
 
     def client_thread():
-        time.sleep(0.1)
+        time.sleep(0.05)
         with TelnetConnection(bind_host, unused_tcp_port, timeout=5) as conn:
             conn.write("no match here")
             conn.flush()
@@ -510,7 +510,7 @@ def test_server_connection_read_until_timeout(bind_host, unused_tcp_port):
 
     conn = server.accept(timeout=5)
     with pytest.raises(TimeoutError, match="Read until timed out"):
-        conn.read_until(">>> ", timeout=0.2)
+        conn.read_until(">>> ", timeout=0.1)
     conn.close()
     server.shutdown()
 
@@ -521,7 +521,7 @@ def test_server_connection_wait_for_timeout(bind_host, unused_tcp_port):
     server.start()
 
     def client_thread():
-        time.sleep(0.1)
+        time.sleep(0.05)
         with TelnetConnection(bind_host, unused_tcp_port, timeout=5):
             time.sleep(1.0)
 
@@ -550,7 +550,7 @@ def test_server_connection_methods_closed_error(bind_host, unused_tcp_port, meth
     server.start()
 
     def client_thread():
-        time.sleep(0.1)
+        time.sleep(0.05)
         with TelnetConnection(bind_host, unused_tcp_port, timeout=5):
             time.sleep(0.2)
 
@@ -584,7 +584,7 @@ def test_client_read_until_eof(bind_host, unused_tcp_port):
     server = BlockingTelnetServer(bind_host, unused_tcp_port, handler=handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    time.sleep(0.1)
+    server._started.wait(timeout=5)
 
     with TelnetConnection(bind_host, unused_tcp_port, timeout=5) as conn:
         with pytest.raises(EOFError, match="Connection closed before match found"):

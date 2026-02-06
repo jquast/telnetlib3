@@ -8,8 +8,10 @@ import pytest
 
 # local
 import telnetlib3
-from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+from telnetlib3.tests.accessories import (  # pylint: disable=unused-import; pylint: disable=unused-import,
     bind_host,
+    create_server,
+    open_connection,
     unused_tcp_port,
 )
 
@@ -78,9 +80,6 @@ def test_reader_unicode_eof_safety():
 
 async def test_telnet_reader_using_readline_unicode(bind_host, unused_tcp_port):
     """Ensure strict RFC interpretation of newlines in readline method."""
-    # local
-    from telnetlib3.tests.accessories import create_server, open_connection
-
     given_expected = {
         "alpha\r\x00": "alpha\r",
         "bravo\r\n": "bravo\r\n",
@@ -93,9 +92,10 @@ async def test_telnet_reader_using_readline_unicode(bind_host, unused_tcp_port):
         "xxxxxxxxxxx": "xxxxxxxxxxx",
     }
 
-    def shell(reader, writer):
+    async def shell(reader, writer):
         for item in sorted(given_expected):
             writer.write(item)
+        await writer.drain()
         writer.close()
 
     async with create_server(
@@ -115,9 +115,6 @@ async def test_telnet_reader_using_readline_unicode(bind_host, unused_tcp_port):
 
 async def test_telnet_reader_using_readline_bytes(bind_host, unused_tcp_port):
     """Ensure strict RFC interpretation of newlines in readline method."""
-    # local
-    from telnetlib3.tests.accessories import create_server, open_connection
-
     given_expected = {
         b"alpha\r\x00": b"alpha\r",
         b"bravo\r\n": b"bravo\r\n",
@@ -155,9 +152,6 @@ async def test_telnet_reader_using_readline_bytes(bind_host, unused_tcp_port):
 
 async def test_telnet_reader_read_exactly_unicode(bind_host, unused_tcp_port):
     """Ensure TelnetReader.readexactly, especially IncompleteReadError."""
-    # local
-    from telnetlib3.tests.accessories import create_server, open_connection
-
     given = "☭---------"
     given_partial = "💉-"
 
@@ -186,9 +180,6 @@ async def test_telnet_reader_read_exactly_unicode(bind_host, unused_tcp_port):
 
 async def test_telnet_reader_read_exactly_bytes(bind_host, unused_tcp_port):
     """Ensure TelnetReader.readexactly, especially IncompleteReadError."""
-    # local
-    from telnetlib3.tests.accessories import create_server, open_connection
-
     given = string.ascii_letters.encode("ascii")
     given_partial = b"zzz"
 
@@ -235,9 +226,6 @@ async def test_telnet_reader_read_0(bind_host, unused_tcp_port):
 
 async def test_telnet_reader_read_beyond_limit_unicode(bind_host, unused_tcp_port):
     """Ensure ability to read(-1) beyond segment sizes of reader._limit."""
-    # local
-    from telnetlib3.tests.accessories import create_server, open_connection
-
     limit = 10
 
     def shell(reader, writer):
@@ -263,9 +251,6 @@ async def test_telnet_reader_read_beyond_limit_unicode(bind_host, unused_tcp_por
 
 async def test_telnet_reader_read_beyond_limit_bytes(bind_host, unused_tcp_port):
     """Ensure ability to read(-1) beyond segment sizes of reader._limit."""
-    # local
-    from telnetlib3.tests.accessories import create_server, open_connection
-
     limit = 10
 
     def shell(reader, writer):
@@ -296,9 +281,6 @@ async def test_telnet_reader_read_beyond_limit_bytes(bind_host, unused_tcp_port)
 
 async def test_telnet_reader_readuntil_pattern_success(bind_host, unused_tcp_port):
     """Test successful pattern matching with readuntil_pattern."""
-    # local
-    from telnetlib3.tests.accessories import create_server, open_connection
-
     given_shell_banner = b"""
 Router> enable
 Router# configure terminal
@@ -349,9 +331,6 @@ async def test_telnet_reader_readuntil_pattern_limit_overrun_chunk_too_large(
     bind_host, unused_tcp_port
 ):
     """Test LimitOverrunError when pattern is found but chunk exceeds limit."""
-    # local
-    from telnetlib3.tests.accessories import create_server, open_connection
-
     given_shell_banner = b"""
 Router> enable
 Router# configure terminal which is a very long command line that exceeds our limit
@@ -408,9 +387,6 @@ async def test_telnet_reader_readuntil_pattern_limit_overrun_buffer_full(
     bind_host, unused_tcp_port
 ):
     """Test LimitOverrunError when buffer exceeds limit and pattern not found."""
-    # local
-    from telnetlib3.tests.accessories import create_server, open_connection
-
     # Create data that will exceed the limit when searching for non-existent pattern
     long_data = b"x" * 50  # exceeds limit of 30
     given_shell_banner = b"Router> " + long_data
@@ -453,9 +429,6 @@ async def test_telnet_reader_readuntil_pattern_limit_overrun_buffer_full(
 
 async def test_telnet_reader_readuntil_pattern_incomplete_read_eof(bind_host, unused_tcp_port):
     """Test IncompleteReadError when EOF occurs before pattern is found."""
-    # local
-    from telnetlib3.tests.accessories import create_server, open_connection
-
     given_shell_banner = b"Router> some incomplete data\n"
 
     pattern = re.compile(rb"\S+[>#]")
@@ -514,9 +487,6 @@ async def test_telnet_reader_readuntil_pattern_invalid_arguments():
 
 async def test_telnet_reader_readuntil_pattern_cancelled_error(bind_host, unused_tcp_port):
     """Test CancelledError handling in readuntil_pattern."""
-    # local
-    from telnetlib3.tests.accessories import create_server, open_connection
-
     given_shell_banner = b"Router> "
 
     pattern = re.compile(rb"\S+[>#]")

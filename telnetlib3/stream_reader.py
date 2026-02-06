@@ -1,5 +1,7 @@
 """Module provides class TelnetReader and TelnetReaderUnicode."""
 
+from __future__ import annotations
+
 # std imports
 import re
 import sys
@@ -7,6 +9,7 @@ import codecs
 import asyncio
 import logging
 import warnings
+from typing import Callable, Optional
 from asyncio import format_helpers
 
 __all__ = (
@@ -26,7 +29,7 @@ class TelnetReader:
 
     _source_traceback = None
 
-    def __init__(self, limit=_DEFAULT_LIMIT):
+    def __init__(self, limit: int = _DEFAULT_LIMIT) -> None:
         """Initialize TelnetReader with optional buffer size limit."""
         self.log = logging.getLogger(__name__)
         # The line length limit is  a security feature;
@@ -38,9 +41,9 @@ class TelnetReader:
         self._limit = limit
         self._buffer = bytearray()
         self._eof = False  # Whether we're done.
-        self._waiter = None  # A future used by _wait_for_data()
-        self._exception = None
-        self._transport = None
+        self._waiter: Optional[asyncio.Future[None]] = None
+        self._exception: Optional[Exception] = None
+        self._transport: Optional[asyncio.BaseTransport] = None
         self._paused = False
         try:
             loop = asyncio.get_running_loop()
@@ -49,7 +52,7 @@ class TelnetReader:
         except RuntimeError:
             pass
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Description of stream encoding state."""
         info = [type(self).__name__]
         if self._buffer:
@@ -69,11 +72,11 @@ class TelnetReader:
         info.append("encoding=False")
         return f"<{' '.join(info)}>"
 
-    def exception(self):
+    def exception(self) -> Optional[Exception]:
         """Return the exception if set, otherwise None."""
         return self._exception
 
-    def set_exception(self, exc):
+    def set_exception(self, exc: Exception) -> None:
         """Set the exception and wake up any waiting coroutine."""
         self._exception = exc
 
@@ -83,7 +86,7 @@ class TelnetReader:
             if not waiter.cancelled():
                 waiter.set_exception(exc)
 
-    def _wakeup_waiter(self):
+    def _wakeup_waiter(self) -> None:
         """Wakeup read*() functions waiting for data or EOF."""
         waiter = self._waiter
         if waiter is not None:
@@ -91,17 +94,18 @@ class TelnetReader:
             if not waiter.cancelled():
                 waiter.set_result(None)
 
-    def set_transport(self, transport):
+    def set_transport(self, transport: asyncio.BaseTransport) -> None:
         """Set the transport for flow control."""
         assert self._transport is None, "Transport already set"
         self._transport = transport
 
-    def _maybe_resume_transport(self):
+    def _maybe_resume_transport(self) -> None:
         if self._paused and len(self._buffer) <= self._limit:
             self._paused = False
-            self._transport.resume_reading()
+            assert self._transport is not None
+            self._transport.resume_reading()  # type: ignore[attr-defined]
 
-    def feed_eof(self):
+    def feed_eof(self) -> None:
         """
         Mark EOF on the reader and wake any pending readers.
 
@@ -119,11 +123,11 @@ class TelnetReader:
         self._eof = True
         self._wakeup_waiter()
 
-    def at_eof(self):
+    def at_eof(self) -> bool:
         """Return True if the buffer is empty and 'feed_eof' was called."""
         return self._eof and not self._buffer
 
-    def feed_data(self, data):
+    def feed_data(self, data: bytes) -> None:
         """Feed data bytes to the reader buffer."""
         assert not self._eof, "feed_data after feed_eof"
 
@@ -135,7 +139,7 @@ class TelnetReader:
 
         if self._transport is not None and not self._paused and len(self._buffer) > 2 * self._limit:
             try:
-                self._transport.pause_reading()
+                self._transport.pause_reading()  # type: ignore[attr-defined]
             except NotImplementedError:
                 # The transport can't be paused.
                 # We'll just have to buffer all data.
@@ -144,7 +148,7 @@ class TelnetReader:
             else:
                 self._paused = True
 
-    async def _wait_for_data(self, func_name):
+    async def _wait_for_data(self, func_name: str) -> None:
         """
         Wait until feed_data() or feed_eof() is called.
 
@@ -166,7 +170,8 @@ class TelnetReader:
         # This is essential for readexactly(n) for case when n > self._limit.
         if self._paused:
             self._paused = False
-            self._transport.resume_reading()
+            assert self._transport is not None
+            self._transport.resume_reading()  # type: ignore[attr-defined]
 
         self._waiter = asyncio.get_running_loop().create_future()
         try:
@@ -174,7 +179,7 @@ class TelnetReader:
         finally:
             self._waiter = None
 
-    async def readuntil(self, separator=b"\n"):
+    async def readuntil(self, separator: bytes = b"\n") -> bytes:
         """
         Read data from the stream until ``separator`` is found.
 
@@ -262,12 +267,12 @@ class TelnetReader:
                 "Separator is found, but chunk is longer than limit", isep
             )
 
-        chunk = self._buffer[: isep + seplen]
+        result = bytes(self._buffer[: isep + seplen])
         del self._buffer[: isep + seplen]
         self._maybe_resume_transport()
-        return bytes(chunk)
+        return result
 
-    async def readuntil_pattern(self, pattern: re.Pattern) -> bytes:
+    async def readuntil_pattern(self, pattern: re.Pattern[bytes]) -> bytes:
         """
         Read data from the stream until ``pattern`` is found.
 
@@ -329,15 +334,15 @@ class TelnetReader:
             # raise an exception with the partial data. This is checked after
             # searching the buffer, as the last received chunk might complete the pattern.
             if self._eof:
-                chunk = bytes(self._buffer)
+                partial = bytes(self._buffer)
                 self._buffer.clear()
-                raise asyncio.IncompleteReadError(chunk, None)
+                raise asyncio.IncompleteReadError(partial, None)
 
             # Wait for more data to arrive since the pattern was not found and
             # we are not at EOF.
             await self._wait_for_data("readuntil_pattern")
 
-    async def read(self, n=-1):
+    async def read(self, n: int = -1) -> bytes:
         """
         Read up to `n` bytes from the stream.
 
@@ -387,7 +392,7 @@ class TelnetReader:
         self._maybe_resume_transport()
         return data
 
-    async def readexactly(self, n):
+    async def readexactly(self, n: int) -> bytes:
         """
         Read exactly `n` bytes.
 
@@ -432,10 +437,10 @@ class TelnetReader:
         self._maybe_resume_transport()
         return data
 
-    def __aiter__(self):
+    def __aiter__(self) -> "TelnetReader":
         return self
 
-    async def __anext__(self):
+    async def __anext__(self) -> bytes:
         val = await self.readline()
         if val == b"":
             raise StopAsyncIteration
@@ -445,7 +450,7 @@ class TelnetReader:
     # instead of the commit 260dd63a that introduced a close() method on a
     # reader.
     @property
-    def connection_closed(self):
+    def connection_closed(self) -> bool:
         """Deprecated: use at_eof() instead."""
         warnings.warn(
             "connection_closed property removed, use at_eof() instead",
@@ -454,7 +459,7 @@ class TelnetReader:
         )
         return self._eof
 
-    def close(self):
+    def close(self) -> None:
         """
         Deprecated: use feed_eof() instead.
 
@@ -471,7 +476,7 @@ class TelnetReader:
         )
         self.feed_eof()
 
-    async def readline(self):
+    async def readline(self) -> bytes:
         r"""
         Read one line.
 
@@ -567,7 +572,13 @@ class TelnetReaderUnicode(TelnetReader):
     #: practice, however.
     _decoder = None
 
-    def __init__(self, fn_encoding, *, limit=_DEFAULT_LIMIT, encoding_errors="replace"):
+    def __init__(
+        self,
+        fn_encoding: Callable[..., str],
+        *,
+        limit: int = _DEFAULT_LIMIT,
+        encoding_errors: str = "replace",
+    ) -> None:
         """
         A Unicode StreamReader interface for Telnet protocol.
 
@@ -581,7 +592,7 @@ class TelnetReaderUnicode(TelnetReader):
         self.fn_encoding = fn_encoding
         self.encoding_errors = encoding_errors
 
-    def decode(self, buf, final=False):
+    def decode(self, buf: bytes, final: bool = False) -> str:
         """Decode bytes ``buf`` using preferred encoding."""
         if buf == b"":
             return ""  # EOF
@@ -589,14 +600,13 @@ class TelnetReaderUnicode(TelnetReader):
         encoding = self.fn_encoding(incoming=True)
 
         # late-binding,
-        # pylint: disable=protected-access
-        if self._decoder is None or encoding != self._decoder._encoding:
+        if self._decoder is None or encoding != getattr(self._decoder, "_encoding", ""):
             self._decoder = codecs.getincrementaldecoder(encoding)(errors=self.encoding_errors)
-            self._decoder._encoding = encoding
+            setattr(self._decoder, "_encoding", encoding)
 
         return self._decoder.decode(buf, final)
 
-    async def readline(self):
+    async def readline(self) -> str:  # type: ignore[override]
         """
         Read one line.
 
@@ -605,15 +615,14 @@ class TelnetReaderUnicode(TelnetReader):
         buf = await super().readline()
         return self.decode(buf)
 
-    async def read(self, n=-1):
+    async def read(self, n: int = -1) -> str:  # type: ignore[override]
         """
         Read up to *n* bytes.
 
         If the EOF was received and the internal buffer is empty, return an empty string.
 
-        :param int n: If *n* is not provided, or set to -1, read until EOF and return all characters
-            as one large string.
-        :rtype: str
+        :param n: If *n* is not provided, or set to -1, read until EOF and return all characters as
+            one large string.
         """
         if self._exception is not None:
             raise self._exception
@@ -650,31 +659,32 @@ class TelnetReaderUnicode(TelnetReader):
         self._maybe_resume_transport()
         return u_data
 
-    async def readexactly(self, n):
+    async def readexactly(self, n: int) -> str:  # type: ignore[override]
         """
         Read exactly *n* unicode characters.
 
         :raises asyncio.IncompleteReadError: if the end of the stream is
-            reached before *n* can be read. the
+            reached before *n* can be read. The
             :attr:`asyncio.IncompleteReadError.partial` attribute of the
             exception contains the partial read characters.
-        :rtype: str
         """
         if self._exception is not None:
             raise self._exception
 
-        blocks = []
+        blocks: list[str] = []
         while n > 0:
             block = await self.read(n)
             if not block:
                 partial = "".join(blocks)
-                raise asyncio.IncompleteReadError(partial, len(partial) + n)
+                raise asyncio.IncompleteReadError(
+                    partial, len(partial) + n  # type: ignore[arg-type]
+                )
             blocks.append(block)
             n -= len(block)
 
         return "".join(blocks)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Description of stream encoding state."""
         encoding = None
         if callable(self.fn_encoding):

@@ -1,13 +1,18 @@
 """Module provides class BaseServer."""
 
+from __future__ import annotations
+
 # std imports
 import sys
+import types
 import asyncio
 import logging
 import datetime
 import traceback
+from typing import Any, Type, Union, Callable, Optional
 
 # local
+from ._types import ShellCallback
 from .telopt import theNULL
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
@@ -24,8 +29,8 @@ logger = logging.getLogger("telnetlib3.server_base")
 class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     """Base Telnet Server Protocol."""
 
-    _when_connected = None
-    _last_received = None
+    _when_connected: Optional[datetime.datetime] = None
+    _last_received: Optional[datetime.datetime] = None
     _transport = None
     _advanced = False
     _closing = False
@@ -35,24 +40,26 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     def __init__(  # pylint: disable=too-many-positional-arguments
         self,
-        shell=None,
-        _waiter_connected=None,
-        encoding="utf8",
-        encoding_errors="strict",
-        force_binary=False,
-        connect_maxwait=4.0,
-        limit=None,
-        reader_factory=TelnetReader,
-        reader_factory_encoding=TelnetReaderUnicode,
-        writer_factory=TelnetWriter,
-        writer_factory_encoding=TelnetWriterUnicode,
-    ):
+        shell: Optional[ShellCallback] = None,
+        _waiter_connected: Optional[asyncio.Future[None]] = None,
+        encoding: Union[str, bool] = "utf8",
+        encoding_errors: str = "strict",
+        force_binary: bool = False,
+        never_send_ga: bool = False,
+        connect_maxwait: float = 4.0,
+        limit: Optional[int] = None,
+        reader_factory: type = TelnetReader,
+        reader_factory_encoding: type = TelnetReaderUnicode,
+        writer_factory: type = TelnetWriter,
+        writer_factory_encoding: type = TelnetWriterUnicode,
+    ) -> None:
         """Class initializer."""
         super().__init__()
         self.default_encoding = encoding
         self._encoding_errors = encoding_errors
         self.force_binary = force_binary
-        self._extra = {}
+        self.never_send_ga = never_send_ga
+        self._extra: dict[str, Any] = {}
 
         self._reader_factory = reader_factory
         self._reader_factory_encoding = reader_factory_encoding
@@ -61,22 +68,24 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         #: a future used for testing
         self._waiter_connected = _waiter_connected or asyncio.Future()
-        self._tasks = [self._waiter_connected]
+        self._tasks: list[Any] = [self._waiter_connected]
         self.shell = shell
-        self.reader = None
-        self.writer = None
+        self.reader: Optional[Union[TelnetReader, TelnetReaderUnicode]] = None
+        self.writer: Optional[Union[TelnetWriter, TelnetWriterUnicode]] = None
         #: maximum duration for :meth:`check_negotiation`.
         self.connect_maxwait = connect_maxwait
         self._limit = limit
 
-    def timeout_connection(self):
+    def timeout_connection(self) -> None:
         """Close the connection due to timeout."""
+        assert self.reader is not None
+        assert self.writer is not None
         self.reader.feed_eof()
         self.writer.close()
 
     # Base protocol methods
 
-    def eof_received(self):
+    def eof_received(self) -> None:
         """
         Called when the other end calls write_eof() or equivalent.
 
@@ -85,15 +94,16 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         logger.debug("EOF from client, closing.")
         self.connection_lost(None)
 
-    def connection_lost(self, exc):
+    def connection_lost(self, exc: Optional[Exception]) -> None:
         """
         Called when the connection is lost or closed.
 
-        :param Exception exc: exception.  ``None`` indicates close by EOF.
+        :param exc: Exception instance, or ``None`` to indicate close by EOF.
         """
         if self._closing:
             return
         self._closing = True
+        assert self.reader is not None
 
         # inform yielding readers about closed connection
         if exc is None:
@@ -132,7 +142,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         # for inspection by tests after close.
         self._transport = None
 
-    def connection_made(self, transport):
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
         """
         Called when a connection is made.
 
@@ -147,8 +157,8 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         reader_factory = self._reader_factory
         writer_factory = self._writer_factory
-        reader_kwds = {}
-        writer_kwds = {}
+        reader_kwds: dict[str, Any] = {}
+        writer_kwds: dict[str, Any] = {}
 
         if self.default_encoding:
             reader_kwds["fn_encoding"] = self.encoding
@@ -176,18 +186,19 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._waiter_connected.add_done_callback(self.begin_shell)
         asyncio.get_event_loop().call_soon(self.begin_negotiation)
 
-    def begin_shell(self, future):
+    def begin_shell(self, future: asyncio.Future[None]) -> None:
         """Start the shell coroutine after negotiation completes."""
         # Don't start shell if the connection was cancelled or errored
         if future.cancelled() or future.exception() is not None:
             return
         if self.shell is not None:
+            assert self.reader is not None and self.writer is not None
             coro = self.shell(self.reader, self.writer)
             if asyncio.iscoroutine(coro):
                 loop = asyncio.get_event_loop()
                 loop.create_task(coro)
 
-    def data_received(self, data):
+    def data_received(self, data: bytes) -> None:
         """
         Process bytes received by transport.
 
@@ -206,6 +217,8 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         #
         self._last_received = datetime.datetime.now()
         self._rx_bytes += len(data)
+        assert self.writer is not None
+        assert self.reader is not None
         writer = self.writer
         reader = self.reader
 
@@ -220,7 +233,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         n = len(data)
         i = 0
         out_start = 0
-        feeding_oob = False
+        feeding_oob = bool(writer.is_oob)
 
         while i < n:
             if not feeding_oob:
@@ -267,38 +280,40 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     # public properties
 
     @property
-    def duration(self):
+    def duration(self) -> float:
         """Time elapsed since client connected, in seconds as float."""
+        assert self._when_connected is not None
         return (datetime.datetime.now() - self._when_connected).total_seconds()
 
     @property
-    def idle(self):
+    def idle(self) -> float:
         """Time elapsed since data last received, in seconds as float."""
+        assert self._last_received is not None
         return (datetime.datetime.now() - self._last_received).total_seconds()
 
     @property
-    def rx_bytes(self):
+    def rx_bytes(self) -> int:
         """Total bytes received from client."""
         return self._rx_bytes
 
     @property
-    def tx_bytes(self):
+    def tx_bytes(self) -> int:
         """Total bytes sent to client."""
         return self._tx_bytes
 
     # public protocol methods
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         hostport = self.get_extra_info("peername", ["-", "closing"])[:2]
         return f"<Peer {hostport[0]} {hostport[1]}>"
 
-    def get_extra_info(self, name, default=None):
+    def get_extra_info(self, name: str, default: Any = None) -> Any:
         """Get optional server protocol or transport information."""
         if self._transport:
             default = self._transport.get_extra_info(name, default)
         return self._extra.get(name, default)
 
-    def begin_negotiation(self):
+    def begin_negotiation(self) -> None:
         """
         Begin on-connect negotiation.
 
@@ -309,7 +324,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._check_later = asyncio.get_event_loop().call_soon(self._check_negotiation_timer)
         self._tasks.append(self._check_later)
 
-    def begin_advanced_negotiation(self):
+    def begin_advanced_negotiation(self) -> None:
         """
         Begin advanced negotiation.
 
@@ -322,7 +337,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         at least one negotiation option to be affirmatively acknowledged.
         """
 
-    def encoding(self, outgoing=False, incoming=False):
+    def encoding(self, outgoing: bool = False, incoming: bool = False) -> Union[str, bool]:
         """
         Encoding that should be used for the direction indicated.
 
@@ -332,12 +347,11 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         # pylint: disable=unused-argument
         return self.default_encoding or "US-ASCII"
 
-    def negotiation_should_advance(self):
+    def negotiation_should_advance(self) -> bool:
         """
         Whether advanced negotiation should commence.
 
-        :rtype: bool
-        :returns: True if advanced negotiation should be permitted.
+        :returns: ``True`` if advanced negotiation should be permitted.
 
         The base implementation returns True if any negotiation options
         were affirmatively acknowledged by client, more than likely
@@ -345,18 +359,18 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         """
         # Generally, this separates a bare TCP connect() from a True
         # RFC-compliant telnet client with responding IAC interpreter.
+        assert self.writer is not None
         server_do = sum(enabled for _, enabled in self.writer.remote_option.items())
         client_will = sum(enabled for _, enabled in self.writer.local_option.items())
         return bool(server_do or client_will)
 
-    def check_negotiation(self, final=False):  # pylint: disable=unused-argument
+    def check_negotiation(self, final: bool = False) -> bool:  # pylint: disable=unused-argument
         """
         Callback, return whether negotiation is complete.
 
-        :param bool final: Whether this is the final time this callback
+        :param final: Whether this is the final time this callback
             will be requested to answer regarding protocol negotiation.
         :returns: Whether negotiation is over (server end is satisfied).
-        :rtype: bool
 
         Method is called on each new command byte processed until negotiation is
         considered final, or after ``connect_maxwait`` has elapsed, setting
@@ -372,13 +386,16 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         # negotiation is complete (returns True) when all negotiation options
         # that have been requested have been acknowledged.
+        assert self.writer is not None
         return not any(self.writer.pending_option.values())
 
     # private methods
 
-    def _check_negotiation_timer(self):
-        self._check_later.cancel()
-        self._tasks.remove(self._check_later)
+    def _check_negotiation_timer(self) -> None:
+        if self._check_later is not None:
+            self._check_later.cancel()
+            if self._check_later in self._tasks:
+                self._tasks.remove(self._check_later)
 
         later = self.connect_maxwait - self.duration
         final = bool(later < 0)
@@ -397,7 +414,12 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             self._tasks.append(self._check_later)
 
     @staticmethod
-    def _log_exception(log, e_type, e_value, e_tb):
+    def _log_exception(
+        log: Callable[..., Any],
+        e_type: Optional[Type[BaseException]],
+        e_value: Optional[BaseException],
+        e_tb: Optional[types.TracebackType],
+    ) -> None:
         rows_tbk = [line for line in "\n".join(traceback.format_tb(e_tb)).split("\n") if line]
         rows_exc = [line.rstrip() for line in traceback.format_exception_only(e_type, e_value)]
 

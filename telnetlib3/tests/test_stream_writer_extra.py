@@ -6,7 +6,7 @@ import collections
 import pytest
 
 # local
-from telnetlib3 import slc
+from telnetlib3 import slc, client_base
 from telnetlib3.telopt import (
     DO,
     IS,
@@ -35,7 +35,9 @@ from telnetlib3.telopt import (
     LFLOW_RESTART_ANY,
     LFLOW_RESTART_XON,
 )
-from telnetlib3.stream_writer import TelnetWriter
+from telnetlib3.client_base import BaseClient
+from telnetlib3.server_base import BaseServer
+from telnetlib3.stream_writer import TelnetWriter, _encode_env_buf
 
 
 class MockTransport:
@@ -52,6 +54,12 @@ class MockTransport:
 
     def get_extra_info(self, name, default=None):
         return self.extra.get(name, default)
+
+    def pause_reading(self):
+        pass
+
+    def resume_reading(self):
+        pass
 
     def close(self):
         self._closing = True
@@ -284,9 +292,6 @@ def test_handle_sb_ttype_is_and_send():
 
 def _encode_env(env):
     """Helper to encode env dict like _encode_env_buf would, for tests."""
-    # local
-    from telnetlib3.stream_writer import _encode_env_buf
-
     return _encode_env_buf(env)
 
 
@@ -461,13 +466,19 @@ def test_handle_sb_status_send_and_is():
     ws2._handle_sb_status(buf2)
 
 
-def test_handle_sb_forwardmask_assertions_and_do_raises_notimplemented():
-    # client end receiving DO FORWARDMASK must have WILL LINEMODE True
+def test_handle_sb_forwardmask_do_raises_notimplemented():
     wc, _, _ = new_writer(server=False, client=True)
     wc.local_option[LINEMODE] = True
-    # DO with some bytes must call _handle_do_forwardmask -> NotImplementedError
-    with pytest.raises(AssertionError):
+    with pytest.raises(NotImplementedError):
         wc._handle_sb_forwardmask(DO, collections.deque([b"x", b"y"]))
+
+
+def test_handle_sb_linemode_mode_empty_buffer():
+    ws, _, _ = new_writer(server=True)
+    ws.local_option[LINEMODE] = True
+    ws.remote_option[LINEMODE] = True
+    with pytest.raises(ValueError, match="missing mode byte"):
+        ws._handle_sb_linemode_mode(collections.deque())
 
 
 def test_handle_sb_linemode_switches():
@@ -508,3 +519,56 @@ def test_handle_subnegotiation_dispatch_and_unhandled():
     ws._handle_sb_naws(buf)
 
     # unhandled command
+    with pytest.raises(ValueError, match="SB unhandled"):
+        ws.handle_subnegotiation(collections.deque([b"\x99", b"\x00"]))
+
+
+async def test_server_data_received_split_sb_linemode():
+    class NoNegServer(BaseServer):
+        def begin_negotiation(self):
+            pass
+
+        def _check_negotiation_timer(self):
+            pass
+
+    transport = MockTransport()
+    server = NoNegServer(encoding=False)
+    server.connection_made(transport)
+
+    server.writer.remote_option[LINEMODE] = True
+    server.writer.local_option[LINEMODE] = True
+
+    transport.writes.clear()
+
+    chunk1 = IAC + SB + LINEMODE + slc.LMODE_MODE
+    server.data_received(chunk1)
+    assert server.writer.is_oob
+
+    mask_byte = b"\x10"
+    chunk2 = mask_byte + IAC + SE
+    server.data_received(chunk2)
+
+    response = b"".join(transport.writes)
+    assert IAC + SB + LINEMODE + slc.LMODE_MODE in response
+
+
+async def test_client_process_chunk_split_sb_linemode():
+    transport = MockTransport()
+    client = BaseClient(encoding=False)
+    client.connection_made(transport)
+
+    client.writer.remote_option[LINEMODE] = True
+    client.writer.local_option[LINEMODE] = True
+
+    transport.writes.clear()
+
+    chunk1 = IAC + SB + LINEMODE + slc.LMODE_MODE
+    client._process_chunk(chunk1)
+    assert client.writer.is_oob
+
+    mask_byte = b"\x10"
+    chunk2 = mask_byte + IAC + SE
+    client._process_chunk(chunk2)
+
+    response = b"".join(transport.writes)
+    assert IAC + SB + LINEMODE + slc.LMODE_MODE in response

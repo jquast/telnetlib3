@@ -14,9 +14,11 @@ from telnetlib3.telopt import (
     SB,
     SE,
     TM,
+    ESC,
     IAC,
     NOP,
     SGA,
+    VAR,
     DONT,
     ECHO,
     GMCP,
@@ -34,6 +36,7 @@ from telnetlib3.telopt import (
     TSPEED,
     CHARSET,
     REQUEST,
+    USERVAR,
     ACCEPTED,
     LINEMODE,
     REJECTED,
@@ -267,14 +270,24 @@ def test_handle_will_invalid_cases_and_else_unhandled():
     w3.set_ext_callback(LOGOUT, lambda cmd: seen.setdefault("v", cmd))
     w3.handle_will(LOGOUT)
     assert seen["v"] == WILL
-    # ELSE branch (unhandled) -> DONT sent, options set -1, pending cleared
+    # ELSE branch (unhandled) -> DONT sent, pending cleared, rejected tracked
     w4, t4, _ = new_writer(server=True)
     w4.pending_option[DO + GMCP] = True
     w4.handle_will(GMCP)
     assert t4.writes[-1] == IAC + DONT + GMCP
-    assert w4.remote_option[GMCP] == -1
-    assert w4.local_option[GMCP] == -1
     assert not w4.pending_option.get(DO + GMCP, False)
+    assert GMCP in w4.rejected_will
+
+
+def test_handle_will_then_do_unsupported_sends_both_dont_and_wont():
+    """WILL then DO for unsupported option must send DONT and WONT."""
+    w, t, _ = new_writer(server=True)
+    w.handle_will(COM_PORT_OPTION)
+    assert t.writes[-1] == IAC + DONT + COM_PORT_OPTION
+    assert COM_PORT_OPTION in w.rejected_will
+    w.handle_do(COM_PORT_OPTION)
+    assert t.writes[-1] == IAC + WONT + COM_PORT_OPTION
+    assert COM_PORT_OPTION in w.rejected_do
 
 
 def test_handle_wont_tm_and_logout_paths():
@@ -497,9 +510,6 @@ def test_option_enabled_and_setitem_debug_path():
 
 def test_escape_unescape_and_env_encode_decode_roundtrip():
     # escaping VAR/USERVAR
-    # local
-    from telnetlib3.telopt import ESC, VAR, USERVAR
-
     buf = b"A" + VAR + b"B" + USERVAR + b"C"
     esc = _escape_environ(buf)
     assert VAR in esc and USERVAR in esc and esc.count(ESC) == 2
@@ -752,11 +762,42 @@ def test_handle_sb_forwardmask_server_will_and_client_do():
     opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
     assert ws.remote_option[opt] is True
 
-    # client DO path currently asserts that bytes must follow DO (pre-check)
+    # client DO path -> _handle_do_forwardmask -> NotImplementedError
     wc, tc, pc = new_writer(server=False, client=True)
     wc.local_option[LINEMODE] = True
-    with pytest.raises(AssertionError):
+    with pytest.raises(NotImplementedError):
         wc._handle_sb_forwardmask(DO, collections.deque([b"x"]))
+
+
+def test_handle_sb_forwardmask_server_without_linemode():
+    ws, ts, ps = new_writer(server=True)
+    ws._handle_sb_forwardmask(WILL, collections.deque())
+    opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
+    assert ws.remote_option[opt] is True
+
+
+def test_handle_sb_forwardmask_server_rejects_do_dont():
+    ws, ts, ps = new_writer(server=True)
+    ws.remote_option[LINEMODE] = True
+    ws._handle_sb_forwardmask(DO, collections.deque())
+    opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
+    assert opt not in ws.remote_option
+
+
+def test_handle_sb_forwardmask_client_without_linemode():
+    wc, tc, pc = new_writer(server=False, client=True)
+    wc._handle_sb_forwardmask(DONT, collections.deque())
+    opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
+    assert wc.local_option[opt] is False
+
+
+def test_handle_sb_linemode_passes_opt_to_forwardmask():
+    ws, ts, ps = new_writer(server=True)
+    ws.remote_option[LINEMODE] = True
+    buf = collections.deque([LINEMODE, WONT, slc.LMODE_FORWARDMASK])
+    ws._handle_sb_linemode(buf)
+    opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
+    assert ws.remote_option[opt] is False
 
 
 def test_slc_add_buffer_full_raises():

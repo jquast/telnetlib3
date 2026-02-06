@@ -75,7 +75,7 @@ async def connection_context(reader, writer):
 @contextlib.asynccontextmanager
 async def create_server(*args, **kwargs):
     """Create a telnetlib3 server with automatic cleanup."""
-    # local - avoid circular import
+    # local import to avoid circular import
     # local
     import telnetlib3
 
@@ -90,9 +90,19 @@ async def create_server(*args, **kwargs):
 @contextlib.asynccontextmanager
 async def open_connection(*args, **kwargs):
     """Open a telnetlib3 connection with automatic cleanup."""
-    # local - avoid circular import
+    # local import to avoid circular import
     # local
     import telnetlib3
+
+    # Force deterministic client: TelnetTerminalClient reads the real terminal
+    # size via TIOCGWINSZ, ignoring cols/rows parameters. Use TelnetClient so
+    # tests get consistent behavior regardless of whether stdin is a TTY.
+    if "client_factory" not in kwargs:
+        # local import to avoid circular import
+        # local
+        from telnetlib3.client import TelnetClient
+
+        kwargs["client_factory"] = TelnetClient
 
     reader, writer = await telnetlib3.open_connection(*args, **kwargs)
     try:

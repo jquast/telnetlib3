@@ -192,6 +192,7 @@ async def _setup_server_client_pair():
         encoding=False,
         connect_minwait=0.05,
         connect_maxwait=0.1,
+        client_factory=telnetlib3.TelnetClient,
     )
 
     await server_ready.wait()

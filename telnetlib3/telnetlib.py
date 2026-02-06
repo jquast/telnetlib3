@@ -36,6 +36,7 @@ from __future__ import annotations
 # Imported modules
 import sys
 import socket
+import _thread
 import selectors
 from time import monotonic as _time
 
@@ -636,9 +637,6 @@ class Telnet:
 
     def mt_interact(self):
         """Multithreaded version of interact()."""
-        # std imports
-        import _thread  # pylint: disable=import-outside-toplevel
-
         _thread.start_new_thread(self.listener, ())
         while 1:
             line = sys.stdin.readline()
@@ -754,5 +752,5 @@ def main():
         tn.interact()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()

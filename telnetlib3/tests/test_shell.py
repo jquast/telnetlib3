@@ -5,19 +5,20 @@ import asyncio
 import logging
 
 # local
-# local imports
+from telnetlib3 import accessories, telnet_server_shell
+from telnetlib3.telopt import DO, IAC, SGA, ECHO, WILL, WONT, TTYPE, BINARY
 from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
     bind_host,
+    create_server,
+    asyncio_server,
+    open_connection,
     unused_tcp_port,
+    asyncio_connection,
 )
 
 
 async def test_telnet_server_shell_as_coroutine(bind_host, unused_tcp_port):
     """Test callback shell(reader, writer) as coroutine of create_server()."""
-    # local
-    from telnetlib3.telopt import DO, IAC, WONT, TTYPE
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
-
     _waiter = asyncio.Future()
     send_input = "Alpha"
     expect_output = "Beta"
@@ -58,9 +59,6 @@ async def test_telnet_server_shell_as_coroutine(bind_host, unused_tcp_port):
 
 async def test_telnet_client_shell_as_coroutine(bind_host, unused_tcp_port):
     """Test callback shell(reader, writer) as coroutine of create_server()."""
-    # local
-    from telnetlib3.tests.accessories import asyncio_server, open_connection
-
     _waiter = asyncio.Future()
 
     async def shell(reader, writer):
@@ -80,10 +78,6 @@ async def test_telnet_client_shell_as_coroutine(bind_host, unused_tcp_port):
 
 async def test_telnet_server_shell_make_coro_by_function(bind_host, unused_tcp_port):
     """Test callback shell(reader, writer) as function, for create_server()."""
-    # local
-    from telnetlib3.telopt import IAC, WONT, TTYPE
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
-
     _waiter = asyncio.Future()
 
     def shell(reader, writer):
@@ -99,10 +93,6 @@ async def test_telnet_server_shell_make_coro_by_function(bind_host, unused_tcp_p
 
 async def test_telnet_server_no_shell(bind_host, unused_tcp_port):
     """Test telnetlib3.TelnetServer() instantiation and connection_made()."""
-    # local
-    from telnetlib3.telopt import DO, IAC, WONT, TTYPE
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
-
     client_expected = IAC + DO + TTYPE + b"beta"
 
     async with create_server(host=bind_host, port=unused_tcp_port) as server:
@@ -124,11 +114,6 @@ async def test_telnet_server_given_shell(
     bind_host, unused_tcp_port
 ):  # pylint: disable=too-many-locals
     """Iterate all state-reading commands of default telnet_server_shell."""
-    # local
-    from telnetlib3 import telnet_server_shell
-    from telnetlib3.telopt import DO, IAC, SGA, ECHO, WILL, WONT, TTYPE, BINARY
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
-
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
@@ -136,6 +121,7 @@ async def test_telnet_server_given_shell(
         connect_maxwait=0.05,
         timeout=1.25,
         limit=13377,
+        never_send_ga=True,
     ) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             expected = IAC + DO + TTYPE
@@ -297,11 +283,6 @@ async def test_telnet_server_given_shell(
 
 async def test_telnet_server_shell_eof(bind_host, unused_tcp_port):
     """Test EOF in telnet_server_shell()."""
-    # local
-    from telnetlib3 import telnet_server_shell
-    from telnetlib3.telopt import IAC, WONT, TTYPE
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
-
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
@@ -318,11 +299,6 @@ async def test_telnet_server_shell_eof(bind_host, unused_tcp_port):
 
 async def test_telnet_server_shell_version_command(bind_host, unused_tcp_port):
     """Test version command in telnet_server_shell."""
-    # local
-    from telnetlib3 import accessories, telnet_server_shell
-    from telnetlib3.telopt import DO, IAC, WONT, TTYPE
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
-
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
@@ -361,11 +337,6 @@ async def test_telnet_server_shell_version_command(bind_host, unused_tcp_port):
 
 async def test_telnet_server_shell_dump_with_kb_limit(bind_host, unused_tcp_port):
     """Test dump command with explicit kb_limit."""
-    # local
-    from telnetlib3 import telnet_server_shell
-    from telnetlib3.telopt import DO, IAC, WONT, TTYPE
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
-
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
@@ -401,11 +372,6 @@ async def test_telnet_server_shell_dump_with_kb_limit(bind_host, unused_tcp_port
 
 async def test_telnet_server_shell_dump_with_all_options(bind_host, unused_tcp_port):
     """Test dump command with all options including close."""
-    # local
-    from telnetlib3 import telnet_server_shell
-    from telnetlib3.telopt import DO, IAC, WONT, TTYPE
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
-
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
@@ -440,11 +406,6 @@ async def test_telnet_server_shell_dump_with_all_options(bind_host, unused_tcp_p
 
 async def test_telnet_server_shell_dump_nodrain(bind_host, unused_tcp_port):
     """Test dump command with nodrain option."""
-    # local
-    from telnetlib3 import telnet_server_shell
-    from telnetlib3.telopt import DO, IAC, WONT, TTYPE
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
-
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
@@ -480,11 +441,6 @@ async def test_telnet_server_shell_dump_nodrain(bind_host, unused_tcp_port):
 
 async def test_telnet_server_shell_dump_large_output(bind_host, unused_tcp_port):
     """Test dump command with larger output."""
-    # local
-    from telnetlib3 import telnet_server_shell
-    from telnetlib3.telopt import DO, IAC, WONT, TTYPE
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
-
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,

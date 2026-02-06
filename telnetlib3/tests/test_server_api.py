@@ -3,7 +3,7 @@
 import asyncio
 
 # local
-from telnetlib3.telopt import IAC, WONT, TTYPE
+from telnetlib3.telopt import IAC, WILL, WONT, TTYPE, BINARY
 from telnetlib3.tests.accessories import bind_host  # pytest fixture
 from telnetlib3.tests.accessories import unused_tcp_port  # pytest fixture
 from telnetlib3.tests.accessories import (
@@ -85,9 +85,6 @@ async def test_server_sockets(bind_host, unused_tcp_port):
 
 async def test_server_with_wait_for(bind_host, unused_tcp_port):
     """Test integration of Server.wait_for_client() with writer.wait_for()."""
-    # local
-    from telnetlib3.telopt import WILL, BINARY
-
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,

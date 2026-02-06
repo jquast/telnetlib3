@@ -4,21 +4,20 @@
 import asyncio
 
 # local
-# local imports
 import telnetlib3
 import telnetlib3.stream_writer
-from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+from telnetlib3.telopt import DO, IS, SB, SE, IAC, WILL, TSPEED
+from telnetlib3.tests.accessories import (  # pylint: disable=unused-import; pylint: disable=unused-import,
     bind_host,
+    create_server,
+    open_connection,
     unused_tcp_port,
+    asyncio_connection,
 )
 
 
 async def test_telnet_server_on_tspeed(bind_host, unused_tcp_port):
     """Test Server's callback method on_tspeed()."""
-    # local
-    from telnetlib3.telopt import IS, SB, SE, IAC, WILL, TSPEED
-    from telnetlib3.tests.accessories import create_server, asyncio_connection
-
     _waiter = asyncio.Future()
 
     class ServerTestTspeed(telnetlib3.TelnetServer):
@@ -39,9 +38,6 @@ async def test_telnet_server_on_tspeed(bind_host, unused_tcp_port):
 
 async def test_telnet_client_send_tspeed(bind_host, unused_tcp_port):
     """Test Client's callback method send_tspeed()."""
-    # local
-    from telnetlib3.tests.accessories import create_server, open_connection
-
     _waiter = asyncio.Future()
     given_rx, given_tx = 1337, 1919
 
