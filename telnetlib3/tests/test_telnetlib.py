@@ -1,6 +1,5 @@
 # jdq(2025): This file was modified from cpython 3.12 test_telnetlib.py, to make it compatible
 # with more versions of python, and, to use pytest instead of unittest.
-# pylint: skip-file
 # std imports
 import io
 import re
@@ -19,6 +18,7 @@ try:
 except OSError:
     pytest.skip("Working socket required", allow_module_level=True)
 
+# pylint:disable=consider-using-from-import
 # local
 import telnetlib3.telnetlib as telnetlib  # noqa: E402
 
@@ -67,7 +67,7 @@ def captured_stdout():
         yield buf
 
 
-class SocketStub(object):
+class SocketStub:
     """A socket proxy that re-defines sendall()"""
 
     def __init__(self, reads=()):
@@ -93,6 +93,7 @@ class TelnetAlike(telnetlib.Telnet):
         """Provide a real OS-level file descriptor so selectors and any code that calls fileno() can
         work, even though the network I/O is mocked."""
         s = getattr(self, "_fileno_sock", None)
+        # pylint: disable=attribute-defined-outside-init
         if s is None:
             try:
                 s1, s2 = socket.socketpair()
@@ -108,6 +109,7 @@ class TelnetAlike(telnetlib.Telnet):
 
     def close(self):
         # Close the internal fileno() provider sockets, but leave the mocked self.sock alone
+        # pylint: disable=attribute-defined-outside-init
         try:
             if getattr(self, "_fileno_sock", None) is not None:
                 try:
@@ -130,7 +132,6 @@ class TelnetAlike(telnetlib.Telnet):
         with captured_stdout() as out:
             telnetlib.Telnet.msg(self, msg, *args)
         self._messages += out.getvalue()
-        return
 
 
 class MockSelector(selectors.BaseSelector):
@@ -157,8 +158,7 @@ class MockSelector(selectors.BaseSelector):
                 break
         if block:
             return []
-        else:
-            return [(key, key.events) for key in self.keys.values()]
+        return [(key, key.events) for key in self.keys.values()]
 
     def get_map(self):
         return self.keys
@@ -169,21 +169,21 @@ def mocktest_socket(reads):
     def new_conn(*ignored):
         return SocketStub(reads)
 
+    old_conn = socket.create_connection
     try:
-        old_conn = socket.create_connection
         socket.create_connection = new_conn
         yield None
     finally:
         socket.create_connection = old_conn
-    return
 
 
 def make_telnet(reads=(), cls=TelnetAlike):
     """Return a telnetlib.Telnet object that uses a SocketStub with reads queued up to be read."""
     for x in reads:
-        assert type(x) is bytes, x
+        assert isinstance(x, bytes)
     with mocktest_socket(reads):
         telnet = cls("dummy", 0)
+        # pylint: disable=attribute-defined-outside-init
         telnet._messages = ""  # debuglevel output
     return telnet
 
@@ -332,7 +332,7 @@ class TestRead(ExpectAndReadBase):
         assert data == want
 
 
-class nego_collector(object):
+class nego_collector:
     def __init__(self, sb_getter=None):
         self.seen = b""
         self.sb_getter = sb_getter
@@ -390,7 +390,7 @@ class TestOption:
             self._test_command([b"x" * 100, tl.IAC, cmd, b"y" * 100])
             self._test_command([b"x" * 10, tl.IAC, cmd, b"y" * 10])
         # all at once
-        self._test_command([tl.IAC + cmd for (cmd) in self.cmds])
+        self._test_command([tl.IAC + cmd for cmd in self.cmds])
 
     def test_SB_commands(self):
         # RFC 855, subnegotiations portion
@@ -440,6 +440,7 @@ class TestOption:
         # Issue 10695
         with mocktest_socket([]):
             telnet = TelnetAlike("dummy", "0")
+            # pylint: disable=attribute-defined-outside-init
             telnet._messages = ""
         telnet.set_debuglevel(1)
         telnet.msg("test")
