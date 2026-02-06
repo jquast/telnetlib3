@@ -27,6 +27,8 @@ Example server usage::
     server.serve_forever()
 """
 
+from __future__ import annotations
+
 # std imports
 import time
 import queue
@@ -239,7 +241,8 @@ class TelnetConnection:
         """
         self._ensure_connected()
         assert self._loop is not None and self._writer is not None
-        self._loop.call_soon_threadsafe(self._writer.write, data)
+        # writer may be TelnetWriter (bytes) or TelnetWriterUnicode (str)
+        self._loop.call_soon_threadsafe(self._writer.write, data)  # type: ignore[arg-type]
 
     def flush(self, timeout: Optional[float] = None) -> None:
         """
@@ -709,7 +712,7 @@ class ServerConnection:
         """
         if self._closed:
             raise RuntimeError("Connection closed")
-        self._loop.call_soon_threadsafe(self._writer.write, data)
+        self._loop.call_soon_threadsafe(self._writer.write, data)  # type: ignore[arg-type]
 
     def flush(self, timeout: Optional[float] = None) -> None:
         """

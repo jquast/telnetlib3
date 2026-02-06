@@ -51,16 +51,18 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
     if not ucs_detect:
         return None
 
-    patience_msg = random.choice([
-        "Contemplate the virtue of patience",
-        "Endure delays with fortitude",
-        "To wait calmly requires discipline",
-        "Suspend expectations of imminence",
-        "The tide hastens for no man",
-        "Cultivate a stoic calmness",
-        "The tranquil mind eschews impatience",
-        "Deliberation is preferable to haste",
-    ])
+    patience_msg = random.choice(
+        [
+            "Contemplate the virtue of patience",
+            "Endure delays with fortitude",
+            "To wait calmly requires discipline",
+            "Suspend expectations of imminence",
+            "The tide hastens for no man",
+            "Cultivate a stoic calmness",
+            "The tranquil mind eschews impatience",
+            "Deliberation is preferable to haste",
+        ]
+    )
     echo(f"{patience_msg}...\r\n")
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
@@ -78,9 +80,11 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
                     "--probe-silently",
                     "--no-final-summary",
                     "--no-languages-test",
-                    "--save-json", tmp_path,
+                    "--save-json",
+                    tmp_path,
                 ],
                 timeout=20,
+                check=False,
             )
         except subprocess.TimeoutExpired:
             logger.warning("ucs-detect timed out (client unresponsive to probes)")
@@ -93,7 +97,7 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
             logger.warning("ucs-detect did not create output file")
             return None
 
-        with open(tmp_path) as f:
+        with open(tmp_path, encoding="utf-8") as f:
             terminal_data = json.load(f)
 
         for key in ("python_version", "datetime", "system", "wcwidth_version"):
@@ -117,25 +121,17 @@ def _create_terminal_fingerprint(terminal_data: Dict[str, Any]) -> Dict[str, Any
 
     results = terminal_data.get("terminal_results", {})
     fingerprint["software_name"] = terminal_data.get("software_name", "unknown")
-    fingerprint["software_version"] = terminal_data.get(
-        "software_version", "unknown"
-    )
+    fingerprint["software_version"] = terminal_data.get("software_version", "unknown")
 
     fingerprint["number_of_colors"] = results.get("number_of_colors")
     fingerprint["sixel"] = results.get("sixel", False)
     fingerprint["iterm2_features"] = results.get("iterm2_features", {})
 
     fingerprint["kitty_graphics"] = results.get("kitty_graphics", False)
-    fingerprint["kitty_clipboard_protocol"] = results.get(
-        "kitty_clipboard_protocol", False
-    )
+    fingerprint["kitty_clipboard_protocol"] = results.get("kitty_clipboard_protocol", False)
     fingerprint["kitty_keyboard"] = results.get("kitty_keyboard", {})
-    fingerprint["kitty_notifications"] = results.get(
-        "kitty_notifications", False
-    )
-    fingerprint["kitty_pointer_shapes"] = results.get(
-        "kitty_pointer_shapes", False
-    )
+    fingerprint["kitty_notifications"] = results.get("kitty_notifications", False)
+    fingerprint["kitty_pointer_shapes"] = results.get("kitty_pointer_shapes", False)
 
     fingerprint["text_sizing"] = results.get("text_sizing", {})
 
@@ -145,9 +141,7 @@ def _create_terminal_fingerprint(terminal_data: Dict[str, Any]) -> Dict[str, Any
 
     raw_modes = results.get("modes", {})
     distilled_modes = {}
-    for mode_num, mode_data in sorted(
-        raw_modes.items(), key=lambda x: int(x[0])
-    ):
+    for mode_num, mode_data in sorted(raw_modes.items(), key=lambda x: int(x[0])):
         if isinstance(mode_data, dict):
             distilled_modes[str(mode_num)] = {
                 "supported": mode_data.get("supported", False),
@@ -246,15 +240,16 @@ def _format_encoding(
 
     if lang_val and charset_val:
         return ("LANG (Charset)", f"{lang_val} ({charset_val})")
-    elif lang_val:
+    if lang_val:
         return ("LANG", lang_val)
-    elif charset_val:
+    if charset_val:
         return ("Charset", charset_val)
-    elif encoding_val and encoding_val != "None":
+    if encoding_val and encoding_val != "None":
         return ("Encoding", encoding_val)
     return None
 
 
+# pylint: disable-next=too-complex,too-many-locals,too-many-branches,too-many-statements
 def _build_terminal_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
     """Build (key, value) tuples for terminal capabilities table."""
     pairs: List[Tuple[str, str]] = []
@@ -302,9 +297,7 @@ def _build_terminal_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
         pairs.append(("fg/bg colors", _color_yes_no(term, has_fg and has_bg)))
 
     has_kitty_gfx = terminal_results.get("kitty_graphics", False)
-    has_iterm2_gfx = (
-        terminal_results.get("iterm2_features") or {}
-    ).get("supported", False)
+    has_iterm2_gfx = (terminal_results.get("iterm2_features") or {}).get("supported", False)
     has_sixel = terminal_results.get("sixel", False)
     if has_kitty_gfx or has_iterm2_gfx:
         protocols = []
@@ -317,22 +310,22 @@ def _build_terminal_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
         pairs.append(("Graphics", term.forestgreen(", ".join(protocols))))
     elif has_sixel:
         pairs.append(("Graphics", term.darkorange("Sixel")))
-    elif any(
-        k in terminal_results
-        for k in ("sixel", "kitty_graphics", "iterm2_features")
-    ):
+    elif any(k in terminal_results for k in ("sixel", "kitty_graphics", "iterm2_features")):
         pairs.append(("Graphics", term.firebrick1("No")))
 
     if da := terminal_results.get("device_attributes"):
         if (sc := da.get("service_class")) is not None:
             class_names = {
-                1: "VT100", 2: "VT200", 18: "VT330",
-                41: "VT420", 61: "VT500", 62: "VT500",
-                64: "VT500", 65: "VT500",
+                1: "VT100",
+                2: "VT200",
+                18: "VT330",
+                41: "VT420",
+                61: "VT500",
+                62: "VT500",
+                64: "VT500",
+                65: "VT500",
             }
-            pairs.append((
-                "Device Class", class_names.get(sc, f"Class {sc}")
-            ))
+            pairs.append(("Device Class", class_names.get(sc, f"Class {sc}")))
 
     screen_ratio = terminal_results.get("screen_ratio")
     if screen_ratio:
@@ -356,8 +349,10 @@ def _build_terminal_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
 
     test_results = terminal_data.get("test_results", {})
     _emoji_keys = (
-        "unicode_wide_results", "emoji_zwj_results",
-        "emoji_vs16_results", "emoji_vs15_results",
+        "unicode_wide_results",
+        "emoji_zwj_results",
+        "emoji_vs16_results",
+        "emoji_vs15_results",
     )
     all_pcts = []
     for key in _emoji_keys:
@@ -376,7 +371,9 @@ def _build_terminal_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
     return pairs
 
 
-def _build_telnet_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
+def _build_telnet_rows(  # pylint: disable=too-many-locals,unused-argument
+    term, data: Dict[str, Any]
+) -> List[Tuple[str, str]]:
     """Build (key, value) tuples for telnet protocol table."""
     pairs: List[Tuple[str, str]] = []
     telnet_probe = data.get("telnet-probe", {})
@@ -400,10 +397,12 @@ def _build_telnet_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
         pairs.append(("Options", _wrap_options(supported, wrap_width)))
 
     if rejected_will := proto_data.get("rejected-will"):
-        pairs.append((
-            "Rejected",
-            _wrap_options(rejected_will, wrap_width),
-        ))
+        pairs.append(
+            (
+                "Rejected",
+                _wrap_options(rejected_will, wrap_width),
+            )
+        )
 
     slc_tab = session_data.get("slc_tab", {})
     if slc_tab:
@@ -436,7 +435,7 @@ def _build_telnet_rows(term, data: Dict[str, Any]) -> List[Tuple[str, str]]:
 def _make_terminal(**kwargs):
     """Create a blessed Terminal, falling back to ``ansi`` on setupterm failure."""
     # 3rd party
-    from blessed import Terminal
+    from blessed import Terminal  # pylint: disable=import-outside-toplevel,import-error
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -465,17 +464,17 @@ def _disable_isig():
 
 def _has_unicode(data: Dict[str, Any]) -> bool:
     """Return whether the terminal supports unicode rendering."""
-    aw = (data.get("terminal-probe", {})
-          .get("session_data", {})
-          .get("ambiguous_width", AMBIGUOUS_WIDTH_UNKNOWN))
+    aw = (
+        data.get("terminal-probe", {})
+        .get("session_data", {})
+        .get("ambiguous_width", AMBIGUOUS_WIDTH_UNKNOWN)
+    )
     return aw >= 1
 
 
 def _sync_timeout(data: Dict[str, Any]) -> float:
     """Return synchronized output timeout based on measured RTT."""
-    cps = (data.get("terminal-probe", {})
-           .get("session_data", {})
-           .get("cps_summary", {}))
+    cps = data.get("terminal-probe", {}).get("session_data", {}).get("cps_summary", {})
     if (rtt_max := cps.get("rtt_max_ms")) and rtt_max > 0:
         return rtt_max * 1.1 / 1000.0
     return 1.0
@@ -491,11 +490,7 @@ def _setup_term_environ(data: Dict[str, Any]) -> None:
     confirmed by the terminal probe, removes it otherwise to prevent the
     server's own stale value from leaking through.
     """
-    ttype_cycle = (
-        data.get("telnet-probe", {})
-        .get("session_data", {})
-        .get("ttype_cycle", [])
-    )
+    ttype_cycle = data.get("telnet-probe", {}).get("session_data", {}).get("ttype_cycle", [])
     # Microsoft telnet cycles ANSI -> VT100 -> VT52 -> VTNT -> VTNT.
     # The "vtnt" terminfo contains $<N> padding sequences that MS telnet
     # displays as literal text.  Override to "ansi" which has no padding.
@@ -510,10 +505,12 @@ def _setup_term_environ(data: Dict[str, Any]) -> None:
 
 def _has_truecolor(data: Dict[str, Any]) -> bool:
     """Return whether the terminal supports 24-bit color."""
-    n = (data.get("terminal-probe", {})
-         .get("session_data", {})
-         .get("terminal_results", {})
-         .get("number_of_colors"))
+    n = (
+        data.get("terminal-probe", {})
+        .get("session_data", {})
+        .get("terminal_results", {})
+        .get("number_of_colors")
+    )
     return n is not None and n >= 16777216
 
 
@@ -542,12 +539,16 @@ def _apply_unicode_borders(tbl) -> None:
     tbl.bottom_right_junction_char = "\u255d"
 
 
-def _display_compact_summary(data: Dict[str, Any], term=None) -> bool:
+def _display_compact_summary(  # pylint: disable=too-complex,too-many-branches
+    data: Dict[str, Any], term=None
+) -> bool:
     """Display compact fingerprint summary using prettytable."""
     try:
         # 3rd party
-        from ucs_detect import _collect_side_by_side_lines
-        from prettytable import PrettyTable
+        from ucs_detect import (  # pylint: disable=import-outside-toplevel
+            _collect_side_by_side_lines,
+        )
+        from prettytable import PrettyTable  # pylint: disable=import-outside-toplevel
     except ImportError:
         return False
 
@@ -648,7 +649,7 @@ def _fingerprint_similarity(a: Dict[str, Any], b: Dict[str, Any]) -> float:
     return sum(scores) / len(scores) if scores else 1.0
 
 
-def _load_known_fingerprints(
+def _load_known_fingerprints(  # pylint: disable=too-complex
     probe_type: str,
 ) -> Dict[str, Dict[str, Any]]:
     """
@@ -687,10 +688,9 @@ def _load_known_fingerprints(
                 if not fname.endswith(".json"):
                     continue
                 try:
-                    with open(os.path.join(terminal_path, fname)) as f:
+                    with open(os.path.join(terminal_path, fname), encoding="utf-8") as f:
                         file_data = json.load(f)
-                    fp_data = file_data.get(probe_type, {}).get(
-                        "fingerprint-data")
+                    fp_data = file_data.get(probe_type, {}).get("fingerprint-data")
                     if fp_data:
                         seen[target_hash] = fp_data
                 except (OSError, json.JSONDecodeError, KeyError):
@@ -724,7 +724,7 @@ def _find_nearest_match(
     return (best_name, best_score)
 
 
-def _build_seen_counts(
+def _build_seen_counts(  # pylint: disable=too-many-locals
     data: Dict[str, Any],
     names: Optional[Dict[str, str]] = None,
     term=None,
@@ -757,9 +757,7 @@ def _build_seen_counts(
         for sub in os.listdir(telnet_dir):
             sub_path = os.path.join(telnet_dir, sub)
             if os.path.isdir(sub_path):
-                like_count += sum(
-                    1 for f in os.listdir(sub_path) if f.endswith(".json")
-                )
+                like_count += sum(1 for f in os.listdir(sub_path) if f.endswith(".json"))
 
     visit_count = len(data.get("sessions", []))
 
@@ -770,34 +768,27 @@ def _build_seen_counts(
     if like_count > 1:
         others = like_count - 1
         noun = "client" if others == 1 else "clients"
-        lines.append(
-            f"I've seen {others} other {noun} with your configuration."
-        )
+        lines.append(f"I've seen {others} other {noun} with your configuration.")
     if visit_count > 1:
         times = "time" if visit_count - 1 == 1 else "times"
-        lines.append(
-            f"I've seen your exact fingerprint {visit_count - 1} {times} before."
-        )
+        lines.append(f"I've seen your exact fingerprint {visit_count - 1} {times} before.")
 
     who = f" {username}" if username else ""
-    terminal_suffix = (f" and {terminal_name}"
-                       if terminal_name and terminal_name != telnet_name
-                       else "")
+    terminal_suffix = (
+        f" and {terminal_name}" if terminal_name and terminal_name != telnet_name else ""
+    )
     if visit_count <= 1:
-        lines.append(
-            f"Welcome{who}! Detected {telnet_name}{terminal_suffix}."
-        )
+        lines.append(f"Welcome{who}! Detected {telnet_name}{terminal_suffix}.")
     else:
-        lines.append(
-            f"Welcome back{who}! Detected {telnet_name}{terminal_suffix}."
-        )
+        lines.append(f"Welcome back{who}! Detected {telnet_name}{terminal_suffix}.")
 
     telnet_unknown = telnet_hash not in _names
-    terminal_unknown = (terminal_known
-                        and terminal_hash not in _names)
+    terminal_unknown = terminal_known and terminal_hash not in _names
     if (telnet_unknown or terminal_unknown) and _names:
         match_lines = _nearest_match_lines(
-            data, _names, term,
+            data,
+            _names,
+            term,
             telnet_unknown=telnet_unknown,
             terminal_unknown=terminal_unknown,
         )
@@ -821,7 +812,7 @@ def _color_match(term, name: str, score: float) -> str:
         return label
     if pct >= 95:
         return term.forestgreen(label)
-    elif pct >= 75:
+    if pct >= 75:
         return term.darkorange(label)
     return term.firebrick1(label)
 
@@ -840,8 +831,7 @@ def _nearest_match_lines(
         if fp_data:
             result = _find_nearest_match(fp_data, "telnet-probe", names)
             if result:
-                result_lines.append(
-                    f"Nearest telnet match: {_color_match(term, *result)}")
+                result_lines.append(f"Nearest telnet match: {_color_match(term, *result)}")
             else:
                 result_lines.append("Nearest telnet match: (none)")
 
@@ -850,8 +840,7 @@ def _nearest_match_lines(
         if fp_data:
             result = _find_nearest_match(fp_data, "terminal-probe", names)
             if result:
-                result_lines.append(
-                    f"Nearest terminal match: {_color_match(term, *result)}")
+                result_lines.append(f"Nearest terminal match: {_color_match(term, *result)}")
             else:
                 result_lines.append("Nearest terminal match: (none)")
     return result_lines
@@ -867,7 +856,7 @@ def _repl_prompt(term) -> None:
     echo(f"\r{term.clear_eos}{term.normal}{legend}")
 
 
-def _paginate(term, text: str, **_kw) -> None:
+def _paginate(term, text: str, **_kw) -> None:  # pylint: disable=unused-argument
     """Display text."""
     for line in text.split("\n"):
         echo(line + "\n")
@@ -883,22 +872,28 @@ def _colorize_json(data: Any, term=None) -> str:
     if _BAT:
         result = subprocess.run(
             [_BAT, "-l", "json", "--style=plain", "--color=always"],
-            input=json_str, capture_output=True, text=True)
+            input=json_str,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         if result.returncode == 0:
             return result.stdout.rstrip("\n")
     if _JQ:
-        env = {"TERM": getattr(term, "kind", None) or "dumb",
-               "COLUMNS": str(term.width or 80),
-               "LINES": str(term.height or 25)}
+        env = {
+            "TERM": getattr(term, "kind", None) or "dumb",
+            "COLUMNS": str(term.width or 80),
+            "LINES": str(term.height or 25),
+        }
         if term.number_of_colors == 1 << 24:
-            env["COLORTERM"] = 'truecolor'
+            env["COLORTERM"] = "truecolor"
         result = subprocess.run(
-            [_JQ, "-C",
-             "walk(if type==\"number\" then (.*100|round)/100 else . end)"],
+            [_JQ, "-C", 'walk(if type=="number" then (.*100|round)/100 else . end)'],
             input=json_str,
             capture_output=True,
             text=True,
             env=env,
+            check=False,
         )
         if result.returncode == 0:
             return result.stdout.rstrip("\n")
@@ -917,12 +912,16 @@ def _strip_empty_features(d: Dict[str, Any]) -> None:
 def _normalize_color_hex(hex_color: str) -> str:
     """Normalize X11 color hex to standard 6-digit format."""
     # 3rd party
-    from blessed.colorspace import hex_to_rgb, rgb_to_hex
+    from blessed.colorspace import (  # pylint: disable=import-outside-toplevel,import-error
+        hex_to_rgb,
+        rgb_to_hex,
+    )
+
     r, g, b = hex_to_rgb(hex_color)
     return rgb_to_hex(r, g, b)
 
 
-def _filter_terminal_detail(
+def _filter_terminal_detail(  # pylint: disable=too-complex,too-many-branches
     detail: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
     """Filter terminal session data for display."""
@@ -946,8 +945,7 @@ def _filter_terminal_detail(
     if terminal_results is not None:
         terminal_results = dict(terminal_results)
         if "text_sizing" in terminal_results:
-            terminal_results["kitty_text_sizing"] = (
-                terminal_results.pop("text_sizing"))
+            terminal_results["kitty_text_sizing"] = terminal_results.pop("text_sizing")
         for key in ("foreground_color_rgb", "background_color_rgb"):
             terminal_results.pop(key, None)
         _strip_empty_features(terminal_results)
@@ -965,9 +963,7 @@ def _filter_terminal_detail(
                 terminal_results["dec_private_modes"] = dec_modes
         for key in ("foreground_color_hex", "background_color_hex"):
             if key in terminal_results:
-                terminal_results[key] = _normalize_color_hex(
-                    terminal_results[key]
-                )
+                terminal_results[key] = _normalize_color_hex(terminal_results[key])
         result["terminal_results"] = terminal_results
 
     test_results = result.get("test_results")
@@ -981,8 +977,7 @@ def _filter_terminal_detail(
                 for ver, data in v.items():
                     if isinstance(data, dict):
                         reduced[ver] = {
-                            sk: sv for sk, sv in data.items()
-                            if sk in ("pct_success", "n_total")
+                            sk: sv for sk, sv in data.items() if sk in ("pct_success", "n_total")
                         }
                     else:
                         reduced[ver] = data
@@ -1027,10 +1022,7 @@ def _show_detail(term, data: Dict[str, Any], section: str) -> None:
 
     underline = term.cyan("=" * len(title))
     if detail:
-        text = (f"{term.magenta(title)}\n"
-                f"{underline}\n"
-                f"\n"
-                f"{_colorize_json(detail, term)}")
+        text = f"{term.magenta(title)}\n" f"{underline}\n" f"\n" f"{_colorize_json(detail, term)}"
         _paginate(term, text)
     else:
         echo(f"{term.magenta(title)}\n{underline}\n\n(no data)\n")
@@ -1046,7 +1038,7 @@ def _client_ip(data: Dict[str, Any]) -> str:
     return "unknown"
 
 
-def _build_database_entries(
+def _build_database_entries(  # pylint: disable=too-many-locals
     names: Optional[Dict[str, str]] = None,
 ) -> List[Tuple[str, str, int, int]]:
     """
@@ -1076,7 +1068,7 @@ def _build_database_entries(
                 n_sessions = 1
                 fpath = os.path.join(terminal_path, fname)
                 try:
-                    with open(fpath) as f:
+                    with open(fpath, encoding="utf-8") as f:
                         fdata = json.load(f)
                     n_sessions = len(fdata.get("sessions", [1]))
                 except (OSError, json.JSONDecodeError):
@@ -1099,10 +1091,7 @@ def _build_database_entries(
         prev = merged.get(key, [0, 0])
         merged[key] = [prev[0] + files, prev[1] + sessions]
 
-    entries = [
-        (kind, name, files, sessions)
-        for (kind, name), (files, sessions) in merged.items()
-    ]
+    entries = [(kind, name, files, sessions) for (kind, name), (files, sessions) in merged.items()]
     entries.sort(key=lambda e: e[3], reverse=True)
     return entries
 
@@ -1115,7 +1104,7 @@ def _show_database(
     """Display scrollable database of all known fingerprints."""
     try:
         # 3rd party
-        from prettytable import PrettyTable
+        from prettytable import PrettyTable  # pylint: disable=import-outside-toplevel
     except ImportError:
         echo("prettytable not installed.\n")
         return
@@ -1137,10 +1126,14 @@ def _show_database(
     tbl.align["Calls"] = "r"
     tbl.max_table_width = max(40, (term.width or 80) - 1)
     for kind, display_name, files, sessions in entries:
-        tbl.add_row([
-            kind, term.forestgreen(display_name),
-            str(files), str(sessions),
-        ])
+        tbl.add_row(
+            [
+                kind,
+                term.forestgreen(display_name),
+                str(files),
+                str(sessions),
+            ]
+        )
 
     _paginate(term, str(tbl))
 
@@ -1155,9 +1148,12 @@ def _fingerprint_repl(
     """Interactive REPL for exploring fingerprint data."""
     ip = _client_ip(data)
     _commands = {
-        "q": "logoff", "t": "terminal-detail",
-        "l": "telnet-detail", "s": "database",
-        "u": "update", "\x0c": "refresh",
+        "q": "logoff",
+        "t": "terminal-detail",
+        "l": "telnet-detail",
+        "s": "database",
+        "u": "update",
+        "\x0c": "refresh",
     }
 
     db_cache = None
@@ -1176,11 +1172,11 @@ def _fingerprint_repl(
         elif key_str not in ("KEY_ENTER", "\r", "\n"):
             logger.info("%s: repl unknown key %r", ip, key_str)
 
-        if key == "q" or key.name == "KEY_ESCAPE" or key == "":
+        if key == "q" or key.name == "KEY_ESCAPE" or not key:
             logger.info("%s: repl logoff", ip)
             echo(f"\n{term.normal}")
             break
-        elif key == "t":
+        if key == "t":
             _show_detail(term, data, "terminal")
         elif key == "l":
             _show_detail(term, data, "telnet")
@@ -1203,8 +1199,7 @@ def _fingerprint_repl(
 def _has_unknown_hashes(data: Dict[str, Any], names: Dict[str, str]) -> bool:
     """Return True if either telnet or terminal hash is not yet named."""
     telnet_hash = data.get("telnet-probe", {}).get("fingerprint", "")
-    terminal_hash = data.get("terminal-probe", {}).get(
-        "fingerprint", _UNKNOWN_TERMINAL_HASH)
+    terminal_hash = data.get("terminal-probe", {}).get("fingerprint", _UNKNOWN_TERMINAL_HASH)
     if telnet_hash not in names:
         return True
     if terminal_hash != _UNKNOWN_TERMINAL_HASH and terminal_hash not in names:
@@ -1212,7 +1207,7 @@ def _has_unknown_hashes(data: Dict[str, Any], names: Dict[str, str]) -> bool:
     return False
 
 
-def _prompt_fingerprint_identification(
+def _prompt_fingerprint_identification(  # pylint: disable=too-many-branches
     term, data: Dict[str, Any], filepath: str, names: Dict[str, str]
 ) -> None:
     """Prompt user to identify unknown fingerprint hashes."""
@@ -1235,12 +1230,10 @@ def _prompt_fingerprint_identification(
 
     if terminal_hash != _UNKNOWN_TERMINAL_HASH:
         if not terminal_known:
-            software_name = (terminal_probe.get("session_data", {})
-                             .get("software_name"))
+            software_name = terminal_probe.get("session_data", {}).get("software_name")
             default = software_name or ""
             if default:
-                prompt = (f"Terminal emulator name"
-                          f" (press return for \"{default}\"): ")
+                prompt = f"Terminal emulator name" f' (press return for "{default}"): '
             else:
                 prompt = f"Terminal emulator name for {terminal_hash}: "
             raw = _cooked_input(prompt)
@@ -1251,8 +1244,7 @@ def _prompt_fingerprint_identification(
                 suggestions["terminal-emulator"] = validated
         elif all_known:
             current_name = names.get(terminal_hash)
-            prompt = (f"Terminal emulator name"
-                      f" (press return for \"{current_name}\"): ")
+            prompt = f"Terminal emulator name" f' (press return for "{current_name}"): '
             raw = _cooked_input(prompt).strip()
             validated = _validate_suggestion(raw) if raw else None
             if validated and validated != current_name:
@@ -1266,8 +1258,7 @@ def _prompt_fingerprint_identification(
             suggestions["telnet-client"] = validated
     elif all_known:
         current_name = names.get(telnet_hash)
-        prompt = (f"Telnet client name"
-                  f" (press return for \"{current_name}\"): ")
+        prompt = f"Telnet client name" f' (press return for "{current_name}"): '
         raw = _cooked_input(prompt).strip()
         validated = _validate_suggestion(raw) if raw else None
         if validated and validated != current_name:
@@ -1319,8 +1310,7 @@ def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
                 if not os.listdir(old_dir):
                     os.rmdir(old_dir)
             except OSError as exc:
-                logger.warning("failed to move %s -> %s: %s",
-                               filepath, new_dir, exc)
+                logger.warning("failed to move %s -> %s: %s", filepath, new_dir, exc)
 
         _atomic_json_write(filepath, data)
 
@@ -1328,7 +1318,7 @@ def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
 
     try:
         # 3rd party
-        import blessed  # noqa: F401
+        import blessed  # noqa: F401  # pylint: disable=import-outside-toplevel,unused-import
     except ImportError:
         print(json.dumps(data, indent=2, sort_keys=True))
         return
@@ -1368,13 +1358,11 @@ def fingerprinting_post_script(filepath: str) -> None:
         logger.warning("Post-script file not found: %s", filepath)
         return
 
-    with open(filepath) as f:
+    with open(filepath, encoding="utf-8") as f:
         data = json.load(f)
 
     telnet_probe = data.get("telnet-probe", {})
-    probed_protocol = telnet_probe.get(
-        "fingerprint-data", {}
-    ).get("probed-protocol")
+    probed_protocol = telnet_probe.get("fingerprint-data", {}).get("probed-protocol")
 
     if probed_protocol == "client":
         _process_client_fingerprint(filepath, data)

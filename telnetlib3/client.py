@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Telnet Client API for the 'telnetlib3' python package."""
 
+from __future__ import annotations
+
 # std imports
 import os
 import sys
@@ -10,14 +12,13 @@ import asyncio
 import argparse
 from typing import (
     Any,
-    Callable,
     Dict,
     List,
+    Tuple,
+    Union,
+    Callable,
     Optional,
     Sequence,
-    Tuple,
-    Type,
-    Union,
 )
 
 # local
@@ -87,11 +88,7 @@ class TelnetClient(client_base.BaseClient):
                 # So which locale should we represent? Rather than using the
                 # locale.getpreferredencoding() method, we provide a deterministic
                 # class value DEFAULT_LOCALE (en_US), derive and modify as needed.
-                "lang": (
-                    "C"
-                    if not encoding
-                    else self.DEFAULT_LOCALE + "." + str(encoding)
-                ),
+                "lang": ("C" if not encoding else self.DEFAULT_LOCALE + "." + str(encoding)),
                 "cols": cols,
                 "rows": rows,
                 "term": term,
@@ -150,7 +147,8 @@ class TelnetClient(client_base.BaseClient):
 
     def send_tspeed(self) -> Tuple[int, int]:
         """Callback for responding to TSPEED requests."""
-        return tuple(map(int, self._extra["tspeed"].split(",")))
+        parts = self._extra["tspeed"].split(",")
+        return (int(parts[0]), int(parts[1]))
 
     def send_xdisploc(self) -> str:
         """Callback for responding to XDISPLOC requests."""
@@ -212,6 +210,7 @@ class TelnetClient(client_base.BaseClient):
         # Get client's desired encoding canonical name
         desired_name = None
         if self.default_encoding:
+            assert isinstance(self.default_encoding, str)
             try:
                 desired_name = codecs.lookup(self.default_encoding).name
             except LookupError:
@@ -309,6 +308,7 @@ class TelnetClient(client_base.BaseClient):
                 "encoding arguments 'outgoing' and 'incoming' are required: toggle at least one."
             )
 
+        assert self.writer is not None
         # may we encode in the direction indicated?
         _outgoing_only = outgoing and not incoming
         _incoming_only = not outgoing and incoming
@@ -483,7 +483,7 @@ async def open_connection(  # pylint: disable=too-many-locals
 
     _, protocol = await asyncio.get_event_loop().create_connection(
         connection_factory,
-        host,
+        host or "localhost",
         port,
         family=family,
         flags=flags,

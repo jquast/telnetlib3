@@ -93,9 +93,10 @@ async def test_telnet_reader_using_readline_unicode(bind_host, unused_tcp_port):
         "xxxxxxxxxxx": "xxxxxxxxxxx",
     }
 
-    def shell(reader, writer):
+    async def shell(reader, writer):
         for item in sorted(given_expected):
             writer.write(item)
+        await writer.drain()
         writer.close()
 
     async with create_server(

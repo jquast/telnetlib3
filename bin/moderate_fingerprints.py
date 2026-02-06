@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# pylint: disable=cyclic-import
 """Moderate fingerprint name suggestions."""
 
 # std imports
@@ -25,7 +26,7 @@ def _iter_files(data_dir):
     if client_base.is_dir():
         for path in sorted(client_base.glob("*/*/*.json")):
             try:
-                with open(path) as f:
+                with open(path, encoding="utf-8") as f:
                     yield path, json.load(f)
             except (OSError, json.JSONDecodeError):
                 continue
@@ -37,12 +38,15 @@ def _print_json(label, data):
     if _BAT:
         r = subprocess.run(
             [_BAT, "-l", "json", "--style=plain", "--color=always"],
-            input=raw, capture_output=True, text=True)
+            input=raw,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         if r.returncode == 0:
             raw = r.stdout.rstrip("\n")
     elif _JQ:
-        r = subprocess.run(
-            [_JQ, "-C", "."], input=raw, capture_output=True, text=True)
+        r = subprocess.run([_JQ, "-C", "."], input=raw, capture_output=True, text=True, check=False)
         if r.returncode == 0:
             raw = r.stdout.rstrip("\n")
     print(f"{label} {raw}")
@@ -92,7 +96,7 @@ def _print_paired(paired_hashes, label, names):
 
 def _load_names(data_dir):
     try:
-        with open(data_dir / "fingerprint_names.json") as f:
+        with open(data_dir / "fingerprint_names.json", encoding="utf-8") as f:
             return json.load(f)
     except FileNotFoundError:
         return {}
@@ -101,7 +105,7 @@ def _load_names(data_dir):
 def _save_names(data_dir, names):
     path = data_dir / "fingerprint_names.json"
     tmp = path.with_suffix(".json.new")
-    with open(tmp, "w") as f:
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(names, f, indent=2, sort_keys=True)
     os.rename(tmp, path)
     print(f"\nSaved {path}")
@@ -124,13 +128,10 @@ def _scan(data_dir, names, revise=False):
             h = data.get(probe_key, {}).get("fingerprint")
             if not h or h == _UNKNOWN:
                 continue
-            labels.setdefault(h, probe_key.split("-")[0])
-            fp_data.setdefault(
-                h, data.get(probe_key, {}).get("fingerprint-data", {}))
-            sessions.setdefault(
-                h, data.get(probe_key, {}).get("session_data", {}))
-            other = ("terminal-probe" if probe_key == "telnet-probe"
-                     else "telnet-probe")
+            labels.setdefault(h, probe_key.split("-", maxsplit=1)[0])
+            fp_data.setdefault(h, data.get(probe_key, {}).get("fingerprint-data", {}))
+            sessions.setdefault(h, data.get(probe_key, {}).get("session_data", {}))
+            other = "terminal-probe" if probe_key == "telnet-probe" else "telnet-probe"
             other_h = data.get(other, {}).get("fingerprint")
             if other_h and other_h != _UNKNOWN:
                 paired[h].add(other_h)
@@ -139,8 +140,14 @@ def _scan(data_dir, names, revise=False):
                 suggestions[h].append(file_sug[look])
 
     return [
-        (labels[h], h, suggestions.get(h, []), fp_data[h],
-         sessions.get(h, {}), paired.get(h, set()))
+        (
+            labels[h],
+            h,
+            suggestions.get(h, []),
+            fp_data[h],
+            sessions.get(h, {}),
+            paired.get(h, set()),
+        )
         for h in sorted(fp_data)
         if (h in names) == revise
     ]
@@ -247,6 +254,7 @@ def _prune(data_dir, names):
 
 
 def main():
+    """CLI entry point for moderating fingerprint name suggestions."""
     data_dir_env = os.environ.get("TELNETLIB3_DATA_DIR")
     if not data_dir_env:
         print("Error: TELNETLIB3_DATA_DIR not set", file=sys.stderr)

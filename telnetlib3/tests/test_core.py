@@ -139,7 +139,6 @@ async def test_telnet_server_advanced_negotiation(bind_host, unused_tcp_port):
         TTYPE,
         BINARY,
         CHARSET,
-        NEW_ENVIRON,
     )
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 

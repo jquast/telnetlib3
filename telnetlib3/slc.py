@@ -1,7 +1,9 @@
 """Special Line Character support for Telnet Linemode Option (:rfc:`1184`)."""
 
+from __future__ import annotations
+
 # std imports
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union, Callable, Optional
 
 # local
 from .telopt import theNULL
@@ -178,7 +180,9 @@ class SLC:
         ):
             if getattr(self, flag):
                 flags.append(flag)
-        value_str = name_unicode(self.val) if self.val != _POSIX_VDISABLE else "(DISABLED:\\xff)"
+        value_str = (
+            name_unicode(chr(self.val[0])) if self.val != _POSIX_VDISABLE else "(DISABLED:\\xff)"
+        )
         return f"({value_str}, {'|'.join(flags)})"
 
 
@@ -244,7 +248,9 @@ def generate_slctab(
 
 
 def generate_forwardmask(
-    binary_mode: bool, tabset: Dict[bytes, SLC], ack: bool = False,
+    binary_mode: bool,
+    tabset: Dict[bytes, SLC],
+    ack: bool = False,
 ) -> "Forwardmask":
     """
     Generate a Forwardmask instance.
@@ -263,7 +269,7 @@ def generate_forwardmask(
         byte = theNULL
         for char in range(start, last + 1):
             func, _, slc_def = snoop(bytes([char]), tabset, {})
-            if func is not None and not slc_def.nosupport:
+            if func is not None and slc_def is not None and not slc_def.nosupport:
                 # set bit for this character, it is a supported slc char
                 byte = bytes([ord(byte) | 1])
             if char != last:
@@ -315,6 +321,8 @@ class Linemode:
         # the inverse OR(|) of acknowledge bit UNSET in comparator,
         # would be the AND OR(& ~) to compare modes without acknowledge
         # bit set.
+        if not isinstance(other, Linemode):
+            return NotImplemented
         return (ord(self.mask) | ord(LMODE_MODE_ACK)) == (ord(other.mask) | ord(LMODE_MODE_ACK))
 
     @property
@@ -376,7 +384,7 @@ class Forwardmask:
 
     def description_table(self) -> List[str]:
         """Returns list of strings describing obj as a tabular ASCII map."""
-        result = []
+        result: List[str] = []
         mrk_cont = "(...)"
 
         def continuing():

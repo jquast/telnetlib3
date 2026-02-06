@@ -53,6 +53,12 @@ class MockTransport:
     def get_extra_info(self, name, default=None):
         return self.extra.get(name, default)
 
+    def pause_reading(self):
+        pass
+
+    def resume_reading(self):
+        pass
+
     def close(self):
         self._closing = True
 
@@ -530,8 +536,6 @@ async def test_server_data_received_split_sb_linemode():
             pass
 
     transport = MockTransport()
-    transport.pause_reading = lambda: None
-    transport.resume_reading = lambda: None
     server = NoNegServer(encoding=False)
     server.connection_made(transport)
 
@@ -557,8 +561,6 @@ async def test_client_process_chunk_split_sb_linemode():
     from telnetlib3.client_base import BaseClient
 
     transport = MockTransport()
-    transport.pause_reading = lambda: None
-    transport.resume_reading = lambda: None
     client = BaseClient(encoding=False)
     client.connection_made(transport)
 

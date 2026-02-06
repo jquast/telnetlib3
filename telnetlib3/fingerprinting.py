@@ -6,6 +6,8 @@ and saves fingerprint files.  Display, REPL, and post-script code live
 in :mod:`telnetlib3.fingerprinting_display`.
 """
 
+from __future__ import annotations
+
 # std imports
 import os
 import json
@@ -14,11 +16,9 @@ import asyncio
 import hashlib
 import logging
 import datetime
-from typing import Any, Dict, List, Tuple, Union, Callable, Optional
+from typing import Any, Dict, List, Tuple, Union, Callable, Optional, cast
 
 # local
-from .stream_reader import TelnetReader, TelnetReaderUnicode
-from .stream_writer import TelnetWriter, TelnetWriterUnicode
 from .telopt import (
     BM,
     DO,
@@ -72,12 +72,12 @@ from .telopt import (
     SUPPRESS_LOCAL_ECHO,
 )
 from .accessories import encoding_from_lang
+from .stream_reader import TelnetReader, TelnetReaderUnicode
+from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
 # Data directory for saving fingerprint data - None when unset (no saves)
 DATA_DIR: Optional[str] = (
-    os.environ["TELNETLIB3_DATA_DIR"]
-    if os.environ.get("TELNETLIB3_DATA_DIR")
-    else None
+    os.environ["TELNETLIB3_DATA_DIR"] if os.environ.get("TELNETLIB3_DATA_DIR") else None
 )
 
 # Maximum files per protocol-fingerprint folder
@@ -198,17 +198,13 @@ ALL_PROBE_OPTIONS = CORE_OPTIONS + MUD_OPTIONS + LEGACY_OPTIONS
 _ALL_KNOWN_OPTIONS = ALL_PROBE_OPTIONS + EXTENDED_OPTIONS
 
 # Build mapping from hex string (e.g., "0x03") to option name (e.g., "SGA")
-_OPT_BYTE_TO_NAME = {
-    f"0x{opt[0]:02x}": name for opt, name, _ in _ALL_KNOWN_OPTIONS
-}
+_OPT_BYTE_TO_NAME = {f"0x{opt[0]:02x}": name for opt, name, _ in _ALL_KNOWN_OPTIONS}
 
 
 async def probe_client_capabilities(
     writer: Union[TelnetWriter, TelnetWriterUnicode],
     options: Optional[List[Tuple[bytes, str, str]]] = None,
-    progress_callback: Optional[
-        Callable[[str, int, int, str], None]
-    ] = None,
+    progress_callback: Optional[Callable[[str, int, int, str], None]] = None,
     timeout: float = 0.5,
 ) -> Dict[str, Dict[str, Any]]:
     """
@@ -296,9 +292,20 @@ async def probe_client_capabilities(
 
 # Keys to collect from extra_info
 _EXTRA_INFO_KEYS = (
-    "TERM", "term", "cols", "rows", "COLUMNS", "LINES",
-    "charset", "LANG", "COLORTERM",
-    "peername", "sockname", "tspeed", "xdisploc", "DISPLAY",
+    "TERM",
+    "term",
+    "cols",
+    "rows",
+    "COLUMNS",
+    "LINES",
+    "charset",
+    "LANG",
+    "COLORTERM",
+    "peername",
+    "sockname",
+    "tspeed",
+    "xdisploc",
+    "DISPLAY",
     "encoding",
 ) + tuple(f"ttype{n}" for n in range(1, 9))
 
@@ -316,29 +323,23 @@ def get_client_fingerprint(
 
     for key in _EXTRA_INFO_KEYS:
         value = writer.get_extra_info(key)
-        if value is not None and value != "":
+        if value is not None and value:
             fingerprint[key] = value
 
     for env_key in ("USER", "SHELL", "HOME", "PATH", "LOGNAME", "MAIL"):
         value = writer.get_extra_info(env_key)
-        if value is not None and value != "":
+        if value is not None and value:
             fingerprint[env_key] = value
 
     return fingerprint
 
 
-async def _run_probe(
-    writer, verbose: bool = True
-) -> Tuple[Dict[str, Dict[str, Any]], float]:
+async def _run_probe(writer, verbose: bool = True) -> Tuple[Dict[str, Dict[str, Any]], float]:
     """Run active probe, optionally extending to MUD options."""
     if _is_maybe_ms_telnet(writer):
-        probe_options = [
-            opt for opt in CORE_OPTIONS + MUD_OPTIONS
-            if opt[0] != NEW_ENVIRON
-        ]
+        probe_options = [opt for opt in CORE_OPTIONS + MUD_OPTIONS if opt[0] != NEW_ENVIRON]
         logger.info(
-            "reduced probe for suspected MS telnet"
-            " (ttype1=%r, ttype2=%r)",
+            "reduced probe for suspected MS telnet (ttype1=%r, ttype2=%r)",
             writer.get_extra_info("ttype1"),
             writer.get_extra_info("ttype2"),
         )
@@ -351,13 +352,10 @@ async def _run_probe(
         await writer.drain()
 
     start_time = time.time()
-    results = await probe_client_capabilities(
-        writer, options=probe_options, timeout=0.5
-    )
+    results = await probe_client_capabilities(writer, options=probe_options, timeout=0.5)
 
     if _is_maybe_mud(writer) and EXTENDED_OPTIONS:
-        ext_results = await probe_client_capabilities(
-            writer, options=EXTENDED_OPTIONS, timeout=0.5)
+        ext_results = await probe_client_capabilities(writer, options=EXTENDED_OPTIONS, timeout=0.5)
         results.update(ext_results)
 
     elapsed = time.time() - start_time
@@ -384,10 +382,8 @@ def _opt_byte_to_name(opt: bytes) -> str:
 def _collect_option_states(writer) -> Dict[str, Dict[str, Any]]:
     """Collect all telnet option states from writer."""
     options = {}
-    for label, opt_dict in [("remote", writer.remote_option),
-                            ("local", writer.local_option)]:
-        entries = {_opt_byte_to_name(opt): enabled
-                   for opt, enabled in opt_dict.items()}
+    for label, opt_dict in [("remote", writer.remote_option), ("local", writer.local_option)]:
+        entries = {_opt_byte_to_name(opt): enabled for opt, enabled in opt_dict.items()}
         if entries:
             options[label] = entries
     return options
@@ -397,23 +393,19 @@ def _collect_rejected_options(writer) -> Dict[str, List[str]]:
     """Collect rejected option offers from writer."""
     result: Dict[str, List[str]] = {}
     if getattr(writer, "rejected_will", None):
-        result["will"] = sorted(
-            _opt_byte_to_name(opt) for opt in writer.rejected_will
-        )
+        result["will"] = sorted(_opt_byte_to_name(opt) for opt in writer.rejected_will)
     if getattr(writer, "rejected_do", None):
-        result["do"] = sorted(
-            _opt_byte_to_name(opt) for opt in writer.rejected_do
-        )
+        result["do"] = sorted(_opt_byte_to_name(opt) for opt in writer.rejected_do)
     return result
 
 
 def _collect_extra_info(writer) -> Dict[str, Any]:
     """Collect all extra_info from writer, including private _extra dict."""
-    extra = {}
+    extra: Dict[str, Any] = {}
 
     protocol = _get_protocol(writer)
     if protocol and hasattr(protocol, "_extra"):
-        for key, value in protocol._extra.items():
+        for key, value in protocol._extra.items():  # pylint: disable=protected-access
             if isinstance(value, tuple):
                 extra[key] = list(value)
             elif isinstance(value, bytes):
@@ -467,35 +459,36 @@ def _collect_protocol_timing(writer) -> Dict[str, Any]:
         if hasattr(protocol, "idle"):
             timing["idle"] = protocol.idle
         if hasattr(protocol, "_connect_time"):
-            timing["connect_time"] = protocol._connect_time
+            timing["connect_time"] = protocol._connect_time  # pylint: disable=protected-access
     return timing
 
 
 def _collect_slc_tab(writer) -> Dict[str, Any]:
     """Collect non-default SLC entries when LINEMODE was negotiated."""
     # local
-    from . import slc
+    from . import slc  # pylint: disable=import-outside-toplevel
 
     slctab = getattr(writer, "slctab", None)
     if not slctab:
         return {}
 
-    if not (hasattr(writer, "remote_option")
-            and writer.remote_option.enabled(LINEMODE)):
+    if not (hasattr(writer, "remote_option") and writer.remote_option.enabled(LINEMODE)):
         return {}
 
     defaults = slc.generate_slctab(slc.BSD_SLC_TAB)
 
-    result = {}
-    slc_set = {}
-    slc_unset = []
-    slc_nosupport = []
+    result: Dict[str, Any] = {}
+    slc_set: Dict[str, Any] = {}
+    slc_unset: list[str] = []
+    slc_nosupport: list[str] = []
 
     for slc_func, slc_def in slctab.items():
         default_def = defaults.get(slc_func)
-        if (default_def is not None
-                and slc_def.mask == default_def.mask
-                and slc_def.val == default_def.val):
+        if (
+            default_def is not None
+            and slc_def.mask == default_def.mask
+            and slc_def.val == default_def.val
+        ):
             continue
 
         name = slc.name_slc_command(slc_func)
@@ -504,9 +497,7 @@ def _collect_slc_tab(writer) -> Dict[str, Any]:
         elif slc_def.val == slc.theNULL:
             slc_unset.append(name)
         else:
-            slc_set[name] = (slc_def.val[0]
-                             if isinstance(slc_def.val, bytes)
-                             else slc_def.val)
+            slc_set[name] = slc_def.val[0] if isinstance(slc_def.val, bytes) else slc_def.val
 
     if slc_set:
         result["set"] = slc_set
@@ -567,14 +558,12 @@ def _create_protocol_fingerprint(
     ttype_cycle = _collect_ttype_cycle(writer)
     fingerprint["ttype-count"] = len(ttype_cycle)
 
-    supported = sorted([
-        name for name, info in probe_results.items()
-        if info["status"] == "WILL"
-    ])
-    refused = sorted([
-        name for name, info in probe_results.items()
-        if info["status"] in ("WONT", "timeout")
-    ])
+    supported: list[str] = sorted(
+        [name for name, info in probe_results.items() if info["status"] == "WILL"]
+    )
+    refused: list[str] = sorted(
+        [name for name, info in probe_results.items() if info["status"] in ("WONT", "timeout")]
+    )
     fingerprint["supported-options"] = supported
     fingerprint["refused-options"] = refused
 
@@ -585,8 +574,7 @@ def _create_protocol_fingerprint(
         fingerprint["rejected-do"] = rejected["do"]
 
     linemode_probed = any(
-        name == "LINEMODE" and info["status"] == "WILL"
-        for name, info in probe_results.items()
+        name == "LINEMODE" and info["status"] == "WILL" for name, info in probe_results.items()
     )
     if linemode_probed:
         slc_tab = _collect_slc_tab(writer)
@@ -617,10 +605,7 @@ def _count_fingerprint_folders(data_dir: Optional[str] = None) -> int:
     client_dir = os.path.join(_dir, "client")
     if not os.path.exists(client_dir):
         return 0
-    return sum(
-        1 for f in os.listdir(client_dir)
-        if os.path.isdir(os.path.join(client_dir, f))
-    )
+    return sum(1 for f in os.listdir(client_dir) if os.path.isdir(os.path.join(client_dir, f)))
 
 
 _UNKNOWN_TERMINAL_HASH = "0" * 16
@@ -638,7 +623,7 @@ def _create_session_fingerprint(writer) -> Dict[str, Any]:
         identity["TERM"] = term
 
     for key in ("USER", "HOME", "SHELL", "LANG", "charset"):
-        if (value := writer.get_extra_info(key)) is not None and value != "":
+        if (value := writer.get_extra_info(key)) is not None and value:
             identity[key] = value
 
     return identity
@@ -652,7 +637,7 @@ def _load_fingerprint_names(data_dir: Optional[str] = None) -> Dict[str, str]:
     names_file = os.path.join(_dir, "fingerprint_names.json")
     if not os.path.exists(names_file):
         return {}
-    with open(names_file) as f:
+    with open(names_file, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -675,12 +660,13 @@ def _validate_suggestion(text: str) -> Optional[str]:
 def _cooked_input(prompt: str) -> str:
     """Call :func:`input` with echo and canonical mode temporarily enabled."""
     # std imports
-    import sys
-    import termios
+    import sys  # pylint: disable=import-outside-toplevel,redefined-outer-name
+    import termios  # pylint: disable=import-outside-toplevel
+
     fd = sys.stdin.fileno()
     old_attrs = termios.tcgetattr(fd)
     new_attrs = list(old_attrs)
-    new_attrs[3] |= (termios.ECHO | termios.ICANON)
+    new_attrs[3] |= termios.ECHO | termios.ICANON
     termios.tcsetattr(fd, termios.TCSANOW, new_attrs)
     try:
         return input(prompt)
@@ -693,7 +679,7 @@ def _cooked_input(prompt: str) -> str:
 def _atomic_json_write(filepath: str, data: dict) -> None:
     """Atomically write JSON data to file via write-to-new + rename."""
     tmp_path = os.path.splitext(filepath)[0] + ".json.new"
-    with open(tmp_path, "w") as f:
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, sort_keys=True)
     os.rename(tmp_path, filepath)
 
@@ -740,7 +726,7 @@ def _build_session_fingerprint(
     return result
 
 
-def _save_fingerprint_data(
+def _save_fingerprint_data(  # pylint: disable=too-many-locals,too-many-branches,too-complex
     writer,
     probe_results: Dict[str, Dict[str, Any]],
     probe_time: float,
@@ -820,7 +806,7 @@ def _save_fingerprint_data(
 
     if os.path.exists(filepath):
         try:
-            with open(filepath) as f:
+            with open(filepath, encoding="utf-8") as f:
                 data = json.load(f)
             data["telnet-probe"]["session_data"] = session_fp
             data["sessions"].append(session_entry)
@@ -898,12 +884,14 @@ async def fingerprinting_server_shell(
     :param reader: TelnetReader instance.
     :param writer: TelnetWriter instance.
     """
+    # pylint: disable=import-outside-toplevel,redefined-outer-name
     # std imports
     import sys
 
     # local
     from .server_pty_shell import pty_shell
 
+    writer = cast(TelnetWriterUnicode, writer)
     probe_results, probe_time = await _run_probe(writer, verbose=False)
 
     # Switch syncterm to Topaz (Amiga) font, just for fun why not
@@ -926,10 +914,13 @@ async def fingerprinting_server_shell(
 
     if filepath is not None:
         post_script = FINGERPRINT_POST_SCRIPT or "telnetlib3.fingerprinting_display"
-        await pty_shell(reader, writer, sys.executable,
-                        ["-W", "ignore::RuntimeWarning:runpy",
-                         "-m", post_script, str(filepath)],
-                        raw_mode=True)
+        await pty_shell(
+            reader,
+            writer,
+            sys.executable,
+            ["-W", "ignore::RuntimeWarning:runpy", "-m", post_script, str(filepath)],
+            raw_mode=True,
+        )
     else:
         writer.close()
 
@@ -950,13 +941,16 @@ def fingerprinting_post_script(filepath: str) -> None:
     :param filepath: Path to the saved fingerprint JSON file.
     """
     # local
+    # pylint: disable-next=import-outside-toplevel,cyclic-import
     from .fingerprinting_display import fingerprinting_post_script as _fps
+
     _fps(filepath)
 
 
 if __name__ == "__main__":
     # std imports
     import sys
+
     if len(sys.argv) != 2:
         print(f"Usage: python -m {__name__} <filepath>", file=sys.stderr)
         sys.exit(1)

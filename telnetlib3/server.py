@@ -11,6 +11,8 @@ variables, terminal type name, and to automatically close connections clients
 after an idle period.
 """
 
+from __future__ import annotations
+
 # std imports
 import os
 import codecs
@@ -19,13 +21,24 @@ import socket
 import asyncio
 import logging
 import argparse
-from typing import Any, Callable, Dict, List, Optional, NamedTuple, Sequence, Tuple, Type, Union
+from typing import (
+    Any,
+    Dict,
+    List,
+    Type,
+    Tuple,
+    Union,
+    Callable,
+    Optional,
+    Sequence,
+    NamedTuple,
+)
 
 # local
 from . import accessories, server_base
+from .telopt import name_commands
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
-from .telopt import name_commands
 
 # Check if PTY support is available (Unix-only modules: pty, termios, fcntl)
 try:
@@ -55,7 +68,7 @@ class CONFIG(NamedTuple):
     timeout: int = 300
     connect_maxwait: float = 1.5
     pty_exec: Optional[str] = None
-    pty_args: Optional[str] = None
+    pty_args: Optional[List[str]] = None
     pty_raw: bool = False
     robot_check: bool = False
     pty_fork_limit: int = 0
@@ -115,10 +128,10 @@ class TelnetServer(server_base.BaseServer):
             writer_factory_encoding=writer_factory_encoding,
         )
         self._environ_requested = False
-        self.waiter_encoding = asyncio.Future()
+        self.waiter_encoding: asyncio.Future[str] = asyncio.Future()
         self._tasks.append(self.waiter_encoding)
         self._ttype_count = 1
-        self._timer = None
+        self._timer: Optional[asyncio.TimerHandle] = None
         self._extra.update(
             {
                 "term": term,
@@ -142,6 +155,7 @@ class TelnetServer(server_base.BaseServer):
         )
 
         super().connection_made(transport)
+        assert self.writer is not None
 
         # begin timeout timer
         self.set_timeout()
@@ -176,6 +190,7 @@ class TelnetServer(server_base.BaseServer):
         from .telopt import DO, TTYPE  # pylint: disable=import-outside-toplevel
 
         super().begin_negotiation()
+        assert self.writer is not None
         self.writer.iac(DO, TTYPE)
 
     def begin_advanced_negotiation(self) -> None:
@@ -198,6 +213,7 @@ class TelnetServer(server_base.BaseServer):
         )
 
         super().begin_advanced_negotiation()
+        assert self.writer is not None
         self.writer.iac(WILL, SGA)
         self.writer.iac(WILL, ECHO)
         self.writer.iac(WILL, BINARY)
@@ -217,6 +233,7 @@ class TelnetServer(server_base.BaseServer):
             NEW_ENVIRON,
         )
 
+        assert self.writer is not None
         # If TTYPE cycle stalled or client refused TTYPE, trigger
         # deferred NEW_ENVIRON negotiation now.  Only when advanced
         # negotiation is active -- a raw TCP client that WONTs TTYPE
@@ -245,15 +262,13 @@ class TelnetServer(server_base.BaseServer):
             and self.writer.pending_option[SB + NEW_ENVIRON]
         )
         waiting_for_charset = (
-            SB + CHARSET in self.writer.pending_option
-            and self.writer.pending_option[SB + CHARSET]
+            SB + CHARSET in self.writer.pending_option and self.writer.pending_option[SB + CHARSET]
         )
 
         if waiting_for_environ or waiting_for_charset:
             if final:
                 logger.warning(
-                    "Waiting for critical subnegotiation:"
-                    " environ=%s, charset=%s",
+                    "Waiting for critical subnegotiation: environ=%s, charset=%s",
                     waiting_for_environ,
                     waiting_for_charset,
                 )
@@ -301,7 +316,7 @@ class TelnetServer(server_base.BaseServer):
         self,
         outgoing: Optional[bool] = None,
         incoming: Optional[bool] = None,
-    ) -> str:
+    ) -> Union[str, bool]:
         """
         Return encoding for the given stream direction.
 
@@ -322,6 +337,7 @@ class TelnetServer(server_base.BaseServer):
             )
 
         # may we encode in the direction indicated?
+        assert self.writer is not None
         _outgoing_only = outgoing and not incoming
         _incoming_only = not outgoing and incoming
         _bidirectional = outgoing and incoming
@@ -383,11 +399,10 @@ class TelnetServer(server_base.BaseServer):
         ``duration` value of ``0``.
         """
         logger.debug("Timeout after %1.2fs", self.idle)
-        # try to write timeout using encoding,
-        try:
+        assert self.writer is not None
+        if isinstance(self.writer, TelnetWriterUnicode):
             self.writer.write("\r\nTimeout.\r\n")
-        except TypeError:
-            # unless server was started with encoding=False, we must send as binary!
+        else:
             self.writer.write(b"\r\nTimeout.\r\n")
         self.timeout_connection()
 
@@ -543,6 +558,7 @@ class TelnetServer(server_base.BaseServer):
 
     def on_ttype(self, ttype: str) -> None:
         """Callback for TTYPE response, :rfc:`930`."""
+        assert self.writer is not None
         # TTYPE may be requested multiple times, we honor this system and
         # attempt to cause the client to cycle, as their first response may
         # not be their most significant. All responses held as 'ttype{n}',
@@ -579,7 +595,9 @@ class TelnetServer(server_base.BaseServer):
             val = self.get_extra_info("ttype2")
             logger.debug(
                 "ttype cycle stop at %s: %s, using %s from ttype2.",
-                key, ttype, val,
+                key,
+                ttype,
+                val,
             )
             self._extra["TERM"] = val
             self._negotiate_environ()
@@ -623,11 +641,13 @@ class TelnetServer(server_base.BaseServer):
 
         if ttype1 == "ANSI" and ttype2 == "VT100":
             logger.info(
-                "skipping NEW_ENVIRON for Microsoft telnet"
-                " (ttype1=%r, ttype2=%r)", ttype1, ttype2,
+                "skipping NEW_ENVIRON for Microsoft telnet (ttype1=%r, ttype2=%r)",
+                ttype1,
+                ttype2,
             )
             return
 
+        assert self.writer is not None
         self.writer.iac(DO, NEW_ENVIRON)
 
     def _check_encoding(self):
@@ -635,6 +655,7 @@ class TelnetServer(server_base.BaseServer):
         # local
         from .telopt import DO, SB, BINARY, CHARSET  # pylint: disable=import-outside-toplevel
 
+        assert self.writer is not None
         # Check if we need to request client to use BINARY mode for client-to-server communication
         if (
             self.writer.outbinary
@@ -675,6 +696,7 @@ class Server:
 
     def close(self) -> None:
         """Close the server, stop accepting new connections, and close all clients."""
+        assert self._server is not None
         self._server.close()
         # Close all connected client transports
         for protocol in list(self._protocols):
@@ -684,6 +706,7 @@ class Server:
 
     async def wait_closed(self) -> None:
         """Wait until the server and all client connections are closed."""
+        assert self._server is not None
         await self._server.wait_closed()
         # Yield to event loop for pending close callbacks
         await asyncio.sleep(0)
@@ -693,10 +716,12 @@ class Server:
     @property
     def sockets(self) -> Optional[Tuple["socket.socket", ...]]:
         """Return list of socket objects the server is listening on."""
+        assert self._server is not None
         return self._server.sockets
 
     def is_serving(self) -> bool:
         """Return True if the server is accepting new connections."""
+        assert self._server is not None
         return self._server.is_serving()
 
     @property
@@ -889,6 +914,7 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
     telnet_server = Server(None)
 
     def factory() -> asyncio.Protocol:
+        protocol: asyncio.Protocol
         if issubclass(protocol_factory, TelnetServer):
             protocol = protocol_factory(
                 shell=shell,
@@ -993,7 +1019,7 @@ def parse_server_args() -> Dict[str, Any]:
             action="store_true",
             default=_config.pty_raw,
             help="raw mode for --pty-exec: disable PTY echo for programs that "
-                 "handle their own terminal I/O (curses, blessed, ucs-detect)",
+            "handle their own terminal I/O (curses, blessed, ucs-detect)",
         )
     parser.add_argument(
         "--robot-check",
@@ -1016,8 +1042,8 @@ def parse_server_args() -> Dict[str, Any]:
         action="store_true",
         default=_config.never_send_ga,
         help="never send IAC GA (Go-Ahead). Default sends GA when SGA is "
-             "not negotiated, which is correct for MUD clients but may "
-             "confuse some other clients.",
+        "not negotiated, which is correct for MUD clients but may "
+        "confuse some other clients.",
     )
     result = vars(parser.parse_args(argv))
     result["pty_args"] = pty_args if PTY_SUPPORT else None
@@ -1040,7 +1066,7 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
     timeout: int = _config.timeout,
     connect_maxwait: float = _config.connect_maxwait,
     pty_exec: Optional[str] = _config.pty_exec,
-    pty_args: Optional[str] = _config.pty_args,
+    pty_args: Optional[List[str]] = _config.pty_args,
     pty_raw: bool = _config.pty_raw,
     robot_check: bool = _config.robot_check,
     pty_fork_limit: int = _config.pty_fork_limit,
@@ -1103,8 +1129,10 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
                     if counter:
                         counter.release()
             except (ConnectionResetError, BrokenPipeError, EOFError):
-                logger.debug("Connection lost in guarded_shell: %s",
-                             writer.get_extra_info("peername", "unknown"))
+                logger.debug(
+                    "Connection lost in guarded_shell: %s",
+                    writer.get_extra_info("peername", "unknown"),
+                )
 
         shell = guarded_shell
 

@@ -1,13 +1,16 @@
 """Accessory functions."""
 
+from __future__ import annotations
+
 # std imports
 import shlex
 import asyncio
 import logging
 import importlib
-from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, Union, Mapping, Callable, Optional
 
 if TYPE_CHECKING:  # pragma: no cover
+    # local
     from .stream_reader import TelnetReader, TelnetReaderUnicode
 
 __all__ = (
@@ -97,7 +100,7 @@ def make_logger(
     """Create and return simple logger for given arguments."""
     lvl = getattr(logging, loglevel.upper())
 
-    _cfg = {"format": logfmt}
+    _cfg: Dict[str, Any] = {"format": logfmt}
     if logfile:
         _cfg["filename"] = logfile
     logging.basicConfig(**_cfg)

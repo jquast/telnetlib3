@@ -1,9 +1,11 @@
 """Telnet server shell implementations."""
 
+from __future__ import annotations
+
 # std imports
 import types
 import asyncio
-from typing import Union
+from typing import Union, cast
 
 # local
 from . import slc, telopt, accessories
@@ -41,16 +43,17 @@ async def filter_ansi(reader, _writer):
 __all__ = ("telnet_server_shell",)
 
 
-async def telnet_server_shell(
+async def telnet_server_shell(  # pylint: disable=too-complex,too-many-branches,too-many-statements
     reader: Union[TelnetReader, TelnetReaderUnicode],
     writer: Union[TelnetWriter, TelnetWriterUnicode],
-) -> None:  # pylint: disable=too-complex,too-many-branches,too-many-statements
+) -> None:
     """
     A default telnet shell, appropriate for use with telnetlib3.create_server.
 
     This shell provides a very simple REPL, allowing introspection and state toggling of the
     connected client session.
     """
+    writer = cast(TelnetWriterUnicode, writer)
     linereader = readline(reader, writer)
     linereader.send(None)
 
@@ -123,9 +126,8 @@ async def telnet_server_shell(
                 do_close = command.split()[4].lower() == "close"
             except IndexError:
                 do_close = False
-            writer.write(
-                f"kb_limit={kb_limit}, delay={delay}, drain={drain}, do_close={do_close}:\r\n"
-            )
+            msg = f"kb_limit={kb_limit}, delay={delay}, drain={drain}, do_close={do_close}:\r\n"
+            writer.write(msg)
             for lineout in character_dump(kb_limit):
                 if writer.is_closing():
                     break

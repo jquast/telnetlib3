@@ -186,13 +186,16 @@ def _make_server():
     return server
 
 
-@pytest.mark.parametrize("ttype1,ttype2,expect_skip", [
-    ("ANSI", "VT100", True),
-    ("ANSI", "ANSI", False),
-    ("ansi", "vt100", False),
-    ("xterm", "xterm", False),
-    ("xterm", "xterm-256color", False),
-])
+@pytest.mark.parametrize(
+    "ttype1,ttype2,expect_skip",
+    [
+        ("ANSI", "VT100", True),
+        ("ANSI", "ANSI", False),
+        ("ansi", "vt100", False),
+        ("xterm", "xterm", False),
+        ("xterm", "xterm-256color", False),
+    ],
+)
 async def test_negotiate_environ_ms_telnet(ttype1, ttype2, expect_skip):
     """NEW_ENVIRON is skipped for Microsoft telnet (ANSI + VT100)."""
     # local

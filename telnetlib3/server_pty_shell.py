@@ -5,6 +5,8 @@ This module provides the ability to spawn PTY-connected programs (bash, tmux, ne
 each telnet connection, with proper terminal negotiation forwarding.
 """
 
+from __future__ import annotations
+
 # std imports
 import os
 import pty
@@ -18,7 +20,7 @@ import struct
 import asyncio
 import logging
 import termios
-from typing import Awaitable, Callable, List, Optional, Union
+from typing import List, Union, Callable, Optional, Awaitable
 
 # local
 from .telopt import ECHO, NAWS, WONT
@@ -549,7 +551,7 @@ async def _wait_for_terminal_info(writer, timeout=2.0):
         await asyncio.sleep(0.1)
 
 
-async def pty_shell(
+async def pty_shell(  # pylint: disable=too-many-positional-arguments
     reader: Union[TelnetReader, TelnetReaderUnicode],
     writer: Union[TelnetWriter, TelnetWriterUnicode],
     program: str,
@@ -582,8 +584,7 @@ async def pty_shell(
         writer.iac(WONT, ECHO)
         await writer.drain()
 
-    session = PTYSession(reader, writer, program, args, preexec_fn=preexec_fn,
-                         raw_mode=raw_mode)
+    session = PTYSession(reader, writer, program, args, preexec_fn=preexec_fn, raw_mode=raw_mode)
     try:
         session.start()
         await session.run()
@@ -628,7 +629,6 @@ def make_pty_shell(
     """
 
     async def shell(reader, writer):
-        await pty_shell(reader, writer, program, args, preexec_fn=preexec_fn,
-                        raw_mode=raw_mode)
+        await pty_shell(reader, writer, program, args, preexec_fn=preexec_fn, raw_mode=raw_mode)
 
     return shell

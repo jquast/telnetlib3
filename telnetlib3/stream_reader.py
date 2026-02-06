@@ -1,5 +1,7 @@
 """Module provides class TelnetReader and TelnetReaderUnicode."""
 
+from __future__ import annotations
+
 # std imports
 import re
 import sys
@@ -7,7 +9,7 @@ import codecs
 import asyncio
 import logging
 import warnings
-from typing import Callable, Optional, Union
+from typing import Callable, Optional
 from asyncio import format_helpers
 
 __all__ = (
@@ -40,8 +42,8 @@ class TelnetReader:
         self._buffer = bytearray()
         self._eof = False  # Whether we're done.
         self._waiter = None  # A future used by _wait_for_data()
-        self._exception = None
-        self._transport = None
+        self._exception: Optional[Exception] = None
+        self._transport: Optional[asyncio.BaseTransport] = None
         self._paused = False
         try:
             loop = asyncio.get_running_loop()
@@ -136,7 +138,7 @@ class TelnetReader:
 
         if self._transport is not None and not self._paused and len(self._buffer) > 2 * self._limit:
             try:
-                self._transport.pause_reading()
+                self._transport.pause_reading()  # type: ignore[attr-defined]
             except NotImplementedError:
                 # The transport can't be paused.
                 # We'll just have to buffer all data.
@@ -330,9 +332,9 @@ class TelnetReader:
             # raise an exception with the partial data. This is checked after
             # searching the buffer, as the last received chunk might complete the pattern.
             if self._eof:
-                chunk = bytes(self._buffer)
+                partial = bytes(self._buffer)
                 self._buffer.clear()
-                raise asyncio.IncompleteReadError(chunk, None)
+                raise asyncio.IncompleteReadError(partial, None)
 
             # Wait for more data to arrive since the pattern was not found and
             # we are not at EOF.
@@ -596,10 +598,9 @@ class TelnetReaderUnicode(TelnetReader):
         encoding = self.fn_encoding(incoming=True)
 
         # late-binding,
-        # pylint: disable=protected-access
-        if self._decoder is None or encoding != self._decoder._encoding:
+        if self._decoder is None or encoding != getattr(self._decoder, "_encoding", ""):
             self._decoder = codecs.getincrementaldecoder(encoding)(errors=self.encoding_errors)
-            self._decoder._encoding = encoding
+            setattr(self._decoder, "_encoding", encoding)
 
         return self._decoder.decode(buf, final)
 
@@ -670,12 +671,14 @@ class TelnetReaderUnicode(TelnetReader):
         if self._exception is not None:
             raise self._exception
 
-        blocks = []
+        blocks: list[str] = []
         while n > 0:
             block = await self.read(n)
             if not block:
                 partial = "".join(blocks)
-                raise asyncio.IncompleteReadError(partial, len(partial) + n)
+                raise asyncio.IncompleteReadError(
+                    partial, len(partial) + n  # type: ignore[arg-type]
+                )
             blocks.append(block)
             n -= len(block)
 

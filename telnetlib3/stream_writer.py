@@ -1,14 +1,20 @@
 """Module provides :class:`TelnetWriter` and :class:`TelnetWriterUnicode`."""
 
-# pylint: disable=too-many-lines
-# pylint: disable=duplicate-code
+from __future__ import annotations
 
 # std imports
 import struct
 import asyncio
 import logging
 import collections
-from typing import Any, Callable, Dict, Optional, Sequence, Set
+from typing import TYPE_CHECKING, Any, Dict, Callable, Optional, Sequence
+
+# pylint: disable=too-many-lines
+# pylint: disable=duplicate-code
+
+
+if TYPE_CHECKING:  # pragma: no cover
+    from .stream_reader import TelnetReader
 
 # local
 from . import slc
@@ -105,7 +111,7 @@ class TelnetWriter:
 
     #: Whether the last byte received by :meth:`~.feed_byte` begins an IAC
     #: command sequence.
-    cmd_received = None
+    cmd_received: bytes | tuple[bytes, bytes] | bool | None = None
 
     #: Whether the last byte received by :meth:`~.feed_byte` is a matching
     #: special line character value, if negotiated.
@@ -126,8 +132,8 @@ class TelnetWriter:
 
     def __init__(
         self,
-        transport: asyncio.BaseTransport,
-        protocol: asyncio.Protocol,
+        transport: asyncio.Transport,
+        protocol: Any,
         *,
         client: bool = False,
         server: bool = False,
@@ -166,7 +172,7 @@ class TelnetWriter:
                 reader,
             )
         self._reader = reader
-        self._closed_fut = None
+        self._closed_fut: Optional[asyncio.Future[Any]] = None
 
         if not any((client, server)) or all((client, server)):
             raise TypeError("keyword arguments `client', and `server' are mutually exclusive.")
@@ -174,7 +180,7 @@ class TelnetWriter:
         self.log = logging.getLogger(__name__)
 
         #: List of (predicate, future) tuples for wait_for functionality
-        self._waiters = []
+        self._waiters: list[tuple[Callable[[], bool], asyncio.Future[bool]]] = []
 
         #: Dictionary of telnet option byte(s) that follow an
         #: IAC-DO or IAC-DONT command, and contains a value of ``True``
@@ -200,10 +206,10 @@ class TelnetWriter:
         self.rejected_do: set = set()
 
         #: Sub-negotiation buffer
-        self._sb_buffer = collections.deque()
+        self._sb_buffer: collections.deque[bytes] = collections.deque()
 
         #: SLC buffer
-        self._slc_buffer = collections.deque()
+        self._slc_buffer: collections.deque[bytes] = collections.deque()
 
         #: SLC Tab (SLC Functions and their support level, and ascii value)
         self.slctab = slc.generate_slctab(self.default_slc_tab)
@@ -217,7 +223,7 @@ class TelnetWriter:
         # Set default callback handlers to local methods.  A base protocol
         # wishing not to wire any callbacks at all may simply allow our stream
         # to gracefully log and do nothing about in most cases.
-        self._iac_callback = {}
+        self._iac_callback: dict[bytes, Callable[..., Any]] = {}
         for iac_cmd, key in (
             (BRK, "brk"),
             (IP, "ip"),
@@ -236,7 +242,7 @@ class TelnetWriter:
         ):
             self.set_iac_callback(cmd=iac_cmd, func=getattr(self, f"handle_{key}"))
 
-        self._slc_callback = {}
+        self._slc_callback: dict[bytes, Callable[..., Any]] = {}
         for slc_cmd, key in (
             (slc.SLC_SYNCH, "dm"),
             (slc.SLC_BRK, "brk"),
@@ -257,7 +263,7 @@ class TelnetWriter:
         ):
             self.set_slc_callback(slc_byte=slc_cmd, func=getattr(self, f"handle_{key}"))
 
-        self._ext_callback = {}
+        self._ext_callback: dict[bytes, Callable[..., Any]] = {}
         for ext_cmd, key in (
             (LOGOUT, "logout"),
             (SNDLOC, "sndloc"),
@@ -270,7 +276,7 @@ class TelnetWriter:
         ):
             self.set_ext_callback(cmd=ext_cmd, func=getattr(self, f"handle_{key}"))
 
-        self._ext_send_callback = {}
+        self._ext_send_callback: dict[bytes, Callable[..., Any]] = {}
         for ext_cmd, key in (
             (TTYPE, "ttype"),
             (TSPEED, "tspeed"),
@@ -318,7 +324,7 @@ class TelnetWriter:
         self._slc_callback.clear()
         self._iac_callback.clear()
         self._protocol = None
-        self._transport = None
+        self._transport = None  # type: ignore[assignment]
         self._connection_closed = True
         # Signal that the connection is closed
         if self._closed_fut is not None and not self._closed_fut.done():
@@ -417,9 +423,7 @@ class TelnetWriter:
         finally:
             self._waiters = [(c, f) for c, f in self._waiters if f is not fut]
 
-    async def wait_for_condition(
-        self, predicate: Callable[["TelnetWriter"], bool]
-    ) -> bool:
+    async def wait_for_condition(self, predicate: Callable[["TelnetWriter"], bool]) -> bool:
         """
         Wait for a custom condition to be met.
 
@@ -611,6 +615,7 @@ class TelnetWriter:
 
         elif self.cmd_received:
             # parse 3rd and final byte of IAC DO, DONT, WILL, WONT.
+            assert isinstance(self.cmd_received, bytes)
             cmd, opt = self.cmd_received, byte
             self.log.debug("recv IAC %s %s", name_command(cmd), name_command(opt))
             try:
@@ -662,6 +667,7 @@ class TelnetWriter:
             # Inform caller which SLC function occurred by this attribute.
             self.slc_received = slc_name
             if callback:
+                assert slc_name is not None
                 self.log.debug(
                     "slc.snoop(%r): %s, callback is %s.",
                     byte,
@@ -775,7 +781,7 @@ class TelnetWriter:
     @property
     def is_oob(self) -> bool:
         """The previous byte should not be received by the API stream."""
-        return self.iac_received or self.cmd_received
+        return bool(self.iac_received or self.cmd_received)
 
     @property
     def linemode(self) -> slc.Linemode:
@@ -960,7 +966,7 @@ class TelnetWriter:
         codepages = self._ext_send_callback[CHARSET]()
 
         sep = " "
-        response = collections.deque()
+        response: collections.deque[bytes] = collections.deque()
         response.extend([IAC, SB, CHARSET, REQUEST])
         response.extend([bytes(sep, "ascii")])
         response.extend([bytes(sep.join(codepages), "ascii")])
@@ -994,7 +1000,7 @@ class TelnetWriter:
             self.log.debug("cannot send SB NEW_ENVIRON SEND IS, request pending.")
             return False
 
-        response = collections.deque()
+        response: collections.deque[bytes] = collections.deque()
         response.extend([IAC, SB, NEW_ENVIRON, SEND])
 
         for env_key in request_list:
@@ -1051,9 +1057,7 @@ class TelnetWriter:
         self.log.debug("cannot send SB TTYPE SEND, request pending.")
         return False
 
-    def request_forwardmask(
-        self, fmask: Optional[slc.Forwardmask] = None
-    ) -> bool:
+    def request_forwardmask(self, fmask: Optional[slc.Forwardmask] = None) -> bool:
         """
         Request the client forward their terminal control characters.
 
@@ -1090,7 +1094,7 @@ class TelnetWriter:
             return True
         return False
 
-    def send_lineflow_mode(self) -> None:
+    def send_lineflow_mode(self) -> Optional[bool]:
         """
         Send LFLOW mode sub-negotiation, :rfc:`1372`.
 
@@ -1270,9 +1274,7 @@ class TelnetWriter:
 
     # public Special Line Mode (SLC) callbacks
     #
-    def set_slc_callback(
-        self, slc_byte: bytes, func: Callable[..., Any]
-    ) -> None:
+    def set_slc_callback(self, slc_byte: bytes, func: Callable[..., Any]) -> None:
         """
         Register ``func`` as callable for receipt of ``slc_byte``.
 
@@ -1317,9 +1319,7 @@ class TelnetWriter:
 
     # public Telnet extension callbacks
     #
-    def set_ext_send_callback(
-        self, cmd: bytes, func: Callable[..., Any]
-    ) -> None:
+    def set_ext_send_callback(self, cmd: bytes, func: Callable[..., Any]) -> None:
         """
         Register callback for inquires of sub-negotiation of ``cmd``.
 
@@ -1355,9 +1355,7 @@ class TelnetWriter:
         assert callable(func), "Argument func must be callable"
         self._ext_send_callback[cmd] = func
 
-    def set_ext_callback(
-        self, cmd: bytes, func: Callable[..., Any]
-    ) -> None:
+    def set_ext_callback(self, cmd: bytes, func: Callable[..., Any]) -> None:
         """
         Register ``func`` as callback for receipt of ``cmd`` negotiation.
 
@@ -2084,8 +2082,7 @@ class TelnetWriter:
         assert len(buf) == 4, f"bad NAWS length {len(buf)}: {buf!r}"
         if not self.remote_option.enabled(NAWS):
             self.log.info(
-                "received IAC SB NAWS without receipt of IAC WILL NAWS"
-                " -- assuming NAWS-enabled"
+                "received IAC SB NAWS without receipt of IAC WILL NAWS -- assuming NAWS-enabled"
             )
             self.remote_option[NAWS] = True
         # note a similar formula:
@@ -2523,25 +2520,26 @@ class TelnetWriter:
             if not self.remote_option.enabled(LINEMODE):
                 self.log.info(
                     "receive and accept LMODE_FORWARDMASK %s without LINEMODE enabled",
-                    name_command(cmd))
+                    name_command(cmd),
+                )
             if cmd in (DO, DONT):
                 self.log.warning(
-                    "cannot recv %s LMODE_FORWARDMASK on server end",
-                    name_command(cmd))
+                    "cannot recv %s LMODE_FORWARDMASK on server end", name_command(cmd)
+                )
                 return
         if self.client:
             if not self.local_option.enabled(LINEMODE):
                 self.log.info(
                     "receive and accept LMODE_FORWARDMASK %s without LINEMODE enabled",
-                    name_command(cmd))
+                    name_command(cmd),
+                )
             if cmd in (WILL, WONT):
                 self.log.warning(
-                    "cannot recv %s LMODE_FORWARDMASK on client end",
-                    name_command(cmd))
+                    "cannot recv %s LMODE_FORWARDMASK on client end", name_command(cmd)
+                )
                 return
             if cmd == DONT and len(buf) > 0:
-                self.log.warning(
-                    "Illegal bytes follow DONT LMODE_FORWARDMASK: %r", buf)
+                self.log.warning("Illegal bytes follow DONT LMODE_FORWARDMASK: %r", buf)
                 return
             if cmd == DO and len(buf) == 0:
                 self.log.warning("bytes must follow DO LMODE_FORWARDMASK")
@@ -2607,8 +2605,8 @@ class TelnetWriterUnicode(TelnetWriter):  # pylint: disable=abstract-method
 
     def __init__(
         self,
-        transport: asyncio.BaseTransport,
-        protocol: asyncio.Protocol,
+        transport: asyncio.Transport,
+        protocol: Any,
         fn_encoding: Callable[..., str],
         *,
         encoding_errors: str = "strict",
@@ -2620,8 +2618,11 @@ class TelnetWriterUnicode(TelnetWriter):  # pylint: disable=abstract-method
         self.fn_encoding = fn_encoding
         self.encoding_errors = encoding_errors
         super().__init__(
-            transport, protocol,
-            client=client, server=server, reader=reader,
+            transport,
+            protocol,
+            client=client,
+            server=server,
+            reader=reader,
         )
 
     def encode(self, string: str, errors: Optional[str] = None) -> bytes:
@@ -2633,7 +2634,9 @@ class TelnetWriterUnicode(TelnetWriter):  # pylint: disable=abstract-method
             ``None`` (default), value of class initializer keyword argument,
             ``encoding_errors``.
 
-        .. note: though a unicode interface, when ``outbinary`` mode has not
+        .. note::
+
+            Though a unicode interface, when ``outbinary`` mode has not
             been protocol negotiated, ``fn_encoding`` strictly enforces 7-bit
             ASCII range (ordinal byte values less than 128), as a strict
             compliance of the telnet RFC.
@@ -2641,9 +2644,9 @@ class TelnetWriterUnicode(TelnetWriter):  # pylint: disable=abstract-method
         encoding = self.fn_encoding(outgoing=True)
         return bytes(string, encoding, errors or self.encoding_errors)
 
-    def write(  # type: ignore[override]
+    def write(  # type: ignore[override]  # pylint: disable=arguments-renamed
         self, string: str, errors: Optional[str] = None
-    ) -> None:  # pylint: disable=arguments-renamed
+    ) -> None:
         """
         Write unicode string to transport, using protocol-preferred encoding.
 
@@ -2673,9 +2676,9 @@ class TelnetWriterUnicode(TelnetWriter):  # pylint: disable=abstract-method
         """
         self.write(string="".join(lines), errors=errors)
 
-    def echo(  # type: ignore[override]
+    def echo(  # type: ignore[override]  # pylint: disable=arguments-renamed
         self, string: str, errors: Optional[str] = None
-    ) -> None:  # pylint: disable=arguments-renamed
+    ) -> None:
         """
         Conditionally write ``string`` to transport when "remote echo" enabled.
 

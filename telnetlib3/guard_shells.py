@@ -12,11 +12,13 @@ These shells are used when normal shell access is denied due to connection limit
 failed robot checks.
 """
 
+from __future__ import annotations
+
 # std imports
 import re
 import asyncio
 import logging
-from typing import Union
+from typing import Union, cast
 
 # local
 from .server_shell import readline2
@@ -189,7 +191,7 @@ async def _ask_question(reader, writer, prompt, timeout=10.0):
         if line.strip():
             return line
         # Blank input - repeat prompt
-        writer.write('\r\n')
+        writer.write("\r\n")
 
 
 async def robot_shell(
@@ -201,14 +203,13 @@ async def robot_shell(
 
     Asks philosophical questions, logs responses, and disconnects.
     """
+    writer = cast(TelnetWriterUnicode, writer)
     peername = writer.get_extra_info("peername")
     logger.info("robot_shell: connection from %s", peername)
 
     answers = []
     try:
-        line1 = await _ask_question(
-            reader, writer, "Do robots dream of electric sheep? [yn] "
-        )
+        line1 = await _ask_question(reader, writer, "Do robots dream of electric sheep? [yn] ")
         if line1 is None:
             logger.info("robot_shell: timeout waiting for response")
             return
@@ -238,6 +239,7 @@ async def busy_shell(
 
     Displays busy message, logs any input, and disconnects.
     """
+    writer = cast(TelnetWriterUnicode, writer)
     logger.info(
         "busy_shell: connection from %s (limit reached)",
         writer.get_extra_info("peername"),

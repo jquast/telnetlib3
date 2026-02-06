@@ -179,11 +179,7 @@ async def test_naws_without_will(bind_host, unused_tcp_port):
         connect_maxwait=0.05,
     ):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
-            writer.write(
-                IAC + SB + NAWS
-                + struct.pack("!HH", given_cols, given_rows)
-                + IAC + SE
-            )
+            writer.write(IAC + SB + NAWS + struct.pack("!HH", given_cols, given_rows) + IAC + SE)
 
             srv_instance = await asyncio.wait_for(_waiter, 0.5)
             assert srv_instance.get_extra_info("cols") == given_cols

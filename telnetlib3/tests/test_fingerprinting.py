@@ -9,7 +9,7 @@ import pytest
 # local
 from telnetlib3 import fingerprinting as fps
 from telnetlib3 import fingerprinting_display as fpd
-from telnetlib3.tests.accessories import (  # noqa: F401
+from telnetlib3.tests.accessories import (  # noqa: F401  # pylint: disable=unused-import
     bind_host,
     create_server,
     open_connection,
@@ -110,10 +110,8 @@ class MockTerm:
 @pytest.mark.asyncio
 async def test_probe_client_capabilities():
     options = [(fps.BINARY, "BINARY", ""), (fps.SGA, "SGA", "")]
-    writer = MockWriter(will_options=[fps.BINARY],
-                        wont_options=[fps.SGA])
-    results = await fps.probe_client_capabilities(
-        writer, options=options, timeout=0.001)
+    writer = MockWriter(will_options=[fps.BINARY], wont_options=[fps.SGA])
+    results = await fps.probe_client_capabilities(writer, options=options, timeout=0.001)
     assert results["BINARY"]["status"] == "WILL"
     assert results["SGA"]["status"] == "WONT"
 
@@ -121,10 +119,8 @@ async def test_probe_client_capabilities():
 def test_save_fingerprint_data(tmp_path, monkeypatch):
     monkeypatch.setattr(fps, "DATA_DIR", str(tmp_path))
 
-    writer = MockWriter(extra={"peername": ("10.0.0.1", 9999),
-                               "TERM": "xterm"})
-    writer._protocol = MockProtocol(
-        {"TERM": "xterm", "ttype1": "xterm", "ttype2": "xterm-256"})
+    writer = MockWriter(extra={"peername": ("10.0.0.1", 9999), "TERM": "xterm"})
+    writer._protocol = MockProtocol({"TERM": "xterm", "ttype1": "xterm", "ttype2": "xterm-256"})
     probe = {
         "BINARY": {"status": "WILL", "opt": fps.BINARY},
         "SGA": {"status": "WONT", "opt": fps.SGA},
@@ -132,7 +128,7 @@ def test_save_fingerprint_data(tmp_path, monkeypatch):
     filepath = fps._save_fingerprint_data(writer, probe, 0.5)
     assert filepath is not None and Path(filepath).exists()
 
-    with open(filepath) as f:
+    with open(filepath, encoding="utf-8") as f:
         data = json.load(f)
 
     assert "telnet-probe" in data
@@ -152,8 +148,7 @@ def test_save_fingerprint_data(tmp_path, monkeypatch):
 def test_save_fingerprint_appends_session(tmp_path, monkeypatch):
     monkeypatch.setattr(fps, "DATA_DIR", str(tmp_path))
 
-    writer = MockWriter(extra={"peername": ("10.0.0.1", 9999),
-                               "TERM": "xterm"})
+    writer = MockWriter(extra={"peername": ("10.0.0.1", 9999), "TERM": "xterm"})
     writer._protocol = MockProtocol({"TERM": "xterm"})
     probe = {"BINARY": {"status": "WILL", "opt": fps.BINARY}}
 
@@ -161,7 +156,7 @@ def test_save_fingerprint_appends_session(tmp_path, monkeypatch):
     fp2 = fps._save_fingerprint_data(writer, probe, 0.5)
     assert fp1 == fp2
 
-    with open(fp2) as f:
+    with open(fp2, encoding="utf-8") as f:
         data = json.load(f)
     assert len(data["sessions"]) == 2
 
@@ -189,24 +184,25 @@ def test_protocol_hash_consistency():
     w2 = MockWriter(extra={"TERM": "xterm", "HOME": "/home/bob"})
     w2._protocol = MockProtocol({"HOME": "/home/bob"})
 
-    h1 = fps._hash_fingerprint(
-        fps._create_protocol_fingerprint(w1, probe))
-    h2 = fps._hash_fingerprint(
-        fps._create_protocol_fingerprint(w2, probe))
+    h1 = fps._hash_fingerprint(fps._create_protocol_fingerprint(w1, probe))
+    h2 = fps._hash_fingerprint(fps._create_protocol_fingerprint(w2, probe))
     assert h1 == h2
     assert len(h1) == 16
 
 
-@pytest.mark.parametrize("text,expected", [
-    ("Ghostty", "Ghostty"),
-    ("  Ghostty  ", "Ghostty"),
-    ("", None),
-    ("   ", None),
-    ("bad\x00name", None),
-    ("bad\x1bname", None),
-    ("bad\x7fname", None),
-    ("good name 123", "good name 123"),
-])
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("Ghostty", "Ghostty"),
+        ("  Ghostty  ", "Ghostty"),
+        ("", None),
+        ("   ", None),
+        ("bad\x00name", None),
+        ("bad\x1bname", None),
+        ("bad\x7fname", None),
+        ("good name 123", "good name 123"),
+    ],
+)
 def test_validate_suggestion(text, expected):
     assert fps._validate_suggestion(text) == expected
 
@@ -223,13 +219,11 @@ def test_prompt_stores_suggestions(tmp_path, monkeypatch):
     inputs = iter(["Ghostty", "GNU Telnet"])
     monkeypatch.setattr(fpd, "_cooked_input", lambda prompt: next(inputs))
 
-    fpd._prompt_fingerprint_identification(
-        MockTerm(), data, str(filepath), {}
-    )
+    fpd._prompt_fingerprint_identification(MockTerm(), data, str(filepath), {})
     assert data["suggestions"]["terminal-emulator"] == "Ghostty"
     assert data["suggestions"]["telnet-client"] == "GNU Telnet"
 
-    with open(filepath) as f:
+    with open(filepath, encoding="utf-8") as f:
         saved = json.load(f)
     assert saved["suggestions"]["terminal-emulator"] == "Ghostty"
 
@@ -246,13 +240,11 @@ def test_prompt_stores_revision(tmp_path, monkeypatch):
     inputs = iter(["Ghostty2", "inetutils-2.5"])
     monkeypatch.setattr(fpd, "_cooked_input", lambda prompt: next(inputs))
     names = {"aaa": "GNU Telnet", "bbbb": "Ghostty"}
-    fpd._prompt_fingerprint_identification(
-        MockTerm(), data, str(filepath), names
-    )
+    fpd._prompt_fingerprint_identification(MockTerm(), data, str(filepath), names)
     assert data["suggestions"]["terminal-emulator-revision"] == "Ghostty2"
     assert data["suggestions"]["telnet-client-revision"] == "inetutils-2.5"
 
-    with open(filepath) as f:
+    with open(filepath, encoding="utf-8") as f:
         saved = json.load(f)
     assert saved["suggestions"]["terminal-emulator-revision"] == "Ghostty2"
 
@@ -261,12 +253,13 @@ def test_prompt_stores_revision(tmp_path, monkeypatch):
 async def test_server_shell(monkeypatch):
     async def noop(_):
         pass
+
     monkeypatch.setattr(fps.asyncio, "sleep", noop)
     monkeypatch.setattr(fps, "DATA_DIR", None)
 
-    writer = MockWriter(extra={"peername": ("127.0.0.1", 12345),
-                               "TERM": "xterm"},
-                        will_options=[fps.BINARY])
+    writer = MockWriter(
+        extra={"peername": ("127.0.0.1", 12345), "TERM": "xterm"}, will_options=[fps.BINARY]
+    )
     await fps.fingerprinting_server_shell(MockReader([]), writer)
     assert writer._closing
 
@@ -399,6 +392,7 @@ def test_create_terminal_fingerprint():
 def test_terminal_fingerprint_hash_excludes_session_vars():
     # std imports
     import copy
+
     base = {
         "software_name": "foot",
         "software_version": "1.16.2",
@@ -435,13 +429,18 @@ def test_terminal_fingerprint_hash_excludes_session_vars():
 async def test_fingerprint_probe_integration(bind_host, unused_tcp_port):
     # std imports
     import asyncio
+
     async with create_server(
-        host=bind_host, port=unused_tcp_port,
-        shell=fps.fingerprinting_server_shell, connect_maxwait=0.5,
+        host=bind_host,
+        port=unused_tcp_port,
+        shell=fps.fingerprinting_server_shell,
+        connect_maxwait=0.5,
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port,
-            connect_minwait=0.2, connect_maxwait=0.5,
+            host=bind_host,
+            port=unused_tcp_port,
+            connect_minwait=0.2,
+            connect_maxwait=0.5,
         ) as (reader, writer):
             try:
                 await asyncio.wait_for(reader.read(100), timeout=1.0)
@@ -449,16 +448,19 @@ async def test_fingerprint_probe_integration(bind_host, unused_tcp_port):
                 pass
 
 
-@pytest.mark.parametrize("ttype1,ttype2,expected", [
-    ("ANSI", "VT100", True),
-    ("ANSI", "", True),
-    ("ANSI", None, True),
-    ("ansi", "vt100", True),
-    ("xterm", "xterm-256color", False),
-    ("ANSI", "xterm", False),
-    ("VT100", "ANSI", False),
-    ("TINTIN++", "xterm-ghostty", False),
-])
+@pytest.mark.parametrize(
+    "ttype1,ttype2,expected",
+    [
+        ("ANSI", "VT100", True),
+        ("ANSI", "", True),
+        ("ANSI", None, True),
+        ("ansi", "vt100", True),
+        ("xterm", "xterm-256color", False),
+        ("ANSI", "xterm", False),
+        ("VT100", "ANSI", False),
+        ("TINTIN++", "xterm-ghostty", False),
+    ],
+)
 def test_is_maybe_ms_telnet(ttype1, ttype2, expected):
     extra = {"peername": ("127.0.0.1", 12345)}
     if ttype1 is not None:
@@ -507,12 +509,15 @@ def _make_ttype_data(ttype_cycle):
     return {"telnet-probe": {"session_data": {"ttype_cycle": ttype_cycle}}}
 
 
-@pytest.mark.parametrize("ttype_cycle,expected_term", [
-    (["ANSI", "VT100", "VT52", "VTNT", "VTNT"], "ansi"),
-    (["ANSI", "ANSI"], "xterm-256color"),
-    (["xterm-256color", "xterm-256color"], "xterm-256color"),
-    ([], "xterm-256color"),
-])
+@pytest.mark.parametrize(
+    "ttype_cycle,expected_term",
+    [
+        (["ANSI", "VT100", "VT52", "VTNT", "VTNT"], "ansi"),
+        (["ANSI", "ANSI"], "xterm-256color"),
+        (["xterm-256color", "xterm-256color"], "xterm-256color"),
+        ([], "xterm-256color"),
+    ],
+)
 def test_setup_term_environ_ms_telnet(ttype_cycle, expected_term, monkeypatch):
     """_setup_term_environ overrides TERM to 'ansi' for MS telnet."""
     monkeypatch.setenv("TERM", "xterm-256color")
@@ -527,12 +532,15 @@ def test_setup_term_environ_no_ttype_cycle(monkeypatch):
     assert os.environ["TERM"] == "vt220"
 
 
-@pytest.mark.parametrize("probe,expected", [
-    ({"WILL": {"SGA": 3}}, False),
-    ({"WONT": {"SGA": 3}}, True),
-    ({"timeout": {"SGA": 3}}, True),
-    ({}, True),
-])
+@pytest.mark.parametrize(
+    "probe,expected",
+    [
+        ({"WILL": {"SGA": 3}}, False),
+        ({"WONT": {"SGA": 3}}, True),
+        ({"timeout": {"SGA": 3}}, True),
+        ({}, True),
+    ],
+)
 def test_client_requires_ga(probe, expected):
     """_client_requires_ga detects MUD clients that refused SGA."""
     data = {"telnet-probe": {"session_data": {"probe": probe}}}
@@ -565,7 +573,7 @@ def test_process_client_fingerprint_skips_ucs_detect_for_mud(monkeypatch, tmp_pa
 
     data = {"telnet-probe": {"session_data": {"probe": {"WONT": {"SGA": 3}}}}}
     filepath = str(tmp_path / "test.json")
-    with open(filepath, "w") as f:
+    with open(filepath, "w", encoding="utf-8") as f:
         json.dump(data, f)
 
     monkeypatch.setattr(fpd, "_setup_term_environ", lambda d: None)
@@ -574,4 +582,4 @@ def test_process_client_fingerprint_skips_ucs_detect_for_mud(monkeypatch, tmp_pa
         fpd._process_client_fingerprint(filepath, data)
     except (ImportError, AttributeError, TypeError):
         pass
-    assert ucs_called == []
+    assert not ucs_called
