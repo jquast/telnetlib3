@@ -919,7 +919,7 @@ def _normalize_color_hex(hex_color: str) -> str:
     )
 
     r, g, b = hex_to_rgb(hex_color)
-    return rgb_to_hex(r, g, b)
+    return str(rgb_to_hex(r, g, b))
 
 
 def _filter_terminal_detail(  # pylint: disable=too-complex,too-many-branches

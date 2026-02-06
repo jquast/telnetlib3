@@ -43,9 +43,7 @@ else:
             "ModeDef", ["iflag", "oflag", "cflag", "lflag", "ispeed", "ospeed", "cc"]
         )
 
-        def __init__(
-            self, telnet_writer: Union[TelnetWriter, TelnetWriterUnicode]
-        ) -> None:
+        def __init__(self, telnet_writer: Union[TelnetWriter, TelnetWriterUnicode]) -> None:
             self.telnet_writer = telnet_writer
             self._fileno = sys.stdin.fileno()
             self._istty = os.path.sameopenfile(0, 1)

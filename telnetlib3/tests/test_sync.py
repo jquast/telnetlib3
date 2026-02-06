@@ -595,9 +595,7 @@ def test_client_read_until_eof(bind_host, unused_tcp_port):
 
 def test_client_connect_timeout(bind_host, unused_tcp_port):
     """TelnetConnection connect_timeout raises ConnectionError on unreachable port."""
-    conn = TelnetConnection(
-        bind_host, unused_tcp_port, timeout=5, connect_timeout=0.1
-    )
+    conn = TelnetConnection(bind_host, unused_tcp_port, timeout=5, connect_timeout=0.1)
     with pytest.raises(ConnectionError):
         conn.connect()
 

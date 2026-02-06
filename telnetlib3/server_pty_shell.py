@@ -379,9 +379,7 @@ class PTYSession:
             telnet_task: asyncio.Task[Union[bytes, str]] = asyncio.create_task(
                 self.reader.read(4096)
             )
-            pty_task: asyncio.Task[bool] = asyncio.create_task(
-                pty_read_event.wait()
-            )
+            pty_task: asyncio.Task[bool] = asyncio.create_task(pty_read_event.wait())
 
             done, pending = await asyncio.wait(
                 {telnet_task, pty_task},

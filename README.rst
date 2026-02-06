@@ -29,7 +29,8 @@
 Introduction
 ============
 
-``telnetlib3`` is a feature-rich Telnet Server and Client and Protocol library for Python 3.9 and newer.
+``telnetlib3`` is a feature-rich Telnet Server and Client Protocol library
+for Python 3.9 and newer.
 
 This library supports both modern asyncio_ *and* legacy `Blocking API`_.
 

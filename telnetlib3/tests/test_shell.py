@@ -112,7 +112,7 @@ async def test_telnet_server_no_shell(bind_host, unused_tcp_port):
 
 async def test_telnet_server_given_shell(
     bind_host, unused_tcp_port
-):  # pylint: disable=too-many-locals
+):
     """Iterate all state-reading commands of default telnet_server_shell."""
     async with create_server(
         host=bind_host,

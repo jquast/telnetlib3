@@ -9,7 +9,7 @@ import pytest
 # local
 import telnetlib3
 import telnetlib3.stream_writer
-from telnetlib3.telopt import DO, IS, SB, SE, IAC, VAR, WILL, WONT, TTYPE, USERVAR, NEW_ENVIRON
+from telnetlib3.telopt import DO, IS, SB, SE, IAC, VAR, WILL, TTYPE, USERVAR, NEW_ENVIRON
 from telnetlib3.tests.accessories import (  # pylint: disable=unused-import; pylint: disable=unused-import,
     bind_host,
     create_server,

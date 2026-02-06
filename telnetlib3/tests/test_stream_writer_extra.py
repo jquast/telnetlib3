@@ -6,7 +6,7 @@ import collections
 import pytest
 
 # local
-from telnetlib3 import slc, client_base
+from telnetlib3 import slc
 from telnetlib3.telopt import (
     DO,
     IS,

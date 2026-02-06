@@ -500,8 +500,7 @@ async def open_connection(  # pylint: disable=too-many-locals
         )
     except asyncio.TimeoutError as exc:
         raise ConnectionError(
-            f"TCP connection to {host or 'localhost'}:{port}"
-            f" timed out after {connect_timeout}s"
+            f"TCP connection to {host or 'localhost'}:{port}" f" timed out after {connect_timeout}s"
         ) from exc
 
     await protocol._waiter_connected  # pylint: disable=protected-access
