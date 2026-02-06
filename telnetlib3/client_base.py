@@ -8,9 +8,12 @@ import asyncio
 import logging
 import weakref
 import datetime
+import types
 import traceback
 import collections
-from typing import Any, Union, Callable, Optional, cast
+from typing import Any, Type, Union, Callable, Optional, cast
+
+from ._types import ShellCallback
 
 # local
 from .telopt import theNULL, name_commands
@@ -38,15 +41,15 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     def __init__(  # pylint: disable=too-many-positional-arguments
         self,
-        shell: Optional[Callable] = None,
+        shell: Optional[ShellCallback] = None,
         encoding: Union[str, bool] = "utf8",
         encoding_errors: str = "strict",
         force_binary: bool = False,
         connect_minwait: float = 1.0,
         connect_maxwait: float = 4.0,
         limit: Optional[int] = None,
-        waiter_closed: Optional[asyncio.Future] = None,
-        _waiter_connected: Optional[asyncio.Future] = None,
+        waiter_closed: Optional[asyncio.Future[None]] = None,
+        _waiter_connected: Optional[asyncio.Future[None]] = None,
     ) -> None:
         """Class initializer."""
         super().__init__()
@@ -178,12 +181,13 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._waiter_connected.add_done_callback(self.begin_shell)
         asyncio.get_event_loop().call_soon(self.begin_negotiation)
 
-    def begin_shell(self, future: asyncio.Future) -> None:
+    def begin_shell(self, future: asyncio.Future[None]) -> None:
         """Start the shell coroutine after negotiation completes."""
         # Don't start shell if the connection was cancelled or errored
         if future.cancelled() or future.exception() is not None:
             return
         if self.shell is not None:
+            assert self.reader is not None and self.writer is not None
             coro = self.shell(self.reader, self.writer)
             if asyncio.iscoroutine(coro):
                 # When a shell is defined as a coroutine, we must ensure
@@ -478,9 +482,9 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     @staticmethod
     def _log_exception(
         logger: Callable[..., Any],
-        e_type: Any,
-        e_value: Any,
-        e_tb: Any,
+        e_type: Optional[Type[BaseException]],
+        e_value: Optional[BaseException],
+        e_tb: Optional[types.TracebackType],
     ) -> None:
         rows_tbk = [line for line in "\n".join(traceback.format_tb(e_tb)).split("\n") if line]
         rows_exc = [line.rstrip() for line in traceback.format_exception_only(e_type, e_value)]

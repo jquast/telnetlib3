@@ -42,6 +42,7 @@ __all__ = (
     "SLC_VARIABLE",
     "SLC_XON",
     "snoop",
+    "theNULL",
 )
 
 SLC_NOSUPPORT, SLC_CANTCHANGE, SLC_VARIABLE, SLC_DEFAULT = (
@@ -387,14 +388,14 @@ class Forwardmask:
         result: List[str] = []
         mrk_cont = "(...)"
 
-        def continuing():
-            return len(result) and result[-1] == mrk_cont
+        def continuing() -> bool:
+            return bool(len(result) and result[-1] == mrk_cont)
 
-        def is_last(mask):
+        def is_last(mask: int) -> bool:
             return mask == len(self.value) - 1
 
-        def same_as_last(row):
-            return len(result) and result[-1].endswith(row.split()[-1])
+        def same_as_last(row: str) -> bool:
+            return bool(len(result) and result[-1].endswith(row.split()[-1]))
 
         for mask, byte in enumerate(self.value):
             if byte == 0:

@@ -41,7 +41,7 @@ class TelnetReader:
         self._limit = limit
         self._buffer = bytearray()
         self._eof = False  # Whether we're done.
-        self._waiter = None  # A future used by _wait_for_data()
+        self._waiter: Optional[asyncio.Future[None]] = None
         self._exception: Optional[Exception] = None
         self._transport: Optional[asyncio.BaseTransport] = None
         self._paused = False
@@ -86,7 +86,7 @@ class TelnetReader:
             if not waiter.cancelled():
                 waiter.set_exception(exc)
 
-    def _wakeup_waiter(self):
+    def _wakeup_waiter(self) -> None:
         """Wakeup read*() functions waiting for data or EOF."""
         waiter = self._waiter
         if waiter is not None:
@@ -99,10 +99,11 @@ class TelnetReader:
         assert self._transport is None, "Transport already set"
         self._transport = transport
 
-    def _maybe_resume_transport(self):
+    def _maybe_resume_transport(self) -> None:
         if self._paused and len(self._buffer) <= self._limit:
             self._paused = False
-            self._transport.resume_reading()
+            assert self._transport is not None
+            self._transport.resume_reading()  # type: ignore[attr-defined]
 
     def feed_eof(self) -> None:
         """
@@ -147,7 +148,7 @@ class TelnetReader:
             else:
                 self._paused = True
 
-    async def _wait_for_data(self, func_name):
+    async def _wait_for_data(self, func_name: str) -> None:
         """
         Wait until feed_data() or feed_eof() is called.
 
@@ -169,7 +170,8 @@ class TelnetReader:
         # This is essential for readexactly(n) for case when n > self._limit.
         if self._paused:
             self._paused = False
-            self._transport.resume_reading()
+            assert self._transport is not None
+            self._transport.resume_reading()  # type: ignore[attr-defined]
 
         self._waiter = asyncio.get_running_loop().create_future()
         try:
@@ -265,12 +267,12 @@ class TelnetReader:
                 "Separator is found, but chunk is longer than limit", isep
             )
 
-        chunk = self._buffer[: isep + seplen]
+        result = bytes(self._buffer[: isep + seplen])
         del self._buffer[: isep + seplen]
         self._maybe_resume_transport()
-        return bytes(chunk)
+        return result
 
-    async def readuntil_pattern(self, pattern: re.Pattern) -> bytes:
+    async def readuntil_pattern(self, pattern: re.Pattern[bytes]) -> bytes:
         """
         Read data from the stream until ``pattern`` is found.
 

@@ -3,11 +3,14 @@
 # std imports
 import asyncio
 import logging
+from typing import Any, Set, Union, cast
 
 # local
 from .client import open_connection
 from .accessories import make_reader_task
 from .server_shell import readline
+from .stream_reader import TelnetReader, TelnetReaderUnicode
+from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
 CR, LF, NUL = ("\r", "\n", "\x00")
 
@@ -16,7 +19,10 @@ CR, LF, NUL = ("\r", "\n", "\x00")
 # local
 
 
-async def relay_shell(client_reader, client_writer):
+async def relay_shell(
+    client_reader: Union[TelnetReader, TelnetReaderUnicode],
+    client_writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> None:
     """
     Example telnet relay shell for use with telnetlib3.create_server.
 
@@ -28,26 +34,28 @@ async def relay_shell(client_reader, client_writer):
     type and environment variable of value COLORTERM.
     """
     log = logging.getLogger("relay_server")
+    _reader = cast(TelnetReaderUnicode, client_reader)
+    _writer = cast(TelnetWriterUnicode, client_writer)
 
-    password_prompt = readline(client_reader, client_writer)
-    password_prompt.send(None)
+    password_prompt = readline(_reader, _writer)
+    next(password_prompt)
 
-    client_writer.write("Telnet Relay shell ready." + CR + LF + CR + LF)
+    _writer.write("Telnet Relay shell ready." + CR + LF + CR + LF)
 
     client_passcode = "867-5309"
     num_tries = 3
     next_host, next_port = "1984.ws", 23
     passcode = None
     for _ in range(num_tries):
-        client_writer.write("Passcode: ")
+        _writer.write("Passcode: ")
         while passcode is None:
-            inp = await client_reader.read(1)
+            inp = await _reader.read(1)
             if not inp:
                 log.info("EOF from client")
                 return
             passcode = password_prompt.send(inp)
         await asyncio.sleep(1)
-        client_writer.write(CR + LF)
+        _writer.write(CR + LF)
         if passcode == client_passcode:
             log.info("passcode accepted")
             break
@@ -56,21 +64,21 @@ async def relay_shell(client_reader, client_writer):
     # wrong passcode after 3 tires
     if passcode is None:
         log.info("passcode failed after %s tries", num_tries)
-        client_writer.close()
+        _writer.close()
         return
 
     # connect to another telnet server (next_host, next_port)
-    client_writer.write(f"Connecting to {next_host}:{next_port} ... ")
+    _writer.write(f"Connecting to {next_host}:{next_port} ... ")
     server_reader, server_writer = await open_connection(
         next_host,
         next_port,
-        cols=client_writer.get_extra_info("cols"),
-        rows=client_writer.get_extra_info("rows"),
+        cols=_writer.get_extra_info("cols"),
+        rows=_writer.get_extra_info("rows"),
     )
-    client_writer.write("connected!" + CR + LF)
+    _writer.write("connected!" + CR + LF)
 
-    done = []
-    client_stdin = make_reader_task(client_reader)
+    done: Set["asyncio.Task[Any]"] = set()
+    client_stdin = make_reader_task(_reader)
     server_stdout = make_reader_task(server_reader)
     wait_for = {client_stdin, server_stdout}
     while wait_for:
@@ -82,7 +90,7 @@ async def relay_shell(client_reader, client_writer):
                 inp = task.result()
                 if inp:
                     server_writer.write(inp)
-                    client_stdin = make_reader_task(client_reader)
+                    client_stdin = make_reader_task(_reader)
                     wait_for.add(client_stdin)
                 else:
                     log.info("EOF from client")
@@ -90,10 +98,10 @@ async def relay_shell(client_reader, client_writer):
             elif task == server_stdout:
                 out = task.result()
                 if out:
-                    client_writer.write(out)
+                    _writer.write(out)
                     server_stdout = make_reader_task(server_reader)
                     wait_for.add(server_stdout)
                 else:
                     log.info("EOF from server")
-                    client_writer.close()
+                    _writer.close()
     log.info("No more tasks: relay server complete")

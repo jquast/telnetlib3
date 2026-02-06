@@ -111,7 +111,6 @@ questions. Demonstrates the client shell callback pattern.
    :language: python
    :lines: 18-41
 
-
 Server API Reference
 --------------------
 
@@ -175,6 +174,48 @@ The ``wait_for_condition()`` method waits for a custom condition::
         lambda w: w.mode == "kludge" and w.remote_option.enabled(ECHO)
     )
 
+Encoding and Binary Mode
+------------------------
+
+By default, telnetlib3 uses ``encoding="utf8"``, which means the shell
+callback receives ``TelnetReaderUnicode`` and ``TelnetWriterUnicode``.
+These work with Python ``str`` -- you read and write strings::
+
+    async def shell(reader, writer):
+        writer.write("Hello, world!\r\n")  # str
+        data = await reader.read(1)        # returns str
+
+To work with raw bytes instead, pass ``encoding=False`` to
+``create_server()`` or ``open_connection()``. The shell then receives
+``TelnetReader`` and ``TelnetWriter``, which work with ``bytes``::
+
+    async def binary_shell(reader, writer):
+        writer.write(b"Hello, world!\r\n")  # bytes
+        data = await reader.read(1)         # returns bytes
+
+    await telnetlib3.create_server(
+        host="127.0.0.1", port=6023,
+        shell=binary_shell, encoding=False
+    )
+
+Binary mode is useful for specific low-level conditions, like performing
+xmodem transfers, or working with legacy systems that predate unicode
+and utf-8 support.
+
+The same applies to clients -- ``open_connection(..., encoding=False)``
+returns a ``(TelnetReader, TelnetWriter)`` pair that works with ``bytes``.
+
+server_binary.py
+~~~~~~~~~~~~~~~~
+
+https://github.com/jquast/telnetlib3/blob/master/bin/server_binary.py
+
+A telnet server in binary mode that echoes client input as hex bytes.
+Demonstrates using ``encoding=False`` for raw byte I/O.
+
+.. literalinclude:: ../bin/server_binary.py
+   :language: python
+   :lines: 34-51
 
 Blocking Interface
 ==================

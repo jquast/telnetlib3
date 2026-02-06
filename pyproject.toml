@@ -135,27 +135,20 @@ msg-template = "{path}:{line}: [{msg_id}({symbol}), {obj}] {msg}"
 
 [tool.mypy]
 python_version = "3.9"
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-warn_return_any = true
-warn_unused_configs = true
-warn_unused_ignores = true
-no_implicit_optional = true
-check_untyped_defs = true
+strict = true
 disallow_subclassing_any = false
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = [
-    "telnetlib3.client",
-    "telnetlib3.fingerprinting_display",
-    "telnetlib3.relay_server",
-    "telnetlib3.sync",
-    "telnetlib3.telnetlib",
-]
+module = ["telnetlib3.tests.*"]
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
+disallow_untyped_calls = false
 warn_return_any = false
+
+[[tool.mypy.overrides]]
+module = ["telnetlib3.telnetlib"]
+ignore_errors = true
 
 [tool.black]
 line-length = 100

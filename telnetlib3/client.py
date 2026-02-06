@@ -23,6 +23,7 @@ from typing import (
 
 # local
 from telnetlib3 import accessories, client_base
+from telnetlib3._types import ShellCallback
 from telnetlib3.stream_reader import TelnetReader, TelnetReaderUnicode
 from telnetlib3.stream_writer import TelnetWriter, TelnetWriterUnicode
 
@@ -54,14 +55,14 @@ class TelnetClient(client_base.BaseClient):
         tspeed: Tuple[int, int] = (38400, 38400),
         xdisploc: str = "",
         send_environ: Optional[Sequence[str]] = None,
-        shell: Optional[Callable[..., Any]] = None,
+        shell: Optional[ShellCallback] = None,
         encoding: Union[str, bool] = "utf8",
         encoding_errors: str = "strict",
         force_binary: bool = False,
         connect_minwait: float = 1.0,
         connect_maxwait: float = 4.0,
         limit: Optional[int] = None,
-        waiter_closed: Optional[asyncio.Future[Any]] = None,
+        waiter_closed: Optional[asyncio.Future[None]] = None,
         _waiter_connected: Optional[asyncio.Future[None]] = None,
     ) -> None:
         """Initialize TelnetClient with terminal parameters."""
@@ -97,7 +98,7 @@ class TelnetClient(client_base.BaseClient):
             }
         )
 
-    def connection_made(self, transport):
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
         """
         Handle connection made to server.
 
@@ -109,6 +110,7 @@ class TelnetClient(client_base.BaseClient):
         from telnetlib3.telopt import NAWS, TTYPE, TSPEED, CHARSET, XDISPLOC, NEW_ENVIRON
 
         super().connection_made(transport)
+        assert self.writer is not None
 
         # Wire extended rfc callbacks for requests of
         # terminal attributes, environment values, etc.
@@ -124,26 +126,28 @@ class TelnetClient(client_base.BaseClient):
 
         # Override the default handle_will method to detect when both sides support CHARSET
         original_handle_will = self.writer.handle_will
+        writer = self.writer
 
-        def enhanced_handle_will(opt):
+        def enhanced_handle_will(opt: bytes) -> None:
             result = original_handle_will(opt)
 
             # If this was a WILL CHARSET from the server, and we also have WILL CHARSET enabled,
             # log that both sides support CHARSET. The server should initiate the actual REQUEST.
             if (
                 opt == CHARSET
-                and self.writer.remote_option.enabled(CHARSET)
-                and self.writer.local_option.enabled(CHARSET)
+                and writer.remote_option.enabled(CHARSET)
+                and writer.local_option.enabled(CHARSET)
             ):
                 self.log.debug("Both sides support CHARSET, ready for server to initiate REQUEST")
 
             return result
 
-        self.writer.handle_will = enhanced_handle_will
+        self.writer.handle_will = enhanced_handle_will  # type: ignore[method-assign]
 
     def send_ttype(self) -> str:
         """Callback for responding to TTYPE requests."""
-        return self._extra["term"]
+        result: str = self._extra["term"]
+        return result
 
     def send_tspeed(self) -> Tuple[int, int]:
         """Callback for responding to TSPEED requests."""
@@ -152,7 +156,8 @@ class TelnetClient(client_base.BaseClient):
 
     def send_xdisploc(self) -> str:
         """Callback for responding to XDISPLOC requests."""
-        return self._extra["xdisploc"]
+        result: str = self._extra["xdisploc"]
+        return result
 
     def send_env(self, keys: Sequence[str]) -> Dict[str, Any]:
         """
@@ -320,7 +325,8 @@ class TelnetClient(client_base.BaseClient):
             # default_encoding, may be re-negotiated later.  Only the CHARSET
             # negotiation method allows the server to select an encoding, so
             # this value is reflected here by a single return statement.
-            return self._extra["charset"]
+            result: str = self._extra["charset"]
+            return result
         return "US-ASCII"
 
 
@@ -346,14 +352,14 @@ class TelnetTerminalClient(TelnetClient):
         return env
 
     @staticmethod
-    def _winsize():
+    def _winsize() -> Tuple[int, int]:
         try:
             # std imports
             import fcntl  # pylint: disable=import-outside-toplevel
             import termios  # pylint: disable=import-outside-toplevel
 
             fmt = "hhhh"
-            buf = "\x00" * struct.calcsize(fmt)
+            buf = b"\x00" * struct.calcsize(fmt)
             val = fcntl.ioctl(sys.stdin.fileno(), termios.TIOCGWINSZ, buf)
             rows, cols, _, _ = struct.unpack(fmt, val)
             return rows, cols
@@ -381,11 +387,11 @@ async def open_connection(  # pylint: disable=too-many-locals
     rows: int = 25,
     tspeed: Tuple[int, int] = (38400, 38400),
     xdisploc: str = "",
-    shell: Optional[Callable] = None,
+    shell: Optional[ShellCallback] = None,
     connect_minwait: float = 2.0,
     connect_maxwait: float = 3.0,
-    waiter_closed: Optional[asyncio.Future] = None,
-    _waiter_connected: Optional[asyncio.Future] = None,
+    waiter_closed: Optional[asyncio.Future[None]] = None,
+    _waiter_connected: Optional[asyncio.Future[None]] = None,
     limit: Optional[int] = None,
     send_environ: Optional[Sequence[str]] = None,
 ) -> Tuple[
@@ -454,7 +460,8 @@ async def open_connection(  # pylint: disable=too-many-locals
         if sys.platform != "win32" and sys.stdin.isatty():
             client_factory = TelnetTerminalClient
 
-    def connection_factory():
+    def connection_factory() -> client_base.BaseClient:
+        assert client_factory is not None
         return client_factory(
             encoding=encoding,
             encoding_errors=encoding_errors,
@@ -484,10 +491,12 @@ async def open_connection(  # pylint: disable=too-many-locals
 
     await protocol._waiter_connected  # pylint: disable=protected-access
 
+    assert protocol.reader is not None
+    assert protocol.writer is not None
     return protocol.reader, protocol.writer
 
 
-async def run_client():
+async def run_client() -> None:
     """Command-line 'telnetlib3-client' entry point, via setuptools."""
     args = _transform_args(_get_argument_parser().parse_args())
     config_msg = f"Client configuration: {accessories.repr_mapping(args)}"
@@ -516,10 +525,12 @@ async def run_client():
     _, writer = await open_connection(args["host"], args["port"], **connection_kwargs)
 
     # repl loop
+    assert writer.protocol is not None
+    assert isinstance(writer.protocol, client_base.BaseClient)
     await writer.protocol.waiter_closed
 
 
-def _get_argument_parser():
+def _get_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Telnet protocol client",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -561,7 +572,7 @@ def _get_argument_parser():
     return parser
 
 
-def _transform_args(args):
+def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
     return {
         "host": args.host,
         "port": args.port,

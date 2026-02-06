@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 import asyncio
 import logging
-from typing import Union, cast
+from typing import Optional, Tuple, Union, cast
 
 # local
 from .server_shell import readline2
@@ -73,11 +73,15 @@ class ConnectionCounter:
         return self._count
 
 
-async def _read_line_inner(reader, max_len):
+async def _read_line_inner(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    max_len: int,
+) -> str:
     """Inner loop for _read_line, separated for wait_for compatibility."""
+    _reader = cast(TelnetReaderUnicode, reader)
     buf = ""
     while len(buf) < max_len:
-        char = await reader.read(1)
+        char = await _reader.read(1)
         if not char:
             break
         if char in ("\r", "\n"):
@@ -86,7 +90,11 @@ async def _read_line_inner(reader, max_len):
     return buf
 
 
-async def _read_line(reader, timeout, max_len=_MAX_INPUT):
+async def _read_line(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    timeout: float,
+    max_len: int = _MAX_INPUT,
+) -> Optional[str]:
     """Read a line with timeout and length limit."""
     try:
         return await asyncio.wait_for(_read_line_inner(reader, max_len), timeout)
@@ -94,7 +102,11 @@ async def _read_line(reader, timeout, max_len=_MAX_INPUT):
         return None
 
 
-async def _readline_with_echo(reader, writer, timeout):
+async def _readline_with_echo(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    timeout: float,
+) -> Optional[str]:
     """Read a line with echo and timeout, using readline2 from server_shell."""
     try:
         return await asyncio.wait_for(readline2(reader, writer), timeout)
@@ -102,7 +114,9 @@ async def _readline_with_echo(reader, writer, timeout):
         return None
 
 
-async def _read_cpr_response(reader):
+async def _read_cpr_response(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+) -> Optional[Tuple[int, int]]:
     """Read CPR response bytes until 'R' terminator."""
     buf = b""
     while True:
@@ -122,14 +136,19 @@ async def _read_cpr_response(reader):
                 return (int(match.group(1)), int(match.group(2)))
 
 
-async def _get_cursor_position(reader, writer, timeout=2.0):
+async def _get_cursor_position(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    timeout: float = 2.0,
+) -> Tuple[Optional[int], Optional[int]]:
     """
     Query cursor position using DSR/CPR.
 
     :returns: (row, col) tuple or (None, None) on timeout/failure.
     """
     # Send Device Status Report request
-    writer.write("\x1b[6n")
+    _writer = cast(TelnetWriterUnicode, writer)
+    _writer.write("\x1b[6n")
     await writer.drain()
 
     # Read response: ESC [ row ; col R
@@ -140,26 +159,32 @@ async def _get_cursor_position(reader, writer, timeout=2.0):
         return (None, None)
 
 
-async def _measure_width(reader, writer, text, timeout=2.0):
+async def _measure_width(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    text: str,
+    timeout: float = 2.0,
+) -> Optional[int]:
     """
     Measure rendered width of text using cursor position.
 
     :returns: Width in columns, or None on failure.
     """
+    _writer = cast(TelnetWriterUnicode, writer)
     _, x1 = await _get_cursor_position(reader, writer, timeout)
     if x1 is None:
         return None
 
-    writer.write(text)
-    await writer.drain()
+    _writer.write(text)
+    await _writer.drain()
 
     _, x2 = await _get_cursor_position(reader, writer, timeout)
     if x2 is None:
         return None
 
     # Clear the test character
-    writer.write(f"\x1b[{x1}G" + " " * (x2 - x1) + f"\x1b[{x1}G")
-    await writer.drain()
+    _writer.write(f"\x1b[{x1}G" + " " * (x2 - x1) + f"\x1b[{x1}G")
+    await _writer.drain()
 
     return x2 - x1
 
@@ -175,14 +200,20 @@ async def robot_check(
     :returns: True if client passes (renders wide char as width 2).
     """
     width = await _measure_width(reader, writer, _WIDE_TEST_CHAR, timeout)
-    return width == 2
+    return bool(width == 2)
 
 
-async def _ask_question(reader, writer, prompt, timeout=10.0):
+async def _ask_question(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    prompt: str,
+    timeout: float = 10.0,
+) -> Optional[str]:
     """Ask a question, echoing input and repeating prompt on blank input."""
+    _writer = cast(TelnetWriterUnicode, writer)
     while True:
-        writer.write(prompt)
-        await writer.drain()
+        _writer.write(prompt)
+        await _writer.drain()
 
         line = await _readline_with_echo(reader, writer, timeout)
         if line is None:
@@ -191,7 +222,7 @@ async def _ask_question(reader, writer, prompt, timeout=10.0):
         if line.strip():
             return line
         # Blank input - repeat prompt
-        writer.write("\r\n")
+        _writer.write("\r\n")
 
 
 async def robot_shell(

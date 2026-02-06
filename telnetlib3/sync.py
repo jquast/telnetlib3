@@ -327,9 +327,9 @@ class TelnetConnection:
 
     def wait_for(
         self,
-        remote: Optional[dict] = None,
-        local: Optional[dict] = None,
-        pending: Optional[dict] = None,
+        remote: Optional[dict[str, bool]] = None,
+        local: Optional[dict[str, bool]] = None,
+        pending: Optional[dict[str, bool]] = None,
         timeout: Optional[float] = None,
     ) -> None:
         """
@@ -449,7 +449,7 @@ class BlockingTelnetServer:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._server: Optional[Server] = None
-        self._client_queue: queue.Queue = queue.Queue()
+        self._client_queue: queue.Queue[ServerConnection] = queue.Queue()
         self._started = threading.Event()
         self._shutdown = threading.Event()
 
@@ -767,9 +767,9 @@ class ServerConnection:
 
     def wait_for(
         self,
-        remote: Optional[dict] = None,
-        local: Optional[dict] = None,
-        pending: Optional[dict] = None,
+        remote: Optional[dict[str, bool]] = None,
+        local: Optional[dict[str, bool]] = None,
+        pending: Optional[dict[str, bool]] = None,
         timeout: Optional[float] = None,
     ) -> None:
         """
@@ -843,17 +843,20 @@ class ServerConnection:
     @property
     def terminal_type(self) -> str:
         """Client terminal type (miniboa-compatible)."""
-        return self.get_extra_info("TERM", "unknown")
+        result: str = self.get_extra_info("TERM", "unknown")
+        return result
 
     @property
     def columns(self) -> int:
         """Terminal width (miniboa-compatible)."""
-        return self.get_extra_info("cols", 80)
+        result: int = self.get_extra_info("cols", 80)
+        return result
 
     @property
     def rows(self) -> int:
         """Terminal height (miniboa-compatible)."""
-        return self.get_extra_info("rows", 24)
+        result: int = self.get_extra_info("rows", 24)
+        return result
 
     @property
     def connect_time(self) -> float:

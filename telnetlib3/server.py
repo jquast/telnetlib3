@@ -37,6 +37,7 @@ from typing import (
 
 # local
 from . import accessories, server_base
+from ._types import ShellCallback
 from .telopt import name_commands
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
@@ -63,7 +64,7 @@ class CONFIG(NamedTuple):
     loglevel: str = "info"
     logfile: Optional[str] = None
     logfmt: str = accessories._DEFAULT_LOGFMT  # pylint: disable=protected-access
-    shell: Callable = accessories.function_lookup("telnetlib3.telnet_server_shell")
+    shell: Callable[..., Any] = accessories.function_lookup("telnetlib3.telnet_server_shell")
     encoding: str = "utf8"
     force_binary: bool = False
     timeout: int = 300
@@ -100,7 +101,7 @@ class TelnetServer(server_base.BaseServer):
         cols: int = 80,
         rows: int = 25,
         timeout: int = 300,
-        shell: Optional[Callable[..., Any]] = None,
+        shell: Optional[ShellCallback] = None,
         _waiter_connected: Optional[asyncio.Future[None]] = None,
         encoding: Union[str, bool] = "utf8",
         encoding_errors: str = "strict",
@@ -129,7 +130,7 @@ class TelnetServer(server_base.BaseServer):
             writer_factory_encoding=writer_factory_encoding,
         )
         self._environ_requested = False
-        self.waiter_encoding: asyncio.Future[str] = asyncio.Future()
+        self.waiter_encoding: asyncio.Future[bool] = asyncio.Future()
         self._tasks.append(self.waiter_encoding)
         self._ttype_count = 1
         self._timer: Optional[asyncio.TimerHandle] = None
@@ -143,7 +144,7 @@ class TelnetServer(server_base.BaseServer):
             }
         )
 
-    def connection_made(self, transport):
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
         """Handle new connection and wire up telnet option callbacks."""
         # local
         from .telopt import (  # pylint: disable=import-outside-toplevel
@@ -163,14 +164,15 @@ class TelnetServer(server_base.BaseServer):
 
         # Wire extended rfc callbacks for responses to
         # requests of terminal attributes, environment values, etc.
-        for tel_opt, callback_fn in [
+        _ext_callbacks: List[Tuple[bytes, Callable[..., Any]]] = [
             (NAWS, self.on_naws),
             (NEW_ENVIRON, self.on_environ),
             (TSPEED, self.on_tspeed),
             (TTYPE, self.on_ttype),
             (XDISPLOC, self.on_xdisploc),
             (CHARSET, self.on_charset),
-        ]:
+        ]
+        for tel_opt, callback_fn in _ext_callbacks:
             self.writer.set_ext_callback(tel_opt, callback_fn)
 
         # Wire up a callbacks that return definitions for requests.
@@ -180,7 +182,7 @@ class TelnetServer(server_base.BaseServer):
         ]:
             self.writer.set_ext_send_callback(tel_opt, callback_fn)
 
-    def data_received(self, data):
+    def data_received(self, data: bytes) -> None:
         """Process received data and reset timeout timer."""
         self.set_timeout()
         super().data_received(data)
@@ -614,7 +616,7 @@ class TelnetServer(server_base.BaseServer):
 
     # private methods
 
-    def _negotiate_environ(self):
+    def _negotiate_environ(self) -> None:
         """
         Send ``DO NEW_ENVIRON`` unless the client is Microsoft telnet.
 
@@ -647,7 +649,7 @@ class TelnetServer(server_base.BaseServer):
         assert self.writer is not None
         self.writer.iac(DO, NEW_ENVIRON)
 
-    def _check_encoding(self):
+    def _check_encoding(self) -> bool:
         # Periodically check for completion of ``waiter_encoding``.
         # local
         from .telopt import DO, SB, BINARY, CHARSET  # pylint: disable=import-outside-toplevel
@@ -746,10 +748,10 @@ class Server:
         """
         return await self._new_client.get()
 
-    def _register_protocol(self, protocol):
+    def _register_protocol(self, protocol: asyncio.Protocol) -> None:
         """Register a new protocol instance (called by factory)."""
         # pylint: disable=protected-access
-        self._protocols.append(protocol)
+        self._protocols.append(protocol)  # type: ignore[arg-type]
         # Only register callbacks if protocol has the required waiters
         # (custom protocols like plain asyncio.Protocol won't have these)
         if hasattr(protocol, "_waiter_connected"):
@@ -761,7 +763,7 @@ class Server:
 class StatusLogger:
     """Periodic status logger for connected clients."""
 
-    def __init__(self, server, interval):
+    def __init__(self, server: Server, interval: int) -> None:
         """
         Initialize status logger.
 
@@ -770,10 +772,10 @@ class StatusLogger:
         """
         self._server = server
         self._interval = interval
-        self._task = None
-        self._last_status = None
+        self._task: Optional["asyncio.Task[None]"] = None
+        self._last_status: Optional[Dict[str, Any]] = None
 
-    def _get_status(self):
+    def _get_status(self) -> Dict[str, Any]:
         """Get current status snapshot using IP:port pairs for change detection."""
         clients = self._server.clients
         client_data = []
@@ -791,13 +793,13 @@ class StatusLogger:
         client_data.sort(key=lambda x: (x["ip"], x["port"]))
         return {"count": len(clients), "clients": client_data}
 
-    def _status_changed(self, current):
+    def _status_changed(self, current: Dict[str, Any]) -> bool:
         """Check if status differs from last logged."""
         if self._last_status is None:
-            return current["count"] > 0
+            return bool(current["count"] > 0)
         return current != self._last_status
 
-    def _format_status(self, status):
+    def _format_status(self, status: Dict[str, Any]) -> str:
         """Format status for logging."""
         if status["count"] == 0:
             return "0 clients connected"
@@ -807,7 +809,7 @@ class StatusLogger:
         )
         return f"{status['count']} client(s): {client_info}"
 
-    async def _run(self):
+    async def _run(self) -> None:
         """Run periodic status logging."""
         while True:
             await asyncio.sleep(self._interval)
@@ -816,12 +818,12 @@ class StatusLogger:
                 logger.info("Status: %s", self._format_status(status))
                 self._last_status = status
 
-    def start(self):
+    def start(self) -> None:
         """Start the status logging task."""
         if self._interval > 0:
             self._task = asyncio.create_task(self._run())
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop the status logging task."""
         if self._task:
             self._task.cancel()
@@ -831,7 +833,7 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
     host: Optional[Union[str, Sequence[str]]] = None,
     port: int = 23,
     protocol_factory: Optional[Type[asyncio.Protocol]] = TelnetServer,
-    shell: Optional[Callable[..., Any]] = None,
+    shell: Optional[ShellCallback] = None,
     encoding: Union[str, bool] = "utf8",
     encoding_errors: str = "strict",
     force_binary: bool = False,
@@ -946,7 +948,7 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
     return telnet_server
 
 
-async def _sigterm_handler(server, _log):
+async def _sigterm_handler(server: Server, _log: logging.Logger) -> None:
     logger.info("SIGTERM received, closing server.")
 
     # This signals the completion of the server.wait_closed() Future,
@@ -1095,7 +1097,10 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
         counter = ConnectionCounter(pty_fork_limit) if pty_fork_limit else None
         inner_shell = shell
 
-        async def guarded_shell(reader, writer):
+        async def guarded_shell(
+            reader: Union[TelnetReader, TelnetReaderUnicode],
+            writer: Union[TelnetWriter, TelnetWriterUnicode],
+        ) -> None:
             try:
                 # Check connection limit first
                 if counter and not counter.try_acquire():
@@ -1172,7 +1177,7 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
     logger.info("Server stop.")
 
 
-def main():
+def main() -> None:
     """Entry point for telnetlib3-server command."""
     asyncio.run(run_server(**parse_server_args()))
 

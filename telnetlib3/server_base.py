@@ -8,10 +8,12 @@ import asyncio
 import logging
 import datetime
 import traceback
-from typing import Any, Union, Callable, Optional
+import types
+from typing import Any, Type, Union, Callable, Optional
 
 # local
 from .telopt import theNULL
+from ._types import ShellCallback
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
@@ -38,7 +40,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     def __init__(  # pylint: disable=too-many-positional-arguments
         self,
-        shell: Optional[Callable[..., Any]] = None,
+        shell: Optional[ShellCallback] = None,
         _waiter_connected: Optional[asyncio.Future[None]] = None,
         encoding: Union[str, bool] = "utf8",
         encoding_errors: str = "strict",
@@ -190,6 +192,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         if future.cancelled() or future.exception() is not None:
             return
         if self.shell is not None:
+            assert self.reader is not None and self.writer is not None
             coro = self.shell(self.reader, self.writer)
             if asyncio.iscoroutine(coro):
                 loop = asyncio.get_event_loop()
@@ -388,7 +391,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     # private methods
 
-    def _check_negotiation_timer(self):
+    def _check_negotiation_timer(self) -> None:
         if self._check_later is not None:
             self._check_later.cancel()
             if self._check_later in self._tasks:
@@ -411,7 +414,12 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             self._tasks.append(self._check_later)
 
     @staticmethod
-    def _log_exception(log, e_type, e_value, e_tb):
+    def _log_exception(
+        log: Callable[..., Any],
+        e_type: Optional[Type[BaseException]],
+        e_value: Optional[BaseException],
+        e_tb: Optional[types.TracebackType],
+    ) -> None:
         rows_tbk = [line for line in "\n".join(traceback.format_tb(e_tb)).split("\n") if line]
         rows_exc = [line.rstrip() for line in traceback.format_exception_only(e_type, e_value)]
 

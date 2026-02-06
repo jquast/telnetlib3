@@ -72,6 +72,7 @@ from .telopt import (
     COM_PORT_OPTION,
     PRAGMA_HEARTBEAT,
     SUPPRESS_LOCAL_ECHO,
+    theNULL,
 )
 from .accessories import encoding_from_lang
 from .stream_reader import TelnetReader, TelnetReaderUnicode
@@ -339,7 +340,9 @@ def get_client_fingerprint(
     return fingerprint
 
 
-async def _run_probe(writer, verbose: bool = True) -> Tuple[Dict[str, Dict[str, Any]], float]:
+async def _run_probe(
+    writer: Union[TelnetWriter, TelnetWriterUnicode], verbose: bool = True
+) -> Tuple[Dict[str, Dict[str, Any]], float]:
     """Run active probe, optionally extending to MUD options."""
     if _is_maybe_ms_telnet(writer):
         probe_options = [opt for opt in CORE_OPTIONS + MUD_OPTIONS if opt[0] != NEW_ENVIRON]
@@ -352,9 +355,10 @@ async def _run_probe(writer, verbose: bool = True) -> Tuple[Dict[str, Dict[str, 
         probe_options = ALL_PROBE_OPTIONS
 
     total = len(probe_options)
+    _writer = cast(TelnetWriterUnicode, writer)
     if verbose:
-        writer.write(f"\rProbing {total} telnet options...\x1b[J")
-        await writer.drain()
+        _writer.write(f"\rProbing {total} telnet options...\x1b[J")
+        await _writer.drain()
 
     start_time = time.time()
     results = await probe_client_capabilities(writer, options=probe_options, timeout=_PROBE_TIMEOUT)
@@ -368,12 +372,14 @@ async def _run_probe(writer, verbose: bool = True) -> Tuple[Dict[str, Dict[str, 
     elapsed = time.time() - start_time
 
     if verbose:
-        writer.write("\r\x1b[K")
+        _writer.write("\r\x1b[K")
 
     return results, elapsed
 
 
-def _get_protocol(writer):
+def _get_protocol(
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> Any:
     """Return the protocol object from a writer."""
     return getattr(writer, "_protocol", None) or getattr(writer, "protocol", None)
 
@@ -386,7 +392,9 @@ def _opt_byte_to_name(opt: bytes) -> str:
     return str(opt)
 
 
-def _collect_option_states(writer) -> Dict[str, Dict[str, Any]]:
+def _collect_option_states(
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> Dict[str, Dict[str, Any]]:
     """Collect all telnet option states from writer."""
     options = {}
     for label, opt_dict in [("remote", writer.remote_option), ("local", writer.local_option)]:
@@ -396,7 +404,9 @@ def _collect_option_states(writer) -> Dict[str, Dict[str, Any]]:
     return options
 
 
-def _collect_rejected_options(writer) -> Dict[str, List[str]]:
+def _collect_rejected_options(
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> Dict[str, List[str]]:
     """Collect rejected option offers from writer."""
     result: Dict[str, List[str]] = {}
     if getattr(writer, "rejected_will", None):
@@ -406,7 +416,9 @@ def _collect_rejected_options(writer) -> Dict[str, List[str]]:
     return result
 
 
-def _collect_extra_info(writer) -> Dict[str, Any]:
+def _collect_extra_info(
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> Dict[str, Any]:
     """Collect all extra_info from writer, including private _extra dict."""
     extra: Dict[str, Any] = {}
 
@@ -441,7 +453,9 @@ def _collect_extra_info(writer) -> Dict[str, Any]:
     return extra
 
 
-def _collect_ttype_cycle(writer) -> List[str]:
+def _collect_ttype_cycle(
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> List[str]:
     """Collect the full TTYPE cycle responses."""
     ttype_list = []
 
@@ -456,7 +470,9 @@ def _collect_ttype_cycle(writer) -> List[str]:
     return ttype_list
 
 
-def _collect_protocol_timing(writer) -> Dict[str, Any]:
+def _collect_protocol_timing(
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> Dict[str, Any]:
     """Collect timing information from protocol."""
     timing = {}
     protocol = _get_protocol(writer)
@@ -470,7 +486,9 @@ def _collect_protocol_timing(writer) -> Dict[str, Any]:
     return timing
 
 
-def _collect_slc_tab(writer) -> Dict[str, Any]:
+def _collect_slc_tab(
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> Dict[str, Any]:
     """Collect non-default SLC entries when LINEMODE was negotiated."""
     slctab = getattr(writer, "slctab", None)
     if not slctab:
@@ -498,7 +516,7 @@ def _collect_slc_tab(writer) -> Dict[str, Any]:
         name = slc.name_slc_command(slc_func)
         if slc_def.nosupport:
             slc_nosupport.append(name)
-        elif slc_def.val == slc.theNULL:
+        elif slc_def.val == theNULL:
             slc_unset.append(name)
         else:
             slc_set[name] = slc_def.val[0] if isinstance(slc_def.val, bytes) else slc_def.val
@@ -514,7 +532,7 @@ def _collect_slc_tab(writer) -> Dict[str, Any]:
 
 
 def _create_protocol_fingerprint(
-    writer,
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
     probe_results: Dict[str, Dict[str, Any]],
 ) -> Dict[str, Any]:
     """
@@ -616,7 +634,9 @@ _UNKNOWN_TERMINAL_HASH = "0" * 16
 AMBIGUOUS_WIDTH_UNKNOWN = -1
 
 
-def _create_session_fingerprint(writer) -> Dict[str, Any]:
+def _create_session_fingerprint(
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> Dict[str, Any]:
     """Create session identity fingerprint from stable client fields."""
     identity: Dict[str, Any] = {}
 
@@ -642,7 +662,8 @@ def _load_fingerprint_names(data_dir: Optional[str] = None) -> Dict[str, str]:
     if not os.path.exists(names_file):
         return {}
     with open(names_file, encoding="utf-8") as f:
-        return json.load(f)
+        result: Dict[str, str] = json.load(f)
+        return result
 
 
 def _resolve_hash_name(hash_val: str, names: Dict[str, str]) -> str:
@@ -679,7 +700,7 @@ def _cooked_input(prompt: str) -> str:
         termios.tcsetattr(fd, termios.TCSANOW, old_attrs)
 
 
-def _atomic_json_write(filepath: str, data: dict) -> None:
+def _atomic_json_write(filepath: str, data: Dict[str, Any]) -> None:
     """Atomically write JSON data to file via write-to-new + rename."""
     tmp_path = os.path.splitext(filepath)[0] + ".json.new"
     with open(tmp_path, "w", encoding="utf-8") as f:
@@ -688,7 +709,7 @@ def _atomic_json_write(filepath: str, data: dict) -> None:
 
 
 def _build_session_fingerprint(
-    writer,
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
     probe_results: Dict[str, Dict[str, Any]],
     probe_time: float,
 ) -> Dict[str, Any]:
@@ -730,7 +751,7 @@ def _build_session_fingerprint(
 
 
 def _save_fingerprint_data(  # pylint: disable=too-many-locals,too-many-branches,too-complex
-    writer,
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
     probe_results: Dict[str, Dict[str, Any]],
     probe_time: float,
     session_fp: Optional[Dict[str, Any]] = None,
@@ -842,7 +863,7 @@ def _save_fingerprint_data(  # pylint: disable=too-many-locals,too-many-branches
         return None
 
 
-def _is_maybe_mud(writer) -> bool:
+def _is_maybe_mud(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> bool:
     """Return whether the client looks like a MUD client."""
     term = (writer.get_extra_info("TERM") or "").lower()
     if term in MUD_TERMINALS:
@@ -853,7 +874,7 @@ def _is_maybe_mud(writer) -> bool:
     return False
 
 
-def _is_maybe_ms_telnet(writer) -> bool:
+def _is_maybe_ms_telnet(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> bool:
     """
     Return whether the client looks like Microsoft Windows telnet.
 

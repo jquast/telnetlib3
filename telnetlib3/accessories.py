@@ -117,13 +117,13 @@ def function_lookup(pymod_path: str) -> Callable[..., Any]:
     """Return callable function target from standard module.function path."""
     module_name, func_name = pymod_path.rsplit(".", 1)
     module = importlib.import_module(module_name)
-    shell_function = getattr(module, func_name)
+    shell_function: Callable[..., Any] = getattr(module, func_name)
     assert callable(shell_function), shell_function
     return shell_function
 
 
 def make_reader_task(
-    reader: "Union[TelnetReader, TelnetReaderUnicode]",
+    reader: "Union[TelnetReader, TelnetReaderUnicode, asyncio.StreamReader]",
     size: int = 2**12,
 ) -> "asyncio.Task[Any]":
     """Return asyncio task wrapping coroutine of reader.read(size)."""

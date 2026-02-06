@@ -15,7 +15,7 @@ import codecs
 import struct
 import asyncio
 import logging
-from typing import List, Union, Callable, Optional, Awaitable
+from typing import Any, Dict, List, Tuple, Union, Callable, Optional, Awaitable, cast
 
 # local
 from .telopt import ECHO, NAWS, WONT
@@ -49,7 +49,7 @@ _BSU = b"\x1b[?2026h"  # Begin Synchronized Update
 _ESU = b"\x1b[?2026l"  # End Synchronized Update
 
 
-def _platform_check():
+def _platform_check() -> None:
     """Verify platform supports PTY operations."""
     if sys.platform == "win32":
         raise NotImplementedError("PTY support is not available on Windows")
@@ -58,7 +58,16 @@ def _platform_check():
 class PTYSession:
     """Manages a PTY session lifecycle."""
 
-    def __init__(self, reader, writer, program, args, *, preexec_fn=None, raw_mode=False):
+    def __init__(
+        self,
+        reader: Union[TelnetReader, TelnetReaderUnicode],
+        writer: Union[TelnetWriter, TelnetWriterUnicode],
+        program: str,
+        args: Optional[List[str]],
+        *,
+        preexec_fn: Optional[Callable[[], None]] = None,
+        raw_mode: bool = False,
+    ) -> None:
         """
         Initialize PTY session.
 
@@ -78,18 +87,18 @@ class PTYSession:
         self.args = args or []
         self.preexec_fn = preexec_fn
         self.raw_mode = raw_mode
-        self.master_fd = None
-        self.child_pid = None
+        self.master_fd: Optional[int] = None
+        self.child_pid: Optional[int] = None
         self._closing = False
         self._output_buffer = b""
         self._in_sync_update = False
-        self._decoder = None
-        self._decoder_charset = None
-        self._naws_pending = None
-        self._naws_timer = None
-        self._ga_timer = None
+        self._decoder: Optional[codecs.IncrementalDecoder] = None
+        self._decoder_charset: Optional[str] = None
+        self._naws_pending: Optional[Tuple[int, int]] = None
+        self._naws_timer: Optional[asyncio.TimerHandle] = None
+        self._ga_timer: Optional[asyncio.TimerHandle] = None
 
-    def start(self):
+    def start(self) -> None:
         """
         Fork PTY, configure environment, and exec program.
 
@@ -145,14 +154,14 @@ class PTYSession:
             if pid:
                 logger.warning("child already exited: status=%d", status)
 
-    def _write_exec_error(self, pipe_fd, exc):
+    def _write_exec_error(self, pipe_fd: int, exc: Exception) -> None:
         """Write exception info to pipe for parent to read."""
         ename = type(exc).__name__
         msg = f"{ename}:{getattr(exc, 'errno', 0)}:{exc}"
         os.write(pipe_fd, msg.encode("utf-8", errors="replace"))
         os.close(pipe_fd)
 
-    def _handle_exec_error(self, data):
+    def _handle_exec_error(self, data: bytes) -> None:
         """Parse exec error from child and raise appropriate exception."""
         try:
             parts = data.decode("utf-8", errors="replace").split(":", 2)
@@ -165,7 +174,7 @@ class PTYSession:
         except Exception as exc:
             raise PTYSpawnError(f"Exec failed: {data!r}") from exc
 
-    def _build_environment(self):
+    def _build_environment(self) -> Dict[str, str]:
         """Build environment dict from negotiated values."""
         env = os.environ.copy()
 
@@ -197,13 +206,21 @@ class PTYSession:
 
         return env
 
-    def _get_window_size(self):
+    def _get_window_size(self) -> Tuple[int, int]:
         """Get window size from negotiated values."""
-        rows = self.writer.get_extra_info("rows", 25)
-        cols = self.writer.get_extra_info("cols", 80)
+        rows: int = self.writer.get_extra_info("rows", 25)
+        cols: int = self.writer.get_extra_info("cols", 80)
         return rows, cols
 
-    def _setup_child(self, env, rows, cols, exec_err_pipe, *, child_cov=None):
+    def _setup_child(
+        self,
+        env: Dict[str, str],
+        rows: int,
+        cols: int,
+        exec_err_pipe: int,
+        *,
+        child_cov: Any = None,
+    ) -> None:
         """Child process setup before exec."""
         # Note: pty.fork() already calls setsid() for the child, so we don't need to
         # std imports
@@ -244,21 +261,22 @@ class PTYSession:
             self._write_exec_error(exec_err_pipe, err)
             os._exit(os.EX_OSERR)
 
-    def _setup_parent(self):
+    def _setup_parent(self) -> None:
         """Parent process setup after fork."""
         # std imports
         import fcntl
 
+        assert self.master_fd is not None
         flags = fcntl.fcntl(self.master_fd, fcntl.F_GETFL)
         fcntl.fcntl(self.master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
         self.writer.set_ext_callback(NAWS, self._on_naws)
 
-    def _on_naws(self, rows, cols):
+    def _on_naws(self, rows: int, cols: int) -> None:
         """Handle NAWS updates by resizing PTY with debouncing."""
         self.writer.protocol.on_naws(rows, cols)
         self._schedule_naws_update(rows, cols)
 
-    def _schedule_naws_update(self, rows, cols):
+    def _schedule_naws_update(self, rows: int, cols: int) -> None:
         """Schedule debounced NAWS update to avoid signal storms during rapid resize."""
         self._naws_pending = (rows, cols)
         if self._naws_timer is not None:
@@ -266,7 +284,7 @@ class PTYSession:
         loop = asyncio.get_event_loop()
         self._naws_timer = loop.call_later(_NAWS_DEBOUNCE, self._fire_naws_update)
 
-    def _fire_naws_update(self):
+    def _fire_naws_update(self) -> None:
         """Fire the pending NAWS update after debounce delay."""
         if self._naws_pending is not None:
             rows, cols = self._naws_pending
@@ -274,7 +292,7 @@ class PTYSession:
             self._naws_timer = None
             self._set_window_size(rows, cols)
 
-    def _set_window_size(self, rows, cols):
+    def _set_window_size(self, rows: int, cols: int) -> None:
         """Set PTY window size and send SIGWINCH to child."""
         # std imports
         import termios
@@ -290,29 +308,33 @@ class PTYSession:
         except ProcessLookupError:
             pass
 
-    async def run(self):
+    async def run(self) -> None:
         """Bridge loop between telnet and PTY."""
         # std imports
         import errno
 
         loop = asyncio.get_event_loop()
         pty_read_event = asyncio.Event()
-        pty_data_queue = asyncio.Queue()
+        pty_data_queue: asyncio.Queue[bytes] = asyncio.Queue()
 
+        assert self.child_pid is not None
+        assert self.master_fd is not None
         pid, _ = os.waitpid(self.child_pid, os.WNOHANG)
         if pid:
             return
 
-        def pty_readable():
+        master_fd = self.master_fd
+
+        def pty_readable() -> None:
             """Callback when PTY has data to read."""
             # Drain available data to reduce tearing, but cap at 256KB to avoid
             # buffering forever on continuous output (e.g., cat large_file)
-            chunks = []
+            chunks: list[bytes] = []
             total = 0
             max_batch = 262144  # 256KB
             while total < max_batch:
                 try:
-                    data = os.read(self.master_fd, 65536)
+                    data = os.read(master_fd, 65536)
                     if data:
                         chunks.append(data)
                         total += len(data)
@@ -332,21 +354,29 @@ class PTYSession:
                 pty_data_queue.put_nowait(b"".join(chunks))
             pty_read_event.set()
 
-        loop.add_reader(self.master_fd, pty_readable)
+        loop.add_reader(master_fd, pty_readable)
 
         try:
             await self._bridge_loop(pty_read_event, pty_data_queue)
         finally:
             try:
-                loop.remove_reader(self.master_fd)
+                loop.remove_reader(master_fd)
             except (ValueError, KeyError):
                 pass
 
-    async def _bridge_loop(self, pty_read_event, pty_data_queue):
+    async def _bridge_loop(
+        self,
+        pty_read_event: asyncio.Event,
+        pty_data_queue: asyncio.Queue[bytes],
+    ) -> None:
         """Main bridge loop transferring data between telnet and PTY."""
         while not self._closing and not self.writer.is_closing():
-            telnet_task = asyncio.create_task(self.reader.read(4096))
-            pty_task = asyncio.create_task(pty_read_event.wait())
+            telnet_task: asyncio.Task[Union[bytes, str]] = asyncio.create_task(
+                self.reader.read(4096)
+            )
+            pty_task: asyncio.Task[bool] = asyncio.create_task(
+                pty_read_event.wait()
+            )
 
             done, pending = await asyncio.wait(
                 {telnet_task, pty_task},
@@ -360,30 +390,29 @@ class PTYSession:
                 except asyncio.CancelledError:
                     pass
 
-            for task in done:
-                try:
-                    if task is telnet_task:
-                        data = task.result()
-                        if data:
-                            self._write_to_pty(data)
-                        else:
-                            self._closing = True
-                            break
+            try:
+                if telnet_task in done:
+                    telnet_data = telnet_task.result()
+                    if telnet_data:
+                        self._write_to_pty(telnet_data)
+                    else:
+                        self._closing = True
+                        continue
 
-                    elif task is pty_task:
-                        task.result()
-                        while not pty_data_queue.empty():
-                            data = pty_data_queue.get_nowait()
-                            self._write_to_telnet(data)
-                        # EAGAIN was hit - flush any remaining partial line
-                        self._flush_remaining()
-                        pty_read_event.clear()
-                except Exception as e:  # pylint: disable=broad-exception-caught
-                    logger.debug("bridge loop error: %s", e)
-                    self._closing = True
-                    break
+                if pty_task in done:
+                    pty_task.result()
+                    while not pty_data_queue.empty():
+                        pty_data = pty_data_queue.get_nowait()
+                        self._write_to_telnet(pty_data)
+                    # EAGAIN was hit - flush any remaining partial line
+                    self._flush_remaining()
+                    pty_read_event.clear()
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.debug("bridge loop error: %s", e)
+                self._closing = True
+                break
 
-    def _write_to_pty(self, data):
+    def _write_to_pty(self, data: Union[str, bytes]) -> None:
         """
         Write data from telnet to PTY.
 
@@ -401,7 +430,7 @@ class PTYSession:
         except OSError:
             self._closing = True
 
-    def _write_to_telnet(self, data):
+    def _write_to_telnet(self, data: bytes) -> None:
         """Write data from PTY to telnet, respecting synchronized update boundaries."""
         if self._ga_timer is not None:
             self._ga_timer.cancel()
@@ -445,7 +474,7 @@ class PTYSession:
                     # next sync boundary, or when more data arrives with EAGAIN)
                     break
 
-    def _flush_output(self, data, final=False):
+    def _flush_output(self, data: bytes, final: bool = False) -> None:
         """Send data to telnet client using incremental decoder."""
         if not data:
             return
@@ -459,16 +488,16 @@ class PTYSession:
         # Decode using incremental decoder - it buffers incomplete sequences
         text = self._decoder.decode(data, final)
         if text:
-            self.writer.write(text)
+            cast(TelnetWriterUnicode, self.writer).write(text)
 
-    def _flush_remaining(self):
+    def _flush_remaining(self) -> None:
         """Flush remaining buffer after EAGAIN (partial lines, prompts, etc.)."""
         if self._output_buffer and not self._in_sync_update:
             self._flush_output(self._output_buffer)
             self._output_buffer = b""
         self._schedule_ga()
 
-    def _schedule_ga(self):
+    def _schedule_ga(self) -> None:
         """Schedule IAC GA after 500ms idle, for clients that refuse SGA."""
         if self._ga_timer is not None:
             self._ga_timer.cancel()
@@ -480,13 +509,13 @@ class PTYSession:
         loop = asyncio.get_event_loop()
         self._ga_timer = loop.call_later(_GA_IDLE, self._fire_ga)
 
-    def _fire_ga(self):
+    def _fire_ga(self) -> None:
         """Send IAC GA if writer is still open."""
         self._ga_timer = None
         if not self.writer.is_closing():
             self.writer.send_ga()
 
-    def _isalive(self):
+    def _isalive(self) -> bool:
         """Check if child process is still running."""
         if self.child_pid is None:
             return False
@@ -496,7 +525,7 @@ class PTYSession:
         except ChildProcessError:
             return False
 
-    def _terminate(self, force=False):
+    def _terminate(self, force: bool = False) -> bool:
         """
         Terminate child with signal escalation (ptyprocess pattern).
 
@@ -511,6 +540,7 @@ class PTYSession:
         if not self._isalive():
             return True
 
+        assert self.child_pid is not None
         signals = [signal.SIGHUP, signal.SIGCONT, signal.SIGINT]
         if force:
             signals.append(signal.SIGKILL)
@@ -526,7 +556,7 @@ class PTYSession:
 
         return not self._isalive()
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         """Kill child process and close PTY fd."""
         # Cancel any pending timers
         if self._ga_timer is not None:
@@ -558,7 +588,10 @@ class PTYSession:
             self.child_pid = None
 
 
-async def _wait_for_terminal_info(writer, timeout=2.0):
+async def _wait_for_terminal_info(
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    timeout: float = 2.0,
+) -> None:
     """
     Wait for TERM and window size to be negotiated.
 
@@ -653,7 +686,10 @@ def make_pty_shell(
         )
     """
 
-    async def shell(reader, writer):
+    async def shell(
+        reader: Union[TelnetReader, TelnetReaderUnicode],
+        writer: Union[TelnetWriter, TelnetWriterUnicode],
+    ) -> None:
         await pty_shell(reader, writer, program, args, preexec_fn=preexec_fn, raw_mode=raw_mode)
 
     return shell
