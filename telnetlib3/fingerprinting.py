@@ -20,6 +20,7 @@ import datetime
 from typing import Any, Dict, List, Tuple, Union, Callable, Optional, cast
 
 # local
+from . import slc
 from .telopt import (
     BM,
     DO,
@@ -471,9 +472,6 @@ def _collect_protocol_timing(writer) -> Dict[str, Any]:
 
 def _collect_slc_tab(writer) -> Dict[str, Any]:
     """Collect non-default SLC entries when LINEMODE was negotiated."""
-    # local
-    from . import slc  # pylint: disable=import-outside-toplevel
-
     slctab = getattr(writer, "slctab", None)
     if not slctab:
         return {}
@@ -666,7 +664,6 @@ def _validate_suggestion(text: str) -> Optional[str]:
 def _cooked_input(prompt: str) -> str:
     """Call :func:`input` with echo and canonical mode temporarily enabled."""
     # std imports
-    import sys  # pylint: disable=import-outside-toplevel,redefined-outer-name
     import termios  # pylint: disable=import-outside-toplevel
 
     fd = sys.stdin.fileno()
@@ -889,10 +886,7 @@ async def fingerprinting_server_shell(
     :param reader: TelnetReader instance.
     :param writer: TelnetWriter instance.
     """
-    # pylint: disable=import-outside-toplevel,redefined-outer-name
-    # std imports
-    import sys
-
+    # pylint: disable=import-outside-toplevel
     # local
     from .server_pty_shell import pty_shell
 

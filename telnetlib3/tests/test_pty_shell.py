@@ -78,7 +78,7 @@ def mock_session():
 @_ignore_forkpty_deprecation
 async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capture):
     """Test PTY shell with various helper modes: cat, env, stty_size."""
-    # local imports
+    # local
     from telnetlib3 import make_pty_shell
 
     # Test 1: cat mode - echo input back
@@ -175,7 +175,7 @@ async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capt
 @_ignore_forkpty_deprecation
 async def test_pty_shell_lifecycle(bind_host, unused_tcp_port, require_no_capture):
     """Test PTY shell lifecycle: child exit and client disconnect."""
-    # local imports
+    # local
     from telnetlib3 import make_pty_shell
 
     # Test 1: child exit closes connection gracefully
@@ -262,7 +262,7 @@ def test_platform_check_not_windows():
 
 def test_make_pty_shell_returns_callable():
     """Test that make_pty_shell returns a callable."""
-    # local imports
+    # local
     from telnetlib3 import make_pty_shell
 
     shell = make_pty_shell(sys.executable)
