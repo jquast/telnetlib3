@@ -102,7 +102,7 @@ class MockTerm:
     forestgreen = staticmethod(lambda x: x)
     firebrick1 = staticmethod(lambda x: x)
     darkorange = staticmethod(lambda x: x)
-    bold_magenta = staticmethod(lambda x: x)
+    bold_magenta = ""
 
     def magenta(self, s):
         return s
@@ -215,7 +215,7 @@ def test_validate_suggestion(text, expected):
 
 
 @requires_unix
-def test_prompt_stores_suggestions(tmp_path, monkeypatch):
+def test_prompt_stores_suggestions(tmp_path, monkeypatch, capsys):
     filepath = tmp_path / "test.json"
     data = {
         "telnet-probe": {"fingerprint": "aaa"},
@@ -232,13 +232,16 @@ def test_prompt_stores_suggestions(tmp_path, monkeypatch):
     assert data["suggestions"]["terminal-emulator"] == "Ghostty"
     assert data["suggestions"]["telnet-client"] == "GNU Telnet"
 
+    captured = capsys.readouterr()
+    assert "Help our database!" in captured.out
+
     with open(filepath, encoding="utf-8") as f:
         saved = json.load(f)
     assert saved["suggestions"]["terminal-emulator"] == "Ghostty"
 
 
 @requires_unix
-def test_prompt_stores_revision(tmp_path, monkeypatch):
+def test_prompt_stores_revision(tmp_path, monkeypatch, capsys):
     filepath = tmp_path / "test.json"
     data = {
         "telnet-probe": {"fingerprint": "aaa"},
@@ -254,11 +257,16 @@ def test_prompt_stores_revision(tmp_path, monkeypatch):
     assert data["suggestions"]["terminal-emulator-revision"] == "Ghostty2"
     assert data["suggestions"]["telnet-client-revision"] == "inetutils-2.5"
 
+    captured = capsys.readouterr()
+    assert "Suggest a revision" in captured.out
+    assert "Your submission is under review." in captured.out
+
     with open(filepath, encoding="utf-8") as f:
         saved = json.load(f)
     assert saved["suggestions"]["terminal-emulator-revision"] == "Ghostty2"
 
 
+@requires_unix
 @pytest.mark.asyncio
 async def test_server_shell(monkeypatch):
     async def noop(_):
@@ -570,7 +578,7 @@ def test_client_requires_ga_missing_keys():
 
 
 @requires_unix
-def test_run_ucs_detect_timeout(monkeypatch):
+def test_run_ucs_detect_timeout(monkeypatch, capsys):
     """_run_ucs_detect returns None on subprocess timeout."""
     # std imports
     import subprocess as sp
@@ -582,9 +590,12 @@ def test_run_ucs_detect_timeout(monkeypatch):
     monkeypatch.setattr("subprocess.run", fake_run)
     assert fpd._run_ucs_detect() is None
 
+    captured = capsys.readouterr()
+    assert captured.out.endswith("...\r\n")
+
 
 @requires_unix
-def test_process_client_fingerprint_skips_ucs_detect_for_mud(monkeypatch, tmp_path):
+def test_process_client_fingerprint_skips_ucs_detect_for_mud(monkeypatch, tmp_path, capsys):
     """_process_client_fingerprint skips ucs-detect when client requires GA."""
     ucs_called = []
     monkeypatch.setattr(fpd, "_run_ucs_detect", lambda: ucs_called.append(1) or None)
@@ -601,3 +612,8 @@ def test_process_client_fingerprint_skips_ucs_detect_for_mud(monkeypatch, tmp_pa
     except (ImportError, AttributeError, TypeError):
         pass
     assert not ucs_called
+
+    captured = capsys.readouterr()
+    if captured.out.strip():
+        result = json.loads(captured.out)
+        assert "telnet-probe" in result

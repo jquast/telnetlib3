@@ -60,7 +60,9 @@ async def test_telnet_server_encoding_client_will(bind_host, unused_tcp_port):
     from telnetlib3.telopt import IAC, WILL, WONT, TTYPE, BINARY
     from telnetlib3.tests.accessories import create_server, asyncio_connection
 
-    async with create_server(host=bind_host, port=unused_tcp_port) as server:
+    async with create_server(
+        host=bind_host, port=unused_tcp_port, connect_maxwait=0.15
+    ) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WILL + BINARY)
             writer.write(IAC + WONT + TTYPE)

@@ -681,7 +681,7 @@ def _atomic_json_write(filepath: str, data: dict) -> None:
     tmp_path = os.path.splitext(filepath)[0] + ".json.new"
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, sort_keys=True)
-    os.rename(tmp_path, filepath)
+    os.replace(tmp_path, filepath)
 
 
 def _build_session_fingerprint(

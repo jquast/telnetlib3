@@ -495,7 +495,10 @@ async def test_telnet_client_cmdline(bind_host, unused_tcp_port):
 
     async with asyncio_server(HelloServer, bind_host, unused_tcp_port):
         proc = await asyncio.create_subprocess_exec(
-            *args, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE
+            *args,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
 
         line = await asyncio.wait_for(proc.stdout.readline(), 1.5)
@@ -506,6 +509,9 @@ async def test_telnet_client_cmdline(bind_host, unused_tcp_port):
 
         out, err = await asyncio.wait_for(proc.communicate(), 1)
         assert out == b"\x1b[m\nConnection closed by foreign host.\n"
+        stderr_text = err.decode()
+        assert "Connected to <Peer" in stderr_text
+        assert "Connection closed to <Peer" in stderr_text
 
 
 @pytest.mark.skipif(
