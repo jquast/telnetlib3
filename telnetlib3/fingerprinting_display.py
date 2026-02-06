@@ -20,7 +20,7 @@ import warnings
 import functools
 import contextlib
 import subprocess
-from typing import Any, Dict, Generator, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional, Generator
 
 # local
 from .fingerprinting import (

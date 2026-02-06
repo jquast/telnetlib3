@@ -5,7 +5,7 @@ from __future__ import annotations
 # std imports
 import types
 import asyncio
-from typing import Generator, Optional, Union, cast
+from typing import Union, Optional, Generator, cast
 
 # local
 from . import slc, telopt, accessories

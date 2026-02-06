@@ -224,8 +224,8 @@ class PTYSession:
         """Child process setup before exec."""
         # Note: pty.fork() already calls setsid() for the child, so we don't need to
         # std imports
-        import termios
         import fcntl
+        import termios
 
         if rows and cols:
             winsize = struct.pack("HHHH", rows, cols, 0, 0)
@@ -295,9 +295,9 @@ class PTYSession:
     def _set_window_size(self, rows: int, cols: int) -> None:
         """Set PTY window size and send SIGWINCH to child."""
         # std imports
-        import termios
-        import signal
         import fcntl
+        import signal
+        import termios
 
         if self.master_fd is None or self.child_pid is None:
             return

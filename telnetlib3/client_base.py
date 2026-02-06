@@ -4,18 +4,17 @@ from __future__ import annotations
 
 # std imports
 import sys
+import types
 import asyncio
 import logging
 import weakref
 import datetime
-import types
 import traceback
 import collections
 from typing import Any, Type, Union, Callable, Optional, cast
 
-from ._types import ShellCallback
-
 # local
+from ._types import ShellCallback
 from .telopt import theNULL, name_commands
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode

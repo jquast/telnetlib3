@@ -6,7 +6,7 @@
 import sys
 import asyncio
 import collections
-from typing import Any, Optional, Tuple, Union
+from typing import Any, Tuple, Union, Optional
 
 # local
 from . import accessories

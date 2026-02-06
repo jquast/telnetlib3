@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 import asyncio
 import logging
-from typing import Optional, Tuple, Union, cast
+from typing import Tuple, Union, Optional, cast
 
 # local
 from .server_shell import readline2
