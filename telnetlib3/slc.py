@@ -389,13 +389,13 @@ class Forwardmask:
         mrk_cont = "(...)"
 
         def continuing() -> bool:
-            return bool(len(result) and result[-1] == mrk_cont)
+            return bool(result and result[-1] == mrk_cont)
 
         def is_last(mask: int) -> bool:
             return mask == len(self.value) - 1
 
         def same_as_last(row: str) -> bool:
-            return bool(len(result) and result[-1].endswith(row.split()[-1]))
+            return bool(result and result[-1].endswith(row.split()[-1]))
 
         for mask, byte in enumerate(self.value):
             if byte == 0:
