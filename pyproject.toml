@@ -53,7 +53,6 @@ docs = [
 extras = [
     "ucs-detect>=2",
     "prettytable",
-    "pyyaml",
 ]
 
 [project.scripts]

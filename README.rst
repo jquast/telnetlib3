@@ -77,7 +77,14 @@ program.
 Fingerprinting Server
 ---------------------
 
-A built-in fingerprinting server shell is provided to uniquely identify telnet clients::
+A built-in fingerprinting server shell is provided to uniquely identify telnet clients.
+
+Install with optional dependencies for full fingerprinting support (prettytable_
+and ucs-detect_)::
+
+    pip install telnetlib3[extras]
+
+Usage::
 
     export TELNETLIB3_DATA_DIR=./data
     telnetlib3-server --shell telnetlib3.fingerprinting_server_shell
@@ -99,6 +106,7 @@ runs it to probe terminal capabilities (colors, sixel, kitty graphics, etc.) and
 adds the results to the fingerprint data as ``terminal-fingerprint-data``.
 
 .. _ucs-detect: https://github.com/jquast/ucs-detect
+.. _prettytable: https://pypi.org/project/prettytable/
 
 Legacy telnetlib
 ----------------
