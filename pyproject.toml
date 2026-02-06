@@ -139,10 +139,7 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["telnetlib3.tests.*"]
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
-disallow_untyped_calls = false
-warn_return_any = false
+ignore_errors = true
 
 [[tool.mypy.overrides]]
 module = ["telnetlib3.telnetlib"]

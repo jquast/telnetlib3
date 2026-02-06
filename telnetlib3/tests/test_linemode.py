@@ -16,7 +16,7 @@ from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
 )
 
 
-async def test_server_demands_remote_linemode_client_agrees(  # pylint: disable=too-many-locals
+async def test_server_demands_remote_linemode_client_agrees(
     bind_host, unused_tcp_port
 ):
     class ServerTestLinemode(telnetlib3.BaseServer):
@@ -70,7 +70,7 @@ async def test_server_demands_remote_linemode_client_agrees(  # pylint: disable=
             assert srv_instance.writer.linemode.lit_echo is True
 
 
-async def test_server_demands_remote_linemode_client_demands_local(  # pylint: disable=too-many-locals
+async def test_server_demands_remote_linemode_client_demands_local(
     bind_host, unused_tcp_port
 ):
     class ServerTestLinemode(telnetlib3.BaseServer):

@@ -47,9 +47,6 @@ async def test_telnet_client_send_tspeed(bind_host, unused_tcp_port):
             _waiter.set_result((rx, tx))
 
         def begin_advanced_negotiation(self):
-            # local
-            from telnetlib3.telopt import DO, TSPEED
-
             super().begin_advanced_negotiation()
             self.writer.iac(DO, TSPEED)
 

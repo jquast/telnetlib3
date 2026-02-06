@@ -1456,9 +1456,7 @@ class TelnetWriter:
         """Receive environment variables as dict, :rfc:`1572`."""
         self.log.debug("Environment values are %r", env)
 
-    def handle_send_client_environ(
-        self, _keys: Any
-    ) -> dict[str, str]:
+    def handle_send_client_environ(self, _keys: Any) -> dict[str, str]:
         """
         Send environment variables as dict, :rfc:`1572`.
 

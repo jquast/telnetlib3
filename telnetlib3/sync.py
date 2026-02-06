@@ -59,6 +59,8 @@ class TelnetConnection:
     :param port: Remote server port (default 23).
     :param timeout: Default timeout for operations in seconds.
     :param encoding: Character encoding (default 'utf8').
+    :param connect_timeout: Timeout in seconds for the TCP connection to be
+        established.  Passed to ``telnetlib3.open_connection()``.
     :param kwargs: Additional arguments passed to ``telnetlib3.open_connection()``.
 
     Example::

@@ -1,7 +1,6 @@
 # std imports
 import asyncio
 import threading
-from unittest.mock import MagicMock
 
 # 3rd party
 import pytest

@@ -1,5 +1,8 @@
 History
 =======
+*unreleased*
+  * new: ``connect_timeout`` arguments for client and ``--connect-timeout`` Client CLI argument.
+
 2.2.0
   * bugfix: workaround for Microsoft Telnet client crash on
     ``SB NEW_ENVIRON SEND``, :ghissue:`24`. Server now defers ``DO

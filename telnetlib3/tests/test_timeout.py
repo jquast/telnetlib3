@@ -4,11 +4,16 @@
 import time
 import asyncio
 
+# 3rd party
+import pytest
+
 # local
+from telnetlib3.client import _transform_args, _get_argument_parser
 from telnetlib3.telopt import DO, IAC, WONT, TTYPE
 from telnetlib3.tests.accessories import (  # pylint: disable=unused-import; pylint: disable=unused-import,
     bind_host,
     create_server,
+    open_connection,
     unused_tcp_port,
     asyncio_connection,
 )
@@ -76,3 +81,45 @@ async def test_telnet_server_binary_mode(bind_host, unused_tcp_port):
             elapsed = time.time() - stime
             assert 0.050 <= round(elapsed, 3) <= 0.200
             assert output == expected_output
+
+
+async def test_open_connection_connect_timeout(bind_host, unused_tcp_port):
+    """Test connect_timeout raises ConnectionError on unreachable port."""
+    with pytest.raises(ConnectionError):
+        async with open_connection(
+            bind_host,
+            unused_tcp_port,
+            connect_timeout=0.1,
+            encoding=False,
+        ):
+            pass
+
+
+async def test_open_connection_connect_timeout_success(bind_host, unused_tcp_port):
+    """Test connect_timeout does not interfere with successful connection."""
+    async with create_server(host=bind_host, port=unused_tcp_port):
+        async with open_connection(
+            bind_host,
+            unused_tcp_port,
+            connect_timeout=5.0,
+            encoding=False,
+            connect_minwait=0.05,
+            connect_maxwait=0.5,
+        ):
+            pass
+
+
+def test_cli_connect_timeout_arg():
+    """Test --connect-timeout CLI argument is parsed."""
+    parser = _get_argument_parser()
+    args = parser.parse_args(["example.com", "--connect-timeout", "2.5"])
+    result = _transform_args(args)
+    assert result["connect_timeout"] == 2.5
+
+
+def test_cli_connect_timeout_default():
+    """Test --connect-timeout defaults to None."""
+    parser = _get_argument_parser()
+    args = parser.parse_args(["example.com"])
+    result = _transform_args(args)
+    assert result["connect_timeout"] is None

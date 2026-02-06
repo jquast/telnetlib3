@@ -15,8 +15,11 @@ from telnetlib3 import slc
 from telnetlib3 import fingerprinting as fps
 
 if sys.platform != "win32":
-    from telnetlib3 import fingerprinting_display as fpd
+    # local
     from telnetlib3 import server_pty_shell
+    from telnetlib3 import fingerprinting_display as fpd
+else:
+    server_pty_shell = None  # type: ignore[assignment]
 
 # local
 from telnetlib3.tests.accessories import (  # noqa: F401  # pylint: disable=unused-import

@@ -324,9 +324,11 @@ async def test_pty_session_naws_behavior(mock_session, monkeypatch):
     def mock_ioctl(fd, cmd, data):
         ioctl_calls.append((fd, cmd, data))
 
-    with patch("os.getpgid", return_value=12345), patch(
-        "os.killpg", side_effect=mock_killpg
-    ), patch("fcntl.ioctl", side_effect=mock_ioctl):
+    with (
+        patch("os.getpgid", return_value=12345),
+        patch("os.killpg", side_effect=mock_killpg),
+        patch("fcntl.ioctl", side_effect=mock_ioctl),
+    ):
         # Rapid updates should be debounced - only one signal after delay
         session._on_naws(25, 80)
         session._on_naws(30, 90)
@@ -355,12 +357,14 @@ async def test_pty_session_naws_behavior(mock_session, monkeypatch):
         if sig == signal_mod.SIGWINCH:
             winch_calls.append((pgid, sig))
 
-    with patch("os.getpgid", return_value=12345), patch(
-        "os.killpg", side_effect=mock_killpg_winch
-    ), patch("os.kill"), patch("os.waitpid", return_value=(0, 0)), patch("os.close"), patch(
-        "fcntl.ioctl"
-    ), patch(
-        "time.sleep"
+    with (
+        patch("os.getpgid", return_value=12345),
+        patch("os.killpg", side_effect=mock_killpg_winch),
+        patch("os.kill"),
+        patch("os.waitpid", return_value=(0, 0)),
+        patch("os.close"),
+        patch("fcntl.ioctl"),
+        patch("time.sleep"),
     ):
         session._on_naws(25, 80)
         session.cleanup()
@@ -481,8 +485,11 @@ async def test_pty_session_cleanup_flushes_remaining_buffer():
     session.master_fd = 99
     session.child_pid = 12345
 
-    with patch("os.close"), patch("os.kill"), patch("os.waitpid", return_value=(0, 0)), patch(
-        "time.sleep"
+    with (
+        patch("os.close"),
+        patch("os.kill"),
+        patch("os.waitpid", return_value=(0, 0)),
+        patch("time.sleep"),
     ):
         session.cleanup()
 
@@ -541,8 +548,10 @@ async def test_pty_session_set_window_size_behavior(mock_session):
     session, _ = mock_session()
     session.master_fd = 99
     session.child_pid = 12345
-    with patch("fcntl.ioctl"), patch("os.getpgid", return_value=12345), patch(
-        "os.killpg", side_effect=ProcessLookupError("process gone")
+    with (
+        patch("fcntl.ioctl"),
+        patch("os.getpgid", return_value=12345),
+        patch("os.killpg", side_effect=ProcessLookupError("process gone")),
     ):
         session._set_window_size(25, 80)
 
@@ -722,9 +731,11 @@ async def test_pty_session_terminate_scenarios():
     def mock_isalive():
         return isalive_calls.pop(0) if isalive_calls else False
 
-    with patch.object(os, "kill", side_effect=mock_kill), patch.object(
-        session, "_isalive", side_effect=mock_isalive
-    ), patch("time.sleep"):
+    with (
+        patch.object(os, "kill", side_effect=mock_kill),
+        patch.object(session, "_isalive", side_effect=mock_isalive),
+        patch("time.sleep"),
+    ):
         result = session._terminate()
 
     assert result is True
@@ -739,8 +750,9 @@ async def test_pty_session_terminate_scenarios():
     def mock_isalive_2():
         return isalive_returns.pop(0) if isalive_returns else False
 
-    with patch.object(os, "kill", side_effect=ProcessLookupError), patch.object(
-        session, "_isalive", side_effect=mock_isalive_2
+    with (
+        patch.object(os, "kill", side_effect=ProcessLookupError),
+        patch.object(session, "_isalive", side_effect=mock_isalive_2),
     ):
         result = session._terminate()
 
@@ -833,8 +845,11 @@ async def test_pty_session_ga_timer_cancelled_on_cleanup(mock_session, monkeypat
     session._schedule_ga()
     assert session._ga_timer is not None
 
-    with patch("os.close"), patch("os.kill"), patch("os.waitpid", return_value=(0, 0)), patch(
-        "time.sleep"
+    with (
+        patch("os.close"),
+        patch("os.kill"),
+        patch("os.waitpid", return_value=(0, 0)),
+        patch("time.sleep"),
     ):
         session.cleanup()
 

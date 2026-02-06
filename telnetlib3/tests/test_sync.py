@@ -591,3 +591,21 @@ def test_client_read_until_eof(bind_host, unused_tcp_port):
             conn.read_until(">>> ", timeout=2)
 
     server.shutdown()
+
+
+def test_client_connect_timeout(bind_host, unused_tcp_port):
+    """TelnetConnection connect_timeout raises ConnectionError on unreachable port."""
+    conn = TelnetConnection(bind_host, unused_tcp_port, timeout=5, connect_timeout=0.1)
+    with pytest.raises(ConnectionError):
+        conn.connect()
+
+
+def test_client_connect_timeout_success(bind_host, unused_tcp_port):
+    """TelnetConnection connect_timeout does not interfere with successful connection."""
+    server = BlockingTelnetServer(bind_host, unused_tcp_port)
+    server.start()
+
+    with TelnetConnection(bind_host, unused_tcp_port, timeout=5, connect_timeout=5.0) as conn:
+        assert conn._connected.is_set()
+
+    server.shutdown()

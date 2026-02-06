@@ -16,9 +16,7 @@ import pexpect
 import telnetlib3
 from telnetlib3.telopt import (
     DO,
-    IS,
     SB,
-    SE,
     IAC,
     SGA,
     ECHO,
@@ -28,7 +26,6 @@ from telnetlib3.telopt import (
     TTYPE,
     BINARY,
     CHARSET,
-    NEW_ENVIRON,
 )
 from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
     bind_host,

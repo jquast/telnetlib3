@@ -390,6 +390,7 @@ async def open_connection(  # pylint: disable=too-many-locals
     shell: Optional[ShellCallback] = None,
     connect_minwait: float = 2.0,
     connect_maxwait: float = 3.0,
+    connect_timeout: Optional[float] = None,
     waiter_closed: Optional[asyncio.Future[None]] = None,
     _waiter_connected: Optional[asyncio.Future[None]] = None,
     limit: Optional[int] = None,
@@ -445,6 +446,11 @@ async def open_connection(  # pylint: disable=too-many-locals
         otherwise confused by our demands, the shell continues anyway after the
         greater of this value has elapsed.  A client that is not answering
         option negotiation will delay the start of the shell by this amount.
+    :param connect_timeout: Timeout in seconds for the TCP connection to be
+        established.  When ``None`` (default), no timeout is applied and the
+        connection attempt may block indefinitely.  When specified, a
+        :exc:`ConnectionError` is raised if the connection is not established
+        within the given time.
 
     :param force_binary: When ``True``, the encoding is used regardless
         of BINARY mode negotiation.
@@ -480,14 +486,22 @@ async def open_connection(  # pylint: disable=too-many-locals
             send_environ=send_environ,
         )
 
-    _, protocol = await asyncio.get_event_loop().create_connection(
-        connection_factory,
-        host or "localhost",
-        port,
-        family=family,
-        flags=flags,
-        local_addr=local_addr,
-    )
+    try:
+        _, protocol = await asyncio.wait_for(
+            asyncio.get_event_loop().create_connection(
+                connection_factory,
+                host or "localhost",
+                port,
+                family=family,
+                flags=flags,
+                local_addr=local_addr,
+            ),
+            timeout=connect_timeout,
+        )
+    except asyncio.TimeoutError as exc:
+        raise ConnectionError(
+            f"TCP connection to {host or 'localhost'}:{port}" f" timed out after {connect_timeout}s"
+        ) from exc
 
     await protocol._waiter_connected  # pylint: disable=protected-access
 
@@ -518,6 +532,7 @@ async def run_client() -> None:
         "force_binary": args["force_binary"],
         "encoding_errors": args["encoding_errors"],
         "connect_minwait": args["connect_minwait"],
+        "connect_timeout": args["connect_timeout"],
         "send_environ": args["send_environ"],
     }
 
@@ -565,6 +580,12 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         help="timeout for pending negotiation",
     )
     parser.add_argument(
+        "--connect-timeout",
+        default=None,
+        type=float,
+        help="timeout for TCP connection (seconds, default: no timeout)",
+    )
+    parser.add_argument(
         "--send-environ",
         default="TERM,LANG,COLUMNS,LINES,COLORTERM",
         help="comma-separated environment variables to send (NEW_ENVIRON)",
@@ -586,6 +607,7 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "force_binary": args.force_binary,
         "encoding_errors": args.encoding_errors,
         "connect_minwait": args.connect_minwait,
+        "connect_timeout": args.connect_timeout,
         "send_environ": tuple(v.strip() for v in args.send_environ.split(",") if v.strip()),
     }
 
