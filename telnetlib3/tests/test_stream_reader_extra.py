@@ -113,8 +113,7 @@ async def test_pause_and_resume_transport_based_on_buffer_limit():
 async def test_anext_iterates_lines_and_stops_on_eof():
     r = TelnetReader()
     r.feed_data(b"Line1\nLine2\n")
-    # first line (using __anext__ for Python 3.8/3.9 compat; anext() is 3.10+)
-    one = await r.__anext__()
+    one = await r.__anext__()  # anext() is 3.10+
     assert one == b"Line1\n"
     # second line
     two = await r.__anext__()

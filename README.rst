@@ -29,7 +29,7 @@
 Introduction
 ============
 
-``telnetlib3`` is a full-featured Telnet Client and Server library for python3.8 and newer.
+``telnetlib3`` is a full-featured Telnet Client and Server library for python3.9 and newer.
 
 Modern asyncio_ and legacy blocking API's are provided.
 

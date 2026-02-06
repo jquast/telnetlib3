@@ -79,7 +79,6 @@ class CONFIG(NamedTuple):
 
 
 # Default config instance - use this to access default values
-# (accessing CONFIG.field directly returns _tuplegetter in Python 3.8)
 _config = CONFIG()
 
 logger = logging.getLogger("telnetlib3.server")
