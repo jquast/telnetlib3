@@ -202,6 +202,7 @@ The following RFC specifications are implemented:
 * `rfc-859`_, "Telnet Status Option", May 1983.
 * `rfc-860`_, "Telnet Timing mark Option", May 1983.
 * `rfc-885`_, "Telnet End of Record Option", Dec 1983.
+* `rfc-930`_, "Telnet Terminal Type Option", Jan 1984.
 * `rfc-1073`_, "Telnet Window Size Option", Oct 1988.
 * `rfc-1079`_, "Telnet Terminal Speed Option", Dec 1988.
 * `rfc-1091`_, "Telnet Terminal-Type Option", Feb 1989.
@@ -224,6 +225,7 @@ The following RFC specifications are implemented:
 .. _rfc-859: https://www.rfc-editor.org/rfc/rfc859.txt
 .. _rfc-860: https://www.rfc-editor.org/rfc/rfc860.txt
 .. _rfc-885: https://www.rfc-editor.org/rfc/rfc885.txt
+.. _rfc-930: https://www.rfc-editor.org/rfc/rfc930.txt
 .. _rfc-1073: https://www.rfc-editor.org/rfc/rfc1073.txt
 .. _rfc-1079: https://www.rfc-editor.org/rfc/rfc1079.txt
 .. _rfc-1091: https://www.rfc-editor.org/rfc/rfc1091.txt
