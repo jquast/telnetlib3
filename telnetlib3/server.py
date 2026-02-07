@@ -518,6 +518,12 @@ class TelnetServer(server_base.BaseServer):
                 logger.debug("MTTS indicates UTF-8 (deferred), resolving to UTF-8")
                 self.on_charset(charset)
                 self.writer._charset_rejected = False
+                # MTTS bit 3 is the MUD world's replacement for BINARY
+                # negotiation — the client is declaring UTF-8 capability
+                # regardless of RFC 856 BINARY mode.
+                self.force_binary = True
+                if not self.waiter_encoding.done():
+                    self.waiter_encoding.set_result(True)
 
     def on_request_charset(self) -> List[str]:
         """
@@ -620,6 +626,9 @@ class TelnetServer(server_base.BaseServer):
                     logger.debug("MTTS indicates UTF-8 (deferred from ttype3)")
                     self.on_charset(charset)
                     self.writer._charset_rejected = False
+                    self.force_binary = True
+                    if not self.waiter_encoding.done():
+                        self.waiter_encoding.set_result(True)
 
         elif ttype == _lastval:
             logger.debug("ttype cycle stop at %s: %s, repeated.", key, ttype)
