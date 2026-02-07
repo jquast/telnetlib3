@@ -1,18 +1,24 @@
 History
 =======
 2.3.0 *unreleased*
-  * new: ``mud`` module with encode/decode functions for GMCP (option 201),
-    MSDP (option 69), and MSSP (option 70) MUD telnet protocols.
-  * new: ``TelnetWriter.send_gmcp()``, ``send_msdp()``, and ``send_mssp()``
-    methods for sending MUD protocol data, with corresponding
-    ``handle_gmcp()``, ``handle_msdp()``, and ``handle_mssp()`` callbacks.
+  * bugfix: missing LICENSE.txt in sdist file.
+  * bugfix: server incorrectly accepted ``DO TSPEED`` and ``DO SNDLOC``
+    with ``WILL`` responses. These are client-only options per :rfc:`1079`
+    and :rfc:`779`; the server now correctly rejects them.
+  * new: :mod:`telnetlib3.mud` module with encode/decode functions for
+    GMCP (option 201), MSDP (option 69), and MSSP (option 70) MUD telnet
+    protocols.
+  * new: :meth:`TelnetWriter.send_gmcp`, :meth:`~TelnetWriter.send_msdp`, and
+    :meth:`~TelnetWriter.send_mssp` methods for sending MUD protocol data, with
+    corresponding :meth:`~TelnetWriter.handle_gmcp`,
+    :meth:`~TelnetWriter.handle_msdp`, and :meth:`~TelnetWriter.handle_mssp`
+    callbacks.
   * new: ``connect_timeout`` arguments for client and ``--connect-timeout``
     Client CLI argument, :ghissue:`30`.
-  * bugfix: missing LICENSE.txt in sdist file.
   * new: ``telnetlib3-fingerprint-server`` CLI with extended ``NEW_ENVIRON``
-    for client fingerprinting (uses ``FingerprintingServer`` protocol factory).
-  * note: fingerprint hashes for MUD clients detected via GMCP/MSDP
-    may change due to improved client classification.
+    for fingerprinting of connected clients.
+  * new: ``telnetlib3-fingerprint`` CLI for fingerprinting the given remote
+    server, probing telnet option support and capturing banners.
 
 2.2.0
   * bugfix: workaround for Microsoft Telnet client crash on
@@ -28,20 +34,23 @@ History
     reduced from 4.0s to 1.5s.
   * performance: both client and server protocol data_received methods
     have approximately ~50x throughput improvement in bulk data transfers.
-  * new: ``Server`` class returned by ``create_server()`` with
-    ``wait_for_client()`` method and ``clients`` property for tracking
-    connected clients.
-  * new: ``TelnetWriter.wait_for()`` and ``wait_for_condition()``
+  * new: :class:`Server` class returned by :func:`create_server` with
+    :meth:`~Server.wait_for_client` method and :attr:`~Server.clients` property
+    for tracking connected clients.
+  * new: :meth:`TelnetWriter.wait_for` and :meth:`~TelnetWriter.wait_for_condition`
     methods for waiting on telnet option negotiation state.
-  * new: ``telnetlib3.sync`` module with blocking (non-asyncio) APIs:
-    ``TelnetConnection`` for clients, ``BlockingTelnetServer`` for servers.
-  * new: ``pty_shell`` module and demonstrating ``telnetlib3-server --pty-exec`` CLI argument
-    and related ``--pty-raw`` server CLI option for raw PTY mode, used by most
-    programs that handle their own terminal I/O.
-  * new: ``guard_shells`` module with ``--robot-check`` and ``--pty-fork-limit``
-    CLI arguments for connection limiting and bot detection.
-  * new: ``fingerprinting`` module for telnet client identification and
-    capability probing.
+  * new: :mod:`telnetlib3.sync` module with blocking (non-asyncio) APIs:
+    :class:`~telnetlib3.sync.TelnetConnection` for clients,
+    :class:`~telnetlib3.sync.BlockingTelnetServer` for servers.
+  * new: :mod:`~telnetlib3.server_pty_shell` module and demonstrating
+    ``telnetlib3-server --pty-exec`` CLI argument and related ``--pty-raw``
+    server CLI option for raw PTY mode, used by most programs that handle their
+    own terminal I/O.
+  * new: :mod:`~telnetlib3.guard_shells` module with ``--robot-check`` and
+    ``--pty-fork-limit`` CLI arguments for connection limiting and bot
+    detection.
+  * new: :mod:`~telnetlib3.fingerprinting` module for telnet client
+    identification and capability probing.
   * new: ``--send-environ`` client CLI option to control which environment
     variables are sent via NEW_ENVIRON. Default no longer includes HOME or
     SHELL.
@@ -69,13 +78,13 @@ History
 2.0.5
  * feature: legacy `telnetlib.py` from Python 3.11 now redistributed,
    note change to project `LICENSE.txt` file.
- * feature: Add `TelnetReader.readuntil_pattern` :ghissue:`92` by
+ * feature: Add :meth:`TelnetReader.readuntil_pattern` :ghissue:`92` by
    :ghuser:`agicy`
- * feature: Add `TelnetWriter.wait_closed` async method in response to
+ * feature: Add :meth:`TelnetWriter.wait_closed` async method in response to
    :ghissue:`82`.
  * bugfix: README Examples do not work :ghissue:`81`
  * bugfix: `TypeError: buf expected bytes, got <class 'str'>` on client timeout
-   in `TelnetServer`, :ghissue:`87`
+   in :class:`TelnetServer`, :ghissue:`87`
  * bugfix: Performance issues with client protocol under heavy load,
    demonstrating server `telnet://1984.ws` now documented in README.
  * bugfix: annoying `socket.send() raised exception` repeating warning,
@@ -98,25 +107,27 @@ History
  * bugfix: "write after close" is disregarded, caused many errors logged in socket.send()
  * bugfix: in accessories.repr_mapping() about using shlex.quote on non-str,
    `TypeError: expected string or bytes-like object, got 'int'`
- * bugfix: about fn_encoding using repr() on TelnetReaderUnicode
+ * bugfix: about fn_encoding using repr() on :class:`TelnetReaderUnicode`
  * bugfix: TelnetReader.is_closing() raises AttributeError
- * deprecation: `TelnetReader.close` and `TelnetReader.connection_closed` emit
-   warning, use `at_eof()` and `feed_eof()` instead.
- * deprecation: the ``loop`` argument are is no longer accepted by TelnetReader.
+ * deprecation: ``TelnetReader.close`` and ``TelnetReader.connection_closed``
+   emit warning, use :meth:`~TelnetReader.at_eof` and
+   :meth:`~TelnetReader.feed_eof` instead.
+ * deprecation: the ``loop`` argument is no longer accepted by
+   :class:`TelnetReader`.
  * enhancement: Add Generic Mud Communication Protocol support :ghissue:`63` by
    :ghuser:`gtaylor`!
- * change: TelnetReader and TelnetWriter no longer derive from
-   `asyncio.StreamReader` and `asyncio.StreamWriter`, this fixes some TypeError
-   in signatures and runtime
+ * change: :class:`TelnetReader` and :class:`TelnetWriter` no longer derive
+   from :class:`asyncio.StreamReader` and :class:`asyncio.StreamWriter`, this
+   fixes some TypeError in signatures and runtime
 
 2.0.0
  * change: Support Python 3.9, 3.10, 3.11. Drop Python 3.6 and earlier, All code
    and examples have been updated to the new-style PEP-492 syntax.
- * change: the ``loop``, ``event_loop``, and ``log`` arguments are no longer accepted to
+ * change: the ``loop``, ``event_loop``, and ``log`` arguments are no longer accepted by
    any class initializers.
  * note: This release has a known memory leak when using the ``_waiter_connected`` and
    ``_waiter_closed`` arguments to Client or Shell class initializers, please do
-   not use them, A replacement "wait_for_negotiation" awaitable is planned for a
+   not use them. A replacement "wait_for_negotiation" awaitable is planned for a
    future release.
  * enhancement: Add COM-PORT-OPTION subnegotiation support :ghissue:`57` by
    :ghuser:`albireox`

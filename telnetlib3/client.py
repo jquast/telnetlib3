@@ -10,6 +10,7 @@ import codecs
 import struct
 import asyncio
 import argparse
+import functools
 from typing import Any, Dict, List, Tuple, Union, Callable, Optional, Sequence
 
 # local
@@ -589,6 +590,100 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
 def main() -> None:
     """Entry point for telnetlib3-client command."""
     asyncio.run(run_client())
+
+
+def _get_fingerprint_argument_parser() -> argparse.ArgumentParser:
+    """Build argument parser for ``telnetlib3-fingerprint`` CLI."""
+    parser = argparse.ArgumentParser(
+        description="Fingerprint a remote telnet server",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("host", help="remote hostname or IP")
+    parser.add_argument(
+        "port", nargs="?", default=23, type=int, help="port number"
+    )
+    parser.add_argument(
+        "--data-dir", default=None,
+        help="directory for fingerprint data (default: $TELNETLIB3_DATA_DIR)",
+    )
+    parser.add_argument(
+        "--save-json", default=None, metavar="PATH",
+        help="write fingerprint JSON to this path",
+    )
+    parser.add_argument(
+        "--connect-timeout", default=10, type=float,
+        help="TCP connection timeout in seconds",
+    )
+    parser.add_argument("--loglevel", default="warn", help="log level")
+    # pylint: disable=protected-access
+    parser.add_argument(
+        "--logfmt", default=accessories._DEFAULT_LOGFMT,
+        help="log format",
+    )
+    parser.add_argument("--logfile", default=None, help="filepath")
+    parser.add_argument(
+        "--silent", action="store_true",
+        help="suppress fingerprint output to stdout",
+    )
+    return parser
+
+
+async def run_fingerprint_client() -> None:
+    """
+    Connect to a remote telnet server and fingerprint it.
+
+    Parses CLI arguments, binds them into
+    :func:`~telnetlib3.server_fingerprinting.fingerprinting_client_shell`
+    via :func:`functools.partial`, and runs the connection.
+    """
+    # local
+    from . import server_fingerprinting  # pylint: disable=import-outside-toplevel
+    from . import fingerprinting  # pylint: disable=import-outside-toplevel
+
+    args = _get_fingerprint_argument_parser().parse_args()
+
+    if args.data_dir is not None:
+        fingerprinting.DATA_DIR = args.data_dir
+
+    log = accessories.make_logger(
+        name=__name__,
+        loglevel=args.loglevel,
+        logfile=args.logfile,
+        logfmt=args.logfmt,
+    )
+    log.debug(
+        "Fingerprint client: host=%s port=%d", args.host, args.port
+    )
+
+    shell = functools.partial(
+        server_fingerprinting.fingerprinting_client_shell,
+        host=args.host,
+        port=args.port,
+        save_path=args.save_json,
+        silent=args.silent,
+    )
+
+    waiter_closed: asyncio.Future[None] = asyncio.get_event_loop().create_future()
+
+    _, writer = await open_connection(
+        host=args.host,
+        port=args.port,
+        shell=shell,
+        encoding=False,
+        connect_minwait=2.0,
+        connect_maxwait=4.0,
+        connect_timeout=args.connect_timeout,
+        waiter_closed=waiter_closed,
+    )
+
+    assert writer.protocol is not None
+    assert isinstance(writer.protocol, client_base.BaseClient)
+    await writer.protocol.waiter_closed
+
+
+def fingerprint_main() -> None:
+    """Entry point for ``telnetlib3-fingerprint`` command."""
+    asyncio.run(run_fingerprint_client())
 
 
 if __name__ == "__main__":  # pragma: no cover

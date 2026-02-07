@@ -1633,7 +1633,9 @@ class TelnetWriter:
             # servers, such as dgamelaunch (nethack.alt.org) freeze up
             # unless we answer IAC-WONT-ECHO.
             self.iac(WONT, ECHO)
-        elif self.server and opt in (LINEMODE, TTYPE, NAWS, NEW_ENVIRON, XDISPLOC, LFLOW):
+        elif self.server and opt in (
+            LINEMODE, TTYPE, NAWS, NEW_ENVIRON, XDISPLOC, LFLOW, TSPEED, SNDLOC,
+        ):
             raise ValueError(f"cannot recv DO {name_command(opt)} on server end (ignored).")
         elif self.client and opt in (LOGOUT,):
             raise ValueError(f"cannot recv DO {name_command(opt)} on client end (ignored).")
@@ -2190,71 +2192,51 @@ class TelnetWriter:
         """
         Callback responds to IAC SB STATUS IS, :rfc:`859`.
 
-        :param buf: sub-negotiation byte buffer containing status data. This implementation does its
-            best to analyze our perspective's state to the state options given. Any discrepancies
-            are reported to the error log, but no action is taken. This implementation handles
-            malformed STATUS data gracefully by skipping invalid command bytes and continuing to
-            process the remaining data.
+        :param buf: sub-negotiation byte buffer containing status data.
+            Compares the remote peer's reported option state against our own
+            and logs a single summary of agreed and disagreed options.
+            Malformed data is handled gracefully by skipping invalid bytes.
         """
-        # Convert deque to list for processing
         buf_list = list(buf)
+        agreed = []
+        disagreed = []
 
-        # Process command-option pairs, handling malformed data gracefully
         i = 0
         while i < len(buf_list):
             if i + 1 >= len(buf_list):
-                # Odd number of bytes remaining, log and skip
                 self.log.warning("STATUS: incomplete pair at end, skipping byte: %s", buf_list[i])
                 break
 
             cmd = buf_list[i]
             opt = buf_list[i + 1]
 
-            # Skip invalid command bytes with a warning
             if cmd not in (DO, DONT, WILL, WONT):
                 self.log.warning(
-                    "STATUS: invalid cmd at pos %s: %s, skipping. Expected DO DONT WILL WONT.",
-                    i,
-                    cmd,
+                    "STATUS: invalid cmd at pos %d: %s, skipping.",
+                    i, cmd,
                 )
-                # Try to resync by looking for the next valid command
                 i += 1
                 continue
 
-            matching = False
+            opt_name = name_command(opt)
             if cmd in (DO, DONT):
-                _side = "local"
                 enabled = self.local_option.enabled(opt)
                 matching = (cmd == DO and enabled) or (cmd == DONT and not enabled)
-            else:  # (WILL, WONT)
-                _side = "remote"
+            else:
                 enabled = self.remote_option.enabled(opt)
                 matching = (cmd == WILL and enabled) or (cmd == WONT and not enabled)
-            _mode = "enabled" if enabled else "not enabled"
 
-            if not matching:
-                self.log.error(
-                    "STATUS %s %s: disagreed, %s option is %s.",
-                    name_command(cmd),
-                    name_command(opt),
-                    _side,
-                    _mode,
-                )
-                self.log.error(
-                    "remote %r is %s",
-                    [(name_commands(_opt), _val) for _opt, _val in self.remote_option.items()],
-                    self.remote_option.enabled(opt),
-                )
-                self.log.error(
-                    " local %r is %s",
-                    [(name_commands(_opt), _val) for _opt, _val in self.local_option.items()],
-                    self.local_option.enabled(opt),
-                )
+            if matching:
+                agreed.append(opt_name)
             else:
-                self.log.debug("STATUS %s %s (agreed).", name_command(cmd), name_command(opt))
+                disagreed.append(opt_name)
 
-            # Move to next pair
             i += 2
+
+        if agreed:
+            self.log.debug("STATUS agreed: %s", ", ".join(agreed))
+        if disagreed:
+            self.log.debug("STATUS disagreed: %s", ", ".join(disagreed))
 
     def _send_status(self) -> None:
         """Callback responds to IAC SB STATUS SEND, :rfc:`859`."""
