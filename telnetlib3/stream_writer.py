@@ -1870,8 +1870,11 @@ class TelnetWriter:
         """
         Check MTTS (MUD Terminal Type Standard) data for UTF-8 support.
 
+        Called as a fallback when CHARSET negotiation is rejected by the client.
         MTTS is a bitmask where bit 3 (value 8) indicates UTF-8 capability.
         Returns "UTF-8" if supported, None otherwise.
+
+        https://tintin.sourceforge.io/protocols/mtts/
         """
         # Try to get MTTS from NEW_ENVIRON (e.g., "MTTS=2825")
         mtts_str = self._protocol.get_extra_info("MTTS")
@@ -1888,7 +1891,7 @@ class TelnetWriter:
                 if mtts_value & 8:
                     return "UTF-8"
             except (ValueError, TypeError):
-                pass
+                self.log.debug("Failed to parse MTTS value: %r", mtts_str)
 
         return None
 
@@ -1920,13 +1923,18 @@ class TelnetWriter:
             self._ext_callback[CHARSET](charset)
         elif opt == REJECTED:
             self.log.warning("recv IAC SB CHARSET REJECTED IAC SE")
-            # After CHARSET rejection, check MTTS for UTF-8 support
-            # MTTS bit 3 (value 8) indicates UTF-8 capability
+            # After CHARSET rejection, check MTTS for UTF-8 support.
+            # TTYPE round 3 data (ttype3) is available here since TTYPE
+            # cycling completes before CHARSET REQUEST is sent. However,
+            # NEW_ENVIRON data may not have arrived yet — server.on_environ()
+            # handles that case with a deferred check.
             if self.server and CHARSET in self._ext_callback:
                 charset_from_mtts = self._check_mtts_for_utf8()
                 if charset_from_mtts:
                     self.log.debug("MTTS indicates UTF-8 support, resolving to UTF-8")
                     self._ext_callback[CHARSET](charset_from_mtts)
+                else:
+                    self._charset_rejected = True
         elif opt in (TTABLE_IS, TTABLE_ACK, TTABLE_NAK, TTABLE_REJECTED):
             raise NotImplementedError(
                 f"Translation table command received but not supported: {opt!r}"

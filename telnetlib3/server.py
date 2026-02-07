@@ -509,6 +509,16 @@ class TelnetServer(server_base.BaseServer):
 
         self._extra.update(u_mapping)
 
+        # Deferred MTTS fallback: CHARSET REJECTED may arrive before
+        # NEW_ENVIRON IS, so the immediate check in stream_writer finds
+        # nothing. Now that environ data is available, retry.
+        if "MTTS" in u_mapping and getattr(self.writer, "_charset_rejected", False):
+            charset = self.writer._check_mtts_for_utf8()
+            if charset:
+                logger.debug("MTTS indicates UTF-8 (deferred), resolving to UTF-8")
+                self.on_charset(charset)
+                self.writer._charset_rejected = False
+
     def on_request_charset(self) -> List[str]:
         """
         Definition for CHARSET request by client, :rfc:`2066`.
@@ -599,6 +609,17 @@ class TelnetServer(server_base.BaseServer):
             )
             self._extra["TERM"] = val
             self._negotiate_environ()
+
+            # Deferred MTTS fallback: CHARSET REJECTED may arrive before
+            # TTYPE round 3 completes, so the immediate check in
+            # stream_writer finds nothing. Now that ttype3 is stored,
+            # retry the MTTS check.
+            if getattr(self.writer, "_charset_rejected", False):
+                charset = self.writer._check_mtts_for_utf8()
+                if charset:
+                    logger.debug("MTTS indicates UTF-8 (deferred from ttype3)")
+                    self.on_charset(charset)
+                    self.writer._charset_rejected = False
 
         elif ttype == _lastval:
             logger.debug("ttype cycle stop at %s: %s, repeated.", key, ttype)
