@@ -24,13 +24,16 @@ from typing import Any, Dict, List, Optional, Tuple
 # local
 from .telopt import (
     DO,
+    VAR,
     LFLOW,
     LINEMODE,
     NAWS,
+    USERVAR,
     NEW_ENVIRON,
     SNDLOC,
     TSPEED,
     TTYPE,
+    VALUE,
     XDISPLOC,
 )
 from .stream_reader import TelnetReader
@@ -43,6 +46,7 @@ from .fingerprinting import (
     _hash_fingerprint,
     _atomic_json_write,
     _opt_byte_to_name,
+    _save_fingerprint_name,
 )
 
 __all__ = (
@@ -101,6 +105,8 @@ async def fingerprinting_client_shell(
     port: int,
     save_path: Optional[str] = None,
     silent: bool = False,
+    set_name: Optional[str] = None,
+    environ_encoding: str = "ascii",
 ) -> None:
     """
     Client shell that fingerprints a remote telnet server.
@@ -115,7 +121,12 @@ async def fingerprinting_client_shell(
     :param port: Remote port number.
     :param save_path: If set, write fingerprint JSON directly to this path.
     :param silent: Suppress fingerprint output to stdout.
+    :param set_name: If set, store this name for the fingerprint hash in
+        ``fingerprint_names.json`` without requiring moderation.
+    :param environ_encoding: Encoding for NEW_ENVIRON data.  Default
+        ``"ascii"`` per :rfc:`1572`; use ``"cp037"`` for EBCDIC hosts.
     """
+    writer.environ_encoding = environ_encoding
     start_time = time.time()
 
     # 1. Let straggler negotiation settle
@@ -145,6 +156,7 @@ async def fingerprinting_client_shell(
 
     # 7. Build session dicts
     session_data: Dict[str, Any] = {
+        "encoding": writer.environ_encoding,
         "option_states": option_states,
         "banner_before_return": _format_banner(banner_before),
         "banner_after_return": _format_banner(banner_after),
@@ -169,7 +181,17 @@ async def fingerprinting_client_shell(
         save_path=save_path,
     )
 
-    # 9. Display
+    # 9. Set name in fingerprint_names.json
+    if set_name is not None:
+        protocol_fp = _create_server_protocol_fingerprint(writer, probe_results)
+        protocol_hash = _hash_fingerprint(protocol_fp)
+        try:
+            _save_fingerprint_name(protocol_hash, set_name)
+            logger.info("set name %r for %s", set_name, protocol_hash)
+        except ValueError:
+            logger.warning("--set-name requires --data-dir or $TELNETLIB3_DATA_DIR")
+
+    # 10. Display
     if not silent:
         protocol_fp = _create_server_protocol_fingerprint(writer, probe_results)
         protocol_hash = _hash_fingerprint(protocol_fp)
@@ -183,7 +205,7 @@ async def fingerprinting_client_shell(
         }
         _print_json(display_data)
 
-    # 10. Close
+    # 11. Close
     writer.close()
 
 
@@ -275,6 +297,57 @@ async def probe_server_capabilities(
     return results
 
 
+def _parse_environ_send(raw: bytes) -> List[Dict[str, Any]]:
+    """
+    Parse a raw NEW_ENVIRON SEND payload into structured entries.
+
+    :param raw: Bytes following ``SB NEW_ENVIRON SEND`` up to ``SE``.
+    :returns: List of dicts, each with ``type`` (``"VAR"`` or ``"USERVAR"``),
+        ``name`` (ASCII text portion), and optionally ``data_hex`` for
+        trailing binary bytes.
+    """
+    entries: List[Dict[str, Any]] = []
+    delimiters = {VAR[0], USERVAR[0]}
+    value_byte = VALUE[0]
+
+    # find positions of VAR/USERVAR delimiters
+    breaks = [i for i, b in enumerate(raw) if b in delimiters]
+
+    for idx, ptr in enumerate(breaks):
+        kind = "VAR" if raw[ptr:ptr + 1] == VAR else "USERVAR"
+        start = ptr + 1
+        end = breaks[idx + 1] if idx + 1 < len(breaks) else len(raw)
+        chunk = raw[start:end]
+
+        if not chunk:
+            # bare VAR or USERVAR with no name = "send all"
+            entries.append({"type": kind, "name": "*"})
+            continue
+
+        # split on VALUE byte if present
+        if value_byte in chunk:
+            name_part, val_part = chunk.split(bytes([value_byte]), 1)
+        else:
+            name_part = chunk
+            val_part = b""
+
+        # extract the ASCII-printable prefix as the variable name
+        ascii_end = 0
+        for i, b in enumerate(name_part):
+            if 0x20 <= b < 0x7F:
+                ascii_end = i + 1
+            else:
+                break
+        name_text = name_part[:ascii_end].decode("ascii") if ascii_end else ""
+
+        entry: Dict[str, Any] = {"type": kind, "name": name_text}
+        if val_part:
+            entry["value_hex"] = val_part.hex()
+        entries.append(entry)
+
+    return entries
+
+
 def _collect_server_option_states(
     writer: TelnetWriter,
 ) -> Dict[str, Dict[str, Any]]:
@@ -293,10 +366,17 @@ def _collect_server_option_states(
     for opt, enabled in writer.local_option.items():
         server_requested[_opt_byte_to_name(opt)] = enabled
 
-    return {
+    result: Dict[str, Any] = {
         "server_offered": server_offered,
         "server_requested": server_requested,
     }
+
+    if writer.environ_send_raw is not None:
+        result["environ_requested"] = _parse_environ_send(
+            writer.environ_send_raw
+        )
+
+    return result
 
 
 def _create_server_protocol_fingerprint(

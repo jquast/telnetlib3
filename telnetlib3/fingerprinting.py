@@ -712,6 +712,34 @@ def _load_fingerprint_names(data_dir: Optional[str] = None) -> Dict[str, str]:
         return result
 
 
+def _save_fingerprint_name(
+    hash_val: str,
+    name: str,
+    data_dir: Optional[str] = None,
+) -> str:
+    """
+    Save a fingerprint hash-to-name mapping in ``fingerprint_names.json``.
+
+    Loads the existing names file, adds or updates the entry for *hash_val*,
+    and writes it back atomically.
+
+    :param hash_val: 16-character hex fingerprint hash.
+    :param name: Human-readable name to associate.
+    :param data_dir: Override data directory.  Falls back to :data:`DATA_DIR`.
+    :returns: Path to the saved names file.
+    :raises ValueError: If *data_dir* is ``None`` and :data:`DATA_DIR` is unset.
+    """
+    _dir = data_dir if data_dir is not None else DATA_DIR
+    if _dir is None:
+        raise ValueError("no data directory configured")
+    os.makedirs(_dir, exist_ok=True)
+    names_file = os.path.join(_dir, "fingerprint_names.json")
+    names = _load_fingerprint_names(_dir)
+    names[hash_val] = name
+    _atomic_json_write(names_file, names)
+    return names_file
+
+
 def _resolve_hash_name(hash_val: str, names: Dict[str, str]) -> str:
     """Return human-readable name for a hash, falling back to the hash itself."""
     return names.get(hash_val, hash_val)

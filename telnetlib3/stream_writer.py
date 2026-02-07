@@ -197,6 +197,11 @@ class TelnetWriter:
         #: indicating state of remote capabilities.
         self.remote_option = Option("remote_option", self.log, on_change=self._check_waiters)
 
+        #: Encoding used for NEW_ENVIRON variable names and values.
+        #: Default ``"ascii"`` per :rfc:`1572`; set to ``"cp037"`` for
+        #: EBCDIC hosts such as IBM OS/400.
+        self.environ_encoding: str = "ascii"
+
         #: Set of option byte(s) for WILL received from remote end
         #: that were rejected with DONT (unhandled options).
         self.rejected_will: set[bytes] = set()
@@ -204,6 +209,10 @@ class TelnetWriter:
         #: Set of option byte(s) for DO received from remote end
         #: that were rejected with WONT (unsupported options).
         self.rejected_do: set[bytes] = set()
+
+        #: Raw bytes of the last NEW_ENVIRON SEND payload, captured
+        #: for fingerprinting.  ``None`` if no SEND was received.
+        self.environ_send_raw: Optional[bytes] = None
 
         #: Sub-negotiation buffer
         self._sb_buffer: collections.deque[bytes] = collections.deque()
@@ -809,7 +818,7 @@ class TelnetWriter:
         """
         assert isinstance(buf, (bytes, bytearray)), buf
         assert buf and buf.startswith(IAC), buf
-        if self._transport is not None:
+        if not self.is_closing():
             self._transport.write(buf)
             if hasattr(self._protocol, "_tx_bytes"):
                 self._protocol._tx_bytes += len(buf)
@@ -1059,7 +1068,9 @@ class TelnetWriter:
                 response.append(env_key)
             else:
                 response.extend([VAR])
-                response.extend([_escape_environ(env_key.encode("ascii"))])
+                response.extend([_escape_environ(
+                    env_key.encode(self.environ_encoding, "replace")
+                )])
         response.extend([IAC, SE])
         self.log.debug("request_environ: %r", b"".join(response))
         self.pending_option[SB + NEW_ENVIRON] = True
@@ -1136,7 +1147,8 @@ class TelnetWriter:
             self.log.debug("send IAC SE")
 
             self.send_iac(IAC + SB + LINEMODE + DO + slc.LMODE_FORWARDMASK)
-            self._transport.write(fmask.value)
+            if not self.is_closing():
+                self._transport.write(fmask.value)
             self.send_iac(IAC + SE)
 
             return True
@@ -1182,7 +1194,8 @@ class TelnetWriter:
         self.log.debug("send IAC SB LINEMODE LINEMODE-MODE %r IAC SE", self._linemode)
 
         self.send_iac(IAC + SB + LINEMODE + slc.LMODE_MODE)
-        self._transport.write(self._linemode.mask)
+        if not self.is_closing():
+            self._transport.write(self._linemode.mask)
         self.send_iac(IAC + SE)
 
     # Public is-a-command (IAC) callbacks
@@ -1950,9 +1963,11 @@ class TelnetWriter:
                 response.extend([IAC, SE])
                 self.log.debug("send IAC SB CHARSET ACCEPTED %s IAC SE", selected)
                 self.send_iac(b"".join(response))
+                self.environ_encoding = selected
         elif opt == ACCEPTED:
             charset = b"".join(buf).decode("ascii")
             self.log.debug("recv IAC SB CHARSET ACCEPTED %s IAC SE", charset)
+            self.environ_encoding = charset
             self._ext_callback[CHARSET](charset)
         elif opt == REJECTED:
             self.log.warning("recv IAC SB CHARSET REJECTED IAC SE")
@@ -2074,9 +2089,13 @@ class TelnetWriter:
         assert cmd == NEW_ENVIRON, (cmd, name_command(cmd))
         assert opt in (IS, SEND, INFO), opt
         opt_kind = {IS: "IS", INFO: "INFO", SEND: "SEND"}.get(opt)
-        self.log.debug("recv %s %s: %r", name_command(cmd), opt_kind, b"".join(buf))
+        raw = b"".join(buf)
+        self.log.debug("recv %s %s: %r", name_command(cmd), opt_kind, raw)
 
-        env = _decode_env_buf(b"".join(buf))
+        if opt == SEND:
+            self.environ_send_raw = raw
+
+        env = _decode_env_buf(raw, encoding=self.environ_encoding)
 
         if opt in (IS, INFO):
             assert self.server, f"SE: cannot recv from server: {name_command(cmd)} {opt_kind}"
@@ -2095,7 +2114,10 @@ class TelnetWriter:
             assert self.client, f"SE: cannot recv from client: {name_command(cmd)} {opt_kind}"
             # client-side, we do _not_ honor the 'send all VAR' or 'send all
             # USERVAR' requests -- it is a small bit of a security issue.
-            send_env = _encode_env_buf(self._ext_send_callback[NEW_ENVIRON](env.keys()))
+            send_env = _encode_env_buf(
+                self._ext_send_callback[NEW_ENVIRON](env.keys()),
+                encoding=self.environ_encoding,
+            )
             response = [IAC, SB, NEW_ENVIRON, IS, send_env, IAC, SE]
             self.log.debug("env send: %r", response)
             self.send_iac(b"".join(response))
@@ -2380,7 +2402,8 @@ class TelnetWriter:
         if len(self._slc_buffer):
             self.log.debug("send (slc_end): %r", b"".join(self._slc_buffer))
             buf = b"".join(self._slc_buffer)
-            self._transport.write(self._escape_iac(buf))
+            if not self.is_closing():
+                self._transport.write(self._escape_iac(buf))
             self._slc_buffer.clear()
 
         self.log.debug("slc_end: [..] IAC SE")
@@ -2805,11 +2828,12 @@ def _unescape_environ(buf: bytes) -> bytes:
     return buf.replace(ESC + VAR, VAR).replace(ESC + USERVAR, USERVAR)
 
 
-def _encode_env_buf(env: dict[str, str]) -> bytes:
+def _encode_env_buf(env: dict[str, str], encoding: str = "ascii") -> bytes:
     """
     Encode dictionary for transmission as environment variables, :rfc:`1572`.
 
     :param env: dictionary of environment values.
+    :param encoding: Character encoding for names and values.
     :returns: buffer meant to follow sequence IAC SB NEW_ENVIRON IS.
         It is not terminated by IAC SE.
 
@@ -2819,13 +2843,13 @@ def _encode_env_buf(env: dict[str, str]) -> bytes:
     buf: collections.deque[bytes] = collections.deque()
     for key, value in env.items():
         buf.append(VAR)
-        buf.extend([_escape_environ(key.encode("ascii"))])
+        buf.extend([_escape_environ(key.encode(encoding, "replace"))])
         buf.append(VALUE)
-        buf.extend([_escape_environ(f"{value}".encode("ascii"))])
+        buf.extend([_escape_environ(f"{value}".encode(encoding, "replace"))])
     return b"".join(buf)
 
 
-def _decode_env_buf(buf: bytes) -> dict[str, str]:
+def _decode_env_buf(buf: bytes, encoding: str = "ascii") -> dict[str, str]:
     """
     Decode environment values to dictionary, :rfc:`1572`.
 
@@ -2854,11 +2878,11 @@ def _decode_env_buf(buf: bytes) -> dict[str, str]:
             end = breaks[idx + 1]
 
         pair = buf[start:end].split(VALUE, 1)
-        key = _unescape_environ(pair[0]).decode("ascii", "strict")
+        key = _unescape_environ(pair[0]).decode(encoding, "replace")
         if len(pair) == 1:
             value = ""
         else:
-            value = _unescape_environ(pair[1]).decode("ascii", "strict")
+            value = _unescape_environ(pair[1]).decode(encoding, "replace")
         env[key] = value
 
     return env

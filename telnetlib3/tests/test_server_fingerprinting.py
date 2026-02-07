@@ -8,6 +8,7 @@ import pytest
 # local
 from telnetlib3 import server_fingerprinting as sfp
 from telnetlib3 import fingerprinting as fps
+from telnetlib3.telopt import VAR, USERVAR
 
 
 class MockOption(dict):
@@ -26,6 +27,8 @@ class MockWriter:
         self._iac_calls = []
         self.remote_option = MockOption()
         self.local_option = MockOption()
+        self.environ_encoding = "ascii"
+        self.environ_send_raw = None
         self._closing = False
 
     def get_extra_info(self, key, default=None):
@@ -363,3 +366,119 @@ async def test_fingerprinting_client_shell_display(tmp_path, monkeypatch, capsys
     session = output["server-probe"]["session_data"]
     assert "raw_hex" not in session.get("banner_before_return", {})
     assert "server_requested" not in session.get("option_states", {})
+
+
+def test_save_fingerprint_name(tmp_path):
+    names_path = fps._save_fingerprint_name("abcd1234abcd1234", "my-server", str(tmp_path))
+    with open(names_path, encoding="utf-8") as f:
+        names = json.load(f)
+    assert names["abcd1234abcd1234"] == "my-server"
+
+    fps._save_fingerprint_name("ffff0000ffff0000", "other-server", str(tmp_path))
+    with open(names_path, encoding="utf-8") as f:
+        names = json.load(f)
+    assert names["abcd1234abcd1234"] == "my-server"
+    assert names["ffff0000ffff0000"] == "other-server"
+
+    fps._save_fingerprint_name("abcd1234abcd1234", "renamed", str(tmp_path))
+    with open(names_path, encoding="utf-8") as f:
+        names = json.load(f)
+    assert names["abcd1234abcd1234"] == "renamed"
+
+
+def test_parse_environ_send_ibm_os400():
+    """Parse an OS/400-style SEND with IBMRSEED + binary seed data."""
+    raw = (
+        USERVAR + b"IBMRSEED\xb6\xd7>\xd5<H\xe4\xa3"
+        + VAR
+        + USERVAR
+    )
+    entries = sfp._parse_environ_send(raw)
+    assert len(entries) == 3
+    assert entries[0]["type"] == "USERVAR"
+    assert entries[0]["name"] == "IBMRSEED"
+    assert entries[1] == {"type": "VAR", "name": "*"}
+    assert entries[2] == {"type": "USERVAR", "name": "*"}
+
+
+def test_parse_environ_send_standard():
+    """Parse a standard SEND requesting USER and LANG."""
+    raw = VAR + b"USER" + VAR + b"LANG"
+    entries = sfp._parse_environ_send(raw)
+    assert len(entries) == 2
+    assert entries[0] == {"type": "VAR", "name": "USER"}
+    assert entries[1] == {"type": "VAR", "name": "LANG"}
+
+
+def test_collect_option_states_with_environ_send():
+    writer = MockWriter()
+    writer.environ_send_raw = VAR + b"USER"
+    states = sfp._collect_server_option_states(writer)
+    assert "environ_requested" in states
+    assert states["environ_requested"][0]["name"] == "USER"
+
+
+def test_save_fingerprint_name_no_data_dir():
+    with pytest.raises(ValueError):
+        fps._save_fingerprint_name("abcd1234abcd1234", "test", None)
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_client_shell_set_name(tmp_path, monkeypatch):
+    monkeypatch.setattr(sfp, "_NEGOTIATION_SETTLE", 0.0)
+    monkeypatch.setattr(sfp, "_BANNER_WAIT", 0.01)
+    monkeypatch.setattr(sfp, "_POST_RETURN_WAIT", 0.01)
+    monkeypatch.setattr(fps, "DATA_DIR", str(tmp_path))
+
+    save_path = str(tmp_path / "result.json")
+    reader = MockReader([b"Welcome"])
+    writer = MockWriter(will_options=[fps.SGA, fps.ECHO])
+
+    await sfp.fingerprinting_client_shell(
+        reader, writer,
+        host="localhost", port=23, save_path=save_path,
+        silent=True, set_name="my-bbs",
+    )
+
+    with open(save_path, encoding="utf-8") as f:
+        data = json.load(f)
+    protocol_hash = data["server-probe"]["fingerprint"]
+
+    names = fps._load_fingerprint_names(str(tmp_path))
+    assert names[protocol_hash] == "my-bbs"
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_client_shell_encoding(tmp_path, monkeypatch):
+    monkeypatch.setattr(sfp, "_NEGOTIATION_SETTLE", 0.0)
+    monkeypatch.setattr(sfp, "_BANNER_WAIT", 0.01)
+    monkeypatch.setattr(sfp, "_POST_RETURN_WAIT", 0.01)
+
+    save_path = str(tmp_path / "result.json")
+    writer = MockWriter(will_options=[fps.SGA])
+
+    await sfp.fingerprinting_client_shell(
+        MockReader([]), writer,
+        host="localhost", port=23, save_path=save_path,
+        silent=True, environ_encoding="cp037",
+    )
+
+    with open(save_path, encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["server-probe"]["session_data"]["encoding"] == "cp037"
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_client_shell_set_name_no_data_dir(monkeypatch):
+    monkeypatch.setattr(sfp, "_NEGOTIATION_SETTLE", 0.0)
+    monkeypatch.setattr(sfp, "_BANNER_WAIT", 0.01)
+    monkeypatch.setattr(sfp, "_POST_RETURN_WAIT", 0.01)
+    monkeypatch.setattr(fps, "DATA_DIR", None)
+
+    writer = MockWriter()
+    await sfp.fingerprinting_client_shell(
+        MockReader([]), writer,
+        host="localhost", port=23,
+        silent=True, set_name="should-warn",
+    )
+    assert writer._closing
