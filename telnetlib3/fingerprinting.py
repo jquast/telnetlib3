@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Tuple, Union, Callable, Optional, cast
 
 # local
 from . import slc
-from .server import TelnetServer
+from .server import TelnetServer  # pylint: disable=cyclic-import
 from .telopt import (
     BM,
     DO,
@@ -198,7 +198,7 @@ class FingerprintingServer(FingerprintingTelnetServer, TelnetServer):
     """
     :class:`~telnetlib3.server.TelnetServer` with extended ``NEW_ENVIRON``.
 
-    Combines :class:`FingerprintingTelnetServer` with :class:`TelnetServer`
+    Combines :class:`FingerprintingTelnetServer` with :class:`~telnetlib3.server.TelnetServer`
     so that :func:`fingerprinting_server_shell` receives the full set of
     environment variables needed for stable fingerprint hashes.
 

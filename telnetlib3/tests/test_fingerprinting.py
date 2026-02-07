@@ -1006,6 +1006,7 @@ def test_process_client_fingerprint_skips_ucs_detect_for_mud(monkeypatch, tmp_pa
         fpd._process_client_fingerprint(filepath, data)
     except (ImportError, AttributeError, TypeError):
         pass
+    capsys.readouterr()
     assert not ucs_called
 
 
