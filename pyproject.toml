@@ -58,6 +58,7 @@ extras = [
 [project.scripts]
 telnetlib3-server = "telnetlib3.server:main"
 telnetlib3-client = "telnetlib3.client:main"
+telnetlib3-fingerprint-server = "telnetlib3.fingerprinting:fingerprint_server_main"
 
 [project.urls]
 Homepage = "https://github.com/jquast/telnetlib3"

@@ -1007,3 +1007,85 @@ def test_process_client_fingerprint_skips_ucs_detect_for_mud(monkeypatch, tmp_pa
     except (ImportError, AttributeError, TypeError):
         pass
     assert not ucs_called
+
+
+def test_protocol_fingerprint_hash_stability():
+    """Hash must not change across releases for the same probe data."""
+    w = MockWriter(
+        extra={"TERM": "xterm", "HOME": "/home/user", "USER": "alice", "SHELL": "/bin/bash"}
+    )
+    w._protocol = MockProtocol({"HOME": "/home/user", "USER": "alice", "SHELL": "/bin/bash"})
+    probe = {
+        "BINARY": {"status": "WILL", "opt": fps.BINARY},
+        "TTYPE": {"status": "WILL", "opt": fps.TTYPE},
+        "SGA": {"status": "WONT", "opt": fps.SGA},
+    }
+    fp = fps._create_protocol_fingerprint(w, probe)
+    assert fps._hash_fingerprint(fp) == "426327fe80f38c2c"
+
+
+def test_fingerprinting_server_on_request_environ():
+    """FingerprintingServer includes HOME and SHELL in environ request."""
+    srv = fps.FingerprintingServer.__new__(fps.FingerprintingServer)
+    env = srv.on_request_environ()
+    assert "HOME" in env
+    assert "SHELL" in env
+    assert "USER" in env
+
+
+def test_fingerprint_server_shell_has_no_protocol_factory():
+    """Shell is a plain callback, not annotated with protocol_factory."""
+    assert not hasattr(fps.fingerprinting_server_shell, "protocol_factory")
+
+
+def test_fingerprint_server_main_exists():
+    """Entry point function is importable."""
+    assert callable(fps.fingerprint_server_main)
+
+
+def _noop_asyncio_run(coro):
+    """Discard a coroutine without running it (avoids RuntimeWarning)."""
+    coro.close()
+
+
+def test_fingerprint_server_main_data_dir_flag(tmp_path, monkeypatch):
+    """--data-dir sets DATA_DIR and passes remaining args through."""
+    data_dir = str(tmp_path / "fp-data")
+    monkeypatch.setattr(sys, "argv", ["prog", "--data-dir", data_dir, "127.0.0.1", "9999"])
+    monkeypatch.setattr("telnetlib3.fingerprinting.asyncio.run", _noop_asyncio_run)
+
+    captured: dict = {}
+    # local
+    from telnetlib3.server import parse_server_args
+
+    original_parse = parse_server_args
+
+    def patched_parse() -> dict:
+        result = original_parse()
+        captured.update(result)
+        return result
+
+    monkeypatch.setattr("telnetlib3.server.parse_server_args", patched_parse)
+
+    old_data_dir = fps.DATA_DIR
+    try:
+        fps.fingerprint_server_main()
+        assert fps.DATA_DIR == data_dir
+        assert captured["host"] == "127.0.0.1"
+        assert captured["port"] == 9999
+    finally:
+        fps.DATA_DIR = old_data_dir
+
+
+def test_fingerprint_server_main_env_fallback(monkeypatch):
+    """DATA_DIR unchanged when --data-dir is not provided."""
+    monkeypatch.setattr(sys, "argv", ["prog"])
+    monkeypatch.setattr("telnetlib3.fingerprinting.asyncio.run", _noop_asyncio_run)
+
+    old_data_dir = fps.DATA_DIR
+    try:
+        fps.DATA_DIR = "/original"
+        fps.fingerprint_server_main()
+        assert fps.DATA_DIR == "/original"
+    finally:
+        fps.DATA_DIR = old_data_dir

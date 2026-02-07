@@ -1046,6 +1046,7 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
     pty_fork_limit: int = _config.pty_fork_limit,
     status_interval: int = _config.status_interval,
     never_send_ga: bool = _config.never_send_ga,
+    protocol_factory: Optional[Type[asyncio.Protocol]] = None,
 ) -> None:
     """
     Program entry point for server daemon.
@@ -1125,6 +1126,7 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
         host,
         port,
         shell=shell,
+        protocol_factory=protocol_factory,
         encoding=encoding,
         force_binary=force_binary,
         never_send_ga=never_send_ga,

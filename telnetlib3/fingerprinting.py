@@ -16,11 +16,13 @@ import time
 import asyncio
 import hashlib
 import logging
+import argparse
 import datetime
 from typing import Any, Dict, List, Tuple, Union, Callable, Optional, cast
 
 # local
 from . import slc
+from .server import TelnetServer
 from .telopt import (
     BM,
     DO,
@@ -120,7 +122,9 @@ MUD_TERMINALS = {
 
 __all__ = (
     "ENVIRON_EXTENDED",
+    "FingerprintingServer",
     "FingerprintingTelnetServer",
+    "fingerprint_server_main",
     "fingerprinting_server_shell",
     "fingerprinting_post_script",
     "get_client_fingerprint",
@@ -188,6 +192,19 @@ class FingerprintingTelnetServer:  # pylint: disable=too-few-public-methods
                 insert_at = i
                 break
         return base[:insert_at] + extra + base[insert_at:]
+
+
+class FingerprintingServer(FingerprintingTelnetServer, TelnetServer):
+    """
+    :class:`~telnetlib3.server.TelnetServer` with extended ``NEW_ENVIRON``.
+
+    Combines :class:`FingerprintingTelnetServer` with :class:`TelnetServer`
+    so that :func:`fingerprinting_server_shell` receives the full set of
+    environment variables needed for stable fingerprint hashes.
+
+    Used as the default ``protocol_factory`` by
+    :func:`fingerprint_server_main` / ``telnetlib3-fingerprint-server`` CLI.
+    """
 
 
 # Timeout for probe_client_capabilities in _run_probe (seconds)
@@ -991,6 +1008,44 @@ def fingerprinting_post_script(filepath: str) -> None:
     from .fingerprinting_display import fingerprinting_post_script as _fps
 
     _fps(filepath)
+
+
+def fingerprint_server_main() -> None:
+    """
+    Entry point for ``telnetlib3-fingerprint-server`` CLI.
+
+    Reuses :func:`~telnetlib3.server.parse_server_args` and
+    :func:`~telnetlib3.server.run_server` with
+    :class:`FingerprintingServer` as the default protocol factory
+    and :func:`fingerprinting_server_shell` as the default shell.
+
+    Accepts ``--data-dir`` to set the fingerprint data directory.
+    Falls back to the ``TELNETLIB3_DATA_DIR`` environment variable.
+    """
+    # pylint: disable=import-outside-toplevel,global-statement
+    # local import is required to prevent circular imports
+    # local
+    from .server import _config, run_server, parse_server_args  # noqa: PLC0415
+
+    global DATA_DIR
+    # Extract --data-dir before parse_server_args() sees argv.
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument(
+        "--data-dir",
+        default=None,
+        help="directory for fingerprint data" " (default: $TELNETLIB3_DATA_DIR)",
+    )
+    pre_args, remaining = pre.parse_known_args()
+    sys.argv[1:] = remaining
+
+    if pre_args.data_dir is not None:
+        DATA_DIR = pre_args.data_dir
+
+    args = parse_server_args()
+    if args["shell"] is _config.shell:
+        args["shell"] = fingerprinting_server_shell
+    args["protocol_factory"] = FingerprintingServer
+    asyncio.run(run_server(**args))
 
 
 def main() -> None:
