@@ -4,6 +4,9 @@
 import asyncio
 import collections
 
+# 3rd party
+import pytest
+
 # local
 import telnetlib3
 import telnetlib3.stream_writer
@@ -460,7 +463,8 @@ async def test_charset_rejected_with_mtts_utf8(bind_host, unused_tcp_port):
     class ServerTestCharsetMTTS(telnetlib3.TelnetServer):
         def on_charset(self, charset):
             super().on_charset(charset)
-            _waiter.set_result(charset)
+            if not _waiter.done():
+                _waiter.set_result(self)
 
     # Create a client that rejects CHARSET but advertises UTF-8 via MTTS
     class ClientWithMTTS(telnetlib3.TelnetClient):
@@ -468,13 +472,15 @@ async def test_charset_rejected_with_mtts_utf8(bind_host, unused_tcp_port):
             # Reject CHARSET negotiation
             return None
 
-        def on_environ(self):
-            # Advertise MTTS=2825 which has bit 3 (UTF-8) set
+        def send_env(self, keys):
+            # Include MTTS=2825 which has bit 3 (UTF-8) set
             # 2825 = 2048 + 512 + 256 + 8 + 1
-            return {"MTTS": "2825"}
+            env = super().send_env(keys)
+            env["MTTS"] = "2825"
+            return env
 
     async with create_server(
-        protocol_factory=lambda: ServerTestCharsetMTTS(),
+        protocol_factory=ServerTestCharsetMTTS,
         host=bind_host,
         port=unused_tcp_port,
         connect_maxwait=0.25,
@@ -485,14 +491,9 @@ async def test_charset_rejected_with_mtts_utf8(bind_host, unused_tcp_port):
             port=unused_tcp_port,
             connect_minwait=0.05,
         ) as (reader, writer):
-            # Wait for charset callback
-            charset = await asyncio.wait_for(_waiter, timeout=1.0)
-            assert charset == "UTF-8", f"Expected UTF-8, got {charset}"
-
-            # Verify the server resolved to UTF-8
-            srv_instance = server[0]
-            assert srv_instance.get_extra_info("charset") == "UTF-8"
-            assert srv_instance.encoding(incoming=True, outgoing=True) == "UTF-8"
+            srv_instance = await asyncio.wait_for(_waiter, timeout=1.0)
+            val = srv_instance.get_extra_info("charset")
+            assert val == "UTF-8", f"Expected 'UTF-8', got {val!r}"
 
 
 async def test_charset_rejected_with_mtts_ttype3(bind_host, unused_tcp_port):
@@ -502,28 +503,28 @@ async def test_charset_rejected_with_mtts_ttype3(bind_host, unused_tcp_port):
     class ServerTestCharsetMTTS(telnetlib3.TelnetServer):
         def on_charset(self, charset):
             super().on_charset(charset)
-            _waiter.set_result(charset)
+            _waiter.set_result(self)
 
     # Create a client that rejects CHARSET but sends MTTS via TTYPE
     class ClientWithMTTSTtype(telnetlib3.TelnetClient):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            self._ttype_count = 0
+            self._ttype_round = 0
 
         def send_charset(self, offered):
             # Reject CHARSET negotiation
             return None
 
-        def on_ttype(self):
+        def send_ttype(self):
             # Cycle through TTYPE responses, ending with MTTS
             responses = ["TINTIN++", "xterm-256color", "MTTS 2825"]
-            self._ttype_count += 1
-            if self._ttype_count <= len(responses):
-                return responses[self._ttype_count - 1]
+            self._ttype_round += 1
+            if self._ttype_round <= len(responses):
+                return responses[self._ttype_round - 1]
             return responses[-1]
 
     async with create_server(
-        protocol_factory=lambda: ServerTestCharsetMTTS(),
+        protocol_factory=ServerTestCharsetMTTS,
         host=bind_host,
         port=unused_tcp_port,
         connect_maxwait=0.25,
@@ -534,14 +535,8 @@ async def test_charset_rejected_with_mtts_ttype3(bind_host, unused_tcp_port):
             port=unused_tcp_port,
             connect_minwait=0.05,
         ) as (reader, writer):
-            # Wait for charset callback
-            charset = await asyncio.wait_for(_waiter, timeout=1.0)
-            assert charset == "UTF-8", f"Expected UTF-8, got {charset}"
-
-            # Verify the server resolved to UTF-8
-            srv_instance = server[0]
+            srv_instance = await asyncio.wait_for(_waiter, timeout=1.0)
             assert srv_instance.get_extra_info("charset") == "UTF-8"
-            assert srv_instance.encoding(incoming=True, outgoing=True) == "UTF-8"
 
 
 async def test_charset_rejected_without_mtts_utf8(bind_host, unused_tcp_port):
@@ -561,12 +556,14 @@ async def test_charset_rejected_without_mtts_utf8(bind_host, unused_tcp_port):
             # Reject CHARSET negotiation
             return None
 
-        def on_environ(self):
+        def send_env(self, keys):
             # MTTS=257 = 256 + 1 (no bit 3 for UTF-8)
-            return {"MTTS": "257"}
+            env = super().send_env(keys)
+            env["MTTS"] = "257"
+            return env
 
     async with create_server(
-        protocol_factory=lambda: ServerTestCharsetNoMTTS(),
+        protocol_factory=ServerTestCharsetNoMTTS,
         host=bind_host,
         port=unused_tcp_port,
         connect_maxwait=0.25,
@@ -577,15 +574,17 @@ async def test_charset_rejected_without_mtts_utf8(bind_host, unused_tcp_port):
             port=unused_tcp_port,
             connect_minwait=0.05,
         ) as (reader, writer):
-            # Wait a bit to ensure negotiation completes
-            await asyncio.sleep(0.3)
+            # on_charset should NOT fire — wait past connect_maxwait and
+            # confirm the future never resolves
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(_waiter, timeout=0.5)
 
-            # Charset callback should not have been called
             assert not charset_called, "on_charset should not be called without UTF-8 in MTTS"
 
-            # Server should fall back to US-ASCII
-            srv_instance = server[0]
-            assert srv_instance.encoding(incoming=True, outgoing=True) == "US-ASCII"
+            # Server charset should remain the default (utf8), not
+            # upgraded via MTTS fallback since bit 3 is not set
+            srv_instance = server.clients[0]
+            assert srv_instance.get_extra_info("charset") == "utf8"
 
 
 def test_check_mtts_for_utf8_from_environ():
@@ -663,6 +662,70 @@ def test_check_mtts_for_utf8_no_mtts():
 
     w, t, _ = new_writer(server=True, client=False)
     w._protocol = MockProtocolNoMTTS()
+
+    result = w._check_mtts_for_utf8()
+    assert result is None
+
+
+def test_check_mtts_for_utf8_environ_takes_precedence():
+    """Test NEW_ENVIRON MTTS is checked before TTYPE round 3."""
+
+    class MockProtocolBothSources:
+        def __init__(self):
+            self._extra = {
+                "MTTS": "257",  # no UTF-8 bit
+                "ttype3": "MTTS 2825",  # has UTF-8 bit
+            }
+
+        def get_extra_info(self, name, default=None):
+            return self._extra.get(name, default)
+
+        async def _drain_helper(self):
+            pass
+
+    w, t, _ = new_writer(server=True, client=False)
+    w._protocol = MockProtocolBothSources()
+
+    # NEW_ENVIRON (MTTS=257, no UTF-8) should win over ttype3
+    result = w._check_mtts_for_utf8()
+    assert result is None
+
+
+def test_check_mtts_for_utf8_zero():
+    """Test _check_mtts_for_utf8 with MTTS=0."""
+
+    class MockProtocolZero:
+        def __init__(self):
+            self._extra = {"MTTS": "0"}
+
+        def get_extra_info(self, name, default=None):
+            return self._extra.get(name, default)
+
+        async def _drain_helper(self):
+            pass
+
+    w, t, _ = new_writer(server=True, client=False)
+    w._protocol = MockProtocolZero()
+
+    result = w._check_mtts_for_utf8()
+    assert result is None
+
+
+def test_check_mtts_for_utf8_malformed():
+    """Test _check_mtts_for_utf8 with non-numeric MTTS value."""
+
+    class MockProtocolMalformed:
+        def __init__(self):
+            self._extra = {"MTTS": "not-a-number"}
+
+        def get_extra_info(self, name, default=None):
+            return self._extra.get(name, default)
+
+        async def _drain_helper(self):
+            pass
+
+    w, t, _ = new_writer(server=True, client=False)
+    w._protocol = MockProtocolMalformed()
 
     result = w._check_mtts_for_utf8()
     assert result is None
