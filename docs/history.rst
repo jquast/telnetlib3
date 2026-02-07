@@ -1,7 +1,8 @@
 History
 =======
-*unreleased*
+2.3.0 *unreleased*
   * new: ``connect_timeout`` arguments for client and ``--connect-timeout`` Client CLI argument.
+  * bugfix: missing LICENSE.txt in sdist file.
 
 2.2.0
   * bugfix: workaround for Microsoft Telnet client crash on
