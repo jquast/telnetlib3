@@ -8,19 +8,12 @@ from telnetlib3.server import StatusLogger, parse_server_args
 from telnetlib3.telopt import IAC, WONT, TTYPE
 from telnetlib3.tests.accessories import bind_host  # pytest fixture
 from telnetlib3.tests.accessories import unused_tcp_port  # pytest fixture
-from telnetlib3.tests.accessories import (
-    create_server,
-    asyncio_connection,
-)
+from telnetlib3.tests.accessories import create_server, asyncio_connection
 
 
 async def test_rx_bytes_tracking(bind_host, unused_tcp_port):
     """rx_bytes increments when data is received from client."""
-    async with create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-        connect_maxwait=0.05,
-    ) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
             client = await asyncio.wait_for(server.wait_for_client(), 0.5)
@@ -35,11 +28,7 @@ async def test_rx_bytes_tracking(bind_host, unused_tcp_port):
 
 async def test_tx_bytes_tracking(bind_host, unused_tcp_port):
     """tx_bytes increments when data is sent to client."""
-    async with create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-        connect_maxwait=0.05,
-    ) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
             client = await asyncio.wait_for(server.wait_for_client(), 0.5)
@@ -54,11 +43,7 @@ async def test_tx_bytes_tracking(bind_host, unused_tcp_port):
 
 async def test_status_logger_get_status(bind_host, unused_tcp_port):
     """StatusLogger._get_status() returns correct client data."""
-    async with create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-        connect_maxwait=0.05,
-    ) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05) as server:
         status_logger = StatusLogger(server, 60)
         status = status_logger._get_status()
         assert status["count"] == 0
@@ -79,11 +64,7 @@ async def test_status_logger_get_status(bind_host, unused_tcp_port):
 
 async def test_status_logger_status_changed(bind_host, unused_tcp_port):
     """StatusLogger._status_changed() detects changes correctly."""
-    async with create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-        connect_maxwait=0.05,
-    ) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05) as server:
         status_logger = StatusLogger(server, 60)
 
         status_empty = status_logger._get_status()
@@ -128,11 +109,7 @@ async def test_status_logger_format_status():
 
 async def test_status_logger_start_stop(bind_host, unused_tcp_port):
     """StatusLogger.start() and stop() manage task lifecycle."""
-    async with create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-        connect_maxwait=0.05,
-    ) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05) as server:
         status_logger = StatusLogger(server, 60)
         assert status_logger._task is None
 
@@ -147,11 +124,7 @@ async def test_status_logger_start_stop(bind_host, unused_tcp_port):
 
 async def test_status_logger_disabled_with_zero_interval(bind_host, unused_tcp_port):
     """StatusLogger with interval=0 does not create task."""
-    async with create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-        connect_maxwait=0.05,
-    ) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05) as server:
         status_logger = StatusLogger(server, 0)
         status_logger.start()
         assert status_logger._task is None

@@ -14,7 +14,6 @@ after an idle period.
 from __future__ import annotations
 
 # std imports
-import os
 import sys
 import codecs
 import signal
@@ -22,18 +21,7 @@ import socket
 import asyncio
 import logging
 import argparse
-from typing import (
-    Any,
-    Dict,
-    List,
-    Type,
-    Tuple,
-    Union,
-    Callable,
-    Optional,
-    Sequence,
-    NamedTuple,
-)
+from typing import Any, Dict, List, Type, Tuple, Union, Callable, Optional, Sequence, NamedTuple
 
 # local
 from . import accessories, server_base
@@ -129,6 +117,7 @@ class TelnetServer(server_base.BaseServer):
             writer_factory_encoding=writer_factory_encoding,
         )
         self._environ_requested = False
+        self._echo_negotiated = False
         self.waiter_encoding: asyncio.Future[bool] = asyncio.Future()
         self._tasks.append(self.waiter_encoding)
         self._ttype_count = 1
@@ -201,13 +190,16 @@ class TelnetServer(server_base.BaseServer):
 
         ``DO NEW_ENVIRON`` is deferred until the TTYPE cycle completes
         so that Microsoft telnet (ANSI + VT100) can be detected first.
-        See ``_negotiate_environ`` and GitHub issue #24.
+        See ``_negotiate_environ()`` and GitHub issue #24.
+
+        ``WILL ECHO`` is deferred until TTYPE reveals the client identity.
+        MUD clients (Mudlet, TinTin++, etc.) interpret ``WILL ECHO`` as
+        "password mode" and mask input.  See ``_negotiate_echo()``.
         """
         # local
         from .telopt import (  # pylint: disable=import-outside-toplevel
             DO,
             SGA,
-            ECHO,
             NAWS,
             WILL,
             BINARY,
@@ -217,7 +209,7 @@ class TelnetServer(server_base.BaseServer):
         super().begin_advanced_negotiation()
         assert self.writer is not None
         self.writer.iac(WILL, SGA)
-        self.writer.iac(WILL, ECHO)
+        # WILL ECHO is deferred -- see _negotiate_echo()
         self.writer.iac(WILL, BINARY)
         # DO NEW_ENVIRON is deferred -- see _negotiate_environ()
         self.writer.iac(DO, NAWS)
@@ -237,9 +229,14 @@ class TelnetServer(server_base.BaseServer):
 
         assert self.writer is not None
         # If TTYPE cycle stalled or client refused TTYPE, trigger
-        # deferred NEW_ENVIRON negotiation now.  Only when advanced
-        # negotiation is active -- a raw TCP client that WONTs TTYPE
-        # should not be sent DO NEW_ENVIRON.
+        # deferred ECHO and NEW_ENVIRON negotiation now.  Only when
+        # advanced negotiation is active -- a raw TCP client that
+        # WONTs TTYPE should not be sent DO NEW_ENVIRON.
+        if not self._echo_negotiated and self._advanced:
+            ttype_refused = self.writer.remote_option.get(TTYPE) is False
+            if ttype_refused or final:
+                self._negotiate_echo()
+
         if not self._environ_requested and self._advanced:
             ttype_refused = self.writer.remote_option.get(TTYPE) is False
             ttype_do_pending = self.writer.pending_option.get(DO + TTYPE)
@@ -315,9 +312,7 @@ class TelnetServer(server_base.BaseServer):
     # new methods
 
     def encoding(
-        self,
-        outgoing: Optional[bool] = None,
-        incoming: Optional[bool] = None,
+        self, outgoing: Optional[bool] = None, incoming: Optional[bool] = None
     ) -> Union[str, bool]:
         """
         Return encoding for the given stream direction.
@@ -431,60 +426,24 @@ class TelnetServer(server_base.BaseServer):
             values.  An empty return value indicates that no request should be
             made.
 
-        The default return value is::
-
-            ['LANG', 'TERM', 'COLUMNS', 'LINES', 'DISPLAY', 'COLORTERM',
-             VAR, USERVAR, 'COLORTERM']
+        The default return value requests only common variables needed for
+        session setup.  Override this method or see
+        :data:`~.fingerprinting.ENVIRON_EXTENDED` for a larger set used
+        during client fingerprinting.
         """
         # local
         from .telopt import VAR, USERVAR  # pylint: disable=import-outside-toplevel
 
-        # Parse additional keys from environment variable (comma-delimited)
-        additional = os.environ.get("TELNETLIB3_FINGERPRINT_ENVIRON_ADDITIONAL", "")
-        additional_keys = [k.strip() for k in additional.split(",") if k.strip()]
-
         return [
-            # Well-known VAR (RFC 1572)
             "USER",
+            "LOGNAME",
             "DISPLAY",
-            # USERVAR - common environment variables
             "LANG",
             "TERM",
             "COLUMNS",
             "LINES",
             "COLORTERM",
-            "HOME",
-            "SHELL",
-            # SSH/remote connection info
-            "SSH_CLIENT",
-            "SSH_TTY",
-            # System info
-            "LOGNAME",
-            "HOSTNAME",
-            "HOSTTYPE",
-            "OSTYPE",
-            "PWD",
-            # Editor preferences
             "EDITOR",
-            "VISUAL",
-            # Terminal multiplexers
-            "TMUX",
-            "STY",
-            # Locale settings
-            "LC_ALL",
-            "LC_CTYPE",
-            "LC_MESSAGES",
-            "LC_COLLATE",
-            "LC_TIME",
-            # Container/remote
-            "DOCKER_HOST",
-            # Shell history
-            "HISTFILE",
-            # Cloud
-            "AWS_PROFILE",
-            "AWS_REGION",
-            # Additional keys from TELNETLIB3_FINGERPRINT_ENVIRON_ADDITIONAL
-            *additional_keys,
             # Request any other VAR/USERVAR the client wants to send
             VAR,
             USERVAR,
@@ -508,22 +467,6 @@ class TelnetServer(server_base.BaseServer):
         logger.debug("on_environ received: %r", u_mapping)
 
         self._extra.update(u_mapping)
-
-        # Deferred MTTS fallback: CHARSET REJECTED may arrive before
-        # NEW_ENVIRON IS, so the immediate check in stream_writer finds
-        # nothing. Now that environ data is available, retry.
-        if "MTTS" in u_mapping and getattr(self.writer, "_charset_rejected", False):
-            charset = self.writer._check_mtts_for_utf8()
-            if charset:
-                logger.debug("MTTS indicates UTF-8 (deferred), resolving to UTF-8")
-                self.on_charset(charset)
-                self.writer._charset_rejected = False
-                # MTTS bit 3 is the MUD world's replacement for BINARY
-                # negotiation — the client is declaring UTF-8 capability
-                # regardless of RFC 856 BINARY mode.
-                self.force_binary = True
-                if not self.waiter_encoding.done():
-                    self.waiter_encoding.set_result(True)
 
     def on_request_charset(self) -> List[str]:
         """
@@ -587,6 +530,10 @@ class TelnetServer(server_base.BaseServer):
 
         _lastval = self.get_extra_info(f"ttype{self._ttype_count - 1}")
 
+        # After first TTYPE, negotiate ECHO -- MUD clients are detected
+        # by ttype1 and never receive WILL ECHO (avoids password mode).
+        self._negotiate_echo()
+
         # After ttype1: send DO NEW_ENVIRON now unless ttype1 is "ANSI",
         # in which case we defer until ttype2 to detect Microsoft telnet
         # (ANSI + VT100) which crashes on NEW_ENVIRON (issue #24).
@@ -607,28 +554,9 @@ class TelnetServer(server_base.BaseServer):
 
         elif self._ttype_count == 3 and ttype.upper().startswith("MTTS "):
             val = self.get_extra_info("ttype2")
-            logger.debug(
-                "ttype cycle stop at %s: %s, using %s from ttype2.",
-                key,
-                ttype,
-                val,
-            )
+            logger.debug("ttype cycle stop at %s: %s, using %s from ttype2.", key, ttype, val)
             self._extra["TERM"] = val
             self._negotiate_environ()
-
-            # Deferred MTTS fallback: CHARSET REJECTED may arrive before
-            # TTYPE round 3 completes, so the immediate check in
-            # stream_writer finds nothing. Now that ttype3 is stored,
-            # retry the MTTS check.
-            if getattr(self.writer, "_charset_rejected", False):
-                charset = self.writer._check_mtts_for_utf8()
-                if charset:
-                    logger.debug("MTTS indicates UTF-8 (deferred from ttype3)")
-                    self.on_charset(charset)
-                    self.writer._charset_rejected = False
-                    self.force_binary = True
-                    if not self.waiter_encoding.done():
-                        self.waiter_encoding.set_result(True)
 
         elif ttype == _lastval:
             logger.debug("ttype cycle stop at %s: %s, repeated.", key, ttype)
@@ -669,14 +597,37 @@ class TelnetServer(server_base.BaseServer):
 
         if ttype1 == "ANSI" and ttype2 == "VT100":
             logger.info(
-                "skipping NEW_ENVIRON for Microsoft telnet (ttype1=%r, ttype2=%r)",
-                ttype1,
-                ttype2,
+                "skipping NEW_ENVIRON for Microsoft telnet (ttype1=%r, ttype2=%r)", ttype1, ttype2
             )
             return
 
         assert self.writer is not None
         self.writer.iac(DO, NEW_ENVIRON)
+
+    def _negotiate_echo(self) -> None:
+        """
+        Send ``WILL ECHO`` unless the client is a MUD client.
+
+        MUD clients (Mudlet, TinTin++, etc.) interpret ``WILL ECHO`` as
+        "password mode" and mask the input bar.  We defer ECHO negotiation
+        until TTYPE arrives so MUD clients are detected first.
+
+        Called from :meth:`on_ttype` on each TTYPE response, and from
+        :meth:`check_negotiation` when TTYPE stalls or is refused.
+        """
+        if self._echo_negotiated:
+            return
+        self._echo_negotiated = True
+
+        # local
+        from .telopt import ECHO, WILL  # pylint: disable=import-outside-toplevel
+        from .fingerprinting import _is_maybe_mud  # pylint: disable=import-outside-toplevel
+
+        assert self.writer is not None
+        if _is_maybe_mud(self.writer):
+            logger.info("skipping WILL ECHO for MUD client")
+            return
+        self.writer.iac(WILL, ECHO)
 
     def _check_encoding(self) -> bool:
         # Periodically check for completion of ``waiter_encoding``.
@@ -996,8 +947,7 @@ def parse_server_args() -> Dict[str, Any]:
         argv = argv[:idx]
 
     parser = argparse.ArgumentParser(
-        description="Telnet protocol server",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        description="Telnet protocol server", formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument("host", nargs="?", default=_config.host, help="bind address")
     parser.add_argument("port", nargs="?", type=int, default=_config.port, help="bind port")

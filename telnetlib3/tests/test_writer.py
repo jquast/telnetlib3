@@ -67,8 +67,7 @@ class SimulSLCServer(telnetlib3.BaseServer):
 
         for slc_cmd in self.slc_callbacks:
             self.writer.set_slc_callback(
-                slc_byte=slc_cmd,
-                func=lambda byte: self.waiters[byte].set_result(byte),
+                slc_byte=slc_cmd, func=lambda byte: self.waiters[byte].set_result(byte)
             )
 
 
@@ -129,11 +128,7 @@ def test_sb_interrupted():
     # instead of awaiting the unlikely SE, and throwing all intermediary bytes
     # out, we just clear what we have received so far within this so called
     # 'SB', and exit the sb buffering state.
-    writer = telnetlib3.TelnetWriter(
-        transport=None,
-        protocol=None,
-        server=True,
-    )
+    writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
 
     given = IAC + SB + b"sbdata-\xff\xff-sbdata"
     sb_expected = b"sbdata-\xff-sbdata"
@@ -177,10 +172,7 @@ async def test_iac_do_twice_replies_once(bind_host, unused_tcp_port):
         port=unused_tcp_port,
         connect_maxwait=0.05,
     ):
-        async with asyncio_connection(bind_host, unused_tcp_port) as (
-            client_reader,
-            client_writer,
-        ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (client_reader, client_writer):
             client_writer.write(given_from_client)
             result_from_server = await asyncio.wait_for(client_reader.read(), 0.5)
             assert result_from_server == expect_from_server
@@ -203,10 +195,7 @@ async def test_iac_dont_dont(bind_host, unused_tcp_port):
         port=unused_tcp_port,
         connect_maxwait=0.05,
     ):
-        async with asyncio_connection(bind_host, unused_tcp_port) as (
-            client_reader,
-            client_writer,
-        ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (client_reader, client_writer):
             client_writer.write(given_from_client)
             result_from_server = await asyncio.wait_for(client_reader.read(), 0.5)
             assert result_from_server == expect_from_server
@@ -273,8 +262,7 @@ async def test_slc_simul(bind_host, unused_tcp_port):
 
     try:
         client_reader, client_writer = await asyncio.open_connection(
-            host=bind_host,
-            port=unused_tcp_port,
+            host=bind_host, port=unused_tcp_port
         )
 
         # exercise
@@ -307,10 +295,7 @@ async def test_unhandled_do_sends_wont(bind_host, unused_tcp_port):
         connect_maxwait=0.05,
         encoding=False,
     ):
-        async with asyncio_connection(bind_host, unused_tcp_port) as (
-            client_reader,
-            client_writer,
-        ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (client_reader, client_writer):
             client_writer.write(given_input_outband)
             result = await asyncio.wait_for(client_reader.readexactly(len(expected_output)), 0.5)
             assert result == expected_output
@@ -334,10 +319,7 @@ async def test_writelines_bytes(bind_host, unused_tcp_port):
         connect_maxwait=0.05,
         encoding=False,
     ):
-        async with asyncio_connection(bind_host, unused_tcp_port) as (
-            client_reader,
-            client_writer,
-        ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (client_reader, client_writer):
             result = await asyncio.wait_for(client_reader.read(), 0.5)
             assert result == expected
 
@@ -360,10 +342,7 @@ async def test_writelines_unicode(bind_host, unused_tcp_port):
         connect_maxwait=0.05,
         encoding="ascii",
     ):
-        async with asyncio_connection(bind_host, unused_tcp_port) as (
-            client_reader,
-            client_writer,
-        ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (client_reader, client_writer):
             result = await asyncio.wait_for(client_reader.read(), 0.5)
             assert result == expected
 
@@ -392,10 +371,7 @@ async def test_send_ga(bind_host, unused_tcp_port):
         port=unused_tcp_port,
         connect_maxwait=0.05,
     ):
-        async with asyncio_connection(bind_host, unused_tcp_port) as (
-            client_reader,
-            client_writer,
-        ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (client_reader, client_writer):
             result = await asyncio.wait_for(client_reader.read(), 0.5)
             assert result == expected
 
@@ -420,10 +396,7 @@ async def test_not_send_ga(bind_host, unused_tcp_port):
         port=unused_tcp_port,
         connect_maxwait=0.05,
     ):
-        async with asyncio_connection(bind_host, unused_tcp_port) as (
-            client_reader,
-            client_writer,
-        ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (client_reader, client_writer):
             client_writer.write(IAC + DO + SGA)
             result = await asyncio.wait_for(client_reader.read(), 0.5)
             assert result == expected
@@ -446,10 +419,7 @@ async def test_not_send_eor(bind_host, unused_tcp_port):
         port=unused_tcp_port,
         connect_maxwait=0.05,
     ):
-        async with asyncio_connection(bind_host, unused_tcp_port) as (
-            client_reader,
-            client_writer,
-        ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (client_reader, client_writer):
             result = await asyncio.wait_for(client_reader.read(), 0.5)
             assert result == expected
 
@@ -478,10 +448,7 @@ async def test_send_eor(bind_host, unused_tcp_port):
         port=unused_tcp_port,
         connect_maxwait=0.05,
     ):
-        async with asyncio_connection(bind_host, unused_tcp_port) as (
-            client_reader,
-            client_writer,
-        ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (client_reader, client_writer):
             client_writer.write(given)
             result = await asyncio.wait_for(client_reader.read(), 0.5)
             assert result == expected

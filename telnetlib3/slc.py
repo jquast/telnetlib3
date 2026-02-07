@@ -87,11 +87,7 @@ NSLC = 30
 
 LMODE_MODE, LMODE_FORWARDMASK, LMODE_SLC = (bytes([const]) for const in range(1, 4))
 LMODE_MODE_REMOTE, LMODE_MODE_LOCAL, LMODE_MODE_TRAPSIG = (bytes([const]) for const in range(3))
-LMODE_MODE_ACK, LMODE_MODE_SOFT_TAB, LMODE_MODE_LIT_ECHO = (
-    bytes([4]),
-    bytes([8]),
-    bytes([16]),
-)
+LMODE_MODE_ACK, LMODE_MODE_SOFT_TAB, LMODE_MODE_LIT_ECHO = (bytes([4]), bytes([8]), bytes([16]))
 
 
 class SLC:
@@ -230,9 +226,7 @@ BSD_SLC_TAB = {
 }
 
 
-def generate_slctab(
-    tabset: Optional[Dict[bytes, SLC]] = None,
-) -> Dict[bytes, SLC]:
+def generate_slctab(tabset: Optional[Dict[bytes, SLC]] = None) -> Dict[bytes, SLC]:
     """
     Returns full 'SLC Tab' for definitions found using ``tabset``.
 
@@ -249,9 +243,7 @@ def generate_slctab(
 
 
 def generate_forwardmask(
-    binary_mode: bool,
-    tabset: Dict[bytes, SLC],
-    ack: bool = False,
+    binary_mode: bool, tabset: Dict[bytes, SLC], ack: bool = False
 ) -> "Forwardmask":
     """
     Generate a Forwardmask instance.
@@ -282,9 +274,7 @@ def generate_forwardmask(
 
 
 def snoop(
-    byte: bytes,
-    slctab: Dict[bytes, SLC],
-    slc_callbacks: Dict[bytes, Callable[..., Any]],
+    byte: bytes, slctab: Dict[bytes, SLC], slc_callbacks: Dict[bytes, Callable[..., Any]]
 ) -> Tuple[Optional[Callable[..., Any]], Optional[bytes], Optional[SLC]]:
     """
     Scan ``slctab`` for matching ``byte`` values.

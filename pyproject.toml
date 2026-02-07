@@ -147,4 +147,5 @@ ignore_errors = true
 
 [tool.black]
 line-length = 100
+skip-magic-trailing-comma = true
 target-version = ["py39", "py310", "py311", "py312", "py313"]

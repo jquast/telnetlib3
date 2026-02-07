@@ -10,16 +10,7 @@ import codecs
 import struct
 import asyncio
 import argparse
-from typing import (
-    Any,
-    Dict,
-    List,
-    Tuple,
-    Union,
-    Callable,
-    Optional,
-    Sequence,
-)
+from typing import Any, Dict, List, Tuple, Union, Callable, Optional, Sequence
 
 # local
 from telnetlib3 import accessories, client_base
@@ -286,11 +277,7 @@ class TelnetClient(client_base.BaseClient):
         """
         return (self._extra["rows"], self._extra["cols"])
 
-    def encoding(
-        self,
-        outgoing: Optional[bool] = None,
-        incoming: Optional[bool] = None,
-    ) -> str:
+    def encoding(self, outgoing: Optional[bool] = None, incoming: Optional[bool] = None) -> str:
         """
         Return encoding for the given stream direction.
 
@@ -365,10 +352,7 @@ class TelnetTerminalClient(TelnetClient):
             return rows, cols
         except (ImportError, IOError):
             # TODO: mock import error, or test on windows or other non-posix.
-            return (
-                int(os.environ.get("LINES", 25)),
-                int(os.environ.get("COLUMNS", 80)),
-            )
+            return (int(os.environ.get("LINES", 25)), int(os.environ.get("COLUMNS", 80)))
 
 
 async def open_connection(  # pylint: disable=too-many-locals
@@ -395,10 +379,7 @@ async def open_connection(  # pylint: disable=too-many-locals
     _waiter_connected: Optional[asyncio.Future[None]] = None,
     limit: Optional[int] = None,
     send_environ: Optional[Sequence[str]] = None,
-) -> Tuple[
-    Union[TelnetReader, TelnetReaderUnicode],
-    Union[TelnetWriter, TelnetWriterUnicode],
-]:
+) -> Tuple[Union[TelnetReader, TelnetReaderUnicode], Union[TelnetWriter, TelnetWriterUnicode]]:
     """
     Connect to a TCP Telnet server as a Telnet client.
 
@@ -516,10 +497,7 @@ async def run_client() -> None:
     config_msg = f"Client configuration: {accessories.repr_mapping(args)}"
 
     log = accessories.make_logger(
-        name=__name__,
-        loglevel=args["loglevel"],
-        logfile=args["logfile"],
-        logfmt=args["logfmt"],
+        name=__name__, loglevel=args["loglevel"], logfile=args["logfile"], logfmt=args["logfmt"]
     )
     log.debug(config_msg)
 
@@ -547,8 +525,7 @@ async def run_client() -> None:
 
 def _get_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Telnet protocol client",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        description="Telnet protocol client", formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument("host", action="store", help="hostname")
     parser.add_argument("port", nargs="?", default=23, type=int, help="port number")
@@ -574,10 +551,7 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         "--connect-minwait", default=1.0, type=float, help="shell delay for negotiation"
     )
     parser.add_argument(
-        "--connect-maxwait",
-        default=4.0,
-        type=float,
-        help="timeout for pending negotiation",
+        "--connect-maxwait", default=4.0, type=float, help="timeout for pending negotiation"
     )
     parser.add_argument(
         "--connect-timeout",

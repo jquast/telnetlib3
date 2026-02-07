@@ -55,10 +55,7 @@ async def test_telnet_client_send_xdisploc(bind_host, unused_tcp_port):
         protocol_factory=ServerTestXdisploc, host=bind_host, port=unused_tcp_port
     ):
         async with open_connection(
-            host=bind_host,
-            port=unused_tcp_port,
-            xdisploc=given_xdisploc,
-            connect_minwait=0.05,
+            host=bind_host, port=unused_tcp_port, xdisploc=given_xdisploc, connect_minwait=0.05
         ) as (reader, writer):
             recv_xdisploc = await asyncio.wait_for(_waiter, 0.5)
             assert recv_xdisploc == given_xdisploc

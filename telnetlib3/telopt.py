@@ -78,6 +78,7 @@ __all__ = (
     "ABORT",
     "ACCEPTED",
     "AO",
+    "ATCP",
     "AUTHENTICATION",
     "AYT",
     "BINARY",
@@ -100,6 +101,7 @@ __all__ = (
     "EXOPL",
     "FORWARD_X",
     "GA",
+    "GMCP",
     "IAC",
     "INFO",
     "IP",
@@ -114,7 +116,18 @@ __all__ = (
     "LOGOUT",
     "MCCP2_COMPRESS",
     "MCCP_COMPRESS",
-    "GMCP",
+    "MSDP",
+    "MSDP_ARRAY_CLOSE",
+    "MSDP_ARRAY_OPEN",
+    "MSDP_TABLE_CLOSE",
+    "MSDP_TABLE_OPEN",
+    "MSDP_VAL",
+    "MSDP_VAR",
+    "MSP",
+    "MSSP",
+    "MSSP_VAL",
+    "MSSP_VAR",
+    "MXP",
     "NAMS",
     "NAOCRD",
     "NAOFFD",
@@ -167,6 +180,7 @@ __all__ = (
     "XASCII",
     "XAUTH",
     "XDISPLOC",
+    "ZMP",
     "theNULL",
     "name_command",
     "name_commands",
@@ -182,6 +196,24 @@ REQUEST, ACCEPTED, REJECTED, TTABLE_IS, TTABLE_REJECTED, TTABLE_ACK, TTABLE_NAK 
 )
 MCCP_COMPRESS, MCCP2_COMPRESS = (bytes([85]), bytes([86]))
 GMCP = bytes([201])
+MSDP = bytes([69])
+MSSP = bytes([70])
+MSP = bytes([90])
+MXP = bytes([91])
+ZMP = bytes([93])
+ATCP = bytes([200])
+
+# MSDP sub-command bytes (used within SB MSDP payloads)
+MSDP_VAR = bytes([1])
+MSDP_VAL = bytes([2])
+MSDP_TABLE_OPEN = bytes([3])
+MSDP_TABLE_CLOSE = bytes([4])
+MSDP_ARRAY_OPEN = bytes([5])
+MSDP_ARRAY_CLOSE = bytes([6])
+
+# MSSP sub-command bytes (used within SB MSSP payloads)
+MSSP_VAR = bytes([1])
+MSSP_VAL = bytes([2])
 
 #: List of globals that may match an iac command option bytes
 _DEBUG_OPTS: Dict[bytes, str] = {
@@ -232,6 +264,12 @@ _DEBUG_OPTS: Dict[bytes, str] = {
         "MCCP_COMPRESS",
         "MCCP2_COMPRESS",
         "GMCP",
+        "MSDP",
+        "MSSP",
+        "MSP",
+        "MXP",
+        "ZMP",
+        "ATCP",
         "ENCRYPT",
         "AUTHENTICATION",
         "TN3270E",

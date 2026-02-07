@@ -168,11 +168,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             pass
 
         self.writer = writer_factory(
-            transport=_transport,
-            protocol=self,
-            reader=self.reader,
-            client=True,
-            **writer_kwds,
+            transport=_transport, protocol=self, reader=self.reader, client=True, **writer_kwds
         )
 
         self.log.info("Connected to %s", self)

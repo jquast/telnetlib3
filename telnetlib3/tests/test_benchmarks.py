@@ -31,11 +31,7 @@ class MockProtocol:
 @pytest.fixture
 def writer():
     """Create a TelnetWriter for benchmarking."""
-    return TelnetWriter(
-        transport=MockTransport(),
-        protocol=MockProtocol(),
-        server=True,
-    )
+    return TelnetWriter(transport=MockTransport(), protocol=MockProtocol(), server=True)
 
 
 @pytest.fixture
@@ -116,11 +112,7 @@ def test_option_setitem(benchmark, writer):
 
 @pytest.mark.parametrize(
     "size",
-    [
-        pytest.param(1, id="1byte"),
-        pytest.param(64, id="64bytes"),
-        pytest.param(1024, id="1kb"),
-    ],
+    [pytest.param(1, id="1byte"), pytest.param(64, id="64bytes"), pytest.param(1024, id="1kb")],
 )
 def test_reader_feed_data(benchmark, reader, size):
     """Benchmark TelnetReader.feed_data() with different chunk sizes."""
@@ -138,11 +130,7 @@ def slctab():
 
 
 @pytest.mark.parametrize(
-    "byte",
-    [
-        pytest.param(b"\x03", id="match_ip"),
-        pytest.param(b"A", id="no_match"),
-    ],
+    "byte", [pytest.param(b"\x03", id="match_ip"), pytest.param(b"A", id="no_match")]
 )
 def test_snoop(benchmark, slctab, byte):
     """Benchmark snoop() for SLC character matching."""
@@ -178,11 +166,7 @@ async def _setup_server_client_pair():
             received_data.extend(data.encode() if isinstance(data, str) else data)
 
     server = await telnetlib3.create_server(
-        host="127.0.0.1",
-        port=0,
-        shell=shell,
-        encoding=False,
-        connect_maxwait=0.1,
+        host="127.0.0.1", port=0, shell=shell, encoding=False, connect_maxwait=0.1
     )
     port = server.sockets[0].getsockname()[1]
 

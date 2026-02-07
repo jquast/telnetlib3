@@ -3,7 +3,7 @@ Fingerprint shell for telnet client identification.
 
 This module probes telnet protocol capabilities, collects session data,
 and saves fingerprint files.  Display, REPL, and post-script code live
-in :mod:`telnetlib3.fingerprinting_display`.
+in ``telnetlib3.fingerprinting_display``.
 """
 
 from __future__ import annotations
@@ -33,6 +33,7 @@ from .telopt import (
     DONT,
     ECHO,
     GMCP,
+    MSDP,
     NAMS,
     NAOL,
     NAOP,
@@ -97,9 +98,7 @@ FINGERPRINT_POST_SCRIPT = os.environ.get("TELNETLIB3_FINGERPRINT_POST_SCRIPT", "
 
 
 # Terminal types that uniquely identify specific telnet clients
-PROTOCOL_MATCHED_TERMINALS = {
-    "syncterm",  # SyncTERM BBS client
-}
+PROTOCOL_MATCHED_TERMINALS = {"syncterm"}  # SyncTERM BBS client
 
 # Terminal types associated with MUD clients, matched case-insensitively.
 # These clients are likely to support extended options like GMCP.
@@ -120,13 +119,76 @@ MUD_TERMINALS = {
 }
 
 __all__ = (
+    "ENVIRON_EXTENDED",
+    "FingerprintingTelnetServer",
     "fingerprinting_server_shell",
     "fingerprinting_post_script",
     "get_client_fingerprint",
     "probe_client_capabilities",
 )
 
+#: Extended NEW_ENVIRON variable list used during client fingerprinting.
+#: The base :class:`~telnetlib3.server.TelnetServer` requests only common
+#: variables (USER, LOGNAME, LANG, TERM, etc.).  This extended set collects
+#: additional information useful for identifying and classifying clients.
+ENVIRON_EXTENDED: list[str] = [
+    "HOME",
+    "SHELL",
+    "SSH_CLIENT",
+    "SSH_TTY",
+    "HOSTNAME",
+    "HOSTTYPE",
+    "OSTYPE",
+    "PWD",
+    "VISUAL",
+    "TMUX",
+    "STY",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_MESSAGES",
+    "LC_COLLATE",
+    "LC_TIME",
+    "DOCKER_HOST",
+    "HISTFILE",
+    "AWS_PROFILE",
+    "AWS_REGION",
+]
+
 logger = logging.getLogger("telnetlib3.fingerprint")
+
+
+class FingerprintingTelnetServer:  # pylint: disable=too-few-public-methods
+    """
+    Mixin that extends ``on_request_environ`` with :data:`ENVIRON_EXTENDED`.
+
+    Usage with :func:`~telnetlib3.server.create_server`::
+
+        from telnetlib3.server import TelnetServer
+        from telnetlib3.fingerprinting import FingerprintingTelnetServer
+
+        class MyServer(FingerprintingTelnetServer, TelnetServer):
+            pass
+
+        server = await create_server(protocol_factory=MyServer, ...)
+    """
+
+    def on_request_environ(self) -> list[Union[str, bytes]]:
+        """Return base environ keys plus :data:`ENVIRON_EXTENDED`."""
+        # pylint: disable=no-member
+        base: list[Union[str, bytes]] = super().on_request_environ()  # type: ignore[misc]
+        # Insert extended keys before the trailing VAR/USERVAR sentinels
+        # local
+        from .telopt import VAR, USERVAR  # pylint: disable=import-outside-toplevel
+
+        extra = [k for k in ENVIRON_EXTENDED if k not in base]
+        # Find where VAR/USERVAR sentinels start and insert before them
+        insert_at = len(base)
+        for i, item in enumerate(base):
+            if item in (VAR, USERVAR):
+                insert_at = i
+                break
+        return base[:insert_at] + extra + base[insert_at:]
+
 
 # Timeout for probe_client_capabilities in _run_probe (seconds)
 _PROBE_TIMEOUT = 0.5
@@ -151,17 +213,13 @@ CORE_OPTIONS = [
     (SNDLOC, "SNDLOC", "Send location"),
 ]
 
-MUD_OPTIONS = [
-    (COM_PORT_OPTION, "COM_PORT", "Serial port control (RFC 2217)"),
-]
+MUD_OPTIONS = [(COM_PORT_OPTION, "COM_PORT", "Serial port control (RFC 2217)")]
 
 # Options with non-standard byte values (> 140) that crash some clients.
 # icy_term (icy_net) only accepts option bytes 0-49, 138-140, and 255,
 # returning a hard error for anything else. GMCP-capable MUD clients
 # typically self-announce via IAC WILL GMCP, so probing is unnecessary.
-EXTENDED_OPTIONS = [
-    (GMCP, "GMCP", "Generic MUD Communication Protocol"),
-]
+EXTENDED_OPTIONS = [(GMCP, "GMCP", "Generic MUD Communication Protocol")]
 
 LEGACY_OPTIONS = [
     (AUTHENTICATION, "AUTHENTICATION", "Telnet authentication"),
@@ -275,23 +333,11 @@ async def probe_client_capabilities(
             progress_callback(name, idx, len(to_probe), "")
 
         if writer.remote_option.enabled(opt):
-            results[name] = {
-                "status": "WILL",
-                "opt": opt,
-                "description": description,
-            }
+            results[name] = {"status": "WILL", "opt": opt, "description": description}
         elif writer.remote_option.get(opt) is False:
-            results[name] = {
-                "status": "WONT",
-                "opt": opt,
-                "description": description,
-            }
+            results[name] = {"status": "WONT", "opt": opt, "description": description}
         else:
-            results[name] = {
-                "status": "timeout",
-                "opt": opt,
-                "description": description,
-            }
+            results[name] = {"status": "timeout", "opt": opt, "description": description}
 
     return results
 
@@ -316,9 +362,7 @@ _EXTRA_INFO_KEYS = (
 ) + tuple(f"ttype{n}" for n in range(1, 9))
 
 
-def get_client_fingerprint(
-    writer: Union[TelnetWriter, TelnetWriterUnicode],
-) -> Dict[str, Any]:
+def get_client_fingerprint(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> Dict[str, Any]:
     """
     Collect all available client information from writer.
 
@@ -377,9 +421,7 @@ async def _run_probe(
     return results, elapsed
 
 
-def _get_protocol(
-    writer: Union[TelnetWriter, TelnetWriterUnicode],
-) -> Any:
+def _get_protocol(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> Any:
     """Return the protocol object from a writer."""
     return getattr(writer, "_protocol", None) or getattr(writer, "protocol", None)
 
@@ -416,9 +458,7 @@ def _collect_rejected_options(
     return result
 
 
-def _collect_extra_info(
-    writer: Union[TelnetWriter, TelnetWriterUnicode],
-) -> Dict[str, Any]:
+def _collect_extra_info(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> Dict[str, Any]:
     """Collect all extra_info from writer, including private _extra dict."""
     extra: Dict[str, Any] = {}
 
@@ -453,9 +493,7 @@ def _collect_extra_info(
     return extra
 
 
-def _collect_ttype_cycle(
-    writer: Union[TelnetWriter, TelnetWriterUnicode],
-) -> List[str]:
+def _collect_ttype_cycle(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> List[str]:
     """Collect the full TTYPE cycle responses."""
     ttype_list = []
 
@@ -470,9 +508,7 @@ def _collect_ttype_cycle(
     return ttype_list
 
 
-def _collect_protocol_timing(
-    writer: Union[TelnetWriter, TelnetWriterUnicode],
-) -> Dict[str, Any]:
+def _collect_protocol_timing(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> Dict[str, Any]:
     """Collect timing information from protocol."""
     timing = {}
     protocol = _get_protocol(writer)
@@ -486,9 +522,7 @@ def _collect_protocol_timing(
     return timing
 
 
-def _collect_slc_tab(
-    writer: Union[TelnetWriter, TelnetWriterUnicode],
-) -> Dict[str, Any]:
+def _collect_slc_tab(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> Dict[str, Any]:
     """Collect non-default SLC entries when LINEMODE was negotiated."""
     slctab = getattr(writer, "slctab", None)
     if not slctab:
@@ -532,8 +566,7 @@ def _collect_slc_tab(
 
 
 def _create_protocol_fingerprint(
-    writer: Union[TelnetWriter, TelnetWriterUnicode],
-    probe_results: Dict[str, Dict[str, Any]],
+    writer: Union[TelnetWriter, TelnetWriterUnicode], probe_results: Dict[str, Dict[str, Any]]
 ) -> Dict[str, Any]:
     """
     Create anonymized/summarized protocol fingerprint from session data.
@@ -545,9 +578,7 @@ def _create_protocol_fingerprint(
     :param probe_results: Probe results from capability probing.
     :returns: Dict with anonymized protocol fingerprint data.
     """
-    fingerprint: Dict[str, Any] = {
-        "probed-protocol": "client",
-    }
+    fingerprint: Dict[str, Any] = {"probed-protocol": "client"}
 
     protocol = _get_protocol(writer)
     extra_dict = getattr(protocol, "_extra", {}) if protocol else {}
@@ -634,9 +665,7 @@ _UNKNOWN_TERMINAL_HASH = "0" * 16
 AMBIGUOUS_WIDTH_UNKNOWN = -1
 
 
-def _create_session_fingerprint(
-    writer: Union[TelnetWriter, TelnetWriterUnicode],
-) -> Dict[str, Any]:
+def _create_session_fingerprint(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> Dict[str, Any]:
     """Create session identity fingerprint from stable client fields."""
     identity: Dict[str, Any] = {}
 
@@ -812,9 +841,7 @@ def _save_fingerprint_data(  # pylint: disable=too-many-locals,too-many-branches
         file_count = _count_protocol_folder_files(probe_dir)
         if file_count >= FINGERPRINT_MAX_FILES:
             logger.warning(
-                "fingerprint %s at file limit (%d), not saving",
-                telnet_hash,
-                FINGERPRINT_MAX_FILES,
+                "fingerprint %s at file limit (%d), not saving", telnet_hash, FINGERPRINT_MAX_FILES
             )
             return None
         logger.info("connection for fingerprint %s", telnet_hash)
@@ -823,10 +850,7 @@ def _save_fingerprint_data(  # pylint: disable=too-many-locals,too-many-branches
 
     peername = writer.get_extra_info("peername")
     now = datetime.datetime.now(datetime.timezone.utc)
-    session_entry = {
-        "ip": str(peername[0]) if peername else None,
-        "connected": now.isoformat(),
-    }
+    session_entry = {"ip": str(peername[0]) if peername else None, "connected": now.isoformat()}
 
     if os.path.exists(filepath):
         try:
@@ -871,6 +895,8 @@ def _is_maybe_mud(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> bool:
     for key in ("ttype1", "ttype2", "ttype3"):
         if (writer.get_extra_info(key) or "").lower() in MUD_TERMINALS:
             return True
+    if writer.remote_option.enabled(GMCP) or writer.remote_option.enabled(MSDP):
+        return True
     return False
 
 

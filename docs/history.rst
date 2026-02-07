@@ -1,7 +1,13 @@
 History
 =======
 2.3.0 *unreleased*
-  * new: ``connect_timeout`` arguments for client and ``--connect-timeout`` Client CLI argument.
+  * new: ``mud`` module with encode/decode functions for GMCP (option 201),
+    MSDP (option 69), and MSSP (option 70) MUD telnet protocols.
+  * new: ``TelnetWriter.send_gmcp()``, ``send_msdp()``, and ``send_mssp()``
+    methods for sending MUD protocol data, with corresponding
+    ``handle_gmcp()``, ``handle_msdp()``, and ``handle_mssp()`` callbacks.
+  * new: ``connect_timeout`` arguments for client and ``--connect-timeout``
+    Client CLI argument, :ghissue:`30`.
   * bugfix: missing LICENSE.txt in sdist file.
 
 2.2.0

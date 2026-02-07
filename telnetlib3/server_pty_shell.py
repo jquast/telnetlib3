@@ -145,10 +145,7 @@ class PTYSession:
                 self._handle_exec_error(exec_err_data)
 
             logger.debug(
-                "forked PTY: program=%s pid=%d fd=%d",
-                self.program,
-                self.child_pid,
-                self.master_fd,
+                "forked PTY: program=%s pid=%d fd=%d", self.program, self.child_pid, self.master_fd
             )
             self._setup_parent()
             pid, status = os.waitpid(self.child_pid, os.WNOHANG)
@@ -370,9 +367,7 @@ class PTYSession:
                 pass
 
     async def _bridge_loop(
-        self,
-        pty_read_event: asyncio.Event,
-        pty_data_queue: asyncio.Queue[bytes],
+        self, pty_read_event: asyncio.Event, pty_data_queue: asyncio.Queue[bytes]
     ) -> None:
         """Main bridge loop transferring data between telnet and PTY."""
         while not self._closing and not self.writer.is_closing():
@@ -382,8 +377,7 @@ class PTYSession:
             pty_task: asyncio.Task[bool] = asyncio.create_task(pty_read_event.wait())
 
             done, pending = await asyncio.wait(
-                {telnet_task, pty_task},
-                return_when=asyncio.FIRST_COMPLETED,
+                {telnet_task, pty_task}, return_when=asyncio.FIRST_COMPLETED
             )
 
             for task in pending:
@@ -593,8 +587,7 @@ class PTYSession:
 
 
 async def _wait_for_terminal_info(
-    writer: Union[TelnetWriter, TelnetWriterUnicode],
-    timeout: float = 2.0,
+    writer: Union[TelnetWriter, TelnetWriterUnicode], timeout: float = 2.0
 ) -> None:
     """
     Wait for TERM and window size to be negotiated.
@@ -662,10 +655,7 @@ def make_pty_shell(
     preexec_fn: Optional[Callable[[], None]] = None,
     raw_mode: bool = False,
 ) -> Callable[
-    [
-        Union[TelnetReader, TelnetReaderUnicode],
-        Union[TelnetWriter, TelnetWriterUnicode],
-    ],
+    [Union[TelnetReader, TelnetReaderUnicode], Union[TelnetWriter, TelnetWriterUnicode]],
     Awaitable[None],
 ]:
     """

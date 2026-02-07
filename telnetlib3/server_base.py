@@ -174,11 +174,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self.reader = reader_factory(**reader_kwds)
 
         self.writer = writer_factory(
-            transport=transport,
-            protocol=self,
-            reader=self.reader,
-            server=True,
-            **writer_kwds,
+            transport=transport, protocol=self, reader=self.reader, server=True, **writer_kwds
         )
 
         logger.info("Connection from %s", self)

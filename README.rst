@@ -72,40 +72,6 @@ program.
     telnetlib3-server 0.0.0.0 1984 --shell=bin.server_wargame.shell
     telnetlib3-server --pty-exec /bin/bash -- --login
 
-Fingerprinting Server
----------------------
-
-A built-in fingerprinting server shell is provided to uniquely identify telnet clients.
-
-Install with optional dependencies for full fingerprinting support (prettytable_
-and ucs-detect_)::
-
-    pip install telnetlib3[extras]
-
-Usage::
-
-    export TELNETLIB3_DATA_DIR=./data
-    telnetlib3-server --shell telnetlib3.fingerprinting_server_shell
-
-A public fingerprinting server you can try out yourself::
-
-    telnet 1984.ws 555
-
-An optional post-fingerprint hook can process saved files. The hook is run as
-``python -m <module> <filepath>``. The built-in post-script pretty-prints the JSON
-and integrates with ucs-detect_ for terminal capability probing::
-
-    export TELNETLIB3_DATA_DIR=./fingerprints
-    export TELNETLIB3_FINGERPRINT_POST_SCRIPT=telnetlib3.fingerprinting
-    telnetlib3-server --shell telnetlib3.fingerprinting_server_shell
-
-If ucs-detect_ is installed and available in PATH, the post-script automatically
-runs it to probe terminal capabilities (colors, sixel, kitty graphics, etc.) and
-adds the results to the fingerprint data as ``terminal-fingerprint-data``.
-
-.. _ucs-detect: https://github.com/jquast/ucs-detect
-.. _prettytable: https://pypi.org/project/prettytable/
-
 Legacy telnetlib
 ----------------
 

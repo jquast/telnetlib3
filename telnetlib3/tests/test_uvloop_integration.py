@@ -16,10 +16,7 @@ except ImportError:
 
 # local
 import telnetlib3
-from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
-    bind_host,
-    unused_tcp_port,
-)
+from telnetlib3.tests.accessories import bind_host, unused_tcp_port  # pylint: disable=unused-import
 
 pytestmark = pytest.mark.skipif(not HAS_UVLOOP, reason="uvloop not installed")
 
@@ -51,9 +48,7 @@ async def test_uvloop_telnet_integration(bind_host, unused_tcp_port):
 
     # Connect client
     reader, writer = await telnetlib3.open_connection(
-        host=bind_host,
-        port=unused_tcp_port,
-        client_factory=telnetlib3.TelnetClient,
+        host=bind_host, port=unused_tcp_port, client_factory=telnetlib3.TelnetClient
     )
 
     # Read response and verify connection works

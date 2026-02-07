@@ -272,11 +272,11 @@ def test_handle_will_invalid_cases_and_else_unhandled():
     assert seen["v"] == WILL
     # ELSE branch (unhandled) -> DONT sent, pending cleared, rejected tracked
     w4, t4, _ = new_writer(server=True)
-    w4.pending_option[DO + GMCP] = True
-    w4.handle_will(GMCP)
-    assert t4.writes[-1] == IAC + DONT + GMCP
-    assert not w4.pending_option.get(DO + GMCP, False)
-    assert GMCP in w4.rejected_will
+    w4.pending_option[DO + COM_PORT_OPTION] = True
+    w4.handle_will(COM_PORT_OPTION)
+    assert t4.writes[-1] == IAC + DONT + COM_PORT_OPTION
+    assert not w4.pending_option.get(DO + COM_PORT_OPTION, False)
+    assert COM_PORT_OPTION in w4.rejected_will
 
 
 def test_handle_will_then_do_unsupported_sends_both_dont_and_wont():

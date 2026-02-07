@@ -1,0 +1,240 @@
+"""
+MUD telnet protocol encoding and decoding utilities.
+
+Provides encode/decode functions for:
+- GMCP (Generic MUD Communication Protocol, option 201)
+- MSDP (MUD Server Data Protocol, option 69)
+- MSSP (MUD Server Status Protocol, option 70)
+
+All encode functions return the payload bytes only (the content between
+``IAC SB <option>`` and ``IAC SE``). The caller is responsible for
+framing with subnegotiation markers.
+"""
+
+from __future__ import annotations
+
+# std imports
+import json
+from typing import Any
+
+# local
+from .telopt import (
+    MSDP_VAL,
+    MSDP_VAR,
+    MSSP_VAL,
+    MSSP_VAR,
+    MSDP_ARRAY_OPEN,
+    MSDP_TABLE_OPEN,
+    MSDP_ARRAY_CLOSE,
+    MSDP_TABLE_CLOSE,
+)
+
+__all__ = ("gmcp_encode", "gmcp_decode", "msdp_encode", "msdp_decode", "mssp_encode", "mssp_decode")
+
+
+def gmcp_encode(package: str, data: Any = None) -> bytes:
+    """
+    Encode a GMCP message.
+
+    :param package: GMCP package name (e.g., "Char.Vitals")
+    :param data: Optional data to encode as JSON
+    :returns: Encoded GMCP payload bytes
+    """
+    if data is None:
+        return package.encode("utf-8")
+    return package.encode("utf-8") + b" " + json.dumps(data, separators=(",", ":")).encode("utf-8")
+
+
+def gmcp_decode(buf: bytes) -> tuple[str, Any]:
+    """
+    Decode a GMCP payload.
+
+    :param buf: GMCP payload bytes
+    :returns: Tuple of (package, data), where data is None if no JSON present
+    :raises ValueError: If JSON is malformed
+    """
+    parts = buf.split(b" ", 1)
+    if len(parts) == 1:
+        return (buf.decode("utf-8"), None)
+
+    package = parts[0].decode("utf-8")
+    try:
+        data = json.loads(parts[1].decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON in GMCP payload: {exc}") from exc
+    return (package, data)
+
+
+def msdp_encode(variables: dict[str, Any]) -> bytes:
+    """
+    Encode variables to MSDP wire format.
+
+    :param variables: Dictionary of variable names to values
+    :returns: Encoded MSDP payload bytes
+    """
+
+    def encode_value(value: Any) -> bytes:
+        """Encode a single MSDP value."""
+        if isinstance(value, dict):
+            result = MSDP_TABLE_OPEN
+            for key, val in value.items():
+                result += MSDP_VAR + key.encode("utf-8") + MSDP_VAL + encode_value(val)
+            result += MSDP_TABLE_CLOSE
+            return result
+        if isinstance(value, list):
+            result = MSDP_ARRAY_OPEN
+            for item in value:
+                result += MSDP_VAL + encode_value(item)
+            result += MSDP_ARRAY_CLOSE
+            return result
+        return str(value).encode("utf-8")
+
+    result = b""
+    for key, value in variables.items():
+        result += MSDP_VAR + key.encode("utf-8") + MSDP_VAL + encode_value(value)
+    return result
+
+
+class _MsdpParser:
+    """State machine for parsing MSDP wire bytes."""
+
+    _DELIMITERS = (MSDP_VAR, MSDP_VAL, MSDP_TABLE_CLOSE, MSDP_ARRAY_CLOSE)
+
+    def __init__(self, buf: bytes) -> None:
+        self.buf = buf
+        self.idx = 0
+
+    def _read_string(self) -> str:
+        start = self.idx
+        while (
+            self.idx < len(self.buf) and self.buf[self.idx : self.idx + 1] not in self._DELIMITERS
+        ):
+            self.idx += 1
+        return self.buf[start : self.idx].decode("utf-8")
+
+    def _read_key(self) -> str:
+        start = self.idx
+        while self.idx < len(self.buf) and self.buf[self.idx : self.idx + 1] not in (
+            MSDP_VAL,
+            MSDP_VAR,
+        ):
+            self.idx += 1
+        return self.buf[start : self.idx].decode("utf-8")
+
+    def _parse_table(self) -> dict[str, Any]:
+        table: dict[str, Any] = {}
+        while self.idx < len(self.buf) and self.buf[self.idx : self.idx + 1] != MSDP_TABLE_CLOSE:
+            if self.buf[self.idx : self.idx + 1] == MSDP_VAR:
+                self.idx += 1
+                key = self._read_key()
+                if self.idx < len(self.buf) and self.buf[self.idx : self.idx + 1] == MSDP_VAL:
+                    self.idx += 1
+                table[key] = self.parse_value()
+        if self.idx < len(self.buf):
+            self.idx += 1
+        return table
+
+    def _parse_array(self) -> list[Any]:
+        array: list[Any] = []
+        while self.idx < len(self.buf) and self.buf[self.idx : self.idx + 1] != MSDP_ARRAY_CLOSE:
+            if self.buf[self.idx : self.idx + 1] == MSDP_VAL:
+                self.idx += 1
+            array.append(self.parse_value())
+        if self.idx < len(self.buf):
+            self.idx += 1
+        return array
+
+    def parse_value(self) -> Any:
+        """Parse a single MSDP value at current position."""
+        if self.idx >= len(self.buf):
+            return ""
+        marker = self.buf[self.idx : self.idx + 1]
+        self.idx += 1
+        if marker == MSDP_TABLE_OPEN:
+            return self._parse_table()
+        if marker == MSDP_ARRAY_OPEN:
+            return self._parse_array()
+        self.idx -= 1
+        return self._read_string()
+
+    def parse(self) -> dict[str, Any]:
+        """Parse the full MSDP buffer into a dict."""
+        result: dict[str, Any] = {}
+        while self.idx < len(self.buf):
+            if self.buf[self.idx : self.idx + 1] == MSDP_VAR:
+                self.idx += 1
+                key = self._read_key()
+                if self.idx < len(self.buf) and self.buf[self.idx : self.idx + 1] == MSDP_VAL:
+                    self.idx += 1
+                    result[key] = self.parse_value()
+            else:
+                self.idx += 1
+        return result
+
+
+def msdp_decode(buf: bytes) -> dict[str, Any]:
+    """
+    Decode MSDP wire bytes to dictionary.
+
+    :param buf: MSDP payload bytes
+    :returns: Dictionary of variable names to values
+    """
+    return _MsdpParser(buf).parse()
+
+
+def mssp_encode(variables: dict[str, str | list[str]]) -> bytes:
+    """
+    Encode variables to MSSP wire format.
+
+    :param variables: Dictionary of variable names to string values or lists
+    :returns: Encoded MSSP payload bytes
+    """
+    result = b""
+    for key, value in variables.items():
+        result += MSSP_VAR + key.encode("utf-8")
+        if isinstance(value, list):
+            for item in value:
+                result += MSSP_VAL + item.encode("utf-8")
+        else:
+            result += MSSP_VAL + value.encode("utf-8")
+    return result
+
+
+def mssp_decode(buf: bytes) -> dict[str, str | list[str]]:
+    """
+    Decode MSSP wire bytes to dictionary.
+
+    :param buf: MSSP payload bytes
+    :returns: Dictionary with str values for single entries, list[str] for multiple
+    """
+    result: dict[str, str | list[str]] = {}
+    idx = 0
+    current_var: str | None = None
+
+    while idx < len(buf):
+        if buf[idx : idx + 1] == MSSP_VAR:
+            idx += 1
+            var_start = idx
+            while idx < len(buf) and buf[idx : idx + 1] not in (MSSP_VAL, MSSP_VAR):
+                idx += 1
+            current_var = buf[var_start:idx].decode("utf-8")
+        elif buf[idx : idx + 1] == MSSP_VAL:
+            idx += 1
+            val_start = idx
+            while idx < len(buf) and buf[idx : idx + 1] not in (MSSP_VAL, MSSP_VAR):
+                idx += 1
+            value = buf[val_start:idx].decode("utf-8")
+
+            if current_var is not None:
+                if current_var in result:
+                    existing = result[current_var]
+                    if isinstance(existing, list):
+                        existing.append(value)
+                    else:
+                        result[current_var] = [existing, value]
+                else:
+                    result[current_var] = value
+        else:
+            idx += 1
+
+    return result

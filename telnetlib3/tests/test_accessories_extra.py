@@ -30,14 +30,7 @@ def test_make_logger_with_file(tmp_path):
 
 
 def test_repr_mapping_quotes_roundtrip():
-    mapping = OrderedDict(
-        [
-            ("a", "simple"),
-            ("b", "needs space"),
-            ("c", "quote'"),
-            ("d", 42),
-        ]
-    )
+    mapping = OrderedDict([("a", "simple"), ("b", "needs space"), ("c", "quote'"), ("d", 42)])
     result = repr_mapping(mapping)
     expected = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in mapping.items())
     assert result == expected

@@ -18,6 +18,7 @@ if TYPE_CHECKING:  # pragma: no cover
 
 # local
 from . import slc
+from .mud import gmcp_decode, gmcp_encode, msdp_decode, msdp_encode, mssp_decode, mssp_encode
 from .telopt import (
     AO,
     DM,
@@ -43,6 +44,8 @@ from .telopt import (
     ECHO,
     GMCP,
     INFO,
+    MSDP,
+    MSSP,
     NAWS,
     SEND,
     SUSP,
@@ -81,10 +84,7 @@ from .telopt import (
     option_from_name,
 )
 
-__all__ = (
-    "TelnetWriter",
-    "TelnetWriterUnicode",
-)
+__all__ = ("TelnetWriter", "TelnetWriterUnicode")
 
 
 class TelnetWriter:
@@ -273,6 +273,9 @@ class TelnetWriter:
             (XDISPLOC, "xdisploc"),
             (NEW_ENVIRON, "environ"),
             (CHARSET, "charset"),
+            (GMCP, "gmcp"),
+            (MSDP, "msdp"),
+            (MSSP, "mssp"),
         ):
             self.set_ext_callback(cmd=ext_cmd, func=getattr(self, f"handle_{key}"))
 
@@ -634,10 +637,7 @@ class TelnetWriter:
                         self.pending_option[WILL + opt] = False
                         self.local_option[opt] = False
                 elif cmd == WILL:
-                    if not self.pending_option.enabled(DO + opt) and opt not in (
-                        TM,
-                        CHARSET,
-                    ):
+                    if not self.pending_option.enabled(DO + opt) and opt not in (TM, CHARSET):
                         self.log.debug("WILL %s unsolicited", name_command(opt))
                     elif opt == CHARSET and not self.pending_option.enabled(DO + opt):
                         self.log.debug(
@@ -898,6 +898,52 @@ class TelnetWriter:
 
         self.log.debug("send IAC CMD_EOR")
         self.send_iac(IAC + CMD_EOR)
+        return True
+
+    def send_gmcp(self, package: str, data: Any = None) -> bool:
+        """
+        Transmit a GMCP message via subnegotiation.
+
+        :param package: GMCP package name (e.g., ``"Char.Vitals"``)
+        :param data: Optional data to encode as JSON
+        :returns: True if sent, False if GMCP is not negotiated
+        """
+        if not (self.local_option.enabled(GMCP) or self.remote_option.enabled(GMCP)):
+            self.log.debug("cannot send GMCP without negotiation")
+            return False
+        payload = self._escape_iac(gmcp_encode(package, data))
+        self.log.debug("send IAC SB GMCP %s IAC SE", package)
+        self.send_iac(IAC + SB + GMCP + payload + IAC + SE)
+        return True
+
+    def send_msdp(self, variables: dict[str, Any]) -> bool:
+        """
+        Transmit MSDP variables via subnegotiation.
+
+        :param variables: Dictionary of variable names to values
+        :returns: True if sent, False if MSDP is not negotiated
+        """
+        if not (self.local_option.enabled(MSDP) or self.remote_option.enabled(MSDP)):
+            self.log.debug("cannot send MSDP without negotiation")
+            return False
+        payload = self._escape_iac(msdp_encode(variables))
+        self.log.debug("send IAC SB MSDP IAC SE")
+        self.send_iac(IAC + SB + MSDP + payload + IAC + SE)
+        return True
+
+    def send_mssp(self, variables: dict[str, str | list[str]]) -> bool:
+        """
+        Transmit MSSP variables via subnegotiation.
+
+        :param variables: Dictionary of variable names to values
+        :returns: True if sent, False if MSSP is not negotiated
+        """
+        if not (self.local_option.enabled(MSSP) or self.remote_option.enabled(MSSP)):
+            self.log.debug("cannot send MSSP without negotiation")
+            return False
+        payload = self._escape_iac(mssp_encode(variables))
+        self.log.debug("send IAC SB MSSP IAC SE")
+        self.send_iac(IAC + SB + MSSP + payload + IAC + SE)
         return True
 
     # Public methods for notifying about, or soliciting state options.
@@ -1393,6 +1439,15 @@ class TelnetWriter:
         * ``CHARSET``: for servers, receiving one string, the character set
           negotiated by client. :rfc:`2066`.
 
+        * ``GMCP``: receiving two arguments (package, data), the GMCP
+          package name as string and decoded JSON data (or None).
+
+        * ``MSDP``: receiving one argument, a dict of MSDP variable
+          names to values (strings, lists, or nested dicts).
+
+        * ``MSSP``: receiving one argument, a dict of MSSP variable
+          names to string values (or list of strings for multi-valued).
+
         :param func: The callback function to register.
         """
         assert cmd in (
@@ -1404,6 +1459,9 @@ class TelnetWriter:
             XDISPLOC,
             NEW_ENVIRON,
             CHARSET,
+            GMCP,
+            MSDP,
+            MSSP,
         ), cmd
         assert callable(func), "Argument func must be callable"
         self._ext_callback[cmd] = func
@@ -1485,6 +1543,18 @@ class TelnetWriter:
         """Receive character set as string, :rfc:`2066`."""
         self.log.debug("Character set: %s", charset)
 
+    def handle_gmcp(self, package: str, data: Any) -> None:
+        """Receive GMCP message with ``package`` name and ``data``."""
+        self.log.debug("GMCP: %s %r", package, data)
+
+    def handle_msdp(self, variables: dict[str, Any]) -> None:
+        """Receive MSDP variables as dict."""
+        self.log.debug("MSDP: %r", variables)
+
+    def handle_mssp(self, variables: dict[str, str | list[str]]) -> None:
+        """Receive MSSP variables as dict."""
+        self.log.debug("MSSP: %r", variables)
+
     def handle_send_client_charset(self, _charsets: list[str]) -> str:
         """
         Send character set selection as string, :rfc:`2066`.
@@ -1563,14 +1633,7 @@ class TelnetWriter:
             # servers, such as dgamelaunch (nethack.alt.org) freeze up
             # unless we answer IAC-WONT-ECHO.
             self.iac(WONT, ECHO)
-        elif self.server and opt in (
-            LINEMODE,
-            TTYPE,
-            NAWS,
-            NEW_ENVIRON,
-            XDISPLOC,
-            LFLOW,
-        ):
+        elif self.server and opt in (LINEMODE, TTYPE, NAWS, NEW_ENVIRON, XDISPLOC, LFLOW):
             raise ValueError(f"cannot recv DO {name_command(opt)} on server end (ignored).")
         elif self.client and opt in (LOGOUT,):
             raise ValueError(f"cannot recv DO {name_command(opt)} on client end (ignored).")
@@ -1602,6 +1665,8 @@ class TelnetWriter:
             NAWS,
             STATUS,
             GMCP,
+            MSDP,
+            MSSP,
         ):
             # first time we've agreed, respond accordingly.
             if not self.local_option.enabled(opt):
@@ -1614,14 +1679,7 @@ class TelnetWriter:
                 self._send_status()
 
             # and expect a follow-up sub-negotiation for these others.
-            elif opt in (
-                LFLOW,
-                TTYPE,
-                NEW_ENVIRON,
-                XDISPLOC,
-                TSPEED,
-                LINEMODE,
-            ):
+            elif opt in (LFLOW, TTYPE, NEW_ENVIRON, XDISPLOC, TSPEED, LINEMODE):
                 # Note that CHARSET is not included -- either side that has sent
                 # WILL and received DO may initiate SB at any time.
                 self.pending_option[SB + opt] = True
@@ -1678,7 +1736,7 @@ class TelnetWriter:
         """
         self.log.debug("handle_will(%s)", name_command(opt))
 
-        if opt in (BINARY, SGA, ECHO, NAWS, LINEMODE, EOR, SNDLOC):
+        if opt in (BINARY, SGA, ECHO, NAWS, LINEMODE, EOR, SNDLOC, GMCP, MSDP, MSSP):
             if opt == ECHO and self.server:
                 raise ValueError("cannot recv WILL ECHO on server end")
             if opt in (NAWS, LINEMODE, SNDLOC) and self.client:
@@ -1828,6 +1886,8 @@ class TelnetWriter:
             STATUS: self._handle_sb_status,
             COM_PORT_OPTION: self._handle_sb_comport,
             GMCP: self._handle_sb_gmcp,
+            MSDP: self._handle_sb_msdp,
+            MSSP: self._handle_sb_mssp,
         }.get(cmd)
         if fn_call is None:
             raise ValueError(f"SB unhandled: cmd={name_command(cmd)}, buf={buf!r}")
@@ -1866,35 +1926,6 @@ class TelnetWriter:
 
     # Private sub-negotiation (SB) routines
 
-    def _check_mtts_for_utf8(self) -> str | None:
-        """
-        Check MTTS (MUD Terminal Type Standard) data for UTF-8 support.
-
-        Called as a fallback when CHARSET negotiation is rejected by the client.
-        MTTS is a bitmask where bit 3 (value 8) indicates UTF-8 capability.
-        Returns "UTF-8" if supported, None otherwise.
-
-        https://tintin.sourceforge.io/protocols/mtts/
-        """
-        # Try to get MTTS from NEW_ENVIRON (e.g., "MTTS=2825")
-        mtts_str = self._protocol.get_extra_info("MTTS")
-        if not mtts_str:
-            # Try TTYPE round 3 (e.g., "MTTS 2825")
-            ttype3 = self._protocol.get_extra_info("ttype3")
-            if ttype3 and ttype3.upper().startswith("MTTS "):
-                mtts_str = ttype3[5:].strip()
-
-        if mtts_str:
-            try:
-                mtts_value = int(mtts_str)
-                # Bit 3 (value 8) indicates UTF-8 support
-                if mtts_value & 8:
-                    return "UTF-8"
-            except (ValueError, TypeError):
-                self.log.debug("Failed to parse MTTS value: %r", mtts_str)
-
-        return None
-
     def _handle_sb_charset(self, buf: collections.deque[bytes]) -> None:
         cmd = buf.popleft()
         assert cmd == CHARSET
@@ -1923,18 +1954,6 @@ class TelnetWriter:
             self._ext_callback[CHARSET](charset)
         elif opt == REJECTED:
             self.log.warning("recv IAC SB CHARSET REJECTED IAC SE")
-            # After CHARSET rejection, check MTTS for UTF-8 support.
-            # TTYPE round 3 data (ttype3) is available here since TTYPE
-            # cycling completes before CHARSET REQUEST is sent. However,
-            # NEW_ENVIRON data may not have arrived yet — server.on_environ()
-            # handles that case with a deferred check.
-            if self.server and CHARSET in self._ext_callback:
-                charset_from_mtts = self._check_mtts_for_utf8()
-                if charset_from_mtts:
-                    self.log.debug("MTTS indicates UTF-8 support, resolving to UTF-8")
-                    self._ext_callback[CHARSET](charset_from_mtts)
-                else:
-                    self._charset_rejected = True
         elif opt in (TTABLE_IS, TTABLE_ACK, TTABLE_NAK, TTABLE_REJECTED):
             raise NotImplementedError(
                 f"Translation table command received but not supported: {opt!r}"
@@ -1969,23 +1988,14 @@ class TelnetWriter:
                 rx_int, tx_int = int(rx_str), int(tx_str)
             except ValueError as err:
                 self.log.error(
-                    "illegal TSPEED values received (rx=%r, tx=%r): %s",
-                    rx_str,
-                    tx_str,
-                    err,
+                    "illegal TSPEED values received (rx=%r, tx=%r): %s", rx_str, tx_str, err
                 )
                 return
             self._ext_callback[TSPEED](rx_int, tx_int)
         elif opt == SEND:
             assert self.client, f"SE: cannot recv from client: {name_command(cmd)} {opt_kind}"
             rx, tx = self._ext_send_callback[TSPEED]()
-            assert (
-                type(rx),
-                type(tx),
-            ) == (
-                int,
-                int,
-            ), (rx, tx)
+            assert (type(rx), type(tx)) == (int, int), (rx, tx)
             brx = f"{rx}".encode("ascii")
             btx = f"{tx}".encode("ascii")
             response = [IAC, SB, TSPEED, IS, brx, b",", btx, IAC, SE]
@@ -2591,15 +2601,9 @@ class TelnetWriter:
                 return
 
         opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
-        if cmd in (
-            WILL,
-            WONT,
-        ):
+        if cmd in (WILL, WONT):
             self.remote_option[opt] = bool(cmd is WILL)
-        elif cmd in (
-            DO,
-            DONT,
-        ):
+        elif cmd in (DO, DONT):
             self.local_option[opt] = bool(cmd is DO)
             if cmd == DO:
                 self._handle_do_forwardmask(buf)
@@ -2616,13 +2620,36 @@ class TelnetWriter:
 
     def _handle_sb_gmcp(self, buf: collections.deque[bytes]) -> None:
         """
-        Callback handles request for Generic Mud Communication Protocol (GMCP).
-
-        This callback simply logs the subnegotiation but does not perform any action.
+        Callback handles Generic MUD Communication Protocol (GMCP) subnegotiation.
 
         :param buf: bytes following IAC SB GMCP.
         """
-        self.log.debug("SB unhandled: cmd=%s, buf=%r", name_command(GMCP), b"".join(buf))
+        buf.popleft()
+        payload = b"".join(buf)
+        package, data = gmcp_decode(payload)
+        self._ext_callback[GMCP](package, data)
+
+    def _handle_sb_msdp(self, buf: collections.deque[bytes]) -> None:
+        """
+        Callback handles MUD Server Data Protocol (MSDP) subnegotiation.
+
+        :param buf: bytes following IAC SB MSDP.
+        """
+        buf.popleft()
+        payload = b"".join(buf)
+        variables = msdp_decode(payload)
+        self._ext_callback[MSDP](variables)
+
+    def _handle_sb_mssp(self, buf: collections.deque[bytes]) -> None:
+        """
+        Callback handles MUD Server Status Protocol (MSSP) subnegotiation.
+
+        :param buf: bytes following IAC SB MSSP.
+        """
+        buf.popleft()
+        payload = b"".join(buf)
+        variables = mssp_decode(payload)
+        self._ext_callback[MSSP](variables)
 
     def _handle_do_forwardmask(self, buf: collections.deque[bytes]) -> None:
         """
@@ -2662,13 +2689,7 @@ class TelnetWriterUnicode(TelnetWriter):  # pylint: disable=abstract-method
         """Initialize TelnetWriterUnicode with encoding callback."""
         self.fn_encoding = fn_encoding
         self.encoding_errors = encoding_errors
-        super().__init__(
-            transport,
-            protocol,
-            client=client,
-            server=server,
-            reader=reader,
-        )
+        super().__init__(transport, protocol, client=client, server=server, reader=reader)
 
     def encode(self, string: str, errors: Optional[str] = None) -> bytes:
         """
@@ -2749,10 +2770,7 @@ class Option(dict[bytes, bool]):
     """
 
     def __init__(
-        self,
-        name: str,
-        log: logging.Logger,
-        on_change: Optional[Callable[[], None]] = None,
+        self, name: str, log: logging.Logger, on_change: Optional[Callable[[], None]] = None
     ) -> None:
         """
         Class initializer.
@@ -2841,14 +2859,7 @@ def _decode_env_buf(buf: bytes) -> dict[str, str]:
     breaks = [
         idx
         for (idx, byte) in enumerate(buf)
-        if (
-            bytes([byte])
-            in (
-                VAR,
-                USERVAR,
-            )
-            and (idx == 0 or bytes([buf[idx - 1]]) != ESC)
-        )
+        if (bytes([byte]) in (VAR, USERVAR) and (idx == 0 or bytes([buf[idx - 1]]) != ESC))
     ]
 
     for idx, ptr in enumerate(breaks):

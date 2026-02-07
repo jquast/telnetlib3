@@ -14,19 +14,7 @@ import pexpect
 
 # local
 import telnetlib3
-from telnetlib3.telopt import (
-    DO,
-    SB,
-    IAC,
-    SGA,
-    ECHO,
-    NAWS,
-    WILL,
-    WONT,
-    TTYPE,
-    BINARY,
-    CHARSET,
-)
+from telnetlib3.telopt import DO, SB, IAC, SGA, NAWS, WILL, WONT, TTYPE, BINARY, CHARSET
 from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
     bind_host,
     create_server,
@@ -46,9 +34,7 @@ async def test_create_server(bind_host, unused_tcp_port):
 async def test_create_server_conditionals(bind_host, unused_tcp_port):
     """Test telnetlib3.create_server conditionals."""
     async with create_server(
-        protocol_factory=lambda: telnetlib3.TelnetServer,
-        host=bind_host,
-        port=unused_tcp_port,
+        protocol_factory=lambda: telnetlib3.TelnetServer, host=bind_host, port=unused_tcp_port
     ):
         pass
 
@@ -79,10 +65,7 @@ async def test_create_server_on_connect(bind_host, unused_tcp_port):
 async def test_telnet_server_open_close(bind_host, unused_tcp_port):
     """Test telnetlib3.TelnetServer() instantiation and connection_made()."""
     async with create_server(host=bind_host, port=unused_tcp_port) as server:
-        async with asyncio_connection(bind_host, unused_tcp_port) as (
-            stream_reader,
-            stream_writer,
-        ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (stream_reader, stream_writer):
             stream_writer.write(IAC + WONT + TTYPE + b"bye\r")
             srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
             srv_instance.writer.write("Goodbye!")
@@ -148,10 +131,10 @@ async def test_telnet_server_advanced_negotiation(bind_host, unused_tcp_port):
                 SB + TTYPE: True,
                 # remaining unreplied values from begin_advanced_negotiation()
                 # DO NEW_ENVIRON is deferred until TTYPE cycle completes
+                # WILL ECHO is deferred until TTYPE reveals client identity
                 DO + CHARSET: True,
                 DO + NAWS: True,
                 WILL + SGA: True,
-                WILL + ECHO: True,
                 WILL + BINARY: True,
             }
 
@@ -205,10 +188,7 @@ async def test_telnet_server_eof_by_client(bind_host, unused_tcp_port):
 
 async def test_telnet_server_closed_by_server(bind_host, unused_tcp_port):
     """Exercise TelnetServer.connection_lost by close()."""
-    async with create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-    ) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             expect_hello = IAC + DO + TTYPE
             hello_reply = IAC + WONT + TTYPE + b"quit" + b"\r\n"
@@ -237,10 +217,7 @@ async def test_telnet_server_closed_by_server(bind_host, unused_tcp_port):
 
 async def test_telnet_server_idle_duration(bind_host, unused_tcp_port):
     """Exercise TelnetServer.idle property."""
-    async with create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-    ) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
             srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
@@ -271,10 +248,7 @@ async def test_telnet_client_idle_duration_minwait(bind_host, unused_tcp_port):
 
 async def test_telnet_server_closed_by_error(bind_host, unused_tcp_port):
     """Exercise TelnetServer.connection_lost by exception."""
-    async with create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-    ) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
             srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
@@ -307,11 +281,7 @@ async def test_telnet_client_open_close_by_error(bind_host, unused_tcp_port):
 
 async def test_telnet_server_negotiation_fail(bind_host, unused_tcp_port):
     """Test telnetlib3.TelnetServer() negotiation failure with client."""
-    async with create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-        connect_maxwait=0.05,
-    ) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             await reader.readexactly(3)  # IAC DO TTYPE, we ignore it!
 
@@ -370,13 +340,7 @@ async def test_telnet_server_as_module():
 async def test_telnet_server_cmdline(bind_host, unused_tcp_port):
     """Test executing telnetlib3/server.py as server."""
     prog = pexpect.which("telnetlib3-server")
-    args = [
-        prog,
-        bind_host,
-        str(unused_tcp_port),
-        "--loglevel=info",
-        "--connect-maxwait=0.05",
-    ]
+    args = [prog, bind_host, str(unused_tcp_port), "--loglevel=info", "--connect-maxwait=0.05"]
     proc = await asyncio.create_subprocess_exec(*args, stderr=asyncio.subprocess.PIPE)
 
     seen = b""
@@ -458,10 +422,7 @@ async def test_telnet_client_cmdline(bind_host, unused_tcp_port):
         assert "Connection closed to <Peer" in stderr_text
 
 
-@pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="pexpect.spawn requires Unix PTY",
-)
+@pytest.mark.skipif(sys.platform == "win32", reason="pexpect.spawn requires Unix PTY")
 @pytest.mark.skipif(
     tuple(map(int, platform.python_version_tuple()[:2])) > (3, 10),
     reason="those shabby pexpect maintainers still use @asyncio.coroutine",

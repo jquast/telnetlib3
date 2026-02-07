@@ -39,11 +39,7 @@ async def test_telnet_server_on_environ(bind_host, unused_tcp_port):
                 + NEW_ENVIRON
                 + IS
                 + telnetlib3.stream_writer._encode_env_buf(
-                    {
-                        "aLpHa": "oMeGa",
-                        "beta": "b",
-                        "gamma": "".join(chr(n) for n in range(0, 128)),
-                    }
+                    {"aLpHa": "oMeGa", "beta": "b", "gamma": "".join(chr(n) for n in range(0, 128))}
                 )
                 + IAC
                 + SE
@@ -107,9 +103,7 @@ async def test_telnet_client_send_var_uservar_environ(bind_host, unused_tcp_port
             return [VAR, USERVAR]
 
     async with create_server(
-        protocol_factory=ServerTestEnviron,
-        host=bind_host,
-        port=unused_tcp_port,
+        protocol_factory=ServerTestEnviron, host=bind_host, port=unused_tcp_port
     ):
         async with open_connection(
             host=bind_host,

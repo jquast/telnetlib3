@@ -43,10 +43,7 @@ def _make_terminal_client(**kwargs):
             id="no_pref_first_viable",
         ),
         pytest.param(
-            ["zzz-fake-1", "zzz-fake-2"],
-            "not-a-real-encoding-xyz",
-            "",
-            id="no_viable_encodings",
+            ["zzz-fake-1", "zzz-fake-2"], "not-a-real-encoding-xyz", "", id="no_viable_encodings"
         ),
         pytest.param(["utf-8"], "latin-1", "utf-8", id="latin1_weak_default"),
     ],
@@ -177,11 +174,7 @@ def test_transform_args():
 async def test_open_connection_default_factory(bind_host, unused_tcp_port, monkeypatch):
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
 
-    async with create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-        connect_maxwait=0.05,
-    ):
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05):
         reader, writer = await cl.open_connection(
             host=bind_host,
             port=unused_tcp_port,
@@ -199,11 +192,7 @@ async def test_open_connection_default_factory(bind_host, unused_tcp_port, monke
 async def test_open_connection_tty_factory(bind_host, unused_tcp_port, monkeypatch):
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
-    async with create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-        connect_maxwait=0.05,
-    ):
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05):
         reader, writer = await cl.open_connection(
             host=bind_host,
             port=unused_tcp_port,

@@ -21,7 +21,19 @@ __all__ = (
     "repr_mapping",
     "function_lookup",
     "make_reader_task",
+    "PATIENCE_MESSAGES",
 )
+
+PATIENCE_MESSAGES = [
+    "Contemplate the virtue of patience",
+    "Endure delays with fortitude",
+    "To wait calmly requires discipline",
+    "Suspend expectations of imminence",
+    "The tide hastens for no man",
+    "Cultivate a stoic calmness",
+    "The tranquil mind eschews impatience",
+    "Deliberation is preferable to haste",
+]
 
 
 def get_version() -> str:
@@ -91,10 +103,7 @@ _DEFAULT_LOGFMT = " ".join(
 
 
 def make_logger(
-    name: str,
-    loglevel: str = "info",
-    logfile: Optional[str] = None,
-    logfmt: str = _DEFAULT_LOGFMT,
+    name: str, loglevel: str = "info", logfile: Optional[str] = None, logfmt: str = _DEFAULT_LOGFMT
 ) -> logging.Logger:
     """Create and return simple logger for given arguments."""
     lvl = getattr(logging, loglevel.upper())
@@ -123,8 +132,7 @@ def function_lookup(pymod_path: str) -> Callable[..., Any]:
 
 
 def make_reader_task(
-    reader: "Union[TelnetReader, TelnetReaderUnicode, asyncio.StreamReader]",
-    size: int = 2**12,
+    reader: "Union[TelnetReader, TelnetReaderUnicode, asyncio.StreamReader]", size: int = 2**12
 ) -> "asyncio.Task[Any]":
     """Return asyncio task wrapping coroutine of reader.read(size)."""
     return asyncio.ensure_future(reader.read(size))

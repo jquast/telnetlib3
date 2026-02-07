@@ -1,8 +1,18 @@
 # std imports
 import asyncio
 
+# 3rd party
+import pytest
+
 # local
-from telnetlib3.guard_shells import ConnectionCounter, busy_shell, robot_shell
+from telnetlib3.guard_shells import (
+    ConnectionCounter,
+    _read_line,
+    busy_shell,
+    robot_shell,
+    _latin1_reading,
+)
+from telnetlib3.stream_reader import TelnetReaderUnicode
 
 
 async def test_connection_counter_integration():
@@ -63,9 +73,7 @@ async def test_counter_release_in_guarded_pattern():
             results.append(f"{name}: released (count={counter.count})")
 
     await asyncio.gather(
-        guarded_shell("client1"),
-        guarded_shell("client2"),
-        guarded_shell("client3"),
+        guarded_shell("client1"), guarded_shell("client2"), guarded_shell("client3")
     )
 
     acquired_count = sum(1 for r in results if "acquired" in r)
@@ -318,3 +326,79 @@ async def test_full_guarded_shell_flow():  # pylint: disable=too-complex
     assert len(shell_calls) >= 1
     assert len(robot_calls) >= 1
     assert counter.count == 0
+
+
+async def test_latin1_reading_switches_encoding():
+    """``_latin1_reading`` switches to latin-1 and restores original."""
+
+    def enc(**kw):
+        return "utf-8"
+
+    reader = TelnetReaderUnicode(fn_encoding=enc, encoding_errors="strict")
+    assert reader.fn_encoding(incoming=True) == "utf-8"
+
+    with _latin1_reading(reader):
+        assert reader.fn_encoding(incoming=True) == "latin-1"
+
+    assert reader.fn_encoding(incoming=True) == "utf-8"
+
+
+async def test_latin1_reading_preserves_raw_bytes():
+    """Latin-1 decodes every byte 0x00-0xFF without error or replacement."""
+
+    def enc(**kw):
+        return "utf-8"
+
+    reader = TelnetReaderUnicode(fn_encoding=enc, encoding_errors="strict")
+    # 0xc5 0x00 is invalid UTF-8 but valid latin-1 (Å and NUL)
+    reader.feed_data(b"\xc5\x00")
+    reader.feed_eof()
+
+    with _latin1_reading(reader):
+        out = await reader.read(-1)
+
+    assert out == "\xc5\x00"
+    assert "\ufffd" not in out
+
+
+async def test_latin1_reading_invalid_utf8_no_crash():
+    """Guard shell read with garbage bytes does not raise UnicodeDecodeError."""
+
+    def enc(**kw):
+        return "utf-8"
+
+    reader = TelnetReaderUnicode(fn_encoding=enc, encoding_errors="strict")
+    reader.feed_data(b"hello\xc5\x00\xff\xfeworld\r")
+    reader.feed_eof()
+
+    with _latin1_reading(reader):
+        result = await _read_line(reader, timeout=5.0)
+
+    assert result is not None
+    assert "hello" in result
+    assert "world" in result
+
+
+async def test_latin1_reading_noop_for_plain_reader():
+    """``_latin1_reading`` is a no-op for non-Unicode readers."""
+
+    class PlainReader:
+        pass
+
+    reader = PlainReader()
+    with _latin1_reading(reader):
+        pass
+
+
+async def test_without_latin1_reading_strict_crashes():
+    """Confirm strict UTF-8 raises on invalid bytes without the guard."""
+
+    def enc(**kw):
+        return "utf-8"
+
+    reader = TelnetReaderUnicode(fn_encoding=enc, encoding_errors="strict")
+    reader.feed_data(b"\xc5\x00")
+    reader.feed_eof()
+
+    with pytest.raises(UnicodeDecodeError):
+        await reader.read(-1)

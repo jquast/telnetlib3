@@ -18,7 +18,8 @@ from __future__ import annotations
 import re
 import asyncio
 import logging
-from typing import Tuple, Union, Optional, cast
+from typing import Tuple, Union, Optional, Generator, cast
+from contextlib import contextmanager
 
 # local
 from .server_shell import readline2
@@ -37,6 +38,30 @@ _MAX_INPUT = 2048
 
 # CPR response pattern: ESC [ row ; col R
 _CPR_PATTERN = re.compile(rb"\x1b\[(\d+);(\d+)R")
+
+
+@contextmanager
+def _latin1_reading(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+) -> Generator[None, None, None]:
+    """
+    Temporarily switch reader to latin-1 for byte-transparent decoding.
+
+    Latin-1 maps bytes 0x00-0xFF one-to-one, so every byte from a scanner
+    or bot is preserved exactly rather than raising ``UnicodeDecodeError``
+    or producing replacement characters.
+    """
+    if not isinstance(reader, TelnetReaderUnicode):
+        yield
+        return
+    orig_fn = reader.fn_encoding
+    reader.fn_encoding = lambda **kw: "latin-1"
+    reader._decoder = None  # pylint: disable=protected-access
+    try:
+        yield
+    finally:
+        reader.fn_encoding = orig_fn
+        reader._decoder = None  # pylint: disable=protected-access
 
 
 class ConnectionCounter:
@@ -73,10 +98,7 @@ class ConnectionCounter:
         return self._count
 
 
-async def _read_line_inner(
-    reader: Union[TelnetReader, TelnetReaderUnicode],
-    max_len: int,
-) -> str:
+async def _read_line_inner(reader: Union[TelnetReader, TelnetReaderUnicode], max_len: int) -> str:
     """Inner loop for _read_line, separated for wait_for compatibility."""
     _reader = cast(TelnetReaderUnicode, reader)
     buf = ""
@@ -91,9 +113,7 @@ async def _read_line_inner(
 
 
 async def _read_line(
-    reader: Union[TelnetReader, TelnetReaderUnicode],
-    timeout: float,
-    max_len: int = _MAX_INPUT,
+    reader: Union[TelnetReader, TelnetReaderUnicode], timeout: float, max_len: int = _MAX_INPUT
 ) -> Optional[str]:
     """Read a line with timeout and length limit."""
     try:
@@ -123,7 +143,6 @@ async def _read_cpr_response(
         try:
             data = await reader.read(1)
         except UnicodeDecodeError:
-            # Bot sent garbage bytes that can't be decoded
             return None
         if not data:
             return None
@@ -199,7 +218,8 @@ async def robot_check(
 
     :returns: True if client passes (renders wide char as width 2).
     """
-    width = await _measure_width(reader, writer, _WIDE_TEST_CHAR, timeout)
+    with _latin1_reading(reader):
+        width = await _measure_width(reader, writer, _WIDE_TEST_CHAR, timeout)
     return bool(width == 2)
 
 
@@ -239,26 +259,27 @@ async def robot_shell(
     logger.info("robot_shell: connection from %s", peername)
 
     answers = []
-    try:
-        line1 = await _ask_question(reader, writer, "Do robots dream of electric sheep? [yn] ")
-        if line1 is None:
-            logger.info("robot_shell: timeout waiting for response")
-            return
-        answers.append(line1)
+    with _latin1_reading(reader):
+        try:
+            line1 = await _ask_question(reader, writer, "Do robots dream of electric sheep? [yn] ")
+            if line1 is None:
+                logger.info("robot_shell: timeout waiting for response")
+                return
+            answers.append(line1)
 
-        line2 = await _ask_question(
-            reader, writer, "\r\nHave you ever wondered, who are the windowmakers? "
-        )
-        if line2 is None:
-            logger.info("robot_shell: timeout on second question")
-            return
-        answers.append(line2)
+            line2 = await _ask_question(
+                reader, writer, "\r\nHave you ever wondered, who are the windowmakers? "
+            )
+            if line2 is None:
+                logger.info("robot_shell: timeout on second question")
+                return
+            answers.append(line2)
 
-        writer.write("\r\n")
-        await writer.drain()
-    finally:
-        if answers:
-            logger.info("robot denied, answers=%r", answers)
+            writer.write("\r\n")
+            await writer.drain()
+        finally:
+            if answers:
+                logger.info("robot denied, answers=%r", answers)
 
 
 async def busy_shell(
@@ -271,24 +292,22 @@ async def busy_shell(
     Displays busy message, logs any input, and disconnects.
     """
     writer = cast(TelnetWriterUnicode, writer)
-    logger.info(
-        "busy_shell: connection from %s (limit reached)",
-        writer.get_extra_info("peername"),
-    )
+    logger.info("busy_shell: connection from %s (limit reached)", writer.get_extra_info("peername"))
 
     writer.write("Machine is busy, do not touch! ")
     await writer.drain()
 
-    line1 = await _read_line(reader, timeout=30.0)
-    if line1 is not None:
-        logger.info("busy_shell: input1=%r", line1)
+    with _latin1_reading(reader):
+        line1 = await _read_line(reader, timeout=30.0)
+        if line1 is not None:
+            logger.info("busy_shell: input1=%r", line1)
 
-    writer.write("\r\nYou hear a distant explosion... ")
-    await writer.drain()
+        writer.write("\r\nYou hear a distant explosion... ")
+        await writer.drain()
 
-    line2 = await _read_line(reader, timeout=30.0)
-    if line2 is not None:
-        logger.info("busy_shell: input2=%r", line2)
+        line2 = await _read_line(reader, timeout=30.0)
+        if line2 is not None:
+            logger.info("busy_shell: input2=%r", line2)
 
     writer.write("\r\n")
     await writer.drain()
