@@ -560,12 +560,6 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         help="timeout for TCP connection (seconds, default: no timeout)",
     )
     parser.add_argument(
-        "--connect-timeout",
-        default=None,
-        type=float,
-        help="timeout for TCP connection (seconds, default: no timeout)",
-    )
-    parser.add_argument(
         "--send-environ",
         default="TERM,LANG,COLUMNS,LINES,COLORTERM",
         help="comma-separated environment variables to send (NEW_ENVIRON)",

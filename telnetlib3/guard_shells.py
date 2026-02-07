@@ -140,7 +140,10 @@ async def _read_cpr_response(
     """Read CPR response bytes until 'R' terminator."""
     buf = b""
     while True:
-        data = await reader.read(1)
+        try:
+            data = await reader.read(1)
+        except UnicodeDecodeError:
+            return None
         if not data:
             return None
         if isinstance(data, str):

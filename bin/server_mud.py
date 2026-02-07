@@ -6,6 +6,7 @@ Usage::
     $ python bin/server_mud.py
     $ telnet localhost 6023
 """
+from __future__ import annotations
 
 # std imports
 import json
