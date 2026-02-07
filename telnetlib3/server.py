@@ -509,6 +509,22 @@ class TelnetServer(server_base.BaseServer):
 
         self._extra.update(u_mapping)
 
+        # Deferred MTTS fallback: CHARSET REJECTED may arrive before
+        # NEW_ENVIRON IS, so the immediate check in stream_writer finds
+        # nothing. Now that environ data is available, retry.
+        if "MTTS" in u_mapping and getattr(self.writer, "_charset_rejected", False):
+            charset = self.writer._check_mtts_for_utf8()
+            if charset:
+                logger.debug("MTTS indicates UTF-8 (deferred), resolving to UTF-8")
+                self.on_charset(charset)
+                self.writer._charset_rejected = False
+                # MTTS bit 3 is the MUD world's replacement for BINARY
+                # negotiation — the client is declaring UTF-8 capability
+                # regardless of RFC 856 BINARY mode.
+                self.force_binary = True
+                if not self.waiter_encoding.done():
+                    self.waiter_encoding.set_result(True)
+
     def on_request_charset(self) -> List[str]:
         """
         Definition for CHARSET request by client, :rfc:`2066`.
@@ -599,6 +615,20 @@ class TelnetServer(server_base.BaseServer):
             )
             self._extra["TERM"] = val
             self._negotiate_environ()
+
+            # Deferred MTTS fallback: CHARSET REJECTED may arrive before
+            # TTYPE round 3 completes, so the immediate check in
+            # stream_writer finds nothing. Now that ttype3 is stored,
+            # retry the MTTS check.
+            if getattr(self.writer, "_charset_rejected", False):
+                charset = self.writer._check_mtts_for_utf8()
+                if charset:
+                    logger.debug("MTTS indicates UTF-8 (deferred from ttype3)")
+                    self.on_charset(charset)
+                    self.writer._charset_rejected = False
+                    self.force_binary = True
+                    if not self.waiter_encoding.done():
+                        self.waiter_encoding.set_result(True)
 
         elif ttype == _lastval:
             logger.debug("ttype cycle stop at %s: %s, repeated.", key, ttype)
