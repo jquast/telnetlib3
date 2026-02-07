@@ -16,9 +16,7 @@ from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
 )
 
 
-async def test_server_demands_remote_linemode_client_agrees(
-    bind_host, unused_tcp_port
-):
+async def test_server_demands_remote_linemode_client_agrees(bind_host, unused_tcp_port):
     class ServerTestLinemode(telnetlib3.BaseServer):
         def begin_negotiation(self):
             super().begin_negotiation()
@@ -26,14 +24,9 @@ async def test_server_demands_remote_linemode_client_agrees(
             asyncio.get_event_loop().call_later(0.1, self.connection_lost, None)
 
     async with create_server(
-        protocol_factory=ServerTestLinemode,
-        host=bind_host,
-        port=unused_tcp_port,
+        protocol_factory=ServerTestLinemode, host=bind_host, port=unused_tcp_port
     ) as server:
-        async with asyncio_connection(bind_host, unused_tcp_port) as (
-            client_reader,
-            client_writer,
-        ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (client_reader, client_writer):
             expect_mode = telnetlib3.stream_writer.TelnetWriter.default_linemode.mask
             expect_stage1 = IAC + DO + LINEMODE
             expect_stage2 = IAC + SB + LINEMODE + LMODE_MODE + expect_mode + IAC + SE
@@ -70,9 +63,7 @@ async def test_server_demands_remote_linemode_client_agrees(
             assert srv_instance.writer.linemode.lit_echo is True
 
 
-async def test_server_demands_remote_linemode_client_demands_local(
-    bind_host, unused_tcp_port
-):
+async def test_server_demands_remote_linemode_client_demands_local(bind_host, unused_tcp_port):
     class ServerTestLinemode(telnetlib3.BaseServer):
         def begin_negotiation(self):
             super().begin_negotiation()
@@ -80,14 +71,9 @@ async def test_server_demands_remote_linemode_client_demands_local(
             asyncio.get_event_loop().call_later(0.1, self.connection_lost, None)
 
     async with create_server(
-        protocol_factory=ServerTestLinemode,
-        host=bind_host,
-        port=unused_tcp_port,
+        protocol_factory=ServerTestLinemode, host=bind_host, port=unused_tcp_port
     ) as server:
-        async with asyncio_connection(bind_host, unused_tcp_port) as (
-            client_reader,
-            client_writer,
-        ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (client_reader, client_writer):
             expect_mode = telnetlib3.stream_writer.TelnetWriter.default_linemode.mask
             expect_stage1 = IAC + DO + LINEMODE
             expect_stage2 = IAC + SB + LINEMODE + LMODE_MODE + expect_mode + IAC + SE

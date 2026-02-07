@@ -30,9 +30,7 @@ from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
     make_preexec_coverage,
 )
 
-pytestmark = [
-    pytest.mark.skipif(sys.platform == "win32", reason="PTY not supported on Windows"),
-]
+pytestmark = [pytest.mark.skipif(sys.platform == "win32", reason="PTY not supported on Windows")]
 
 PTY_HELPER = os.path.join(os.path.dirname(__file__), "pty_helper.py")
 
@@ -100,11 +98,7 @@ async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capt
         connect_maxwait=0.15,
     ):
         async with open_connection(
-            host=bind_host,
-            port=unused_tcp_port,
-            cols=80,
-            rows=25,
-            connect_minwait=0.05,
+            host=bind_host, port=unused_tcp_port, cols=80, rows=25, connect_minwait=0.05
         ) as (reader, writer):
             await asyncio.wait_for(_waiter, 2.0)
             await asyncio.sleep(0.1)
@@ -159,11 +153,7 @@ async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capt
         connect_maxwait=0.15,
     ):
         async with open_connection(
-            host=bind_host,
-            port=unused_tcp_port,
-            cols=80,
-            rows=25,
-            connect_minwait=0.05,
+            host=bind_host, port=unused_tcp_port, cols=80, rows=25, connect_minwait=0.05
         ) as (reader, writer):
             await asyncio.wait_for(_waiter, 2.0)
             await asyncio.sleep(0.1)
@@ -197,11 +187,7 @@ async def test_pty_shell_lifecycle(bind_host, unused_tcp_port, require_no_captur
         connect_maxwait=0.15,
     ):
         async with open_connection(
-            host=bind_host,
-            port=unused_tcp_port,
-            cols=80,
-            rows=25,
-            connect_minwait=0.05,
+            host=bind_host, port=unused_tcp_port, cols=80, rows=25, connect_minwait=0.05
         ) as (reader, writer):
             await asyncio.wait_for(_waiter, 2.0)
             await asyncio.sleep(0.1)
@@ -237,11 +223,7 @@ async def test_pty_shell_lifecycle(bind_host, unused_tcp_port, require_no_captur
         connect_maxwait=0.15,
     ):
         async with open_connection(
-            host=bind_host,
-            port=unused_tcp_port,
-            cols=80,
-            rows=25,
-            connect_minwait=0.05,
+            host=bind_host, port=unused_tcp_port, cols=80, rows=25, connect_minwait=0.05
         ) as (reader, writer):
             await asyncio.wait_for(_waiter, 2.0)
             await asyncio.sleep(0.1)
@@ -276,13 +258,7 @@ async def test_pty_session_build_environment(mock_session):
     """Test PTYSession environment building with various configurations."""
     # Test with full environment info
     session, _ = mock_session(
-        {
-            "TERM": "xterm-256color",
-            "rows": 30,
-            "cols": 100,
-            "LANG": "en_US.UTF-8",
-            "DISPLAY": ":0",
-        }
+        {"TERM": "xterm-256color", "rows": 30, "cols": 100, "LANG": "en_US.UTF-8", "DISPLAY": ":0"}
     )
     env = session._build_environment()
     assert env["TERM"] == "xterm-256color"
@@ -293,14 +269,7 @@ async def test_pty_session_build_environment(mock_session):
     assert env["DISPLAY"] == ":0"
 
     # Test charset fallback when no LANG
-    session, _ = mock_session(
-        {
-            "TERM": "vt100",
-            "rows": 24,
-            "cols": 80,
-            "charset": "ISO-8859-1",
-        }
-    )
+    session, _ = mock_session({"TERM": "vt100", "rows": 24, "cols": 80, "charset": "ISO-8859-1"})
     env = session._build_environment()
     assert env["TERM"] == "vt100"
     assert env["LANG"] == "en_US.ISO-8859-1"
@@ -589,11 +558,7 @@ async def test_pty_session_cleanup_error_recovery(
 
 
 @pytest.mark.parametrize(
-    "in_sync_update,expected_writes,expected_buffer",
-    [
-        (False, 1, b""),
-        (True, 0, b"partial line"),
-    ],
+    "in_sync_update,expected_writes,expected_buffer", [(False, 1, b""), (True, 0, b"partial line")]
 )
 async def test_pty_session_flush_remaining_scenarios(
     in_sync_update, expected_writes, expected_buffer
@@ -680,11 +645,7 @@ async def test_pty_session_exec_error_parsing(error_data, expected_substrings):
 
 @pytest.mark.parametrize(
     "child_pid,waitpid_behavior,expected",
-    [
-        (None, None, False),
-        (99999, ChildProcessError, False),
-        (12345, (0, 0), True),
-    ],
+    [(None, None, False), (99999, ChildProcessError, False), (12345, (0, 0), True)],
 )
 async def test_pty_session_isalive_scenarios(child_pid, waitpid_behavior, expected):
     """Test _isalive returns correct values for various child states."""

@@ -1,0 +1,10 @@
+root = true
+
+[*.py]
+charset = utf-8
+tab_width = 4
+indent_size = tab
+indent_space = space
+trim_trailing_whitespace = true
+insert_final_newline = true
+max_line_length = 100

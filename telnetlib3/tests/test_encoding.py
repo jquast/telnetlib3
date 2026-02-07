@@ -22,11 +22,7 @@ from telnetlib3.tests.accessories import (  # pylint: disable=unused-import; pyl
 
 async def test_telnet_server_encoding_default(bind_host, unused_tcp_port):
     """Default encoding US-ASCII unless it can be negotiated/confirmed!"""
-    async with create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-        connect_maxwait=0.05,
-    ) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
 
@@ -81,11 +77,7 @@ async def test_telnet_server_encoding_server_do(bind_host, unused_tcp_port):
 
 async def test_telnet_server_encoding_bidirectional(bind_host, unused_tcp_port):
     """Server's default encoding with bi-directional BINARY negotiation."""
-    async with create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-        connect_maxwait=0.05,
-    ) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + DO + BINARY)
             writer.write(IAC + WILL + BINARY)
@@ -100,10 +92,7 @@ async def test_telnet_server_encoding_bidirectional(bind_host, unused_tcp_port):
 async def test_telnet_client_and_server_encoding_bidirectional(bind_host, unused_tcp_port):
     """Given a default encoding for client and server, client always wins!"""
     async with create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-        encoding="latin1",
-        connect_maxwait=1.0,
+        host=bind_host, port=unused_tcp_port, encoding="latin1", connect_maxwait=1.0
     ) as server:
         async with open_connection(
             host=bind_host, port=unused_tcp_port, encoding="cp437", connect_minwait=1.0
@@ -130,11 +119,7 @@ async def test_telnet_server_encoding_by_LANG(bind_host, unused_tcp_port):
                 + SB
                 + NEW_ENVIRON
                 + IS
-                + telnetlib3.stream_writer._encode_env_buf(
-                    {
-                        "LANG": "uk_UA.KOI8-U",
-                    }
-                )
+                + telnetlib3.stream_writer._encode_env_buf({"LANG": "uk_UA.KOI8-U"})
                 + IAC
                 + SE
             )
@@ -209,10 +194,7 @@ async def test_telnet_server_binary_mode(bind_host, unused_tcp_port):
         assert val == b"output"
 
     async with create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-        shell=binary_shell,
-        encoding=False,
+        host=bind_host, port=unused_tcp_port, shell=binary_shell, encoding=False
     ) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             val = await reader.readexactly(len(IAC + DO + TTYPE))
@@ -233,10 +215,7 @@ async def test_telnet_client_and_server_escape_iac_encoding(bind_host, unused_tc
     given_string = "".join(chr(val) for val in list(range(256))) * 2
 
     async with create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-        encoding="iso8859-1",
-        connect_maxwait=0.05,
+        host=bind_host, port=unused_tcp_port, encoding="iso8859-1", connect_maxwait=0.05
     ) as server:
         async with open_connection(
             host=bind_host, port=unused_tcp_port, encoding="iso8859-1", connect_minwait=0.05
@@ -257,10 +236,7 @@ async def test_telnet_client_and_server_escape_iac_binary(bind_host, unused_tcp_
     given_string = bytes(range(256)) * 2
 
     async with create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-        encoding=False,
-        connect_maxwait=0.05,
+        host=bind_host, port=unused_tcp_port, encoding=False, connect_maxwait=0.05
     ) as server:
         async with open_connection(
             host=bind_host, port=unused_tcp_port, encoding=False, connect_minwait=0.05

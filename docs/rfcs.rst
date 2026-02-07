@@ -1,8 +1,8 @@
-RFCs
-====
+Specifications
+==============
 
-Implemented
------------
+RFCs Implemented
+----------------
 
 * :rfc:`727`, "Telnet Logout Option," Apr 1977.
 * :rfc:`779`, "Telnet Send-Location Option", Apr 1981.
@@ -26,8 +26,8 @@ Implemented
 * :rfc:`1572`, "Telnet Environment Option", Jan 1994.
 * :rfc:`2066`, "Telnet Charset Option", Jan 1997.
 
-Not Implemented
----------------
+RFCs Not Implemented
+--------------------
 
 * :rfc:`861`, "Telnet Extended Options List", May 1983. describes a method of
   negotiating options after all possible 255 option bytes are exhausted by
@@ -65,6 +65,32 @@ Not Implemented
 * :rfc:`1412`, "Telnet Authentication: SPX"
 * :rfc:`1416`, "Telnet Authentication Option"
 * :rfc:`2217`, "Telnet Com Port Control Option", Oct 1997
+
+MUDs Implemented
+----------------
+
+These are community-standard telnet extensions widely used by MUD (Multi-User
+Dungeon) servers and clients.
+
+* `GMCP`_ (Generic MUD Communication Protocol, option 201). JSON-based
+  bidirectional messaging for game data such as room info, character vitals,
+  and client metadata.
+* `MSDP`_ (MUD Server Data Protocol, option 69). Structured key-value protocol
+  for game variables with support for nested tables and arrays.
+* `MSSP`_ (MUD Server Status Protocol, option 70). Server metadata protocol
+  for MUD crawlers and directories, providing server name, player count,
+  codebase, and other listing information.
+
+.. _GMCP: https://www.gammon.com.au/gmcp
+.. _MSDP: https://tintin.mudhalla.net/protocols/msdp/
+.. _MSSP: https://tintin.mudhalla.net/protocols/mssp/
+
+MUDs Not Implemented
+--------------------
+
+Constants are also defined for the following MUD options, though their handlers
+are not implemented: MCCP/MCCP2 (85/86, compression), MXP (91, markup), ZMP
+(93, messaging), MSP (90, sound), and ATCP (200, Achaea-specific).
 
 Additional Resources
 --------------------

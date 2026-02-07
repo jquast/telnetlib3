@@ -23,11 +23,7 @@ async def test_telnet_server_default_timeout(bind_host, unused_tcp_port):
     """Test callback on_timeout() as coroutine of create_server()."""
     given_timeout = 19.29
 
-    async with create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-        timeout=given_timeout,
-    ) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, timeout=given_timeout) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
 
@@ -86,12 +82,7 @@ async def test_telnet_server_binary_mode(bind_host, unused_tcp_port):
 async def test_open_connection_connect_timeout(bind_host, unused_tcp_port):
     """Test connect_timeout raises ConnectionError on unreachable port."""
     with pytest.raises(ConnectionError):
-        async with open_connection(
-            bind_host,
-            unused_tcp_port,
-            connect_timeout=0.1,
-            encoding=False,
-        ):
+        async with open_connection(bind_host, unused_tcp_port, connect_timeout=0.1, encoding=False):
             pass
 
 

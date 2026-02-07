@@ -54,10 +54,7 @@ async def test_telnet_client_send_tspeed(bind_host, unused_tcp_port):
         protocol_factory=ServerTestTspeed, host=bind_host, port=unused_tcp_port
     ):
         async with open_connection(
-            host=bind_host,
-            port=unused_tcp_port,
-            tspeed=(given_rx, given_tx),
-            connect_minwait=0.05,
+            host=bind_host, port=unused_tcp_port, tspeed=(given_rx, given_tx), connect_minwait=0.05
         ) as (reader, writer):
             recv_rx, recv_tx = await asyncio.wait_for(_waiter, 3.0)
             assert recv_rx == given_rx

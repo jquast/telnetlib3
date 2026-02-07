@@ -23,6 +23,7 @@ import subprocess
 from typing import Any, Dict, List, Tuple, Optional, Generator
 
 # local
+from .accessories import PATIENCE_MESSAGES
 from .fingerprinting import (
     DATA_DIR,
     _UNKNOWN_TERMINAL_HASH,
@@ -51,18 +52,7 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
     if not ucs_detect:
         return None
 
-    patience_msg = random.choice(
-        [
-            "Contemplate the virtue of patience",
-            "Endure delays with fortitude",
-            "To wait calmly requires discipline",
-            "Suspend expectations of imminence",
-            "The tide hastens for no man",
-            "Cultivate a stoic calmness",
-            "The tranquil mind eschews impatience",
-            "Deliberation is preferable to haste",
-        ]
-    )
+    patience_msg = random.choice(PATIENCE_MESSAGES)
     echo(f"{patience_msg}...\r\n")
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
@@ -218,16 +208,11 @@ def _format_ttype(
 
 def _is_utf8_charset(value: str) -> bool:
     """Test whether a charset or encoding string refers to UTF-8."""
-    return value.lower().replace("-", "").replace("_", "") in (
-        "utf8",
-        "unicode11utf8",
-    )
+    return value.lower().replace("-", "").replace("_", "") in ("utf8", "unicode11utf8")
 
 
 def _format_encoding(
-    extra: Dict[str, Any],
-    proto_data: Dict[str, Any],
-    ambiguous_width: Optional[int] = None,
+    extra: Dict[str, Any], proto_data: Dict[str, Any], ambiguous_width: Optional[int] = None
 ) -> Optional[Tuple[str, str]]:
     """Consolidate LANG, charset, and encoding into a single key-value pair."""
     lang_val = extra.get("LANG")
@@ -398,12 +383,7 @@ def _build_telnet_rows(  # pylint: disable=too-many-locals,unused-argument
         pairs.append(("Options", _wrap_options(supported, wrap_width)))
 
     if rejected_will := proto_data.get("rejected-will"):
-        pairs.append(
-            (
-                "Rejected",
-                _wrap_options(rejected_will, wrap_width),
-            )
-        )
+        pairs.append(("Rejected", _wrap_options(rejected_will, wrap_width)))
 
     slc_tab = session_data.get("slc_tab", {})
     if slc_tab:
@@ -701,9 +681,7 @@ def _load_known_fingerprints(  # pylint: disable=too-complex
 
 
 def _find_nearest_match(
-    fp_data: Dict[str, Any],
-    probe_type: str,
-    names: Dict[str, str],
+    fp_data: Dict[str, Any], probe_type: str, names: Dict[str, str]
 ) -> Optional[Tuple[str, float]]:
     """
     Find the most similar named fingerprint.
@@ -726,9 +704,7 @@ def _find_nearest_match(
 
 
 def _build_seen_counts(  # pylint: disable=too-many-locals
-    data: Dict[str, Any],
-    names: Optional[Dict[str, str]] = None,
-    term: Any = None,
+    data: Dict[str, Any], names: Optional[Dict[str, str]] = None, term: Any = None
 ) -> str:
     """Build friendly "seen before" text from folder and session counts."""
     if DATA_DIR is None or not os.path.exists(DATA_DIR):
@@ -787,11 +763,7 @@ def _build_seen_counts(  # pylint: disable=too-many-locals
     terminal_unknown = terminal_known and terminal_hash not in _names
     if (telnet_unknown or terminal_unknown) and _names:
         match_lines = _nearest_match_lines(
-            data,
-            _names,
-            term,
-            telnet_unknown=telnet_unknown,
-            terminal_unknown=terminal_unknown,
+            data, _names, term, telnet_unknown=telnet_unknown, terminal_unknown=terminal_unknown
         )
         if match_lines:
             lines.extend(match_lines)
@@ -993,9 +965,7 @@ def _filter_terminal_detail(  # pylint: disable=too-complex,too-many-branches
     return result
 
 
-def _filter_telnet_detail(
-    detail: Optional[Dict[str, Any]],
-) -> Optional[Dict[str, Any]]:
+def _filter_telnet_detail(detail: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Filter telnet probe data for display."""
     if not detail:
         return detail
@@ -1098,9 +1068,7 @@ def _build_database_entries(  # pylint: disable=too-many-locals
 
 
 def _show_database(
-    term: Any,
-    data: Dict[str, Any],
-    entries: List[Tuple[str, str, int, int]],
+    term: Any, data: Dict[str, Any], entries: List[Tuple[str, str, int, int]]
 ) -> None:
     """Display scrollable database of all known fingerprints."""
     try:
@@ -1127,14 +1095,7 @@ def _show_database(
     tbl.align["Calls"] = "r"
     tbl.max_table_width = max(40, (term.width or 80) - 1)
     for kind, display_name, files, sessions in entries:
-        tbl.add_row(
-            [
-                kind,
-                term.forestgreen(display_name),
-                str(files),
-                str(sessions),
-            ]
-        )
+        tbl.add_row([kind, term.forestgreen(display_name), str(files), str(sessions)])
 
     _paginate(term, str(tbl))
 

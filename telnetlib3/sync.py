@@ -138,10 +138,7 @@ class TelnetConnection:
 
             kwargs["client_factory"] = TelnetClient
         self._reader, self._writer = await _open_connection(
-            self._host,
-            self._port,
-            encoding=self._encoding,
-            **kwargs,
+            self._host, self._port, encoding=self._encoding, **kwargs
         )
         self._connected.set()
 
@@ -368,8 +365,7 @@ class TelnetConnection:
         assert self._loop is not None and self._writer is not None
         timeout = timeout if timeout is not None else self._timeout
         future = asyncio.run_coroutine_threadsafe(
-            self._writer.wait_for(remote=remote, local=local, pending=pending),
-            self._loop,
+            self._writer.wait_for(remote=remote, local=local, pending=pending), self._loop
         )
         try:
             future.result(timeout=timeout)
@@ -494,12 +490,7 @@ class BlockingTelnetServer:
             # pylint: disable=protected-access
             await conn._wait_closed()
 
-        self._server = await _create_server(
-            self._host,
-            self._port,
-            shell=shell,
-            **self._kwargs,
-        )
+        self._server = await _create_server(self._host, self._port, shell=shell, **self._kwargs)
 
     def accept(self, timeout: Optional[float] = None) -> "ServerConnection":
         """
@@ -608,12 +599,7 @@ class ServerConnection:
     - :meth:`deactivate` - Set active=False to queue disconnection
     """
 
-    def __init__(
-        self,
-        reader: TelnetReader,
-        writer: TelnetWriter,
-        loop: asyncio.AbstractEventLoop,
-    ):
+    def __init__(self, reader: TelnetReader, writer: TelnetWriter, loop: asyncio.AbstractEventLoop):
         """Initialize connection from reader/writer pair."""
         self._reader = reader
         self._writer = writer
@@ -796,8 +782,7 @@ class ServerConnection:
         if self._closed:
             raise RuntimeError("Connection closed")
         future = asyncio.run_coroutine_threadsafe(
-            self._writer.wait_for(remote=remote, local=local, pending=pending),
-            self._loop,
+            self._writer.wait_for(remote=remote, local=local, pending=pending), self._loop
         )
         try:
             future.result(timeout=timeout)
@@ -874,12 +859,12 @@ class ServerConnection:
         r"""
         Send text to the client (miniboa-compatible).
 
-        Alias for :meth:`write`. Converts \n to \r\n like miniboa.
+        Alias for :meth:`write`. Normalizes newlines to \r\n like miniboa.
 
         :param text: Text to send.
         """
         if isinstance(text, str):
-            text = text.replace("\n", "\r\n")
+            text = text.replace("\r\n", "\n").replace("\n", "\r\n")
         self.write(text)
 
     def addrport(self) -> str:

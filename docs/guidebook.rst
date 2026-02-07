@@ -205,6 +205,31 @@ and utf-8 support.
 The same applies to clients -- ``open_connection(..., encoding=False)``
 returns a ``(TelnetReader, TelnetWriter)`` pair that works with ``bytes``.
 
+Line Endings
+~~~~~~~~~~~~
+
+The telnet protocol (RFC 854) requires ``\r\n`` (CR LF) as the line ending
+for all NVT (Network Virtual Terminal) output. This applies in all standard
+modes:
+
+- **NVT ASCII mode** (default): ``\r\n`` is required.
+- **Kludge mode** (SGA negotiated, no LINEMODE): input is character-at-a-time,
+  but server output is still NVT -- ``\r\n`` is expected.
+- **Binary mode** (TRANSMIT-BINARY): raw bytes, no NVT transformation --
+  ``\n`` is acceptable if both sides agree.
+
+The ``write()`` method on both the asyncio and blocking interfaces sends data
+as-is -- it does **not** convert ``\n`` to ``\r\n``::
+
+    # Correct:
+    writer.write("Hello!\r\n")
+
+    # Wrong -- most clients will not display a proper line break:
+    writer.write("Hello!\n")
+
+For maximum compatibility with MUD clients, legacy terminals, and standard
+telnet implementations, always use ``\r\n`` with ``write()``.
+
 server_binary.py
 ~~~~~~~~~~~~~~~~
 
@@ -355,30 +380,37 @@ migration::
     server = BlockingTelnetServer('0.0.0.0', 6023, handler=handler)
     server.serve_forever()
 
-Property and method mapping:
+Properties and methods with equal mapping:
 
-=========================  ====================================
-miniboa                    :mod:`telnetlib3.sync`
-=========================  ====================================
-``client.active``          ``conn.active``
-``client.address``         ``conn.address``
-``client.port``            ``conn.port``
-``client.terminal_type``   ``conn.terminal_type``
-``client.columns``         ``conn.columns``
-``client.rows``            ``conn.rows``
-``client.send()``          ``conn.send()``
-``client.addrport()``      ``conn.addrport()``
-``client.idle()``          ``conn.idle()``
-``client.duration()``      ``conn.duration()``
-``client.deactivate()``    ``conn.deactivate()``
-=========================  ====================================
+:attr:`~telnetlib3.sync.ServerConnection.active`,
+:attr:`~telnetlib3.sync.ServerConnection.address`,
+:attr:`~telnetlib3.sync.ServerConnection.port`,
+:attr:`~telnetlib3.sync.ServerConnection.terminal_type`,
+:attr:`~telnetlib3.sync.ServerConnection.columns`,
+:attr:`~telnetlib3.sync.ServerConnection.rows`,
+:meth:`~telnetlib3.sync.ServerConnection.send`,
+:meth:`~telnetlib3.sync.ServerConnection.addrport`,
+:meth:`~telnetlib3.sync.ServerConnection.idle`,
+:meth:`~telnetlib3.sync.ServerConnection.duration`,
+:meth:`~telnetlib3.sync.ServerConnection.deactivate`
 
 Key differences from miniboa:
 
-- telnetlib3 uses a thread-per-connection model (blocking I/O)
-- miniboa uses a poll-based model (non-blocking with ``server.poll()``)
-- telnetlib3 has ``readline()``/``read()`` blocking methods
-- miniboa uses ``get_command()`` (non-blocking, check ``cmd_ready``)
+- telnetlib3 uses a thread-per-connection model instead of miniboa's
+  poll-based ``server.poll()`` loop
+- miniboa's ``get_command()`` and ``cmd_ready`` are replaced by blocking
+  :meth:`~telnetlib3.sync.ServerConnection.readline` and
+  :meth:`~telnetlib3.sync.ServerConnection.read`
+
+.. note::
+
+   The ``send()`` method normalizes newlines to ``\r\n`` for miniboa
+   compatibility.  Both ``\n`` and ``\r\n`` in the input produce a single
+   ``\r\n`` on the wire::
+
+       conn.send("Hello!\n")        # OK -- sends \r\n on the wire
+       conn.send("Hello!\r\n")      # OK -- also sends \r\n on the wire
+       conn.write("Hello!\r\n")     # OK -- write() sends as-is
 
 
 Advanced Negotiation
@@ -403,6 +435,98 @@ property::
     print(f"Mode: {writer.mode}")  # 'local', 'remote', or 'kludge'
     print(f"ECHO enabled: {writer.remote_option.enabled(ECHO)}")
 
+
+Fingerprinting Server
+=====================
+
+The public telnetlib3 demonstration Fingerprinting Server is::
+
+    telnet 1984.ws 555
+
+
+The fingerprinting shell
+(:func:`telnetlib3.fingerprinting.fingerprinting_server_shell`) probes each
+connecting client's telnet capabilities, terminal emulator features, and unicode
+support. This useful for uniquely identify clients across sessions by the
+capabilities of the software used.  The fingerprinting shell runs in two phases:
+
+1. **Telnet probe** -- negotiates all standard telnet options (TTYPE, NAWS,
+   BINARY, SGA, ECHO, NEW_ENVIRON, CHARSET, LINEMODE, SLC) and records which
+   options the client supports, the TTYPE cycle, environment variables, and SLC
+   table. A deterministic hash is computed from the protocol-level fingerprint.
+
+2. **Terminal probe** -- if `ucs-detect <https://pypi.org/project/ucs-detect/>`_
+   is installed, the shell spawns it through a PTY to probe the terminal
+   emulator's software and version, color depth, graphics protocols (Kitty,
+   iTerm2, Sixel), device attributes, DEC private modes, unicode version
+   support, and emoji rendering. A second hash is computed from the terminal
+   fingerprint.
+
+Running
+-------
+
+Install with optional dependencies for full fingerprinting support (prettytable_
+and ucs-detect_)::
+
+    pip install telnetlib3[extras]
+
+
+::
+
+    TELNETLIB3_DATA_DIR=data telnetlib3-server --shell telnetlib3.fingerprinting_server_shell
+
+Storage
+-------
+
+Results are saved as JSON files organized by fingerprint hash::
+
+    $TELNETLIB3_DATA_DIR/client/<telnet-hash>/<terminal-hash>/
+
+Moderating
+----------
+
+The ``bin/moderate_fingerprints.py`` script provides an interactive CLI for
+reviewing client-submitted name suggestions and assigning names to hashes::
+
+    export TELNETLIB3_DATA_DIR=./data
+    python bin/moderate_fingerprints.py
+
+
+MUD Server
+==========
+
+The public telnetlib3 demonstration MUD Server is::
+
+    telnet 1984.ws 6066
+
+telnetlib3 supports the common MUD (Multi-User Dungeon) protocols used by
+MUD clients like Mudlet, TinTin++, and BlowTorch:
+
+- **GMCP** (Generic MUD Communication Protocol) -- JSON-based structured data
+  for room info, character vitals, inventory, and more.
+- **MSDP** (MUD Server Data Protocol) -- binary-encoded variable/value pairs for
+  real-time game state.
+- **MSSP** (MUD Server Status Protocol) -- server metadata for MUD
+  crawlers and directories.
+
+The :mod:`telnetlib3.mud` module provides encode/decode functions for all three
+protocols using :class:`~telnetlib3.stream_writer.TelnetWriter` methods
+``send_gmcp()``, ``send_msdp()``, and ``send_mssp()``.
+
+Running
+-------
+
+The repository includes a "mini-MUD" example at `bin/server_mud.py
+<https://github.com/jquast/telnetlib3/blob/master/bin/server_mud.py>`_ with
+rooms, combat, weapons, GMCP/MSDP/MSSP support, and basic persistence.
+
+::
+
+    telnetlib3-server --shell bin.server_mud.shell
+
+Then, connect with any telnet or MUD client::
+
+    telnet localhost 6023
 
 Legacy telnetlib Compatibility
 ==============================

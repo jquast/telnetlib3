@@ -12,10 +12,7 @@ import warnings
 from typing import Callable, Optional
 from asyncio import format_helpers
 
-__all__ = (
-    "TelnetReader",
-    "TelnetReaderUnicode",
-)
+__all__ = ("TelnetReader", "TelnetReaderUnicode")
 
 _DEFAULT_LIMIT = 2**16  # 64 KiB
 
@@ -470,9 +467,7 @@ class TelnetReader:
         graceful shutdown.
         """
         warnings.warn(
-            "close() is deprecated; use feed_eof() instead",
-            DeprecationWarning,
-            stacklevel=2,
+            "close() is deprecated; use feed_eof() instead", DeprecationWarning, stacklevel=2
         )
         self.feed_eof()
 

@@ -18,6 +18,7 @@ from . import client_base
 from . import client_shell
 from . import client
 from . import telopt
+from . import mud
 from . import slc
 from . import telnetlib
 from . import guard_shells
@@ -33,6 +34,7 @@ from .client_base import *  # noqa
 from .client_shell import *  # noqa
 from .client import *  # noqa
 from .telopt import *  # noqa
+from .mud import *  # noqa
 from .slc import *  # noqa
 from .telnetlib import *  # noqa
 from .guard_shells import *  # noqa
@@ -71,6 +73,7 @@ __all__ = tuple(
         + sync.__all__
         # protocol bits, bytes, and names
         + telopt.__all__
+        + mud.__all__
         + slc.__all__
         # python's legacy stdlib api
         + telnetlib.__all__

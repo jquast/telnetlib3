@@ -27,9 +27,9 @@ class DummyWriter:
         self.echos.append(data)
 
 
-def _run_readline(sequence):
+def _run_readline(sequence, maxvis=0):
     w = DummyWriter()
-    gen = ss.readline(None, w)
+    gen = ss.readline(None, w, maxvis=maxvis)
     gen.send(None)
     cmds = []
     for ch in sequence:
@@ -133,8 +133,7 @@ def test_get_slcdata_contains_expected_sections():
 async def test_terminal_determine_mode(monkeypatch):
     monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(fileno=lambda: 0))
     tw = types.SimpleNamespace(
-        will_echo=False,
-        log=types.SimpleNamespace(debug=lambda *a, **k: None),
+        will_echo=False, log=types.SimpleNamespace(debug=lambda *a, **k: None)
     )
     term = cs.Terminal(tw)
     mode = cs.Terminal.ModeDef(0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 38400, 38400, [0] * 32)
@@ -237,11 +236,15 @@ async def test_busy_shell_full_conversation():
     "input_chars,expected",
     [
         pytest.param(["\x1b", "[", "A", "x"], "x", id="csi_sequence"),
-        pytest.param(["\x1b", "X"], "X", id="esc_non_bracket"),
+        pytest.param(["\x1b", "!", "x"], "!", id="esc_non_sequence"),
         pytest.param(["a"], "a", id="normal_char"),
         pytest.param([""], "", id="eof"),
         pytest.param(["\x1b", "[", "1", ";", "2", "H", "z"], "z", id="csi_with_params"),
         pytest.param(["\x1b", "[", ""], "", id="csi_no_final_byte"),
+        pytest.param(["\x1b", "O", "P", "x"], "x", id="ss3_f1"),
+        pytest.param(["\x1b", "O", "A", "y"], "y", id="ss3_arrow_up"),
+        pytest.param(["\x1b", "O", "p", "z"], "z", id="ss3_kp0"),
+        pytest.param(["\x1b", "O", ""], "", id="ss3_eof"),
     ],
 )
 @pytest.mark.asyncio
@@ -374,8 +377,7 @@ async def test_readline_with_echo_timeout():
 
 
 @pytest.mark.parametrize(
-    "timeout_at",
-    [pytest.param(1, id="first_question"), pytest.param(2, id="second_question")],
+    "timeout_at", [pytest.param(1, id="first_question"), pytest.param(2, id="second_question")]
 )
 @pytest.mark.asyncio
 async def test_robot_shell_timeout(monkeypatch, timeout_at):
@@ -420,10 +422,7 @@ async def test_ask_question_blank_then_answer(monkeypatch):
 
 @pytest.mark.parametrize(
     "never_send_ga,expect_ga",
-    [
-        pytest.param(False, True, id="ga_sent"),
-        pytest.param(True, False, id="ga_suppressed"),
-    ],
+    [pytest.param(False, True, id="ga_sent"), pytest.param(True, False, id="ga_suppressed")],
 )
 @pytest.mark.asyncio
 async def test_telnet_server_shell_ga(never_send_ga, expect_ga):
@@ -470,3 +469,264 @@ async def test_telnet_server_shell_dump_closing():
     w2 = _ClosingWriter()
     await ss.telnet_server_shell(MockReader(list("dump 1\r") + list("quit\r")), w2)
     assert "1 OK" not in "".join(w2.written)
+
+
+# -- readline2 is alias for readline_async --
+
+
+def test_readline2_is_readline_async():
+    assert ss.readline2 is ss.readline_async
+
+
+# -- _LineEditor tests --
+
+
+@pytest.mark.parametrize(
+    "chars,expected_cmds",
+    [
+        pytest.param("a\r", ["a"], id="cr_terminates"),
+        pytest.param("b\n", ["b"], id="lf_terminates"),
+        pytest.param("c\r\n", ["c"], id="crlf_single_cmd"),
+        pytest.param("d\r\x00", ["d"], id="crnul_single_cmd"),
+        pytest.param("x\ry\r", ["x", "y"], id="two_commands_cr"),
+        pytest.param("x\r\ny\r\n", ["x", "y"], id="two_commands_crlf"),
+    ],
+)
+def test_line_editor_crlf(chars, expected_cmds):
+    editor = ss._LineEditor()
+    cmds = []
+    for ch in chars:
+        _, cmd = editor.feed(ch)
+        if cmd is not None:
+            cmds.append(cmd)
+    assert cmds == expected_cmds
+
+
+def test_line_editor_backspace():
+    editor = ss._LineEditor()
+    editor.feed("a")
+    editor.feed("b")
+    echo, cmd = editor.feed("\b")
+    assert cmd is None
+    assert "\b \b" in echo
+    _, cmd = editor.feed("\r")
+    assert cmd == "a"
+
+
+def test_line_editor_backspace_on_empty():
+    editor = ss._LineEditor()
+    echo, cmd = editor.feed("\x7f")
+    assert cmd is None
+    assert not echo
+
+
+def test_line_editor_maxvis_ascii():
+    editor = ss._LineEditor(maxvis=3)
+    for ch in "abc":
+        echo, _ = editor.feed(ch)
+        assert echo == ch
+    echo, _ = editor.feed("d")
+    assert not echo
+    _, cmd = editor.feed("\r")
+    assert cmd == "abc"
+
+
+# -- _backspace_grapheme tests --
+
+
+@pytest.mark.parametrize(
+    "command,expected_cmd,expected_echo",
+    [
+        pytest.param("hello", "hell", "\b \b", id="ascii"),
+        pytest.param("", "", "", id="empty"),
+        pytest.param("a", "", "\b \b", id="single"),
+    ],
+)
+def test_backspace_grapheme_ascii(command, expected_cmd, expected_echo):
+    cmd, echo = ss._backspace_grapheme(command)
+    assert cmd == expected_cmd
+    assert echo == expected_echo
+
+
+wcwidth_available = pytest.mark.skipif(
+    not ss._HAS_WCWIDTH_ITER_GRAPHEMES, reason="wcwidth not installed"
+)
+
+
+@wcwidth_available
+@pytest.mark.parametrize(
+    "command,expected_cmd,expected_echo",
+    [
+        pytest.param("ab\u30b3", "ab", "\b \b\b \b", id="wide_cjk"),
+        pytest.param("\u30b3", "", "\b \b\b \b", id="single_wide"),
+        pytest.param("cafe\u0301", "caf", "\b \b", id="combining_accent"),
+        pytest.param(
+            "ab\U0001f468\u200d\U0001f469\u200d\U0001f467", "ab", "\b \b\b \b", id="family_emoji"
+        ),
+        pytest.param("x\U0001f1fa\U0001f1f8", "x", "\b \b\b \b", id="flag_emoji"),
+    ],
+)
+def test_backspace_grapheme_wcwidth(command, expected_cmd, expected_echo):
+    cmd, echo = ss._backspace_grapheme(command)
+    assert cmd == expected_cmd
+    assert echo == expected_echo
+
+
+def test_backspace_grapheme_no_wcwidth(monkeypatch):
+    monkeypatch.setattr(ss, "_HAS_WCWIDTH_ITER_GRAPHEMES", False)
+    cmd, echo = ss._backspace_grapheme("ab\u30b3")
+    assert cmd == "ab"
+    assert echo == "\b \b"
+
+
+# -- _visible_width tests --
+
+
+@pytest.mark.parametrize(
+    "text,expected", [pytest.param("hello", 5, id="ascii"), pytest.param("", 0, id="empty")]
+)
+def test_visible_width_ascii(text, expected):
+    assert ss._visible_width(text) == expected
+
+
+@wcwidth_available
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        pytest.param("\u30b3\u30f3\u30cb\u30c1\u30cf", 10, id="cjk"),
+        pytest.param("a\u30b3b", 4, id="mixed"),
+        pytest.param("cafe\u0301", 4, id="combining"),
+    ],
+)
+def test_visible_width_wcwidth(text, expected):
+    assert ss._visible_width(text) == expected
+
+
+def test_visible_width_no_wcwidth(monkeypatch):
+    monkeypatch.setattr(ss, "_HAS_WCWIDTH_ITER_GRAPHEMES", False)
+    assert ss._visible_width("\u30b3\u30f3\u30cb\u30c1\u30cf") == 5
+
+
+# -- readline (blocking) grapheme + maxvis tests --
+
+
+@wcwidth_available
+def test_readline_backspace_wide():
+    cmds, echos = _run_readline("a\u30b3\b\r")
+    assert cmds == ["a"]
+    echo_str = "".join(echos)
+    assert echo_str.count("\b \b") == 2
+
+
+@wcwidth_available
+def test_readline_backspace_emoji():
+    family = "\U0001f468\u200d\U0001f469\u200d\U0001f467"
+    cmds, _ = _run_readline("x" + family + "\bq\r")
+    assert cmds == ["xq"]
+
+
+def test_readline_maxvis_ascii():
+    cmds, echos = _run_readline("abcdefg\r", maxvis=5)
+    assert cmds == ["abcde"]
+    echo_str = "".join(echos)
+    assert "f" not in echo_str
+    assert "g" not in echo_str
+
+
+@wcwidth_available
+def test_readline_maxvis_wide():
+    cmds, _ = _run_readline("a\u30b3x\r", maxvis=3)
+    assert cmds == ["a\u30b3"]
+
+
+# -- readline_async grapheme + maxvis tests --
+
+
+@wcwidth_available
+@pytest.mark.asyncio
+async def test_readline_async_backspace_wide():
+    result = await ss.readline_async(
+        MockReader(list("a\u30b3") + ["\x7f", "b", "\r"]), MockWriter()
+    )
+    assert result == "ab"
+
+
+@wcwidth_available
+@pytest.mark.asyncio
+async def test_readline_async_backspace_emoji():
+    family = "\U0001f468\u200d\U0001f469\u200d\U0001f467"
+    result = await ss.readline_async(
+        MockReader(list("x") + list(family) + ["\x7f", "y", "\r"]), MockWriter()
+    )
+    assert result == "xy"
+
+
+@pytest.mark.asyncio
+async def test_readline_async_maxvis_ascii():
+    result = await ss.readline_async(MockReader(list("abcdef\r")), MockWriter(), maxvis=4)
+    assert result == "abcd"
+
+
+@wcwidth_available
+@pytest.mark.asyncio
+async def test_readline_async_maxvis_wide():
+    result = await ss.readline_async(MockReader(list("a\u30b3\u30b3x\r")), MockWriter(), maxvis=5)
+    assert result == "a\u30b3\u30b3"
+
+
+@pytest.mark.asyncio
+async def test_readline_async_lf_terminates():
+    result = await ss.readline_async(MockReader(list("hello\n")), MockWriter())
+    assert result == "hello"
+
+
+@pytest.mark.asyncio
+async def test_readline_async_ss3_filtered():
+    result = await ss.readline_async(
+        MockReader(list("he") + ["\x1b", "O", "P"] + list("llo\r")), MockWriter()
+    )
+    assert result == "hello"
+
+
+# -- filter_ansi enhanced tests --
+
+
+wcwidth_seq_available = pytest.mark.skipif(
+    not ss._HAS_WCWIDTH_ITER_SEQUENCES, reason="wcwidth not installed"
+)
+
+
+@pytest.mark.asyncio
+async def test_filter_ansi_ss3_no_wcwidth(monkeypatch):
+    monkeypatch.setattr(ss, "_HAS_WCWIDTH_ITER_SEQUENCES", False)
+    result = await ss.filter_ansi(MockReader(["\x1b", "O", "P", "x"]), MockWriter())
+    assert result == "x"
+
+
+@wcwidth_seq_available
+@pytest.mark.parametrize(
+    "input_chars,expected",
+    [
+        pytest.param(["\x1b", "]", "0", ";", "t", "\x07", "x"], "x", id="osc_sequence"),
+        pytest.param(["\x1b", "P", "q", "\x1b", "\\", "y"], "y", id="dcs_sequence"),
+        pytest.param(["\x1b", "(", "B", "z"], "z", id="charset_designation"),
+        pytest.param(["\x1b", "D", "w"], "w", id="fe_sequence"),
+        pytest.param(["\x1b", "X", "v"], "v", id="fe_sos_sequence"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_filter_ansi_wcwidth_sequences(input_chars, expected):
+    result = await ss.filter_ansi(MockReader(input_chars), MockWriter())
+    assert result == expected
+
+
+# -- telnet_server_shell with LF-terminated input --
+
+
+@pytest.mark.asyncio
+async def test_telnet_server_shell_lf_input():
+    reader = MockReader(list("quit\n"))
+    writer = MockWriter()
+    await ss.telnet_server_shell(reader, writer)
+    written = "".join(writer.written)
+    assert "Goodbye." in written

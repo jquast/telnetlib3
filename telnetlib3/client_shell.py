@@ -125,9 +125,7 @@ else:
                 cc=cc,
             )
 
-        async def make_stdio(
-            self,
-        ) -> Tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        async def make_stdio(self) -> Tuple[asyncio.StreamReader, asyncio.StreamWriter]:
             """Return (reader, writer) pair for sys.stdin, sys.stdout."""
             reader = asyncio.StreamReader()
             reader_protocol = asyncio.StreamReaderProtocol(reader)

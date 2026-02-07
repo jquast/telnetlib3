@@ -12,18 +12,52 @@ from . import slc, telopt, accessories
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
+# conditional wcwidth support
+_HAS_WCWIDTH_ITER_SEQUENCES: bool = False  # pylint: disable=invalid-name
+_HAS_WCWIDTH_ITER_GRAPHEMES: bool = False  # pylint: disable=invalid-name
+
+try:
+    # 3rd party
+    from wcwidth.escape_sequences import ZERO_WIDTH_PATTERN as _ZERO_WIDTH_PATTERN
+
+    _HAS_WCWIDTH_ITER_SEQUENCES = True  # pylint: disable=invalid-name
+except ImportError:
+    pass
+
+try:
+    # 3rd party
+    from wcwidth import wcswidth as _wcswidth
+    from wcwidth import iter_graphemes_reverse as _iter_graphemes_reverse
+
+    _HAS_WCWIDTH_ITER_GRAPHEMES = True  # pylint: disable=invalid-name
+except ImportError:
+    pass
+
 CR, LF, NUL = ("\r", "\n", "\x00")
 ESC = "\x1b"
 
+# Characters after ESC that start multi-byte output sequences.
+# Fe sequences (ESC + 0x40-0x5F) that overlap with these starters
+# are not matched as 2-byte sequences, avoiding premature consumption
+# of a CSI, OSC, DCS, APC, PM, or charset designation start.
+_SEQ_STARTERS = frozenset("[])P_^(")
 
-async def filter_ansi(
-    reader: TelnetReaderUnicode,
-    _writer: TelnetWriterUnicode,
+# SS3 (ESC O) introduces 3-byte input sequences: F1-F4 (ESC O P-S),
+# application-mode arrows (ESC O A-D), and keypad keys (ESC O j-y, M, X).
+# wcwidth's ZERO_WIDTH_PATTERN matches ESC O as a 2-byte Fe sequence
+# (0x4F is in Fe range 0x40-0x5F), missing the third byte.  We handle
+# SS3 explicitly since it is an input sequence, not an output sequence.
+_SS3 = "O"
+
+
+async def filter_ansi(  # pylint: disable=too-complex,too-many-branches,too-many-nested-blocks
+    reader: TelnetReaderUnicode, _writer: TelnetWriterUnicode
 ) -> str:
     """
     Read and return the next non-ANSI-escape character from reader.
 
-    ANSI escape sequences (ESC [ ... final_byte) are silently consumed.
+    When wcwidth is available, handles CSI, OSC, DCS, APC, PM, charset designation, Fe, Fp, and SS3
+    sequences. Otherwise falls back to CSI and SS3 only.
     """
     while True:
         char = await reader.read(1)
@@ -31,19 +65,110 @@ async def filter_ansi(
             return ""
         if char != ESC:
             return char
-        # Consume escape sequence: ESC [ (params) final_byte
+
         next_char = await reader.read(1)
-        if next_char != "[":
-            # Not a CSI sequence, return the second char
-            return next_char
-        # Read until final byte (0x40-0x7E)
-        while True:
-            seq_char = await reader.read(1)
-            if not seq_char or (0x40 <= ord(seq_char) <= 0x7E):
-                break
+        if not next_char:
+            return ""
+
+        # SS3: ESC O + one final byte (F1-F4, keypad, app-mode arrows).
+        # Handled before wcwidth's ZERO_WIDTH_PATTERN which would match
+        # ESC O as a 2-byte Fe sequence, missing the third byte.
+        if next_char == _SS3:
+            await reader.read(1)
+            continue
+
+        if not _HAS_WCWIDTH_ITER_SEQUENCES:
+            # CSI-only fallback
+            if next_char != "[":
+                return next_char
+            while True:
+                seq_char = await reader.read(1)
+                if not seq_char or (0x40 <= ord(seq_char) <= 0x7E):
+                    break
+        else:
+            buf = ESC + next_char
+            if next_char in _SEQ_STARTERS:
+                # Multi-byte: CSI, OSC, DCS, APC, PM, or charset
+                while len(buf) < 256:
+                    seq_char = await reader.read(1)
+                    if not seq_char:
+                        break
+                    buf += seq_char
+                    match = _ZERO_WIDTH_PATTERN.match(buf)
+                    # Skip spurious 2-byte Fe matches on the
+                    # ESC+starter prefix — the real sequence is
+                    # longer (CSI 3+, charset 3, OSC/DCS/APC/PM 4+)
+                    if match and match.end() > 2:
+                        if match.end() < len(buf):
+                            return buf[match.end()]
+                        break
+            else:
+                # Check for 2-byte Fe/Fp sequence
+                match = _ZERO_WIDTH_PATTERN.match(buf)
+                if not match:
+                    return next_char
 
 
-__all__ = ("telnet_server_shell",)
+def _backspace_grapheme(command: str) -> tuple[str, str]:
+    """Remove last grapheme cluster, return (new_command, echo_str)."""
+    if not command:
+        return command, ""
+    if _HAS_WCWIDTH_ITER_GRAPHEMES:
+        last = next(_iter_graphemes_reverse(command))
+        new_command = command[: len(command) - len(last)]
+        w = int(_wcswidth(last))
+        w = max(w, 1)
+        return new_command, "\b \b" * w
+    return command[:-1], "\b \b"
+
+
+def _visible_width(text: str) -> int:
+    """Return visible display width of text."""
+    if _HAS_WCWIDTH_ITER_GRAPHEMES:
+        result = int(_wcswidth(text))
+        return max(0, result)
+    return len(text)
+
+
+class _LineEditor:  # pylint: disable=too-few-public-methods
+    """Shared line-editing state machine for readline and readline_async."""
+
+    def __init__(self, maxvis: int = 0) -> None:
+        self.command: str = ""
+        self.last_char: str = ""
+        self.maxvis: int = maxvis
+
+    def feed(self, char: str) -> tuple[str, Optional[str]]:
+        """Feed one character, return (echo_str, command_or_none)."""
+        # LF/NUL after CR: silently consume
+        if char in (LF, NUL) and self.last_char == CR:
+            self.last_char = char
+            return "", None
+
+        # Line terminator (CR or LF)
+        if char in (CR, LF):
+            self.last_char = char
+            cmd = self.command
+            self.command = ""
+            return "", cmd
+
+        # Backspace
+        if char in ("\b", "\x7f"):
+            self.last_char = char
+            if self.command:
+                self.command, echo = _backspace_grapheme(self.command)
+                return echo, None
+            return "", None
+
+        # Regular character -- check maxvis
+        self.last_char = char
+        if self.maxvis and _visible_width(self.command + char) > self.maxvis:
+            return "", None
+        self.command += char
+        return char, None
+
+
+__all__ = ("telnet_server_shell", "readline_async", "readline2", "readline")
 
 
 async def telnet_server_shell(  # pylint: disable=too-complex,too-many-branches,too-many-statements
@@ -58,8 +183,6 @@ async def telnet_server_shell(  # pylint: disable=too-complex,too-many-branches,
     """
     _reader = cast(TelnetReaderUnicode, reader)
     writer = cast(TelnetWriterUnicode, writer)
-    linereader = readline(_reader, writer)
-    next(linereader)
 
     writer.write("Ready." + CR + LF)
 
@@ -72,14 +195,9 @@ async def telnet_server_shell(  # pylint: disable=too-complex,too-many-branches,
             writer.send_ga()
         await writer.drain()
 
-        command = None
-        while command is None:
-            await writer.drain()
-            inp = await _reader.read(1)
-            if not inp:
-                # close/eof by client at prompt
-                return
-            command = linereader.send(inp)
+        command = await readline_async(_reader, writer)
+        if command is None:
+            return
         writer.write(CR + LF)
 
         if command == "quit":
@@ -109,9 +227,9 @@ async def telnet_server_shell(  # pylint: disable=too-complex,too-many-branches,
         elif command.startswith("dump"):
             # dump [kb] [ms_delay] [drain|nodrain] [close|noclose]
             #
-            # this allows you to experiment with the effects of 'drain', and,
-            # some longer-running programs that check for early break through
-            # writer.is_closing().
+            # this allows you to experiment with the effects of
+            # 'drain', and, some longer-running programs that check
+            # for early break through writer.is_closing().
             try:
                 kb_limit = int(command.split()[1])
             except (ValueError, IndexError):
@@ -120,8 +238,8 @@ async def telnet_server_shell(  # pylint: disable=too-complex,too-many-branches,
                 delay = int(float(command.split()[2]) / 1000)
             except (ValueError, IndexError):
                 delay = 0
-            # experiment with large sizes and 'nodrain', the server pretty much
-            # locks up and stops talking to new clients.
+            # experiment with large sizes and 'nodrain', the server
+            # pretty much locks up and stops talking to new clients.
             try:
                 drain = command.split()[3].lower() == "nodrain"
             except IndexError:
@@ -130,7 +248,7 @@ async def telnet_server_shell(  # pylint: disable=too-complex,too-many-branches,
                 do_close = command.split()[4].lower() == "close"
             except IndexError:
                 do_close = False
-            msg = f"kb_limit={kb_limit}, delay={delay}, drain={drain}, do_close={do_close}:\r\n"
+            msg = f"kb_limit={kb_limit}, delay={delay}," f" drain={drain}, do_close={do_close}:\r\n"
             writer.write(msg)
             for lineout in character_dump(kb_limit):
                 if writer.is_closing():
@@ -184,81 +302,55 @@ async def get_next_ascii(
 def readline(
     _reader: Union[TelnetReader, TelnetReaderUnicode],
     writer: Union[TelnetWriter, TelnetWriterUnicode],
+    maxvis: int = 0,
 ) -> Generator[Optional[str], str, None]:
     """
-    A very crude readline coroutine interface.
+    Blocking readline using generator yield/send protocol.
 
-    This is a legacy function
-    designed for Python 3.4 and remains here for compatibility, superseded by
-    :func:`~.readline2`
+    Characters are fed in via ``send()`` and complete lines are yielded.
+    Uses :class:`_LineEditor` for grapheme-aware backspace and maxvis
+    support.
     """
     _writer = cast(TelnetWriterUnicode, writer)
-    command, inp, last_inp = "", "", ""
+    editor = _LineEditor(maxvis=maxvis)
     inp = yield None
     while True:
-        if inp in (LF, NUL) and last_inp == CR:
-            last_inp = inp
-            inp = yield None
-
-        elif inp in (CR, LF):
-            # first CR or LF yields command
-            last_inp = inp
-            inp = yield command
-            command = ""
-
-        elif inp in ("\b", "\x7f"):
-            # backspace over input
-            if command:
-                command = command[:-1]
-                _writer.echo("\b \b")
-            last_inp = inp
-            inp = yield None
-
-        else:
-            # buffer and echo input
-            command += inp
-            _writer.echo(inp)
-            last_inp = inp
-            inp = yield None
+        echo, cmd = editor.feed(inp)
+        if echo:
+            _writer.echo(echo)
+        inp = yield cmd
 
 
-async def readline2(
+async def readline_async(
     reader: Union[TelnetReader, TelnetReaderUnicode],
     writer: Union[TelnetWriter, TelnetWriterUnicode],
+    maxvis: int = 0,
 ) -> Optional[str]:
     """
-    Async readline interface that filters ANSI escape sequences.
+    Async readline that filters ANSI escape sequences.
 
-    This version attempts to filter away escape sequences, such as when a user
-    presses an arrow or function key. Delete key is backspace.
-
-    However, this function does not handle all possible types of carriage
-    returns and so it is not used by default shell, :func:`telnet_server_shell`.
+    Uses :func:`filter_ansi` to strip escape sequences and
+    :class:`_LineEditor` for grapheme-aware backspace and maxvis support.
     """
     _reader = cast(TelnetReaderUnicode, reader)
     _writer = cast(TelnetWriterUnicode, writer)
-    command = ""
+    editor = _LineEditor(maxvis=maxvis)
     while True:
         next_char = await filter_ansi(_reader, _writer)
-
-        if next_char == CR:
-            return command
-
-        if next_char in (LF, NUL) and len(command) == 0:
-            continue
-
-        if next_char in ("\b", "\x7f"):
-            # backspace over input
-            if len(command) > 0:
-                command = command[:-1]
-                _writer.echo("\b \b")
-
-        elif not next_char:
+        if not next_char:
             return None
+        # Skip leading LF/NUL on empty buffer -- accounts for
+        # CR+LF pairs split across successive readline_async calls
+        if next_char in (LF, NUL) and not editor.command:
+            continue
+        echo, cmd = editor.feed(next_char)
+        if echo:
+            _writer.echo(echo)
+        if cmd is not None:
+            return cmd
 
-        else:
-            command += next_char
-            _writer.echo(next_char)
+
+readline2 = readline_async
 
 
 def get_slcdata(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> str:
@@ -295,10 +387,7 @@ def get_slcdata(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> str:
     )
 
 
-def do_toggle(
-    writer: Union[TelnetWriter, TelnetWriterUnicode],
-    option: Optional[str],
-) -> str:
+def do_toggle(writer: Union[TelnetWriter, TelnetWriterUnicode], option: Optional[str]) -> str:
     """Display or toggle telnet session parameters."""
     tbl_opt = {
         "echo": writer.local_option.enabled(telopt.ECHO),
@@ -324,7 +413,7 @@ def do_toggle(
     if option in ("goahead", "all"):
         cmd = telopt.WILL if tbl_opt["goahead"] else telopt.WONT
         writer.iac(cmd, telopt.SGA)
-        msgs.append(f"{telopt.name_command(cmd).lower()} suppress go-ahead.")
+        msgs.append(f"{telopt.name_command(cmd).lower()}" " suppress go-ahead.")
 
     if option in ("outbinary", "binary", "all"):
         cmd = telopt.WONT if tbl_opt["outbinary"] else telopt.WILL

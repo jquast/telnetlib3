@@ -319,8 +319,19 @@ def test_server_connection_miniboa_methods(bind_host, unused_tcp_port):
     server.shutdown()
 
 
-def test_server_connection_send_converts_newlines(bind_host, unused_tcp_port):
-    """ServerConnection send() converts \\n to \\r\\n like miniboa."""
+@pytest.mark.parametrize(
+    "send_text,expected_suffix",
+    [
+        ("Hello\n", "Hello\r\n"),
+        ("Hello\r\n", "Hello\r\n"),
+        ("A\nB\r\nC\n", "A\r\nB\r\nC\r\n"),
+        ("bare text", "bare text"),
+    ],
+)
+def test_server_connection_send_newline_conversion(
+    bind_host, unused_tcp_port, send_text, expected_suffix
+):
+    """Send() normalizes all newline styles to \\r\\n without doubling."""
     server = BlockingTelnetServer(bind_host, unused_tcp_port)
     server.start()
 
@@ -329,13 +340,13 @@ def test_server_connection_send_converts_newlines(bind_host, unused_tcp_port):
     def client_thread():
         time.sleep(0.05)
         with TelnetConnection(bind_host, unused_tcp_port, timeout=5) as conn:
-            received.append(conn.read(20, timeout=5))
+            received.append(conn.read(100, timeout=5))
 
     thread = threading.Thread(target=client_thread)
     thread.start()
 
     conn = server.accept(timeout=5)
-    conn.send("Hello\nWorld\n")
+    conn.send(send_text)
     conn.flush(timeout=5)
     conn.close()
 
@@ -343,7 +354,8 @@ def test_server_connection_send_converts_newlines(bind_host, unused_tcp_port):
     server.shutdown()
 
     assert len(received) == 1
-    assert "\r\n" in received[0]
+    assert received[0].endswith(expected_suffix)
+    assert "\r\r\n" not in received[0]
 
 
 def test_client_writer_property(bind_host, unused_tcp_port):

@@ -334,10 +334,10 @@ def test_create_terminal_fingerprint():
         },
         "test_results": {
             "unicode_wide_results": {
-                "17.0.0": {"n_errors": 0, "n_total": 10, "pct_success": 100.0, "cps": 8.7},
+                "17.0.0": {"n_errors": 0, "n_total": 10, "pct_success": 100.0, "cps": 8.7}
             },
             "emoji_vs16_results": {
-                "9.0.0": {"n_errors": 2, "n_total": 12, "pct_success": 83.3, "cps": 9.2},
+                "9.0.0": {"n_errors": 2, "n_total": 12, "pct_success": 83.3, "cps": 9.2}
             },
             "language_results": None,
         },
@@ -422,10 +422,7 @@ async def test_fingerprint_probe_integration(bind_host, unused_tcp_port):
         connect_maxwait=0.5,
     ):
         async with open_connection(
-            host=bind_host,
-            port=unused_tcp_port,
-            connect_minwait=0.2,
-            connect_maxwait=0.5,
+            host=bind_host, port=unused_tcp_port, connect_minwait=0.2, connect_maxwait=0.5
         ) as (reader, writer):
             try:
                 await asyncio.wait_for(reader.read(100), timeout=1.0)
@@ -562,9 +559,7 @@ async def test_probe_already_negotiated(opt, value, name, expected_status):
     writer = MockWriter()
     writer.remote_option[opt] = value
     results = await fps.probe_client_capabilities(
-        writer,
-        options=[(opt, name, "test")],
-        timeout=0.01,
+        writer, options=[(opt, name, "test")], timeout=0.01
     )
     assert results[name]["status"] == expected_status
     assert results[name]["already_negotiated"] is True
@@ -607,8 +602,7 @@ def test_get_client_fingerprint():
 async def test_run_probe_verbose(monkeypatch):
     monkeypatch.setattr(fps, "_PROBE_TIMEOUT", 0.01)
     writer = MockWriter(
-        extra={"peername": ("127.0.0.1", 12345), "ttype1": "xterm"},
-        wont_options=[fps.BINARY],
+        extra={"peername": ("127.0.0.1", 12345), "ttype1": "xterm"}, wont_options=[fps.BINARY]
     )
     await fps._run_probe(writer, verbose=True)
     written = "".join(writer.written)
@@ -651,11 +645,7 @@ def test_collect_rejected_options_with_data():
 def test_collect_extra_info_tuples_and_bytes():
     writer = MockWriter(extra={"peername": ("1.2.3.4", 99)})
     writer._protocol = MockProtocol(
-        {
-            "tspeed": (38400, 38400),
-            "raw_data": b"\x01\x02\x03",
-            "name": "test",
-        }
+        {"tspeed": (38400, 38400), "raw_data": b"\x01\x02\x03", "name": "test"}
     )
     result = fps._collect_extra_info(writer)
     assert result["tspeed"] == [38400, 38400]
@@ -684,11 +674,7 @@ def test_collect_extra_info_removes_duplicate_keys():
 def test_collect_ttype_cycle():
     writer = MockWriter(extra={"ttype1": "xterm", "ttype2": "xterm-256color", "ttype3": "vt100"})
     writer._protocol = MockProtocol(
-        {
-            "ttype1": "xterm",
-            "ttype2": "xterm-256color",
-            "ttype3": "vt100",
-        }
+        {"ttype1": "xterm", "ttype2": "xterm-256color", "ttype3": "vt100"}
     )
     assert fps._collect_ttype_cycle(writer) == ["xterm", "xterm-256color", "vt100"]
 
@@ -846,11 +832,7 @@ def test_save_fingerprint_data_max_files(tmp_path, monkeypatch):
 
     monkeypatch.setattr(fps, "FINGERPRINT_MAX_FILES", 0)
     assert (
-        fps._save_fingerprint_data(
-            _probe_writer(peername=("10.0.0.2", 9999)),
-            _BINARY_PROBE,
-            0.5,
-        )
+        fps._save_fingerprint_data(_probe_writer(peername=("10.0.0.2", 9999)), _BINARY_PROBE, 0.5)
         is None
     )
 
@@ -883,9 +865,7 @@ def test_save_fingerprint_data_mkdir_oserror(tmp_path, monkeypatch):
 def test_save_fingerprint_data_write_oserror(tmp_path, monkeypatch):
     monkeypatch.setattr(fps, "DATA_DIR", str(tmp_path))
     monkeypatch.setattr(
-        fps,
-        "_atomic_json_write",
-        lambda fp, data: (_ for _ in ()).throw(OSError("disk full")),
+        fps, "_atomic_json_write", lambda fp, data: (_ for _ in ()).throw(OSError("disk full"))
     )
     assert fps._save_fingerprint_data(_probe_writer(), _BINARY_PROBE, 0.5) is None
 
@@ -895,9 +875,7 @@ def test_save_fingerprint_data_update_oserror(tmp_path, monkeypatch):
     assert fps._save_fingerprint_data(_probe_writer(), _BINARY_PROBE, 0.5) is not None
 
     monkeypatch.setattr(
-        fps,
-        "_atomic_json_write",
-        lambda fp, data: (_ for _ in ()).throw(OSError("disk full")),
+        fps, "_atomic_json_write", lambda fp, data: (_ for _ in ()).throw(OSError("disk full"))
     )
     assert fps._save_fingerprint_data(_probe_writer(), _BINARY_PROBE, 0.5) is None
 
@@ -912,6 +890,16 @@ def test_save_fingerprint_data_update_oserror(tmp_path, monkeypatch):
 )
 def test_is_maybe_mud(extra, expected):
     assert fps._is_maybe_mud(MockWriter(extra=extra)) is expected
+
+
+@pytest.mark.parametrize(
+    "opt,expected",
+    [pytest.param(fps.GMCP, True, id="gmcp"), pytest.param(fps.MSDP, True, id="msdp")],
+)
+def test_is_maybe_mud_by_option(opt, expected):
+    w = MockWriter(extra={"TERM": "xterm"})
+    w.remote_option[opt] = True
+    assert fps._is_maybe_mud(w) is expected
 
 
 def test_build_session_fingerprint_with_slc():
@@ -940,8 +928,7 @@ async def test_server_shell_syncterm(monkeypatch):
     monkeypatch.setattr(fps, "_PROBE_TIMEOUT", 0.05)
 
     writer = MockWriter(
-        extra={"peername": ("127.0.0.1", 12345), "TERM": "syncterm"},
-        will_options=[fps.BINARY],
+        extra={"peername": ("127.0.0.1", 12345), "TERM": "syncterm"}, will_options=[fps.BINARY]
     )
     await fps.fingerprinting_server_shell(MockReader([]), writer)
     assert "\x1b[0;40 D" in "".join(writer.written) and writer._closing
@@ -962,8 +949,7 @@ async def test_server_shell_with_post_script(monkeypatch, tmp_path):
     monkeypatch.setattr(server_pty_shell, "pty_shell", fake_pty_shell)
 
     writer = MockWriter(
-        extra={"peername": ("127.0.0.1", 12345), "TERM": "xterm"},
-        will_options=[fps.BINARY],
+        extra={"peername": ("127.0.0.1", 12345), "TERM": "xterm"}, will_options=[fps.BINARY]
     )
     writer._protocol = MockProtocol({"TERM": "xterm"})
     await fps.fingerprinting_server_shell(MockReader([]), writer)
@@ -974,11 +960,7 @@ async def test_server_shell_with_post_script(monkeypatch, tmp_path):
 @pytest.mark.parametrize(
     "input_fn,expected",
     [
-        pytest.param(
-            lambda prompt: (_ for _ in ()).throw(EOFError),
-            "",
-            id="eof",
-        ),
+        pytest.param(lambda prompt: (_ for _ in ()).throw(EOFError), "", id="eof"),
         pytest.param(lambda prompt: "hello", "hello", id="normal"),
     ],
 )
