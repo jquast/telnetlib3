@@ -8,7 +8,7 @@ version = "2.2.0"
 description = " Python Telnet server and client CLI and Protocol library"
 readme = "README.rst"
 license = "ISC"
-license-files = ["LICENSE"]
+license-files = ["LICENSE.txt"]
 authors = [
     {name = "Jeff Quast", email = "contact@jeffquast.com"},
 ]
