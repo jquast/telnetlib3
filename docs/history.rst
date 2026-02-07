@@ -9,6 +9,10 @@ History
   * new: ``connect_timeout`` arguments for client and ``--connect-timeout``
     Client CLI argument, :ghissue:`30`.
   * bugfix: missing LICENSE.txt in sdist file.
+  * new: ``telnetlib3-fingerprint-server`` CLI with extended ``NEW_ENVIRON``
+    for client fingerprinting (uses ``FingerprintingServer`` protocol factory).
+  * note: fingerprint hashes for MUD clients detected via GMCP/MSDP
+    may change due to improved client classification.
 
 2.2.0
   * bugfix: workaround for Microsoft Telnet client crash on

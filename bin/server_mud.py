@@ -6,6 +6,7 @@ Usage::
     $ python bin/server_mud.py
     $ telnet localhost 6023
 """
+
 from __future__ import annotations
 
 # std imports
@@ -858,8 +859,6 @@ async def main(argv: list[str] | None = None) -> None:
         f"{SERVER_NAME} running on"
         f" {args.host}:{args.port}\n"
         f"Connect with: telnet {args.host} {args.port}\n"
-        "Or use GMCP client:"
-        " python bin/client_gmcp.py\n"
         "Press Ctrl+C to stop"
     )
     await server.wait_closed()

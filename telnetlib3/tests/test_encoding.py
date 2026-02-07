@@ -109,9 +109,7 @@ async def test_telnet_client_and_server_encoding_bidirectional(bind_host, unused
 
 async def test_telnet_server_encoding_by_LANG(bind_host, unused_tcp_port):
     """Server's encoding negotiated by LANG value."""
-    async with create_server(
-        host=bind_host, port=unused_tcp_port, connect_maxwait=0.5
-    ) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + DO + BINARY)
             writer.write(IAC + WILL + BINARY)
@@ -136,9 +134,7 @@ async def test_telnet_server_encoding_by_LANG(bind_host, unused_tcp_port):
 
 async def test_telnet_server_encoding_LANG_no_encoding_suffix(bind_host, unused_tcp_port):
     """Server falls back to default when LANG has no encoding suffix."""
-    async with create_server(
-        host=bind_host, port=unused_tcp_port, connect_maxwait=0.5
-    ) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + DO + BINARY)
             writer.write(IAC + WILL + BINARY)
@@ -161,9 +157,7 @@ async def test_telnet_server_encoding_LANG_no_encoding_suffix(bind_host, unused_
 
 async def test_telnet_server_encoding_LANG_invalid_encoding(bind_host, unused_tcp_port):
     """Server falls back to default when LANG has unknown encoding."""
-    async with create_server(
-        host=bind_host, port=unused_tcp_port, connect_maxwait=0.5
-    ) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + DO + BINARY)
             writer.write(IAC + WILL + BINARY)

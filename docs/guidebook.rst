@@ -471,17 +471,21 @@ Install with optional dependencies for full fingerprinting support
 
     pip install telnetlib3[extras]
 
+A dedicated CLI entry point is provided::
 
-::
+    telnetlib3-fingerprint-server --data-dir data
 
-    TELNETLIB3_DATA_DIR=data telnetlib3-server --shell telnetlib3.fingerprinting_server_shell
+This uses :class:`~telnetlib3.fingerprinting.FingerprintingServer` as the
+protocol factory and :func:`~telnetlib3.fingerprinting.fingerprinting_server_shell`
+as the default shell. All ``telnetlib3-server`` options (``--host``, ``--port``,
+etc.) are accepted.
 
 Storage
 -------
 
 Results are saved as JSON files organized by fingerprint hash::
 
-    $TELNETLIB3_DATA_DIR/client/<telnet-hash>/<terminal-hash>/
+    <data-dir>/client/<telnet-hash>/<terminal-hash>/
 
 Moderating
 ----------
