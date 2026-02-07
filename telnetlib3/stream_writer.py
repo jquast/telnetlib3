@@ -1866,6 +1866,32 @@ class TelnetWriter:
 
     # Private sub-negotiation (SB) routines
 
+    def _check_mtts_for_utf8(self) -> str | None:
+        """
+        Check MTTS (MUD Terminal Type Standard) data for UTF-8 support.
+
+        MTTS is a bitmask where bit 3 (value 8) indicates UTF-8 capability.
+        Returns "UTF-8" if supported, None otherwise.
+        """
+        # Try to get MTTS from NEW_ENVIRON (e.g., "MTTS=2825")
+        mtts_str = self._protocol.get_extra_info("MTTS")
+        if not mtts_str:
+            # Try TTYPE round 3 (e.g., "MTTS 2825")
+            ttype3 = self._protocol.get_extra_info("ttype3")
+            if ttype3 and ttype3.upper().startswith("MTTS "):
+                mtts_str = ttype3[5:].strip()
+
+        if mtts_str:
+            try:
+                mtts_value = int(mtts_str)
+                # Bit 3 (value 8) indicates UTF-8 support
+                if mtts_value & 8:
+                    return "UTF-8"
+            except (ValueError, TypeError):
+                pass
+
+        return None
+
     def _handle_sb_charset(self, buf: collections.deque[bytes]) -> None:
         cmd = buf.popleft()
         assert cmd == CHARSET
@@ -1894,6 +1920,13 @@ class TelnetWriter:
             self._ext_callback[CHARSET](charset)
         elif opt == REJECTED:
             self.log.warning("recv IAC SB CHARSET REJECTED IAC SE")
+            # After CHARSET rejection, check MTTS for UTF-8 support
+            # MTTS bit 3 (value 8) indicates UTF-8 capability
+            if self.server and CHARSET in self._ext_callback:
+                charset_from_mtts = self._check_mtts_for_utf8()
+                if charset_from_mtts:
+                    self.log.debug("MTTS indicates UTF-8 support, resolving to UTF-8")
+                    self._ext_callback[CHARSET](charset_from_mtts)
         elif opt in (TTABLE_IS, TTABLE_ACK, TTABLE_NAK, TTABLE_REJECTED):
             raise NotImplementedError(
                 f"Translation table command received but not supported: {opt!r}"
