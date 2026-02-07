@@ -3,7 +3,7 @@ Fingerprint shell for telnet client identification.
 
 This module probes telnet protocol capabilities, collects session data,
 and saves fingerprint files.  Display, REPL, and post-script code live
-in :mod:`telnetlib3.fingerprinting_display`.
+in ``telnetlib3.fingerprinting_display``.
 """
 
 from __future__ import annotations
@@ -161,7 +161,7 @@ class FingerprintingTelnetServer:  # pylint: disable=too-few-public-methods
     """
     Mixin that extends ``on_request_environ`` with :data:`ENVIRON_EXTENDED`.
 
-    Usage with :func:`~telnetlib3.create_server`::
+    Usage with :func:`~telnetlib3.server.create_server`::
 
         from telnetlib3.server import TelnetServer
         from telnetlib3.fingerprinting import FingerprintingTelnetServer

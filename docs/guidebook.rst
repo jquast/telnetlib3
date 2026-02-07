@@ -465,8 +465,9 @@ capabilities of the software used.  The fingerprinting shell runs in two phases:
 Running
 -------
 
-Install with optional dependencies for full fingerprinting support (prettytable_
-and ucs-detect_)::
+Install with optional dependencies for full fingerprinting support
+(`prettytable <https://pypi.org/project/prettytable/>`_ and
+`ucs-detect <https://pypi.org/project/ucs-detect/>`_)::
 
     pip install telnetlib3[extras]
 

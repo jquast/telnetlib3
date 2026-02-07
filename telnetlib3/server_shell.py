@@ -308,7 +308,7 @@ def readline(
     Blocking readline using generator yield/send protocol.
 
     Characters are fed in via ``send()`` and complete lines are yielded.
-    Uses :class:`_LineEditor` for grapheme-aware backspace and maxvis
+    Uses ``_LineEditor`` for grapheme-aware backspace and maxvis
     support.
     """
     _writer = cast(TelnetWriterUnicode, writer)
@@ -329,8 +329,8 @@ async def readline_async(
     """
     Async readline that filters ANSI escape sequences.
 
-    Uses :func:`filter_ansi` to strip escape sequences and
-    :class:`_LineEditor` for grapheme-aware backspace and maxvis support.
+    Uses ``filter_ansi()`` to strip escape sequences and
+    ``_LineEditor`` for grapheme-aware backspace and maxvis support.
     """
     _reader = cast(TelnetReaderUnicode, reader)
     _writer = cast(TelnetWriterUnicode, writer)

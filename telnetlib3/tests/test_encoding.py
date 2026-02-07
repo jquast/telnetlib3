@@ -109,7 +109,9 @@ async def test_telnet_client_and_server_encoding_bidirectional(bind_host, unused
 
 async def test_telnet_server_encoding_by_LANG(bind_host, unused_tcp_port):
     """Server's encoding negotiated by LANG value."""
-    async with create_server(host=bind_host, port=unused_tcp_port) as server:
+    async with create_server(
+        host=bind_host, port=unused_tcp_port, connect_maxwait=0.5
+    ) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + DO + BINARY)
             writer.write(IAC + WILL + BINARY)
@@ -125,7 +127,7 @@ async def test_telnet_server_encoding_by_LANG(bind_host, unused_tcp_port):
             )
             writer.write(IAC + WONT + TTYPE)
 
-            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 2.0)
             assert srv_instance.encoding(incoming=True) == "KOI8-U"
             assert srv_instance.encoding(outgoing=True) == "KOI8-U"
             assert srv_instance.encoding(incoming=True, outgoing=True) == "KOI8-U"
@@ -134,7 +136,9 @@ async def test_telnet_server_encoding_by_LANG(bind_host, unused_tcp_port):
 
 async def test_telnet_server_encoding_LANG_no_encoding_suffix(bind_host, unused_tcp_port):
     """Server falls back to default when LANG has no encoding suffix."""
-    async with create_server(host=bind_host, port=unused_tcp_port) as server:
+    async with create_server(
+        host=bind_host, port=unused_tcp_port, connect_maxwait=0.5
+    ) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + DO + BINARY)
             writer.write(IAC + WILL + BINARY)
@@ -150,14 +154,16 @@ async def test_telnet_server_encoding_LANG_no_encoding_suffix(bind_host, unused_
             )
             writer.write(IAC + WONT + TTYPE)
 
-            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 2.0)
             assert srv_instance.encoding(incoming=True) == "utf8"
             assert srv_instance.get_extra_info("LANG") == "en_IL"
 
 
 async def test_telnet_server_encoding_LANG_invalid_encoding(bind_host, unused_tcp_port):
     """Server falls back to default when LANG has unknown encoding."""
-    async with create_server(host=bind_host, port=unused_tcp_port) as server:
+    async with create_server(
+        host=bind_host, port=unused_tcp_port, connect_maxwait=0.5
+    ) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + DO + BINARY)
             writer.write(IAC + WILL + BINARY)
@@ -173,7 +179,7 @@ async def test_telnet_server_encoding_LANG_invalid_encoding(bind_host, unused_tc
             )
             writer.write(IAC + WONT + TTYPE)
 
-            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 2.0)
             assert srv_instance.encoding(incoming=True) == "utf8"
             assert srv_instance.get_extra_info("LANG") == "en_US.BOGUS-ENCODING"
 

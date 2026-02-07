@@ -190,11 +190,11 @@ class TelnetServer(server_base.BaseServer):
 
         ``DO NEW_ENVIRON`` is deferred until the TTYPE cycle completes
         so that Microsoft telnet (ANSI + VT100) can be detected first.
-        See :meth:`_negotiate_environ` and GitHub issue #24.
+        See ``_negotiate_environ()`` and GitHub issue #24.
 
         ``WILL ECHO`` is deferred until TTYPE reveals the client identity.
         MUD clients (Mudlet, TinTin++, etc.) interpret ``WILL ECHO`` as
-        "password mode" and mask input.  See :meth:`_negotiate_echo`.
+        "password mode" and mask input.  See ``_negotiate_echo()``.
         """
         # local
         from .telopt import (  # pylint: disable=import-outside-toplevel
