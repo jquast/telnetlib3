@@ -1074,6 +1074,39 @@ def test_miscellaneous_handle_logs_cover_remaining_handlers():
     ws.handle_xoff(b"\x00")
 
 
+def test_sb_interrupted_logs_warning_with_context(caplog):
+    """SB interruption logs WARNING (not ERROR) with option name and byte count."""
+    import logging
+
+    w, t, _ = new_writer(server=True)
+    # Enter SB mode: IAC SB CHARSET <payload bytes>
+    w.feed_byte(IAC)
+    w.feed_byte(SB)
+    w.feed_byte(CHARSET)
+    w.feed_byte(b"\x01")
+    w.feed_byte(b"\x02")
+    # Interrupt with IAC WONT (instead of IAC SE)
+    with caplog.at_level(logging.WARNING):
+        w.feed_byte(IAC)
+        w.feed_byte(WONT)
+    assert any("SB CHARSET (3 bytes) interrupted by IAC WONT" in r.message for r in caplog.records)
+    assert all(r.levelno != logging.ERROR for r in caplog.records)
+    # The WONT command is still parsed: next byte is its option
+    w.feed_byte(ECHO)
+
+
+def test_sb_begin_logged(caplog):
+    """Entering SB mode logs the option name at DEBUG level."""
+    import logging
+
+    w, t, _ = new_writer(server=True)
+    with caplog.at_level(logging.DEBUG):
+        w.feed_byte(IAC)
+        w.feed_byte(SB)
+        w.feed_byte(TTYPE)
+    assert any("begin sub-negotiation SB TTYPE" in r.message for r in caplog.records)
+
+
 def test_name_option_distinguishes_commands_from_options():
     """name_option renders IAC command bytes as repr, not their command names."""
     # local

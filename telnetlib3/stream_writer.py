@@ -623,7 +623,11 @@ class TelnetWriter:
             # IAC SB sub-negotiation buffer, assert command is SE.
             self.cmd_received = cmd = byte
             if cmd != SE:
-                self.log.error("sub-negotiation buffer interrupted by IAC %s", name_command(cmd))
+                sb_opt = name_command(self._sb_buffer[0]) if self._sb_buffer else "?"
+                self.log.warning(
+                    "sub-negotiation SB %s (%d bytes) interrupted by IAC %s",
+                    sb_opt, len(self._sb_buffer), name_command(cmd),
+                )
                 self._sb_buffer.clear()
             else:
                 # sub-negotiation end (SE), fire handle_subnegotiation
@@ -639,6 +643,8 @@ class TelnetWriter:
 
         elif self.cmd_received == SB:
             # continue buffering of sub-negotiation command.
+            if not self._sb_buffer:
+                self.log.debug("begin sub-negotiation SB %s", name_command(byte))
             self._sb_buffer.append(byte)
             assert len(self._sb_buffer) < (1 << 15)  # 32k SB buffer
 
