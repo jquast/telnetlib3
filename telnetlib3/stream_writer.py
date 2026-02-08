@@ -2722,7 +2722,7 @@ class TelnetWriter:
         self.log.debug("FORWARDMASK received (%d bytes), not applied", len(mask))
 
 
-class TelnetWriterUnicode(TelnetWriter):  # pylint: disable=abstract-method
+class TelnetWriterUnicode(TelnetWriter):
     """
     A Unicode StreamWriter interface for Telnet protocol.
 
