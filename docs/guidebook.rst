@@ -412,7 +412,6 @@ Key differences from miniboa:
        conn.send("Hello!\r\n")      # OK -- also sends \r\n on the wire
        conn.write("Hello!\r\n")     # OK -- write() sends as-is
 
-
 Advanced Negotiation
 --------------------
 
@@ -442,7 +441,6 @@ Fingerprinting Server
 The public telnetlib3 demonstration Fingerprinting Server is::
 
     telnet 1984.ws 555
-
 
 The fingerprinting shell
 (:func:`telnetlib3.fingerprinting.fingerprinting_server_shell`) probes each

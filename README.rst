@@ -29,29 +29,25 @@
 Introduction
 ============
 
-``telnetlib3`` is a feature-rich Telnet Server and Client Protocol library
+``telnetlib3`` is a feature-rich Telnet Server and Client and Protocol library
 for Python 3.9 and newer.
 
 This library supports both modern asyncio_ *and* legacy `Blocking API`_.
 
 The python telnetlib.py_ module removed by Python 3.13 is also re-distributed as-is, as a backport.
 
-telnetlib3 provides multiple interfaces for working with the Telnet protocol:
+See the `Guidebook`_ for examples and the `API documentation`_.
 
 Asyncio Protocol
 ----------------
 
-Modern async/await interface for both client and server, supporting concurrent
-connections. See the `Guidebook`_ for examples and the `API documentation`_.
+The core protocol and CLI utilities are written using an `Asyncio Interface`_.
 
 Blocking API
 ------------
 
-A traditional synchronous interface modeled after telnetlib.py_ (client) and miniboa_ (server),
-with various enhancements in protocol negotiation is provided. Blocking API calls for complex
-arrangements of clients and servers typically require threads.
-
-See `sync API documentation`_ for more.
+A Synchronous interface ,modeled after telnetlib.py_ (client) and miniboa_ (server), with various
+enhancements in protocol negotiation is also provided.  See `sync API documentation`_ for more.
 
 Command-line Utilities
 ----------------------
@@ -69,13 +65,24 @@ program.
     telnetlib3-client nethack.alt.org
     telnetlib3-client xibalba.l33t.codes 44510
     telnetlib3-client --shell bin.client_wargame.shell 1984.ws 666
+    telnetlib3-server # default shell
     telnetlib3-server 0.0.0.0 1984 --shell=bin.server_wargame.shell
     telnetlib3-server --pty-exec /bin/bash -- --login
+
+
+There is also fingerprinting CLIs, ``telnetlib3-fingerprint`` and
+``telnetlib3-fingerprint-server``
+
+::
+
+    telnetlib3-fingerprint-server
+    telnetlib3-fingerprint-client 1984.ws
+
 
 Legacy telnetlib
 ----------------
 
-This library contains an unadulterated copy of Python 3.12's telnetlib.py_,
+This library contains an *unadulterated copy* of Python 3.12's telnetlib.py_,
 from the standard library before it was removed in Python 3.13.
 
 To migrate code, change import statements:
