@@ -29,6 +29,7 @@ from telnetlib3.telopt import (
     WONT,
     LFLOW,
     TTYPE,
+    VALUE,
     BINARY,
     LOGOUT,
     SNDLOC,
@@ -129,6 +130,50 @@ def test_close_idempotent_and_cleanup():
     w2.close()
     w2.write(b"ignored")
     assert not t2.writes
+
+
+def test_send_iac_skipped_when_closing():
+    """send_iac() drops writes when transport is closing."""
+    w, t, _ = new_writer(server=True)
+    t._closing = True
+    w.send_iac(IAC + NOP)
+    assert not t.writes
+
+
+def test_send_iac_skipped_when_closed():
+    """send_iac() drops writes after close()."""
+    w, t, _ = new_writer(server=True)
+    w.close()
+    w.send_iac(IAC + NOP)
+    assert not t.writes
+
+
+def test_forwardmask_skipped_when_closing():
+    """request_forwardmask() drops writes when transport is closing."""
+    w, t, _ = new_writer(server=True)
+    w.remote_option[LINEMODE] = True
+    t._closing = True
+    w.request_forwardmask()
+    assert not t.writes
+
+
+def test_send_linemode_skipped_when_closing():
+    """send_linemode() drops writes when transport is closing."""
+    w, t, _ = new_writer(server=True)
+    w.remote_option[LINEMODE] = True
+    t._closing = True
+    w.send_linemode()
+    assert not t.writes
+
+
+def test_slc_end_skipped_when_closing():
+    """_slc_end() drops writes when closing, buffer still cleared."""
+    w, t, _ = new_writer(server=True)
+    w._slc_buffer = [b"\x03\x03\x04"]
+    t._closing = True
+    w._slc_end()
+    assert not t.writes
+    assert not w._slc_buffer
 
 
 def test_get_extra_info_merges_protocol_and_transport():
@@ -522,6 +567,24 @@ def test_escape_unescape_and_env_encode_decode_roundtrip():
     assert dec == {"USER": "root", "LANG": "C.UTF-8"}
 
 
+def test_decode_env_buf_ebcdic():
+    """EBCDIC-encoded env data decoded when encoding=cp037."""
+    ebcdic_user = "USER".encode("cp037")
+    ebcdic_root = "root".encode("cp037")
+    payload = VAR + ebcdic_user + VALUE + ebcdic_root
+    result = _decode_env_buf(payload, encoding="cp037")
+    assert result == {"USER": "root"}
+
+
+def test_decode_env_buf_non_ascii_replace():
+    """Non-ASCII bytes with default ascii encoding use replacement chars."""
+    payload = VAR + b"\x93\x96\x87\x89\x95" + VALUE + b"\xff\xfe"
+    result = _decode_env_buf(payload)
+    assert len(result) == 1
+    key = list(result.keys())[0]
+    assert "\ufffd" in key
+
+
 def test_transport_property_write_eof_can_write_eof_and_is_closing():
     class MT2(MockTransport):
         def __init__(self):
@@ -887,6 +950,27 @@ def test_handle_send_server_and_client_charset_returns():
     assert ws.handle_send_server_charset() == ["UTF-8"]
     wc, tc, pc = new_writer(server=False, client=True)
     assert not wc.handle_send_client_charset(["UTF-8", "ASCII"])
+
+
+def test_charset_accepted_updates_environ_encoding():
+    """CHARSET ACCEPTED updates environ_encoding for NEW_ENVIRON decoding."""
+    ws, ts, ps = new_writer(server=True)
+    assert ws.environ_encoding == "ascii"
+    ws.set_ext_callback(CHARSET, lambda c: None)
+    buf = collections.deque([CHARSET, ACCEPTED, b"UTF-8"])
+    ws._handle_sb_charset(buf)
+    assert ws.environ_encoding == "UTF-8"
+
+
+def test_charset_request_accepted_updates_environ_encoding():
+    """Client accepting CHARSET REQUEST updates environ_encoding."""
+    wc, tc, pc = new_writer(server=False, client=True)
+    assert wc.environ_encoding == "ascii"
+    wc.set_ext_send_callback(CHARSET, lambda offers: "UTF-8")
+    sep = b";"
+    buf = collections.deque([CHARSET, REQUEST, sep, b"UTF-8;ASCII"])
+    wc._handle_sb_charset(buf)
+    assert wc.environ_encoding == "UTF-8"
 
 
 def test_iac_wont_and_dont_suppressed_when_remote_false():

@@ -1,0 +1,452 @@
+"""
+Fingerprint shell for telnet server identification.
+
+This module probes remote telnet servers for protocol capabilities,
+collects banner data and session information, and saves fingerprint
+files.  It mirrors :mod:`telnetlib3.fingerprinting` but operates as
+a client connecting *to* a server.
+"""
+
+from __future__ import annotations
+
+# std imports
+import os
+import sys
+import json
+import time
+import shutil
+import asyncio
+import logging
+import datetime
+import subprocess
+from typing import Any
+
+# local
+from . import fingerprinting as _fps
+from .telopt import (
+    VAR,
+    NAWS,
+    LFLOW,
+    TTYPE,
+    VALUE,
+    SNDLOC,
+    TSPEED,
+    USERVAR,
+    LINEMODE,
+    XDISPLOC,
+    NEW_ENVIRON,
+)
+from .stream_reader import TelnetReader
+from .stream_writer import TelnetWriter
+from .fingerprinting import (
+    ALL_PROBE_OPTIONS,
+    _hash_fingerprint,
+    _opt_byte_to_name,
+    _atomic_json_write,
+    _save_fingerprint_name,
+    _save_fingerprint_to_dir,
+    probe_client_capabilities,
+)
+
+__all__ = ("fingerprinting_client_shell", "probe_server_capabilities")
+
+# Options where only the client sends WILL (in response to a server's DO).
+# A server should never WILL these — they describe client-side properties.
+# The probe must not send DO for these; their state is already captured
+# in ``server_requested`` (what the server sent DO for).
+_CLIENT_ONLY_WILL = frozenset({TTYPE, TSPEED, NAWS, XDISPLOC, NEW_ENVIRON, LFLOW, LINEMODE, SNDLOC})
+
+_BANNER_MAX_BYTES = 1024
+_NEGOTIATION_SETTLE = 0.5
+_BANNER_WAIT = 3.0
+_POST_RETURN_WAIT = 3.0
+_JQ = shutil.which("jq")
+
+logger = logging.getLogger("telnetlib3.server_fingerprint")
+
+
+def _is_display_worthy(v: Any) -> bool:
+    """Return True if *v* should be kept in culled display output."""
+    # pylint: disable-next=use-implicit-booleaness-not-comparison-to-string
+    return v is not False and v != {} and v != [] and v != ""
+
+
+def _cull_display(obj: Any) -> Any:
+    """Recursively remove empty, false-valued, and verbose entries for display."""
+    if isinstance(obj, dict):
+        return {k: _cull_display(v) for k, v in obj.items() if _is_display_worthy(v)}
+    if isinstance(obj, list):
+        return [_cull_display(item) for item in obj]
+    return obj
+
+
+def _print_json(data: dict[str, Any]) -> None:
+    """Print *data* as JSON to stdout, colorized through ``jq`` when available."""
+    raw = json.dumps(_cull_display(data), indent=2, sort_keys=True)
+    if _JQ:
+        result = subprocess.run(
+            [_JQ, "-C", "."], input=raw, capture_output=True, text=True, check=False
+        )
+        if result.returncode == 0:
+            raw = result.stdout.rstrip("\n")
+    print(raw, file=sys.stdout)
+
+
+async def fingerprinting_client_shell(
+    reader: TelnetReader,
+    writer: TelnetWriter,
+    *,
+    host: str,
+    port: int,
+    save_path: str | None = None,
+    silent: bool = False,
+    set_name: str | None = None,
+    environ_encoding: str = "ascii",
+) -> None:
+    """
+    Client shell that fingerprints a remote telnet server.
+
+    Designed to be used with :func:`functools.partial` to bind CLI
+    arguments, then passed as the ``shell`` callback to
+    :func:`~telnetlib3.client.open_connection` with ``encoding=False``.
+
+    :param reader: Binary-mode :class:`~telnetlib3.stream_reader.TelnetReader`.
+    :param writer: Binary-mode :class:`~telnetlib3.stream_writer.TelnetWriter`.
+    :param host: Remote hostname or IP address.
+    :param port: Remote port number.
+    :param save_path: If set, write fingerprint JSON directly to this path.
+    :param silent: Suppress fingerprint output to stdout.
+    :param set_name: If set, store this name for the fingerprint hash in
+        ``fingerprint_names.json`` without requiring moderation.
+    :param environ_encoding: Encoding for NEW_ENVIRON data.  Default
+        ``"ascii"`` per :rfc:`1572`; use ``"cp037"`` for EBCDIC hosts.
+    """
+    writer.environ_encoding = environ_encoding
+    try:
+        await _fingerprint_session(
+            reader,
+            writer,
+            host=host,
+            port=port,
+            save_path=save_path,
+            silent=silent,
+            set_name=set_name,
+        )
+    except (ConnectionError, EOFError) as exc:
+        logger.warning("%s:%d: %s", host, port, exc)
+        writer.close()
+
+
+async def _fingerprint_session(
+    reader: TelnetReader,
+    writer: TelnetWriter,
+    *,
+    host: str,
+    port: int,
+    save_path: str | None,
+    silent: bool,
+    set_name: str | None,
+) -> None:
+    """Run the fingerprint session (inner helper for error handling)."""
+    start_time = time.time()
+
+    # 1. Let straggler negotiation settle
+    await asyncio.sleep(_NEGOTIATION_SETTLE)
+
+    # 2. Read banner (pre-return)
+    banner_before = await _read_banner(reader, timeout=_BANNER_WAIT)
+
+    # 3. Send return, read post-return data
+    writer.write(b"\r\n")
+    await writer.drain()
+    banner_after = await _read_banner(reader, timeout=_POST_RETURN_WAIT)
+
+    # 4. Snapshot option states before probing
+    option_states = _collect_server_option_states(writer)
+
+    # 5. Active probe
+    probe_start = time.time()
+    probe_results = await probe_server_capabilities(writer)
+    probe_time = time.time() - probe_start
+
+    # 6. Build session dicts
+    session_data: dict[str, Any] = {
+        "encoding": writer.environ_encoding,
+        "option_states": option_states,
+        "banner_before_return": _format_banner(banner_before, encoding=writer.environ_encoding),
+        "banner_after_return": _format_banner(banner_after, encoding=writer.environ_encoding),
+        "timing": {"probe": probe_time, "total": time.time() - start_time},
+    }
+    session_entry: dict[str, Any] = {
+        "host": host,
+        "ip": (writer.get_extra_info("peername") or (host,))[0],
+        "port": port,
+        "connected": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+
+    # 7. Save
+    _save_server_fingerprint_data(
+        writer=writer,
+        probe_results=probe_results,
+        session_data=session_data,
+        session_entry=session_entry,
+        save_path=save_path,
+    )
+
+    # 8. Set name in fingerprint_names.json
+    if set_name is not None:
+        protocol_fp = _create_server_protocol_fingerprint(writer, probe_results)
+        protocol_hash = _hash_fingerprint(protocol_fp)
+        try:
+            _save_fingerprint_name(protocol_hash, set_name)
+            logger.info("set name %r for %s", set_name, protocol_hash)
+        except ValueError:
+            logger.warning("--set-name requires --data-dir or $TELNETLIB3_DATA_DIR")
+
+    # 9. Display
+    if not silent:
+        protocol_fp = _create_server_protocol_fingerprint(writer, probe_results)
+        protocol_hash = _hash_fingerprint(protocol_fp)
+        display_data: dict[str, Any] = {
+            "server-probe": {
+                "fingerprint": protocol_hash,
+                "fingerprint-data": protocol_fp,
+                "session_data": session_data,
+            },
+            "sessions": [session_entry],
+        }
+        _print_json(display_data)
+
+    # 10. Close
+    writer.close()
+
+
+async def probe_server_capabilities(
+    writer: TelnetWriter, options: list[tuple[bytes, str, str]] | None = None, timeout: float = 0.5
+) -> dict[str, _fps.ProbeResult]:
+    """
+    Actively probe a remote server for telnet capability support.
+
+    Sends ``IAC DO`` for all options not yet negotiated, then waits
+    for ``WILL``/``WONT`` responses.  Delegates to
+    :func:`~telnetlib3.fingerprinting.probe_client_capabilities`.
+
+    :param writer: :class:`~telnetlib3.stream_writer.TelnetWriter` instance.
+    :param options: List of ``(opt_bytes, name, description)`` tuples.
+        Defaults to :data:`~telnetlib3.fingerprinting.ALL_PROBE_OPTIONS`
+        minus client-only options.
+    :param timeout: Seconds to wait for all responses.
+    :returns: Dict mapping option name to status dict.
+    """
+    if options is None:
+        options = [
+            (opt, name, desc)
+            for opt, name, desc in ALL_PROBE_OPTIONS
+            if opt not in _CLIENT_ONLY_WILL
+        ]
+    return await probe_client_capabilities(writer, options=options, timeout=timeout)
+
+
+def _parse_environ_send(raw: bytes) -> list[dict[str, Any]]:
+    """
+    Parse a raw NEW_ENVIRON SEND payload into structured entries.
+
+    :param raw: Bytes following ``SB NEW_ENVIRON SEND`` up to ``SE``.
+    :returns: List of dicts, each with ``type`` (``"VAR"`` or ``"USERVAR"``),
+        ``name`` (ASCII text portion), and optionally ``data_hex`` for
+        trailing binary bytes.
+    """
+    entries: list[dict[str, Any]] = []
+    delimiters = {VAR[0], USERVAR[0]}
+    value_byte = VALUE[0]
+
+    # find positions of VAR/USERVAR delimiters
+    breaks = [i for i, b in enumerate(raw) if b in delimiters]
+
+    for idx, ptr in enumerate(breaks):
+        kind = "VAR" if raw[ptr : ptr + 1] == VAR else "USERVAR"
+        start = ptr + 1
+        end = breaks[idx + 1] if idx + 1 < len(breaks) else len(raw)
+        chunk = raw[start:end]
+
+        if not chunk:
+            # bare VAR or USERVAR with no name = "send all"
+            entries.append({"type": kind, "name": "*"})
+            continue
+
+        # split on VALUE byte if present
+        if value_byte in chunk:
+            name_part, val_part = chunk.split(bytes([value_byte]), 1)
+        else:
+            name_part = chunk
+            val_part = b""
+
+        # contiguous ASCII-printable prefix only; trailing binary is ignored
+        ascii_end = 0
+        for i, b in enumerate(name_part):
+            if 0x20 <= b < 0x7F:
+                ascii_end = i + 1
+            else:
+                break
+        name_text = name_part[:ascii_end].decode("ascii") if ascii_end else ""
+
+        entry: dict[str, Any] = {"type": kind, "name": name_text}
+        if val_part:
+            entry["value_hex"] = val_part.hex()
+        entries.append(entry)
+
+    return entries
+
+
+def _collect_server_option_states(writer: TelnetWriter) -> dict[str, dict[str, Any]]:
+    """
+    Collect telnet option states from the server perspective.
+
+    :param writer: :class:`~telnetlib3.stream_writer.TelnetWriter` instance.
+    :returns: Dict with ``server_offered`` (server WILL) and
+        ``server_requested`` (server DO) entries.
+    """
+    server_offered: dict[str, Any] = {}
+    for opt, enabled in writer.remote_option.items():
+        server_offered[_opt_byte_to_name(opt)] = enabled
+
+    server_requested: dict[str, Any] = {}
+    for opt, enabled in writer.local_option.items():
+        server_requested[_opt_byte_to_name(opt)] = enabled
+
+    result: dict[str, Any] = {
+        "server_offered": server_offered,
+        "server_requested": server_requested,
+    }
+
+    if writer.environ_send_raw is not None:
+        result["environ_requested"] = _parse_environ_send(writer.environ_send_raw)
+
+    return result
+
+
+def _create_server_protocol_fingerprint(
+    writer: TelnetWriter, probe_results: dict[str, _fps.ProbeResult]
+) -> dict[str, Any]:
+    """
+    Create anonymized protocol fingerprint for a remote server.
+
+    :param writer: :class:`~telnetlib3.stream_writer.TelnetWriter` instance.
+    :param probe_results: Results from :func:`probe_server_capabilities`.
+    :returns: Deterministic fingerprint dict suitable for hashing.
+    """
+    offered = sorted(name for name, info in probe_results.items() if info["status"] == "WILL")
+    refused = sorted(
+        name for name, info in probe_results.items() if info["status"] in ("WONT", "timeout")
+    )
+
+    requested = sorted(
+        _opt_byte_to_name(opt) for opt, enabled in writer.local_option.items() if enabled
+    )
+
+    return {
+        "probed-protocol": "server",
+        "offered-options": offered,
+        "requested-options": requested,
+        "refused-options": refused,
+    }
+
+
+def _save_server_fingerprint_data(
+    writer: TelnetWriter,
+    probe_results: dict[str, _fps.ProbeResult],
+    session_data: dict[str, Any],
+    session_entry: dict[str, Any],
+    save_path: str | None = None,
+) -> str | None:
+    """
+    Save server fingerprint data to a JSON file.
+
+    Directory structure: ``DATA_DIR/server/<protocol_hash>/<session_hash>.json``
+
+    :param writer: :class:`~telnetlib3.stream_writer.TelnetWriter` instance.
+    :param probe_results: Results from :func:`probe_server_capabilities`.
+    :param session_data: Pre-built dict with ``option_states``, ``banner_before_return``,
+        ``banner_after_return``, and ``timing`` keys.
+    :param session_entry: Pre-built dict with ``host``, ``ip``, ``port``,
+        and ``connected`` keys.
+    :param save_path: If set, write directly to this path.
+    :returns: Path to saved file, or ``None`` if saving was skipped.
+    """
+    protocol_fp = _create_server_protocol_fingerprint(writer, probe_results)
+    protocol_hash = _hash_fingerprint(protocol_fp)
+
+    data: dict[str, Any] = {
+        "server-probe": {
+            "fingerprint": protocol_hash,
+            "fingerprint-data": protocol_fp,
+            "session_data": session_data,
+        },
+        "sessions": [session_entry],
+    }
+
+    # Direct save path
+    if save_path is not None:
+        save_dir = os.path.dirname(save_path)
+        if save_dir:
+            os.makedirs(save_dir, exist_ok=True)
+        _atomic_json_write(save_path, data)
+        logger.info("saved server fingerprint to %s", save_path)
+        return save_path
+
+    # DATA_DIR-based save
+    data_dir = _fps.DATA_DIR
+    if data_dir is None:
+        return None
+    if not os.path.isdir(data_dir):
+        os.makedirs(data_dir, exist_ok=True)
+
+    session_identity = {
+        "host": session_entry["host"],
+        "port": session_entry["port"],
+        "ip": session_entry["ip"],
+    }
+    session_hash = _hash_fingerprint(session_identity)
+    server_dir = os.path.join(data_dir, "server", protocol_hash)
+
+    return _save_fingerprint_to_dir(
+        target_dir=server_dir,
+        session_hash=session_hash,
+        data=data,
+        probe_key="server-probe",
+        data_dir=data_dir,
+        side="server",
+        protocol_hash=protocol_hash,
+    )
+
+
+def _format_banner(data: bytes, encoding: str = "utf-8") -> str:
+    """
+    Format raw banner bytes for JSON serialization.
+
+    Default ``"utf-8"`` is intentional -- banners are typically UTF-8
+    regardless of ``environ_encoding``; callers may override.
+
+    :param data: Raw bytes from the server.
+    :param encoding: Character encoding to use for decoding.
+    :returns: Decoded text string (undecodable bytes replaced).
+    """
+    return data.decode(encoding, errors="replace")
+
+
+async def _read_banner(reader: TelnetReader, timeout: float = _BANNER_WAIT) -> bytes:
+    """
+    Read up to :data:`_BANNER_MAX_BYTES` from *reader* with timeout.
+
+    Returns whatever bytes were received before the timeout, which may
+    be empty if the server sends nothing.
+
+    :param reader: :class:`~telnetlib3.stream_reader.TelnetReader` instance.
+    :param timeout: Seconds to wait for data.
+    :returns: Banner bytes (may be empty).
+    """
+    try:
+        data = await asyncio.wait_for(reader.read(_BANNER_MAX_BYTES), timeout=timeout)
+    except (asyncio.TimeoutError, EOFError):
+        data = b""
+    return data

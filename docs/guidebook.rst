@@ -412,7 +412,6 @@ Key differences from miniboa:
        conn.send("Hello!\r\n")      # OK -- also sends \r\n on the wire
        conn.write("Hello!\r\n")     # OK -- write() sends as-is
 
-
 Advanced Negotiation
 --------------------
 
@@ -442,7 +441,6 @@ Fingerprinting Server
 The public telnetlib3 demonstration Fingerprinting Server is::
 
     telnet 1984.ws 555
-
 
 The fingerprinting shell
 (:func:`telnetlib3.fingerprinting.fingerprinting_server_shell`) probes each
@@ -495,6 +493,40 @@ reviewing client-submitted name suggestions and assigning names to hashes::
 
     export TELNETLIB3_DATA_DIR=./data
     python bin/moderate_fingerprints.py
+
+
+Fingerprinting Client
+=====================
+
+The ``telnetlib3-fingerprint`` CLI connects to a remote telnet server,
+probes its supported telnet options, captures the login banner, and saves a
+structured JSON fingerprint.  This is the reverse of the fingerprinting
+server -- it fingerprints *servers* instead of clients.
+
+Running
+-------
+
+::
+
+    telnetlib3-fingerprint example.com 23
+
+Options:
+
+- ``--data-dir <path>`` -- directory for fingerprint data
+  (default: ``$TELNETLIB3_DATA_DIR``).
+- ``--save-json <path>`` -- write the JSON result to a specific file instead
+  of ``<data-dir>/server/<hash>/``.
+- ``--connect-timeout <secs>`` -- TCP connection timeout (default 10).
+- ``--silent`` -- suppress fingerprint output to stdout.
+
+The fingerprint JSON records which options the server offered (WILL) and
+requested (DO), which it refused, the pre-login banner text, and optional
+DNS resolution results.  Files are stored under::
+
+    <data-dir>/server/<protocol-hash>/<session-hash>.json
+
+The ``bin/moderate_fingerprints.py`` script handles both client and server
+fingerprints.
 
 
 MUD Server

@@ -23,6 +23,7 @@ from . import slc
 from . import telnetlib
 from . import guard_shells
 from . import fingerprinting
+from . import server_fingerprinting
 if sys.platform != "win32":
     from . import fingerprinting_display  # noqa: F401
 from . import sync
@@ -39,6 +40,7 @@ from .slc import *  # noqa
 from .telnetlib import *  # noqa
 from .guard_shells import *  # noqa
 from .fingerprinting import *  # noqa
+from .server_fingerprinting import *  # noqa
 if sys.platform != "win32":
     from .fingerprinting_display import *  # noqa
 from .sync import *  # noqa
@@ -61,6 +63,7 @@ __all__ = tuple(
         + server_shell.__all__
         + guard_shells.__all__
         + fingerprinting.__all__
+        + server_fingerprinting.__all__
         + (server_pty_shell.__all__ if PTY_SUPPORT else ())
         # client,
         + client_base.__all__

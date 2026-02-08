@@ -565,19 +565,6 @@ async def test_probe_already_negotiated(opt, value, name, expected_status):
     assert results[name]["already_negotiated"] is True
 
 
-@pytest.mark.asyncio
-async def test_probe_with_progress_callback():
-    called = []
-    writer = MockWriter(will_options=[fps.BINARY])
-    await fps.probe_client_capabilities(
-        writer,
-        options=[(fps.BINARY, "BINARY", "test")],
-        timeout=0.01,
-        progress_callback=lambda name, idx, total, status: called.append((name, idx)),
-    )
-    assert called == [("BINARY", 1)]
-
-
 def test_get_client_fingerprint():
     writer = MockWriter(
         extra={

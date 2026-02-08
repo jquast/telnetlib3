@@ -197,6 +197,11 @@ class TelnetWriter:
         #: indicating state of remote capabilities.
         self.remote_option = Option("remote_option", self.log, on_change=self._check_waiters)
 
+        #: Encoding used for NEW_ENVIRON variable names and values.
+        #: Default ``"ascii"`` per :rfc:`1572`; set to ``"cp037"`` for
+        #: EBCDIC hosts such as IBM OS/400.
+        self.environ_encoding: str = "ascii"
+
         #: Set of option byte(s) for WILL received from remote end
         #: that were rejected with DONT (unhandled options).
         self.rejected_will: set[bytes] = set()
@@ -204,6 +209,10 @@ class TelnetWriter:
         #: Set of option byte(s) for DO received from remote end
         #: that were rejected with WONT (unsupported options).
         self.rejected_do: set[bytes] = set()
+
+        #: Raw bytes of the last NEW_ENVIRON SEND payload, captured
+        #: for fingerprinting.  ``None`` if no SEND was received.
+        self.environ_send_raw: Optional[bytes] = None
 
         #: Sub-negotiation buffer
         self._sb_buffer: collections.deque[bytes] = collections.deque()
@@ -809,7 +818,7 @@ class TelnetWriter:
         """
         assert isinstance(buf, (bytes, bytearray)), buf
         assert buf and buf.startswith(IAC), buf
-        if self._transport is not None:
+        if not self.is_closing():
             self._transport.write(buf)
             if hasattr(self._protocol, "_tx_bytes"):
                 self._protocol._tx_bytes += len(buf)
@@ -900,51 +909,45 @@ class TelnetWriter:
         self.send_iac(IAC + CMD_EOR)
         return True
 
-    def send_gmcp(self, package: str, data: Any = None) -> bool:
+    def send_gmcp(self, package: str, data: Any = None) -> None:
         """
         Transmit a GMCP message via subnegotiation.
 
         :param package: GMCP package name (e.g., ``"Char.Vitals"``)
         :param data: Optional data to encode as JSON
-        :returns: True if sent, False if GMCP is not negotiated
         """
         if not (self.local_option.enabled(GMCP) or self.remote_option.enabled(GMCP)):
             self.log.debug("cannot send GMCP without negotiation")
-            return False
+            return
         payload = self._escape_iac(gmcp_encode(package, data))
         self.log.debug("send IAC SB GMCP %s IAC SE", package)
         self.send_iac(IAC + SB + GMCP + payload + IAC + SE)
-        return True
 
-    def send_msdp(self, variables: dict[str, Any]) -> bool:
+    def send_msdp(self, variables: dict[str, Any]) -> None:
         """
         Transmit MSDP variables via subnegotiation.
 
         :param variables: Dictionary of variable names to values
-        :returns: True if sent, False if MSDP is not negotiated
         """
         if not (self.local_option.enabled(MSDP) or self.remote_option.enabled(MSDP)):
             self.log.debug("cannot send MSDP without negotiation")
-            return False
+            return
         payload = self._escape_iac(msdp_encode(variables))
         self.log.debug("send IAC SB MSDP IAC SE")
         self.send_iac(IAC + SB + MSDP + payload + IAC + SE)
-        return True
 
-    def send_mssp(self, variables: dict[str, str | list[str]]) -> bool:
+    def send_mssp(self, variables: dict[str, str | list[str]]) -> None:
         """
         Transmit MSSP variables via subnegotiation.
 
         :param variables: Dictionary of variable names to values
-        :returns: True if sent, False if MSSP is not negotiated
         """
         if not (self.local_option.enabled(MSSP) or self.remote_option.enabled(MSSP)):
             self.log.debug("cannot send MSSP without negotiation")
-            return False
+            return
         payload = self._escape_iac(mssp_encode(variables))
         self.log.debug("send IAC SB MSSP IAC SE")
         self.send_iac(IAC + SB + MSSP + payload + IAC + SE)
-        return True
 
     # Public methods for notifying about, or soliciting state options.
     #
@@ -1059,7 +1062,7 @@ class TelnetWriter:
                 response.append(env_key)
             else:
                 response.extend([VAR])
-                response.extend([_escape_environ(env_key.encode("ascii"))])
+                response.extend([_escape_environ(env_key.encode(self.environ_encoding, "replace"))])
         response.extend([IAC, SE])
         self.log.debug("request_environ: %r", b"".join(response))
         self.pending_option[SB + NEW_ENVIRON] = True
@@ -1136,7 +1139,8 @@ class TelnetWriter:
             self.log.debug("send IAC SE")
 
             self.send_iac(IAC + SB + LINEMODE + DO + slc.LMODE_FORWARDMASK)
-            self._transport.write(fmask.value)
+            if not self.is_closing():
+                self._transport.write(fmask.value)
             self.send_iac(IAC + SE)
 
             return True
@@ -1182,7 +1186,8 @@ class TelnetWriter:
         self.log.debug("send IAC SB LINEMODE LINEMODE-MODE %r IAC SE", self._linemode)
 
         self.send_iac(IAC + SB + LINEMODE + slc.LMODE_MODE)
-        self._transport.write(self._linemode.mask)
+        if not self.is_closing():
+            self._transport.write(self._linemode.mask)
         self.send_iac(IAC + SE)
 
     # Public is-a-command (IAC) callbacks
@@ -1544,11 +1549,24 @@ class TelnetWriter:
         self.log.debug("Character set: %s", charset)
 
     def handle_gmcp(self, package: str, data: Any) -> None:
-        """Receive GMCP message with ``package`` name and ``data``."""
+        """
+        Receive GMCP message with ``package`` name and ``data``.
+
+        :param package: GMCP package name (e.g., ``"Char.Vitals"``).
+        :param data: Decoded JSON value -- may be any JSON type
+            (``str``, ``int``, ``float``, ``bool``, ``None``,
+            ``list``, or ``dict``).
+        """
         self.log.debug("GMCP: %s %r", package, data)
 
     def handle_msdp(self, variables: dict[str, Any]) -> None:
-        """Receive MSDP variables as dict."""
+        """
+        Receive MSDP variables as dict.
+
+        :param variables: Mapping of variable names to values.  Values
+            may be ``str``, ``dict[str, Any]`` (MSDP table), or
+            ``list[Any]`` (MSDP array) per the MSDP wire format.
+        """
         self.log.debug("MSDP: %r", variables)
 
     def handle_mssp(self, variables: dict[str, str | list[str]]) -> None:
@@ -1633,7 +1651,16 @@ class TelnetWriter:
             # servers, such as dgamelaunch (nethack.alt.org) freeze up
             # unless we answer IAC-WONT-ECHO.
             self.iac(WONT, ECHO)
-        elif self.server and opt in (LINEMODE, TTYPE, NAWS, NEW_ENVIRON, XDISPLOC, LFLOW):
+        elif self.server and opt in (
+            LINEMODE,
+            TTYPE,
+            NAWS,
+            NEW_ENVIRON,
+            XDISPLOC,
+            LFLOW,
+            TSPEED,
+            SNDLOC,
+        ):
             raise ValueError(f"cannot recv DO {name_command(opt)} on server end (ignored).")
         elif self.client and opt in (LOGOUT,):
             raise ValueError(f"cannot recv DO {name_command(opt)} on client end (ignored).")
@@ -1948,9 +1975,11 @@ class TelnetWriter:
                 response.extend([IAC, SE])
                 self.log.debug("send IAC SB CHARSET ACCEPTED %s IAC SE", selected)
                 self.send_iac(b"".join(response))
+                self.environ_encoding = selected
         elif opt == ACCEPTED:
             charset = b"".join(buf).decode("ascii")
             self.log.debug("recv IAC SB CHARSET ACCEPTED %s IAC SE", charset)
+            self.environ_encoding = charset
             self._ext_callback[CHARSET](charset)
         elif opt == REJECTED:
             self.log.warning("recv IAC SB CHARSET REJECTED IAC SE")
@@ -2072,9 +2101,13 @@ class TelnetWriter:
         assert cmd == NEW_ENVIRON, (cmd, name_command(cmd))
         assert opt in (IS, SEND, INFO), opt
         opt_kind = {IS: "IS", INFO: "INFO", SEND: "SEND"}.get(opt)
-        self.log.debug("recv %s %s: %r", name_command(cmd), opt_kind, b"".join(buf))
+        raw = b"".join(buf)
+        self.log.debug("recv %s %s: %r", name_command(cmd), opt_kind, raw)
 
-        env = _decode_env_buf(b"".join(buf))
+        if opt == SEND:
+            self.environ_send_raw = raw
+
+        env = _decode_env_buf(raw, encoding=self.environ_encoding)
 
         if opt in (IS, INFO):
             assert self.server, f"SE: cannot recv from server: {name_command(cmd)} {opt_kind}"
@@ -2093,7 +2126,9 @@ class TelnetWriter:
             assert self.client, f"SE: cannot recv from client: {name_command(cmd)} {opt_kind}"
             # client-side, we do _not_ honor the 'send all VAR' or 'send all
             # USERVAR' requests -- it is a small bit of a security issue.
-            send_env = _encode_env_buf(self._ext_send_callback[NEW_ENVIRON](env.keys()))
+            send_env = _encode_env_buf(
+                self._ext_send_callback[NEW_ENVIRON](env.keys()), encoding=self.environ_encoding
+            )
             response = [IAC, SB, NEW_ENVIRON, IS, send_env, IAC, SE]
             self.log.debug("env send: %r", response)
             self.send_iac(b"".join(response))
@@ -2190,71 +2225,47 @@ class TelnetWriter:
         """
         Callback responds to IAC SB STATUS IS, :rfc:`859`.
 
-        :param buf: sub-negotiation byte buffer containing status data. This implementation does its
-            best to analyze our perspective's state to the state options given. Any discrepancies
-            are reported to the error log, but no action is taken. This implementation handles
-            malformed STATUS data gracefully by skipping invalid command bytes and continuing to
-            process the remaining data.
+        :param buf: sub-negotiation byte buffer containing status data. Compares the remote peer's
+            reported option state against our own and logs a single summary of agreed and disagreed
+            options. Malformed data is handled gracefully by skipping invalid bytes.
         """
-        # Convert deque to list for processing
         buf_list = list(buf)
+        agreed = []
+        disagreed = []
 
-        # Process command-option pairs, handling malformed data gracefully
         i = 0
         while i < len(buf_list):
             if i + 1 >= len(buf_list):
-                # Odd number of bytes remaining, log and skip
                 self.log.warning("STATUS: incomplete pair at end, skipping byte: %s", buf_list[i])
                 break
 
             cmd = buf_list[i]
             opt = buf_list[i + 1]
 
-            # Skip invalid command bytes with a warning
             if cmd not in (DO, DONT, WILL, WONT):
-                self.log.warning(
-                    "STATUS: invalid cmd at pos %s: %s, skipping. Expected DO DONT WILL WONT.",
-                    i,
-                    cmd,
-                )
-                # Try to resync by looking for the next valid command
+                self.log.warning("STATUS: invalid cmd at pos %d: %s, skipping.", i, cmd)
                 i += 1
                 continue
 
-            matching = False
+            opt_name = name_command(opt)
             if cmd in (DO, DONT):
-                _side = "local"
                 enabled = self.local_option.enabled(opt)
                 matching = (cmd == DO and enabled) or (cmd == DONT and not enabled)
-            else:  # (WILL, WONT)
-                _side = "remote"
+            else:
                 enabled = self.remote_option.enabled(opt)
                 matching = (cmd == WILL and enabled) or (cmd == WONT and not enabled)
-            _mode = "enabled" if enabled else "not enabled"
 
-            if not matching:
-                self.log.error(
-                    "STATUS %s %s: disagreed, %s option is %s.",
-                    name_command(cmd),
-                    name_command(opt),
-                    _side,
-                    _mode,
-                )
-                self.log.error(
-                    "remote %r is %s",
-                    [(name_commands(_opt), _val) for _opt, _val in self.remote_option.items()],
-                    self.remote_option.enabled(opt),
-                )
-                self.log.error(
-                    " local %r is %s",
-                    [(name_commands(_opt), _val) for _opt, _val in self.local_option.items()],
-                    self.local_option.enabled(opt),
-                )
+            if matching:
+                agreed.append(opt_name)
             else:
-                self.log.debug("STATUS %s %s (agreed).", name_command(cmd), name_command(opt))
+                disagreed.append(opt_name)
 
-            # Move to next pair
             i += 2
+
+        if agreed:
+            self.log.debug("STATUS agreed: %s", ", ".join(agreed))
+        if disagreed:
+            self.log.debug("STATUS disagreed: %s", ", ".join(disagreed))
 
     def _send_status(self) -> None:
         """Callback responds to IAC SB STATUS SEND, :rfc:`859`."""
@@ -2398,7 +2409,8 @@ class TelnetWriter:
         if len(self._slc_buffer):
             self.log.debug("send (slc_end): %r", b"".join(self._slc_buffer))
             buf = b"".join(self._slc_buffer)
-            self._transport.write(self._escape_iac(buf))
+            if not self.is_closing():
+                self._transport.write(self._escape_iac(buf))
             self._slc_buffer.clear()
 
         self.log.debug("slc_end: [..] IAC SE")
@@ -2823,11 +2835,12 @@ def _unescape_environ(buf: bytes) -> bytes:
     return buf.replace(ESC + VAR, VAR).replace(ESC + USERVAR, USERVAR)
 
 
-def _encode_env_buf(env: dict[str, str]) -> bytes:
+def _encode_env_buf(env: dict[str, str], encoding: str = "ascii") -> bytes:
     """
     Encode dictionary for transmission as environment variables, :rfc:`1572`.
 
     :param env: dictionary of environment values.
+    :param encoding: Character encoding for names and values.
     :returns: buffer meant to follow sequence IAC SB NEW_ENVIRON IS.
         It is not terminated by IAC SE.
 
@@ -2837,13 +2850,13 @@ def _encode_env_buf(env: dict[str, str]) -> bytes:
     buf: collections.deque[bytes] = collections.deque()
     for key, value in env.items():
         buf.append(VAR)
-        buf.extend([_escape_environ(key.encode("ascii"))])
+        buf.extend([_escape_environ(key.encode(encoding, "replace"))])
         buf.append(VALUE)
-        buf.extend([_escape_environ(f"{value}".encode("ascii"))])
+        buf.extend([_escape_environ(f"{value}".encode(encoding, "replace"))])
     return b"".join(buf)
 
 
-def _decode_env_buf(buf: bytes) -> dict[str, str]:
+def _decode_env_buf(buf: bytes, encoding: str = "ascii") -> dict[str, str]:
     """
     Decode environment values to dictionary, :rfc:`1572`.
 
@@ -2872,11 +2885,11 @@ def _decode_env_buf(buf: bytes) -> dict[str, str]:
             end = breaks[idx + 1]
 
         pair = buf[start:end].split(VALUE, 1)
-        key = _unescape_environ(pair[0]).decode("ascii", "strict")
+        key = _unescape_environ(pair[0]).decode(encoding, "replace")
         if len(pair) == 1:
             value = ""
         else:
-            value = _unescape_environ(pair[1]).decode("ascii", "strict")
+            value = _unescape_environ(pair[1]).decode(encoding, "replace")
         env[key] = value
 
     return env

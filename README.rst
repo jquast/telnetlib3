@@ -29,29 +29,25 @@
 Introduction
 ============
 
-``telnetlib3`` is a feature-rich Telnet Server and Client Protocol library
+``telnetlib3`` is a feature-rich Telnet Server, Client, and Protocol library
 for Python 3.9 and newer.
 
 This library supports both modern asyncio_ *and* legacy `Blocking API`_.
 
 The python telnetlib.py_ module removed by Python 3.13 is also re-distributed as-is, as a backport.
 
-telnetlib3 provides multiple interfaces for working with the Telnet protocol:
+See the `Guidebook`_ for examples and the `API documentation`_.
 
 Asyncio Protocol
 ----------------
 
-Modern async/await interface for both client and server, supporting concurrent
-connections. See the `Guidebook`_ for examples and the `API documentation`_.
+The core protocol and CLI utilities are written using an `Asyncio Interface`_.
 
 Blocking API
 ------------
 
-A traditional synchronous interface modeled after telnetlib.py_ (client) and miniboa_ (server),
-with various enhancements in protocol negotiation is provided. Blocking API calls for complex
-arrangements of clients and servers typically require threads.
-
-See `sync API documentation`_ for more.
+A Synchronous interface, modeled after telnetlib.py_ (client) and miniboa_ (server), with various
+enhancements in protocol negotiation is also provided.  See `sync API documentation`_ for more.
 
 Command-line Utilities
 ----------------------
@@ -66,16 +62,38 @@ program.
 
 ::
 
+    # utf8 roguelike server
     telnetlib3-client nethack.alt.org
+    # utf8 bbs
     telnetlib3-client xibalba.l33t.codes 44510
+    # automatic communication with telnet server
     telnetlib3-client --shell bin.client_wargame.shell 1984.ws 666
+    # run a server with default shell
+    telnetlib3-server
+    # or custom port and ip and shell
     telnetlib3-server 0.0.0.0 1984 --shell=bin.server_wargame.shell
-    telnetlib3-server --pty-exec /bin/bash -- --login
+    # run an external program with a pseudo-terminal
+    telnetlib3-server --pty-exec /bin/bash --pty-raw -- --login
+    # or a simple linemode program, bc (calculator)
+    telnetlib3-server --pty-exec /bin/bc
+
+
+There are also fingerprinting CLIs, ``telnetlib3-fingerprint`` and
+``telnetlib3-fingerprint-server``
+
+::
+
+    # host a server, wait for clients to connect and fingerprint them,
+    telnetlib3-fingerprint-server
+
+    # report fingerprint of telnet server on 1984.ws
+    telnetlib3-fingerprint 1984.ws
+
 
 Legacy telnetlib
 ----------------
 
-This library contains an unadulterated copy of Python 3.12's telnetlib.py_,
+This library contains an *unadulterated copy* of Python 3.12's telnetlib.py_,
 from the standard library before it was removed in Python 3.13.
 
 To migrate code, change import statements:
@@ -206,6 +224,8 @@ The following RFC specifications are implemented:
 .. _rfc-2066: https://www.rfc-editor.org/rfc/rfc2066.txt
 .. _`bin/`: https://github.com/jquast/telnetlib3/tree/master/bin
 .. _telnetlib.py: https://docs.python.org/3.12/library/telnetlib.html
+.. _Asyncio Interface: https://telnetlib3.readthedocs.io/en/latest/guidebook.html#asyncio-interface
+.. _Blocking API: https://telnetlib3.readthedocs.io/en/latest/guidebook.html#blocking-interface
 .. _Guidebook: https://telnetlib3.readthedocs.io/en/latest/guidebook.html
 .. _API documentation: https://telnetlib3.readthedocs.io/en/latest/api.html
 .. _sync API documentation: https://telnetlib3.readthedocs.io/en/latest/api/sync.html

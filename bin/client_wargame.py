@@ -30,7 +30,7 @@ async def shell(reader, writer):
             break
         if "?" in outp:
             # Reply to all questions with 'y'
-            writer.write("y")
+            writer.write("y\r\n")
 
         # Display all server output
         print(outp, flush=True, end="")

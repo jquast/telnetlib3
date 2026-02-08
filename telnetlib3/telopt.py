@@ -75,6 +75,7 @@ NAOVTD = b"\x0f"
 NAOLFD = b"\x10"
 
 __all__ = (
+    "AARDWOLF",
     "ABORT",
     "ACCEPTED",
     "AO",
@@ -201,6 +202,7 @@ MSSP = bytes([70])
 MSP = bytes([90])
 MXP = bytes([91])
 ZMP = bytes([93])
+AARDWOLF = bytes([102])
 ATCP = bytes([200])
 
 # MSDP sub-command bytes (used within SB MSDP payloads)
@@ -269,6 +271,7 @@ _DEBUG_OPTS: Dict[bytes, str] = {
         "MSP",
         "MXP",
         "ZMP",
+        "AARDWOLF",
         "ATCP",
         "ENCRYPT",
         "AUTHENTICATION",

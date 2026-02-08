@@ -168,16 +168,14 @@ def test_sb_mssp_dispatch():
 def test_send_gmcp():
     w, t, p = new_writer(server=True)
     w.local_option[GMCP] = True
-    result = w.send_gmcp("Char.Vitals", {"hp": 100})
-    assert result is True
+    w.send_gmcp("Char.Vitals", {"hp": 100})
     expected = IAC + SB + GMCP + b'Char.Vitals {"hp":100}' + IAC + SE
     assert expected in t.writes
 
 
 def test_send_gmcp_not_negotiated():
     w, t, p = new_writer(server=True)
-    result = w.send_gmcp("Char.Vitals", {"hp": 100})
-    assert result is False
+    w.send_gmcp("Char.Vitals", {"hp": 100})
     assert len(t.writes) == 0
 
 
@@ -188,8 +186,7 @@ def test_send_msdp():
     # local
     from telnetlib3.telopt import MSDP_VAL, MSDP_VAR
 
-    result = w.send_msdp({"HEALTH": "100"})
-    assert result is True
+    w.send_msdp({"HEALTH": "100"})
     expected = IAC + SB + MSDP + MSDP_VAR + b"HEALTH" + MSDP_VAL + b"100" + IAC + SE
     assert expected in t.writes
 
@@ -201,7 +198,6 @@ def test_send_mssp():
     # local
     from telnetlib3.telopt import MSSP_VAL, MSSP_VAR
 
-    result = w.send_mssp({"NAME": "TestMUD"})
-    assert result is True
+    w.send_mssp({"NAME": "TestMUD"})
     expected = IAC + SB + MSSP + MSSP_VAR + b"NAME" + MSSP_VAL + b"TestMUD" + IAC + SE
     assert expected in t.writes

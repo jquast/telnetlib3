@@ -238,10 +238,10 @@ class PTYSession:
             # terminal responses from being echoed back through the PTY.
             attrs[3] &= ~(termios.ECHO | termios.ICANON)
         else:
-            # Normal mode: Keep ECHO and ICANON enabled for proper input()
-            # behavior. We sent WONT ECHO to the client, so the PTY handles echo
-            # with proper output translation (ONLCR: \n → \r\n).
-            pass
+            # Normal mode: keep ICANON for line editing but disable ECHO.
+            # We sent WONT ECHO so the client does local echo; if the PTY
+            # also echoed, every character would appear twice.
+            attrs[3] &= ~termios.ECHO
 
         # Set VERASE to ^H (0x08) since many telnet clients send ^H for backspace
         # (default PTY ERASE is often ^? which won't work for those clients).

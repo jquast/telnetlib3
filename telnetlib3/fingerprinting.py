@@ -18,7 +18,7 @@ import hashlib
 import logging
 import argparse
 import datetime
-from typing import Any, Dict, List, Tuple, Union, Callable, Optional, cast
+from typing import Any, Union, Optional, TypedDict, cast
 
 # local
 from . import slc
@@ -81,6 +81,16 @@ from .accessories import encoding_from_lang
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
+
+class ProbeResult(TypedDict, total=False):
+    """Result of probing a single telnet option."""
+
+    status: str
+    opt: bytes
+    description: str
+    already_negotiated: bool
+
+
 # Data directory for saving fingerprint data - None when unset (no saves)
 DATA_DIR: Optional[str] = (
     os.environ["TELNETLIB3_DATA_DIR"] if os.environ.get("TELNETLIB3_DATA_DIR") else None
@@ -124,6 +134,7 @@ __all__ = (
     "ENVIRON_EXTENDED",
     "FingerprintingServer",
     "FingerprintingTelnetServer",
+    "ProbeResult",
     "fingerprint_server_main",
     "fingerprinting_server_shell",
     "fingerprinting_post_script",
@@ -178,7 +189,9 @@ class FingerprintingTelnetServer:  # pylint: disable=too-few-public-methods
 
     def on_request_environ(self) -> list[Union[str, bytes]]:
         """Return base environ keys plus :data:`ENVIRON_EXTENDED`."""
-        # pylint: disable=no-member
+        if not isinstance(self, TelnetServer):
+            raise TypeError("FingerprintingTelnetServer must be combined with TelnetServer")
+        # pylint: disable-next=no-member
         base: list[Union[str, bytes]] = super().on_request_environ()  # type: ignore[misc]
         # Insert extended keys before the trailing VAR/USERVAR sentinels
         # local
@@ -284,10 +297,9 @@ _OPT_BYTE_TO_NAME = {f"0x{opt[0]:02x}": name for opt, name, _ in _ALL_KNOWN_OPTI
 
 async def probe_client_capabilities(
     writer: Union[TelnetWriter, TelnetWriterUnicode],
-    options: Optional[List[Tuple[bytes, str, str]]] = None,
-    progress_callback: Optional[Callable[[str, int, int, str], None]] = None,
+    options: Optional[list[tuple[bytes, str, str]]] = None,
     timeout: float = 0.5,
-) -> Dict[str, Dict[str, Any]]:
+) -> dict[str, ProbeResult]:
     """
     Actively probe client for telnet capability support.
 
@@ -296,33 +308,24 @@ async def probe_client_capabilities(
     :param writer: TelnetWriter instance.
     :param options: List of (opt_bytes, name, description) tuples to probe. Defaults to
         ALL_PROBE_OPTIONS.
-    :param progress_callback: Optional callback(name, idx, total, status) called during result
-        collection.
     :param timeout: Timeout in seconds to wait for all responses.
-    :returns: Dict mapping option name to {"status": "WILL"|"WONT"|"timeout", "opt": bytes,
-        "description": str}.
+    :returns: Dict mapping option name to :class:`ProbeResult`.
     """
     if options is None:
         options = ALL_PROBE_OPTIONS
 
-    results = {}
+    results: dict[str, ProbeResult] = {}
     to_probe = []
 
     for opt, name, description in options:
         if writer.remote_option.enabled(opt):
-            results[name] = {
-                "status": "WILL",
-                "opt": opt,
-                "description": description,
-                "already_negotiated": True,
-            }
+            results[name] = ProbeResult(
+                status="WILL", opt=opt, description=description, already_negotiated=True
+            )
         elif writer.remote_option.get(opt) is False:
-            results[name] = {
-                "status": "WONT",
-                "opt": opt,
-                "description": description,
-                "already_negotiated": True,
-            }
+            results[name] = ProbeResult(
+                status="WONT", opt=opt, description=description, already_negotiated=True
+            )
         else:
             to_probe.append((opt, name, description))
 
@@ -342,19 +345,16 @@ async def probe_client_capabilities(
             break
         await asyncio.sleep(0.05)
 
-    for idx, (opt, name, description) in enumerate(to_probe, 1):
+    for opt, name, description in to_probe:
         if name in results:
             continue
 
-        if progress_callback:
-            progress_callback(name, idx, len(to_probe), "")
-
         if writer.remote_option.enabled(opt):
-            results[name] = {"status": "WILL", "opt": opt, "description": description}
+            results[name] = ProbeResult(status="WILL", opt=opt, description=description)
         elif writer.remote_option.get(opt) is False:
-            results[name] = {"status": "WONT", "opt": opt, "description": description}
+            results[name] = ProbeResult(status="WONT", opt=opt, description=description)
         else:
-            results[name] = {"status": "timeout", "opt": opt, "description": description}
+            results[name] = ProbeResult(status="timeout", opt=opt, description=description)
 
     return results
 
@@ -379,7 +379,7 @@ _EXTRA_INFO_KEYS = (
 ) + tuple(f"ttype{n}" for n in range(1, 9))
 
 
-def get_client_fingerprint(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> Dict[str, Any]:
+def get_client_fingerprint(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> dict[str, Any]:
     """
     Collect all available client information from writer.
 
@@ -403,7 +403,7 @@ def get_client_fingerprint(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> 
 
 async def _run_probe(
     writer: Union[TelnetWriter, TelnetWriterUnicode], verbose: bool = True
-) -> Tuple[Dict[str, Dict[str, Any]], float]:
+) -> tuple[dict[str, ProbeResult], float]:
     """Run active probe, optionally extending to MUD options."""
     if _is_maybe_ms_telnet(writer):
         probe_options = [opt for opt in CORE_OPTIONS + MUD_OPTIONS if opt[0] != NEW_ENVIRON]
@@ -453,7 +453,7 @@ def _opt_byte_to_name(opt: bytes) -> str:
 
 def _collect_option_states(
     writer: Union[TelnetWriter, TelnetWriterUnicode],
-) -> Dict[str, Dict[str, Any]]:
+) -> dict[str, dict[str, Any]]:
     """Collect all telnet option states from writer."""
     options = {}
     for label, opt_dict in [("remote", writer.remote_option), ("local", writer.local_option)]:
@@ -465,9 +465,9 @@ def _collect_option_states(
 
 def _collect_rejected_options(
     writer: Union[TelnetWriter, TelnetWriterUnicode],
-) -> Dict[str, List[str]]:
+) -> dict[str, list[str]]:
     """Collect rejected option offers from writer."""
-    result: Dict[str, List[str]] = {}
+    result: dict[str, list[str]] = {}
     if getattr(writer, "rejected_will", None):
         result["will"] = sorted(_opt_byte_to_name(opt) for opt in writer.rejected_will)
     if getattr(writer, "rejected_do", None):
@@ -475,9 +475,9 @@ def _collect_rejected_options(
     return result
 
 
-def _collect_extra_info(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> Dict[str, Any]:
+def _collect_extra_info(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> dict[str, Any]:
     """Collect all extra_info from writer, including private _extra dict."""
-    extra: Dict[str, Any] = {}
+    extra: dict[str, Any] = {}
 
     protocol = _get_protocol(writer)
     if protocol and hasattr(protocol, "_extra"):
@@ -510,7 +510,7 @@ def _collect_extra_info(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> Dic
     return extra
 
 
-def _collect_ttype_cycle(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> List[str]:
+def _collect_ttype_cycle(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> list[str]:
     """Collect the full TTYPE cycle responses."""
     ttype_list = []
 
@@ -525,7 +525,7 @@ def _collect_ttype_cycle(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> Li
     return ttype_list
 
 
-def _collect_protocol_timing(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> Dict[str, Any]:
+def _collect_protocol_timing(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> dict[str, Any]:
     """Collect timing information from protocol."""
     timing = {}
     protocol = _get_protocol(writer)
@@ -539,7 +539,7 @@ def _collect_protocol_timing(writer: Union[TelnetWriter, TelnetWriterUnicode]) -
     return timing
 
 
-def _collect_slc_tab(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> Dict[str, Any]:
+def _collect_slc_tab(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> dict[str, Any]:
     """Collect non-default SLC entries when LINEMODE was negotiated."""
     slctab = getattr(writer, "slctab", None)
     if not slctab:
@@ -550,8 +550,8 @@ def _collect_slc_tab(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> Dict[s
 
     defaults = slc.generate_slctab(slc.BSD_SLC_TAB)
 
-    result: Dict[str, Any] = {}
-    slc_set: Dict[str, Any] = {}
+    result: dict[str, Any] = {}
+    slc_set: dict[str, Any] = {}
     slc_unset: list[str] = []
     slc_nosupport: list[str] = []
 
@@ -583,8 +583,8 @@ def _collect_slc_tab(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> Dict[s
 
 
 def _create_protocol_fingerprint(
-    writer: Union[TelnetWriter, TelnetWriterUnicode], probe_results: Dict[str, Dict[str, Any]]
-) -> Dict[str, Any]:
+    writer: Union[TelnetWriter, TelnetWriterUnicode], probe_results: dict[str, ProbeResult]
+) -> dict[str, Any]:
     """
     Create anonymized/summarized protocol fingerprint from session data.
 
@@ -595,7 +595,7 @@ def _create_protocol_fingerprint(
     :param probe_results: Probe results from capability probing.
     :returns: Dict with anonymized protocol fingerprint data.
     """
-    fingerprint: Dict[str, Any] = {"probed-protocol": "client"}
+    fingerprint: dict[str, Any] = {"probed-protocol": "client"}
 
     protocol = _get_protocol(writer)
     extra_dict = getattr(protocol, "_extra", {}) if protocol else {}
@@ -654,7 +654,7 @@ def _create_protocol_fingerprint(
     return fingerprint
 
 
-def _hash_fingerprint(data: Dict[str, Any]) -> str:
+def _hash_fingerprint(data: dict[str, Any]) -> str:
     """Create deterministic 16-char SHA256 hash of a fingerprint dict."""
     canonical = json.dumps(data, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
@@ -667,24 +667,103 @@ def _count_protocol_folder_files(protocol_dir: str) -> int:
     return sum(1 for f in os.listdir(protocol_dir) if f.endswith(".json"))
 
 
-def _count_fingerprint_folders(data_dir: Optional[str] = None) -> int:
-    """Count unique telnet fingerprint folders in ``DATA_DIR/client/``."""
+def _count_fingerprint_folders(data_dir: Optional[str] = None, side: str = "client") -> int:
+    """Count unique fingerprint folders in ``DATA_DIR/<side>/``."""
     _dir = data_dir if data_dir is not None else DATA_DIR
     if _dir is None:
         return 0
-    client_dir = os.path.join(_dir, "client")
-    if not os.path.exists(client_dir):
+    side_dir = os.path.join(_dir, side)
+    if not os.path.exists(side_dir):
         return 0
-    return sum(1 for f in os.listdir(client_dir) if os.path.isdir(os.path.join(client_dir, f)))
+    return sum(1 for f in os.listdir(side_dir) if os.path.isdir(os.path.join(side_dir, f)))
+
+
+def _save_fingerprint_to_dir(
+    target_dir: str,
+    session_hash: str,
+    data: dict[str, Any],
+    *,
+    probe_key: str,
+    data_dir: str,
+    side: str,
+    protocol_hash: str,
+) -> Optional[str]:
+    """
+    Save fingerprint data to a directory with limit checks and session appending.
+
+    Handles fingerprint-count and file-count limits, creates directories as
+    needed, and appends to existing session files when the session hash matches.
+
+    :param target_dir: Directory path for this fingerprint's files.
+    :param session_hash: Hash used for the filename.
+    :param data: Complete fingerprint data dict to save.
+    :param probe_key: Top-level key in *data* (e.g. ``"telnet-probe"``).
+    :param data_dir: Base data directory for counting fingerprint folders.
+    :param side: ``"client"`` or ``"server"`` subdirectory name.
+    :param protocol_hash: Protocol fingerprint hash for logging.
+    :returns: Path to saved file, or ``None`` if saving was skipped.
+    """
+    is_new_dir = not os.path.exists(target_dir)
+
+    if is_new_dir:
+        if _count_fingerprint_folders(data_dir, side=side) >= FINGERPRINT_MAX_FINGERPRINTS:
+            logger.warning(
+                "max fingerprints (%d) exceeded, not saving %s",
+                FINGERPRINT_MAX_FINGERPRINTS,
+                protocol_hash,
+            )
+            return None
+        try:
+            os.makedirs(target_dir, exist_ok=True)
+        except OSError as exc:
+            logger.warning("failed to create directory %s: %s", target_dir, exc)
+            return None
+        logger.info("new %s fingerprint %s", side, protocol_hash)
+    else:
+        if _count_protocol_folder_files(target_dir) >= FINGERPRINT_MAX_FILES:
+            logger.warning(
+                "fingerprint %s at file limit (%d), not saving",
+                protocol_hash,
+                FINGERPRINT_MAX_FILES,
+            )
+            return None
+        logger.info("connection for %s fingerprint %s", side, protocol_hash)
+
+    filepath = os.path.join(target_dir, f"{session_hash}.json")
+
+    if os.path.exists(filepath):
+        try:
+            with open(filepath, encoding="utf-8") as f:
+                existing = json.load(f)
+            existing[probe_key]["session_data"] = data[probe_key]["session_data"]
+            existing["sessions"].append(data["sessions"][0])
+        except (OSError, json.JSONDecodeError, KeyError) as exc:
+            logger.warning("failed to read existing %s: %s", filepath, exc)
+            existing = None
+
+        if existing is not None:
+            try:
+                _atomic_json_write(filepath, existing)
+                return filepath
+            except OSError as exc:
+                logger.warning("failed to update fingerprint: %s", exc)
+                return None
+
+    try:
+        _atomic_json_write(filepath, data)
+        return filepath
+    except OSError as exc:
+        logger.warning("failed to save fingerprint: %s", exc)
+        return None
 
 
 _UNKNOWN_TERMINAL_HASH = "0" * 16
 AMBIGUOUS_WIDTH_UNKNOWN = -1
 
 
-def _create_session_fingerprint(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> Dict[str, Any]:
+def _create_session_fingerprint(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> dict[str, Any]:
     """Create session identity fingerprint from stable client fields."""
-    identity: Dict[str, Any] = {}
+    identity: dict[str, Any] = {}
 
     if peername := writer.get_extra_info("peername"):
         identity["client-ip"] = peername[0]
@@ -699,7 +778,7 @@ def _create_session_fingerprint(writer: Union[TelnetWriter, TelnetWriterUnicode]
     return identity
 
 
-def _load_fingerprint_names(data_dir: Optional[str] = None) -> Dict[str, str]:
+def _load_fingerprint_names(data_dir: Optional[str] = None) -> dict[str, str]:
     """Load fingerprint hash-to-name mapping from ``fingerprint_names.json``."""
     _dir = data_dir if data_dir is not None else DATA_DIR
     if _dir is None:
@@ -708,11 +787,35 @@ def _load_fingerprint_names(data_dir: Optional[str] = None) -> Dict[str, str]:
     if not os.path.exists(names_file):
         return {}
     with open(names_file, encoding="utf-8") as f:
-        result: Dict[str, str] = json.load(f)
+        result: dict[str, str] = json.load(f)
         return result
 
 
-def _resolve_hash_name(hash_val: str, names: Dict[str, str]) -> str:
+def _save_fingerprint_name(hash_val: str, name: str, data_dir: Optional[str] = None) -> str:
+    """
+    Save a fingerprint hash-to-name mapping in ``fingerprint_names.json``.
+
+    Loads the existing names file, adds or updates the entry for *hash_val*,
+    and writes it back atomically.
+
+    :param hash_val: 16-character hex fingerprint hash.
+    :param name: Human-readable name to associate.
+    :param data_dir: Override data directory.  Falls back to :data:`DATA_DIR`.
+    :returns: Path to the saved names file.
+    :raises ValueError: If *data_dir* is ``None`` and :data:`DATA_DIR` is unset.
+    """
+    _dir = data_dir if data_dir is not None else DATA_DIR
+    if _dir is None:
+        raise ValueError("no data directory configured")
+    os.makedirs(_dir, exist_ok=True)
+    names_file = os.path.join(_dir, "fingerprint_names.json")
+    names = _load_fingerprint_names(_dir)
+    names[hash_val] = name
+    _atomic_json_write(names_file, names)
+    return names_file
+
+
+def _resolve_hash_name(hash_val: str, names: dict[str, str]) -> str:
     """Return human-readable name for a hash, falling back to the hash itself."""
     return names.get(hash_val, hash_val)
 
@@ -746,7 +849,7 @@ def _cooked_input(prompt: str) -> str:
         termios.tcsetattr(fd, termios.TCSANOW, old_attrs)
 
 
-def _atomic_json_write(filepath: str, data: Dict[str, Any]) -> None:
+def _atomic_json_write(filepath: str, data: dict[str, Any]) -> None:
     """Atomically write JSON data to file via write-to-new + rename."""
     tmp_path = os.path.splitext(filepath)[0] + ".json.new"
     with open(tmp_path, "w", encoding="utf-8") as f:
@@ -756,9 +859,9 @@ def _atomic_json_write(filepath: str, data: Dict[str, Any]) -> None:
 
 def _build_session_fingerprint(
     writer: Union[TelnetWriter, TelnetWriterUnicode],
-    probe_results: Dict[str, Dict[str, Any]],
+    probe_results: dict[str, ProbeResult],
     probe_time: float,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build the session fingerprint dict (raw detailed data)."""
     extra = _collect_extra_info(writer)
     extra.pop("peername", None)
@@ -771,7 +874,7 @@ def _build_session_fingerprint(
     linemode_probed = probe_results.get("LINEMODE", {}).get("status")
     slc_tab = _collect_slc_tab(writer) if linemode_probed == "WILL" else {}
 
-    probe_by_status: Dict[str, Dict[str, int]] = {}
+    probe_by_status: dict[str, dict[str, int]] = {}
     for name, info in probe_results.items():
         status = info["status"]
         opt_byte = info["opt"][0] if isinstance(info["opt"], bytes) else info["opt"]
@@ -796,17 +899,17 @@ def _build_session_fingerprint(
     return result
 
 
-def _save_fingerprint_data(  # pylint: disable=too-many-locals,too-many-branches,too-complex
+def _save_fingerprint_data(
     writer: Union[TelnetWriter, TelnetWriterUnicode],
-    probe_results: Dict[str, Dict[str, Any]],
+    probe_results: dict[str, ProbeResult],
     probe_time: float,
-    session_fp: Optional[Dict[str, Any]] = None,
+    session_fp: Optional[dict[str, Any]] = None,
 ) -> Optional[str]:
     """
     Save comprehensive fingerprint data to a JSON file.
 
-    Creates directory structure: DATA_DIR/<protocol-hash>/uuid4.json
-    Respects FINGERPRINT_MAX_FILES and FINGERPRINT_MAX_FINGERPRINTS limits.
+    Creates directory structure:
+    ``DATA_DIR/client/<protocol-hash>/<probe-hash>/<session_hash>.json``
 
     :param writer: TelnetWriter instance with full protocol access.
     :param probe_results: Probe results from capability probing.
@@ -838,54 +941,10 @@ def _save_fingerprint_data(  # pylint: disable=too-many-locals,too-many-branches
                 break
     if probe_dir is None:
         probe_dir = os.path.join(telnet_dir, _UNKNOWN_TERMINAL_HASH)
-    is_new_dir = not os.path.exists(probe_dir)
-
-    if is_new_dir:
-        if _count_fingerprint_folders() >= FINGERPRINT_MAX_FINGERPRINTS:
-            logger.warning(
-                "max fingerprints (%d) exceeded, not saving %s",
-                FINGERPRINT_MAX_FINGERPRINTS,
-                telnet_hash,
-            )
-            return None
-        try:
-            os.makedirs(probe_dir, exist_ok=True)
-        except OSError as exc:
-            logger.warning("failed to create directory %s: %s", probe_dir, exc)
-            return None
-        logger.info("new fingerprint %s", telnet_hash)
-    else:
-        file_count = _count_protocol_folder_files(probe_dir)
-        if file_count >= FINGERPRINT_MAX_FILES:
-            logger.warning(
-                "fingerprint %s at file limit (%d), not saving", telnet_hash, FINGERPRINT_MAX_FILES
-            )
-            return None
-        logger.info("connection for fingerprint %s", telnet_hash)
-
-    filepath = os.path.join(probe_dir, f"{session_hash}.json")
 
     peername = writer.get_extra_info("peername")
     now = datetime.datetime.now(datetime.timezone.utc)
     session_entry = {"ip": str(peername[0]) if peername else None, "connected": now.isoformat()}
-
-    if os.path.exists(filepath):
-        try:
-            with open(filepath, encoding="utf-8") as f:
-                data = json.load(f)
-            data["telnet-probe"]["session_data"] = session_fp
-            data["sessions"].append(session_entry)
-        except (OSError, json.JSONDecodeError, KeyError) as exc:
-            logger.warning("failed to read existing %s: %s", filepath, exc)
-            data = None
-
-        if data is not None:
-            try:
-                _atomic_json_write(filepath, data)
-                return filepath
-            except OSError as exc:
-                logger.warning("failed to update fingerprint: %s", exc)
-                return None
 
     data = {
         "telnet-probe": {
@@ -896,12 +955,15 @@ def _save_fingerprint_data(  # pylint: disable=too-many-locals,too-many-branches
         "sessions": [session_entry],
     }
 
-    try:
-        _atomic_json_write(filepath, data)
-        return filepath
-    except OSError as exc:
-        logger.warning("failed to save fingerprint: %s", exc)
-        return None
+    return _save_fingerprint_to_dir(
+        target_dir=probe_dir,
+        session_hash=session_hash,
+        data=data,
+        probe_key="telnet-probe",
+        data_dir=DATA_DIR,
+        side="client",
+        protocol_hash=telnet_hash,
+    )
 
 
 def _is_maybe_mud(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> bool:

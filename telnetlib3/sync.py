@@ -733,8 +733,11 @@ class ServerConnection:
         if self._closed:
             return
         self._closed = True
-        self._loop.call_soon_threadsafe(self._writer.close)
-        self._loop.call_soon_threadsafe(self._close_event.set)
+        try:
+            self._loop.call_soon_threadsafe(self._writer.close)
+            self._loop.call_soon_threadsafe(self._close_event.set)
+        except RuntimeError:
+            pass  # Event loop already closed during shutdown
 
     def get_extra_info(self, name: str, default: Any = None) -> Any:
         """

@@ -21,7 +21,6 @@ __all__ = (
     "repr_mapping",
     "function_lookup",
     "make_reader_task",
-    "PATIENCE_MESSAGES",
 )
 
 PATIENCE_MESSAGES = [
