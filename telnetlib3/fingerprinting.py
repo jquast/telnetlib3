@@ -36,6 +36,7 @@ from .telopt import (
     ECHO,
     GMCP,
     MSDP,
+    MSSP,
     NAMS,
     NAOL,
     NAOP,
@@ -249,7 +250,11 @@ MUD_OPTIONS = [(COM_PORT_OPTION, "COM_PORT", "Serial port control (RFC 2217)")]
 # icy_term (icy_net) only accepts option bytes 0-49, 138-140, and 255,
 # returning a hard error for anything else. GMCP-capable MUD clients
 # typically self-announce via IAC WILL GMCP, so probing is unnecessary.
-EXTENDED_OPTIONS = [(GMCP, "GMCP", "Generic MUD Communication Protocol")]
+EXTENDED_OPTIONS = [
+    (GMCP, "GMCP", "Generic MUD Communication Protocol"),
+    (MSDP, "MSDP", "MUD Server Data Protocol"),
+    (MSSP, "MSSP", "MUD Server Status Protocol"),
+]
 
 LEGACY_OPTIONS = [
     (AUTHENTICATION, "AUTHENTICATION", "Telnet authentication"),

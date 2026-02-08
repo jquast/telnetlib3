@@ -29,6 +29,7 @@ class MockWriter:
         self.local_option = MockOption()
         self.environ_encoding = "ascii"
         self.environ_send_raw = None
+        self.mssp_data = None
         self._closing = False
 
     def get_extra_info(self, key, default=None):
@@ -464,6 +465,53 @@ async def test_fingerprinting_client_shell_set_name_no_data_dir(monkeypatch):
         MockReader([]), writer, host="localhost", port=23, silent=True, set_name="should-warn"
     )
     assert writer._closing
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_client_shell_mssp(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(sfp, "_NEGOTIATION_SETTLE", 0.0)
+    monkeypatch.setattr(sfp, "_BANNER_WAIT", 0.01)
+    monkeypatch.setattr(sfp, "_POST_RETURN_WAIT", 0.01)
+    monkeypatch.setattr(sfp, "_JQ", None)
+
+    save_path = str(tmp_path / "result.json")
+    reader = MockReader([b"Welcome to TestMUD\r\n"])
+    writer = MockWriter(will_options=[fps.SGA])
+    writer.mssp_data = {"NAME": "TestMUD", "PLAYERS": "42", "CODEBASE": "telnetlib3"}
+
+    await sfp.fingerprinting_client_shell(
+        reader, writer, host="localhost", port=23, save_path=save_path
+    )
+
+    with open(save_path, encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["server-probe"]["session_data"]["mssp"] == {
+        "NAME": "TestMUD",
+        "PLAYERS": "42",
+        "CODEBASE": "telnetlib3",
+    }
+
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    assert output["server-probe"]["session_data"]["mssp"]["NAME"] == "TestMUD"
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_client_shell_no_mssp(tmp_path, monkeypatch):
+    monkeypatch.setattr(sfp, "_NEGOTIATION_SETTLE", 0.0)
+    monkeypatch.setattr(sfp, "_BANNER_WAIT", 0.01)
+    monkeypatch.setattr(sfp, "_POST_RETURN_WAIT", 0.01)
+
+    save_path = str(tmp_path / "result.json")
+    writer = MockWriter(will_options=[fps.SGA])
+
+    await sfp.fingerprinting_client_shell(
+        MockReader([]), writer, host="localhost", port=23, save_path=save_path, silent=True
+    )
+
+    with open(save_path, encoding="utf-8") as f:
+        data = json.load(f)
+    assert "mssp" not in data["server-probe"]["session_data"]
 
 
 class ErrorReader(MockReader):

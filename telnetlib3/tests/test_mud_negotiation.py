@@ -165,6 +165,69 @@ def test_sb_mssp_dispatch():
     assert received_args[0] == {"NAME": "TestMUD"}
 
 
+def test_handle_mssp_stores_data():
+    w, t, p = new_writer(server=True)
+    assert w.mssp_data is None
+    w.handle_mssp({"NAME": "TestMUD", "PLAYERS": "42"})
+    assert w.mssp_data == {"NAME": "TestMUD", "PLAYERS": "42"}
+
+
+def test_sb_mssp_dispatch_stores_data():
+    w, t, p = new_writer(server=True)
+    w.pending_option[SB + MSSP] = True
+
+    # local
+    from telnetlib3.telopt import MSSP_VAL, MSSP_VAR
+
+    payload = MSSP_VAR + b"NAME" + MSSP_VAL + b"TestMUD" + MSSP_VAR + b"PLAYERS" + MSSP_VAL + b"5"
+    buf = collections.deque([bytes([MSSP[0]])] + [bytes([b]) for b in payload])
+    w.handle_subnegotiation(buf)
+    assert w.mssp_data == {"NAME": "TestMUD", "PLAYERS": "5"}
+
+
+def test_sb_mssp_latin1_fallback():
+    """MSSP with non-UTF-8 bytes falls back to latin-1 decoding."""
+    w, t, p = new_writer(server=True)
+    w.pending_option[SB + MSSP] = True
+
+    # local
+    from telnetlib3.telopt import MSSP_VAL, MSSP_VAR
+
+    # 0xC9 is 'É' in latin-1 but invalid as a lone UTF-8 lead byte
+    payload = MSSP_VAR + b"NAME" + MSSP_VAL + b"\xc9toile"
+    buf = collections.deque([bytes([MSSP[0]])] + [bytes([b]) for b in payload])
+    w.handle_subnegotiation(buf)
+    assert w.mssp_data == {"NAME": "\xc9toile"}
+
+
+def test_sb_gmcp_latin1_fallback():
+    """GMCP with non-UTF-8 bytes falls back to latin-1 decoding."""
+    w, t, p = new_writer(server=True)
+    w.pending_option[SB + GMCP] = True
+    received_args: list[tuple[object, ...]] = []
+    w.set_ext_callback(GMCP, lambda pkg, data: received_args.append((pkg, data)))
+    payload = b"Caf\xe9"
+    buf = collections.deque([bytes([GMCP[0]])] + [bytes([b]) for b in payload])
+    w.handle_subnegotiation(buf)
+    assert received_args[0] == ("Caf\xe9", None)
+
+
+def test_sb_msdp_latin1_fallback():
+    """MSDP with non-UTF-8 bytes falls back to latin-1 decoding."""
+    w, t, p = new_writer(server=True)
+    w.pending_option[SB + MSDP] = True
+
+    # local
+    from telnetlib3.telopt import MSDP_VAL, MSDP_VAR
+
+    received_args: list[object] = []
+    w.set_ext_callback(MSDP, received_args.append)
+    payload = MSDP_VAR + b"KEY" + MSDP_VAL + b"Caf\xe9"
+    buf = collections.deque([bytes([MSDP[0]])] + [bytes([b]) for b in payload])
+    w.handle_subnegotiation(buf)
+    assert received_args[0] == {"KEY": "Caf\xe9"}
+
+
 def test_send_gmcp():
     w, t, p = new_writer(server=True)
     w.local_option[GMCP] = True

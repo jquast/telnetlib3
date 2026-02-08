@@ -40,6 +40,20 @@ __all__ = (
 )
 
 
+def _decode_best_effort(buf: bytes, encoding: str = "utf-8") -> str:
+    """
+    Decode bytes trying *encoding* first, falling back to latin-1.
+
+    :param buf: Raw bytes to decode.
+    :param encoding: Primary encoding to attempt.
+    :returns: Decoded string.
+    """
+    try:
+        return buf.decode(encoding)
+    except (UnicodeDecodeError, LookupError):
+        return buf.decode("latin-1")
+
+
 def gmcp_encode(package: str, data: Any = None) -> bytes:
     """
     Encode a GMCP message.
@@ -53,21 +67,22 @@ def gmcp_encode(package: str, data: Any = None) -> bytes:
     return package.encode("utf-8") + b" " + json.dumps(data, separators=(",", ":")).encode("utf-8")
 
 
-def gmcp_decode(buf: bytes) -> tuple[str, Any]:
+def gmcp_decode(buf: bytes, encoding: str = "utf-8") -> tuple[str, Any]:
     """
     Decode a GMCP payload.
 
     :param buf: GMCP payload bytes
+    :param encoding: Character encoding to try first, falls back to latin-1.
     :returns: Tuple of (package, data), where data is None if no JSON present
     :raises ValueError: If JSON is malformed
     """
     parts = buf.split(b" ", 1)
     if len(parts) == 1:
-        return (buf.decode("utf-8"), None)
+        return (_decode_best_effort(buf, encoding), None)
 
-    package = parts[0].decode("utf-8")
+    package = _decode_best_effort(parts[0], encoding)
     try:
-        data = json.loads(parts[1].decode("utf-8"))
+        data = json.loads(_decode_best_effort(parts[1], encoding))
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid JSON in GMCP payload: {exc}") from exc
     return (package, data)
@@ -108,10 +123,11 @@ class MsdpParser:
 
     _DELIMITERS = (MSDP_VAR, MSDP_VAL, MSDP_TABLE_CLOSE, MSDP_ARRAY_CLOSE)
 
-    def __init__(self, buf: bytes) -> None:
+    def __init__(self, buf: bytes, encoding: str = "utf-8") -> None:
         """Initialize parser with raw MSDP buffer."""
         self.buf = buf
         self.idx = 0
+        self.encoding = encoding
 
     def _read_string(self) -> str:
         start = self.idx
@@ -119,7 +135,7 @@ class MsdpParser:
             self.idx < len(self.buf) and self.buf[self.idx : self.idx + 1] not in self._DELIMITERS
         ):
             self.idx += 1
-        return self.buf[start : self.idx].decode("utf-8")
+        return _decode_best_effort(self.buf[start : self.idx], self.encoding)
 
     def _read_key(self) -> str:
         start = self.idx
@@ -128,7 +144,7 @@ class MsdpParser:
             MSDP_VAR,
         ):
             self.idx += 1
-        return self.buf[start : self.idx].decode("utf-8")
+        return _decode_best_effort(self.buf[start : self.idx], self.encoding)
 
     def _parse_table(self) -> dict[str, Any]:
         table: dict[str, Any] = {}
@@ -181,14 +197,15 @@ class MsdpParser:
         return result
 
 
-def msdp_decode(buf: bytes) -> dict[str, Any]:
+def msdp_decode(buf: bytes, encoding: str = "utf-8") -> dict[str, Any]:
     """
     Decode MSDP wire bytes to dictionary.
 
     :param buf: MSDP payload bytes
+    :param encoding: Character encoding to try first, falls back to latin-1.
     :returns: Dictionary of variable names to values
     """
-    return MsdpParser(buf).parse()
+    return MsdpParser(buf, encoding=encoding).parse()
 
 
 def mssp_encode(variables: dict[str, str | list[str]]) -> bytes:
@@ -209,11 +226,12 @@ def mssp_encode(variables: dict[str, str | list[str]]) -> bytes:
     return result
 
 
-def mssp_decode(buf: bytes) -> dict[str, str | list[str]]:
+def mssp_decode(buf: bytes, encoding: str = "utf-8") -> dict[str, str | list[str]]:
     """
     Decode MSSP wire bytes to dictionary.
 
     :param buf: MSSP payload bytes
+    :param encoding: Character encoding to try first, falls back to latin-1.
     :returns: Dictionary with str values for single entries, list[str] for multiple
     """
     result: dict[str, str | list[str]] = {}
@@ -226,13 +244,13 @@ def mssp_decode(buf: bytes) -> dict[str, str | list[str]]:
             var_start = idx
             while idx < len(buf) and buf[idx : idx + 1] not in (MSSP_VAL, MSSP_VAR):
                 idx += 1
-            current_var = buf[var_start:idx].decode("utf-8")
+            current_var = _decode_best_effort(buf[var_start:idx], encoding)
         elif buf[idx : idx + 1] == MSSP_VAL:
             idx += 1
             val_start = idx
             while idx < len(buf) and buf[idx : idx + 1] not in (MSSP_VAL, MSSP_VAR):
                 idx += 1
-            value = buf[val_start:idx].decode("utf-8")
+            value = _decode_best_effort(buf[val_start:idx], encoding)
 
             if current_var is not None:
                 if current_var in result:

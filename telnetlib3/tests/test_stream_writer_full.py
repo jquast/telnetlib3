@@ -261,10 +261,10 @@ def test_handle_logout_paths():
 
 
 def test_handle_do_variants_and_tm_and_logout():
-    # server receiving forbidden DO -> ValueError
-    ws, *_ = new_writer(server=True)
-    with pytest.raises(ValueError, match="cannot recv DO LINEMODE"):
-        ws.handle_do(LINEMODE)
+    # server receiving reversed DO LINEMODE -> WONT refusal
+    ws, ts, _ = new_writer(server=True)
+    ws.handle_do(LINEMODE)
+    assert ts.writes[-1] == IAC + WONT + LINEMODE
     # client receiving DO LOGOUT -> ValueError
     wc, *_ = new_writer(server=False, client=True)
     with pytest.raises(ValueError, match="cannot recv DO LOGOUT"):
@@ -301,10 +301,10 @@ def test_handle_will_invalid_cases_and_else_unhandled():
     ws, *_ = new_writer(server=True)
     with pytest.raises(ValueError, match="cannot recv WILL ECHO"):
         ws.handle_will(ECHO)
-    # client WILL NAWS invalid
-    wc, *_ = new_writer(server=False, client=True)
-    with pytest.raises(ValueError, match="cannot recv WILL NAWS on client end"):
-        wc.handle_will(NAWS)
+    # client receiving reversed WILL NAWS -> DONT refusal
+    wc, tc, _ = new_writer(server=False, client=True)
+    wc.handle_will(NAWS)
+    assert tc.writes[-1] == IAC + DONT + NAWS
     # WILL TM requires pending DO TM
     wtm, *_ = new_writer(server=True)
     with pytest.raises(ValueError, match="cannot recv WILL TM"):
@@ -825,11 +825,11 @@ def test_handle_sb_forwardmask_server_will_and_client_do():
     opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
     assert ws.remote_option[opt] is True
 
-    # client DO path -> _handle_do_forwardmask -> NotImplementedError
+    # client DO path -> forwardmask logged, local_option set
     wc, tc, pc = new_writer(server=False, client=True)
     wc.local_option[LINEMODE] = True
-    with pytest.raises(NotImplementedError):
-        wc._handle_sb_forwardmask(DO, collections.deque([b"x"]))
+    wc._handle_sb_forwardmask(DO, collections.deque([b"x"]))
+    assert wc.local_option[opt] is True
 
 
 def test_handle_sb_forwardmask_server_without_linemode():

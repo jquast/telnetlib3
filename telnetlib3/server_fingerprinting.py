@@ -25,6 +25,7 @@ from typing import Any
 from . import fingerprinting as _fps
 from .telopt import (
     VAR,
+    MSSP,
     NAWS,
     LFLOW,
     TTYPE,
@@ -169,6 +170,13 @@ async def _fingerprint_session(
     probe_results = await probe_server_capabilities(writer)
     probe_time = time.time() - probe_start
 
+    # 5b. If server acknowledged MSSP but data hasn't arrived yet, poll briefly
+    if writer.remote_option.enabled(MSSP) and writer.mssp_data is None:
+        for _ in range(10):
+            await asyncio.sleep(0.05)
+            if writer.mssp_data is not None:
+                break
+
     # 6. Build session dicts
     session_data: dict[str, Any] = {
         "encoding": writer.environ_encoding,
@@ -177,6 +185,8 @@ async def _fingerprint_session(
         "banner_after_return": _format_banner(banner_after, encoding=writer.environ_encoding),
         "timing": {"probe": probe_time, "total": time.time() - start_time},
     }
+    if writer.mssp_data is not None:
+        session_data["mssp"] = writer.mssp_data
     session_entry: dict[str, Any] = {
         "host": host,
         "ip": (writer.get_extra_info("peername") or (host,))[0],

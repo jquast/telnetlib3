@@ -58,6 +58,20 @@ def test_gmcp_nested_json() -> None:
     assert decoded_data == data
 
 
+def test_gmcp_decode_encoding_param() -> None:
+    """gmcp_decode uses the encoding parameter for decoding."""
+    decoded_pkg, decoded_data = gmcp_decode(b"Caf\xe9", encoding="latin-1")
+    assert decoded_pkg == "Caf\xe9"
+    assert decoded_data is None
+
+
+def test_gmcp_decode_latin1_fallback() -> None:
+    """gmcp_decode falls back to latin-1 when utf-8 fails."""
+    decoded_pkg, decoded_data = gmcp_decode(b"Caf\xe9")
+    assert decoded_pkg == "Caf\xe9"
+    assert decoded_data is None
+
+
 def test_gmcp_decode_invalid_json() -> None:
     """Decode GMCP with invalid JSON raises ValueError."""
     with pytest.raises(ValueError):
@@ -122,6 +136,20 @@ def test_msdp_empty_value() -> None:
     assert decoded == variables
 
 
+def test_msdp_decode_encoding_param() -> None:
+    """msdp_decode uses the encoding parameter for decoding."""
+    encoded = MSDP_VAR + b"KEY" + MSDP_VAL + b"Caf\xe9"
+    decoded = msdp_decode(encoded, encoding="latin-1")
+    assert decoded == {"KEY": "Caf\xe9"}
+
+
+def test_msdp_decode_latin1_fallback() -> None:
+    """msdp_decode falls back to latin-1 when utf-8 fails."""
+    encoded = MSDP_VAR + b"KEY" + MSDP_VAL + b"Caf\xe9"
+    decoded = msdp_decode(encoded)
+    assert decoded == {"KEY": "Caf\xe9"}
+
+
 def test_mssp_single_value() -> None:
     """Encode and decode MSSP with single values."""
     variables = {"NAME": "TestMUD", "UPTIME": "12345"}
@@ -168,3 +196,17 @@ def test_mssp_decode_multi_returns_list() -> None:
     decoded = mssp_decode(encoded)
     assert decoded["SINGLE"] == "one"
     assert decoded["MULTI"] == ["first", "second"]
+
+
+def test_mssp_decode_encoding_param() -> None:
+    """mssp_decode uses the encoding parameter for decoding."""
+    encoded = MSSP_VAR + b"NAME" + MSSP_VAL + b"\xc9toile"
+    decoded = mssp_decode(encoded, encoding="latin-1")
+    assert decoded == {"NAME": "\xc9toile"}
+
+
+def test_mssp_decode_latin1_fallback() -> None:
+    """mssp_decode falls back to latin-1 when utf-8 fails."""
+    encoded = MSSP_VAR + b"NAME" + MSSP_VAL + b"\xc9toile"
+    decoded = mssp_decode(encoded)
+    assert decoded == {"NAME": "\xc9toile"}

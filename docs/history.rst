@@ -1,12 +1,14 @@
 History
 =======
 2.3.0 *unreleased*
-  * bugfix: missing LICENSE.txt in sdist file.
+  * bugfix: repeat "socket.send() raised exception." exceptions
   * bugfix: server incorrectly accepted ``DO TSPEED`` and ``DO SNDLOC``
     with ``WILL`` responses. These are client-only options per :rfc:`1079`
     and :rfc:`779`; the server now correctly rejects them.
-  * bugfix: repeat "socket.send() raised exception." exceptions
+  * bugfix: ``LINEMODE DO FORWARDMASK`` subnegotiation no longer raises
+    ``NotImplementedError``; the mask is accepted (logged only).
   * bugfix: echo doubling in ``--pty-exec`` without ``--pty-raw`` (linemode).
+  * bugfix: missing LICENSE.txt in sdist file.
   * new: :mod:`telnetlib3.mud` module with encode/decode functions for
     GMCP (option 201), MSDP (option 69), and MSSP (option 70) MUD telnet
     protocols.
@@ -22,6 +24,15 @@ History
     for fingerprinting of connected clients.
   * new: ``telnetlib3-fingerprint`` CLI for fingerprinting the given remote
     server, probing telnet option support and capturing banners.
+  * enhancement: reversed ``WILL``/``DO`` for directional options (e.g. ``WILL
+    NAWS`` from server, ``DO TTYPE`` from client) now gracefully refused with
+    ``DONT``/``WONT`` instead of raising ``ValueError``.
+  * enhancement: ``NEW_ENVIRON SEND`` and response logging improved --
+    ``SEND (all)`` / ``env send: (empty)`` instead of raw byte dumps.
+  * bugfix: GMCP, MSDP, and MSSP decoding now uses ``--encoding`` when set,
+    falling back to latin-1 for non-UTF-8 bytes instead of lossy replacement.
+  * enhancement: ``telnetlib3-fingerprint`` now probes MSDP and MSSP options
+    and captures MSSP server status data in session output.
 
 2.2.0
   * bugfix: workaround for Microsoft Telnet client crash on
