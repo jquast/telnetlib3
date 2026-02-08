@@ -9,11 +9,12 @@ History
   * new: :mod:`telnetlib3.mud` module with encode/decode functions for
     GMCP (option 201), MSDP (option 69), and MSSP (option 70) MUD telnet
     protocols.
-  * new: :meth:`TelnetWriter.send_gmcp`, :meth:`~TelnetWriter.send_msdp`, and
-    :meth:`~TelnetWriter.send_mssp` methods for sending MUD protocol data, with
-    corresponding :meth:`~TelnetWriter.handle_gmcp`,
-    :meth:`~TelnetWriter.handle_msdp`, and :meth:`~TelnetWriter.handle_mssp`
-    callbacks.
+  * new: :meth:`~telnetlib3.stream_writer.TelnetWriter.send_gmcp`,
+    :meth:`~telnetlib3.stream_writer.TelnetWriter.send_msdp`, and
+    :meth:`~telnetlib3.stream_writer.TelnetWriter.send_mssp` methods for sending MUD protocol
+    data, with corresponding :meth:`~telnetlib3.stream_writer.TelnetWriter.handle_gmcp`,
+    :meth:`~telnetlib3.stream_writer.TelnetWriter.handle_msdp`, and
+    :meth:`~telnetlib3.stream_writer.TelnetWriter.handle_mssp` callbacks.
   * new: ``connect_timeout`` arguments for client and ``--connect-timeout``
     Client CLI argument, :ghissue:`30`.
   * new: ``telnetlib3-fingerprint-server`` CLI with extended ``NEW_ENVIRON``
@@ -35,11 +36,14 @@ History
     reduced from 4.0s to 1.5s.
   * performance: both client and server protocol data_received methods
     have approximately ~50x throughput improvement in bulk data transfers.
-  * new: :class:`Server` class returned by :func:`create_server` with
-    :meth:`~Server.wait_for_client` method and :attr:`~Server.clients` property
-    for tracking connected clients.
-  * new: :meth:`TelnetWriter.wait_for` and :meth:`~TelnetWriter.wait_for_condition`
-    methods for waiting on telnet option negotiation state.
+  * new: :class:`~telnetlib3.server.Server` class returned by
+    :func:`~telnetlib3.server.create_server` with
+    :meth:`~telnetlib3.server.Server.wait_for_client` method and
+    :attr:`~telnetlib3.server.Server.clients` property for tracking connected
+    clients.
+  * new: :meth:`~telnetlib3.stream_writer.TelnetWriter.wait_for` and
+    :meth:`~telnetlib3.stream_writer.TelnetWriter.wait_for_condition` methods for waiting on
+    telnet option negotiation state.
   * new: :mod:`telnetlib3.sync` module with blocking (non-asyncio) APIs:
     :class:`~telnetlib3.sync.TelnetConnection` for clients,
     :class:`~telnetlib3.sync.BlockingTelnetServer` for servers.
@@ -79,13 +83,13 @@ History
 2.0.5
  * feature: legacy `telnetlib.py` from Python 3.11 now redistributed,
    note change to project `LICENSE.txt` file.
- * feature: Add :meth:`TelnetReader.readuntil_pattern` :ghissue:`92` by
+ * feature: Add :meth:`~telnetlib3.stream_reader.TelnetReader.readuntil_pattern` :ghissue:`92` by
    :ghuser:`agicy`
- * feature: Add :meth:`TelnetWriter.wait_closed` async method in response to
-   :ghissue:`82`.
+ * feature: Add :meth:`~telnetlib3.stream_writer.TelnetWriter.wait_closed`
+   async method in response to :ghissue:`82`.
  * bugfix: README Examples do not work :ghissue:`81`
  * bugfix: `TypeError: buf expected bytes, got <class 'str'>` on client timeout
-   in :class:`TelnetServer`, :ghissue:`87`
+   in :class:`~telnetlib3.server.TelnetServer`, :ghissue:`87`
  * bugfix: Performance issues with client protocol under heavy load,
    demonstrating server `telnet://1984.ws` now documented in README.
  * bugfix: annoying `socket.send() raised exception` repeating warning,
@@ -108,16 +112,17 @@ History
  * bugfix: "write after close" is disregarded, caused many errors logged in socket.send()
  * bugfix: in accessories.repr_mapping() about using shlex.quote on non-str,
    `TypeError: expected string or bytes-like object, got 'int'`
- * bugfix: about fn_encoding using repr() on :class:`TelnetReaderUnicode`
+ * bugfix: about fn_encoding using repr() on :class:`~telnetlib3.stream_reader.TelnetReaderUnicode`
  * bugfix: TelnetReader.is_closing() raises AttributeError
  * deprecation: ``TelnetReader.close`` and ``TelnetReader.connection_closed``
-   emit warning, use :meth:`~TelnetReader.at_eof` and
-   :meth:`~TelnetReader.feed_eof` instead.
+   emit warning, use :meth:`~telnetlib3.stream_reader.TelnetReader.at_eof` and
+   :meth:`~telnetlib3.stream_reader.TelnetReader.feed_eof` instead.
  * deprecation: the ``loop`` argument is no longer accepted by
-   :class:`TelnetReader`.
+   :class:`~telnetlib3.stream_reader.TelnetReader`.
  * enhancement: Add Generic Mud Communication Protocol support :ghissue:`63` by
    :ghuser:`gtaylor`!
- * change: :class:`TelnetReader` and :class:`TelnetWriter` no longer derive
+ * change: :class:`~telnetlib3.stream_reader.TelnetReader` and
+   :class:`~telnetlib3.stream_writer.TelnetWriter` no longer derive
    from :class:`asyncio.StreamReader` and :class:`asyncio.StreamWriter`, this
    fixes some TypeError in signatures and runtime
 

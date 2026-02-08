@@ -6,8 +6,8 @@ import asyncio
 import pytest
 
 # local
-from telnetlib3 import server_fingerprinting as sfp
 from telnetlib3 import fingerprinting as fps
+from telnetlib3 import server_fingerprinting as sfp
 from telnetlib3.telopt import VAR, USERVAR
 
 
@@ -71,12 +71,8 @@ _BINARY_PROBE = {"BINARY": {"status": "WILL", "opt": fps.BINARY}}
 def _save(writer=None, save_path=None, **overrides):
     session_data = {
         "option_states": overrides.pop("option_states", {}),
-        "banner_before_return": sfp._format_banner(
-            overrides.pop("banner_before", b"")
-        ),
-        "banner_after_return": sfp._format_banner(
-            overrides.pop("banner_after", b"")
-        ),
+        "banner_before_return": sfp._format_banner(overrides.pop("banner_before", b"")),
+        "banner_after_return": sfp._format_banner(overrides.pop("banner_after", b"")),
         "timing": {
             "probe": overrides.pop("probe_time", 0.1),
             "total": overrides.pop("total_time", 1.0),
@@ -88,12 +84,12 @@ def _save(writer=None, save_path=None, **overrides):
         "ip": overrides.pop("ip", "10.0.0.1"),
         "connected": "2026-01-01T00:00:00+00:00",
     }
-    defaults = dict(
-        writer=writer or MockWriter(extra={"peername": ("10.0.0.1", 23)}),
-        probe_results=overrides.pop("probe_results", _BINARY_PROBE),
-        session_data=session_data,
-        session_entry=session_entry,
-    )
+    defaults = {
+        "writer": writer or MockWriter(extra={"peername": ("10.0.0.1", 23)}),
+        "probe_results": overrides.pop("probe_results", _BINARY_PROBE),
+        "session_data": session_data,
+        "session_entry": session_entry,
+    }
     defaults.update(overrides)
     if save_path is not None:
         defaults["save_path"] = save_path
@@ -104,9 +100,7 @@ def _save(writer=None, save_path=None, **overrides):
 async def test_probe_server_capabilities():
     options = [(fps.BINARY, "BINARY", ""), (fps.SGA, "SGA", "")]
     writer = MockWriter(will_options=[fps.BINARY], wont_options=[fps.SGA])
-    results = await sfp.probe_server_capabilities(
-        writer, options=options, timeout=0.01
-    )
+    results = await sfp.probe_server_capabilities(writer, options=options, timeout=0.01)
     assert results["BINARY"]["status"] == "WILL"
     assert results["SGA"]["status"] == "WONT"
 
@@ -147,8 +141,8 @@ async def test_probe_timeout_and_defaults():
 def test_collect_server_option_states():
     writer = MockWriter()
     states = sfp._collect_server_option_states(writer)
-    assert states["server_offered"] == {}
-    assert states["server_requested"] == {}
+    assert not states["server_offered"]
+    assert not states["server_requested"]
 
     writer.remote_option[fps.SGA] = True
     writer.remote_option[fps.ECHO] = True
@@ -198,7 +192,7 @@ def test_server_fingerprint_hash_consistency():
 
 def test_format_banner():
     assert sfp._format_banner(b"Hello\r\nWorld") == "Hello\r\nWorld"
-    assert sfp._format_banner(b"") == ""
+    assert not sfp._format_banner(b"")
     assert sfp._format_banner(b"\xff\xfe\xfd") == "\ufffd\ufffd\ufffd"
 
 
@@ -306,9 +300,7 @@ async def test_fingerprinting_client_shell(tmp_path, monkeypatch):
     writer = MockWriter(will_options=[fps.SGA, fps.ECHO])
 
     await sfp.fingerprinting_client_shell(
-        reader, writer,
-        host="localhost", port=23, save_path=save_path,
-        silent=True,
+        reader, writer, host="localhost", port=23, save_path=save_path, silent=True
     )
 
     assert writer._closing
@@ -327,9 +319,7 @@ async def test_fingerprinting_client_shell_no_save(monkeypatch):
 
     writer = MockWriter()
     await sfp.fingerprinting_client_shell(
-        MockReader([]), writer,
-        host="localhost", port=23,
-        silent=True,
+        MockReader([]), writer, host="localhost", port=23, silent=True
     )
     assert writer._closing
 
@@ -346,8 +336,7 @@ async def test_fingerprinting_client_shell_display(tmp_path, monkeypatch, capsys
     writer = MockWriter(will_options=[fps.SGA])
 
     await sfp.fingerprinting_client_shell(
-        reader, writer,
-        host="localhost", port=23, save_path=save_path,
+        reader, writer, host="localhost", port=23, save_path=save_path
     )
 
     captured = capsys.readouterr()
@@ -379,11 +368,7 @@ def test_save_fingerprint_name(tmp_path):
 
 def test_parse_environ_send_ibm_os400():
     """Parse an OS/400-style SEND with IBMRSEED + binary seed data."""
-    raw = (
-        USERVAR + b"IBMRSEED\xb6\xd7>\xd5<H\xe4\xa3"
-        + VAR
-        + USERVAR
-    )
+    raw = USERVAR + b"IBMRSEED\xb6\xd7>\xd5<H\xe4\xa3" + VAR + USERVAR
     entries = sfp._parse_environ_send(raw)
     assert len(entries) == 3
     assert entries[0]["type"] == "USERVAR"
@@ -426,9 +411,13 @@ async def test_fingerprinting_client_shell_set_name(tmp_path, monkeypatch):
     writer = MockWriter(will_options=[fps.SGA, fps.ECHO])
 
     await sfp.fingerprinting_client_shell(
-        reader, writer,
-        host="localhost", port=23, save_path=save_path,
-        silent=True, set_name="my-bbs",
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        set_name="my-bbs",
     )
 
     with open(save_path, encoding="utf-8") as f:
@@ -449,9 +438,13 @@ async def test_fingerprinting_client_shell_encoding(tmp_path, monkeypatch):
     writer = MockWriter(will_options=[fps.SGA])
 
     await sfp.fingerprinting_client_shell(
-        MockReader([]), writer,
-        host="localhost", port=23, save_path=save_path,
-        silent=True, environ_encoding="cp037",
+        MockReader([]),
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        environ_encoding="cp037",
     )
 
     with open(save_path, encoding="utf-8") as f:
@@ -468,9 +461,7 @@ async def test_fingerprinting_client_shell_set_name_no_data_dir(monkeypatch):
 
     writer = MockWriter()
     await sfp.fingerprinting_client_shell(
-        MockReader([]), writer,
-        host="localhost", port=23,
-        silent=True, set_name="should-warn",
+        MockReader([]), writer, host="localhost", port=23, silent=True, set_name="should-warn"
     )
     assert writer._closing
 
@@ -487,11 +478,14 @@ class ErrorReader(MockReader):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("exc", [
-    ConnectionResetError(104, "Connection reset by peer"),
-    ConnectionAbortedError("Connection aborted"),
-    EOFError("EOF"),
-])
+@pytest.mark.parametrize(
+    "exc",
+    [
+        ConnectionResetError(104, "Connection reset by peer"),
+        ConnectionAbortedError("Connection aborted"),
+        EOFError("EOF"),
+    ],
+)
 async def test_fingerprinting_client_shell_connection_error(monkeypatch, exc):
     """Connection errors produce a warning, not an unhandled exception."""
     monkeypatch.setattr(sfp, "_NEGOTIATION_SETTLE", 0.0)
@@ -500,7 +494,6 @@ async def test_fingerprinting_client_shell_connection_error(monkeypatch, exc):
 
     writer = MockWriter()
     await sfp.fingerprinting_client_shell(
-        ErrorReader(exc), writer,
-        host="192.0.2.1", port=23, silent=True,
+        ErrorReader(exc), writer, host="192.0.2.1", port=23, silent=True
     )
     assert writer._closing

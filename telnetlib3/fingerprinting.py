@@ -712,11 +712,7 @@ def _load_fingerprint_names(data_dir: Optional[str] = None) -> Dict[str, str]:
         return result
 
 
-def _save_fingerprint_name(
-    hash_val: str,
-    name: str,
-    data_dir: Optional[str] = None,
-) -> str:
+def _save_fingerprint_name(hash_val: str, name: str, data_dir: Optional[str] = None) -> str:
     """
     Save a fingerprint hash-to-name mapping in ``fingerprint_names.json``.
 

@@ -6,16 +6,18 @@
 import os
 import sys
 import json
+import shutil
 import signal
 import socket
-import shutil
 import argparse
 import subprocess
 import collections
 from pathlib import Path
 
 try:
-    from wcwidth import strip_sequences, iter_sequences
+    # 3rd party
+    from wcwidth import iter_sequences, strip_sequences
+
     _HAS_WCWIDTH = True
 except ImportError:
     _HAS_WCWIDTH = False
@@ -25,10 +27,7 @@ _JQ = shutil.which("jq")
 _UNKNOWN = "0" * 16
 _PROBES = {
     "telnet-probe": ("telnet-client", "telnet-client-revision"),
-    "terminal-probe": (
-        "terminal-emulator",
-        "terminal-emulator-revision",
-    ),
+    "terminal-probe": ("terminal-emulator", "terminal-emulator-revision"),
     "server-probe": ("telnet-server", "telnet-server-revision"),
 }
 
@@ -112,9 +111,7 @@ def _resolve_dns(host, timeout=5):
     try:
         signal.alarm(timeout)
         try:
-            infos = socket.getaddrinfo(
-                host, None, socket.AF_UNSPEC, socket.SOCK_STREAM
-            )
+            infos = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
             forward = sorted({info[4][0] for info in infos})
         except (socket.gaierror, TimeoutError):
             pass
@@ -230,22 +227,11 @@ def _scan(data_dir, names, revise=False):
             h = data.get(probe_key, {}).get("fingerprint")
             if not h or h == _UNKNOWN:
                 continue
-            labels.setdefault(
-                h, probe_key.split("-", maxsplit=1)[0]
-            )
-            fp_data.setdefault(
-                h,
-                data.get(probe_key, {}).get("fingerprint-data", {}),
-            )
-            sessions.setdefault(
-                h, data.get(probe_key, {}).get("session_data", {})
-            )
+            labels.setdefault(h, probe_key.split("-", maxsplit=1)[0])
+            fp_data.setdefault(h, data.get(probe_key, {}).get("fingerprint-data", {}))
+            sessions.setdefault(h, data.get(probe_key, {}).get("session_data", {}))
             if probe_key in ("telnet-probe", "terminal-probe"):
-                other = (
-                    "terminal-probe"
-                    if probe_key == "telnet-probe"
-                    else "telnet-probe"
-                )
+                other = "terminal-probe" if probe_key == "telnet-probe" else "telnet-probe"
                 other_h = data.get(other, {}).get("fingerprint")
                 if other_h and other_h != _UNKNOWN:
                     paired[h].add(other_h)
@@ -336,15 +322,10 @@ def _relocate(data_dir):
             stale.add(path.parent)
             continue
         th = data.get("telnet-probe", {}).get("fingerprint")
-        tmh = data.get(
-            "terminal-probe", {}
-        ).get("fingerprint", _UNKNOWN)
+        tmh = data.get("terminal-probe", {}).get("fingerprint", _UNKNOWN)
         if not th:
             continue
-        if (
-            path.parent.parent.name == th
-            and path.parent.name == tmh
-        ):
+        if path.parent.parent.name == th and path.parent.name == tmh:
             continue
         target = client_base / th / tmh / path.name
         if target.exists():
@@ -366,7 +347,7 @@ def _relocate(data_dir):
 def _prune(data_dir, names):
     """Remove named hashes that have no data files."""
     hashes = set()
-    for path, data in _iter_files(data_dir):
+    for _path, data in _iter_files(data_dir):
         for probe_key in _PROBES:
             h = data.get(probe_key, {}).get("fingerprint")
             if h and h != _UNKNOWN:
@@ -402,9 +383,7 @@ def _get_argument_parser():
         help="directory for fingerprint data (default: $TELNETLIB3_DATA_DIR)",
     )
     parser.add_argument(
-        "--check-revise",
-        action="store_true",
-        help="review already-named fingerprints for revision",
+        "--check-revise", action="store_true", help="review already-named fingerprints for revision"
     )
     parser.add_argument(
         "--no-prune",

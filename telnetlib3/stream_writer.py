@@ -1068,9 +1068,7 @@ class TelnetWriter:
                 response.append(env_key)
             else:
                 response.extend([VAR])
-                response.extend([_escape_environ(
-                    env_key.encode(self.environ_encoding, "replace")
-                )])
+                response.extend([_escape_environ(env_key.encode(self.environ_encoding, "replace"))])
         response.extend([IAC, SE])
         self.log.debug("request_environ: %r", b"".join(response))
         self.pending_option[SB + NEW_ENVIRON] = True
@@ -1647,7 +1645,14 @@ class TelnetWriter:
             # unless we answer IAC-WONT-ECHO.
             self.iac(WONT, ECHO)
         elif self.server and opt in (
-            LINEMODE, TTYPE, NAWS, NEW_ENVIRON, XDISPLOC, LFLOW, TSPEED, SNDLOC,
+            LINEMODE,
+            TTYPE,
+            NAWS,
+            NEW_ENVIRON,
+            XDISPLOC,
+            LFLOW,
+            TSPEED,
+            SNDLOC,
         ):
             raise ValueError(f"cannot recv DO {name_command(opt)} on server end (ignored).")
         elif self.client and opt in (LOGOUT,):
@@ -2115,8 +2120,7 @@ class TelnetWriter:
             # client-side, we do _not_ honor the 'send all VAR' or 'send all
             # USERVAR' requests -- it is a small bit of a security issue.
             send_env = _encode_env_buf(
-                self._ext_send_callback[NEW_ENVIRON](env.keys()),
-                encoding=self.environ_encoding,
+                self._ext_send_callback[NEW_ENVIRON](env.keys()), encoding=self.environ_encoding
             )
             response = [IAC, SB, NEW_ENVIRON, IS, send_env, IAC, SE]
             self.log.debug("env send: %r", response)
@@ -2214,10 +2218,9 @@ class TelnetWriter:
         """
         Callback responds to IAC SB STATUS IS, :rfc:`859`.
 
-        :param buf: sub-negotiation byte buffer containing status data.
-            Compares the remote peer's reported option state against our own
-            and logs a single summary of agreed and disagreed options.
-            Malformed data is handled gracefully by skipping invalid bytes.
+        :param buf: sub-negotiation byte buffer containing status data. Compares the remote peer's
+            reported option state against our own and logs a single summary of agreed and disagreed
+            options. Malformed data is handled gracefully by skipping invalid bytes.
         """
         buf_list = list(buf)
         agreed = []
@@ -2233,10 +2236,7 @@ class TelnetWriter:
             opt = buf_list[i + 1]
 
             if cmd not in (DO, DONT, WILL, WONT):
-                self.log.warning(
-                    "STATUS: invalid cmd at pos %d: %s, skipping.",
-                    i, cmd,
-                )
+                self.log.warning("STATUS: invalid cmd at pos %d: %s, skipping.", i, cmd)
                 i += 1
                 continue
 

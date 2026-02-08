@@ -19,48 +19,43 @@ import asyncio
 import logging
 import datetime
 import subprocess
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 # local
+from . import fingerprinting as _fps
 from .telopt import (
     DO,
     VAR,
-    LFLOW,
-    LINEMODE,
     NAWS,
-    USERVAR,
-    NEW_ENVIRON,
-    SNDLOC,
-    TSPEED,
+    LFLOW,
     TTYPE,
     VALUE,
+    SNDLOC,
+    TSPEED,
+    USERVAR,
+    LINEMODE,
     XDISPLOC,
+    NEW_ENVIRON,
 )
 from .stream_reader import TelnetReader
 from .stream_writer import TelnetWriter
-from . import fingerprinting as _fps
 from .fingerprinting import (
+    ALL_PROBE_OPTIONS,
     FINGERPRINT_MAX_FILES,
     FINGERPRINT_MAX_FINGERPRINTS,
-    ALL_PROBE_OPTIONS,
     _hash_fingerprint,
-    _atomic_json_write,
     _opt_byte_to_name,
+    _atomic_json_write,
     _save_fingerprint_name,
 )
 
-__all__ = (
-    "fingerprinting_client_shell",
-    "probe_server_capabilities",
-)
+__all__ = ("fingerprinting_client_shell", "probe_server_capabilities")
 
 # Options where only the client sends WILL (in response to a server's DO).
 # A server should never WILL these — they describe client-side properties.
 # The probe must not send DO for these; their state is already captured
 # in ``server_requested`` (what the server sent DO for).
-_CLIENT_ONLY_WILL = frozenset({
-    TTYPE, TSPEED, NAWS, XDISPLOC, NEW_ENVIRON, LFLOW, LINEMODE, SNDLOC,
-})
+_CLIENT_ONLY_WILL = frozenset({TTYPE, TSPEED, NAWS, XDISPLOC, NEW_ENVIRON, LFLOW, LINEMODE, SNDLOC})
 
 _BANNER_MAX_BYTES = 1024
 _NEGOTIATION_SETTLE = 0.5
@@ -71,11 +66,16 @@ _JQ = shutil.which("jq")
 logger = logging.getLogger("telnetlib3.server_fingerprint")
 
 
+def _is_display_worthy(v: Any) -> bool:
+    """Return True if *v* should be kept in culled display output."""
+    # pylint: disable-next=use-implicit-booleaness-not-comparison-to-string
+    return v is not False and v != {} and v != [] and v != ""
+
+
 def _cull_display(obj: Any) -> Any:
     """Recursively remove empty, false-valued, and verbose entries for display."""
     if isinstance(obj, dict):
-        return {k: _cull_display(v) for k, v in obj.items()
-                if v is not False and v != {} and v != [] and v != ""}
+        return {k: _cull_display(v) for k, v in obj.items() if _is_display_worthy(v)}
     if isinstance(obj, list):
         return [_cull_display(item) for item in obj]
     return obj
@@ -86,7 +86,7 @@ def _print_json(data: Dict[str, Any]) -> None:
     raw = json.dumps(_cull_display(data), indent=2, sort_keys=True)
     if _JQ:
         result = subprocess.run(
-            [_JQ, "-C", "."], input=raw, capture_output=True, text=True, check=False,
+            [_JQ, "-C", "."], input=raw, capture_output=True, text=True, check=False
         )
         if result.returncode == 0:
             raw = result.stdout.rstrip("\n")
@@ -125,9 +125,13 @@ async def fingerprinting_client_shell(
     writer.environ_encoding = environ_encoding
     try:
         await _fingerprint_session(
-            reader, writer,
-            host=host, port=port, save_path=save_path,
-            silent=silent, set_name=set_name,
+            reader,
+            writer,
+            host=host,
+            port=port,
+            save_path=save_path,
+            silent=silent,
+            set_name=set_name,
         )
     except (ConnectionError, EOFError) as exc:
         logger.warning("%s:%d: %s", host, port, exc)
@@ -166,26 +170,17 @@ async def _fingerprint_session(
     probe_results = await probe_server_capabilities(writer)
     probe_time = time.time() - probe_start
 
-    # 6. Peer IP
-    peername = writer.get_extra_info("peername")
-    ip = peername[0] if peername else host
-
-    total_time = time.time() - start_time
-
-    # 7. Build session dicts
+    # 6. Build session dicts
     session_data: Dict[str, Any] = {
         "encoding": writer.environ_encoding,
         "option_states": option_states,
         "banner_before_return": _format_banner(banner_before),
         "banner_after_return": _format_banner(banner_after),
-        "timing": {
-            "probe": probe_time,
-            "total": total_time,
-        },
+        "timing": {"probe": probe_time, "total": time.time() - start_time},
     }
     session_entry: Dict[str, Any] = {
         "host": host,
-        "ip": ip,
+        "ip": (writer.get_extra_info("peername") or (host,))[0],
         "port": port,
         "connected": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
@@ -246,7 +241,8 @@ async def probe_server_capabilities(
     """
     if options is None:
         options = [
-            (opt, name, desc) for opt, name, desc in ALL_PROBE_OPTIONS
+            (opt, name, desc)
+            for opt, name, desc in ALL_PROBE_OPTIONS
             if opt not in _CLIENT_ONLY_WILL
         ]
 
@@ -294,23 +290,11 @@ async def probe_server_capabilities(
         if name in results:
             continue
         if writer.remote_option.enabled(opt):
-            results[name] = {
-                "status": "WILL",
-                "opt": opt,
-                "description": description,
-            }
+            results[name] = {"status": "WILL", "opt": opt, "description": description}
         elif writer.remote_option.get(opt) is False:
-            results[name] = {
-                "status": "WONT",
-                "opt": opt,
-                "description": description,
-            }
+            results[name] = {"status": "WONT", "opt": opt, "description": description}
         else:
-            results[name] = {
-                "status": "timeout",
-                "opt": opt,
-                "description": description,
-            }
+            results[name] = {"status": "timeout", "opt": opt, "description": description}
 
     return results
 
@@ -332,7 +316,7 @@ def _parse_environ_send(raw: bytes) -> List[Dict[str, Any]]:
     breaks = [i for i, b in enumerate(raw) if b in delimiters]
 
     for idx, ptr in enumerate(breaks):
-        kind = "VAR" if raw[ptr:ptr + 1] == VAR else "USERVAR"
+        kind = "VAR" if raw[ptr : ptr + 1] == VAR else "USERVAR"
         start = ptr + 1
         end = breaks[idx + 1] if idx + 1 < len(breaks) else len(raw)
         chunk = raw[start:end]
@@ -366,9 +350,7 @@ def _parse_environ_send(raw: bytes) -> List[Dict[str, Any]]:
     return entries
 
 
-def _collect_server_option_states(
-    writer: TelnetWriter,
-) -> Dict[str, Dict[str, Any]]:
+def _collect_server_option_states(writer: TelnetWriter) -> Dict[str, Dict[str, Any]]:
     """
     Collect telnet option states from the server perspective.
 
@@ -390,16 +372,13 @@ def _collect_server_option_states(
     }
 
     if writer.environ_send_raw is not None:
-        result["environ_requested"] = _parse_environ_send(
-            writer.environ_send_raw
-        )
+        result["environ_requested"] = _parse_environ_send(writer.environ_send_raw)
 
     return result
 
 
 def _create_server_protocol_fingerprint(
-    writer: TelnetWriter,
-    probe_results: Dict[str, Dict[str, Any]],
+    writer: TelnetWriter, probe_results: Dict[str, Dict[str, Any]]
 ) -> Dict[str, Any]:
     """
     Create anonymized protocol fingerprint for a remote server.
@@ -408,19 +387,13 @@ def _create_server_protocol_fingerprint(
     :param probe_results: Results from :func:`probe_server_capabilities`.
     :returns: Deterministic fingerprint dict suitable for hashing.
     """
-    offered = sorted(
-        name for name, info in probe_results.items()
-        if info["status"] == "WILL"
-    )
+    offered = sorted(name for name, info in probe_results.items() if info["status"] == "WILL")
     refused = sorted(
-        name for name, info in probe_results.items()
-        if info["status"] in ("WONT", "timeout")
+        name for name, info in probe_results.items() if info["status"] in ("WONT", "timeout")
     )
 
     requested = sorted(
-        _opt_byte_to_name(opt)
-        for opt, enabled in writer.local_option.items()
-        if enabled
+        _opt_byte_to_name(opt) for opt, enabled in writer.local_option.items() if enabled
     )
 
     return {
@@ -501,9 +474,7 @@ def _save_server_fingerprint_data(
         os.makedirs(server_dir, exist_ok=True)
         logger.info("new server fingerprint %s", protocol_hash)
     else:
-        file_count = sum(
-            1 for f in os.listdir(server_dir) if f.endswith(".json")
-        )
+        file_count = sum(1 for f in os.listdir(server_dir) if f.endswith(".json"))
         if file_count >= FINGERPRINT_MAX_FILES:
             logger.warning(
                 "fingerprint %s at file limit (%d), not saving",
@@ -540,10 +511,7 @@ def _count_server_fingerprint_folders(data_dir: Optional[str] = None) -> int:
     server_dir = os.path.join(_dir, "server")
     if not os.path.exists(server_dir):
         return 0
-    return sum(
-        1 for f in os.listdir(server_dir)
-        if os.path.isdir(os.path.join(server_dir, f))
-    )
+    return sum(1 for f in os.listdir(server_dir) if os.path.isdir(os.path.join(server_dir, f)))
 
 
 def _format_banner(data: bytes) -> str:
@@ -556,10 +524,7 @@ def _format_banner(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-async def _read_banner(
-    reader: TelnetReader,
-    timeout: float = _BANNER_WAIT,
-) -> bytes:
+async def _read_banner(reader: TelnetReader, timeout: float = _BANNER_WAIT) -> bytes:
     """
     Read up to :data:`_BANNER_MAX_BYTES` from *reader* with timeout.
 
@@ -571,11 +536,7 @@ async def _read_banner(
     :returns: Banner bytes (may be empty).
     """
     try:
-        data = await asyncio.wait_for(
-            reader.read(_BANNER_MAX_BYTES), timeout=timeout
-        )
+        data = await asyncio.wait_for(reader.read(_BANNER_MAX_BYTES), timeout=timeout)
     except (asyncio.TimeoutError, EOFError):
         data = b""
     return data
-
-

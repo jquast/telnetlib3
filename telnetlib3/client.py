@@ -599,46 +599,46 @@ def _get_fingerprint_argument_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("host", help="remote hostname or IP")
+    parser.add_argument("port", nargs="?", default=23, type=int, help="port number")
     parser.add_argument(
-        "port", nargs="?", default=23, type=int, help="port number"
-    )
-    parser.add_argument(
-        "--data-dir", default=None,
+        "--data-dir",
+        default=None,
         help="directory for fingerprint data (default: $TELNETLIB3_DATA_DIR)",
     )
     parser.add_argument(
-        "--save-json", default=None, metavar="PATH",
-        help="write fingerprint JSON to this path",
+        "--save-json", default=None, metavar="PATH", help="write fingerprint JSON to this path"
     )
     parser.add_argument(
-        "--connect-timeout", default=10, type=float,
-        help="TCP connection timeout in seconds",
+        "--connect-timeout", default=10, type=float, help="TCP connection timeout in seconds"
     )
     parser.add_argument("--loglevel", default="warn", help="log level")
     # pylint: disable=protected-access
-    parser.add_argument(
-        "--logfmt", default=accessories._DEFAULT_LOGFMT,
-        help="log format",
-    )
+    parser.add_argument("--logfmt", default=accessories._DEFAULT_LOGFMT, help="log format")
     parser.add_argument("--logfile", default=None, help="filepath")
     parser.add_argument(
-        "--silent", action="store_true",
-        help="suppress fingerprint output to stdout",
+        "--silent", action="store_true", help="suppress fingerprint output to stdout"
     )
     parser.add_argument(
-        "--set-name", default=None, metavar="NAME",
+        "--set-name",
+        default=None,
+        metavar="NAME",
         help="store this name for the fingerprint in fingerprint_names.json",
     )
     parser.add_argument(
-        "--encoding", default="ascii", metavar="CODEC", dest="stream_encoding",
+        "--encoding",
+        default="ascii",
+        metavar="CODEC",
+        dest="stream_encoding",
         help="character encoding of the remote server (e.g. cp037 for EBCDIC)",
     )
     parser.add_argument(
-        "--ttype", default="VT100",
-        help="terminal type sent in response to TTYPE requests",
+        "--ttype", default="VT100", help="terminal type sent in response to TTYPE requests"
     )
     parser.add_argument(
-        "--send-env", action="append", metavar="KEY=VALUE", default=[],
+        "--send-env",
+        action="append",
+        metavar="KEY=VALUE",
+        default=[],
         help="environment variable to send (repeatable)",
     )
     return parser
@@ -653,8 +653,8 @@ async def run_fingerprint_client() -> None:
     via :func:`functools.partial`, and runs the connection.
     """
     # local
-    from . import server_fingerprinting  # pylint: disable=import-outside-toplevel
     from . import fingerprinting  # pylint: disable=import-outside-toplevel
+    from . import server_fingerprinting  # pylint: disable=import-outside-toplevel
 
     args = _get_fingerprint_argument_parser().parse_args()
 
@@ -662,14 +662,9 @@ async def run_fingerprint_client() -> None:
         fingerprinting.DATA_DIR = args.data_dir
 
     log = accessories.make_logger(
-        name=__name__,
-        loglevel=args.loglevel,
-        logfile=args.logfile,
-        logfmt=args.logfmt,
+        name=__name__, loglevel=args.loglevel, logfile=args.logfile, logfmt=args.logfmt
     )
-    log.debug(
-        "Fingerprint client: host=%s port=%d", args.host, args.port
-    )
+    log.debug("Fingerprint client: host=%s port=%d", args.host, args.port)
 
     shell = functools.partial(
         server_fingerprinting.fingerprinting_client_shell,
@@ -696,9 +691,7 @@ async def run_fingerprint_client() -> None:
     environ_encoding = args.stream_encoding
     ttype = args.ttype
 
-    def fingerprint_client_factory(
-        **kwargs: Any,
-    ) -> client_base.BaseClient:
+    def fingerprint_client_factory(**kwargs: Any) -> client_base.BaseClient:
         # Ensure extra env keys are in the send list
         if extra_env:
             send = set(kwargs.get("send_environ") or TelnetClient.DEFAULT_SEND_ENVIRON)
@@ -708,9 +701,7 @@ async def run_fingerprint_client() -> None:
         orig_connection_made = client.connection_made
         orig_send_env = client.send_env
 
-        def patched_connection_made(
-            transport: asyncio.BaseTransport,
-        ) -> None:
+        def patched_connection_made(transport: asyncio.BaseTransport) -> None:
             orig_connection_made(transport)
             assert client.writer is not None
             client.writer.environ_encoding = environ_encoding
