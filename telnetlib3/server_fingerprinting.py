@@ -19,12 +19,11 @@ import asyncio
 import logging
 import datetime
 import subprocess
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any
 
 # local
 from . import fingerprinting as _fps
 from .telopt import (
-    DO,
     VAR,
     NAWS,
     LFLOW,
@@ -41,12 +40,12 @@ from .stream_reader import TelnetReader
 from .stream_writer import TelnetWriter
 from .fingerprinting import (
     ALL_PROBE_OPTIONS,
-    FINGERPRINT_MAX_FILES,
-    FINGERPRINT_MAX_FINGERPRINTS,
     _hash_fingerprint,
     _opt_byte_to_name,
     _atomic_json_write,
     _save_fingerprint_name,
+    _save_fingerprint_to_dir,
+    probe_client_capabilities,
 )
 
 __all__ = ("fingerprinting_client_shell", "probe_server_capabilities")
@@ -81,7 +80,7 @@ def _cull_display(obj: Any) -> Any:
     return obj
 
 
-def _print_json(data: Dict[str, Any]) -> None:
+def _print_json(data: dict[str, Any]) -> None:
     """Print *data* as JSON to stdout, colorized through ``jq`` when available."""
     raw = json.dumps(_cull_display(data), indent=2, sort_keys=True)
     if _JQ:
@@ -99,9 +98,9 @@ async def fingerprinting_client_shell(
     *,
     host: str,
     port: int,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
     silent: bool = False,
-    set_name: Optional[str] = None,
+    set_name: str | None = None,
     environ_encoding: str = "ascii",
 ) -> None:
     """
@@ -144,9 +143,9 @@ async def _fingerprint_session(
     *,
     host: str,
     port: int,
-    save_path: Optional[str],
+    save_path: str | None,
     silent: bool,
-    set_name: Optional[str],
+    set_name: str | None,
 ) -> None:
     """Run the fingerprint session (inner helper for error handling)."""
     start_time = time.time()
@@ -171,21 +170,21 @@ async def _fingerprint_session(
     probe_time = time.time() - probe_start
 
     # 6. Build session dicts
-    session_data: Dict[str, Any] = {
+    session_data: dict[str, Any] = {
         "encoding": writer.environ_encoding,
         "option_states": option_states,
-        "banner_before_return": _format_banner(banner_before),
-        "banner_after_return": _format_banner(banner_after),
+        "banner_before_return": _format_banner(banner_before, encoding=writer.environ_encoding),
+        "banner_after_return": _format_banner(banner_after, encoding=writer.environ_encoding),
         "timing": {"probe": probe_time, "total": time.time() - start_time},
     }
-    session_entry: Dict[str, Any] = {
+    session_entry: dict[str, Any] = {
         "host": host,
         "ip": (writer.get_extra_info("peername") or (host,))[0],
         "port": port,
         "connected": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
 
-    # 8. Save
+    # 7. Save
     _save_server_fingerprint_data(
         writer=writer,
         probe_results=probe_results,
@@ -194,7 +193,7 @@ async def _fingerprint_session(
         save_path=save_path,
     )
 
-    # 9. Set name in fingerprint_names.json
+    # 8. Set name in fingerprint_names.json
     if set_name is not None:
         protocol_fp = _create_server_protocol_fingerprint(writer, probe_results)
         protocol_hash = _hash_fingerprint(protocol_fp)
@@ -204,11 +203,11 @@ async def _fingerprint_session(
         except ValueError:
             logger.warning("--set-name requires --data-dir or $TELNETLIB3_DATA_DIR")
 
-    # 10. Display
+    # 9. Display
     if not silent:
         protocol_fp = _create_server_protocol_fingerprint(writer, probe_results)
         protocol_hash = _hash_fingerprint(protocol_fp)
-        display_data: Dict[str, Any] = {
+        display_data: dict[str, Any] = {
             "server-probe": {
                 "fingerprint": protocol_hash,
                 "fingerprint-data": protocol_fp,
@@ -218,24 +217,24 @@ async def _fingerprint_session(
         }
         _print_json(display_data)
 
-    # 11. Close
+    # 10. Close
     writer.close()
 
 
 async def probe_server_capabilities(
-    writer: TelnetWriter,
-    options: Optional[List[Tuple[bytes, str, str]]] = None,
-    timeout: float = 0.5,
-) -> Dict[str, Dict[str, Any]]:
+    writer: TelnetWriter, options: list[tuple[bytes, str, str]] | None = None, timeout: float = 0.5
+) -> dict[str, _fps.ProbeResult]:
     """
     Actively probe a remote server for telnet capability support.
 
     Sends ``IAC DO`` for all options not yet negotiated, then waits
-    for ``WILL``/``WONT`` responses.
+    for ``WILL``/``WONT`` responses.  Delegates to
+    :func:`~telnetlib3.fingerprinting.probe_client_capabilities`.
 
     :param writer: :class:`~telnetlib3.stream_writer.TelnetWriter` instance.
     :param options: List of ``(opt_bytes, name, description)`` tuples.
-        Defaults to :data:`~telnetlib3.fingerprinting.ALL_PROBE_OPTIONS`.
+        Defaults to :data:`~telnetlib3.fingerprinting.ALL_PROBE_OPTIONS`
+        minus client-only options.
     :param timeout: Seconds to wait for all responses.
     :returns: Dict mapping option name to status dict.
     """
@@ -245,61 +244,10 @@ async def probe_server_capabilities(
             for opt, name, desc in ALL_PROBE_OPTIONS
             if opt not in _CLIENT_ONLY_WILL
         ]
-
-    results: Dict[str, Dict[str, Any]] = {}
-    to_probe: List[Tuple[bytes, str, str]] = []
-
-    for opt, name, description in options:
-        if writer.remote_option.enabled(opt):
-            results[name] = {
-                "status": "WILL",
-                "opt": opt,
-                "description": description,
-                "already_negotiated": True,
-            }
-        elif writer.remote_option.get(opt) is False:
-            results[name] = {
-                "status": "WONT",
-                "opt": opt,
-                "description": description,
-                "already_negotiated": True,
-            }
-        else:
-            to_probe.append((opt, name, description))
-
-    # Send IAC DO for each unprobed option
-    for opt, name, description in to_probe:
-        writer.iac(DO, opt)
-
-    await writer.drain()
-
-    # Wait for responses
-    deadline = asyncio.get_event_loop().time() + timeout
-    while asyncio.get_event_loop().time() < deadline:
-        all_responded = all(
-            writer.remote_option.get(opt) is not None
-            for opt, name, desc in to_probe
-            if name not in results
-        )
-        if all_responded:
-            break
-        await asyncio.sleep(0.05)
-
-    # Collect results
-    for opt, name, description in to_probe:
-        if name in results:
-            continue
-        if writer.remote_option.enabled(opt):
-            results[name] = {"status": "WILL", "opt": opt, "description": description}
-        elif writer.remote_option.get(opt) is False:
-            results[name] = {"status": "WONT", "opt": opt, "description": description}
-        else:
-            results[name] = {"status": "timeout", "opt": opt, "description": description}
-
-    return results
+    return await probe_client_capabilities(writer, options=options, timeout=timeout)
 
 
-def _parse_environ_send(raw: bytes) -> List[Dict[str, Any]]:
+def _parse_environ_send(raw: bytes) -> list[dict[str, Any]]:
     """
     Parse a raw NEW_ENVIRON SEND payload into structured entries.
 
@@ -308,7 +256,7 @@ def _parse_environ_send(raw: bytes) -> List[Dict[str, Any]]:
         ``name`` (ASCII text portion), and optionally ``data_hex`` for
         trailing binary bytes.
     """
-    entries: List[Dict[str, Any]] = []
+    entries: list[dict[str, Any]] = []
     delimiters = {VAR[0], USERVAR[0]}
     value_byte = VALUE[0]
 
@@ -333,7 +281,7 @@ def _parse_environ_send(raw: bytes) -> List[Dict[str, Any]]:
             name_part = chunk
             val_part = b""
 
-        # extract the ASCII-printable prefix as the variable name
+        # contiguous ASCII-printable prefix only; trailing binary is ignored
         ascii_end = 0
         for i, b in enumerate(name_part):
             if 0x20 <= b < 0x7F:
@@ -342,7 +290,7 @@ def _parse_environ_send(raw: bytes) -> List[Dict[str, Any]]:
                 break
         name_text = name_part[:ascii_end].decode("ascii") if ascii_end else ""
 
-        entry: Dict[str, Any] = {"type": kind, "name": name_text}
+        entry: dict[str, Any] = {"type": kind, "name": name_text}
         if val_part:
             entry["value_hex"] = val_part.hex()
         entries.append(entry)
@@ -350,7 +298,7 @@ def _parse_environ_send(raw: bytes) -> List[Dict[str, Any]]:
     return entries
 
 
-def _collect_server_option_states(writer: TelnetWriter) -> Dict[str, Dict[str, Any]]:
+def _collect_server_option_states(writer: TelnetWriter) -> dict[str, dict[str, Any]]:
     """
     Collect telnet option states from the server perspective.
 
@@ -358,15 +306,15 @@ def _collect_server_option_states(writer: TelnetWriter) -> Dict[str, Dict[str, A
     :returns: Dict with ``server_offered`` (server WILL) and
         ``server_requested`` (server DO) entries.
     """
-    server_offered: Dict[str, Any] = {}
+    server_offered: dict[str, Any] = {}
     for opt, enabled in writer.remote_option.items():
         server_offered[_opt_byte_to_name(opt)] = enabled
 
-    server_requested: Dict[str, Any] = {}
+    server_requested: dict[str, Any] = {}
     for opt, enabled in writer.local_option.items():
         server_requested[_opt_byte_to_name(opt)] = enabled
 
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "server_offered": server_offered,
         "server_requested": server_requested,
     }
@@ -378,8 +326,8 @@ def _collect_server_option_states(writer: TelnetWriter) -> Dict[str, Dict[str, A
 
 
 def _create_server_protocol_fingerprint(
-    writer: TelnetWriter, probe_results: Dict[str, Dict[str, Any]]
-) -> Dict[str, Any]:
+    writer: TelnetWriter, probe_results: dict[str, _fps.ProbeResult]
+) -> dict[str, Any]:
     """
     Create anonymized protocol fingerprint for a remote server.
 
@@ -406,11 +354,11 @@ def _create_server_protocol_fingerprint(
 
 def _save_server_fingerprint_data(
     writer: TelnetWriter,
-    probe_results: Dict[str, Dict[str, Any]],
-    session_data: Dict[str, Any],
-    session_entry: Dict[str, Any],
-    save_path: Optional[str] = None,
-) -> Optional[str]:
+    probe_results: dict[str, _fps.ProbeResult],
+    session_data: dict[str, Any],
+    session_entry: dict[str, Any],
+    save_path: str | None = None,
+) -> str | None:
     """
     Save server fingerprint data to a JSON file.
 
@@ -428,7 +376,7 @@ def _save_server_fingerprint_data(
     protocol_fp = _create_server_protocol_fingerprint(writer, probe_results)
     protocol_hash = _hash_fingerprint(protocol_fp)
 
-    data: Dict[str, Any] = {
+    data: dict[str, Any] = {
         "server-probe": {
             "fingerprint": protocol_hash,
             "fingerprint-data": protocol_fp,
@@ -459,69 +407,31 @@ def _save_server_fingerprint_data(
         "ip": session_entry["ip"],
     }
     session_hash = _hash_fingerprint(session_identity)
-
     server_dir = os.path.join(data_dir, "server", protocol_hash)
-    is_new_dir = not os.path.exists(server_dir)
 
-    if is_new_dir:
-        if _count_server_fingerprint_folders(data_dir) >= FINGERPRINT_MAX_FINGERPRINTS:
-            logger.warning(
-                "max fingerprints (%d) exceeded, not saving %s",
-                FINGERPRINT_MAX_FINGERPRINTS,
-                protocol_hash,
-            )
-            return None
-        os.makedirs(server_dir, exist_ok=True)
-        logger.info("new server fingerprint %s", protocol_hash)
-    else:
-        file_count = sum(1 for f in os.listdir(server_dir) if f.endswith(".json"))
-        if file_count >= FINGERPRINT_MAX_FILES:
-            logger.warning(
-                "fingerprint %s at file limit (%d), not saving",
-                protocol_hash,
-                FINGERPRINT_MAX_FILES,
-            )
-            return None
-        logger.info("connection for server fingerprint %s", protocol_hash)
-
-    filepath = os.path.join(server_dir, f"{session_hash}.json")
-
-    if os.path.exists(filepath):
-        with open(filepath, encoding="utf-8") as f:
-            existing = json.load(f)
-        existing["server-probe"]["session_data"] = session_data
-        existing["sessions"].append(session_entry)
-        _atomic_json_write(filepath, existing)
-        return filepath
-
-    _atomic_json_write(filepath, data)
-    return filepath
+    return _save_fingerprint_to_dir(
+        target_dir=server_dir,
+        session_hash=session_hash,
+        data=data,
+        probe_key="server-probe",
+        data_dir=data_dir,
+        side="server",
+        protocol_hash=protocol_hash,
+    )
 
 
-def _count_server_fingerprint_folders(data_dir: Optional[str] = None) -> int:
-    """
-    Count unique fingerprint folders in ``DATA_DIR/server/``.
-
-    :param data_dir: Override data directory.  Falls back to :data:`DATA_DIR`.
-    :returns: Number of fingerprint subdirectories.
-    """
-    _dir = data_dir if data_dir is not None else _fps.DATA_DIR
-    if _dir is None:
-        return 0
-    server_dir = os.path.join(_dir, "server")
-    if not os.path.exists(server_dir):
-        return 0
-    return sum(1 for f in os.listdir(server_dir) if os.path.isdir(os.path.join(server_dir, f)))
-
-
-def _format_banner(data: bytes) -> str:
+def _format_banner(data: bytes, encoding: str = "utf-8") -> str:
     """
     Format raw banner bytes for JSON serialization.
 
+    Default ``"utf-8"`` is intentional -- banners are typically UTF-8
+    regardless of ``environ_encoding``; callers may override.
+
     :param data: Raw bytes from the server.
-    :returns: Decoded text string (non-UTF-8 bytes replaced).
+    :param encoding: Character encoding to use for decoding.
+    :returns: Decoded text string (undecodable bytes replaced).
     """
-    return data.decode("utf-8", errors="replace")
+    return data.decode(encoding, errors="replace")
 
 
 async def _read_banner(reader: TelnetReader, timeout: float = _BANNER_WAIT) -> bytes:

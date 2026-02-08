@@ -238,14 +238,14 @@ def test_save_server_fingerprint_max_files(tmp_path, monkeypatch):
     monkeypatch.setattr(fps, "DATA_DIR", str(tmp_path))
     assert _save() is not None
 
-    monkeypatch.setattr(sfp, "FINGERPRINT_MAX_FILES", 0)
+    monkeypatch.setattr(fps, "FINGERPRINT_MAX_FILES", 0)
     w2 = MockWriter(extra={"peername": ("10.0.0.2", 23)})
     assert _save(writer=w2, ip="10.0.0.2") is None
 
 
 def test_save_server_fingerprint_max_fingerprints(tmp_path, monkeypatch):
     monkeypatch.setattr(fps, "DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(sfp, "FINGERPRINT_MAX_FINGERPRINTS", 0)
+    monkeypatch.setattr(fps, "FINGERPRINT_MAX_FINGERPRINTS", 0)
     assert _save() is None
 
 
@@ -255,14 +255,14 @@ def test_save_server_fingerprint_data_dir_none(monkeypatch):
 
 
 def test_count_server_fingerprint_folders(tmp_path):
-    assert sfp._count_server_fingerprint_folders(data_dir=str(tmp_path)) == 0
-    assert sfp._count_server_fingerprint_folders(data_dir=None) == 0
+    assert fps._count_fingerprint_folders(data_dir=str(tmp_path), side="server") == 0
+    assert fps._count_fingerprint_folders(data_dir=None, side="server") == 0
     server_dir = tmp_path / "server"
     server_dir.mkdir()
     (server_dir / "hash1").mkdir()
     (server_dir / "hash2").mkdir()
     (server_dir / "not_a_dir.txt").write_text("")
-    assert sfp._count_server_fingerprint_folders(data_dir=str(tmp_path)) == 2
+    assert fps._count_fingerprint_folders(data_dir=str(tmp_path), side="server") == 2
 
 
 def test_save_appends_session(tmp_path, monkeypatch):

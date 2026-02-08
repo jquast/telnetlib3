@@ -29,7 +29,15 @@ from .telopt import (
     MSDP_TABLE_CLOSE,
 )
 
-__all__ = ("gmcp_encode", "gmcp_decode", "msdp_encode", "msdp_decode", "mssp_encode", "mssp_decode")
+__all__ = (
+    "gmcp_encode",
+    "gmcp_decode",
+    "msdp_encode",
+    "msdp_decode",
+    "mssp_encode",
+    "mssp_decode",
+    "MsdpParser",
+)
 
 
 def gmcp_encode(package: str, data: Any = None) -> bytes:
@@ -95,12 +103,13 @@ def msdp_encode(variables: dict[str, Any]) -> bytes:
     return result
 
 
-class _MsdpParser:
+class MsdpParser:
     """State machine for parsing MSDP wire bytes."""
 
     _DELIMITERS = (MSDP_VAR, MSDP_VAL, MSDP_TABLE_CLOSE, MSDP_ARRAY_CLOSE)
 
     def __init__(self, buf: bytes) -> None:
+        """Initialize parser with raw MSDP buffer."""
         self.buf = buf
         self.idx = 0
 
@@ -179,7 +188,7 @@ def msdp_decode(buf: bytes) -> dict[str, Any]:
     :param buf: MSDP payload bytes
     :returns: Dictionary of variable names to values
     """
-    return _MsdpParser(buf).parse()
+    return MsdpParser(buf).parse()
 
 
 def mssp_encode(variables: dict[str, str | list[str]]) -> bytes:

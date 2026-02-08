@@ -27,9 +27,9 @@ class DummyWriter:
         self.echos.append(data)
 
 
-def _run_readline(sequence, maxvis=0):
+def _run_readline(sequence, max_visible_width=0):
     w = DummyWriter()
-    gen = ss.readline(None, w, maxvis=maxvis)
+    gen = ss.readline(None, w, max_visible_width=max_visible_width)
     gen.send(None)
     cmds = []
     for ch in sequence:
@@ -521,7 +521,7 @@ def test_line_editor_backspace_on_empty():
 
 
 def test_line_editor_maxvis_ascii():
-    editor = ss._LineEditor(maxvis=3)
+    editor = ss._LineEditor(max_visible_width=3)
     for ch in "abc":
         echo, _ = editor.feed(ch)
         assert echo == ch
@@ -626,7 +626,7 @@ def test_readline_backspace_emoji():
 
 
 def test_readline_maxvis_ascii():
-    cmds, echos = _run_readline("abcdefg\r", maxvis=5)
+    cmds, echos = _run_readline("abcdefg\r", max_visible_width=5)
     assert cmds == ["abcde"]
     echo_str = "".join(echos)
     assert "f" not in echo_str
@@ -635,7 +635,7 @@ def test_readline_maxvis_ascii():
 
 @wcwidth_available
 def test_readline_maxvis_wide():
-    cmds, _ = _run_readline("a\u30b3x\r", maxvis=3)
+    cmds, _ = _run_readline("a\u30b3x\r", max_visible_width=3)
     assert cmds == ["a\u30b3"]
 
 
@@ -663,14 +663,18 @@ async def test_readline_async_backspace_emoji():
 
 @pytest.mark.asyncio
 async def test_readline_async_maxvis_ascii():
-    result = await ss.readline_async(MockReader(list("abcdef\r")), MockWriter(), maxvis=4)
+    result = await ss.readline_async(
+        MockReader(list("abcdef\r")), MockWriter(), max_visible_width=4
+    )
     assert result == "abcd"
 
 
 @wcwidth_available
 @pytest.mark.asyncio
 async def test_readline_async_maxvis_wide():
-    result = await ss.readline_async(MockReader(list("a\u30b3\u30b3x\r")), MockWriter(), maxvis=5)
+    result = await ss.readline_async(
+        MockReader(list("a\u30b3\u30b3x\r")), MockWriter(), max_visible_width=5
+    )
     assert result == "a\u30b3\u30b3"
 
 

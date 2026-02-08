@@ -909,51 +909,45 @@ class TelnetWriter:
         self.send_iac(IAC + CMD_EOR)
         return True
 
-    def send_gmcp(self, package: str, data: Any = None) -> bool:
+    def send_gmcp(self, package: str, data: Any = None) -> None:
         """
         Transmit a GMCP message via subnegotiation.
 
         :param package: GMCP package name (e.g., ``"Char.Vitals"``)
         :param data: Optional data to encode as JSON
-        :returns: True if sent, False if GMCP is not negotiated
         """
         if not (self.local_option.enabled(GMCP) or self.remote_option.enabled(GMCP)):
             self.log.debug("cannot send GMCP without negotiation")
-            return False
+            return
         payload = self._escape_iac(gmcp_encode(package, data))
         self.log.debug("send IAC SB GMCP %s IAC SE", package)
         self.send_iac(IAC + SB + GMCP + payload + IAC + SE)
-        return True
 
-    def send_msdp(self, variables: dict[str, Any]) -> bool:
+    def send_msdp(self, variables: dict[str, Any]) -> None:
         """
         Transmit MSDP variables via subnegotiation.
 
         :param variables: Dictionary of variable names to values
-        :returns: True if sent, False if MSDP is not negotiated
         """
         if not (self.local_option.enabled(MSDP) or self.remote_option.enabled(MSDP)):
             self.log.debug("cannot send MSDP without negotiation")
-            return False
+            return
         payload = self._escape_iac(msdp_encode(variables))
         self.log.debug("send IAC SB MSDP IAC SE")
         self.send_iac(IAC + SB + MSDP + payload + IAC + SE)
-        return True
 
-    def send_mssp(self, variables: dict[str, str | list[str]]) -> bool:
+    def send_mssp(self, variables: dict[str, str | list[str]]) -> None:
         """
         Transmit MSSP variables via subnegotiation.
 
         :param variables: Dictionary of variable names to values
-        :returns: True if sent, False if MSSP is not negotiated
         """
         if not (self.local_option.enabled(MSSP) or self.remote_option.enabled(MSSP)):
             self.log.debug("cannot send MSSP without negotiation")
-            return False
+            return
         payload = self._escape_iac(mssp_encode(variables))
         self.log.debug("send IAC SB MSSP IAC SE")
         self.send_iac(IAC + SB + MSSP + payload + IAC + SE)
-        return True
 
     # Public methods for notifying about, or soliciting state options.
     #
@@ -1555,11 +1549,24 @@ class TelnetWriter:
         self.log.debug("Character set: %s", charset)
 
     def handle_gmcp(self, package: str, data: Any) -> None:
-        """Receive GMCP message with ``package`` name and ``data``."""
+        """
+        Receive GMCP message with ``package`` name and ``data``.
+
+        :param package: GMCP package name (e.g., ``"Char.Vitals"``).
+        :param data: Decoded JSON value -- may be any JSON type
+            (``str``, ``int``, ``float``, ``bool``, ``None``,
+            ``list``, or ``dict``).
+        """
         self.log.debug("GMCP: %s %r", package, data)
 
     def handle_msdp(self, variables: dict[str, Any]) -> None:
-        """Receive MSDP variables as dict."""
+        """
+        Receive MSDP variables as dict.
+
+        :param variables: Mapping of variable names to values.  Values
+            may be ``str``, ``dict[str, Any]`` (MSDP table), or
+            ``list[Any]`` (MSDP array) per the MSDP wire format.
+        """
         self.log.debug("MSDP: %r", variables)
 
     def handle_mssp(self, variables: dict[str, str | list[str]]) -> None:

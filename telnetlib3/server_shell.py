@@ -133,10 +133,10 @@ def _visible_width(text: str) -> int:
 class _LineEditor:  # pylint: disable=too-few-public-methods
     """Shared line-editing state machine for readline and readline_async."""
 
-    def __init__(self, maxvis: int = 0) -> None:
+    def __init__(self, max_visible_width: int = 0) -> None:
         self.command: str = ""
         self.last_char: str = ""
-        self.maxvis: int = maxvis
+        self.max_visible_width: int = max_visible_width
 
     def feed(self, char: str) -> tuple[str, Optional[str]]:
         """Feed one character, return (echo_str, command_or_none)."""
@@ -160,15 +160,15 @@ class _LineEditor:  # pylint: disable=too-few-public-methods
                 return echo, None
             return "", None
 
-        # Regular character -- check maxvis
+        # Regular character -- check max_visible_width
         self.last_char = char
-        if self.maxvis and _visible_width(self.command + char) > self.maxvis:
+        if self.max_visible_width and _visible_width(self.command + char) > self.max_visible_width:
             return "", None
         self.command += char
         return char, None
 
 
-__all__ = ("telnet_server_shell", "readline_async", "readline2", "readline")
+__all__ = ("telnet_server_shell", "readline_async", "readline")
 
 
 async def telnet_server_shell(  # pylint: disable=too-complex,too-many-branches,too-many-statements
@@ -302,17 +302,17 @@ async def get_next_ascii(
 def readline(
     _reader: Union[TelnetReader, TelnetReaderUnicode],
     writer: Union[TelnetWriter, TelnetWriterUnicode],
-    maxvis: int = 0,
+    max_visible_width: int = 0,
 ) -> Generator[Optional[str], str, None]:
     """
     Blocking readline using generator yield/send protocol.
 
     Characters are fed in via ``send()`` and complete lines are yielded.
-    Uses ``_LineEditor`` for grapheme-aware backspace and maxvis
+    Uses ``_LineEditor`` for grapheme-aware backspace and max_visible_width
     support.
     """
     _writer = cast(TelnetWriterUnicode, writer)
-    editor = _LineEditor(maxvis=maxvis)
+    editor = _LineEditor(max_visible_width=max_visible_width)
     inp = yield None
     while True:
         echo, cmd = editor.feed(inp)
@@ -324,17 +324,17 @@ def readline(
 async def readline_async(
     reader: Union[TelnetReader, TelnetReaderUnicode],
     writer: Union[TelnetWriter, TelnetWriterUnicode],
-    maxvis: int = 0,
+    max_visible_width: int = 0,
 ) -> Optional[str]:
     """
     Async readline that filters ANSI escape sequences.
 
     Uses ``filter_ansi()`` to strip escape sequences and
-    ``_LineEditor`` for grapheme-aware backspace and maxvis support.
+    ``_LineEditor`` for grapheme-aware backspace and max_visible_width support.
     """
     _reader = cast(TelnetReaderUnicode, reader)
     _writer = cast(TelnetWriterUnicode, writer)
-    editor = _LineEditor(maxvis=maxvis)
+    editor = _LineEditor(max_visible_width=max_visible_width)
     while True:
         next_char = await filter_ansi(_reader, _writer)
         if not next_char:
