@@ -6,6 +6,7 @@ History
     with ``WILL`` responses. These are client-only options per :rfc:`1079`
     and :rfc:`779`; the server now correctly rejects them.
   * bugfix: repeat "socket.send() raised exception." exceptions
+  * bugfix: echo doubling in ``--pty-exec`` without ``--pty-raw`` (linemode).
   * new: :mod:`telnetlib3.mud` module with encode/decode functions for
     GMCP (option 201), MSDP (option 69), and MSSP (option 70) MUD telnet
     protocols.
