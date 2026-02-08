@@ -1,5 +1,6 @@
 # std imports
 import struct
+import logging
 import collections
 
 # 3rd party
@@ -19,9 +20,11 @@ from telnetlib3.telopt import (
     NAWS,
     SEND,
     WILL,
+    WONT,
     LFLOW,
     TTYPE,
     BINARY,
+    SNDLOC,
     STATUS,
     TSPEED,
     CHARSET,
@@ -37,7 +40,7 @@ from telnetlib3.telopt import (
 )
 from telnetlib3.client_base import BaseClient
 from telnetlib3.server_base import BaseServer
-from telnetlib3.stream_writer import TelnetWriter, _encode_env_buf
+from telnetlib3.stream_writer import TelnetWriter, _encode_env_buf, _format_sb_status
 
 
 class MockTransport:
@@ -573,3 +576,74 @@ async def test_client_process_chunk_split_sb_linemode():
 
     response = b"".join(transport.writes)
     assert IAC + SB + LINEMODE + slc.LMODE_MODE in response
+
+
+@pytest.mark.parametrize(
+    "opt, data, expected",
+    [
+        (NAWS, b"\x00\x50\x00\x19", "NAWS 80x25"),
+        (NAWS, b"\x01\x00\x00\xc8", "NAWS 256x200"),
+        (TTYPE, IS + b"VT100", "TTYPE IS VT100"),
+        (TTYPE, SEND + b"xterm", "TTYPE SEND xterm"),
+        (XDISPLOC, IS + b"host:0.0", "XDISPLOC IS host:0.0"),
+        (SNDLOC, IS + b"Building4", "SNDLOC IS Building4"),
+        (TTYPE, b"\x99" + b"data", "TTYPE 99 data"),
+        (STATUS, b"\xab\xcd", "STATUS abcd"),
+        (NAWS, b"\x00\x50\x00", "NAWS 005000"),
+        (STATUS, b"", "STATUS"),
+        (BINARY, b"", "BINARY"),
+    ],
+)
+def test_format_sb_status(opt, data, expected):
+    """Test _format_sb_status output for each branch."""
+    assert _format_sb_status(opt, data) == expected
+
+
+def _make_status_is_buf(*parts):
+    """Build a deque for _handle_sb_status from raw byte sequences."""
+    buf = collections.deque()
+    buf.append(STATUS)
+    buf.append(IS)
+    for part in parts:
+        for byte_val in part:
+            buf.append(bytes([byte_val]))
+    return buf
+
+
+def test_receive_status_sb_naws(caplog):
+    """STATUS IS with embedded SB NAWS data SE."""
+    ws, _, _ = new_writer(server=True)
+    ws.local_option[NAWS] = True
+    naws_payload = struct.pack("!HH", 80, 25)
+    buf = _make_status_is_buf(SB + NAWS + naws_payload + SE)
+    with caplog.at_level(logging.DEBUG):
+        ws._handle_sb_status(buf)
+    assert any("NAWS 80x25" in msg for msg in caplog.messages)
+
+
+def test_receive_status_sb_missing_se(caplog):
+    """STATUS IS with SB block missing SE consumes rest of buffer."""
+    ws, _, _ = new_writer(server=True)
+    naws_payload = struct.pack("!HH", 80, 25)
+    buf = _make_status_is_buf(SB + NAWS + naws_payload)
+    with caplog.at_level(logging.DEBUG):
+        ws._handle_sb_status(buf)
+    assert any("subneg" in msg for msg in caplog.messages)
+
+
+def test_receive_status_mixed_do_will_and_sb(caplog):
+    """STATUS IS with DO/WILL pairs intermixed with SB blocks."""
+    ws, _, _ = new_writer(server=True)
+    ws.local_option[BINARY] = True
+    ws.remote_option[SGA] = True
+    ws.remote_option[ECHO] = True
+    ws.local_option[NAWS] = True
+    naws_payload = struct.pack("!HH", 132, 43)
+    buf = _make_status_is_buf(
+        DO + BINARY + WILL + SGA + SB + NAWS + naws_payload + SE + WONT + ECHO
+    )
+    with caplog.at_level(logging.DEBUG):
+        ws._handle_sb_status(buf)
+    assert any("agreed" in msg.lower() for msg in caplog.messages)
+    assert any("NAWS 132x43" in msg for msg in caplog.messages)
+    assert any("disagree" in msg.lower() for msg in caplog.messages)

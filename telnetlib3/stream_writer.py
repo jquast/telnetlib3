@@ -1735,7 +1735,7 @@ class TelnetWriter:
         """
         self.log.debug("handle_dont(%s)", name_command(opt))
         if opt == LOGOUT:
-            assert self.server, "cannot recv DONT LOGOUT on server end"
+            assert self.server, "cannot recv DONT LOGOUT on client end"
             self._ext_callback[LOGOUT](DONT)
         # many implementations (wrongly!) sent a WONT in reply to DONT. It
         # sounds reasonable, but it can and will cause telnet loops. (ruby?)
@@ -1797,7 +1797,7 @@ class TelnetWriter:
 
         elif opt == LOGOUT:
             if self.client:
-                raise ValueError("cannot recv WILL LOGOUT on server end")
+                raise ValueError("cannot recv WILL LOGOUT on client end")
             self._ext_callback[LOGOUT](WILL)
 
         elif opt == STATUS:
@@ -2682,7 +2682,8 @@ class TelnetWriter:
         """
         buf.popleft()
         payload = b"".join(buf)
-        package, data = gmcp_decode(payload)
+        encoding = self.environ_encoding or "utf-8"
+        package, data = gmcp_decode(payload, encoding=encoding)
         self._ext_callback[GMCP](package, data)
 
     def _handle_sb_msdp(self, buf: collections.deque[bytes]) -> None:
@@ -2693,7 +2694,8 @@ class TelnetWriter:
         """
         buf.popleft()
         payload = b"".join(buf)
-        variables = msdp_decode(payload)
+        encoding = self.environ_encoding or "utf-8"
+        variables = msdp_decode(payload, encoding=encoding)
         self._ext_callback[MSDP](variables)
 
     def _handle_sb_mssp(self, buf: collections.deque[bytes]) -> None:
@@ -2705,11 +2707,7 @@ class TelnetWriter:
         buf.popleft()
         payload = b"".join(buf)
         encoding = self.environ_encoding or "utf-8"
-        try:
-            variables = mssp_decode(payload, encoding=encoding)
-        except UnicodeDecodeError:
-            self.log.debug("MSSP decode failed with %s, retrying latin-1", encoding)
-            variables = mssp_decode(payload, encoding="latin-1")
+        variables = mssp_decode(payload, encoding=encoding)
         self._ext_callback[MSSP](variables)
 
     def _handle_do_forwardmask(self, buf: collections.deque[bytes]) -> None:

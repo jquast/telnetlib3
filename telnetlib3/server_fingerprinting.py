@@ -170,9 +170,12 @@ async def _fingerprint_session(
     probe_results = await probe_server_capabilities(writer)
     probe_time = time.time() - probe_start
 
-    # 5b. If server acknowledged MSSP but data hasn't arrived yet, wait briefly
+    # 5b. If server acknowledged MSSP but data hasn't arrived yet, poll briefly
     if writer.remote_option.enabled(MSSP) and writer.mssp_data is None:
-        await asyncio.sleep(0.25)
+        for _ in range(10):
+            await asyncio.sleep(0.05)
+            if writer.mssp_data is not None:
+                break
 
     # 6. Build session dicts
     session_data: dict[str, Any] = {
