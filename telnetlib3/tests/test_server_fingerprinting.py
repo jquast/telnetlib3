@@ -34,11 +34,15 @@ class MockWriter:
         self._will_options = set(will_options or [])
         self._wont_options = set(wont_options or [])
         self._iac_calls = []
+        self._writes: list[bytes] = []
         self.remote_option = MockOption()
         self.local_option = MockOption()
         self.environ_encoding = "ascii"
         self.environ_send_raw = None
         self.mssp_data = None
+        self.zmp_data: list[list[str]] = []
+        self.atcp_data: list[tuple[str, str]] = []
+        self.aardwolf_data: list[dict[str, object]] = []
         self._closing = False
 
     def get_extra_info(self, key, default=None):
@@ -52,7 +56,7 @@ class MockWriter:
             self.remote_option[opt] = False
 
     def write(self, data):
-        pass
+        self._writes.append(data)
 
     async def drain(self):
         pass
@@ -148,9 +152,7 @@ async def test_probe_timeout_and_defaults():
     results2 = await sfp.probe_server_capabilities(writer2, timeout=0.01)
     assert "BINARY" in results2
     base = fps.QUICK_PROBE_OPTIONS + fps.EXTENDED_OPTIONS
-    expected = len(base) - len(
-        [o for o in base if o[0] in sfp._CLIENT_ONLY_WILL]
-    )
+    expected = len(base) - len([o for o in base if o[0] in sfp._CLIENT_ONLY_WILL])
     assert len(results2) == expected
 
 
@@ -241,9 +243,7 @@ async def test_read_banner_until_quiet_max_bytes():
 @pytest.mark.asyncio
 async def test_read_banner_until_quiet_collects_multiple_chunks():
     reader = MockReader([b"chunk1", b"chunk2", b"chunk3"])
-    result = await sfp._read_banner_until_quiet(
-        reader, quiet_time=0.01, max_wait=1.0
-    )
+    result = await sfp._read_banner_until_quiet(reader, quiet_time=0.01, max_wait=1.0)
     assert result == b"chunk1chunk2chunk3"
 
 
@@ -643,9 +643,7 @@ async def test_probe_server_capabilities_full():
     legacy_names = {name for _, name, _ in fps.LEGACY_OPTIONS}
     assert probed_names.issuperset(legacy_names)
     base = fps.ALL_PROBE_OPTIONS + fps.EXTENDED_OPTIONS
-    expected = len(base) - len(
-        [o for o in base if o[0] in sfp._CLIENT_ONLY_WILL]
-    )
+    expected = len(base) - len([o for o in base if o[0] in sfp._CLIENT_ONLY_WILL])
     assert len(results) == expected
 
 
@@ -710,3 +708,91 @@ async def test_probe_skipped_when_closing(tmp_path):
         data = json.load(f)
     assert data["server-probe"]["fingerprint-data"]["offered-options"] == []
     assert data["server-probe"]["fingerprint-data"]["refused-options"] == []
+
+
+@pytest.mark.parametrize(
+    "banner,expected",
+    [
+        pytest.param(b"Welcome\r\n", b"\r\n", id="no_prompt"),
+        pytest.param(b"", b"\r\n", id="empty"),
+        pytest.param(b"Continue? (yes/no) ", b"yes\r\n", id="yes_no_parens"),
+        pytest.param(b"Continue? (y/n) ", b"y\r\n", id="y_n_parens"),
+        pytest.param(b"Accept terms? [Yes/No]:", b"yes\r\n", id="yes_no_brackets"),
+        pytest.param(b"Accept? [Y/N]:", b"y\r\n", id="y_n_brackets"),
+        pytest.param(b"Accept YES/NO now", b"yes\r\n", id="yes_no_uppercase"),
+        pytest.param(b"Confirm y/n\r\n> ", b"y\r\n", id="y_n_trailing_newline"),
+        pytest.param(b"Type yes/no please", b"yes\r\n", id="yes_no_space_delimited"),
+        pytest.param(b"systemd/network", b"\r\n", id="false_positive_word"),
+        pytest.param(b"beyond", b"\r\n", id="substring_y_n_not_matched"),
+    ],
+)
+def test_detect_yn_prompt(banner, expected):
+    assert sfp._detect_yn_prompt(banner) == expected
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_yn_prompt(tmp_path):
+    """Banner with y/n prompt causes 'y\\r\\n' instead of bare '\\r\\n'."""
+    save_path = str(tmp_path / "result.json")
+    reader = MockReader([b"Do you accept? (y/n) "])
+    writer = MockWriter(will_options=[fps.SGA])
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"y\r\n" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_yes_no_prompt(tmp_path):
+    """Banner with yes/no prompt causes 'yes\\r\\n' instead of bare '\\r\\n'."""
+    save_path = str(tmp_path / "result.json")
+    reader = MockReader([b"Continue? (yes/no) "])
+    writer = MockWriter(will_options=[fps.SGA])
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"yes\r\n" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_no_yn_prompt(tmp_path):
+    """Banner without y/n prompt sends bare '\\r\\n'."""
+    save_path = str(tmp_path / "result.json")
+    reader = MockReader([b"Welcome to BBS\r\n"])
+    writer = MockWriter(will_options=[fps.SGA])
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"\r\n" in writer._writes
+    assert b"y\r\n" not in writer._writes
+    assert b"yes\r\n" not in writer._writes

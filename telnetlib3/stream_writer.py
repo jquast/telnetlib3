@@ -19,7 +19,7 @@ if TYPE_CHECKING:  # pragma: no cover
 # local
 from . import slc
 from .mud import (
-    aardwolf_decode,
+    zmp_decode,
     atcp_decode,
     gmcp_decode,
     gmcp_encode,
@@ -27,7 +27,7 @@ from .mud import (
     msdp_encode,
     mssp_decode,
     mssp_encode,
-    zmp_decode,
+    aardwolf_decode,
 )
 from .telopt import (
     AO,
@@ -74,11 +74,11 @@ from .telopt import (
     SNDLOC,
     STATUS,
     TSPEED,
-    AARDWOLF,
     CHARSET,
     CMD_EOR,
     REQUEST,
     USERVAR,
+    AARDWOLF,
     ACCEPTED,
     LFLOW_ON,
     LINEMODE,
@@ -101,6 +101,9 @@ from .telopt import (
 )
 
 __all__ = ("TelnetWriter", "TelnetWriterUnicode")
+
+#: MUD options that allow empty SB payloads (e.g. ``IAC SB MXP IAC SE``).
+_EMPTY_SB_OK = frozenset({MXP, MSP, ZMP, AARDWOLF, ATCP})
 
 
 class TelnetWriter:
@@ -658,7 +661,9 @@ class TelnetWriter:
                 sb_opt = name_command(self._sb_buffer[0]) if self._sb_buffer else "?"
                 self.log.warning(
                     "sub-negotiation SB %s (%d bytes) interrupted by IAC %s",
-                    sb_opt, len(self._sb_buffer), name_command(cmd),
+                    sb_opt,
+                    len(self._sb_buffer),
+                    name_command(cmd),
                 )
                 self._sb_buffer.clear()
             else:
@@ -1857,8 +1862,23 @@ class TelnetWriter:
         """
         self.log.debug("handle_will(%s)", name_command(opt))
 
-        if opt in (BINARY, SGA, ECHO, NAWS, LINEMODE, EOR, SNDLOC,
-                   GMCP, MSDP, MSSP, MSP, MXP, ZMP, AARDWOLF, ATCP):
+        if opt in (
+            BINARY,
+            SGA,
+            ECHO,
+            NAWS,
+            LINEMODE,
+            EOR,
+            SNDLOC,
+            GMCP,
+            MSDP,
+            MSSP,
+            MSP,
+            MXP,
+            ZMP,
+            AARDWOLF,
+            ATCP,
+        ):
             if opt == ECHO and self.server:
                 raise ValueError("cannot recv WILL ECHO on server end")
             if opt in (NAWS, LINEMODE, SNDLOC) and self.client:
@@ -1995,7 +2015,6 @@ class TelnetWriter:
         if buf[0] == theNULL:
             raise ValueError("SE: buffer is NUL")
         # MUD protocols may send empty SB payloads (e.g. IAC SB MXP IAC SE).
-        _EMPTY_SB_OK = frozenset({MXP, MSP, ZMP, AARDWOLF, ATCP})
         if len(buf) == 1 and buf[0] not in _EMPTY_SB_OK:
             raise ValueError(f"SE: buffer too short: {buf!r}")
 
@@ -2808,7 +2827,8 @@ class TelnetWriter:
         self._ext_callback[MSSP](variables)
 
     def _handle_sb_msp(self, buf: collections.deque[bytes]) -> None:
-        """Handle MUD Sound Protocol (MSP) subnegotiation.
+        """
+        Handle MUD Sound Protocol (MSP) subnegotiation.
 
         :param buf: bytes following IAC SB MSP.
         """
@@ -2817,7 +2837,8 @@ class TelnetWriter:
         self._ext_callback[MSP](payload)
 
     def _handle_sb_mxp(self, buf: collections.deque[bytes]) -> None:
-        """Handle MUD eXtension Protocol (MXP) subnegotiation.
+        """
+        Handle MUD eXtension Protocol (MXP) subnegotiation.
 
         :param buf: bytes following IAC SB MXP.
         """
@@ -2826,7 +2847,8 @@ class TelnetWriter:
         self._ext_callback[MXP](payload)
 
     def _handle_sb_zmp(self, buf: collections.deque[bytes]) -> None:
-        """Handle Zenith MUD Protocol (ZMP) subnegotiation.
+        """
+        Handle Zenith MUD Protocol (ZMP) subnegotiation.
 
         :param buf: bytes following IAC SB ZMP.
         """
@@ -2837,7 +2859,8 @@ class TelnetWriter:
         self._ext_callback[ZMP](parts)
 
     def _handle_sb_aardwolf(self, buf: collections.deque[bytes]) -> None:
-        """Handle Aardwolf protocol subnegotiation.
+        """
+        Handle Aardwolf protocol subnegotiation.
 
         :param buf: bytes following IAC SB AARDWOLF.
         """
@@ -2847,7 +2870,8 @@ class TelnetWriter:
         self._ext_callback[AARDWOLF](data)
 
     def _handle_sb_atcp(self, buf: collections.deque[bytes]) -> None:
-        """Handle Achaea Telnet Client Protocol (ATCP) subnegotiation.
+        """
+        Handle Achaea Telnet Client Protocol (ATCP) subnegotiation.
 
         :param buf: bytes following IAC SB ATCP.
         """

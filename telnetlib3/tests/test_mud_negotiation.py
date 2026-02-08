@@ -7,10 +7,7 @@ import collections
 import pytest
 
 # local
-from telnetlib3.telopt import (
-    DO, SB, SE, IAC, GMCP, MSDP, MSSP, WILL,
-    MSP, MXP, ZMP, AARDWOLF, ATCP,
-)
+from telnetlib3.telopt import DO, SB, SE, IAC, MSP, MXP, ZMP, ATCP, GMCP, MSDP, MSSP, WILL, AARDWOLF
 from telnetlib3.stream_writer import TelnetWriter
 
 

@@ -742,10 +742,7 @@ def _get_fingerprint_argument_parser() -> argparse.ArgumentParser:
         "--banner-max-wait", default=8.0, type=float, help="max seconds to wait for banner data"
     )
     parser.add_argument(
-        "--banner-max-bytes",
-        default=65536,
-        type=int,
-        help="max bytes per banner read call",
+        "--banner-max-bytes", default=65536, type=int, help="max bytes per banner read call"
     )
     return parser
 

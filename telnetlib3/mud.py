@@ -335,10 +335,7 @@ def aardwolf_decode(buf: bytes) -> dict[str, Any]:
         return {"channel": "unknown", "channel_byte": 0, "data_bytes": b""}
     channel_byte = buf[0]
     channel_name = _AARDWOLF_CHANNELS.get(channel_byte, f"0x{channel_byte:02x}")
-    result: dict[str, Any] = {
-        "channel": channel_name,
-        "channel_byte": channel_byte,
-    }
+    result: dict[str, Any] = {"channel": channel_name, "channel_byte": channel_byte}
     if len(buf) == 2:
         result["data_byte"] = buf[1]
     if len(buf) > 1:

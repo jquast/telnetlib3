@@ -11,6 +11,7 @@ from __future__ import annotations
 
 # std imports
 import os
+import re
 import sys
 import json
 import time
@@ -40,8 +41,8 @@ from .telopt import (
 from .stream_reader import TelnetReader
 from .stream_writer import TelnetWriter
 from .fingerprinting import (
-    ALL_PROBE_OPTIONS,
     EXTENDED_OPTIONS,
+    ALL_PROBE_OPTIONS,
     QUICK_PROBE_OPTIONS,
     _hash_fingerprint,
     _opt_byte_to_name,
@@ -65,6 +66,10 @@ _BANNER_WAIT = 3.0
 _POST_RETURN_WAIT = 3.0
 _PROBE_TIMEOUT = 0.5
 _JQ = shutil.which("jq")
+
+# Match "yes/no" or "y/n" surrounded by non-alphanumeric chars (or at
+# string boundaries).  Used to auto-answer confirmation prompts.
+_YN_RE = re.compile(rb"(?i)(?:^|[^a-zA-Z0-9])(yes/no|y/n)(?:[^a-zA-Z0-9]|$)")
 
 logger = logging.getLogger("telnetlib3.server_fingerprint")
 
@@ -94,6 +99,27 @@ def _print_json(data: dict[str, Any]) -> None:
         if result.returncode == 0:
             raw = result.stdout.rstrip("\n")
     print(raw, file=sys.stdout)
+
+
+def _detect_yn_prompt(banner: bytes) -> bytes:
+    r"""
+    Return an appropriate first-prompt response based on banner content.
+
+    If the banner contains a ``yes/no`` or ``y/n`` confirmation prompt
+    (case-insensitive, delimited by non-alphanumeric characters), returns
+    ``b"yes\r\n"`` or ``b"y\r\n"`` respectively.  Otherwise returns a
+    bare ``b"\r\n"``.
+
+    :param banner: Raw banner bytes collected before the first prompt.
+    :returns: Response bytes to send.
+    """
+    match = _YN_RE.search(banner)
+    if match:
+        token = match.group(1).lower()
+        if token == b"yes/no":
+            return b"yes\r\n"
+        return b"y\r\n"
+    return b"\r\n"
 
 
 async def fingerprinting_client_shell(
@@ -158,7 +184,7 @@ async def fingerprinting_client_shell(
         writer.close()
 
 
-async def _fingerprint_session(
+async def _fingerprint_session(  # pylint: disable=too-many-locals
     reader: TelnetReader,
     writer: TelnetWriter,
     *,
@@ -181,20 +207,15 @@ async def _fingerprint_session(
 
     # 2. Read banner (pre-return) — wait until output stops
     banner_before = await _read_banner_until_quiet(
-        reader,
-        quiet_time=banner_quiet_time,
-        max_wait=banner_max_wait,
-        max_bytes=banner_max_bytes,
+        reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait, max_bytes=banner_max_bytes
     )
 
-    # 3. Send return, read post-return data
-    writer.write(b"\r\n")
+    # 3. Send return (or "yes"/"y" if the banner contains a y/n prompt)
+    prompt_response = _detect_yn_prompt(banner_before)
+    writer.write(prompt_response)
     await writer.drain()
     banner_after = await _read_banner_until_quiet(
-        reader,
-        quiet_time=banner_quiet_time,
-        max_wait=banner_max_wait,
-        max_bytes=banner_max_bytes,
+        reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait, max_bytes=banner_max_bytes
     )
 
     # 4. Snapshot option states before probing
@@ -229,11 +250,10 @@ async def _fingerprint_session(
     if writer.zmp_data:
         session_data["zmp"] = writer.zmp_data
     if writer.atcp_data:
-        session_data["atcp"] = [
-            {"package": pkg, "value": val} for pkg, val in writer.atcp_data
-        ]
+        session_data["atcp"] = [{"package": pkg, "value": val} for pkg, val in writer.atcp_data]
     if writer.aardwolf_data:
         session_data["aardwolf"] = writer.aardwolf_data
+
     session_entry: dict[str, Any] = {
         "host": host,
         "ip": (writer.get_extra_info("peername") or (host,))[0],
@@ -522,9 +542,7 @@ async def _await_mssp_data(writer: TelnetWriter, deadline: float) -> None:
 
 
 async def _read_banner(
-    reader: TelnetReader,
-    timeout: float = _BANNER_WAIT,
-    max_bytes: int = _BANNER_MAX_BYTES,
+    reader: TelnetReader, timeout: float = _BANNER_WAIT, max_bytes: int = _BANNER_MAX_BYTES
 ) -> bytes:
     """
     Read up to *max_bytes* from *reader* with timeout.
@@ -571,9 +589,7 @@ async def _read_banner_until_quiet(
         if remaining <= 0:
             break
         try:
-            chunk = await asyncio.wait_for(
-                reader.read(max_bytes), timeout=remaining
-            )
+            chunk = await asyncio.wait_for(reader.read(max_bytes), timeout=remaining)
             if not chunk:
                 break
             chunks.append(chunk)
