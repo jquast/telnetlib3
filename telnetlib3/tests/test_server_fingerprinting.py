@@ -219,6 +219,33 @@ async def test_read_banner():
     assert await sfp._read_banner(MockReader([]), timeout=0.01) == b""
 
 
+@pytest.mark.asyncio
+async def test_read_banner_max_bytes():
+    big = b"A" * 200
+    reader = MockReader([big])
+    result = await sfp._read_banner(reader, timeout=0.1, max_bytes=50)
+    assert result == b"A" * 50
+
+
+@pytest.mark.asyncio
+async def test_read_banner_until_quiet_max_bytes():
+    big = b"B" * 200
+    reader = MockReader([big])
+    result = await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=0.05, max_bytes=80
+    )
+    assert result == b"B" * 80
+
+
+@pytest.mark.asyncio
+async def test_read_banner_until_quiet_collects_multiple_chunks():
+    reader = MockReader([b"chunk1", b"chunk2", b"chunk3"])
+    result = await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=1.0
+    )
+    assert result == b"chunk1chunk2chunk3"
+
+
 def test_save_server_fingerprint_data(tmp_path, monkeypatch):
     monkeypatch.setattr(fps, "DATA_DIR", str(tmp_path))
     filepath = _save(

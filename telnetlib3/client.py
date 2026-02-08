@@ -741,6 +741,12 @@ def _get_fingerprint_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--banner-max-wait", default=8.0, type=float, help="max seconds to wait for banner data"
     )
+    parser.add_argument(
+        "--banner-max-bytes",
+        default=65536,
+        type=int,
+        help="max bytes per banner read call",
+    )
     return parser
 
 
@@ -778,6 +784,7 @@ async def run_fingerprint_client() -> None:
         mssp_wait=args.mssp_wait,
         banner_quiet_time=args.banner_quiet_time,
         banner_max_wait=args.banner_max_wait,
+        banner_max_bytes=args.banner_max_bytes,
     )
 
     # Parse --always-will/--always-do option names/numbers

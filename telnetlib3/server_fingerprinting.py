@@ -58,7 +58,7 @@ __all__ = ("fingerprinting_client_shell", "probe_server_capabilities")
 # in ``server_requested`` (what the server sent DO for).
 _CLIENT_ONLY_WILL = frozenset({TTYPE, TSPEED, NAWS, XDISPLOC, NEW_ENVIRON, LFLOW, LINEMODE, SNDLOC})
 
-_BANNER_MAX_BYTES = 1024
+_BANNER_MAX_BYTES = 65536
 _NEGOTIATION_SETTLE = 0.5
 _BANNER_WAIT = 3.0
 _POST_RETURN_WAIT = 3.0
@@ -109,6 +109,7 @@ async def fingerprinting_client_shell(
     mssp_wait: float = 5.0,
     banner_quiet_time: float = 2.0,
     banner_max_wait: float = 8.0,
+    banner_max_bytes: int = _BANNER_MAX_BYTES,
 ) -> None:
     """
     Client shell that fingerprints a remote telnet server.
@@ -131,8 +132,9 @@ async def fingerprinting_client_shell(
         ``"full"`` includes all LEGACY options.
     :param mssp_wait: Max seconds since connect to wait for MSSP data.
     :param banner_quiet_time: Seconds of silence before considering the
-        pre-return banner complete.
-    :param banner_max_wait: Max seconds to wait for pre-return banner data.
+        banner complete.
+    :param banner_max_wait: Max seconds to wait for banner data.
+    :param banner_max_bytes: Maximum bytes per banner read call.
     """
     writer.environ_encoding = environ_encoding
     try:
@@ -148,6 +150,7 @@ async def fingerprinting_client_shell(
             mssp_wait=mssp_wait,
             banner_quiet_time=banner_quiet_time,
             banner_max_wait=banner_max_wait,
+            banner_max_bytes=banner_max_bytes,
         )
     except (ConnectionError, EOFError) as exc:
         logger.warning("%s:%d: %s", host, port, exc)
@@ -167,6 +170,7 @@ async def _fingerprint_session(
     mssp_wait: float = 5.0,
     banner_quiet_time: float = 2.0,
     banner_max_wait: float = 8.0,
+    banner_max_bytes: int = _BANNER_MAX_BYTES,
 ) -> None:
     """Run the fingerprint session (inner helper for error handling)."""
     start_time = time.time()
@@ -176,13 +180,21 @@ async def _fingerprint_session(
 
     # 2. Read banner (pre-return) — wait until output stops
     banner_before = await _read_banner_until_quiet(
-        reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait
+        reader,
+        quiet_time=banner_quiet_time,
+        max_wait=banner_max_wait,
+        max_bytes=banner_max_bytes,
     )
 
     # 3. Send return, read post-return data
     writer.write(b"\r\n")
     await writer.drain()
-    banner_after = await _read_banner(reader, timeout=_POST_RETURN_WAIT)
+    banner_after = await _read_banner_until_quiet(
+        reader,
+        quiet_time=banner_quiet_time,
+        max_wait=banner_max_wait,
+        max_bytes=banner_max_bytes,
+    )
 
     # 4. Snapshot option states before probing
     session_data: dict[str, Any] = {"option_states": _collect_server_option_states(writer)}
@@ -497,26 +509,34 @@ async def _await_mssp_data(writer: TelnetWriter, deadline: float) -> None:
         remaining = deadline - time.time()
 
 
-async def _read_banner(reader: TelnetReader, timeout: float = _BANNER_WAIT) -> bytes:
+async def _read_banner(
+    reader: TelnetReader,
+    timeout: float = _BANNER_WAIT,
+    max_bytes: int = _BANNER_MAX_BYTES,
+) -> bytes:
     """
-    Read up to :data:`_BANNER_MAX_BYTES` from *reader* with timeout.
+    Read up to *max_bytes* from *reader* with timeout.
 
     Returns whatever bytes were received before the timeout, which may
     be empty if the server sends nothing.
 
     :param reader: :class:`~telnetlib3.stream_reader.TelnetReader` instance.
     :param timeout: Seconds to wait for data.
+    :param max_bytes: Maximum bytes to read in a single call.
     :returns: Banner bytes (may be empty).
     """
     try:
-        data = await asyncio.wait_for(reader.read(_BANNER_MAX_BYTES), timeout=timeout)
+        data = await asyncio.wait_for(reader.read(max_bytes), timeout=timeout)
     except (asyncio.TimeoutError, EOFError):
         data = b""
     return data
 
 
 async def _read_banner_until_quiet(
-    reader: TelnetReader, quiet_time: float = 2.0, max_wait: float = 8.0
+    reader: TelnetReader,
+    quiet_time: float = 2.0,
+    max_wait: float = 8.0,
+    max_bytes: int = _BANNER_MAX_BYTES,
 ) -> bytes:
     """
     Read banner data until output stops for *quiet_time* seconds.
@@ -528,6 +548,7 @@ async def _read_banner_until_quiet(
     :param reader: :class:`~telnetlib3.stream_reader.TelnetReader` instance.
     :param quiet_time: Seconds of silence before considering banner complete.
     :param max_wait: Maximum total seconds to wait for banner data.
+    :param max_bytes: Maximum bytes per read call.
     :returns: Banner bytes (may be empty).
     """
     chunks: list[bytes] = []
@@ -538,7 +559,9 @@ async def _read_banner_until_quiet(
         if remaining <= 0:
             break
         try:
-            chunk = await asyncio.wait_for(reader.read(_BANNER_MAX_BYTES), timeout=remaining)
+            chunk = await asyncio.wait_for(
+                reader.read(max_bytes), timeout=remaining
+            )
             if not chunk:
                 break
             chunks.append(chunk)
