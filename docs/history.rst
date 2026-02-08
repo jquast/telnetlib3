@@ -9,6 +9,10 @@ History
     ``NotImplementedError``; the mask is accepted (logged only).
   * bugfix: echo doubling in ``--pty-exec`` without ``--pty-raw`` (linemode).
   * bugfix: missing LICENSE.txt in sdist file.
+  * bugfix: GMCP, MSDP, and MSSP decoding now uses ``--encoding`` when set,
+    falling back to latin-1 for non-UTF-8 bytes instead of lossy replacement.
+  * bugfix: ``NEW_ENVIRON SEND`` with empty payload now correctly
+    interpreted as "send all" per :rfc:`1572`.
   * new: :mod:`telnetlib3.mud` module with encode/decode functions for
     GMCP (option 201), MSDP (option 69), and MSSP (option 70) MUD telnet
     protocols.
@@ -29,10 +33,10 @@ History
     ``DONT``/``WONT`` instead of raising ``ValueError``.
   * enhancement: ``NEW_ENVIRON SEND`` and response logging improved --
     ``SEND (all)`` / ``env send: (empty)`` instead of raw byte dumps.
-  * bugfix: GMCP, MSDP, and MSSP decoding now uses ``--encoding`` when set,
-    falling back to latin-1 for non-UTF-8 bytes instead of lossy replacement.
   * enhancement: ``telnetlib3-fingerprint`` now probes MSDP and MSSP options
     and captures MSSP server status data in session output.
+  * new: ``--always-will``, ``--always-do``, ``--scan-type``, ``--mssp-wait``,
+    ``--banner-quiet-time``, ``--banner-max-wait`` options for ``telnetlib3-fingerprint``.
 
 2.2.0
   * bugfix: workaround for Microsoft Telnet client crash on

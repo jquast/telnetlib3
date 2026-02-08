@@ -41,6 +41,7 @@ from .stream_reader import TelnetReader
 from .stream_writer import TelnetWriter
 from .fingerprinting import (
     ALL_PROBE_OPTIONS,
+    QUICK_PROBE_OPTIONS,
     _hash_fingerprint,
     _opt_byte_to_name,
     _atomic_json_write,
@@ -61,6 +62,7 @@ _BANNER_MAX_BYTES = 1024
 _NEGOTIATION_SETTLE = 0.5
 _BANNER_WAIT = 3.0
 _POST_RETURN_WAIT = 3.0
+_PROBE_TIMEOUT = 0.5
 _JQ = shutil.which("jq")
 
 logger = logging.getLogger("telnetlib3.server_fingerprint")
@@ -103,6 +105,10 @@ async def fingerprinting_client_shell(
     silent: bool = False,
     set_name: str | None = None,
     environ_encoding: str = "ascii",
+    scan_type: str = "quick",
+    mssp_wait: float = 5.0,
+    banner_quiet_time: float = 2.0,
+    banner_max_wait: float = 8.0,
 ) -> None:
     """
     Client shell that fingerprints a remote telnet server.
@@ -121,6 +127,12 @@ async def fingerprinting_client_shell(
         ``fingerprint_names.json`` without requiring moderation.
     :param environ_encoding: Encoding for NEW_ENVIRON data.  Default
         ``"ascii"`` per :rfc:`1572`; use ``"cp037"`` for EBCDIC hosts.
+    :param scan_type: ``"quick"`` probes CORE + MUD options only (default);
+        ``"full"`` includes all LEGACY options.
+    :param mssp_wait: Max seconds since connect to wait for MSSP data.
+    :param banner_quiet_time: Seconds of silence before considering the
+        pre-return banner complete.
+    :param banner_max_wait: Max seconds to wait for pre-return banner data.
     """
     writer.environ_encoding = environ_encoding
     try:
@@ -132,6 +144,10 @@ async def fingerprinting_client_shell(
             save_path=save_path,
             silent=silent,
             set_name=set_name,
+            scan_type=scan_type,
+            mssp_wait=mssp_wait,
+            banner_quiet_time=banner_quiet_time,
+            banner_max_wait=banner_max_wait,
         )
     except (ConnectionError, EOFError) as exc:
         logger.warning("%s:%d: %s", host, port, exc)
@@ -147,6 +163,10 @@ async def _fingerprint_session(
     save_path: str | None,
     silent: bool,
     set_name: str | None,
+    scan_type: str = "quick",
+    mssp_wait: float = 5.0,
+    banner_quiet_time: float = 2.0,
+    banner_max_wait: float = 8.0,
 ) -> None:
     """Run the fingerprint session (inner helper for error handling)."""
     start_time = time.time()
@@ -154,8 +174,10 @@ async def _fingerprint_session(
     # 1. Let straggler negotiation settle
     await asyncio.sleep(_NEGOTIATION_SETTLE)
 
-    # 2. Read banner (pre-return)
-    banner_before = await _read_banner(reader, timeout=_BANNER_WAIT)
+    # 2. Read banner (pre-return) — wait until output stops
+    banner_before = await _read_banner_until_quiet(
+        reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait
+    )
 
     # 3. Send return, read post-return data
     writer.write(b"\r\n")
@@ -163,28 +185,32 @@ async def _fingerprint_session(
     banner_after = await _read_banner(reader, timeout=_POST_RETURN_WAIT)
 
     # 4. Snapshot option states before probing
-    option_states = _collect_server_option_states(writer)
+    session_data: dict[str, Any] = {"option_states": _collect_server_option_states(writer)}
 
-    # 5. Active probe
-    probe_start = time.time()
-    probe_results = await probe_server_capabilities(writer)
-    probe_time = time.time() - probe_start
+    # 5. Active probe (skip if connection already lost)
+    if writer.is_closing():
+        probe_results: dict[str, Any] = {}
+        probe_time = 0.0
+    else:
+        probe_time = time.time()
+        probe_results = await probe_server_capabilities(
+            writer, scan_type=scan_type, timeout=_PROBE_TIMEOUT
+        )
+        probe_time = time.time() - probe_time
 
-    # 5b. If server acknowledged MSSP but data hasn't arrived yet, poll briefly
-    if writer.remote_option.enabled(MSSP) and writer.mssp_data is None:
-        for _ in range(10):
-            await asyncio.sleep(0.05)
-            if writer.mssp_data is not None:
-                break
+    # 5b. If server acknowledged MSSP but data hasn't arrived yet, wait.
+    await _await_mssp_data(writer, start_time + mssp_wait)
 
-    # 6. Build session dicts
-    session_data: dict[str, Any] = {
-        "encoding": writer.environ_encoding,
-        "option_states": option_states,
-        "banner_before_return": _format_banner(banner_before, encoding=writer.environ_encoding),
-        "banner_after_return": _format_banner(banner_after, encoding=writer.environ_encoding),
-        "timing": {"probe": probe_time, "total": time.time() - start_time},
-    }
+    # 6. Complete session dicts
+    session_data.update(
+        {
+            "scan_type": scan_type,
+            "encoding": writer.environ_encoding,
+            "banner_before_return": _format_banner(banner_before, encoding=writer.environ_encoding),
+            "banner_after_return": _format_banner(banner_after, encoding=writer.environ_encoding),
+            "timing": {"probe": probe_time, "total": time.time() - start_time},
+        }
+    )
     if writer.mssp_data is not None:
         session_data["mssp"] = writer.mssp_data
     session_entry: dict[str, Any] = {
@@ -201,11 +227,14 @@ async def _fingerprint_session(
         session_data=session_data,
         session_entry=session_entry,
         save_path=save_path,
+        scan_type=scan_type,
     )
 
     # 8. Set name in fingerprint_names.json
     if set_name is not None:
-        protocol_fp = _create_server_protocol_fingerprint(writer, probe_results)
+        protocol_fp = _create_server_protocol_fingerprint(
+            writer, probe_results, scan_type=scan_type
+        )
         protocol_hash = _hash_fingerprint(protocol_fp)
         try:
             _save_fingerprint_name(protocol_hash, set_name)
@@ -215,24 +244,30 @@ async def _fingerprint_session(
 
     # 9. Display
     if not silent:
-        protocol_fp = _create_server_protocol_fingerprint(writer, probe_results)
+        protocol_fp = _create_server_protocol_fingerprint(
+            writer, probe_results, scan_type=scan_type
+        )
         protocol_hash = _hash_fingerprint(protocol_fp)
-        display_data: dict[str, Any] = {
-            "server-probe": {
-                "fingerprint": protocol_hash,
-                "fingerprint-data": protocol_fp,
-                "session_data": session_data,
-            },
-            "sessions": [session_entry],
-        }
-        _print_json(display_data)
+        _print_json(
+            {
+                "server-probe": {
+                    "fingerprint": protocol_hash,
+                    "fingerprint-data": protocol_fp,
+                    "session_data": session_data,
+                },
+                "sessions": [session_entry],
+            }
+        )
 
     # 10. Close
     writer.close()
 
 
 async def probe_server_capabilities(
-    writer: TelnetWriter, options: list[tuple[bytes, str, str]] | None = None, timeout: float = 0.5
+    writer: TelnetWriter,
+    options: list[tuple[bytes, str, str]] | None = None,
+    timeout: float = 0.5,
+    scan_type: str = "quick",
 ) -> dict[str, _fps.ProbeResult]:
     """
     Actively probe a remote server for telnet capability support.
@@ -243,17 +278,16 @@ async def probe_server_capabilities(
 
     :param writer: :class:`~telnetlib3.stream_writer.TelnetWriter` instance.
     :param options: List of ``(opt_bytes, name, description)`` tuples.
-        Defaults to :data:`~telnetlib3.fingerprinting.ALL_PROBE_OPTIONS`
-        minus client-only options.
+        Defaults to option list based on *scan_type*, minus client-only
+        options.
     :param timeout: Seconds to wait for all responses.
+    :param scan_type: ``"quick"`` probes CORE + MUD options only;
+        ``"full"`` includes LEGACY options.  Default ``"quick"``.
     :returns: Dict mapping option name to status dict.
     """
     if options is None:
-        options = [
-            (opt, name, desc)
-            for opt, name, desc in ALL_PROBE_OPTIONS
-            if opt not in _CLIENT_ONLY_WILL
-        ]
+        base = ALL_PROBE_OPTIONS if scan_type == "full" else QUICK_PROBE_OPTIONS
+        options = [(opt, name, desc) for opt, name, desc in base if opt not in _CLIENT_ONLY_WILL]
     return await probe_client_capabilities(writer, options=options, timeout=timeout)
 
 
@@ -269,6 +303,10 @@ def _parse_environ_send(raw: bytes) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     delimiters = {VAR[0], USERVAR[0]}
     value_byte = VALUE[0]
+
+    # Per RFC 1572: bare SEND with no VAR/USERVAR list means "send all"
+    if not raw:
+        return [{"type": "VAR", "name": "*"}, {"type": "USERVAR", "name": "*"}]
 
     # find positions of VAR/USERVAR delimiters
     breaks = [i for i, b in enumerate(raw) if b in delimiters]
@@ -336,13 +374,14 @@ def _collect_server_option_states(writer: TelnetWriter) -> dict[str, dict[str, A
 
 
 def _create_server_protocol_fingerprint(
-    writer: TelnetWriter, probe_results: dict[str, _fps.ProbeResult]
+    writer: TelnetWriter, probe_results: dict[str, _fps.ProbeResult], scan_type: str = "quick"
 ) -> dict[str, Any]:
     """
     Create anonymized protocol fingerprint for a remote server.
 
     :param writer: :class:`~telnetlib3.stream_writer.TelnetWriter` instance.
     :param probe_results: Results from :func:`probe_server_capabilities`.
+    :param scan_type: ``"quick"`` or ``"full"`` probe depth used.
     :returns: Deterministic fingerprint dict suitable for hashing.
     """
     offered = sorted(name for name, info in probe_results.items() if info["status"] == "WILL")
@@ -356,6 +395,7 @@ def _create_server_protocol_fingerprint(
 
     return {
         "probed-protocol": "server",
+        "scan-type": scan_type,
         "offered-options": offered,
         "requested-options": requested,
         "refused-options": refused,
@@ -367,7 +407,9 @@ def _save_server_fingerprint_data(
     probe_results: dict[str, _fps.ProbeResult],
     session_data: dict[str, Any],
     session_entry: dict[str, Any],
+    *,
     save_path: str | None = None,
+    scan_type: str = "quick",
 ) -> str | None:
     """
     Save server fingerprint data to a JSON file.
@@ -381,9 +423,10 @@ def _save_server_fingerprint_data(
     :param session_entry: Pre-built dict with ``host``, ``ip``, ``port``,
         and ``connected`` keys.
     :param save_path: If set, write directly to this path.
+    :param scan_type: ``"quick"`` or ``"full"`` probe depth used.
     :returns: Path to saved file, or ``None`` if saving was skipped.
     """
-    protocol_fp = _create_server_protocol_fingerprint(writer, probe_results)
+    protocol_fp = _create_server_protocol_fingerprint(writer, probe_results, scan_type=scan_type)
     protocol_hash = _hash_fingerprint(protocol_fp)
 
     data: dict[str, Any] = {
@@ -444,6 +487,16 @@ def _format_banner(data: bytes, encoding: str = "utf-8") -> str:
     return data.decode(encoding, errors="replace")
 
 
+async def _await_mssp_data(writer: TelnetWriter, deadline: float) -> None:
+    """Wait for MSSP data until *deadline* if server acknowledged MSSP."""
+    if not writer.remote_option.enabled(MSSP) or writer.mssp_data is not None:
+        return
+    remaining = deadline - time.time()
+    while remaining > 0 and writer.mssp_data is None:
+        await asyncio.sleep(min(0.05, remaining))
+        remaining = deadline - time.time()
+
+
 async def _read_banner(reader: TelnetReader, timeout: float = _BANNER_WAIT) -> bytes:
     """
     Read up to :data:`_BANNER_MAX_BYTES` from *reader* with timeout.
@@ -460,3 +513,35 @@ async def _read_banner(reader: TelnetReader, timeout: float = _BANNER_WAIT) -> b
     except (asyncio.TimeoutError, EOFError):
         data = b""
     return data
+
+
+async def _read_banner_until_quiet(
+    reader: TelnetReader, quiet_time: float = 2.0, max_wait: float = 8.0
+) -> bytes:
+    """
+    Read banner data until output stops for *quiet_time* seconds.
+
+    Keeps reading chunks as they arrive.  If no new data appears within
+    *quiet_time* seconds (or *max_wait* total elapses), returns everything
+    collected so far.
+
+    :param reader: :class:`~telnetlib3.stream_reader.TelnetReader` instance.
+    :param quiet_time: Seconds of silence before considering banner complete.
+    :param max_wait: Maximum total seconds to wait for banner data.
+    :returns: Banner bytes (may be empty).
+    """
+    chunks: list[bytes] = []
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + max_wait
+    while loop.time() < deadline:
+        remaining = min(quiet_time, deadline - loop.time())
+        if remaining <= 0:
+            break
+        try:
+            chunk = await asyncio.wait_for(reader.read(_BANNER_MAX_BYTES), timeout=remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        except (asyncio.TimeoutError, EOFError):
+            break
+    return b"".join(chunks)

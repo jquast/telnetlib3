@@ -15,7 +15,7 @@ from typing import Any, Type, Union, Callable, Optional, cast
 
 # local
 from ._types import ShellCallback
-from .telopt import theNULL, name_commands
+from .telopt import DO, WILL, theNULL, name_commands
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
@@ -271,6 +271,13 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         """
         self._check_later = asyncio.get_event_loop().call_soon(self._check_negotiation_timer)
         self._tasks.append(self._check_later)
+
+        # Send proactive WILL/DO for any "always" options
+        if self.writer is not None:
+            for opt in self.writer.always_will:
+                self.writer.iac(WILL, opt)
+            for opt in self.writer.always_do:
+                self.writer.iac(DO, opt)
 
     def encoding(self, outgoing: bool = False, incoming: bool = False) -> Union[str, bool]:
         """

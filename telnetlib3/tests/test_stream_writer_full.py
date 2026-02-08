@@ -567,6 +567,23 @@ def test_escape_unescape_and_env_encode_decode_roundtrip():
     assert dec == {"USER": "root", "LANG": "C.UTF-8"}
 
 
+def test_decode_env_buf_bare_delimiters():
+    """Bare VAR/USERVAR delimiters produce empty-string keys."""
+    payload = VAR + USERVAR
+    result = _decode_env_buf(payload)
+    assert result == {"": ""}
+
+
+def test_handle_sb_environ_bare_var_uservar_sends_empty():
+    """SEND with bare VAR/USERVAR passes [''] to callback; security policy returns {}."""
+    wc, tc, _ = new_writer(server=False, client=True)
+    received_keys = []
+    wc.set_ext_send_callback(NEW_ENVIRON, lambda keys: (received_keys.extend(keys), {})[1])
+    payload = VAR + USERVAR
+    wc._handle_sb_environ(collections.deque([NEW_ENVIRON, SEND, payload]))
+    assert received_keys == [""]
+
+
 def test_decode_env_buf_ebcdic():
     """EBCDIC-encoded env data decoded when encoding=cp037."""
     ebcdic_user = "USER".encode("cp037")
@@ -1055,3 +1072,22 @@ def test_miscellaneous_handle_logs_cover_remaining_handlers():
     ws.handle_ew(b"\x00")
     ws.handle_xon(b"\x00")
     ws.handle_xoff(b"\x00")
+
+
+def test_name_option_distinguishes_commands_from_options():
+    """name_option renders IAC command bytes as repr, not their command names."""
+    # local
+    from telnetlib3.telopt import name_option, name_command
+
+    assert name_option(WONT) == repr(WONT)
+    assert name_option(DO) == repr(DO)
+    assert name_option(DONT) == repr(DONT)
+    assert name_option(WILL) == repr(WILL)
+    assert name_option(IAC) == repr(IAC)
+    assert name_option(SB) == repr(SB)
+    assert name_option(SE) == repr(SE)
+    assert name_option(SGA) == "SGA"
+    assert name_option(TTYPE) == "TTYPE"
+    assert name_option(NAWS) == "NAWS"
+    assert name_command(WONT) == "WONT"
+    assert name_command(SGA) == "SGA"

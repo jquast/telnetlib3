@@ -1160,11 +1160,7 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
 
 def main() -> None:
     """Entry point for telnetlib3-server command."""
-    try:
-        asyncio.run(run_server(**parse_server_args()))
-    except OSError as err:
-        print(f"Error: {err}", file=sys.stderr)
-        sys.exit(1)
+    asyncio.run(run_server(**parse_server_args()))
 
 
 if __name__ == "__main__":  # pragma: no cover

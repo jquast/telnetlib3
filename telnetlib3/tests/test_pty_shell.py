@@ -34,6 +34,14 @@ pytestmark = [pytest.mark.skipif(sys.platform == "win32", reason="PTY not suppor
 
 PTY_HELPER = os.path.join(os.path.dirname(__file__), "pty_helper.py")
 
+
+@pytest.fixture(autouse=True)
+def _fast_pty_timing(monkeypatch):
+    """Reduce PTY timing delays for fast tests."""
+    monkeypatch.setattr(sps, "_NAWS_DEBOUNCE", 0.01)
+    monkeypatch.setattr(sps, "_GA_IDLE", 0.01)
+
+
 # Python 3.15+ emits DeprecationWarning when forkpty() is called in a multi-threaded
 # process. The warning is valid (forking in threaded processes can deadlock), but
 # pytest itself uses threads, so we can't avoid it. The PTY code still works fine -
@@ -275,9 +283,8 @@ async def test_pty_session_build_environment(mock_session):
     assert env["LANG"] == "en_US.ISO-8859-1"
 
 
-async def test_pty_session_naws_behavior(mock_session, monkeypatch):
+async def test_pty_session_naws_behavior(mock_session):
     """Test NAWS debouncing, latest value usage, and cleanup cancellation."""
-    monkeypatch.setattr(sps, "_NAWS_DEBOUNCE", 0.05)
 
     session, _ = mock_session()
     session.master_fd = 1
@@ -467,7 +474,7 @@ async def test_pty_session_cleanup_flushes_remaining_buffer():
     assert session._output_buffer == b""
 
 
-async def test_wait_for_terminal_info_behavior(monkeypatch):
+async def test_wait_for_terminal_info_behavior():
     """Test _wait_for_terminal_info early return, timeout, and polling behavior."""
     # Returns early when TERM and rows available
     writer = MagicMock()
@@ -720,9 +727,8 @@ async def test_pty_session_terminate_scenarios():
     assert result is True
 
 
-async def test_pty_session_ga_timer_fires_after_idle(mock_session, monkeypatch):
+async def test_pty_session_ga_timer_fires_after_idle(mock_session):
     """GA is sent after _flush_remaining when SGA not negotiated."""
-    monkeypatch.setattr(sps, "_GA_IDLE", 0.05)
 
     session, written = mock_session({"charset": "utf-8"}, capture_writes=True)
     protocol = MagicMock()
@@ -742,9 +748,8 @@ async def test_pty_session_ga_timer_fires_after_idle(mock_session, monkeypatch):
     assert session._ga_timer is None
 
 
-async def test_pty_session_ga_timer_cancelled_by_new_output(mock_session, monkeypatch):
+async def test_pty_session_ga_timer_cancelled_by_new_output(mock_session):
     """GA timer is cancelled when new PTY output arrives."""
-    monkeypatch.setattr(sps, "_GA_IDLE", 0.05)
 
     session, written = mock_session({"charset": "utf-8"}, capture_writes=True)
     protocol = MagicMock()
@@ -790,9 +795,8 @@ async def test_pty_session_ga_timer_suppressed_in_raw_mode(mock_session):
     assert session._ga_timer is None
 
 
-async def test_pty_session_ga_timer_cancelled_on_cleanup(mock_session, monkeypatch):
+async def test_pty_session_ga_timer_cancelled_on_cleanup(mock_session):
     """GA timer is cancelled during cleanup."""
-    monkeypatch.setattr(sps, "_GA_IDLE", 0.05)
 
     session, _ = mock_session({"charset": "utf-8"})
     protocol = MagicMock()

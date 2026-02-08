@@ -502,8 +502,34 @@ async def run_client() -> None:
     )
     log.debug(config_msg)
 
+    always_will: set[bytes] = args["always_will"]
+    always_do: set[bytes] = args["always_do"]
+
+    # Wrap client factory to inject always_will/always_do before negotiation
+    client_factory: Optional[Callable[..., client_base.BaseClient]] = None
+    if always_will or always_do:
+
+        def _client_factory(**kwargs: Any) -> client_base.BaseClient:
+            client: TelnetClient
+            if sys.platform != "win32" and sys.stdin.isatty():
+                client = TelnetTerminalClient(**kwargs)
+            else:
+                client = TelnetClient(**kwargs)
+            orig_connection_made = client.connection_made
+
+            def _patched_connection_made(transport: asyncio.BaseTransport) -> None:
+                orig_connection_made(transport)
+                assert client.writer is not None
+                client.writer.always_will = always_will
+                client.writer.always_do = always_do
+
+            client.connection_made = _patched_connection_made  # type: ignore[method-assign]
+            return client
+
+        client_factory = _client_factory
+
     # Build connection kwargs explicitly to avoid pylint false positive
-    connection_kwargs = {
+    connection_kwargs: Dict[str, Any] = {
         "encoding": args["encoding"],
         "tspeed": args["tspeed"],
         "shell": args["shell"],
@@ -514,6 +540,8 @@ async def run_client() -> None:
         "connect_timeout": args["connect_timeout"],
         "send_environ": args["send_environ"],
     }
+    if client_factory is not None:
+        connection_kwargs["client_factory"] = client_factory
 
     # connect
     _, writer = await open_connection(args["host"], args["port"], **connection_kwargs)
@@ -565,7 +593,38 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         default="TERM,LANG,COLUMNS,LINES,COLORTERM",
         help="comma-separated environment variables to send (NEW_ENVIRON)",
     )
+    parser.add_argument(
+        "--always-will",
+        action="append",
+        default=[],
+        metavar="OPT",
+        help="always send WILL for this option (name like MXP or number, repeatable)",
+    )
+    parser.add_argument(
+        "--always-do",
+        action="append",
+        default=[],
+        metavar="OPT",
+        help="always send DO for this option (name like GMCP or number, repeatable)",
+    )
     return parser
+
+
+def _parse_option_arg(value: str) -> bytes:
+    """
+    Resolve a telnet option name or integer to option bytes.
+
+    :param value: Option name (e.g. ``"MXP"``) or decimal byte value (e.g. ``"91"``).
+    :returns: Single-byte option value.
+    :raises ValueError: When *value* is not a known name or valid integer.
+    """
+    # local
+    from .telopt import option_from_name  # pylint: disable=import-outside-toplevel
+
+    try:
+        return option_from_name(value)
+    except KeyError:
+        return bytes([int(value)])
 
 
 def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
@@ -584,6 +643,8 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "connect_minwait": args.connect_minwait,
         "connect_timeout": args.connect_timeout,
         "send_environ": tuple(v.strip() for v in args.send_environ.split(",") if v.strip()),
+        "always_will": {_parse_option_arg(v) for v in args.always_will},
+        "always_do": {_parse_option_arg(v) for v in args.always_do},
     }
 
 
@@ -639,11 +700,46 @@ def _get_fingerprint_argument_parser() -> argparse.ArgumentParser:
         "--ttype", default="VT100", help="terminal type sent in response to TTYPE requests"
     )
     parser.add_argument(
+        "--scan-type",
+        choices=["quick", "full"],
+        default="quick",
+        help="probe depth: 'quick' probes core options only, " "'full' includes legacy options",
+    )
+    parser.add_argument(
         "--send-env",
         action="append",
         metavar="KEY=VALUE",
         default=[],
         help="environment variable to send (repeatable)",
+    )
+    parser.add_argument(
+        "--always-will",
+        action="append",
+        default=[],
+        metavar="OPT",
+        help="always send WILL for this option (name like MXP or number, repeatable)",
+    )
+    parser.add_argument(
+        "--always-do",
+        action="append",
+        default=[],
+        metavar="OPT",
+        help="always send DO for this option (name like GMCP or number, repeatable)",
+    )
+    parser.add_argument(
+        "--mssp-wait",
+        default=5.0,
+        type=float,
+        help="max seconds since connect to wait for MSSP data",
+    )
+    parser.add_argument(
+        "--banner-quiet-time",
+        default=2.0,
+        type=float,
+        help="seconds of silence before considering banner complete",
+    )
+    parser.add_argument(
+        "--banner-max-wait", default=8.0, type=float, help="max seconds to wait for banner data"
     )
     return parser
 
@@ -678,7 +774,15 @@ async def run_fingerprint_client() -> None:
         silent=args.silent,
         set_name=args.set_name,
         environ_encoding=args.stream_encoding,
+        scan_type=args.scan_type,
+        mssp_wait=args.mssp_wait,
+        banner_quiet_time=args.banner_quiet_time,
+        banner_max_wait=args.banner_max_wait,
     )
+
+    # Parse --always-will/--always-do option names/numbers
+    fp_always_will = {_parse_option_arg(v) for v in args.always_will}
+    fp_always_do = {_parse_option_arg(v) for v in args.always_do}
 
     # Parse --send-env KEY=VALUE pairs
     extra_env: Dict[str, str] = {}
@@ -709,6 +813,8 @@ async def run_fingerprint_client() -> None:
             orig_connection_made(transport)
             assert client.writer is not None
             client.writer.environ_encoding = environ_encoding
+            client.writer.always_will = fp_always_will
+            client.writer.always_do = fp_always_do
 
         def patched_send_env(keys: Sequence[str]) -> Dict[str, Any]:
             result = orig_send_env(keys)
@@ -722,18 +828,22 @@ async def run_fingerprint_client() -> None:
 
     waiter_closed: asyncio.Future[None] = asyncio.get_event_loop().create_future()
 
-    _, writer = await open_connection(
-        host=args.host,
-        port=args.port,
-        client_factory=fingerprint_client_factory,
-        shell=shell,
-        encoding=False,
-        term=ttype,
-        connect_minwait=2.0,
-        connect_maxwait=4.0,
-        connect_timeout=args.connect_timeout,
-        waiter_closed=waiter_closed,
-    )
+    try:
+        _, writer = await open_connection(
+            host=args.host,
+            port=args.port,
+            client_factory=fingerprint_client_factory,
+            shell=shell,
+            encoding=False,
+            term=ttype,
+            connect_minwait=2.0,
+            connect_maxwait=4.0,
+            connect_timeout=args.connect_timeout,
+            waiter_closed=waiter_closed,
+        )
+    except OSError as err:
+        log.error("%s:%d: %s", args.host, args.port, err)
+        raise
 
     assert writer.protocol is not None
     assert isinstance(writer.protocol, client_base.BaseClient)

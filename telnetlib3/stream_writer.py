@@ -79,6 +79,7 @@ from .telopt import (
     LFLOW_RESTART_ANY,
     LFLOW_RESTART_XON,
     theNULL,
+    name_option,
     name_command,
     name_commands,
     option_from_name,
@@ -201,6 +202,16 @@ class TelnetWriter:
         #: Default ``"ascii"`` per :rfc:`1572`; set to ``"cp037"`` for
         #: EBCDIC hosts such as IBM OS/400.
         self.environ_encoding: str = "ascii"
+
+        #: Set of option byte(s) for which the client always sends WILL
+        #: (even when not natively supported).  Overrides the default
+        #: WONT rejection in :meth:`handle_do`.
+        self.always_will: set[bytes] = set()
+
+        #: Set of option byte(s) for which the client always sends DO
+        #: (even when not natively supported).  Overrides the default
+        #: DONT rejection in :meth:`handle_will`.
+        self.always_do: set[bytes] = set()
 
         #: Set of option byte(s) for WILL received from remote end
         #: that were rejected with DONT (unhandled options).
@@ -635,7 +646,7 @@ class TelnetWriter:
             # parse 3rd and final byte of IAC DO, DONT, WILL, WONT.
             assert isinstance(self.cmd_received, bytes)
             cmd, opt = self.cmd_received, byte
-            self.log.debug("recv IAC %s %s", name_command(cmd), name_command(opt))
+            self.log.debug("recv IAC %s %s", name_command(cmd), name_option(opt))
             try:
                 if cmd == DO:
                     try:
@@ -1717,6 +1728,9 @@ class TelnetWriter:
                 # WILL and received DO may initiate SB at any time.
                 self.pending_option[SB + opt] = True
 
+        elif opt in self.always_will:
+            if not self.local_option.enabled(opt):
+                self.iac(WILL, opt)
         else:
             self.log.debug("DO %s not supported.", name_command(opt))
             self.rejected_do.add(opt)
@@ -1852,6 +1866,10 @@ class TelnetWriter:
                     LFLOW: self.send_lineflow_mode,
                 }[opt]()
 
+        elif opt in self.always_do:
+            if not self.remote_option.enabled(opt):
+                self.iac(DO, opt)
+                self.remote_option[opt] = True
         else:
             self.iac(DONT, opt)
             self.rejected_will.add(opt)
@@ -2143,7 +2161,7 @@ class TelnetWriter:
             assert self.client, f"SE: cannot recv from client: {name_command(cmd)} {opt_kind}"
             # client-side, we do _not_ honor the 'send all VAR' or 'send all
             # USERVAR' requests -- it is a small bit of a security issue.
-            reply_env = self._ext_send_callback[NEW_ENVIRON](env.keys())
+            reply_env = self._ext_send_callback[NEW_ENVIRON](list(env.keys()))
             send_env = _encode_env_buf(reply_env, encoding=self.environ_encoding)
             response = [IAC, SB, NEW_ENVIRON, IS, send_env, IAC, SE]
             if reply_env:

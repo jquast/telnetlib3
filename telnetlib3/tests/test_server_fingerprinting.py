@@ -11,6 +11,15 @@ from telnetlib3 import server_fingerprinting as sfp
 from telnetlib3.telopt import VAR, USERVAR
 
 
+@pytest.fixture(autouse=True)
+def _fast_fingerprint(monkeypatch):
+    """Zero out all fingerprint session delays for fast tests."""
+    monkeypatch.setattr(sfp, "_NEGOTIATION_SETTLE", 0.0)
+    monkeypatch.setattr(sfp, "_BANNER_WAIT", 0.01)
+    monkeypatch.setattr(sfp, "_POST_RETURN_WAIT", 0.01)
+    monkeypatch.setattr(sfp, "_PROBE_TIMEOUT", 0.01)
+
+
 class MockOption(dict):
     def __init__(self, values=None):
         super().__init__(values or {})
@@ -47,6 +56,9 @@ class MockWriter:
 
     async def drain(self):
         pass
+
+    def is_closing(self):
+        return self._closing
 
     def close(self):
         self._closing = True
@@ -135,7 +147,9 @@ async def test_probe_timeout_and_defaults():
     writer2 = MockWriter(wont_options=[fps.BINARY])
     results2 = await sfp.probe_server_capabilities(writer2, timeout=0.01)
     assert "BINARY" in results2
-    expected = len(fps.ALL_PROBE_OPTIONS) - len(sfp._CLIENT_ONLY_WILL)
+    expected = len(fps.QUICK_PROBE_OPTIONS) - len(
+        [o for o in fps.QUICK_PROBE_OPTIONS if o[0] in sfp._CLIENT_ONLY_WILL]
+    )
     assert len(results2) == expected
 
 
@@ -291,17 +305,21 @@ def test_banner_data_in_saved_fingerprint(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_fingerprinting_client_shell(tmp_path, monkeypatch):
-    monkeypatch.setattr(sfp, "_NEGOTIATION_SETTLE", 0.0)
-    monkeypatch.setattr(sfp, "_BANNER_WAIT", 0.01)
-    monkeypatch.setattr(sfp, "_POST_RETURN_WAIT", 0.01)
-
+async def test_fingerprinting_client_shell(tmp_path):
     save_path = str(tmp_path / "result.json")
     reader = MockReader([b"Welcome to BBS\r\nLogin: "])
     writer = MockWriter(will_options=[fps.SGA, fps.ECHO])
 
     await sfp.fingerprinting_client_shell(
-        reader, writer, host="localhost", port=23, save_path=save_path, silent=True
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
     )
 
     assert writer._closing
@@ -313,23 +331,26 @@ async def test_fingerprinting_client_shell(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_fingerprinting_client_shell_no_save(monkeypatch):
-    monkeypatch.setattr(sfp, "_NEGOTIATION_SETTLE", 0.0)
-    monkeypatch.setattr(sfp, "_BANNER_WAIT", 0.01)
-    monkeypatch.setattr(sfp, "_POST_RETURN_WAIT", 0.01)
+
     monkeypatch.setattr(fps, "DATA_DIR", None)
 
     writer = MockWriter()
     await sfp.fingerprinting_client_shell(
-        MockReader([]), writer, host="localhost", port=23, silent=True
+        MockReader([]),
+        writer,
+        host="localhost",
+        port=23,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
     )
     assert writer._closing
 
 
 @pytest.mark.asyncio
 async def test_fingerprinting_client_shell_display(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(sfp, "_NEGOTIATION_SETTLE", 0.0)
-    monkeypatch.setattr(sfp, "_BANNER_WAIT", 0.01)
-    monkeypatch.setattr(sfp, "_POST_RETURN_WAIT", 0.01)
+
     monkeypatch.setattr(sfp, "_JQ", None)
 
     save_path = str(tmp_path / "result.json")
@@ -337,7 +358,14 @@ async def test_fingerprinting_client_shell_display(tmp_path, monkeypatch, capsys
     writer = MockWriter(will_options=[fps.SGA])
 
     await sfp.fingerprinting_client_shell(
-        reader, writer, host="localhost", port=23, save_path=save_path
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
     )
 
     captured = capsys.readouterr()
@@ -402,9 +430,7 @@ def test_save_fingerprint_name_no_data_dir():
 
 @pytest.mark.asyncio
 async def test_fingerprinting_client_shell_set_name(tmp_path, monkeypatch):
-    monkeypatch.setattr(sfp, "_NEGOTIATION_SETTLE", 0.0)
-    monkeypatch.setattr(sfp, "_BANNER_WAIT", 0.01)
-    monkeypatch.setattr(sfp, "_POST_RETURN_WAIT", 0.01)
+
     monkeypatch.setattr(fps, "DATA_DIR", str(tmp_path))
 
     save_path = str(tmp_path / "result.json")
@@ -419,6 +445,9 @@ async def test_fingerprinting_client_shell_set_name(tmp_path, monkeypatch):
         save_path=save_path,
         silent=True,
         set_name="my-bbs",
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
     )
 
     with open(save_path, encoding="utf-8") as f:
@@ -430,10 +459,7 @@ async def test_fingerprinting_client_shell_set_name(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_fingerprinting_client_shell_encoding(tmp_path, monkeypatch):
-    monkeypatch.setattr(sfp, "_NEGOTIATION_SETTLE", 0.0)
-    monkeypatch.setattr(sfp, "_BANNER_WAIT", 0.01)
-    monkeypatch.setattr(sfp, "_POST_RETURN_WAIT", 0.01)
+async def test_fingerprinting_client_shell_encoding(tmp_path):
 
     save_path = str(tmp_path / "result.json")
     writer = MockWriter(will_options=[fps.SGA])
@@ -446,6 +472,9 @@ async def test_fingerprinting_client_shell_encoding(tmp_path, monkeypatch):
         save_path=save_path,
         silent=True,
         environ_encoding="cp037",
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
     )
 
     with open(save_path, encoding="utf-8") as f:
@@ -455,23 +484,27 @@ async def test_fingerprinting_client_shell_encoding(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_fingerprinting_client_shell_set_name_no_data_dir(monkeypatch):
-    monkeypatch.setattr(sfp, "_NEGOTIATION_SETTLE", 0.0)
-    monkeypatch.setattr(sfp, "_BANNER_WAIT", 0.01)
-    monkeypatch.setattr(sfp, "_POST_RETURN_WAIT", 0.01)
+
     monkeypatch.setattr(fps, "DATA_DIR", None)
 
     writer = MockWriter()
     await sfp.fingerprinting_client_shell(
-        MockReader([]), writer, host="localhost", port=23, silent=True, set_name="should-warn"
+        MockReader([]),
+        writer,
+        host="localhost",
+        port=23,
+        silent=True,
+        set_name="should-warn",
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
     )
     assert writer._closing
 
 
 @pytest.mark.asyncio
 async def test_fingerprinting_client_shell_mssp(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(sfp, "_NEGOTIATION_SETTLE", 0.0)
-    monkeypatch.setattr(sfp, "_BANNER_WAIT", 0.01)
-    monkeypatch.setattr(sfp, "_POST_RETURN_WAIT", 0.01)
+
     monkeypatch.setattr(sfp, "_JQ", None)
 
     save_path = str(tmp_path / "result.json")
@@ -480,7 +513,14 @@ async def test_fingerprinting_client_shell_mssp(tmp_path, monkeypatch, capsys):
     writer.mssp_data = {"NAME": "TestMUD", "PLAYERS": "42", "CODEBASE": "telnetlib3"}
 
     await sfp.fingerprinting_client_shell(
-        reader, writer, host="localhost", port=23, save_path=save_path
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
     )
 
     with open(save_path, encoding="utf-8") as f:
@@ -497,16 +537,21 @@ async def test_fingerprinting_client_shell_mssp(tmp_path, monkeypatch, capsys):
 
 
 @pytest.mark.asyncio
-async def test_fingerprinting_client_shell_no_mssp(tmp_path, monkeypatch):
-    monkeypatch.setattr(sfp, "_NEGOTIATION_SETTLE", 0.0)
-    monkeypatch.setattr(sfp, "_BANNER_WAIT", 0.01)
-    monkeypatch.setattr(sfp, "_POST_RETURN_WAIT", 0.01)
+async def test_fingerprinting_client_shell_no_mssp(tmp_path):
 
     save_path = str(tmp_path / "result.json")
     writer = MockWriter(will_options=[fps.SGA])
 
     await sfp.fingerprinting_client_shell(
-        MockReader([]), writer, host="localhost", port=23, save_path=save_path, silent=True
+        MockReader([]),
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
     )
 
     with open(save_path, encoding="utf-8") as f:
@@ -534,14 +579,105 @@ class ErrorReader(MockReader):
         EOFError("EOF"),
     ],
 )
-async def test_fingerprinting_client_shell_connection_error(monkeypatch, exc):
+async def test_fingerprinting_client_shell_connection_error(exc):
     """Connection errors produce a warning, not an unhandled exception."""
-    monkeypatch.setattr(sfp, "_NEGOTIATION_SETTLE", 0.0)
-    monkeypatch.setattr(sfp, "_BANNER_WAIT", 0.01)
-    monkeypatch.setattr(sfp, "_POST_RETURN_WAIT", 0.01)
 
     writer = MockWriter()
     await sfp.fingerprinting_client_shell(
-        ErrorReader(exc), writer, host="192.0.2.1", port=23, silent=True
+        ErrorReader(exc),
+        writer,
+        host="192.0.2.1",
+        port=23,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
     )
     assert writer._closing
+
+
+@pytest.mark.asyncio
+async def test_probe_server_capabilities_quick_default():
+    """Default scan_type='quick' excludes legacy options."""
+    writer = MockWriter(wont_options=[fps.BINARY])
+    results = await sfp.probe_server_capabilities(writer, timeout=0.01)
+    probed_names = set(results.keys())
+    legacy_names = {name for _, name, _ in fps.LEGACY_OPTIONS}
+    assert not probed_names.intersection(legacy_names)
+
+
+@pytest.mark.asyncio
+async def test_probe_server_capabilities_full():
+    """scan_type='full' includes legacy options."""
+    writer = MockWriter(wont_options=[fps.BINARY])
+    results = await sfp.probe_server_capabilities(writer, timeout=0.01, scan_type="full")
+    probed_names = set(results.keys())
+    legacy_names = {name for _, name, _ in fps.LEGACY_OPTIONS}
+    assert probed_names.issuperset(legacy_names)
+    expected = len(fps.ALL_PROBE_OPTIONS) - len(
+        [o for o in fps.ALL_PROBE_OPTIONS if o[0] in sfp._CLIENT_ONLY_WILL]
+    )
+    assert len(results) == expected
+
+
+@pytest.mark.asyncio
+async def test_scan_type_recorded_in_fingerprint(tmp_path):
+    """scan_type appears in both session_data and fingerprint-data."""
+
+    for scan_type in ("quick", "full"):
+        save_path = str(tmp_path / f"{scan_type}.json")
+        reader = MockReader([b"Welcome"])
+        writer = MockWriter(will_options=[fps.SGA])
+
+        await sfp.fingerprinting_client_shell(
+            reader,
+            writer,
+            host="localhost",
+            port=23,
+            save_path=save_path,
+            silent=True,
+            scan_type=scan_type,
+            banner_quiet_time=0.01,
+            banner_max_wait=0.01,
+            mssp_wait=0.01,
+        )
+
+        with open(save_path, encoding="utf-8") as f:
+            data = json.load(f)
+        assert data["server-probe"]["session_data"]["scan_type"] == scan_type
+        assert data["server-probe"]["fingerprint-data"]["scan-type"] == scan_type
+
+
+def test_parse_environ_send_empty_payload():
+    """Bare SB NEW_ENVIRON SEND SE (empty payload) means 'send all' per RFC 1572."""
+    entries = sfp._parse_environ_send(b"")
+    assert len(entries) == 2
+    assert entries[0] == {"type": "VAR", "name": "*"}
+    assert entries[1] == {"type": "USERVAR", "name": "*"}
+
+
+@pytest.mark.asyncio
+async def test_probe_skipped_when_closing(tmp_path):
+    """Probe burst is skipped when the connection is already closed."""
+
+    save_path = str(tmp_path / "result.json")
+    writer = MockWriter(will_options=[fps.SGA])
+    writer._closing = True
+
+    await sfp.fingerprinting_client_shell(
+        MockReader([]),
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert not writer._iac_calls
+    with open(save_path, encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["server-probe"]["fingerprint-data"]["offered-options"] == []
+    assert data["server-probe"]["fingerprint-data"]["refused-options"] == []

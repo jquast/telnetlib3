@@ -500,7 +500,6 @@ async def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port):
             b"Press Return to continue:\r\ngoodbye.\n"
             b"\x1b[m\nConnection closed by foreign host.\n"
         )
-
         assert len(logfile_output) in (2, 3), logfile
         assert "Connected to <Peer" in logfile_output[0], logfile
         assert any("Connection closed to <Peer" in line for line in logfile_output[1:]), logfile
