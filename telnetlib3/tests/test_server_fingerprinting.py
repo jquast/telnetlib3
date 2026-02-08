@@ -197,17 +197,9 @@ def test_server_fingerprint_hash_consistency():
 
 
 def test_format_banner():
-    data = b"Hello\r\nWorld"
-    result = sfp._format_banner(data)
-    assert result["raw_hex"] == data.hex()
-    assert result["length"] == len(data)
-    assert "Hello" in result["text"]
-
-    empty = sfp._format_banner(b"")
-    assert empty["raw_hex"] == "" and empty["length"] == 0
-
-    non_utf8 = sfp._format_banner(b"\xff\xfe\xfd")
-    assert non_utf8["length"] == 3
+    assert sfp._format_banner(b"Hello\r\nWorld") == "Hello\r\nWorld"
+    assert sfp._format_banner(b"") == ""
+    assert sfp._format_banner(b"\xff\xfe\xfd") == "\ufffd\ufffd\ufffd"
 
 
 @pytest.mark.asyncio
@@ -298,9 +290,8 @@ def test_banner_data_in_saved_fingerprint(tmp_path):
     )
     with open(save_path, encoding="utf-8") as f:
         session = json.load(f)["server-probe"]["session_data"]
-    assert session["banner_before_return"]["length"] == 7
-    assert "Hello" in session["banner_before_return"]["text"]
-    assert session["banner_after_return"]["length"] == 7
+    assert "Hello" in session["banner_before_return"]
+    assert session["banner_after_return"] == "Login: "
     assert "probe" in session["timing"]
 
 
@@ -364,7 +355,7 @@ async def test_fingerprinting_client_shell_display(tmp_path, monkeypatch, capsys
     assert output["server-probe"]["fingerprint-data"]["probed-protocol"] == "server"
     assert output["sessions"][0]["host"] == "localhost"
     session = output["server-probe"]["session_data"]
-    assert "raw_hex" not in session.get("banner_before_return", {})
+    assert isinstance(session.get("banner_before_return", ""), str)
     assert "server_requested" not in session.get("option_states", {})
 
 
@@ -480,5 +471,36 @@ async def test_fingerprinting_client_shell_set_name_no_data_dir(monkeypatch):
         MockReader([]), writer,
         host="localhost", port=23,
         silent=True, set_name="should-warn",
+    )
+    assert writer._closing
+
+
+class ErrorReader(MockReader):
+    """MockReader whose read() raises a connection error."""
+
+    def __init__(self, exc: Exception):
+        super().__init__()
+        self._exc = exc
+
+    async def read(self, n: int) -> bytes:
+        raise self._exc
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exc", [
+    ConnectionResetError(104, "Connection reset by peer"),
+    ConnectionAbortedError("Connection aborted"),
+    EOFError("EOF"),
+])
+async def test_fingerprinting_client_shell_connection_error(monkeypatch, exc):
+    """Connection errors produce a warning, not an unhandled exception."""
+    monkeypatch.setattr(sfp, "_NEGOTIATION_SETTLE", 0.0)
+    monkeypatch.setattr(sfp, "_BANNER_WAIT", 0.01)
+    monkeypatch.setattr(sfp, "_POST_RETURN_WAIT", 0.01)
+
+    writer = MockWriter()
+    await sfp.fingerprinting_client_shell(
+        ErrorReader(exc), writer,
+        host="192.0.2.1", port=23, silent=True,
     )
     assert writer._closing

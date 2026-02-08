@@ -747,7 +747,11 @@ async def run_fingerprint_client() -> None:
 
 def fingerprint_main() -> None:
     """Entry point for ``telnetlib3-fingerprint`` command."""
-    asyncio.run(run_fingerprint_client())
+    try:
+        asyncio.run(run_fingerprint_client())
+    except ConnectionError as err:
+        print(f"Error: {err}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":  # pragma: no cover

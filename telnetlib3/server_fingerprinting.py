@@ -71,15 +71,11 @@ _JQ = shutil.which("jq")
 logger = logging.getLogger("telnetlib3.server_fingerprint")
 
 
-_DISPLAY_SKIP_KEYS = {"raw_hex"}
-
-
 def _cull_display(obj: Any) -> Any:
     """Recursively remove empty, false-valued, and verbose entries for display."""
     if isinstance(obj, dict):
         return {k: _cull_display(v) for k, v in obj.items()
-                if k not in _DISPLAY_SKIP_KEYS
-                and v is not False and v != {} and v != [] and v != ""}
+                if v is not False and v != {} and v != [] and v != ""}
     if isinstance(obj, list):
         return [_cull_display(item) for item in obj]
     return obj
@@ -127,6 +123,28 @@ async def fingerprinting_client_shell(
         ``"ascii"`` per :rfc:`1572`; use ``"cp037"`` for EBCDIC hosts.
     """
     writer.environ_encoding = environ_encoding
+    try:
+        await _fingerprint_session(
+            reader, writer,
+            host=host, port=port, save_path=save_path,
+            silent=silent, set_name=set_name,
+        )
+    except (ConnectionError, EOFError) as exc:
+        logger.warning("%s:%d: %s", host, port, exc)
+        writer.close()
+
+
+async def _fingerprint_session(
+    reader: TelnetReader,
+    writer: TelnetWriter,
+    *,
+    host: str,
+    port: int,
+    save_path: Optional[str],
+    silent: bool,
+    set_name: Optional[str],
+) -> None:
+    """Run the fingerprint session (inner helper for error handling)."""
     start_time = time.time()
 
     # 1. Let straggler negotiation settle
@@ -528,18 +546,14 @@ def _count_server_fingerprint_folders(data_dir: Optional[str] = None) -> int:
     )
 
 
-def _format_banner(data: bytes) -> Dict[str, Any]:
+def _format_banner(data: bytes) -> str:
     """
     Format raw banner bytes for JSON serialization.
 
     :param data: Raw bytes from the server.
-    :returns: Dict with ``raw_hex``, ``text``, and ``length`` keys.
+    :returns: Decoded text string (non-UTF-8 bytes replaced).
     """
-    return {
-        "raw_hex": data.hex(),
-        "text": data.decode("utf-8", errors="replace"),
-        "length": len(data),
-    }
+    return data.decode("utf-8", errors="replace")
 
 
 async def _read_banner(
