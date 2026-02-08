@@ -1,10 +1,16 @@
-"""Integration tests for MUD protocol negotiation (GMCP, MSDP, MSSP)."""
+"""Integration tests for MUD protocol negotiation (GMCP, MSDP, MSSP, MXP, etc.)."""
 
 # std imports
 import collections
 
+# 3rd party
+import pytest
+
 # local
-from telnetlib3.telopt import DO, SB, SE, IAC, GMCP, MSDP, MSSP, WILL
+from telnetlib3.telopt import (
+    DO, SB, SE, IAC, GMCP, MSDP, MSSP, WILL,
+    MSP, MXP, ZMP, AARDWOLF, ATCP,
+)
 from telnetlib3.stream_writer import TelnetWriter
 
 
@@ -228,7 +234,6 @@ def test_sb_msdp_latin1_fallback():
     assert received_args[0] == {"KEY": "Caf\xe9"}
 
 
-
 def test_send_gmcp():
     w, t, p = new_writer(server=True)
     w.local_option[GMCP] = True
@@ -265,3 +270,137 @@ def test_send_mssp():
     w.send_mssp({"NAME": "TestMUD"})
     expected = IAC + SB + MSSP + MSSP_VAR + b"NAME" + MSSP_VAL + b"TestMUD" + IAC + SE
     assert expected in t.writes
+
+
+_MUD_EXTENDED = [MSP, MXP, ZMP, AARDWOLF, ATCP]
+_MUD_EXT_IDS = ["MSP", "MXP", "ZMP", "AARDWOLF", "ATCP"]
+
+
+@pytest.mark.parametrize("opt", _MUD_EXTENDED, ids=_MUD_EXT_IDS)
+def test_handle_will_mud_extended(opt):
+    w, t, _p = new_writer(server=True)
+    w.handle_will(opt)
+    assert IAC + DO + opt in t.writes
+    assert w.remote_option.get(opt) is True
+
+
+@pytest.mark.parametrize("opt", _MUD_EXTENDED, ids=_MUD_EXT_IDS)
+def test_handle_do_mud_extended(opt):
+    w, t, _p = new_writer(server=True)
+    w.handle_do(opt)
+    assert IAC + WILL + opt in t.writes
+
+
+@pytest.mark.parametrize("opt", _MUD_EXTENDED, ids=_MUD_EXT_IDS)
+def test_set_ext_callback_mud_extended(opt):
+    w, _t, _p = new_writer(server=True)
+    w.set_ext_callback(opt, lambda *a: None)
+
+
+@pytest.mark.parametrize("opt", [MSP, MXP], ids=["MSP", "MXP"])
+def test_sb_raw_mud_empty_payload(opt):
+    """Empty SB payload (e.g. IAC SB MXP IAC SE) must not raise."""
+    w, _t, _p = new_writer(server=True)
+    received: list[bytes] = []
+    w.set_ext_callback(opt, lambda data: received.append(data))
+    w.pending_option[SB + opt] = True
+    buf = collections.deque([bytes([opt[0]])])
+    w.handle_subnegotiation(buf)
+    assert received == [b""]
+
+
+@pytest.mark.parametrize("opt", [MSP, MXP], ids=["MSP", "MXP"])
+def test_sb_raw_mud_with_payload(opt):
+    w, _t, _p = new_writer(server=True)
+    received: list[bytes] = []
+    w.set_ext_callback(opt, lambda data: received.append(data))
+    w.pending_option[SB + opt] = True
+    payload = b"\x01\x02\x03"
+    buf = collections.deque([bytes([opt[0]])] + [bytes([b]) for b in payload])
+    w.handle_subnegotiation(buf)
+    assert received == [payload]
+
+
+def test_sb_zmp_dispatch():
+    w, _t, _p = new_writer(server=True)
+    w.pending_option[SB + ZMP] = True
+    payload = b"zmp.ident\x00MudName\x001.0\x00A test MUD\x00"
+    buf = collections.deque([bytes([ZMP[0]])] + [bytes([b]) for b in payload])
+    w.handle_subnegotiation(buf)
+    assert w.zmp_data == [["zmp.ident", "MudName", "1.0", "A test MUD"]]
+
+
+def test_sb_zmp_empty_payload():
+    w, _t, _p = new_writer(server=True)
+    w.pending_option[SB + ZMP] = True
+    buf = collections.deque([bytes([ZMP[0]])])
+    w.handle_subnegotiation(buf)
+    assert w.zmp_data == [[]]
+
+
+def test_sb_zmp_accumulates():
+    w, _t, _p = new_writer(server=True)
+    w.pending_option[SB + ZMP] = True
+    buf1 = collections.deque([bytes([ZMP[0]])] + [bytes([b]) for b in b"zmp.ping\x00"])
+    w.handle_subnegotiation(buf1)
+    w.pending_option[SB + ZMP] = True
+    buf2 = collections.deque([bytes([ZMP[0]])] + [bytes([b]) for b in b"zmp.check\x00zmp.ping\x00"])
+    w.handle_subnegotiation(buf2)
+    assert len(w.zmp_data) == 2
+    assert w.zmp_data[0] == ["zmp.ping"]
+    assert w.zmp_data[1] == ["zmp.check", "zmp.ping"]
+
+
+def test_sb_atcp_dispatch():
+    w, _t, _p = new_writer(server=True)
+    w.pending_option[SB + ATCP] = True
+    payload = b"Room.Exits ne,sw,nw"
+    buf = collections.deque([bytes([ATCP[0]])] + [bytes([b]) for b in payload])
+    w.handle_subnegotiation(buf)
+    assert w.atcp_data == [("Room.Exits", "ne,sw,nw")]
+
+
+def test_sb_atcp_no_value():
+    w, _t, _p = new_writer(server=True)
+    w.pending_option[SB + ATCP] = True
+    payload = b"Conn.MXP"
+    buf = collections.deque([bytes([ATCP[0]])] + [bytes([b]) for b in payload])
+    w.handle_subnegotiation(buf)
+    assert w.atcp_data == [("Conn.MXP", "")]
+
+
+def test_sb_atcp_empty_payload():
+    w, _t, _p = new_writer(server=True)
+    w.pending_option[SB + ATCP] = True
+    buf = collections.deque([bytes([ATCP[0]])])
+    w.handle_subnegotiation(buf)
+    assert w.atcp_data == [("", "")]
+
+
+def test_sb_aardwolf_dispatch():
+    w, _t, _p = new_writer(server=True)
+    w.pending_option[SB + AARDWOLF] = True
+    payload = bytes([100, 3])
+    buf = collections.deque([bytes([AARDWOLF[0]])] + [bytes([b]) for b in payload])
+    w.handle_subnegotiation(buf)
+    assert len(w.aardwolf_data) == 1
+    assert w.aardwolf_data[0]["channel"] == "status"
+    assert w.aardwolf_data[0]["data_byte"] == 3
+
+
+def test_sb_aardwolf_tick():
+    w, _t, _p = new_writer(server=True)
+    w.pending_option[SB + AARDWOLF] = True
+    payload = bytes([101, 1])
+    buf = collections.deque([bytes([AARDWOLF[0]])] + [bytes([b]) for b in payload])
+    w.handle_subnegotiation(buf)
+    assert w.aardwolf_data[0]["channel"] == "tick"
+    assert w.aardwolf_data[0]["data_byte"] == 1
+
+
+def test_sb_aardwolf_empty_payload():
+    w, _t, _p = new_writer(server=True)
+    w.pending_option[SB + AARDWOLF] = True
+    buf = collections.deque([bytes([AARDWOLF[0]])])
+    w.handle_subnegotiation(buf)
+    assert w.aardwolf_data[0]["channel"] == "unknown"

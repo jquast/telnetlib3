@@ -18,7 +18,17 @@ if TYPE_CHECKING:  # pragma: no cover
 
 # local
 from . import slc
-from .mud import gmcp_decode, gmcp_encode, msdp_decode, msdp_encode, mssp_decode, mssp_encode
+from .mud import (
+    aardwolf_decode,
+    atcp_decode,
+    gmcp_decode,
+    gmcp_encode,
+    msdp_decode,
+    msdp_encode,
+    mssp_decode,
+    mssp_encode,
+    zmp_decode,
+)
 from .telopt import (
     AO,
     DM,
@@ -37,9 +47,13 @@ from .telopt import (
     EOR,
     ESC,
     IAC,
+    MSP,
+    MXP,
     NOP,
     SGA,
     VAR,
+    ZMP,
+    ATCP,
     DONT,
     ECHO,
     GMCP,
@@ -60,6 +74,7 @@ from .telopt import (
     SNDLOC,
     STATUS,
     TSPEED,
+    AARDWOLF,
     CHARSET,
     CMD_EOR,
     REQUEST,
@@ -229,6 +244,18 @@ class TelnetWriter:
         #: ``None`` until a ``SB MSSP`` payload is received and decoded.
         self.mssp_data: Optional[dict[str, str | list[str]]] = None
 
+        #: Accumulated ZMP messages (list of [command, arg, ...] lists).
+        #: Empty until ``SB ZMP`` payloads are received and decoded.
+        self.zmp_data: list[list[str]] = []
+
+        #: Accumulated ATCP messages (list of (package, value) tuples).
+        #: Empty until ``SB ATCP`` payloads are received and decoded.
+        self.atcp_data: list[tuple[str, str]] = []
+
+        #: Accumulated Aardwolf messages (list of decoded dicts).
+        #: Empty until ``SB AARDWOLF`` payloads are received and decoded.
+        self.aardwolf_data: list[dict[str, Any]] = []
+
         #: Sub-negotiation buffer
         self._sb_buffer: collections.deque[bytes] = collections.deque()
 
@@ -300,6 +327,11 @@ class TelnetWriter:
             (GMCP, "gmcp"),
             (MSDP, "msdp"),
             (MSSP, "mssp"),
+            (MSP, "msp"),
+            (MXP, "mxp"),
+            (ZMP, "zmp"),
+            (AARDWOLF, "aardwolf"),
+            (ATCP, "atcp"),
         ):
             self.set_ext_callback(cmd=ext_cmd, func=getattr(self, f"handle_{key}"))
 
@@ -1488,6 +1520,11 @@ class TelnetWriter:
             GMCP,
             MSDP,
             MSSP,
+            MSP,
+            MXP,
+            ZMP,
+            AARDWOLF,
+            ATCP,
         ), cmd
         assert callable(func), "Argument func must be callable"
         self._ext_callback[cmd] = func
@@ -1594,6 +1631,29 @@ class TelnetWriter:
         """Receive MSSP variables as dict."""
         self.log.debug("MSSP: %r", variables)
         self.mssp_data = variables
+
+    def handle_msp(self, data: bytes) -> None:
+        """Receive MUD Sound Protocol subnegotiation data."""
+        self.log.debug("MSP: %r", data)
+
+    def handle_mxp(self, data: bytes) -> None:
+        """Receive MUD eXtension Protocol subnegotiation data."""
+        self.log.debug("MXP: %r", data)
+
+    def handle_zmp(self, parts: list[str]) -> None:
+        """Receive decoded ZMP message as list of ``[command, arg, ...]``."""
+        self.log.debug("ZMP: %r", parts)
+        self.zmp_data.append(parts)
+
+    def handle_aardwolf(self, data: dict[str, Any]) -> None:
+        """Receive decoded Aardwolf message as dict."""
+        self.log.debug("AARDWOLF: %r", data)
+        self.aardwolf_data.append(data)
+
+    def handle_atcp(self, package: str, value: str) -> None:
+        """Receive decoded ATCP message as ``(package, value)``."""
+        self.log.debug("ATCP: %s %r", package, value)
+        self.atcp_data.append((package, value))
 
     def handle_send_client_charset(self, _charsets: list[str]) -> str:
         """
@@ -1717,6 +1777,11 @@ class TelnetWriter:
             GMCP,
             MSDP,
             MSSP,
+            MSP,
+            MXP,
+            ZMP,
+            AARDWOLF,
+            ATCP,
         ):
             # first time we've agreed, respond accordingly.
             if not self.local_option.enabled(opt):
@@ -1792,7 +1857,8 @@ class TelnetWriter:
         """
         self.log.debug("handle_will(%s)", name_command(opt))
 
-        if opt in (BINARY, SGA, ECHO, NAWS, LINEMODE, EOR, SNDLOC, GMCP, MSDP, MSSP):
+        if opt in (BINARY, SGA, ECHO, NAWS, LINEMODE, EOR, SNDLOC,
+                   GMCP, MSDP, MSSP, MSP, MXP, ZMP, AARDWOLF, ATCP):
             if opt == ECHO and self.server:
                 raise ValueError("cannot recv WILL ECHO on server end")
             if opt in (NAWS, LINEMODE, SNDLOC) and self.client:
@@ -1928,7 +1994,9 @@ class TelnetWriter:
             raise ValueError("SE: buffer empty")
         if buf[0] == theNULL:
             raise ValueError("SE: buffer is NUL")
-        if len(buf) == 1:
+        # MUD protocols may send empty SB payloads (e.g. IAC SB MXP IAC SE).
+        _EMPTY_SB_OK = frozenset({MXP, MSP, ZMP, AARDWOLF, ATCP})
+        if len(buf) == 1 and buf[0] not in _EMPTY_SB_OK:
             raise ValueError(f"SE: buffer too short: {buf!r}")
 
         cmd = buf[0]
@@ -1952,6 +2020,11 @@ class TelnetWriter:
             GMCP: self._handle_sb_gmcp,
             MSDP: self._handle_sb_msdp,
             MSSP: self._handle_sb_mssp,
+            MSP: self._handle_sb_msp,
+            MXP: self._handle_sb_mxp,
+            ZMP: self._handle_sb_zmp,
+            AARDWOLF: self._handle_sb_aardwolf,
+            ATCP: self._handle_sb_atcp,
         }.get(cmd)
         if fn_call is None:
             raise ValueError(f"SB unhandled: cmd={name_command(cmd)}, buf={buf!r}")
@@ -2733,6 +2806,56 @@ class TelnetWriter:
         encoding = self.environ_encoding or "utf-8"
         variables = mssp_decode(payload, encoding=encoding)
         self._ext_callback[MSSP](variables)
+
+    def _handle_sb_msp(self, buf: collections.deque[bytes]) -> None:
+        """Handle MUD Sound Protocol (MSP) subnegotiation.
+
+        :param buf: bytes following IAC SB MSP.
+        """
+        buf.popleft()
+        payload = b"".join(buf)
+        self._ext_callback[MSP](payload)
+
+    def _handle_sb_mxp(self, buf: collections.deque[bytes]) -> None:
+        """Handle MUD eXtension Protocol (MXP) subnegotiation.
+
+        :param buf: bytes following IAC SB MXP.
+        """
+        buf.popleft()
+        payload = b"".join(buf)
+        self._ext_callback[MXP](payload)
+
+    def _handle_sb_zmp(self, buf: collections.deque[bytes]) -> None:
+        """Handle Zenith MUD Protocol (ZMP) subnegotiation.
+
+        :param buf: bytes following IAC SB ZMP.
+        """
+        buf.popleft()
+        payload = b"".join(buf)
+        encoding = self.environ_encoding or "utf-8"
+        parts = zmp_decode(payload, encoding=encoding)
+        self._ext_callback[ZMP](parts)
+
+    def _handle_sb_aardwolf(self, buf: collections.deque[bytes]) -> None:
+        """Handle Aardwolf protocol subnegotiation.
+
+        :param buf: bytes following IAC SB AARDWOLF.
+        """
+        buf.popleft()
+        payload = b"".join(buf)
+        data = aardwolf_decode(payload)
+        self._ext_callback[AARDWOLF](data)
+
+    def _handle_sb_atcp(self, buf: collections.deque[bytes]) -> None:
+        """Handle Achaea Telnet Client Protocol (ATCP) subnegotiation.
+
+        :param buf: bytes following IAC SB ATCP.
+        """
+        buf.popleft()
+        payload = b"".join(buf)
+        encoding = self.environ_encoding or "utf-8"
+        package, value = atcp_decode(payload, encoding=encoding)
+        self._ext_callback[ATCP](package, value)
 
     def _handle_do_forwardmask(self, buf: collections.deque[bytes]) -> None:
         """

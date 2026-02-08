@@ -147,8 +147,9 @@ async def test_probe_timeout_and_defaults():
     writer2 = MockWriter(wont_options=[fps.BINARY])
     results2 = await sfp.probe_server_capabilities(writer2, timeout=0.01)
     assert "BINARY" in results2
-    expected = len(fps.QUICK_PROBE_OPTIONS) - len(
-        [o for o in fps.QUICK_PROBE_OPTIONS if o[0] in sfp._CLIENT_ONLY_WILL]
+    base = fps.QUICK_PROBE_OPTIONS + fps.EXTENDED_OPTIONS
+    expected = len(base) - len(
+        [o for o in base if o[0] in sfp._CLIENT_ONLY_WILL]
     )
     assert len(results2) == expected
 
@@ -641,8 +642,9 @@ async def test_probe_server_capabilities_full():
     probed_names = set(results.keys())
     legacy_names = {name for _, name, _ in fps.LEGACY_OPTIONS}
     assert probed_names.issuperset(legacy_names)
-    expected = len(fps.ALL_PROBE_OPTIONS) - len(
-        [o for o in fps.ALL_PROBE_OPTIONS if o[0] in sfp._CLIENT_ONLY_WILL]
+    base = fps.ALL_PROBE_OPTIONS + fps.EXTENDED_OPTIONS
+    expected = len(base) - len(
+        [o for o in base if o[0] in sfp._CLIENT_ONLY_WILL]
     )
     assert len(results) == expected
 

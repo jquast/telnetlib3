@@ -28,10 +28,14 @@ from .telopt import (
     DO,
     DET,
     EOR,
+    MSP,
+    MXP,
     RCP,
     RSP,
     SGA,
     TLS,
+    ZMP,
+    ATCP,
     DONT,
     ECHO,
     GMCP,
@@ -46,6 +50,7 @@ from .telopt import (
     TTYPE,
     X3PAD,
     XAUTH,
+    AARDWOLF,
     BINARY,
     KERMIT,
     NAOCRD,
@@ -254,6 +259,11 @@ EXTENDED_OPTIONS = [
     (GMCP, "GMCP", "Generic MUD Communication Protocol"),
     (MSDP, "MSDP", "MUD Server Data Protocol"),
     (MSSP, "MSSP", "MUD Server Status Protocol"),
+    (MSP, "MSP", "MUD Sound Protocol"),
+    (MXP, "MXP", "MUD eXtension Protocol"),
+    (ZMP, "ZMP", "Zenith MUD Protocol"),
+    (AARDWOLF, "AARDWOLF", "Aardwolf protocol"),
+    (ATCP, "ATCP", "Achaea Telnet Client Protocol"),
 ]
 
 LEGACY_OPTIONS = [
@@ -980,7 +990,8 @@ def _is_maybe_mud(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> bool:
     for key in ("ttype1", "ttype2", "ttype3"):
         if (writer.get_extra_info(key) or "").lower() in MUD_TERMINALS:
             return True
-    if writer.remote_option.enabled(GMCP) or writer.remote_option.enabled(MSDP):
+    mud_opts = (GMCP, MSDP, MXP, MSP, ATCP, AARDWOLF)
+    if any(writer.remote_option.enabled(opt) for opt in mud_opts):
         return True
     return False
 

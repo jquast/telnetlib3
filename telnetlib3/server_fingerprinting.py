@@ -41,6 +41,7 @@ from .stream_reader import TelnetReader
 from .stream_writer import TelnetWriter
 from .fingerprinting import (
     ALL_PROBE_OPTIONS,
+    EXTENDED_OPTIONS,
     QUICK_PROBE_OPTIONS,
     _hash_fingerprint,
     _opt_byte_to_name,
@@ -225,6 +226,14 @@ async def _fingerprint_session(
     )
     if writer.mssp_data is not None:
         session_data["mssp"] = writer.mssp_data
+    if writer.zmp_data:
+        session_data["zmp"] = writer.zmp_data
+    if writer.atcp_data:
+        session_data["atcp"] = [
+            {"package": pkg, "value": val} for pkg, val in writer.atcp_data
+        ]
+    if writer.aardwolf_data:
+        session_data["aardwolf"] = writer.aardwolf_data
     session_entry: dict[str, Any] = {
         "host": host,
         "ip": (writer.get_extra_info("peername") or (host,))[0],
@@ -299,6 +308,9 @@ async def probe_server_capabilities(
     """
     if options is None:
         base = ALL_PROBE_OPTIONS if scan_type == "full" else QUICK_PROBE_OPTIONS
+        # Servers handle unknown options gracefully, so always include
+        # EXTENDED_OPTIONS (MUD protocols with high byte values).
+        base = base + EXTENDED_OPTIONS
         options = [(opt, name, desc) for opt, name, desc in base if opt not in _CLIENT_ONLY_WILL]
     return await probe_client_capabilities(writer, options=options, timeout=timeout)
 
