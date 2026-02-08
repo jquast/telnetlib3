@@ -23,6 +23,9 @@ class MockTransport:
     def get_write_buffer_size(self):
         return 0
 
+    def is_closing(self):
+        return False
+
 
 class MockProtocol:
     """Minimal protocol mock for benchmarking."""
