@@ -1,4 +1,5 @@
 # std imports
+import logging
 import collections
 
 # 3rd party
@@ -1076,8 +1077,6 @@ def test_miscellaneous_handle_logs_cover_remaining_handlers():
 
 def test_sb_interrupted_logs_warning_with_context(caplog):
     """SB interruption logs WARNING (not ERROR) with option name and byte count."""
-    import logging
-
     w, t, _ = new_writer(server=True)
     # Enter SB mode: IAC SB CHARSET <payload bytes>
     w.feed_byte(IAC)
@@ -1097,8 +1096,6 @@ def test_sb_interrupted_logs_warning_with_context(caplog):
 
 def test_sb_begin_logged(caplog):
     """Entering SB mode logs the option name at DEBUG level."""
-    import logging
-
     w, t, _ = new_writer(server=True)
     with caplog.at_level(logging.DEBUG):
         w.feed_byte(IAC)
