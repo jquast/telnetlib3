@@ -884,3 +884,27 @@ async def test_fingerprinting_shell_help_prompt(tmp_path):
     )
 
     assert b"help\r\n" in writer._writes
+
+
+class TestCullDisplay:
+    """Tests for _cull_display bytes conversion."""
+
+    def test_bytes_utf8(self):
+        assert sfp._cull_display(b"hello") == "hello"
+
+    def test_bytes_binary(self):
+        assert sfp._cull_display(b"\x80\xff") == "80ff"
+
+    def test_bytes_in_dict(self):
+        result = sfp._cull_display({"data_bytes": b"\x01"})
+        assert result == {"data_bytes": "\x01"}
+        json.dumps(result)
+
+    def test_bytes_in_nested_list(self):
+        result = sfp._cull_display({"items": [{"val": b"\xfe\xed"}]})
+        assert result == {"items": [{"val": "feed"}]}
+        json.dumps(result)
+
+    def test_empty_bytes_culled(self):
+        result = sfp._cull_display({"data_bytes": b""})
+        assert result == {}

@@ -89,7 +89,7 @@ logger = logging.getLogger("telnetlib3.server_fingerprint")
 def _is_display_worthy(v: Any) -> bool:
     """Return True if *v* should be kept in culled display output."""
     # pylint: disable-next=use-implicit-booleaness-not-comparison-to-string
-    return v is not False and v != {} and v != [] and v != ""
+    return v is not False and v != {} and v != [] and v != "" and v != b""
 
 
 def _cull_display(obj: Any) -> Any:
@@ -98,6 +98,11 @@ def _cull_display(obj: Any) -> Any:
         return {k: _cull_display(v) for k, v in obj.items() if _is_display_worthy(v)}
     if isinstance(obj, list):
         return [_cull_display(item) for item in obj]
+    if isinstance(obj, bytes):
+        try:
+            return obj.decode("utf-8")
+        except UnicodeDecodeError:
+            return obj.hex()
     return obj
 
 

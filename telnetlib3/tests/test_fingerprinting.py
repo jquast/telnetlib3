@@ -966,6 +966,21 @@ def test_cooked_input(monkeypatch, input_fn, expected):
     assert fps._cooked_input("test> ") == expected
 
 
+def test_atomic_json_write_bytes_values(tmp_path):
+    """_atomic_json_write encodes bytes values as UTF-8 or hex."""
+    filepath = str(tmp_path / "test.json")
+    fps._atomic_json_write(filepath, {
+        "text": b"hello",
+        "binary": b"\x80\xff",
+        "nested": {"val": b"\x01"},
+    })
+    with open(filepath, encoding="utf-8") as f:
+        result = json.load(f)
+    assert result["text"] == "hello"
+    assert result["binary"] == "80ff"
+    assert result["nested"]["val"] == "\x01"
+
+
 def test_fingerprinting_main(monkeypatch, tmp_path):
     called = []
     monkeypatch.setattr(sys, "argv", ["fingerprinting", str(tmp_path / "test.json")])
