@@ -466,11 +466,12 @@ def test_handle_sb_status_send_and_is():
     ws2._handle_sb_status(buf2)
 
 
-def test_handle_sb_forwardmask_do_raises_notimplemented():
+def test_handle_sb_forwardmask_do_accepted():
     wc, _, _ = new_writer(server=False, client=True)
     wc.local_option[LINEMODE] = True
-    with pytest.raises(NotImplementedError):
-        wc._handle_sb_forwardmask(DO, collections.deque([b"x", b"y"]))
+    wc._handle_sb_forwardmask(DO, collections.deque([b"x", b"y"]))
+    opt = SB + LINEMODE + slc.LMODE_FORWARDMASK
+    assert wc.local_option[opt] is True
 
 
 def test_handle_sb_linemode_mode_empty_buffer():

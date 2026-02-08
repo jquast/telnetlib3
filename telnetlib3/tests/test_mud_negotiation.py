@@ -165,6 +165,41 @@ def test_sb_mssp_dispatch():
     assert received_args[0] == {"NAME": "TestMUD"}
 
 
+def test_handle_mssp_stores_data():
+    w, t, p = new_writer(server=True)
+    assert w.mssp_data is None
+    w.handle_mssp({"NAME": "TestMUD", "PLAYERS": "42"})
+    assert w.mssp_data == {"NAME": "TestMUD", "PLAYERS": "42"}
+
+
+def test_sb_mssp_dispatch_stores_data():
+    w, t, p = new_writer(server=True)
+    w.pending_option[SB + MSSP] = True
+
+    # local
+    from telnetlib3.telopt import MSSP_VAL, MSSP_VAR
+
+    payload = MSSP_VAR + b"NAME" + MSSP_VAL + b"TestMUD" + MSSP_VAR + b"PLAYERS" + MSSP_VAL + b"5"
+    buf = collections.deque([bytes([MSSP[0]])] + [bytes([b]) for b in payload])
+    w.handle_subnegotiation(buf)
+    assert w.mssp_data == {"NAME": "TestMUD", "PLAYERS": "5"}
+
+
+def test_sb_mssp_latin1_fallback():
+    """MSSP with non-UTF-8 bytes falls back to latin-1 decoding."""
+    w, t, p = new_writer(server=True)
+    w.pending_option[SB + MSSP] = True
+
+    # local
+    from telnetlib3.telopt import MSSP_VAL, MSSP_VAR
+
+    # 0xC9 is 'É' in latin-1 but invalid as a lone UTF-8 lead byte
+    payload = MSSP_VAR + b"NAME" + MSSP_VAL + b"\xc9toile"
+    buf = collections.deque([bytes([MSSP[0]])] + [bytes([b]) for b in payload])
+    w.handle_subnegotiation(buf)
+    assert w.mssp_data == {"NAME": "\xc9toile"}
+
+
 def test_send_gmcp():
     w, t, p = new_writer(server=True)
     w.local_option[GMCP] = True

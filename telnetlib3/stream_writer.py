@@ -214,6 +214,10 @@ class TelnetWriter:
         #: for fingerprinting.  ``None`` if no SEND was received.
         self.environ_send_raw: Optional[bytes] = None
 
+        #: Decoded MSSP variables received via subnegotiation.
+        #: ``None`` until a ``SB MSSP`` payload is received and decoded.
+        self.mssp_data: Optional[dict[str, str | list[str]]] = None
+
         #: Sub-negotiation buffer
         self._sb_buffer: collections.deque[bytes] = collections.deque()
 
@@ -1572,6 +1576,7 @@ class TelnetWriter:
     def handle_mssp(self, variables: dict[str, str | list[str]]) -> None:
         """Receive MSSP variables as dict."""
         self.log.debug("MSSP: %r", variables)
+        self.mssp_data = variables
 
     def handle_send_client_charset(self, _charsets: list[str]) -> str:
         """
@@ -1661,7 +1666,8 @@ class TelnetWriter:
             TSPEED,
             SNDLOC,
         ):
-            raise ValueError(f"cannot recv DO {name_command(opt)} on server end (ignored).")
+            self.log.debug("recv DO %s on server end, refusing.", name_command(opt))
+            self.iac(WONT, opt)
         elif self.client and opt in (LOGOUT,):
             raise ValueError(f"cannot recv DO {name_command(opt)} on client end (ignored).")
         elif opt == TM:
@@ -1758,8 +1764,11 @@ class TelnetWriter:
         unsupported capabilities, RFC specifies a response of (IAC, DONT, opt).
         Similarly, set ``self.remote_option[opt]`` to ``False``.
 
-        :raises ValueError: When an invalid WILL command is received for the
-            current endpoint role (server/client).
+        Options received in the wrong direction (e.g. WILL NAWS on client
+        end) are gracefully refused with DONT per Postel's law (RFC 1123).
+
+        :raises ValueError: When WILL ECHO is received on server end, or
+            when WILL TM is received without prior DO TM.
         """
         self.log.debug("handle_will(%s)", name_command(opt))
 
@@ -1767,7 +1776,9 @@ class TelnetWriter:
             if opt == ECHO and self.server:
                 raise ValueError("cannot recv WILL ECHO on server end")
             if opt in (NAWS, LINEMODE, SNDLOC) and self.client:
-                raise ValueError(f"cannot recv WILL {name_command(opt)} on client end")
+                self.log.debug("recv WILL %s on client end, refusing.", name_command(opt))
+                self.iac(DONT, opt)
+                return
             if not self.remote_option.enabled(opt):
                 self.iac(DO, opt)
                 self.remote_option[opt] = True
@@ -1805,7 +1816,9 @@ class TelnetWriter:
             #
             # Though Others -- XDISPLOC, TTYPE, TSPEED, are 1-directional.
             if not self.server and opt not in (CHARSET,):
-                raise ValueError(f"cannot recv WILL {name_command(opt)} on client end.")
+                self.log.debug("recv WILL %s on client end, refusing.", name_command(opt))
+                self.iac(DONT, opt)
+                return
 
             # First, we need to acknowledge WILL with DO for all options
             # This was missing for CHARSET when received by client
@@ -2102,12 +2115,16 @@ class TelnetWriter:
         assert opt in (IS, SEND, INFO), opt
         opt_kind = {IS: "IS", INFO: "INFO", SEND: "SEND"}.get(opt)
         raw = b"".join(buf)
-        self.log.debug("recv %s %s: %r", name_command(cmd), opt_kind, raw)
 
         if opt == SEND:
             self.environ_send_raw = raw
 
         env = _decode_env_buf(raw, encoding=self.environ_encoding)
+        env_keys = [k for k in env if k]
+        if env_keys:
+            self.log.debug("recv %s %s: %s", name_command(cmd), opt_kind, ", ".join(env_keys))
+        else:
+            self.log.debug("recv %s %s (all)", name_command(cmd), opt_kind)
 
         if opt in (IS, INFO):
             assert self.server, f"SE: cannot recv from server: {name_command(cmd)} {opt_kind}"
@@ -2126,11 +2143,15 @@ class TelnetWriter:
             assert self.client, f"SE: cannot recv from client: {name_command(cmd)} {opt_kind}"
             # client-side, we do _not_ honor the 'send all VAR' or 'send all
             # USERVAR' requests -- it is a small bit of a security issue.
-            send_env = _encode_env_buf(
-                self._ext_send_callback[NEW_ENVIRON](env.keys()), encoding=self.environ_encoding
-            )
+            reply_env = self._ext_send_callback[NEW_ENVIRON](env.keys())
+            send_env = _encode_env_buf(reply_env, encoding=self.environ_encoding)
             response = [IAC, SB, NEW_ENVIRON, IS, send_env, IAC, SE]
-            self.log.debug("env send: %r", response)
+            if reply_env:
+                self.log.debug(
+                    "env send: %s", ", ".join(f"{k}={v!r}" for k, v in reply_env.items())
+                )
+            else:
+                self.log.debug("env send: (empty)")
             self.send_iac(b"".join(response))
             if self.pending_option.enabled(WILL + TTYPE):
                 self.pending_option[WILL + TTYPE] = False
@@ -2225,28 +2246,49 @@ class TelnetWriter:
         """
         Callback responds to IAC SB STATUS IS, :rfc:`859`.
 
-        :param buf: sub-negotiation byte buffer containing status data. Compares the remote peer's
-            reported option state against our own and logs a single summary of agreed and disagreed
-            options. Malformed data is handled gracefully by skipping invalid bytes.
+        :param buf: sub-negotiation byte buffer containing status data.
+            Parses ``WILL/WONT/DO/DONT <opt>`` pairs and ``SB <opt> <data> SE``
+            blocks.  Compares the remote peer's reported option state against
+            our own and logs a summary of agreed, disagreed, and subnegotiation
+            parameters.
         """
         buf_list = list(buf)
         agreed = []
         disagreed = []
+        sb_info = []
 
         i = 0
         while i < len(buf_list):
             if i + 1 >= len(buf_list):
-                self.log.warning("STATUS: incomplete pair at end, skipping byte: %s", buf_list[i])
+                self.log.debug("STATUS: trailing byte: %s", buf_list[i])
                 break
 
             cmd = buf_list[i]
-            opt = buf_list[i + 1]
+
+            # SB <opt> <data...> SE block
+            if cmd == SB:
+                opt = buf_list[i + 1]
+                # find matching SE
+                se_idx = None
+                for j in range(i + 2, len(buf_list)):
+                    if buf_list[j] == SE:
+                        se_idx = j
+                        break
+                if se_idx is None:
+                    sb_data = b"".join(buf_list[i + 2 :])
+                    sb_info.append(f"{name_command(opt)} {sb_data.hex()}")
+                    break
+                sb_data = b"".join(buf_list[i + 2 : se_idx])
+                sb_info.append(_format_sb_status(opt, sb_data))
+                i = se_idx + 1
+                continue
 
             if cmd not in (DO, DONT, WILL, WONT):
-                self.log.warning("STATUS: invalid cmd at pos %d: %s, skipping.", i, cmd)
+                self.log.debug("STATUS: unknown byte at pos %d: %s", i, cmd)
                 i += 1
                 continue
 
+            opt = buf_list[i + 1]
             opt_name = name_command(opt)
             if cmd in (DO, DONT):
                 enabled = self.local_option.enabled(opt)
@@ -2266,6 +2308,8 @@ class TelnetWriter:
             self.log.debug("STATUS agreed: %s", ", ".join(agreed))
         if disagreed:
             self.log.debug("STATUS disagreed: %s", ", ".join(disagreed))
+        if sb_info:
+            self.log.debug("STATUS subneg: %s", "; ".join(sb_info))
 
     def _send_status(self) -> None:
         """Callback responds to IAC SB STATUS SEND, :rfc:`859`."""
@@ -2660,7 +2704,12 @@ class TelnetWriter:
         """
         buf.popleft()
         payload = b"".join(buf)
-        variables = mssp_decode(payload)
+        encoding = self.environ_encoding or "utf-8"
+        try:
+            variables = mssp_decode(payload, encoding=encoding)
+        except UnicodeDecodeError:
+            self.log.debug("MSSP decode failed with %s, retrying latin-1", encoding)
+            variables = mssp_decode(payload, encoding="latin-1")
         self._ext_callback[MSSP](variables)
 
     def _handle_do_forwardmask(self, buf: collections.deque[bytes]) -> None:
@@ -2668,9 +2717,9 @@ class TelnetWriter:
         Callback handles request for LINEMODE DO FORWARDMASK.
 
         :param buf: bytes following IAC SB LINEMODE DO FORWARDMASK.
-        :raises NotImplementedError:
         """
-        raise NotImplementedError
+        mask = b"".join(buf)
+        self.log.debug("FORWARDMASK received (%d bytes), not applied", len(mask))
 
 
 class TelnetWriterUnicode(TelnetWriter):  # pylint: disable=abstract-method
@@ -2854,6 +2903,28 @@ def _encode_env_buf(env: dict[str, str], encoding: str = "ascii") -> bytes:
         buf.append(VALUE)
         buf.extend([_escape_environ(f"{value}".encode(encoding, "replace"))])
     return b"".join(buf)
+
+
+def _format_sb_status(opt: bytes, data: bytes) -> str:
+    """
+    Format a STATUS IS subnegotiation block as a human-readable string.
+
+    :param opt: Option byte (e.g. NAWS, TTYPE).
+    :param data: Subnegotiation payload bytes.
+    :returns: Descriptive string like ``"NAWS 80x25"`` or ``"TTYPE IS VT100"``.
+    """
+    opt_name = name_command(opt)
+    if opt == NAWS and len(data) == 4:
+        w = (data[0] << 8) | data[1]
+        h = (data[2] << 8) | data[3]
+        return f"{opt_name} {w}x{h}"
+    if opt in (TTYPE, XDISPLOC, SNDLOC) and len(data) >= 2:
+        kind = {IS: "IS", SEND: "SEND"}.get(data[0:1], data[0:1].hex())
+        text = data[1:].decode("ascii", errors="replace")
+        return f"{opt_name} {kind} {text}"
+    if data:
+        return f"{opt_name} {data.hex()}"
+    return opt_name
 
 
 def _decode_env_buf(buf: bytes, encoding: str = "ascii") -> dict[str, str]:

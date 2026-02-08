@@ -168,3 +168,15 @@ def test_mssp_decode_multi_returns_list() -> None:
     decoded = mssp_decode(encoded)
     assert decoded["SINGLE"] == "one"
     assert decoded["MULTI"] == ["first", "second"]
+
+
+def test_mssp_decode_encoding_param() -> None:
+    """mssp_decode uses the encoding parameter for decoding."""
+    # 3rd party
+    import pytest
+
+    encoded = MSSP_VAR + b"NAME" + MSSP_VAL + b"\xc9toile"
+    with pytest.raises(UnicodeDecodeError):
+        mssp_decode(encoded)
+    decoded = mssp_decode(encoded, encoding="latin-1")
+    assert decoded == {"NAME": "\xc9toile"}

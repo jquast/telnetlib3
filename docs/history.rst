@@ -22,6 +22,15 @@ History
     for fingerprinting of connected clients.
   * new: ``telnetlib3-fingerprint`` CLI for fingerprinting the given remote
     server, probing telnet option support and capturing banners.
+  * enhancement: reversed ``WILL``/``DO`` for directional options (e.g. ``WILL
+    NAWS`` from server, ``DO TTYPE`` from client) now gracefully refused with
+    ``DONT``/``WONT`` instead of raising ``ValueError``.
+  * bugfix: ``LINEMODE DO FORWARDMASK`` subnegotiation no longer raises
+    ``NotImplementedError``; the mask is accepted and logged at debug level.
+  * enhancement: ``NEW_ENVIRON SEND`` and response logging improved --
+    ``SEND (all)`` / ``env send: (empty)`` instead of raw byte dumps.
+  * enhancement: ``telnetlib3-fingerprint`` now probes MSDP and MSSP options
+    and captures MSSP server status data in session output.
 
 2.2.0
   * bugfix: workaround for Microsoft Telnet client crash on
