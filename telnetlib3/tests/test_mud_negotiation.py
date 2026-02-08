@@ -228,6 +228,7 @@ def test_sb_msdp_latin1_fallback():
     assert received_args[0] == {"KEY": "Caf\xe9"}
 
 
+
 def test_send_gmcp():
     w, t, p = new_writer(server=True)
     w.local_option[GMCP] = True

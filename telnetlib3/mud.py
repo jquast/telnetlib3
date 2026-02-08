@@ -233,6 +233,7 @@ def mssp_decode(buf: bytes, encoding: str = "utf-8") -> dict[str, str | list[str
     :param buf: MSSP payload bytes
     :param encoding: Character encoding to try first, falls back to latin-1.
     :returns: Dictionary with str values for single entries, list[str] for multiple
+    :raises UnicodeDecodeError: When payload bytes cannot be decoded.
     """
     result: dict[str, str | list[str]] = {}
     idx = 0
