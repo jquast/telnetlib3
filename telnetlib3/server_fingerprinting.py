@@ -71,6 +71,13 @@ _JQ = shutil.which("jq")
 # string boundaries).  Used to auto-answer confirmation prompts.
 _YN_RE = re.compile(rb"(?i)(?:^|[^a-zA-Z0-9])(yes/no|y/n)(?:[^a-zA-Z0-9]|$)")
 
+# Match MUD/BBS login prompts that offer 'who' as a command.
+# Quoted: "enter a name (or 'who')", or bare WHO without surrounding
+# alphanumerics: "\nWHO                to see players connected.\n"
+_WHO_RE = re.compile(
+    rb"(?i)(?:'who'|\"who\"|(?:^|[^a-zA-Z0-9])who(?:[^a-zA-Z0-9]|$))"
+)
+
 logger = logging.getLogger("telnetlib3.server_fingerprint")
 
 
@@ -107,8 +114,13 @@ def _detect_yn_prompt(banner: bytes) -> bytes:
 
     If the banner contains a ``yes/no`` or ``y/n`` confirmation prompt
     (case-insensitive, delimited by non-alphanumeric characters), returns
-    ``b"yes\r\n"`` or ``b"y\r\n"`` respectively.  Otherwise returns a
-    bare ``b"\r\n"``.
+    ``b"yes\r\n"`` or ``b"y\r\n"`` respectively.
+
+    If the banner contains a MUD/BBS login prompt offering ``'who'`` or
+    ``'finger'`` as alternatives (e.g. "enter a name (or 'who')"),
+    returns ``b"who\r\n"``.
+
+    Otherwise returns a bare ``b"\r\n"``.
 
     :param banner: Raw banner bytes collected before the first prompt.
     :returns: Response bytes to send.
@@ -119,6 +131,8 @@ def _detect_yn_prompt(banner: bytes) -> bytes:
         if token == b"yes/no":
             return b"yes\r\n"
         return b"y\r\n"
+    if _WHO_RE.search(banner):
+        return b"who\r\n"
     return b"\r\n"
 
 

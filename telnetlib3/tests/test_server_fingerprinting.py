@@ -724,6 +724,27 @@ async def test_probe_skipped_when_closing(tmp_path):
         pytest.param(b"Type yes/no please", b"yes\r\n", id="yes_no_space_delimited"),
         pytest.param(b"systemd/network", b"\r\n", id="false_positive_word"),
         pytest.param(b"beyond", b"\r\n", id="substring_y_n_not_matched"),
+        pytest.param(
+            b"Please enter a name: (or 'who' or 'finger'):",
+            b"who\r\n",
+            id="who_single_quotes",
+        ),
+        pytest.param(
+            b'Enter your name (or "who"):', b"who\r\n", id="who_double_quotes"
+        ),
+        pytest.param(
+            b"What is your name? (or 'WHO')", b"who\r\n", id="who_uppercase"
+        ),
+        pytest.param(b"Enter your name:", b"\r\n", id="name_prompt_no_who"),
+        pytest.param(
+            b"connect <name> <password>\r\n"
+            b"WHO                to see players connected.\r\n"
+            b"QUIT               to disconnect.\r\n",
+            b"who\r\n",
+            id="who_bare_command_listing",
+        ),
+        pytest.param(b"Type WHO to list users", b"who\r\n", id="who_bare_mid_sentence"),
+        pytest.param(b"somehow", b"\r\n", id="who_inside_word_not_matched"),
     ],
 )
 def test_detect_yn_prompt(banner, expected):
@@ -796,3 +817,25 @@ async def test_fingerprinting_shell_no_yn_prompt(tmp_path):
     assert b"\r\n" in writer._writes
     assert b"y\r\n" not in writer._writes
     assert b"yes\r\n" not in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_who_prompt(tmp_path):
+    """Banner with 'who' option causes 'who\\r\\n' response."""
+    save_path = str(tmp_path / "result.json")
+    reader = MockReader([b"Please enter a name: (or 'who' or 'finger'):"])
+    writer = MockWriter(will_options=[fps.SGA])
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"who\r\n" in writer._writes
