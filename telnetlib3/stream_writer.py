@@ -259,6 +259,11 @@ class TelnetWriter:
         #: Empty until ``SB AARDWOLF`` payloads are received and decoded.
         self.aardwolf_data: list[dict[str, Any]] = []
 
+        #: Accumulated MXP subnegotiation payloads (list of raw bytes).
+        #: Empty until ``SB MXP`` payloads are received.  An empty payload
+        #: (``b""``) signals MXP mode activation.
+        self.mxp_data: list[bytes] = []
+
         #: Sub-negotiation buffer
         self._sb_buffer: collections.deque[bytes] = collections.deque()
 
@@ -1644,6 +1649,7 @@ class TelnetWriter:
     def handle_mxp(self, data: bytes) -> None:
         """Receive MUD eXtension Protocol subnegotiation data."""
         self.log.debug("MXP: %r", data)
+        self.mxp_data.append(data)
 
     def handle_zmp(self, parts: list[str]) -> None:
         """Receive decoded ZMP message as list of ``[command, arg, ...]``."""
@@ -1799,7 +1805,7 @@ class TelnetWriter:
                 self._send_status()
 
             # and expect a follow-up sub-negotiation for these others.
-            elif opt in (LFLOW, TTYPE, NEW_ENVIRON, XDISPLOC, TSPEED, LINEMODE):
+            elif opt in (LFLOW, TTYPE, NEW_ENVIRON, XDISPLOC, TSPEED, LINEMODE, MXP):
                 # Note that CHARSET is not included -- either side that has sent
                 # WILL and received DO may initiate SB at any time.
                 self.pending_option[SB + opt] = True
@@ -1888,7 +1894,7 @@ class TelnetWriter:
             if not self.remote_option.enabled(opt):
                 self.iac(DO, opt)
                 self.remote_option[opt] = True
-            if opt in (NAWS, LINEMODE, SNDLOC):
+            if opt in (NAWS, LINEMODE, SNDLOC, MXP):
                 # expect to receive some sort of follow-up subnegotiation
                 self.pending_option[SB + opt] = True
                 if opt == LINEMODE:

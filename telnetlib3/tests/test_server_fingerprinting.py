@@ -43,6 +43,7 @@ class MockWriter:
         self.zmp_data: list[list[str]] = []
         self.atcp_data: list[tuple[str, str]] = []
         self.aardwolf_data: list[dict[str, object]] = []
+        self.mxp_data: list[bytes] = []
         self._closing = False
 
     def get_extra_info(self, key, default=None):
@@ -745,6 +746,28 @@ async def test_probe_skipped_when_closing(tmp_path):
         ),
         pytest.param(b"Type WHO to list users", b"who\r\n", id="who_bare_mid_sentence"),
         pytest.param(b"somehow", b"\r\n", id="who_inside_word_not_matched"),
+        pytest.param(
+            b"Type 'help' for a list of commands:",
+            b"help\r\n",
+            id="help_single_quotes",
+        ),
+        pytest.param(
+            b'Enter your name (or "help"):', b"help\r\n", id="help_double_quotes"
+        ),
+        pytest.param(
+            b"HELP               to see available commands.\r\n",
+            b"help\r\n",
+            id="help_bare_command_listing",
+        ),
+        pytest.param(b"Type HELP for info", b"help\r\n", id="help_bare_mid_sentence"),
+        pytest.param(b"helpful tips", b"\r\n", id="help_inside_word_not_matched"),
+        pytest.param(
+            b"connect <name>\r\n"
+            b"WHO                to see players connected.\r\n"
+            b"HELP               to see available commands.\r\n",
+            b"who\r\n",
+            id="who_preferred_over_help",
+        ),
     ],
 )
 def test_detect_yn_prompt(banner, expected):
@@ -839,3 +862,25 @@ async def test_fingerprinting_shell_who_prompt(tmp_path):
     )
 
     assert b"who\r\n" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_help_prompt(tmp_path):
+    """Banner with 'help' option causes 'help\\r\\n' response."""
+    save_path = str(tmp_path / "result.json")
+    reader = MockReader([b"Type 'help' for a list of commands:"])
+    writer = MockWriter(will_options=[fps.SGA])
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"help\r\n" in writer._writes

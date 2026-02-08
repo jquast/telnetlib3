@@ -318,6 +318,56 @@ def test_sb_raw_mud_with_payload(opt):
     assert received == [payload]
 
 
+def test_mxp_data_stored_on_empty_sb():
+    w, _t, _p = new_writer(server=True)
+    w.pending_option[SB + MXP] = True
+    buf = collections.deque([bytes([MXP[0]])])
+    w.handle_subnegotiation(buf)
+    assert w.mxp_data == [b""]
+
+
+def test_mxp_data_stored_with_payload():
+    w, _t, _p = new_writer(server=True)
+    w.pending_option[SB + MXP] = True
+    payload = b"\x01\x02\x03"
+    buf = collections.deque([bytes([MXP[0]])] + [bytes([b]) for b in payload])
+    w.handle_subnegotiation(buf)
+    assert w.mxp_data == [payload]
+
+
+def test_mxp_data_accumulates():
+    w, _t, _p = new_writer(server=True)
+    w.pending_option[SB + MXP] = True
+    buf1 = collections.deque([bytes([MXP[0]])])
+    w.handle_subnegotiation(buf1)
+    w.pending_option[SB + MXP] = True
+    payload = b"\x01\x02"
+    buf2 = collections.deque([bytes([MXP[0]])] + [bytes([b]) for b in payload])
+    w.handle_subnegotiation(buf2)
+    assert w.mxp_data == [b"", payload]
+
+
+def test_handle_will_mxp_sets_pending_sb():
+    w, t, _p = new_writer(server=True)
+    w.handle_will(MXP)
+    assert IAC + DO + MXP in t.writes
+    assert w.pending_option.get(SB + MXP) is True
+
+
+def test_handle_do_mxp_sets_pending_sb():
+    w, t, _p = new_writer(server=True)
+    w.handle_do(MXP)
+    assert IAC + WILL + MXP in t.writes
+    assert w.pending_option.get(SB + MXP) is True
+
+
+def test_handle_will_mxp_client_sets_pending_sb():
+    w, t, _p = new_writer(server=False, client=True)
+    w.handle_will(MXP)
+    assert IAC + DO + MXP in t.writes
+    assert w.pending_option.get(SB + MXP) is True
+
+
 def test_sb_zmp_dispatch():
     w, _t, _p = new_writer(server=True)
     w.pending_option[SB + ZMP] = True

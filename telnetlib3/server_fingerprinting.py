@@ -78,6 +78,11 @@ _WHO_RE = re.compile(
     rb"(?i)(?:'who'|\"who\"|(?:^|[^a-zA-Z0-9])who(?:[^a-zA-Z0-9]|$))"
 )
 
+# Same pattern for 'help' — offered as a login-screen command on many MUDs.
+_HELP_RE = re.compile(
+    rb"(?i)(?:'help'|\"help\"|(?:^|[^a-zA-Z0-9])help(?:[^a-zA-Z0-9]|$))"
+)
+
 logger = logging.getLogger("telnetlib3.server_fingerprint")
 
 
@@ -116,9 +121,9 @@ def _detect_yn_prompt(banner: bytes) -> bytes:
     (case-insensitive, delimited by non-alphanumeric characters), returns
     ``b"yes\r\n"`` or ``b"y\r\n"`` respectively.
 
-    If the banner contains a MUD/BBS login prompt offering ``'who'`` or
-    ``'finger'`` as alternatives (e.g. "enter a name (or 'who')"),
-    returns ``b"who\r\n"``.
+    If the banner contains a MUD/BBS login prompt offering ``'who'`` as
+    an alternative (e.g. "enter a name (or 'who')"), returns
+    ``b"who\r\n"``.  Similarly, ``'help'`` prompts return ``b"help\r\n"``.
 
     Otherwise returns a bare ``b"\r\n"``.
 
@@ -133,6 +138,8 @@ def _detect_yn_prompt(banner: bytes) -> bytes:
         return b"y\r\n"
     if _WHO_RE.search(banner):
         return b"who\r\n"
+    if _HELP_RE.search(banner):
+        return b"help\r\n"
     return b"\r\n"
 
 
@@ -267,6 +274,8 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
         session_data["atcp"] = [{"package": pkg, "value": val} for pkg, val in writer.atcp_data]
     if writer.aardwolf_data:
         session_data["aardwolf"] = writer.aardwolf_data
+    if writer.mxp_data:
+        session_data["mxp"] = [d.hex() if d else "activated" for d in writer.mxp_data]
 
     session_entry: dict[str, Any] = {
         "host": host,
