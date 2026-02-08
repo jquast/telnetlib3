@@ -589,7 +589,11 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
 
 def main() -> None:
     """Entry point for telnetlib3-client command."""
-    asyncio.run(run_client())
+    try:
+        asyncio.run(run_client())
+    except OSError as err:
+        print(f"Error: {err}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _get_fingerprint_argument_parser() -> argparse.ArgumentParser:
@@ -740,7 +744,7 @@ def fingerprint_main() -> None:
     """Entry point for ``telnetlib3-fingerprint`` command."""
     try:
         asyncio.run(run_fingerprint_client())
-    except ConnectionError as err:
+    except OSError as err:
         print(f"Error: {err}", file=sys.stderr)
         sys.exit(1)
 

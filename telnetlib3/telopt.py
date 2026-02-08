@@ -159,6 +159,7 @@ __all__ = (
     "STATUS",
     "SUPDUP",
     "SUPDUPOUTPUT",
+    "TELOPT_92",
     "SUPPRESS_LOCAL_ECHO",
     "SUSP",
     "TLS",
@@ -201,6 +202,7 @@ MSDP = bytes([69])
 MSSP = bytes([70])
 MSP = bytes([90])
 MXP = bytes([91])
+TELOPT_92 = bytes([92])
 ZMP = bytes([93])
 AARDWOLF = bytes([102])
 ATCP = bytes([200])
@@ -270,6 +272,7 @@ _DEBUG_OPTS: Dict[bytes, str] = {
         "MSSP",
         "MSP",
         "MXP",
+        "TELOPT_92",
         "ZMP",
         "AARDWOLF",
         "ATCP",
