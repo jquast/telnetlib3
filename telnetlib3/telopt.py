@@ -159,6 +159,7 @@ __all__ = (
     "STATUS",
     "SUPDUP",
     "SUPDUPOUTPUT",
+    "TELOPT_92",
     "SUPPRESS_LOCAL_ECHO",
     "SUSP",
     "TLS",
@@ -185,6 +186,7 @@ __all__ = (
     "theNULL",
     "name_command",
     "name_commands",
+    "name_option",
     "option_from_name",
 )
 
@@ -201,6 +203,7 @@ MSDP = bytes([69])
 MSSP = bytes([70])
 MSP = bytes([90])
 MXP = bytes([91])
+TELOPT_92 = bytes([92])
 ZMP = bytes([93])
 AARDWOLF = bytes([102])
 ATCP = bytes([200])
@@ -270,6 +273,7 @@ _DEBUG_OPTS: Dict[bytes, str] = {
         "MSSP",
         "MSP",
         "MXP",
+        "TELOPT_92",
         "ZMP",
         "AARDWOLF",
         "ATCP",
@@ -328,6 +332,28 @@ def option_from_name(name: str) -> bytes:
 
 def name_command(byte: bytes) -> str:
     """Return string description for (maybe) telnet command byte."""
+    return _DEBUG_OPTS.get(byte, repr(byte))
+
+
+#: IAC command bytes that should display as hex when used as option codes.
+#: Servers with output-filter bugs can send e.g. ``IAC WONT 0xFC`` where
+#: 0xFC is the WONT command byte itself.  Displaying "WONT WONT" is
+#: confusing, so :func:`name_option` renders these as ``b'\\xfc'``.
+_IAC_CMD_BYTES: frozenset[bytes] = frozenset(
+    {IAC, DO, DONT, WILL, WONT, SB, SE, NOP, DM, BRK, IP, AO, AYT, EC, EL, GA}
+)
+
+
+def name_option(byte: bytes) -> str:
+    """
+    Return string description for a telnet option byte.
+
+    Unlike :func:`name_command`, IAC command bytes (DO, DONT, WILL, WONT,
+    etc.) are displayed as ``repr(byte)`` rather than their command names
+    when they appear in the option-byte position.
+    """
+    if byte in _IAC_CMD_BYTES:
+        return repr(byte)
     return _DEBUG_OPTS.get(byte, repr(byte))
 
 

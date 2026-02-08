@@ -98,7 +98,7 @@ DATA_DIR: Optional[str] = (
 )
 
 # Maximum files per protocol-fingerprint folder
-FINGERPRINT_MAX_FILES = int(os.environ.get("TELNETLIB3_FINGERPRINT_MAX_FILES", "200"))
+FINGERPRINT_MAX_FILES = int(os.environ.get("TELNETLIB3_FINGERPRINT_MAX_FILES", "1000"))
 
 # Maximum number of unique fingerprint folders
 FINGERPRINT_MAX_FINGERPRINTS = int(
@@ -292,6 +292,7 @@ LEGACY_OPTIONS = [
 ]
 
 ALL_PROBE_OPTIONS = CORE_OPTIONS + MUD_OPTIONS + LEGACY_OPTIONS
+QUICK_PROBE_OPTIONS = CORE_OPTIONS + MUD_OPTIONS
 
 # All known options including extended, for display/name lookup only
 _ALL_KNOWN_OPTIONS = ALL_PROBE_OPTIONS + EXTENDED_OPTIONS

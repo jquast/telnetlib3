@@ -29,6 +29,13 @@ from telnetlib3.tests.accessories import (  # noqa: F401  # pylint: disable=unus
     unused_tcp_port,
 )
 
+
+@pytest.fixture(autouse=True)
+def _fast_probe_timeout(monkeypatch):
+    """Reduce probe timeout for fast tests."""
+    monkeypatch.setattr(fps, "_PROBE_TIMEOUT", 0.01)
+
+
 requires_unix = pytest.mark.skipif(sys.platform == "win32", reason="requires termios (Unix only)")
 
 _BINARY_PROBE = {"BINARY": {"status": "WILL", "opt": fps.BINARY}}
@@ -273,7 +280,6 @@ def test_prompt_stores_revision(tmp_path, monkeypatch, capsys):
 async def test_server_shell(monkeypatch):
     monkeypatch.setattr(fps.asyncio, "sleep", _noop)
     monkeypatch.setattr(fps, "DATA_DIR", None)
-    monkeypatch.setattr(fps, "_PROBE_TIMEOUT", 0.05)
 
     writer = MockWriter(
         extra={"peername": ("127.0.0.1", 12345), "TERM": "xterm"}, will_options=[fps.BINARY]
@@ -453,8 +459,8 @@ def test_is_maybe_ms_telnet(ttype1, ttype2, expected):
 
 
 @pytest.mark.asyncio
-async def test_run_probe_ms_telnet_reduced(monkeypatch):
-    monkeypatch.setattr(fps, "_PROBE_TIMEOUT", 0.05)
+async def test_run_probe_ms_telnet_reduced():
+
     writer = MockWriter(
         extra={"peername": ("127.0.0.1", 12345), "ttype1": "ANSI", "ttype2": "VT100"},
         wont_options=[fps.BINARY, fps.SGA],
@@ -467,8 +473,8 @@ async def test_run_probe_ms_telnet_reduced(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_probe_normal_client_full(monkeypatch):
-    monkeypatch.setattr(fps, "_PROBE_TIMEOUT", 0.05)
+async def test_run_probe_normal_client_full():
+
     writer = MockWriter(
         extra={"peername": ("127.0.0.1", 12345), "ttype1": "xterm", "ttype2": "xterm-256color"},
         wont_options=[fps.BINARY, fps.SGA],
@@ -540,8 +546,8 @@ def test_run_ucs_detect_timeout(monkeypatch, capsys):
 
 
 @pytest.mark.asyncio
-async def test_probe_default_options(monkeypatch):
-    monkeypatch.setattr(fps, "_PROBE_TIMEOUT", 0.01)
+async def test_probe_default_options():
+
     writer = MockWriter(wont_options=[fps.BINARY])
     results = await fps.probe_client_capabilities(writer, timeout=0.01)
     assert "BINARY" in results and len(results) == len(fps.ALL_PROBE_OPTIONS)
@@ -586,8 +592,8 @@ def test_get_client_fingerprint():
 
 
 @pytest.mark.asyncio
-async def test_run_probe_verbose(monkeypatch):
-    monkeypatch.setattr(fps, "_PROBE_TIMEOUT", 0.01)
+async def test_run_probe_verbose():
+
     writer = MockWriter(
         extra={"peername": ("127.0.0.1", 12345), "ttype1": "xterm"}, wont_options=[fps.BINARY]
     )
@@ -597,8 +603,8 @@ async def test_run_probe_verbose(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_probe_mud_extended(monkeypatch):
-    monkeypatch.setattr(fps, "_PROBE_TIMEOUT", 0.01)
+async def test_run_probe_mud_extended():
+
     writer = MockWriter(
         extra={"peername": ("127.0.0.1", 12345), "TERM": "mudlet"},
         wont_options=[fps.BINARY, fps.GMCP],
@@ -912,7 +918,6 @@ def test_build_session_fingerprint_with_rejected():
 async def test_server_shell_syncterm(monkeypatch):
     monkeypatch.setattr(fps.asyncio, "sleep", _noop)
     monkeypatch.setattr(fps, "DATA_DIR", None)
-    monkeypatch.setattr(fps, "_PROBE_TIMEOUT", 0.05)
 
     writer = MockWriter(
         extra={"peername": ("127.0.0.1", 12345), "TERM": "syncterm"}, will_options=[fps.BINARY]
@@ -926,7 +931,6 @@ async def test_server_shell_syncterm(monkeypatch):
 async def test_server_shell_with_post_script(monkeypatch, tmp_path):
     monkeypatch.setattr(fps.asyncio, "sleep", _noop)
     monkeypatch.setattr(fps, "DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(fps, "_PROBE_TIMEOUT", 0.05)
 
     pty_called = []
 
