@@ -34,11 +34,17 @@ class MockWriter:
         self._will_options = set(will_options or [])
         self._wont_options = set(wont_options or [])
         self._iac_calls = []
+        self._writes: list[bytes] = []
         self.remote_option = MockOption()
         self.local_option = MockOption()
         self.environ_encoding = "ascii"
         self.environ_send_raw = None
         self.mssp_data = None
+        self.zmp_data: list[list[str]] = []
+        self.atcp_data: list[tuple[str, str]] = []
+        self.aardwolf_data: list[dict[str, object]] = []
+        self.mxp_data: list[bytes] = []
+        self.comport_data: dict[str, object] | None = None
         self._closing = False
 
     def get_extra_info(self, key, default=None):
@@ -52,7 +58,7 @@ class MockWriter:
             self.remote_option[opt] = False
 
     def write(self, data):
-        pass
+        self._writes.append(data)
 
     async def drain(self):
         pass
@@ -147,9 +153,8 @@ async def test_probe_timeout_and_defaults():
     writer2 = MockWriter(wont_options=[fps.BINARY])
     results2 = await sfp.probe_server_capabilities(writer2, timeout=0.01)
     assert "BINARY" in results2
-    expected = len(fps.QUICK_PROBE_OPTIONS) - len(
-        [o for o in fps.QUICK_PROBE_OPTIONS if o[0] in sfp._CLIENT_ONLY_WILL]
-    )
+    base = fps.QUICK_PROBE_OPTIONS + fps.EXTENDED_OPTIONS
+    expected = len(base) - len([o for o in base if o[0] in sfp._CLIENT_ONLY_WILL])
     assert len(results2) == expected
 
 
@@ -217,6 +222,31 @@ async def test_read_banner():
     assert await sfp._read_banner(reader, timeout=0.1) == b"Welcome to BBS\r\n"
 
     assert await sfp._read_banner(MockReader([]), timeout=0.01) == b""
+
+
+@pytest.mark.asyncio
+async def test_read_banner_max_bytes():
+    big = b"A" * 200
+    reader = MockReader([big])
+    result = await sfp._read_banner(reader, timeout=0.1, max_bytes=50)
+    assert result == b"A" * 50
+
+
+@pytest.mark.asyncio
+async def test_read_banner_until_quiet_max_bytes():
+    big = b"B" * 200
+    reader = MockReader([big])
+    result = await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=0.05, max_bytes=80
+    )
+    assert result == b"B" * 80
+
+
+@pytest.mark.asyncio
+async def test_read_banner_until_quiet_collects_multiple_chunks():
+    reader = MockReader([b"chunk1", b"chunk2", b"chunk3"])
+    result = await sfp._read_banner_until_quiet(reader, quiet_time=0.01, max_wait=1.0)
+    assert result == b"chunk1chunk2chunk3"
 
 
 def test_save_server_fingerprint_data(tmp_path, monkeypatch):
@@ -614,9 +644,8 @@ async def test_probe_server_capabilities_full():
     probed_names = set(results.keys())
     legacy_names = {name for _, name, _ in fps.LEGACY_OPTIONS}
     assert probed_names.issuperset(legacy_names)
-    expected = len(fps.ALL_PROBE_OPTIONS) - len(
-        [o for o in fps.ALL_PROBE_OPTIONS if o[0] in sfp._CLIENT_ONLY_WILL]
-    )
+    base = fps.ALL_PROBE_OPTIONS + fps.EXTENDED_OPTIONS
+    expected = len(base) - len([o for o in base if o[0] in sfp._CLIENT_ONLY_WILL])
     assert len(results) == expected
 
 
@@ -681,3 +710,223 @@ async def test_probe_skipped_when_closing(tmp_path):
         data = json.load(f)
     assert data["server-probe"]["fingerprint-data"]["offered-options"] == []
     assert data["server-probe"]["fingerprint-data"]["refused-options"] == []
+
+
+@pytest.mark.parametrize(
+    "banner,expected",
+    [
+        pytest.param(b"Welcome\r\n", b"\r\n", id="no_prompt"),
+        pytest.param(b"", b"\r\n", id="empty"),
+        pytest.param(b"Continue? (yes/no) ", b"yes\r\n", id="yes_no_parens"),
+        pytest.param(b"Continue? (y/n) ", b"y\r\n", id="y_n_parens"),
+        pytest.param(b"Accept terms? [Yes/No]:", b"yes\r\n", id="yes_no_brackets"),
+        pytest.param(b"Accept? [Y/N]:", b"y\r\n", id="y_n_brackets"),
+        pytest.param(b"Accept YES/NO now", b"yes\r\n", id="yes_no_uppercase"),
+        pytest.param(b"Confirm y/n\r\n> ", b"y\r\n", id="y_n_trailing_newline"),
+        pytest.param(b"Type yes/no please", b"yes\r\n", id="yes_no_space_delimited"),
+        pytest.param(b"systemd/network", b"\r\n", id="false_positive_word"),
+        pytest.param(b"beyond", b"\r\n", id="substring_y_n_not_matched"),
+        pytest.param(
+            b"Please enter a name: (or 'who' or 'finger'):", b"who\r\n", id="who_single_quotes"
+        ),
+        pytest.param(b'Enter your name (or "who"):', b"who\r\n", id="who_double_quotes"),
+        pytest.param(b"What is your name? (or 'WHO')", b"who\r\n", id="who_uppercase"),
+        pytest.param(b"Enter your name:", b"\r\n", id="name_prompt_no_who"),
+        pytest.param(
+            b"connect <name> <password>\r\n"
+            b"WHO                to see players connected.\r\n"
+            b"QUIT               to disconnect.\r\n",
+            b"who\r\n",
+            id="who_bare_command_listing",
+        ),
+        pytest.param(b"Type WHO to list users", b"who\r\n", id="who_bare_mid_sentence"),
+        pytest.param(b"somehow", b"\r\n", id="who_inside_word_not_matched"),
+        pytest.param(b"Type 'help' for a list of commands:", b"help\r\n", id="help_single_quotes"),
+        pytest.param(b'Enter your name (or "help"):', b"help\r\n", id="help_double_quotes"),
+        pytest.param(
+            b"HELP               to see available commands.\r\n",
+            b"help\r\n",
+            id="help_bare_command_listing",
+        ),
+        pytest.param(b"Type HELP for info", b"help\r\n", id="help_bare_mid_sentence"),
+        pytest.param(b"helpful tips", b"\r\n", id="help_inside_word_not_matched"),
+        pytest.param(
+            b"connect <name>\r\n"
+            b"WHO                to see players connected.\r\n"
+            b"HELP               to see available commands.\r\n",
+            b"who\r\n",
+            id="who_preferred_over_help",
+        ),
+        pytest.param(b"Color? ", b"y\r\n", id="color_question"),
+        pytest.param(b"Do you want color? ", b"y\r\n", id="color_in_sentence"),
+        pytest.param(b"ANSI COLOR? ", b"y\r\n", id="color_uppercase"),
+        pytest.param(b"color ? ", b"y\r\n", id="color_space_before_question"),
+        pytest.param(b"colorful display", b"\r\n", id="color_no_question_mark"),
+        pytest.param(
+            b"Select charset:\r\n1) ASCII\r\n2) ISO-8859-1\r\n5) UTF-8\r\n",
+            b"5\r\n",
+            id="menu_utf8",
+        ),
+        pytest.param(b"3) utf-8\r\nChoose: ", b"3\r\n", id="menu_utf8_lowercase"),
+        pytest.param(b"Choose encoding: 1) UTF8", b"1\r\n", id="menu_utf8_no_hyphen"),
+        pytest.param(
+            b"12) UTF-8\r\nSelect: ",
+            b"12\r\n",
+            id="menu_utf8_multidigit",
+        ),
+        pytest.param(b"1) ASCII\r\n2) Latin-1\r\n", b"\r\n", id="menu_no_utf8"),
+        pytest.param(b"(1) Ansi\r\n(2) VT100\r\n", b"1\r\n", id="menu_ansi_parens"),
+        pytest.param(b"[1] ANSI\r\n[2] VT100\r\n", b"1\r\n", id="menu_ansi_brackets"),
+        pytest.param(b"(3) ansi\r\n", b"3\r\n", id="menu_ansi_lowercase"),
+        pytest.param(b"[12] Ansi\r\n", b"12\r\n", id="menu_ansi_multidigit"),
+        pytest.param(b"(1] ANSI\r\n", b"1\r\n", id="menu_ansi_mixed_brackets"),
+        pytest.param(
+            b"1) ASCII\r\n2) UTF-8\r\n(3) Ansi\r\n",
+            b"2\r\n",
+            id="menu_utf8_preferred_over_ansi",
+        ),
+        pytest.param(b"gb/big5", b"big5\r\n", id="gb_big5"),
+        pytest.param(b"GB/Big5\r\n", b"big5\r\n", id="gb_big5_mixed_case"),
+        pytest.param(b"Select: GB / Big5 ", b"big5\r\n", id="gb_big5_spaces"),
+        pytest.param(b"gb/big 5\r\n", b"big5\r\n", id="gb_big5_space_before_5"),
+        pytest.param(b"bigfoot5", b"\r\n", id="big5_inside_word_not_matched"),
+    ],
+)
+def test_detect_yn_prompt(banner, expected):
+    assert sfp._detect_yn_prompt(banner) == expected
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_yn_prompt(tmp_path):
+    """Banner with y/n prompt causes 'y\\r\\n' instead of bare '\\r\\n'."""
+    save_path = str(tmp_path / "result.json")
+    reader = MockReader([b"Do you accept? (y/n) "])
+    writer = MockWriter(will_options=[fps.SGA])
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"y\r\n" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_yes_no_prompt(tmp_path):
+    """Banner with yes/no prompt causes 'yes\\r\\n' instead of bare '\\r\\n'."""
+    save_path = str(tmp_path / "result.json")
+    reader = MockReader([b"Continue? (yes/no) "])
+    writer = MockWriter(will_options=[fps.SGA])
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"yes\r\n" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_no_yn_prompt(tmp_path):
+    """Banner without y/n prompt sends bare '\\r\\n'."""
+    save_path = str(tmp_path / "result.json")
+    reader = MockReader([b"Welcome to BBS\r\n"])
+    writer = MockWriter(will_options=[fps.SGA])
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"\r\n" in writer._writes
+    assert b"y\r\n" not in writer._writes
+    assert b"yes\r\n" not in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_who_prompt(tmp_path):
+    """Banner with 'who' option causes 'who\\r\\n' response."""
+    save_path = str(tmp_path / "result.json")
+    reader = MockReader([b"Please enter a name: (or 'who' or 'finger'):"])
+    writer = MockWriter(will_options=[fps.SGA])
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"who\r\n" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_help_prompt(tmp_path):
+    """Banner with 'help' option causes 'help\\r\\n' response."""
+    save_path = str(tmp_path / "result.json")
+    reader = MockReader([b"Type 'help' for a list of commands:"])
+    writer = MockWriter(will_options=[fps.SGA])
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"help\r\n" in writer._writes
+
+
+class TestCullDisplay:
+    """Tests for _cull_display bytes conversion."""
+
+    def test_bytes_utf8(self):
+        assert sfp._cull_display(b"hello") == "hello"
+
+    def test_bytes_binary(self):
+        assert sfp._cull_display(b"\x80\xff") == "80ff"
+
+    def test_bytes_in_dict(self):
+        result = sfp._cull_display({"data_bytes": b"\x01"})
+        assert result == {"data_bytes": "\x01"}
+        json.dumps(result)
+
+    def test_bytes_in_nested_list(self):
+        result = sfp._cull_display({"items": [{"val": b"\xfe\xed"}]})
+        assert result == {"items": [{"val": "feed"}]}
+        json.dumps(result)
+
+    def test_empty_bytes_culled(self):
+        result = sfp._cull_display({"data_bytes": b""})
+        assert result == {}

@@ -18,7 +18,17 @@ if TYPE_CHECKING:  # pragma: no cover
 
 # local
 from . import slc
-from .mud import gmcp_decode, gmcp_encode, msdp_decode, msdp_encode, mssp_decode, mssp_encode
+from .mud import (
+    zmp_decode,
+    atcp_decode,
+    gmcp_decode,
+    gmcp_encode,
+    msdp_decode,
+    msdp_encode,
+    mssp_decode,
+    mssp_encode,
+    aardwolf_decode,
+)
 from .telopt import (
     AO,
     DM,
@@ -37,9 +47,13 @@ from .telopt import (
     EOR,
     ESC,
     IAC,
+    MSP,
+    MXP,
     NOP,
     SGA,
     VAR,
+    ZMP,
+    ATCP,
     DONT,
     ECHO,
     GMCP,
@@ -64,6 +78,7 @@ from .telopt import (
     CMD_EOR,
     REQUEST,
     USERVAR,
+    AARDWOLF,
     ACCEPTED,
     LFLOW_ON,
     LINEMODE,
@@ -86,6 +101,9 @@ from .telopt import (
 )
 
 __all__ = ("TelnetWriter", "TelnetWriterUnicode")
+
+#: MUD options that allow empty SB payloads (e.g. ``IAC SB MXP IAC SE``).
+_EMPTY_SB_OK = frozenset({MXP, MSP, ZMP, AARDWOLF, ATCP})
 
 
 class TelnetWriter:
@@ -229,6 +247,27 @@ class TelnetWriter:
         #: ``None`` until a ``SB MSSP`` payload is received and decoded.
         self.mssp_data: Optional[dict[str, str | list[str]]] = None
 
+        #: Accumulated ZMP messages (list of [command, arg, ...] lists).
+        #: Empty until ``SB ZMP`` payloads are received and decoded.
+        self.zmp_data: list[list[str]] = []
+
+        #: Accumulated ATCP messages (list of (package, value) tuples).
+        #: Empty until ``SB ATCP`` payloads are received and decoded.
+        self.atcp_data: list[tuple[str, str]] = []
+
+        #: Accumulated Aardwolf messages (list of decoded dicts).
+        #: Empty until ``SB AARDWOLF`` payloads are received and decoded.
+        self.aardwolf_data: list[dict[str, Any]] = []
+
+        #: Accumulated MXP subnegotiation payloads (list of raw bytes).
+        #: Empty until ``SB MXP`` payloads are received.  An empty payload
+        #: (``b""``) signals MXP mode activation.
+        self.mxp_data: list[bytes] = []
+
+        #: COM-PORT-OPTION (RFC 2217) data received via subnegotiation.
+        #: ``None`` until an ``SB COM-PORT-OPTION`` payload is received.
+        self.comport_data: Optional[dict[str, Any]] = None
+
         #: Sub-negotiation buffer
         self._sb_buffer: collections.deque[bytes] = collections.deque()
 
@@ -300,6 +339,11 @@ class TelnetWriter:
             (GMCP, "gmcp"),
             (MSDP, "msdp"),
             (MSSP, "mssp"),
+            (MSP, "msp"),
+            (MXP, "mxp"),
+            (ZMP, "zmp"),
+            (AARDWOLF, "aardwolf"),
+            (ATCP, "atcp"),
         ):
             self.set_ext_callback(cmd=ext_cmd, func=getattr(self, f"handle_{key}"))
 
@@ -614,7 +658,12 @@ class TelnetWriter:
                 # Any other, expect a callback.  Otherwise this protocol
                 # does not comprehend the remote end's request.
                 if cmd not in self._iac_callback:
-                    raise ValueError(f"IAC {name_command(cmd)}({cmd!r}): not a legal 2-byte cmd")
+                    self.iac_received = False
+                    self.cmd_received = False
+                    self.log.debug(
+                        "IAC %s: not a legal 2-byte cmd, treating as data", name_command(cmd)
+                    )
+                    return True
                 self._iac_callback[cmd](cmd)
             self.iac_received = False
 
@@ -626,7 +675,9 @@ class TelnetWriter:
                 sb_opt = name_command(self._sb_buffer[0]) if self._sb_buffer else "?"
                 self.log.warning(
                     "sub-negotiation SB %s (%d bytes) interrupted by IAC %s",
-                    sb_opt, len(self._sb_buffer), name_command(cmd),
+                    sb_opt,
+                    len(self._sb_buffer),
+                    name_command(cmd),
                 )
                 self._sb_buffer.clear()
             else:
@@ -690,7 +741,7 @@ class TelnetWriter:
             finally:
                 # toggle iac_received on any ValueErrors/AssertionErrors raised
                 self.iac_received = False
-                self.cmd_received = (opt, byte)
+                self.cmd_received = (opt, byte)  # pylint: disable=redefined-variable-type
 
         elif self.mode == "remote" or self.mode == "kludge" and self.slc_simulated:
             # 'byte' is tested for SLC characters
@@ -991,6 +1042,25 @@ class TelnetWriter:
         else:
             self.log.info("cannot send SB STATUS SEND, request pending.")
         return False
+
+    def request_comport_signature(self) -> bool:
+        """
+        Send ``IAC SB COM-PORT-OPTION SIGNATURE IAC SE``, :rfc:`2217`.
+
+        Requests the server's COM-PORT-OPTION signature string. Returns True if the request was
+        sent.
+        """
+        if not self.remote_option.enabled(COM_PORT_OPTION):
+            self.log.debug(
+                "cannot send SB COM-PORT-OPTION SIGNATURE"
+                " without receipt of WILL COM-PORT-OPTION"
+            )
+            return False
+        # RFC 2217: sub-command 0 = SIGNATURE, empty payload = request
+        response = [IAC, SB, COM_PORT_OPTION, b"\x00", IAC, SE]
+        self.log.debug("send IAC SB COM-PORT-OPTION SIGNATURE IAC SE")
+        self.send_iac(b"".join(response))
+        return True
 
     def request_tspeed(self) -> bool:
         """
@@ -1488,6 +1558,11 @@ class TelnetWriter:
             GMCP,
             MSDP,
             MSSP,
+            MSP,
+            MXP,
+            ZMP,
+            AARDWOLF,
+            ATCP,
         ), cmd
         assert callable(func), "Argument func must be callable"
         self._ext_callback[cmd] = func
@@ -1594,6 +1669,30 @@ class TelnetWriter:
         """Receive MSSP variables as dict."""
         self.log.debug("MSSP: %r", variables)
         self.mssp_data = variables
+
+    def handle_msp(self, data: bytes) -> None:
+        """Receive MUD Sound Protocol subnegotiation data."""
+        self.log.debug("MSP: %r", data)
+
+    def handle_mxp(self, data: bytes) -> None:
+        """Receive MUD eXtension Protocol subnegotiation data."""
+        self.log.debug("MXP: %r", data)
+        self.mxp_data.append(data)
+
+    def handle_zmp(self, parts: list[str]) -> None:
+        """Receive decoded ZMP message as list of ``[command, arg, ...]``."""
+        self.log.debug("ZMP: %r", parts)
+        self.zmp_data.append(parts)
+
+    def handle_aardwolf(self, data: dict[str, Any]) -> None:
+        """Receive decoded Aardwolf message as dict."""
+        self.log.debug("AARDWOLF: %r", data)
+        self.aardwolf_data.append(data)
+
+    def handle_atcp(self, package: str, value: str) -> None:
+        """Receive decoded ATCP message as ``(package, value)``."""
+        self.log.debug("ATCP: %s %r", package, value)
+        self.atcp_data.append((package, value))
 
     def handle_send_client_charset(self, _charsets: list[str]) -> str:
         """
@@ -1717,6 +1816,11 @@ class TelnetWriter:
             GMCP,
             MSDP,
             MSSP,
+            MSP,
+            MXP,
+            ZMP,
+            AARDWOLF,
+            ATCP,
         ):
             # first time we've agreed, respond accordingly.
             if not self.local_option.enabled(opt):
@@ -1729,7 +1833,7 @@ class TelnetWriter:
                 self._send_status()
 
             # and expect a follow-up sub-negotiation for these others.
-            elif opt in (LFLOW, TTYPE, NEW_ENVIRON, XDISPLOC, TSPEED, LINEMODE):
+            elif opt in (LFLOW, TTYPE, NEW_ENVIRON, XDISPLOC, TSPEED, LINEMODE, MXP):
                 # Note that CHARSET is not included -- either side that has sent
                 # WILL and received DO may initiate SB at any time.
                 self.pending_option[SB + opt] = True
@@ -1792,7 +1896,24 @@ class TelnetWriter:
         """
         self.log.debug("handle_will(%s)", name_command(opt))
 
-        if opt in (BINARY, SGA, ECHO, NAWS, LINEMODE, EOR, SNDLOC, GMCP, MSDP, MSSP):
+        if opt in (
+            BINARY,
+            SGA,
+            ECHO,
+            NAWS,
+            LINEMODE,
+            EOR,
+            SNDLOC,
+            COM_PORT_OPTION,
+            GMCP,
+            MSDP,
+            MSSP,
+            MSP,
+            MXP,
+            ZMP,
+            AARDWOLF,
+            ATCP,
+        ):
             if opt == ECHO and self.server:
                 raise ValueError("cannot recv WILL ECHO on server end")
             if opt in (NAWS, LINEMODE, SNDLOC) and self.client:
@@ -1802,12 +1923,14 @@ class TelnetWriter:
             if not self.remote_option.enabled(opt):
                 self.iac(DO, opt)
                 self.remote_option[opt] = True
-            if opt in (NAWS, LINEMODE, SNDLOC):
+            if opt in (NAWS, LINEMODE, SNDLOC, MXP):
                 # expect to receive some sort of follow-up subnegotiation
                 self.pending_option[SB + opt] = True
                 if opt == LINEMODE:
                     # server sets the initial mode and sends forwardmask,
                     self.send_linemode(self.default_linemode)
+            if opt == COM_PORT_OPTION and self.client:
+                self.request_comport_signature()
 
         elif opt == TM:
             if opt == TM and not self.pending_option.enabled(DO + TM):
@@ -1928,7 +2051,8 @@ class TelnetWriter:
             raise ValueError("SE: buffer empty")
         if buf[0] == theNULL:
             raise ValueError("SE: buffer is NUL")
-        if len(buf) == 1:
+        # MUD protocols may send empty SB payloads (e.g. IAC SB MXP IAC SE).
+        if len(buf) == 1 and buf[0] not in _EMPTY_SB_OK:
             raise ValueError(f"SE: buffer too short: {buf!r}")
 
         cmd = buf[0]
@@ -1952,6 +2076,11 @@ class TelnetWriter:
             GMCP: self._handle_sb_gmcp,
             MSDP: self._handle_sb_msdp,
             MSSP: self._handle_sb_mssp,
+            MSP: self._handle_sb_msp,
+            MXP: self._handle_sb_mxp,
+            ZMP: self._handle_sb_zmp,
+            AARDWOLF: self._handle_sb_aardwolf,
+            ATCP: self._handle_sb_atcp,
         }.get(cmd)
         if fn_call is None:
             raise ValueError(f"SB unhandled: cmd={name_command(cmd)}, buf={buf!r}")
@@ -2105,7 +2234,9 @@ class TelnetWriter:
         self.log.debug("recv %s %s: %r", name_command(cmd), opt_kind, b"".join(buf))
 
         if opt == IS:
-            assert self.server, f"SE: cannot recv from server: {name_command(cmd)} {opt!r}"
+            if not self.server:
+                self.log.warning("ignoring TTYPE IS from server: %r", b"".join(buf))
+                return
             ttype_str = b"".join(buf).decode("ascii")
             self.log.debug("recv IAC SB TTYPE IS %r", ttype_str)
             self._ext_callback[TTYPE](ttype_str)
@@ -2406,6 +2537,21 @@ class TelnetWriter:
         self.log.debug("recv IAC SB LINEMODE LINEMODE-MODE %r IAC SE", suggest_mode.mask)
 
         if not suggest_mode.ack:
+            # RFC 1184: if the proposed mode is the same as our current
+            # mode (ignoring the ACK bit), suppress the redundant ACK to
+            # prevent an infinite echo loop with misbehaving servers that
+            # re-send the same MODE without ACK repeatedly.
+            if self._linemode == suggest_mode:
+                self.log.debug(
+                    "suppressing redundant ACK for unchanged LINEMODE-MODE %r", suggest_mode.mask
+                )
+                return
+            # Guard: LINEMODE must be negotiated before we can send a reply
+            if not (self.local_option.enabled(LINEMODE) or self.remote_option.enabled(LINEMODE)):
+                self.log.warning(
+                    "ignoring LINEMODE-MODE %r: LINEMODE not negotiated", suggest_mode.mask
+                )
+                return
             # This implementation acknowledges and sets local linemode
             # to *any* setting the remote end suggests, requiring a
             # reply.  See notes later under server receipt of acknowledged
@@ -2470,7 +2616,8 @@ class TelnetWriter:
             slc_def = slc.SLC(flag, value)
             self._slc_process(func, slc_def)
         self._slc_end()
-        self.request_forwardmask()
+        if self.server:
+            self.request_forwardmask()
 
     def _slc_end(self) -> None:
         """Transmit SLC commands buffered by :meth:`_slc_send`."""
@@ -2688,15 +2835,97 @@ class TelnetWriter:
             if cmd == DO:
                 self._handle_do_forwardmask(buf)
 
+    # RFC 2217 sub-command names (server-to-client response codes)
+    _COMPORT_SUBCMDS: dict[int, str] = {
+        0: "SIGNATURE",
+        100: "SIGNATURE",
+        101: "SET-BAUDRATE",
+        102: "SET-DATASIZE",
+        103: "SET-PARITY",
+        104: "SET-STOPSIZE",
+        105: "SET-CONTROL",
+        106: "NOTIFY-LINESTATE",
+        107: "NOTIFY-MODEMSTATE",
+        108: "FLOWCONTROL-SUSPEND",
+        109: "FLOWCONTROL-RESUME",
+        110: "SET-LINESTATE-MASK",
+        111: "SET-MODEMSTATE-MASK",
+        112: "PURGE-DATA",
+    }
+
+    _COMPORT_PARITY: dict[int, str] = {
+        0: "REQUEST",
+        1: "NONE",
+        2: "ODD",
+        3: "EVEN",
+        4: "MARK",
+        5: "SPACE",
+    }
+
+    _COMPORT_STOPSIZE: dict[int, str] = {0: "REQUEST", 1: "1", 2: "2", 3: "1.5"}
+
     def _handle_sb_comport(self, buf: collections.deque[bytes]) -> None:
         """
-        Callback handles IAC-SB-COM-PORT-OPTION.
+        Callback handles ``IAC SB COM-PORT-OPTION`` per :rfc:`2217`.
 
-        This callback simply logs the subnegotiation but does not perform any action.
+        Parses the sub-command byte and payload, storing results in
+        :attr:`comport_data` for fingerprinting.
 
-        :param buf: bytes following IAC SB COM-PORT-OPTION.
+        :param buf: bytes following ``IAC SB COM-PORT-OPTION``.
         """
-        self.log.debug("SB unhandled: cmd=%s, buf=%r", name_command(COM_PORT_OPTION), buf)
+        buf.popleft()  # COM_PORT_OPTION byte
+        if not buf:
+            self.log.debug("SB COM-PORT-OPTION: empty payload")
+            return
+
+        subcmd = ord(buf.popleft())
+        payload = b"".join(buf)
+        subcmd_name = self._COMPORT_SUBCMDS.get(subcmd, f"UNKNOWN-{subcmd}")
+
+        if self.comport_data is None:
+            self.comport_data = {}
+
+        if subcmd in (0, 100) and payload:
+            # SIGNATURE response
+            sig = payload.decode("ascii", errors="replace")
+            self.comport_data["signature"] = sig
+            self.log.debug("COM-PORT-OPTION SIGNATURE: %r", sig)
+        elif subcmd in (1, 101) and len(payload) == 4:
+            # SET-BAUDRATE response: 4-byte big-endian uint32
+            baudrate = int.from_bytes(payload, "big")
+            self.comport_data["baudrate"] = baudrate
+            self.log.debug("COM-PORT-OPTION BAUDRATE: %d", baudrate)
+        elif subcmd in (2, 102) and len(payload) == 1:
+            # SET-DATASIZE response: 1 byte (5-8 bits, 0=request)
+            datasize = payload[0]
+            self.comport_data["datasize"] = datasize
+            self.log.debug("COM-PORT-OPTION DATASIZE: %d", datasize)
+        elif subcmd in (3, 103) and len(payload) == 1:
+            # SET-PARITY response
+            parity = payload[0]
+            self.comport_data["parity"] = self._COMPORT_PARITY.get(parity, f"unknown-{parity}")
+            self.log.debug("COM-PORT-OPTION PARITY: %s", self.comport_data["parity"])
+        elif subcmd in (4, 104) and len(payload) == 1:
+            # SET-STOPSIZE response
+            stopsize = payload[0]
+            self.comport_data["stopsize"] = self._COMPORT_STOPSIZE.get(
+                stopsize, f"unknown-{stopsize}"
+            )
+            self.log.debug("COM-PORT-OPTION STOPSIZE: %s", self.comport_data["stopsize"])
+        elif subcmd in (5, 105) and len(payload) == 1:
+            # SET-CONTROL response
+            self.comport_data["control"] = payload[0]
+            self.log.debug("COM-PORT-OPTION CONTROL: %d", payload[0])
+        elif subcmd in (6, 106) and len(payload) == 1:
+            # NOTIFY-LINESTATE
+            self.comport_data["linestate"] = payload[0]
+            self.log.debug("COM-PORT-OPTION LINESTATE: 0x%02x", payload[0])
+        elif subcmd in (7, 107) and len(payload) == 1:
+            # NOTIFY-MODEMSTATE
+            self.comport_data["modemstate"] = payload[0]
+            self.log.debug("COM-PORT-OPTION MODEMSTATE: 0x%02x", payload[0])
+        else:
+            self.log.debug("COM-PORT-OPTION %s (subcmd=%d): %r", subcmd_name, subcmd, payload)
 
     def _handle_sb_gmcp(self, buf: collections.deque[bytes]) -> None:
         """
@@ -2733,6 +2962,61 @@ class TelnetWriter:
         encoding = self.environ_encoding or "utf-8"
         variables = mssp_decode(payload, encoding=encoding)
         self._ext_callback[MSSP](variables)
+
+    def _handle_sb_msp(self, buf: collections.deque[bytes]) -> None:
+        """
+        Handle MUD Sound Protocol (MSP) subnegotiation.
+
+        :param buf: bytes following IAC SB MSP.
+        """
+        buf.popleft()
+        payload = b"".join(buf)
+        self._ext_callback[MSP](payload)
+
+    def _handle_sb_mxp(self, buf: collections.deque[bytes]) -> None:
+        """
+        Handle MUD eXtension Protocol (MXP) subnegotiation.
+
+        :param buf: bytes following IAC SB MXP.
+        """
+        buf.popleft()
+        payload = b"".join(buf)
+        self._ext_callback[MXP](payload)
+
+    def _handle_sb_zmp(self, buf: collections.deque[bytes]) -> None:
+        """
+        Handle Zenith MUD Protocol (ZMP) subnegotiation.
+
+        :param buf: bytes following IAC SB ZMP.
+        """
+        buf.popleft()
+        payload = b"".join(buf)
+        encoding = self.environ_encoding or "utf-8"
+        parts = zmp_decode(payload, encoding=encoding)
+        self._ext_callback[ZMP](parts)
+
+    def _handle_sb_aardwolf(self, buf: collections.deque[bytes]) -> None:
+        """
+        Handle Aardwolf protocol subnegotiation.
+
+        :param buf: bytes following IAC SB AARDWOLF.
+        """
+        buf.popleft()
+        payload = b"".join(buf)
+        data = aardwolf_decode(payload)
+        self._ext_callback[AARDWOLF](data)
+
+    def _handle_sb_atcp(self, buf: collections.deque[bytes]) -> None:
+        """
+        Handle Achaea Telnet Client Protocol (ATCP) subnegotiation.
+
+        :param buf: bytes following IAC SB ATCP.
+        """
+        buf.popleft()
+        payload = b"".join(buf)
+        encoding = self.environ_encoding or "utf-8"
+        package, value = atcp_decode(payload, encoding=encoding)
+        self._ext_callback[ATCP](package, value)
 
     def _handle_do_forwardmask(self, buf: collections.deque[bytes]) -> None:
         """

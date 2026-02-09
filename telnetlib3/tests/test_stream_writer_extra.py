@@ -491,7 +491,7 @@ def test_handle_sb_linemode_switches():
     # LMODE_MODE without ACK -> triggers send_linemode (ACK set)
     ws.local_option[LINEMODE] = True  # allow send_linemode assertion
     ws.remote_option[LINEMODE] = True
-    ws._handle_sb_linemode_mode(collections.deque([bytes([0])]))  # suggest 0 mask
+    ws._handle_sb_linemode_mode(collections.deque([bytes([3])]))  # suggest EDIT|TRAPSIG
     # send_linemode writes two frames (SB LINEMODE LMODE_MODE ... SE)
     assert ts.writes[-1].endswith(IAC + SE)
 
@@ -511,6 +511,52 @@ def test_handle_sb_linemode_switches():
     wc2._handle_sb_linemode_mode(collections.deque([suggest_ack2]))
     assert wc2._linemode == same
     assert not tc2.writes
+
+
+def test_handle_sb_linemode_suppresses_duplicate_mode():
+    """Redundant MODE without ACK matching current mode is not re-ACKed."""
+    ws, ts, _ = new_writer(server=True)
+    ws.local_option[LINEMODE] = True
+    ws.remote_option[LINEMODE] = True
+
+    mode_val = bytes([3])  # EDIT | TRAPSIG
+    mode_with_ack = bytes([3 | 4])  # same + ACK bit
+
+    # first proposal: should be ACKed
+    ws._handle_sb_linemode_mode(collections.deque([mode_val]))
+    assert len(ts.writes) > 0
+    first_write_count = len(ts.writes)
+    # verify our linemode is now set with ACK
+    assert ws._linemode.mask == mode_with_ack
+
+    # same proposal again: should be suppressed (no new writes)
+    ws._handle_sb_linemode_mode(collections.deque([mode_val]))
+    assert len(ts.writes) == first_write_count
+
+    # different proposal: should be ACKed
+    ws._handle_sb_linemode_mode(collections.deque([bytes([1])]))
+    assert len(ts.writes) > first_write_count
+
+
+def test_handle_sb_linemode_suppresses_duplicate_mode_client():
+    """Client also suppresses redundant MODE proposals."""
+    wc, tc, _ = new_writer(server=False, client=True)
+    wc.local_option[LINEMODE] = True
+    wc.remote_option[LINEMODE] = True
+
+    mode_val = bytes([3])
+    mode_with_ack = bytes([3 | 4])
+
+    # first proposal: ACKed
+    wc._handle_sb_linemode_mode(collections.deque([mode_val]))
+    first_write_count = len(tc.writes)
+    assert first_write_count > 0
+    assert wc._linemode.mask == mode_with_ack
+
+    # same proposal repeated 3 times: all suppressed
+    for _ in range(3):
+        wc._handle_sb_linemode_mode(collections.deque([mode_val]))
+    assert len(tc.writes) == first_write_count
 
 
 def test_handle_subnegotiation_dispatch_and_unhandled():

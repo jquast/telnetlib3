@@ -123,7 +123,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             # the StreamReader will receive eof.
             self._waiter_connected.set_result(None)
 
-        if self.shell is None:
+        if self.shell is None and not self.waiter_closed.done():
             # when a shell is defined, we allow the completion of the coroutine
             # to set the result of waiter_closed.
             self.waiter_closed.set_result(weakref.proxy(self))
@@ -200,6 +200,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                     lambda fut_obj: (
                         self.waiter_closed.set_result(weakref.proxy(self))
                         if self.waiter_closed is not None
+                        and not self.waiter_closed.done()
                         else None
                     )
                 )

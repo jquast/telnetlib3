@@ -16,6 +16,7 @@ from . import stream_writer
 from . import stream_reader
 from . import client_base
 from . import client_shell
+from . import color_filter
 from . import client
 from . import telopt
 from . import mud
@@ -26,6 +27,7 @@ from . import fingerprinting
 from . import server_fingerprinting
 if sys.platform != "win32":
     from . import fingerprinting_display  # noqa: F401
+from . import encodings  # noqa: F401 - registers custom codecs (petscii, atarist)
 from . import sync
 from .server_base import *  # noqa
 from .server import *  # noqa

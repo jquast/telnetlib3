@@ -43,6 +43,9 @@ classifiers = [
     "Topic :: Terminals :: Telnet",
 ]
 requires-python = ">=3.9"
+dependencies = [
+    "wcwidth>=0.2.13",
+]
 
 [project.optional-dependencies]
 docs = [

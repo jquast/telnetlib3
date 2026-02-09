@@ -11,6 +11,7 @@ from __future__ import annotations
 
 # std imports
 import os
+import re
 import sys
 import json
 import time
@@ -40,6 +41,7 @@ from .telopt import (
 from .stream_reader import TelnetReader
 from .stream_writer import TelnetWriter
 from .fingerprinting import (
+    EXTENDED_OPTIONS,
     ALL_PROBE_OPTIONS,
     QUICK_PROBE_OPTIONS,
     _hash_fingerprint,
@@ -58,12 +60,38 @@ __all__ = ("fingerprinting_client_shell", "probe_server_capabilities")
 # in ``server_requested`` (what the server sent DO for).
 _CLIENT_ONLY_WILL = frozenset({TTYPE, TSPEED, NAWS, XDISPLOC, NEW_ENVIRON, LFLOW, LINEMODE, SNDLOC})
 
-_BANNER_MAX_BYTES = 1024
+_BANNER_MAX_BYTES = 65536
 _NEGOTIATION_SETTLE = 0.5
 _BANNER_WAIT = 3.0
 _POST_RETURN_WAIT = 3.0
 _PROBE_TIMEOUT = 0.5
 _JQ = shutil.which("jq")
+
+# Match "yes/no" or "y/n" surrounded by non-alphanumeric chars (or at
+# string boundaries).  Used to auto-answer confirmation prompts.
+_YN_RE = re.compile(rb"(?i)(?:^|[^a-zA-Z0-9])(yes/no|y/n)(?:[^a-zA-Z0-9]|$)")
+
+# Match MUD/BBS login prompts that offer 'who' as a command.
+# Quoted: "enter a name (or 'who')", or bare WHO without surrounding
+# alphanumerics: "\nWHO                to see players connected.\n"
+_WHO_RE = re.compile(rb"(?i)(?:'who'|\"who\"|(?:^|[^a-zA-Z0-9])who(?:[^a-zA-Z0-9]|$))")
+
+# Same pattern for 'help' — offered as a login-screen command on many MUDs.
+_HELP_RE = re.compile(rb"(?i)(?:'help'|\"help\"|(?:^|[^a-zA-Z0-9])help(?:[^a-zA-Z0-9]|$))")
+
+# Match "color?" prompts — many MUDs ask if the user wants color.
+_COLOR_RE = re.compile(rb"(?i)color\s*\?")
+
+# Match numbered menu items offering UTF-8, e.g. "5) UTF-8" or "3) utf8".
+# Many BBS/MUD systems present a charset selection menu at connect time.
+_MENU_UTF8_RE = re.compile(rb"(\d+)\s*\)\s*UTF-?8", re.IGNORECASE)
+
+# Match numbered menu items offering ANSI, e.g. "(1) Ansi" or "[2] ANSI".
+# Brackets may be parentheses or square brackets (mixed allowed).
+_MENU_ANSI_RE = re.compile(rb"[\[(](\d+)[\])]\s*ANSI", re.IGNORECASE)
+
+# Match "gb/big5" encoding selection prompts common on Chinese BBS systems.
+_GB_BIG5_RE = re.compile(rb"(?i)(?:^|[^a-zA-Z0-9])gb\s*/\s*big\s*5(?:[^a-zA-Z0-9]|$)")
 
 logger = logging.getLogger("telnetlib3.server_fingerprint")
 
@@ -71,7 +99,7 @@ logger = logging.getLogger("telnetlib3.server_fingerprint")
 def _is_display_worthy(v: Any) -> bool:
     """Return True if *v* should be kept in culled display output."""
     # pylint: disable-next=use-implicit-booleaness-not-comparison-to-string
-    return v is not False and v != {} and v != [] and v != ""
+    return v is not False and v != {} and v != [] and v != "" and v != b""
 
 
 def _cull_display(obj: Any) -> Any:
@@ -80,6 +108,11 @@ def _cull_display(obj: Any) -> Any:
         return {k: _cull_display(v) for k, v in obj.items() if _is_display_worthy(v)}
     if isinstance(obj, list):
         return [_cull_display(item) for item in obj]
+    if isinstance(obj, bytes):
+        try:
+            return obj.decode("utf-8")
+        except UnicodeDecodeError:
+            return obj.hex()
     return obj
 
 
@@ -93,6 +126,61 @@ def _print_json(data: dict[str, Any]) -> None:
         if result.returncode == 0:
             raw = result.stdout.rstrip("\n")
     print(raw, file=sys.stdout)
+
+
+def _detect_yn_prompt(banner: bytes) -> bytes:  # pylint: disable=too-many-return-statements
+    r"""
+    Return an appropriate first-prompt response based on banner content.
+
+    If the banner contains a ``yes/no`` or ``y/n`` confirmation prompt
+    (case-insensitive, delimited by non-alphanumeric characters), returns
+    ``b"yes\r\n"`` or ``b"y\r\n"`` respectively.
+
+    If the banner contains a ``color?`` prompt (case-insensitive),
+    returns ``b"y\r\n"`` to accept color.
+
+    If the banner contains a numbered menu item for UTF-8 (e.g.
+    ``5) UTF-8``), returns the digit followed by ``b"\r\n"`` to select
+    the UTF-8 charset option.
+
+    If the banner contains a bracketed numbered menu item for ANSI
+    (e.g. ``(1) Ansi`` or ``[2] ANSI``), returns the digit followed
+    by ``b"\r\n"`` to select the ANSI option.
+
+    If the banner contains a ``gb/big5`` encoding selection prompt
+    (common on Chinese BBS systems), returns ``b"big5\r\n"`` to select
+    Big5 encoding.
+
+    If the banner contains a MUD/BBS login prompt offering ``'who'`` as
+    an alternative (e.g. "enter a name (or 'who')"), returns
+    ``b"who\r\n"``.  Similarly, ``'help'`` prompts return ``b"help\r\n"``.
+
+    Otherwise returns a bare ``b"\r\n"``.
+
+    :param banner: Raw banner bytes collected before the first prompt.
+    :returns: Response bytes to send.
+    """
+    match = _YN_RE.search(banner)
+    if match:
+        token = match.group(1).lower()
+        if token == b"yes/no":
+            return b"yes\r\n"
+        return b"y\r\n"
+    if _COLOR_RE.search(banner):
+        return b"y\r\n"
+    menu_match = _MENU_UTF8_RE.search(banner)
+    if menu_match:
+        return menu_match.group(1) + b"\r\n"
+    ansi_match = _MENU_ANSI_RE.search(banner)
+    if ansi_match:
+        return ansi_match.group(1) + b"\r\n"
+    if _GB_BIG5_RE.search(banner):
+        return b"big5\r\n"
+    if _WHO_RE.search(banner):
+        return b"who\r\n"
+    if _HELP_RE.search(banner):
+        return b"help\r\n"
+    return b"\r\n"
 
 
 async def fingerprinting_client_shell(
@@ -109,6 +197,7 @@ async def fingerprinting_client_shell(
     mssp_wait: float = 5.0,
     banner_quiet_time: float = 2.0,
     banner_max_wait: float = 8.0,
+    banner_max_bytes: int = _BANNER_MAX_BYTES,
 ) -> None:
     """
     Client shell that fingerprints a remote telnet server.
@@ -131,8 +220,9 @@ async def fingerprinting_client_shell(
         ``"full"`` includes all LEGACY options.
     :param mssp_wait: Max seconds since connect to wait for MSSP data.
     :param banner_quiet_time: Seconds of silence before considering the
-        pre-return banner complete.
-    :param banner_max_wait: Max seconds to wait for pre-return banner data.
+        banner complete.
+    :param banner_max_wait: Max seconds to wait for banner data.
+    :param banner_max_bytes: Maximum bytes per banner read call.
     """
     writer.environ_encoding = environ_encoding
     try:
@@ -148,13 +238,14 @@ async def fingerprinting_client_shell(
             mssp_wait=mssp_wait,
             banner_quiet_time=banner_quiet_time,
             banner_max_wait=banner_max_wait,
+            banner_max_bytes=banner_max_bytes,
         )
     except (ConnectionError, EOFError) as exc:
         logger.warning("%s:%d: %s", host, port, exc)
         writer.close()
 
 
-async def _fingerprint_session(
+async def _fingerprint_session(  # pylint: disable=too-many-locals
     reader: TelnetReader,
     writer: TelnetWriter,
     *,
@@ -167,6 +258,7 @@ async def _fingerprint_session(
     mssp_wait: float = 5.0,
     banner_quiet_time: float = 2.0,
     banner_max_wait: float = 8.0,
+    banner_max_bytes: int = _BANNER_MAX_BYTES,
 ) -> None:
     """Run the fingerprint session (inner helper for error handling)."""
     start_time = time.time()
@@ -176,13 +268,16 @@ async def _fingerprint_session(
 
     # 2. Read banner (pre-return) — wait until output stops
     banner_before = await _read_banner_until_quiet(
-        reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait
+        reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait, max_bytes=banner_max_bytes
     )
 
-    # 3. Send return, read post-return data
-    writer.write(b"\r\n")
+    # 3. Send return (or "yes"/"y" if the banner contains a y/n prompt)
+    prompt_response = _detect_yn_prompt(banner_before)
+    writer.write(prompt_response)
     await writer.drain()
-    banner_after = await _read_banner(reader, timeout=_POST_RETURN_WAIT)
+    banner_after = await _read_banner_until_quiet(
+        reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait, max_bytes=banner_max_bytes
+    )
 
     # 4. Snapshot option states before probing
     session_data: dict[str, Any] = {"option_states": _collect_server_option_states(writer)}
@@ -213,6 +308,17 @@ async def _fingerprint_session(
     )
     if writer.mssp_data is not None:
         session_data["mssp"] = writer.mssp_data
+    if writer.zmp_data:
+        session_data["zmp"] = writer.zmp_data
+    if writer.atcp_data:
+        session_data["atcp"] = [{"package": pkg, "value": val} for pkg, val in writer.atcp_data]
+    if writer.aardwolf_data:
+        session_data["aardwolf"] = writer.aardwolf_data
+    if writer.mxp_data:
+        session_data["mxp"] = [d.hex() if d else "activated" for d in writer.mxp_data]
+    if writer.comport_data:
+        session_data["comport"] = writer.comport_data
+
     session_entry: dict[str, Any] = {
         "host": host,
         "ip": (writer.get_extra_info("peername") or (host,))[0],
@@ -287,6 +393,9 @@ async def probe_server_capabilities(
     """
     if options is None:
         base = ALL_PROBE_OPTIONS if scan_type == "full" else QUICK_PROBE_OPTIONS
+        # Servers handle unknown options gracefully, so always include
+        # EXTENDED_OPTIONS (MUD protocols with high byte values).
+        base = base + EXTENDED_OPTIONS
         options = [(opt, name, desc) for opt, name, desc in base if opt not in _CLIENT_ONLY_WILL]
     return await probe_client_capabilities(writer, options=options, timeout=timeout)
 
@@ -497,26 +606,32 @@ async def _await_mssp_data(writer: TelnetWriter, deadline: float) -> None:
         remaining = deadline - time.time()
 
 
-async def _read_banner(reader: TelnetReader, timeout: float = _BANNER_WAIT) -> bytes:
+async def _read_banner(
+    reader: TelnetReader, timeout: float = _BANNER_WAIT, max_bytes: int = _BANNER_MAX_BYTES
+) -> bytes:
     """
-    Read up to :data:`_BANNER_MAX_BYTES` from *reader* with timeout.
+    Read up to *max_bytes* from *reader* with timeout.
 
     Returns whatever bytes were received before the timeout, which may
     be empty if the server sends nothing.
 
     :param reader: :class:`~telnetlib3.stream_reader.TelnetReader` instance.
     :param timeout: Seconds to wait for data.
+    :param max_bytes: Maximum bytes to read in a single call.
     :returns: Banner bytes (may be empty).
     """
     try:
-        data = await asyncio.wait_for(reader.read(_BANNER_MAX_BYTES), timeout=timeout)
+        data = await asyncio.wait_for(reader.read(max_bytes), timeout=timeout)
     except (asyncio.TimeoutError, EOFError):
         data = b""
     return data
 
 
 async def _read_banner_until_quiet(
-    reader: TelnetReader, quiet_time: float = 2.0, max_wait: float = 8.0
+    reader: TelnetReader,
+    quiet_time: float = 2.0,
+    max_wait: float = 8.0,
+    max_bytes: int = _BANNER_MAX_BYTES,
 ) -> bytes:
     """
     Read banner data until output stops for *quiet_time* seconds.
@@ -528,6 +643,7 @@ async def _read_banner_until_quiet(
     :param reader: :class:`~telnetlib3.stream_reader.TelnetReader` instance.
     :param quiet_time: Seconds of silence before considering banner complete.
     :param max_wait: Maximum total seconds to wait for banner data.
+    :param max_bytes: Maximum bytes per read call.
     :returns: Banner bytes (may be empty).
     """
     chunks: list[bytes] = []
@@ -538,7 +654,7 @@ async def _read_banner_until_quiet(
         if remaining <= 0:
             break
         try:
-            chunk = await asyncio.wait_for(reader.read(_BANNER_MAX_BYTES), timeout=remaining)
+            chunk = await asyncio.wait_for(reader.read(max_bytes), timeout=remaining)
             if not chunk:
                 break
             chunks.append(chunk)

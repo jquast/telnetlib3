@@ -46,6 +46,7 @@ from telnetlib3.telopt import (
     LFLOW_OFF,
     TTABLE_IS,
     NEW_ENVIRON,
+    AUTHENTICATION,
     COM_PORT_OPTION,
     theNULL,
 )
@@ -318,22 +319,22 @@ def test_handle_will_invalid_cases_and_else_unhandled():
     assert seen["v"] == WILL
     # ELSE branch (unhandled) -> DONT sent, pending cleared, rejected tracked
     w4, t4, _ = new_writer(server=True)
-    w4.pending_option[DO + COM_PORT_OPTION] = True
-    w4.handle_will(COM_PORT_OPTION)
-    assert t4.writes[-1] == IAC + DONT + COM_PORT_OPTION
-    assert not w4.pending_option.get(DO + COM_PORT_OPTION, False)
-    assert COM_PORT_OPTION in w4.rejected_will
+    w4.pending_option[DO + AUTHENTICATION] = True
+    w4.handle_will(AUTHENTICATION)
+    assert t4.writes[-1] == IAC + DONT + AUTHENTICATION
+    assert not w4.pending_option.get(DO + AUTHENTICATION, False)
+    assert AUTHENTICATION in w4.rejected_will
 
 
 def test_handle_will_then_do_unsupported_sends_both_dont_and_wont():
     """WILL then DO for unsupported option must send DONT and WONT."""
     w, t, _ = new_writer(server=True)
-    w.handle_will(COM_PORT_OPTION)
-    assert t.writes[-1] == IAC + DONT + COM_PORT_OPTION
-    assert COM_PORT_OPTION in w.rejected_will
-    w.handle_do(COM_PORT_OPTION)
-    assert t.writes[-1] == IAC + WONT + COM_PORT_OPTION
-    assert COM_PORT_OPTION in w.rejected_do
+    w.handle_will(AUTHENTICATION)
+    assert t.writes[-1] == IAC + DONT + AUTHENTICATION
+    assert AUTHENTICATION in w.rejected_will
+    w.handle_do(AUTHENTICATION)
+    assert t.writes[-1] == IAC + WONT + AUTHENTICATION
+    assert AUTHENTICATION in w.rejected_do
 
 
 def test_handle_wont_tm_and_logout_paths():
@@ -358,8 +359,10 @@ def test_handle_subnegotiation_comport_and_gmcp_and_errors():
     w, *_ = new_writer(server=True)
     # GMCP
     w.handle_subnegotiation(collections.deque([GMCP, b"a", b"b"]))
-    # COM PORT OPTION
-    w.handle_subnegotiation(collections.deque([COM_PORT_OPTION, b"x", b"y"]))
+    # COM PORT OPTION: SIGNATURE response (subcmd 100 = server response)
+    w.handle_subnegotiation(collections.deque([COM_PORT_OPTION, b"\x64", b"T", b"e", b"s", b"t"]))
+    assert w.comport_data is not None
+    assert w.comport_data["signature"] == "Test"
     # errors
     with pytest.raises(ValueError, match="SE: buffer empty"):
         w.handle_subnegotiation(collections.deque([]))
@@ -1102,6 +1105,87 @@ def test_sb_begin_logged(caplog):
         w.feed_byte(SB)
         w.feed_byte(TTYPE)
     assert any("begin sub-negotiation SB TTYPE" in r.message for r in caplog.records)
+
+
+def test_handle_will_comport_accepted_and_signature_requested():
+    """Client accepting WILL COM_PORT_OPTION sends DO and requests SIGNATURE."""
+    w, t, _ = new_writer(server=False, client=True)
+    w.handle_will(COM_PORT_OPTION)
+    assert t.writes[-2] == IAC + DO + COM_PORT_OPTION
+    assert w.remote_option.enabled(COM_PORT_OPTION)
+    assert COM_PORT_OPTION not in w.rejected_will
+    # SIGNATURE request: IAC SB COM_PORT_OPTION \x00 IAC SE
+    assert t.writes[-1] == IAC + SB + COM_PORT_OPTION + b"\x00" + IAC + SE
+
+
+def test_comport_sb_signature_response():
+    """COM-PORT-OPTION SIGNATURE response is parsed and stored."""
+    w, *_ = new_writer(server=False, client=True)
+    w.remote_option[COM_PORT_OPTION] = True
+    w.handle_subnegotiation(
+        collections.deque([COM_PORT_OPTION, b"\x64", b"M", b"y", b"D", b"e", b"v"])
+    )
+    assert w.comport_data == {"signature": "MyDev"}
+
+
+def test_comport_sb_baudrate_response():
+    """COM-PORT-OPTION SET-BAUDRATE response is parsed."""
+    w, *_ = new_writer(server=False, client=True)
+    # subcmd 101 = SET-BAUDRATE response, 4-byte big-endian 9600
+    w.handle_subnegotiation(
+        collections.deque(
+            [COM_PORT_OPTION, bytes([101]), *[bytes([b]) for b in (0, 0, 0x25, 0x80)]]
+        )
+    )
+    assert w.comport_data["baudrate"] == 9600
+
+
+def test_comport_sb_datasize_parity_stopsize():
+    """COM-PORT-OPTION datasize, parity, stopsize responses are parsed."""
+    w, *_ = new_writer(server=False, client=True)
+    # datasize=8
+    w.handle_subnegotiation(collections.deque([COM_PORT_OPTION, bytes([102]), bytes([8])]))
+    assert w.comport_data["datasize"] == 8
+    # parity=NONE (1)
+    w.handle_subnegotiation(collections.deque([COM_PORT_OPTION, bytes([103]), bytes([1])]))
+    assert w.comport_data["parity"] == "NONE"
+    # stopsize=1 (1)
+    w.handle_subnegotiation(collections.deque([COM_PORT_OPTION, bytes([104]), bytes([1])]))
+    assert w.comport_data["stopsize"] == "1"
+
+
+def test_comport_sb_empty_subcmd_payload():
+    """COM-PORT-OPTION SIGNATURE with no payload does not store a signature."""
+    w, *_ = new_writer(server=False, client=True)
+    # subcmd 0 = SIGNATURE with no payload (server requesting our signature)
+    w.handle_subnegotiation(collections.deque([COM_PORT_OPTION, b"\x00"]))
+    assert "signature" not in (w.comport_data or {})
+
+
+def test_ttype_is_from_server_ignored_on_client():
+    """Client receiving TTYPE IS (protocol violation) logs warning, no crash."""
+    w, *_ = new_writer(server=False, client=True)
+    w.handle_subnegotiation(collections.deque([TTYPE, IS, b"\x01", b"\x00"]))
+
+
+def test_linemode_slc_no_forwardmask_on_client():
+    """Client processing SLC does not call request_forwardmask."""
+    w, t, _ = new_writer(server=False, client=True)
+    w.local_option[LINEMODE] = True
+    w.remote_option[LINEMODE] = True
+    func = slc.SLC_IP
+    flag = bytes([slc.SLC_LEVELBITS | ord(slc.SLC_FLUSHIN)])
+    value = b"\x03"  # ^C
+    w._handle_sb_linemode_slc(collections.deque([func, flag, value]))
+    # no AssertionError raised — forwardmask not requested on client
+
+
+def test_linemode_mode_without_negotiation_ignored():
+    """LINEMODE-MODE without prior LINEMODE negotiation is ignored."""
+    w, t, _ = new_writer(server=False, client=True)
+    mode_byte = bytes([0x03])
+    w._handle_sb_linemode_mode(collections.deque([mode_byte]))
+    # no AssertionError — the mode is silently ignored
 
 
 def test_name_option_distinguishes_commands_from_options():

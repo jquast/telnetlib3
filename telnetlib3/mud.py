@@ -5,6 +5,9 @@ Provides encode/decode functions for:
 - GMCP (Generic MUD Communication Protocol, option 201)
 - MSDP (MUD Server Data Protocol, option 69)
 - MSSP (MUD Server Status Protocol, option 70)
+- ZMP (Zenith MUD Protocol, option 93)
+- ATCP (Achaea Telnet Client Protocol, option 200)
+- AARDWOLF (Aardwolf protocol, option 102)
 
 All encode functions return the payload bytes only (the content between
 ``IAC SB <option>`` and ``IAC SE``). The caller is responsible for
@@ -37,6 +40,9 @@ __all__ = (
     "mssp_encode",
     "mssp_decode",
     "MsdpParser",
+    "zmp_decode",
+    "atcp_decode",
+    "aardwolf_decode",
 )
 
 
@@ -81,8 +87,11 @@ def gmcp_decode(buf: bytes, encoding: str = "utf-8") -> tuple[str, Any]:
         return (_decode_best_effort(buf, encoding), None)
 
     package = _decode_best_effort(parts[0], encoding)
+    text = _decode_best_effort(parts[1], encoding).strip()
+    if not text:
+        return (package, None)
     try:
-        data = json.loads(_decode_best_effort(parts[1], encoding))
+        data = json.loads(text)
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid JSON in GMCP payload: {exc}") from exc
     return (package, data)
@@ -264,4 +273,74 @@ def mssp_decode(buf: bytes, encoding: str = "utf-8") -> dict[str, str | list[str
         else:
             idx += 1
 
+    return result
+
+
+def zmp_decode(buf: bytes, encoding: str = "utf-8") -> list[str]:
+    """
+    Decode ZMP payload to list of NUL-delimited strings.
+
+    The first element is the command name, the rest are arguments.
+
+    :param buf: ZMP payload bytes (NUL-delimited).
+    :param encoding: Character encoding to try first, falls back to latin-1.
+    :returns: List of strings ``[command, arg1, arg2, ...]``.
+    """
+    if not buf:
+        return []
+    # Split on NUL bytes and strip trailing empty string from final NUL.
+    parts = buf.split(b"\x00")
+    if parts and parts[-1] == b"":
+        parts = parts[:-1]
+    return [_decode_best_effort(p, encoding) for p in parts]
+
+
+def atcp_decode(buf: bytes, encoding: str = "utf-8") -> tuple[str, str]:
+    """
+    Decode ATCP payload to ``(package, value)`` tuple.
+
+    Format is ``package.name value`` separated by the first space.
+    If no space is present, *value* is an empty string.
+
+    :param buf: ATCP payload bytes.
+    :param encoding: Character encoding to try first, falls back to latin-1.
+    :returns: Tuple of ``(package, value)``.
+    """
+    parts = buf.split(b" ", 1)
+    package = _decode_best_effort(parts[0], encoding)
+    value = _decode_best_effort(parts[1], encoding) if len(parts) > 1 else ""
+    return (package, value)
+
+
+# Aardwolf channel byte meanings (server → client).
+_AARDWOLF_CHANNELS: dict[int, str] = {
+    100: "status",
+    101: "tick",
+    102: "affect",
+    103: "group",
+    104: "skill",
+    105: "quest",
+    106: "spell",
+    107: "stat",
+    108: "message",
+}
+
+
+def aardwolf_decode(buf: bytes) -> dict[str, Any]:
+    """
+    Decode Aardwolf protocol payload.
+
+    :param buf: Aardwolf payload bytes (typically 1-2 bytes).
+    :returns: Dict with ``channel``, ``channel_byte``, ``data_byte``,
+        and ``data_bytes`` (for longer payloads).
+    """
+    if not buf:
+        return {"channel": "unknown", "channel_byte": 0, "data_bytes": b""}
+    channel_byte = buf[0]
+    channel_name = _AARDWOLF_CHANNELS.get(channel_byte, f"0x{channel_byte:02x}")
+    result: dict[str, Any] = {"channel": channel_name, "channel_byte": channel_byte}
+    if len(buf) == 2:
+        result["data_byte"] = buf[1]
+    if len(buf) > 1:
+        result["data_bytes"] = buf[1:]
     return result

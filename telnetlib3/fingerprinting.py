@@ -28,10 +28,14 @@ from .telopt import (
     DO,
     DET,
     EOR,
+    MSP,
+    MXP,
     RCP,
     RSP,
     SGA,
     TLS,
+    ZMP,
+    ATCP,
     DONT,
     ECHO,
     GMCP,
@@ -63,6 +67,7 @@ from .telopt import (
     CHARSET,
     ENCRYPT,
     TN3270E,
+    AARDWOLF,
     LINEMODE,
     SEND_URL,
     XDISPLOC,
@@ -254,6 +259,11 @@ EXTENDED_OPTIONS = [
     (GMCP, "GMCP", "Generic MUD Communication Protocol"),
     (MSDP, "MSDP", "MUD Server Data Protocol"),
     (MSSP, "MSSP", "MUD Server Status Protocol"),
+    (MSP, "MSP", "MUD Sound Protocol"),
+    (MXP, "MXP", "MUD eXtension Protocol"),
+    (ZMP, "ZMP", "Zenith MUD Protocol"),
+    (AARDWOLF, "AARDWOLF", "Aardwolf protocol"),
+    (ATCP, "ATCP", "Achaea Telnet Client Protocol"),
 ]
 
 LEGACY_OPTIONS = [
@@ -855,11 +865,23 @@ def _cooked_input(prompt: str) -> str:
         termios.tcsetattr(fd, termios.TCSANOW, old_attrs)
 
 
+class _BytesSafeEncoder(json.JSONEncoder):
+    """JSON encoder that converts bytes to str (UTF-8) or hex."""
+
+    def default(self, o: Any) -> Any:
+        if isinstance(o, bytes):
+            try:
+                return o.decode("utf-8")
+            except UnicodeDecodeError:
+                return o.hex()
+        return super().default(o)
+
+
 def _atomic_json_write(filepath: str, data: dict[str, Any]) -> None:
     """Atomically write JSON data to file via write-to-new + rename."""
     tmp_path = os.path.splitext(filepath)[0] + ".json.new"
     with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, sort_keys=True)
+        json.dump(data, f, indent=2, sort_keys=True, cls=_BytesSafeEncoder)
     os.replace(tmp_path, filepath)
 
 
@@ -902,6 +924,8 @@ def _build_session_fingerprint(
     rejected = _collect_rejected_options(writer)
     if rejected:
         result["rejected"] = rejected
+    if writer.comport_data:
+        result["comport"] = writer.comport_data
     return result
 
 
@@ -980,7 +1004,8 @@ def _is_maybe_mud(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> bool:
     for key in ("ttype1", "ttype2", "ttype3"):
         if (writer.get_extra_info(key) or "").lower() in MUD_TERMINALS:
             return True
-    if writer.remote_option.enabled(GMCP) or writer.remote_option.enabled(MSDP):
+    mud_opts = (GMCP, MSDP, MXP, MSP, ATCP, AARDWOLF)
+    if any(writer.remote_option.enabled(opt) for opt in mud_opts):
         return True
     return False
 
