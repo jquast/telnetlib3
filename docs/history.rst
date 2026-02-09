@@ -1,6 +1,7 @@
 History
 =======
-2.3.0 *unreleased*
+
+2.3.0
   * bugfix: repeat "socket.send() raised exception." exceptions
   * bugfix: server incorrectly accepted ``DO TSPEED`` and ``DO SNDLOC``
     with ``WILL`` responses. These are client-only options per :rfc:`1079`
