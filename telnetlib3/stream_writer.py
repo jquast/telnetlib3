@@ -2504,6 +2504,16 @@ class TelnetWriter:
         self.log.debug("recv IAC SB LINEMODE LINEMODE-MODE %r IAC SE", suggest_mode.mask)
 
         if not suggest_mode.ack:
+            # RFC 1184: if the proposed mode is the same as our current
+            # mode (ignoring the ACK bit), suppress the redundant ACK to
+            # prevent an infinite echo loop with misbehaving servers that
+            # re-send the same MODE without ACK repeatedly.
+            if self._linemode == suggest_mode:
+                self.log.debug(
+                    "suppressing redundant ACK for unchanged LINEMODE-MODE %r",
+                    suggest_mode.mask,
+                )
+                return
             # This implementation acknowledges and sets local linemode
             # to *any* setting the remote end suggests, requiring a
             # reply.  See notes later under server receipt of acknowledged

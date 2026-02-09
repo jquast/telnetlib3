@@ -393,6 +393,7 @@ async def test_telnet_client_cmdline(bind_host, unused_tcp_port):
         "--loglevel=info",
         "--connect-minwait=0.05",
         "--connect-maxwait=0.05",
+        "--colormatch=none",
     ]
 
     class HelloServer(asyncio.Protocol):
@@ -469,6 +470,7 @@ async def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port):
         "--connect-minwait=0.15",
         "--connect-maxwait=0.15",
         f"--logfile={logfile}",
+        "--colormatch=none",
     ]
 
     async def shell(reader, writer):

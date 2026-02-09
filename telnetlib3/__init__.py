@@ -16,6 +16,7 @@ from . import stream_writer
 from . import stream_reader
 from . import client_base
 from . import client_shell
+from . import color_filter
 from . import client
 from . import telopt
 from . import mud

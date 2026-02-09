@@ -12,26 +12,10 @@ from . import slc, telopt, accessories
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
-# conditional wcwidth support
-_HAS_WCWIDTH_ITER_SEQUENCES: bool = False  # pylint: disable=invalid-name
-_HAS_WCWIDTH_ITER_GRAPHEMES: bool = False  # pylint: disable=invalid-name
-
-try:
-    # 3rd party
-    from wcwidth.escape_sequences import ZERO_WIDTH_PATTERN as _ZERO_WIDTH_PATTERN
-
-    _HAS_WCWIDTH_ITER_SEQUENCES = True  # pylint: disable=invalid-name
-except ImportError:
-    pass
-
-try:
-    # 3rd party
-    from wcwidth import wcswidth as _wcswidth
-    from wcwidth import iter_graphemes_reverse as _iter_graphemes_reverse
-
-    _HAS_WCWIDTH_ITER_GRAPHEMES = True  # pylint: disable=invalid-name
-except ImportError:
-    pass
+# 3rd party
+from wcwidth import wcswidth as _wcswidth
+from wcwidth import iter_graphemes_reverse as _iter_graphemes_reverse
+from wcwidth.escape_sequences import ZERO_WIDTH_PATTERN as _ZERO_WIDTH_PATTERN
 
 CR, LF, NUL = ("\r", "\n", "\x00")
 ESC = "\x1b"
@@ -77,57 +61,44 @@ async def filter_ansi(  # pylint: disable=too-complex,too-many-branches,too-many
             await reader.read(1)
             continue
 
-        if not _HAS_WCWIDTH_ITER_SEQUENCES:
-            # CSI-only fallback
-            if next_char != "[":
-                return next_char
-            while True:
+        buf = ESC + next_char
+        if next_char in _SEQ_STARTERS:
+            # Multi-byte: CSI, OSC, DCS, APC, PM, or charset
+            while len(buf) < 256:
                 seq_char = await reader.read(1)
-                if not seq_char or (0x40 <= ord(seq_char) <= 0x7E):
+                if not seq_char:
+                    break
+                buf += seq_char
+                match = _ZERO_WIDTH_PATTERN.match(buf)
+                # Skip spurious 2-byte Fe matches on the
+                # ESC+starter prefix — the real sequence is
+                # longer (CSI 3+, charset 3, OSC/DCS/APC/PM 4+)
+                if match and match.end() > 2:
+                    if match.end() < len(buf):
+                        return buf[match.end()]
                     break
         else:
-            buf = ESC + next_char
-            if next_char in _SEQ_STARTERS:
-                # Multi-byte: CSI, OSC, DCS, APC, PM, or charset
-                while len(buf) < 256:
-                    seq_char = await reader.read(1)
-                    if not seq_char:
-                        break
-                    buf += seq_char
-                    match = _ZERO_WIDTH_PATTERN.match(buf)
-                    # Skip spurious 2-byte Fe matches on the
-                    # ESC+starter prefix — the real sequence is
-                    # longer (CSI 3+, charset 3, OSC/DCS/APC/PM 4+)
-                    if match and match.end() > 2:
-                        if match.end() < len(buf):
-                            return buf[match.end()]
-                        break
-            else:
-                # Check for 2-byte Fe/Fp sequence
-                match = _ZERO_WIDTH_PATTERN.match(buf)
-                if not match:
-                    return next_char
+            # Check for 2-byte Fe/Fp sequence
+            match = _ZERO_WIDTH_PATTERN.match(buf)
+            if not match:
+                return next_char
 
 
 def _backspace_grapheme(command: str) -> tuple[str, str]:
     """Remove last grapheme cluster, return (new_command, echo_str)."""
     if not command:
         return command, ""
-    if _HAS_WCWIDTH_ITER_GRAPHEMES:
-        last = next(_iter_graphemes_reverse(command))
-        new_command = command[: len(command) - len(last)]
-        w = int(_wcswidth(last))
-        w = max(w, 1)
-        return new_command, "\b \b" * w
-    return command[:-1], "\b \b"
+    last = next(_iter_graphemes_reverse(command))
+    new_command = command[: len(command) - len(last)]
+    w = int(_wcswidth(last))
+    w = max(w, 1)
+    return new_command, "\b \b" * w
 
 
 def _visible_width(text: str) -> int:
     """Return visible display width of text."""
-    if _HAS_WCWIDTH_ITER_GRAPHEMES:
-        result = int(_wcswidth(text))
-        return max(0, result)
-    return len(text)
+    result = int(_wcswidth(text))
+    return max(0, result)
 
 
 class _LineEditor:  # pylint: disable=too-few-public-methods

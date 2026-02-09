@@ -242,6 +242,11 @@ else:
                             if telnet_task in wait_for:
                                 telnet_task.cancel()
                                 wait_for.remove(telnet_task)
+                            _cf = getattr(telnet_writer, '_color_filter', None)
+                            if _cf is not None:
+                                _flush = _cf.flush()
+                                if _flush:
+                                    stdout.write(_flush.encode())
                             stdout.write(f"\033[m{linesep}Connection closed.{linesep}".encode())
                             # Cleanup resize handler on local escape close
                             if term._istty and remove_winch:  # pylint: disable=protected-access
@@ -273,6 +278,11 @@ else:
                         if stdin_task in wait_for:
                             stdin_task.cancel()
                             wait_for.remove(stdin_task)
+                        _cf = getattr(telnet_writer, '_color_filter', None)
+                        if _cf is not None:
+                            _flush = _cf.flush()
+                            if _flush:
+                                stdout.write(_flush.encode())
                         stdout.write(
                             f"\033[m{linesep}Connection closed by foreign host.{linesep}".encode()
                         )
@@ -289,6 +299,9 @@ else:
                             except Exception:  # pylint: disable=broad-exception-caught
                                 pass
                     else:
+                        _cf = getattr(telnet_writer, '_color_filter', None)
+                        if _cf is not None:
+                            out = _cf.filter(out)
                         stdout.write(out.encode() or b":?!?:")
                         telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
                         wait_for.add(telnet_task)

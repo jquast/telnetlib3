@@ -548,12 +548,6 @@ def test_backspace_grapheme_ascii(command, expected_cmd, expected_echo):
     assert echo == expected_echo
 
 
-wcwidth_available = pytest.mark.skipif(
-    not ss._HAS_WCWIDTH_ITER_GRAPHEMES, reason="wcwidth not installed"
-)
-
-
-@wcwidth_available
 @pytest.mark.parametrize(
     "command,expected_cmd,expected_echo",
     [
@@ -572,13 +566,6 @@ def test_backspace_grapheme_wcwidth(command, expected_cmd, expected_echo):
     assert echo == expected_echo
 
 
-def test_backspace_grapheme_no_wcwidth(monkeypatch):
-    monkeypatch.setattr(ss, "_HAS_WCWIDTH_ITER_GRAPHEMES", False)
-    cmd, echo = ss._backspace_grapheme("ab\u30b3")
-    assert cmd == "ab"
-    assert echo == "\b \b"
-
-
 # -- _visible_width tests --
 
 
@@ -589,7 +576,6 @@ def test_visible_width_ascii(text, expected):
     assert ss._visible_width(text) == expected
 
 
-@wcwidth_available
 @pytest.mark.parametrize(
     "text,expected",
     [
@@ -602,15 +588,10 @@ def test_visible_width_wcwidth(text, expected):
     assert ss._visible_width(text) == expected
 
 
-def test_visible_width_no_wcwidth(monkeypatch):
-    monkeypatch.setattr(ss, "_HAS_WCWIDTH_ITER_GRAPHEMES", False)
-    assert ss._visible_width("\u30b3\u30f3\u30cb\u30c1\u30cf") == 5
-
-
 # -- readline (blocking) grapheme + maxvis tests --
 
 
-@wcwidth_available
+
 def test_readline_backspace_wide():
     cmds, echos = _run_readline("a\u30b3\b\r")
     assert cmds == ["a"]
@@ -618,7 +599,7 @@ def test_readline_backspace_wide():
     assert echo_str.count("\b \b") == 2
 
 
-@wcwidth_available
+
 def test_readline_backspace_emoji():
     family = "\U0001f468\u200d\U0001f469\u200d\U0001f467"
     cmds, _ = _run_readline("x" + family + "\bq\r")
@@ -633,7 +614,7 @@ def test_readline_maxvis_ascii():
     assert "g" not in echo_str
 
 
-@wcwidth_available
+
 def test_readline_maxvis_wide():
     cmds, _ = _run_readline("a\u30b3x\r", max_visible_width=3)
     assert cmds == ["a\u30b3"]
@@ -642,7 +623,7 @@ def test_readline_maxvis_wide():
 # -- readline_async grapheme + maxvis tests --
 
 
-@wcwidth_available
+
 @pytest.mark.asyncio
 async def test_readline_async_backspace_wide():
     result = await ss.readline_async(
@@ -651,7 +632,7 @@ async def test_readline_async_backspace_wide():
     assert result == "ab"
 
 
-@wcwidth_available
+
 @pytest.mark.asyncio
 async def test_readline_async_backspace_emoji():
     family = "\U0001f468\u200d\U0001f469\u200d\U0001f467"
@@ -669,7 +650,7 @@ async def test_readline_async_maxvis_ascii():
     assert result == "abcd"
 
 
-@wcwidth_available
+
 @pytest.mark.asyncio
 async def test_readline_async_maxvis_wide():
     result = await ss.readline_async(
@@ -695,19 +676,6 @@ async def test_readline_async_ss3_filtered():
 # -- filter_ansi enhanced tests --
 
 
-wcwidth_seq_available = pytest.mark.skipif(
-    not ss._HAS_WCWIDTH_ITER_SEQUENCES, reason="wcwidth not installed"
-)
-
-
-@pytest.mark.asyncio
-async def test_filter_ansi_ss3_no_wcwidth(monkeypatch):
-    monkeypatch.setattr(ss, "_HAS_WCWIDTH_ITER_SEQUENCES", False)
-    result = await ss.filter_ansi(MockReader(["\x1b", "O", "P", "x"]), MockWriter())
-    assert result == "x"
-
-
-@wcwidth_seq_available
 @pytest.mark.parametrize(
     "input_chars,expected",
     [
