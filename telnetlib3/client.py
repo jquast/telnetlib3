@@ -532,6 +532,7 @@ async def run_client() -> None:
     colormatch: str = args["colormatch"]
     shell_callback = args["shell"]
     if colormatch.lower() != "none":
+        # local
         from .color_filter import (  # pylint: disable=import-outside-toplevel
             PALETTES,
             ColorConfig,
@@ -540,8 +541,7 @@ async def run_client() -> None:
 
         if colormatch not in PALETTES:
             print(
-                f"Unknown palette {colormatch!r},"
-                f" available: {', '.join(sorted(PALETTES))}",
+                f"Unknown palette {colormatch!r}," f" available: {', '.join(sorted(PALETTES))}",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -559,6 +559,7 @@ async def run_client() -> None:
             reader: Union[TelnetReader, TelnetReaderUnicode],
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
+            # pylint: disable-next=protected-access
             writer_arg._color_filter = color_filter  # type: ignore[union-attr]
             await original_shell(reader, writer_arg)
 

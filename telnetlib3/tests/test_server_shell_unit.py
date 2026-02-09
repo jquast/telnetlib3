@@ -591,13 +591,11 @@ def test_visible_width_wcwidth(text, expected):
 # -- readline (blocking) grapheme + maxvis tests --
 
 
-
 def test_readline_backspace_wide():
     cmds, echos = _run_readline("a\u30b3\b\r")
     assert cmds == ["a"]
     echo_str = "".join(echos)
     assert echo_str.count("\b \b") == 2
-
 
 
 def test_readline_backspace_emoji():
@@ -614,7 +612,6 @@ def test_readline_maxvis_ascii():
     assert "g" not in echo_str
 
 
-
 def test_readline_maxvis_wide():
     cmds, _ = _run_readline("a\u30b3x\r", max_visible_width=3)
     assert cmds == ["a\u30b3"]
@@ -623,14 +620,12 @@ def test_readline_maxvis_wide():
 # -- readline_async grapheme + maxvis tests --
 
 
-
 @pytest.mark.asyncio
 async def test_readline_async_backspace_wide():
     result = await ss.readline_async(
         MockReader(list("a\u30b3") + ["\x7f", "b", "\r"]), MockWriter()
     )
     assert result == "ab"
-
 
 
 @pytest.mark.asyncio
@@ -648,7 +643,6 @@ async def test_readline_async_maxvis_ascii():
         MockReader(list("abcdef\r")), MockWriter(), max_visible_width=4
     )
     assert result == "abcd"
-
 
 
 @pytest.mark.asyncio

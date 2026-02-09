@@ -7,15 +7,15 @@ import types
 import asyncio
 from typing import Union, Optional, Generator, cast
 
-# local
-from . import slc, telopt, accessories
-from .stream_reader import TelnetReader, TelnetReaderUnicode
-from .stream_writer import TelnetWriter, TelnetWriterUnicode
-
 # 3rd party
 from wcwidth import wcswidth as _wcswidth
 from wcwidth import iter_graphemes_reverse as _iter_graphemes_reverse
 from wcwidth.escape_sequences import ZERO_WIDTH_PATTERN as _ZERO_WIDTH_PATTERN
+
+# local
+from . import slc, telopt, accessories
+from .stream_reader import TelnetReader, TelnetReaderUnicode
+from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
 CR, LF, NUL = ("\r", "\n", "\x00")
 ESC = "\x1b"
@@ -34,9 +34,7 @@ _SEQ_STARTERS = frozenset("[])P_^(")
 _SS3 = "O"
 
 
-async def filter_ansi(  # pylint: disable=too-complex,too-many-branches,too-many-nested-blocks
-    reader: TelnetReaderUnicode, _writer: TelnetWriterUnicode
-) -> str:
+async def filter_ansi(reader: TelnetReaderUnicode, _writer: TelnetWriterUnicode) -> str:
     """
     Read and return the next non-ANSI-escape character from reader.
 

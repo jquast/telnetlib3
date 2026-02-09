@@ -242,7 +242,7 @@ else:
                             if telnet_task in wait_for:
                                 telnet_task.cancel()
                                 wait_for.remove(telnet_task)
-                            _cf = getattr(telnet_writer, '_color_filter', None)
+                            _cf = getattr(telnet_writer, "_color_filter", None)
                             if _cf is not None:
                                 _flush = _cf.flush()
                                 if _flush:
@@ -278,7 +278,7 @@ else:
                         if stdin_task in wait_for:
                             stdin_task.cancel()
                             wait_for.remove(stdin_task)
-                        _cf = getattr(telnet_writer, '_color_filter', None)
+                        _cf = getattr(telnet_writer, "_color_filter", None)
                         if _cf is not None:
                             _flush = _cf.flush()
                             if _flush:
@@ -299,7 +299,7 @@ else:
                             except Exception:  # pylint: disable=broad-exception-caught
                                 pass
                     else:
-                        _cf = getattr(telnet_writer, '_color_filter', None)
+                        _cf = getattr(telnet_writer, "_color_filter", None)
                         if _cf is not None:
                             out = _cf.filter(out)
                         stdout.write(out.encode() or b":?!?:")

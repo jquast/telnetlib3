@@ -1,6 +1,11 @@
 History
 =======
-2.4.0
+2.4.0 *unreleased*
+  * new: :mod:`telnetlib3.color_filter` module — translates 16-color ANSI SGR
+    codes to 24-bit RGB from hardware palettes (EGA, CGA, VGA, Amiga, xterm).
+    Enabled by default. New client CLI options: ``--colormatch``,
+    ``--color-brightness``, ``--color-contrast``, ``--background-color``,
+    ``--reverse-video``.
   * new: :func:`~telnetlib3.mud.zmp_decode`,
     :func:`~telnetlib3.mud.atcp_decode`, and
     :func:`~telnetlib3.mud.aardwolf_decode` decode functions for ZMP (option
@@ -12,9 +17,23 @@ History
     :meth:`~telnetlib3.stream_writer.TelnetWriter.handle_mxp` callbacks for
     receiving MUD extended protocol subnegotiations, with accumulated data
     stored in ``zmp_data``, ``atcp_data``, and ``aardwolf_data`` attributes.
+  * new: COM-PORT-OPTION (:rfc:`2217`) subnegotiation parsing with
+    ``comport_data`` attribute and
+    :meth:`~telnetlib3.stream_writer.TelnetWriter.request_comport_signature`.
   * enhancement: ``telnetlib3-fingerprint`` now always probes extended MUD
     options (MSP, MXP, ZMP, AARDWOLF, ATCP) during server scans and captures
-    ZMP, ATCP, and Aardwolf data in session output.
+    ZMP, ATCP, Aardwolf, MXP, and COM-PORT data in session output.
+  * enhancement: ``telnetlib3-fingerprint`` smart prompt detection —
+    auto-answers yes/no, color, UTF-8 menu, ``who``, and ``help`` prompts.
+  * enhancement: ``--banner-max-bytes`` option for ``telnetlib3-fingerprint``;
+    default raised from 1024 to 65536.
+  * bugfix: rare LINEMODE ACK loop with misbehaving servers that re-send
+    unchanged MODE without ACK.
+  * bugfix: unknown IAC commands no longer raise ``ValueError``; treated as
+    data.
+  * bugfix: client no longer asserts on ``TTYPE IS`` from server.
+  * bugfix: ``request_forwardmask()`` only called on server side.
+  * change: ``wcwidth`` is now a required dependency.
 
 
 2.3.0 *unreleased*

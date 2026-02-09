@@ -248,7 +248,7 @@ def test_atcp_decode_with_value() -> None:
 def test_atcp_decode_no_value() -> None:
     package, value = atcp_decode(b"Conn.MXP")
     assert package == "Conn.MXP"
-    assert value == ""
+    assert not value
 
 
 def test_atcp_decode_value_with_spaces() -> None:
@@ -259,8 +259,8 @@ def test_atcp_decode_value_with_spaces() -> None:
 
 def test_atcp_decode_empty() -> None:
     package, value = atcp_decode(b"")
-    assert package == ""
-    assert value == ""
+    assert not package
+    assert not value
 
 
 def test_atcp_decode_latin1_fallback() -> None:

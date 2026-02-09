@@ -924,6 +924,8 @@ def _build_session_fingerprint(
     rejected = _collect_rejected_options(writer)
     if rejected:
         result["rejected"] = rejected
+    if writer.comport_data:
+        result["comport"] = writer.comport_data
     return result
 
 

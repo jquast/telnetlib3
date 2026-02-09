@@ -44,6 +44,7 @@ class MockWriter:
         self.atcp_data: list[tuple[str, str]] = []
         self.aardwolf_data: list[dict[str, object]] = []
         self.mxp_data: list[bytes] = []
+        self.comport_data: dict[str, object] | None = None
         self._closing = False
 
     def get_extra_info(self, key, default=None):
@@ -726,16 +727,10 @@ async def test_probe_skipped_when_closing(tmp_path):
         pytest.param(b"systemd/network", b"\r\n", id="false_positive_word"),
         pytest.param(b"beyond", b"\r\n", id="substring_y_n_not_matched"),
         pytest.param(
-            b"Please enter a name: (or 'who' or 'finger'):",
-            b"who\r\n",
-            id="who_single_quotes",
+            b"Please enter a name: (or 'who' or 'finger'):", b"who\r\n", id="who_single_quotes"
         ),
-        pytest.param(
-            b'Enter your name (or "who"):', b"who\r\n", id="who_double_quotes"
-        ),
-        pytest.param(
-            b"What is your name? (or 'WHO')", b"who\r\n", id="who_uppercase"
-        ),
+        pytest.param(b'Enter your name (or "who"):', b"who\r\n", id="who_double_quotes"),
+        pytest.param(b"What is your name? (or 'WHO')", b"who\r\n", id="who_uppercase"),
         pytest.param(b"Enter your name:", b"\r\n", id="name_prompt_no_who"),
         pytest.param(
             b"connect <name> <password>\r\n"
@@ -746,14 +741,8 @@ async def test_probe_skipped_when_closing(tmp_path):
         ),
         pytest.param(b"Type WHO to list users", b"who\r\n", id="who_bare_mid_sentence"),
         pytest.param(b"somehow", b"\r\n", id="who_inside_word_not_matched"),
-        pytest.param(
-            b"Type 'help' for a list of commands:",
-            b"help\r\n",
-            id="help_single_quotes",
-        ),
-        pytest.param(
-            b'Enter your name (or "help"):', b"help\r\n", id="help_double_quotes"
-        ),
+        pytest.param(b"Type 'help' for a list of commands:", b"help\r\n", id="help_single_quotes"),
+        pytest.param(b'Enter your name (or "help"):', b"help\r\n", id="help_double_quotes"),
         pytest.param(
             b"HELP               to see available commands.\r\n",
             b"help\r\n",
@@ -768,6 +757,24 @@ async def test_probe_skipped_when_closing(tmp_path):
             b"who\r\n",
             id="who_preferred_over_help",
         ),
+        pytest.param(b"Color? ", b"y\r\n", id="color_question"),
+        pytest.param(b"Do you want color? ", b"y\r\n", id="color_in_sentence"),
+        pytest.param(b"ANSI COLOR? ", b"y\r\n", id="color_uppercase"),
+        pytest.param(b"color ? ", b"y\r\n", id="color_space_before_question"),
+        pytest.param(b"colorful display", b"\r\n", id="color_no_question_mark"),
+        pytest.param(
+            b"Select charset:\r\n1) ASCII\r\n2) ISO-8859-1\r\n5) UTF-8\r\n",
+            b"5\r\n",
+            id="menu_utf8",
+        ),
+        pytest.param(b"3) utf-8\r\nChoose: ", b"3\r\n", id="menu_utf8_lowercase"),
+        pytest.param(b"Choose encoding: 1) UTF8", b"1\r\n", id="menu_utf8_no_hyphen"),
+        pytest.param(
+            b"12) UTF-8\r\nSelect: ",
+            b"12\r\n",
+            id="menu_utf8_multidigit",
+        ),
+        pytest.param(b"1) ASCII\r\n2) Latin-1\r\n", b"\r\n", id="menu_no_utf8"),
     ],
 )
 def test_detect_yn_prompt(banner, expected):

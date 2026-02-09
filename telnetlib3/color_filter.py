@@ -36,7 +36,7 @@ from __future__ import annotations
 
 # std imports
 import re
-from typing import Dict, List, Match, Optional, Tuple, NamedTuple
+from typing import Dict, List, Match, Tuple, Optional, NamedTuple
 
 # 3rd party
 from wcwidth.sgr_state import _SGR_PATTERN
@@ -47,14 +47,22 @@ __all__ = ("ColorConfig", "ColorFilter", "PALETTES")
 # Index 0-7: normal colors (black, red, green, yellow, blue, magenta, cyan, white)
 # Index 8-15: bright variants of the same order.
 PaletteRGB = Tuple[
-    Tuple[int, int, int], Tuple[int, int, int],
-    Tuple[int, int, int], Tuple[int, int, int],
-    Tuple[int, int, int], Tuple[int, int, int],
-    Tuple[int, int, int], Tuple[int, int, int],
-    Tuple[int, int, int], Tuple[int, int, int],
-    Tuple[int, int, int], Tuple[int, int, int],
-    Tuple[int, int, int], Tuple[int, int, int],
-    Tuple[int, int, int], Tuple[int, int, int],
+    Tuple[int, int, int],
+    Tuple[int, int, int],
+    Tuple[int, int, int],
+    Tuple[int, int, int],
+    Tuple[int, int, int],
+    Tuple[int, int, int],
+    Tuple[int, int, int],
+    Tuple[int, int, int],
+    Tuple[int, int, int],
+    Tuple[int, int, int],
+    Tuple[int, int, int],
+    Tuple[int, int, int],
+    Tuple[int, int, int],
+    Tuple[int, int, int],
+    Tuple[int, int, int],
+    Tuple[int, int, int],
 ]
 
 # Hardware color palettes.  Each defines exact RGB values for ANSI colors 0-15.
@@ -62,45 +70,105 @@ PALETTES: Dict[str, PaletteRGB] = {
     # IBM Enhanced Graphics Adapter -- the classic DOS palette used by most
     # BBS and MUD ANSI artwork.
     "ega": (
-        (0, 0, 0), (170, 0, 0), (0, 170, 0), (170, 85, 0),
-        (0, 0, 170), (170, 0, 170), (0, 170, 170), (170, 170, 170),
-        (85, 85, 85), (255, 85, 85), (85, 255, 85), (255, 255, 85),
-        (85, 85, 255), (255, 85, 255), (85, 255, 255), (255, 255, 255),
+        (0, 0, 0),
+        (170, 0, 0),
+        (0, 170, 0),
+        (170, 85, 0),
+        (0, 0, 170),
+        (170, 0, 170),
+        (0, 170, 170),
+        (170, 170, 170),
+        (85, 85, 85),
+        (255, 85, 85),
+        (85, 255, 85),
+        (255, 255, 85),
+        (85, 85, 255),
+        (255, 85, 255),
+        (85, 255, 255),
+        (255, 255, 255),
     ),
     # IBM Color Graphics Adapter -- earlier, more saturated palette.
     "cga": (
-        (0, 0, 0), (170, 0, 0), (0, 170, 0), (170, 170, 0),
-        (0, 0, 170), (170, 0, 170), (0, 170, 170), (170, 170, 170),
-        (85, 85, 85), (255, 85, 85), (85, 255, 85), (255, 255, 85),
-        (85, 85, 255), (255, 85, 255), (85, 255, 255), (255, 255, 255),
+        (0, 0, 0),
+        (170, 0, 0),
+        (0, 170, 0),
+        (170, 170, 0),
+        (0, 0, 170),
+        (170, 0, 170),
+        (0, 170, 170),
+        (170, 170, 170),
+        (85, 85, 85),
+        (255, 85, 85),
+        (85, 255, 85),
+        (255, 255, 85),
+        (85, 85, 255),
+        (255, 85, 255),
+        (85, 255, 255),
+        (255, 255, 255),
     ),
     # VGA / DOS standard palette -- the most common DOS palette, very close
     # to EGA but with a brighter dark yellow.
     "vga": (
-        (0, 0, 0), (170, 0, 0), (0, 170, 0), (170, 85, 0),
-        (0, 0, 170), (170, 0, 170), (0, 170, 170), (170, 170, 170),
-        (85, 85, 85), (255, 85, 85), (85, 255, 85), (255, 255, 85),
-        (85, 85, 255), (255, 85, 255), (85, 255, 255), (255, 255, 255),
+        (0, 0, 0),
+        (170, 0, 0),
+        (0, 170, 0),
+        (170, 85, 0),
+        (0, 0, 170),
+        (170, 0, 170),
+        (0, 170, 170),
+        (170, 170, 170),
+        (85, 85, 85),
+        (255, 85, 85),
+        (85, 255, 85),
+        (255, 255, 85),
+        (85, 85, 255),
+        (255, 85, 255),
+        (85, 255, 255),
+        (255, 255, 255),
     ),
     # Amiga Workbench 1.x palette -- warmer tones characteristic of the
     # Commodore Amiga.
     "amiga": (
-        (0, 0, 0), (170, 0, 0), (0, 170, 0), (170, 170, 0),
-        (0, 0, 170), (170, 0, 170), (0, 170, 170), (187, 187, 187),
-        (85, 85, 85), (255, 85, 85), (85, 255, 85), (255, 255, 85),
-        (85, 85, 255), (255, 85, 255), (85, 255, 255), (255, 255, 255),
+        (0, 0, 0),
+        (170, 0, 0),
+        (0, 170, 0),
+        (170, 170, 0),
+        (0, 0, 170),
+        (170, 0, 170),
+        (0, 170, 170),
+        (187, 187, 187),
+        (85, 85, 85),
+        (255, 85, 85),
+        (85, 255, 85),
+        (255, 255, 85),
+        (85, 85, 255),
+        (255, 85, 255),
+        (85, 255, 255),
+        (255, 255, 255),
     ),
     # xterm default palette -- the standard xterm color table.
     "xterm": (
-        (0, 0, 0), (205, 0, 0), (0, 205, 0), (205, 205, 0),
-        (0, 0, 238), (205, 0, 205), (0, 205, 205), (229, 229, 229),
-        (127, 127, 127), (255, 0, 0), (0, 255, 0), (255, 255, 0),
-        (92, 92, 255), (255, 0, 255), (0, 255, 255), (255, 255, 255),
+        (0, 0, 0),
+        (205, 0, 0),
+        (0, 205, 0),
+        (205, 205, 0),
+        (0, 0, 238),
+        (205, 0, 205),
+        (0, 205, 205),
+        (229, 229, 229),
+        (127, 127, 127),
+        (255, 0, 0),
+        (0, 255, 0),
+        (255, 255, 0),
+        (92, 92, 255),
+        (255, 0, 255),
+        (0, 255, 255),
+        (255, 255, 255),
     ),
 }
 
 # Detect potentially incomplete escape sequence at end of a chunk.
-_TRAILING_ESC = re.compile(r'\x1b(\[[\d;:]*)?$')
+_TRAILING_ESC = re.compile(r"\x1b(\[[\d;:]*)?$")
 
 
 class ColorConfig(NamedTuple):
@@ -150,9 +218,7 @@ def _is_foreground_code(code: int) -> bool:
 
 
 def _adjust_color(
-    r: int, g: int, b: int,
-    brightness: float,
-    contrast: float,
+    r: int, g: int, b: int, brightness: float, contrast: float
 ) -> Tuple[int, int, int]:
     """
     Apply brightness and contrast scaling to an RGB color.
@@ -183,23 +249,21 @@ class ColorFilter:
     """
     Stateful ANSI color palette translation filter.
 
-    Translates basic 16-color ANSI SGR codes to 24-bit RGB equivalents from a
-    named hardware palette, with brightness/contrast adjustment and background
-    color enforcement.
+    Translates basic 16-color ANSI SGR codes to 24-bit RGB equivalents from a named hardware
+    palette, with brightness/contrast adjustment and background color enforcement.
 
-    The filter is designed to process chunked text (as received from a telnet
-    connection) and correctly handles escape sequences split across chunk
-    boundaries.
+    The filter is designed to process chunked text (as received from a telnet connection) and
+    correctly handles escape sequences split across chunk boundaries.
 
     :param config: Color configuration parameters.
     """
 
     def __init__(self, config: ColorConfig) -> None:
+        """Initialize with the given color configuration."""
         self._config = config
         palette = PALETTES[config.palette_name]
         self._adjusted: List[Tuple[int, int, int]] = [
-            _adjust_color(r, g, b, config.brightness, config.contrast)
-            for r, g, b in palette
+            _adjust_color(r, g, b, config.brightness, config.contrast) for r, g, b in palette
         ]
         bg = config.background_color
         if config.reverse_video:
@@ -213,9 +277,8 @@ class ColorFilter:
         """
         Transform SGR sequences in *text* using the configured palette.
 
-        Handles chunked input by buffering incomplete trailing escape sequences
-        across calls.  On the very first non-empty output, the configured
-        background color is injected.
+        Handles chunked input by buffering incomplete trailing escape sequences across calls.  On
+        the very first non-empty output, the configured background color is injected.
 
         :param text: Input text, possibly containing ANSI escape sequences.
         :returns: Text with basic colors replaced by 24-bit RGB equivalents.
@@ -227,7 +290,7 @@ class ColorFilter:
         match = _TRAILING_ESC.search(text)
         if match:
             self._buffer = match.group()
-            text = text[:match.start()]
+            text = text[: match.start()]
 
         if not text:
             return ""
@@ -239,14 +302,14 @@ class ColorFilter:
             result = self._bg_sgr + result
         return result
 
+    # pylint: disable-next=too-complex,too-many-branches,too-many-statements
     def _replace_sgr(self, match: Match[str]) -> str:  # noqa: C901
-        """
+        r"""
         Regex replacement callback for a single SGR sequence.
 
-        Tracks bold state across calls so that ``\\x1b[1;30m`` (bold + black)
-        uses the bright palette entry (index 8) instead of pure black.  This
-        preserves the traditional "bold as bright" rendering that legacy
-        systems rely on, which would otherwise be lost when converting to
+        Tracks bold state across calls so that ``\x1b[1;30m`` (bold + black) uses the bright palette
+        entry (index 8) instead of pure black.  This preserves the traditional "bold as bright"
+        rendering that legacy systems rely on, which would otherwise be lost when converting to
         24-bit RGB (terminals do not brighten true-color values for bold).
         """
         params_str = match.group(1)

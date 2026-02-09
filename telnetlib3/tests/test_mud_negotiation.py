@@ -299,7 +299,7 @@ def test_sb_raw_mud_empty_payload(opt):
     """Empty SB payload (e.g. IAC SB MXP IAC SE) must not raise."""
     w, _t, _p = new_writer(server=True)
     received: list[bytes] = []
-    w.set_ext_callback(opt, lambda data: received.append(data))
+    w.set_ext_callback(opt, received.append)
     w.pending_option[SB + opt] = True
     buf = collections.deque([bytes([opt[0]])])
     w.handle_subnegotiation(buf)
@@ -310,7 +310,7 @@ def test_sb_raw_mud_empty_payload(opt):
 def test_sb_raw_mud_with_payload(opt):
     w, _t, _p = new_writer(server=True)
     received: list[bytes] = []
-    w.set_ext_callback(opt, lambda data: received.append(data))
+    w.set_ext_callback(opt, received.append)
     w.pending_option[SB + opt] = True
     payload = b"\x01\x02\x03"
     buf = collections.deque([bytes([opt[0]])] + [bytes([b]) for b in payload])

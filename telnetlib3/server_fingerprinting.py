@@ -74,14 +74,17 @@ _YN_RE = re.compile(rb"(?i)(?:^|[^a-zA-Z0-9])(yes/no|y/n)(?:[^a-zA-Z0-9]|$)")
 # Match MUD/BBS login prompts that offer 'who' as a command.
 # Quoted: "enter a name (or 'who')", or bare WHO without surrounding
 # alphanumerics: "\nWHO                to see players connected.\n"
-_WHO_RE = re.compile(
-    rb"(?i)(?:'who'|\"who\"|(?:^|[^a-zA-Z0-9])who(?:[^a-zA-Z0-9]|$))"
-)
+_WHO_RE = re.compile(rb"(?i)(?:'who'|\"who\"|(?:^|[^a-zA-Z0-9])who(?:[^a-zA-Z0-9]|$))")
 
 # Same pattern for 'help' — offered as a login-screen command on many MUDs.
-_HELP_RE = re.compile(
-    rb"(?i)(?:'help'|\"help\"|(?:^|[^a-zA-Z0-9])help(?:[^a-zA-Z0-9]|$))"
-)
+_HELP_RE = re.compile(rb"(?i)(?:'help'|\"help\"|(?:^|[^a-zA-Z0-9])help(?:[^a-zA-Z0-9]|$))")
+
+# Match "color?" prompts — many MUDs ask if the user wants color.
+_COLOR_RE = re.compile(rb"(?i)color\s*\?")
+
+# Match numbered menu items offering UTF-8, e.g. "5) UTF-8" or "3) utf8".
+# Many BBS/MUD systems present a charset selection menu at connect time.
+_MENU_UTF8_RE = re.compile(rb"(\d+)\s*\)\s*UTF-?8", re.IGNORECASE)
 
 logger = logging.getLogger("telnetlib3.server_fingerprint")
 
@@ -126,6 +129,13 @@ def _detect_yn_prompt(banner: bytes) -> bytes:
     (case-insensitive, delimited by non-alphanumeric characters), returns
     ``b"yes\r\n"`` or ``b"y\r\n"`` respectively.
 
+    If the banner contains a ``color?`` prompt (case-insensitive),
+    returns ``b"y\r\n"`` to accept color.
+
+    If the banner contains a numbered menu item for UTF-8 (e.g.
+    ``5) UTF-8``), returns the digit followed by ``b"\r\n"`` to select
+    the UTF-8 charset option.
+
     If the banner contains a MUD/BBS login prompt offering ``'who'`` as
     an alternative (e.g. "enter a name (or 'who')"), returns
     ``b"who\r\n"``.  Similarly, ``'help'`` prompts return ``b"help\r\n"``.
@@ -141,6 +151,11 @@ def _detect_yn_prompt(banner: bytes) -> bytes:
         if token == b"yes/no":
             return b"yes\r\n"
         return b"y\r\n"
+    if _COLOR_RE.search(banner):
+        return b"y\r\n"
+    menu_match = _MENU_UTF8_RE.search(banner)
+    if menu_match:
+        return menu_match.group(1) + b"\r\n"
     if _WHO_RE.search(banner):
         return b"who\r\n"
     if _HELP_RE.search(banner):
@@ -281,6 +296,8 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
         session_data["aardwolf"] = writer.aardwolf_data
     if writer.mxp_data:
         session_data["mxp"] = [d.hex() if d else "activated" for d in writer.mxp_data]
+    if writer.comport_data:
+        session_data["comport"] = writer.comport_data
 
     session_entry: dict[str, Any] = {
         "host": host,

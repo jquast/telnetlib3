@@ -264,6 +264,10 @@ class TelnetWriter:
         #: (``b""``) signals MXP mode activation.
         self.mxp_data: list[bytes] = []
 
+        #: COM-PORT-OPTION (RFC 2217) data received via subnegotiation.
+        #: ``None`` until an ``SB COM-PORT-OPTION`` payload is received.
+        self.comport_data: Optional[dict[str, Any]] = None
+
         #: Sub-negotiation buffer
         self._sb_buffer: collections.deque[bytes] = collections.deque()
 
@@ -654,7 +658,12 @@ class TelnetWriter:
                 # Any other, expect a callback.  Otherwise this protocol
                 # does not comprehend the remote end's request.
                 if cmd not in self._iac_callback:
-                    raise ValueError(f"IAC {name_command(cmd)}({cmd!r}): not a legal 2-byte cmd")
+                    self.iac_received = False
+                    self.cmd_received = False
+                    self.log.debug(
+                        "IAC %s: not a legal 2-byte cmd, treating as data", name_command(cmd)
+                    )
+                    return True
                 self._iac_callback[cmd](cmd)
             self.iac_received = False
 
@@ -732,7 +741,7 @@ class TelnetWriter:
             finally:
                 # toggle iac_received on any ValueErrors/AssertionErrors raised
                 self.iac_received = False
-                self.cmd_received = (opt, byte)
+                self.cmd_received = (opt, byte)  # pylint: disable=redefined-variable-type
 
         elif self.mode == "remote" or self.mode == "kludge" and self.slc_simulated:
             # 'byte' is tested for SLC characters
@@ -1033,6 +1042,25 @@ class TelnetWriter:
         else:
             self.log.info("cannot send SB STATUS SEND, request pending.")
         return False
+
+    def request_comport_signature(self) -> bool:
+        """
+        Send ``IAC SB COM-PORT-OPTION SIGNATURE IAC SE``, :rfc:`2217`.
+
+        Requests the server's COM-PORT-OPTION signature string. Returns True if the request was
+        sent.
+        """
+        if not self.remote_option.enabled(COM_PORT_OPTION):
+            self.log.debug(
+                "cannot send SB COM-PORT-OPTION SIGNATURE"
+                " without receipt of WILL COM-PORT-OPTION"
+            )
+            return False
+        # RFC 2217: sub-command 0 = SIGNATURE, empty payload = request
+        response = [IAC, SB, COM_PORT_OPTION, b"\x00", IAC, SE]
+        self.log.debug("send IAC SB COM-PORT-OPTION SIGNATURE IAC SE")
+        self.send_iac(b"".join(response))
+        return True
 
     def request_tspeed(self) -> bool:
         """
@@ -1876,6 +1904,7 @@ class TelnetWriter:
             LINEMODE,
             EOR,
             SNDLOC,
+            COM_PORT_OPTION,
             GMCP,
             MSDP,
             MSSP,
@@ -1900,6 +1929,8 @@ class TelnetWriter:
                 if opt == LINEMODE:
                     # server sets the initial mode and sends forwardmask,
                     self.send_linemode(self.default_linemode)
+            if opt == COM_PORT_OPTION and self.client:
+                self.request_comport_signature()
 
         elif opt == TM:
             if opt == TM and not self.pending_option.enabled(DO + TM):
@@ -2203,7 +2234,9 @@ class TelnetWriter:
         self.log.debug("recv %s %s: %r", name_command(cmd), opt_kind, b"".join(buf))
 
         if opt == IS:
-            assert self.server, f"SE: cannot recv from server: {name_command(cmd)} {opt!r}"
+            if not self.server:
+                self.log.warning("ignoring TTYPE IS from server: %r", b"".join(buf))
+                return
             ttype_str = b"".join(buf).decode("ascii")
             self.log.debug("recv IAC SB TTYPE IS %r", ttype_str)
             self._ext_callback[TTYPE](ttype_str)
@@ -2510,8 +2543,13 @@ class TelnetWriter:
             # re-send the same MODE without ACK repeatedly.
             if self._linemode == suggest_mode:
                 self.log.debug(
-                    "suppressing redundant ACK for unchanged LINEMODE-MODE %r",
-                    suggest_mode.mask,
+                    "suppressing redundant ACK for unchanged LINEMODE-MODE %r", suggest_mode.mask
+                )
+                return
+            # Guard: LINEMODE must be negotiated before we can send a reply
+            if not (self.local_option.enabled(LINEMODE) or self.remote_option.enabled(LINEMODE)):
+                self.log.warning(
+                    "ignoring LINEMODE-MODE %r: LINEMODE not negotiated", suggest_mode.mask
                 )
                 return
             # This implementation acknowledges and sets local linemode
@@ -2578,7 +2616,8 @@ class TelnetWriter:
             slc_def = slc.SLC(flag, value)
             self._slc_process(func, slc_def)
         self._slc_end()
-        self.request_forwardmask()
+        if self.server:
+            self.request_forwardmask()
 
     def _slc_end(self) -> None:
         """Transmit SLC commands buffered by :meth:`_slc_send`."""
@@ -2796,15 +2835,97 @@ class TelnetWriter:
             if cmd == DO:
                 self._handle_do_forwardmask(buf)
 
+    # RFC 2217 sub-command names (server-to-client response codes)
+    _COMPORT_SUBCMDS: dict[int, str] = {
+        0: "SIGNATURE",
+        100: "SIGNATURE",
+        101: "SET-BAUDRATE",
+        102: "SET-DATASIZE",
+        103: "SET-PARITY",
+        104: "SET-STOPSIZE",
+        105: "SET-CONTROL",
+        106: "NOTIFY-LINESTATE",
+        107: "NOTIFY-MODEMSTATE",
+        108: "FLOWCONTROL-SUSPEND",
+        109: "FLOWCONTROL-RESUME",
+        110: "SET-LINESTATE-MASK",
+        111: "SET-MODEMSTATE-MASK",
+        112: "PURGE-DATA",
+    }
+
+    _COMPORT_PARITY: dict[int, str] = {
+        0: "REQUEST",
+        1: "NONE",
+        2: "ODD",
+        3: "EVEN",
+        4: "MARK",
+        5: "SPACE",
+    }
+
+    _COMPORT_STOPSIZE: dict[int, str] = {0: "REQUEST", 1: "1", 2: "2", 3: "1.5"}
+
     def _handle_sb_comport(self, buf: collections.deque[bytes]) -> None:
         """
-        Callback handles IAC-SB-COM-PORT-OPTION.
+        Callback handles ``IAC SB COM-PORT-OPTION`` per :rfc:`2217`.
 
-        This callback simply logs the subnegotiation but does not perform any action.
+        Parses the sub-command byte and payload, storing results in
+        :attr:`comport_data` for fingerprinting.
 
-        :param buf: bytes following IAC SB COM-PORT-OPTION.
+        :param buf: bytes following ``IAC SB COM-PORT-OPTION``.
         """
-        self.log.debug("SB unhandled: cmd=%s, buf=%r", name_command(COM_PORT_OPTION), buf)
+        buf.popleft()  # COM_PORT_OPTION byte
+        if not buf:
+            self.log.debug("SB COM-PORT-OPTION: empty payload")
+            return
+
+        subcmd = ord(buf.popleft())
+        payload = b"".join(buf)
+        subcmd_name = self._COMPORT_SUBCMDS.get(subcmd, f"UNKNOWN-{subcmd}")
+
+        if self.comport_data is None:
+            self.comport_data = {}
+
+        if subcmd in (0, 100) and payload:
+            # SIGNATURE response
+            sig = payload.decode("ascii", errors="replace")
+            self.comport_data["signature"] = sig
+            self.log.debug("COM-PORT-OPTION SIGNATURE: %r", sig)
+        elif subcmd in (1, 101) and len(payload) == 4:
+            # SET-BAUDRATE response: 4-byte big-endian uint32
+            baudrate = int.from_bytes(payload, "big")
+            self.comport_data["baudrate"] = baudrate
+            self.log.debug("COM-PORT-OPTION BAUDRATE: %d", baudrate)
+        elif subcmd in (2, 102) and len(payload) == 1:
+            # SET-DATASIZE response: 1 byte (5-8 bits, 0=request)
+            datasize = payload[0]
+            self.comport_data["datasize"] = datasize
+            self.log.debug("COM-PORT-OPTION DATASIZE: %d", datasize)
+        elif subcmd in (3, 103) and len(payload) == 1:
+            # SET-PARITY response
+            parity = payload[0]
+            self.comport_data["parity"] = self._COMPORT_PARITY.get(parity, f"unknown-{parity}")
+            self.log.debug("COM-PORT-OPTION PARITY: %s", self.comport_data["parity"])
+        elif subcmd in (4, 104) and len(payload) == 1:
+            # SET-STOPSIZE response
+            stopsize = payload[0]
+            self.comport_data["stopsize"] = self._COMPORT_STOPSIZE.get(
+                stopsize, f"unknown-{stopsize}"
+            )
+            self.log.debug("COM-PORT-OPTION STOPSIZE: %s", self.comport_data["stopsize"])
+        elif subcmd in (5, 105) and len(payload) == 1:
+            # SET-CONTROL response
+            self.comport_data["control"] = payload[0]
+            self.log.debug("COM-PORT-OPTION CONTROL: %d", payload[0])
+        elif subcmd in (6, 106) and len(payload) == 1:
+            # NOTIFY-LINESTATE
+            self.comport_data["linestate"] = payload[0]
+            self.log.debug("COM-PORT-OPTION LINESTATE: 0x%02x", payload[0])
+        elif subcmd in (7, 107) and len(payload) == 1:
+            # NOTIFY-MODEMSTATE
+            self.comport_data["modemstate"] = payload[0]
+            self.log.debug("COM-PORT-OPTION MODEMSTATE: 0x%02x", payload[0])
+        else:
+            self.log.debug("COM-PORT-OPTION %s (subcmd=%d): %r", subcmd_name, subcmd, payload)
 
     def _handle_sb_gmcp(self, buf: collections.deque[bytes]) -> None:
         """

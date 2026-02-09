@@ -1,7 +1,9 @@
 """Tests for telnetlib3.color_filter — ANSI color palette translation."""
 
+# 3rd party
 import pytest
 
+# local
 from telnetlib3.color_filter import (
     PALETTES,
     ColorConfig,
@@ -39,31 +41,29 @@ class TestColorConfig:
 
 
 class TestSgrCodeToPaletteIndex:
-    @pytest.mark.parametrize("code,expected", [
-        (30, 0), (31, 1), (32, 2), (33, 3),
-        (34, 4), (35, 5), (36, 6), (37, 7),
-    ])
+    @pytest.mark.parametrize(
+        "code,expected", [(30, 0), (31, 1), (32, 2), (33, 3), (34, 4), (35, 5), (36, 6), (37, 7)]
+    )
     def test_normal_foreground(self, code: int, expected: int) -> None:
         assert _sgr_code_to_palette_index(code) == expected
 
-    @pytest.mark.parametrize("code,expected", [
-        (40, 0), (41, 1), (42, 2), (43, 3),
-        (44, 4), (45, 5), (46, 6), (47, 7),
-    ])
+    @pytest.mark.parametrize(
+        "code,expected", [(40, 0), (41, 1), (42, 2), (43, 3), (44, 4), (45, 5), (46, 6), (47, 7)]
+    )
     def test_normal_background(self, code: int, expected: int) -> None:
         assert _sgr_code_to_palette_index(code) == expected
 
-    @pytest.mark.parametrize("code,expected", [
-        (90, 8), (91, 9), (92, 10), (93, 11),
-        (94, 12), (95, 13), (96, 14), (97, 15),
-    ])
+    @pytest.mark.parametrize(
+        "code,expected",
+        [(90, 8), (91, 9), (92, 10), (93, 11), (94, 12), (95, 13), (96, 14), (97, 15)],
+    )
     def test_bright_foreground(self, code: int, expected: int) -> None:
         assert _sgr_code_to_palette_index(code) == expected
 
-    @pytest.mark.parametrize("code,expected", [
-        (100, 8), (101, 9), (102, 10), (103, 11),
-        (104, 12), (105, 13), (106, 14), (107, 15),
-    ])
+    @pytest.mark.parametrize(
+        "code,expected",
+        [(100, 8), (101, 9), (102, 10), (103, 11), (104, 12), (105, 13), (106, 14), (107, 15)],
+    )
     def test_bright_background(self, code: int, expected: int) -> None:
         assert _sgr_code_to_palette_index(code) == expected
 
@@ -121,11 +121,7 @@ class TestAdjustColor:
 
 class TestColorFilterBasicTranslation:
     def _make_filter(self, **kwargs: object) -> ColorFilter:
-        cfg = ColorConfig(
-            brightness=1.0,
-            contrast=1.0,
-            **kwargs,  # type: ignore[arg-type]
-        )
+        cfg = ColorConfig(brightness=1.0, contrast=1.0, **kwargs)  # type: ignore[arg-type]
         return ColorFilter(cfg)
 
     def test_red_foreground(self) -> None:
@@ -146,36 +142,28 @@ class TestColorFilterBasicTranslation:
         f = self._make_filter()
         result = f.filter("\x1b[91m")
         ega_bright_red = PALETTES["ega"][9]
-        expected = (
-            f"\x1b[38;2;{ega_bright_red[0]};"
-            f"{ega_bright_red[1]};{ega_bright_red[2]}m"
-        )
+        expected = f"\x1b[38;2;{ega_bright_red[0]};" f"{ega_bright_red[1]};{ega_bright_red[2]}m"
         assert expected in result
 
     def test_bright_red_background(self) -> None:
         f = self._make_filter()
         result = f.filter("\x1b[101m")
         ega_bright_red = PALETTES["ega"][9]
-        expected = (
-            f"\x1b[48;2;{ega_bright_red[0]};"
-            f"{ega_bright_red[1]};{ega_bright_red[2]}m"
-        )
+        expected = f"\x1b[48;2;{ega_bright_red[0]};" f"{ega_bright_red[1]};{ega_bright_red[2]}m"
         assert expected in result
 
-    @pytest.mark.parametrize("code,idx", [
-        (30, 0), (31, 1), (32, 2), (33, 3),
-        (34, 4), (35, 5), (36, 6), (37, 7),
-    ])
+    @pytest.mark.parametrize(
+        "code,idx", [(30, 0), (31, 1), (32, 2), (33, 3), (34, 4), (35, 5), (36, 6), (37, 7)]
+    )
     def test_all_normal_foreground_colors(self, code: int, idx: int) -> None:
         f = self._make_filter()
         result = f.filter(f"\x1b[{code}m")
         rgb = PALETTES["ega"][idx]
         assert f"38;2;{rgb[0]};{rgb[1]};{rgb[2]}" in result
 
-    @pytest.mark.parametrize("code,idx", [
-        (40, 0), (41, 1), (42, 2), (43, 3),
-        (44, 4), (45, 5), (46, 6), (47, 7),
-    ])
+    @pytest.mark.parametrize(
+        "code,idx", [(40, 0), (41, 1), (42, 2), (43, 3), (44, 4), (45, 5), (46, 6), (47, 7)]
+    )
     def test_all_normal_background_colors(self, code: int, idx: int) -> None:
         f = self._make_filter()
         result = f.filter(f"\x1b[{code}m")
@@ -185,11 +173,7 @@ class TestColorFilterBasicTranslation:
 
 class TestColorFilterReset:
     def _make_filter(self) -> ColorFilter:
-        cfg = ColorConfig(
-            brightness=1.0,
-            contrast=1.0,
-            background_color=(16, 16, 16),
-        )
+        cfg = ColorConfig(brightness=1.0, contrast=1.0, background_color=(16, 16, 16))
         return ColorFilter(cfg)
 
     def test_explicit_reset(self) -> None:
@@ -340,19 +324,14 @@ class TestColorFilterBoldAsBright:
         normal_black = PALETTES["ega"][0]
         assert f"48;2;{normal_black[0]};{normal_black[1]};{normal_black[2]}" in result
 
-    @pytest.mark.parametrize("code,normal_idx", [
-        (30, 0), (31, 1), (32, 2), (33, 3),
-        (34, 4), (35, 5), (36, 6), (37, 7),
-    ])
-    def test_all_bold_fg_use_bright_palette(
-        self, code: int, normal_idx: int
-    ) -> None:
+    @pytest.mark.parametrize(
+        "code,normal_idx", [(30, 0), (31, 1), (32, 2), (33, 3), (34, 4), (35, 5), (36, 6), (37, 7)]
+    )
+    def test_all_bold_fg_use_bright_palette(self, code: int, normal_idx: int) -> None:
         f = self._make_filter()
         result = f.filter(f"\x1b[1;{code}m")
         bright_rgb = PALETTES["ega"][normal_idx + 8]
-        assert (
-            f"38;2;{bright_rgb[0]};{bright_rgb[1]};{bright_rgb[2]}" in result
-        )
+        assert f"38;2;{bright_rgb[0]};{bright_rgb[1]};{bright_rgb[2]}" in result
 
 
 class TestColorFilterChunkedInput:
@@ -387,24 +366,18 @@ class TestColorFilterChunkedInput:
     def test_flush_empty_when_no_buffer(self) -> None:
         f = self._make_filter()
         f.filter("hello")
-        assert f.flush() == ""
+        assert not f.flush()
 
 
 class TestColorFilterInitialBackground:
     def test_first_output_has_background(self) -> None:
-        f = ColorFilter(ColorConfig(
-            brightness=1.0, contrast=1.0,
-            background_color=(16, 16, 16),
-        ))
+        f = ColorFilter(ColorConfig(brightness=1.0, contrast=1.0, background_color=(16, 16, 16)))
         result = f.filter("hello")
         assert result.startswith("\x1b[48;2;16;16;16m")
         assert result.endswith("hello")
 
     def test_second_output_no_extra_background(self) -> None:
-        f = ColorFilter(ColorConfig(
-            brightness=1.0, contrast=1.0,
-            background_color=(16, 16, 16),
-        ))
+        f = ColorFilter(ColorConfig(brightness=1.0, contrast=1.0, background_color=(16, 16, 16)))
         f.filter("hello")
         result2 = f.filter("world")
         assert not result2.startswith("\x1b[48;2;")
@@ -421,17 +394,16 @@ class TestColorFilterPlainText:
         f = ColorFilter(ColorConfig(brightness=1.0, contrast=1.0))
         # First call sets initial, but empty input returns ""
         result = f.filter("")
-        assert result == ""
+        assert not result
 
 
 class TestColorFilterReverseVideo:
     def _make_filter(self) -> ColorFilter:
-        return ColorFilter(ColorConfig(
-            brightness=1.0,
-            contrast=1.0,
-            reverse_video=True,
-            background_color=(16, 16, 16),
-        ))
+        return ColorFilter(
+            ColorConfig(
+                brightness=1.0, contrast=1.0, reverse_video=True, background_color=(16, 16, 16)
+            )
+        )
 
     def test_fg_becomes_bg(self) -> None:
         f = self._make_filter()
@@ -453,20 +425,14 @@ class TestColorFilterReverseVideo:
 
 class TestColorFilterBrightnessContrast:
     def test_reduced_brightness(self) -> None:
-        f = ColorFilter(ColorConfig(
-            brightness=0.5,
-            contrast=1.0,
-        ))
+        f = ColorFilter(ColorConfig(brightness=0.5, contrast=1.0))
         result = f.filter("\x1b[37m")
         ega_white = PALETTES["ega"][7]
         adjusted = _adjust_color(*ega_white, 0.5, 1.0)
         assert f"38;2;{adjusted[0]};{adjusted[1]};{adjusted[2]}" in result
 
     def test_reduced_contrast(self) -> None:
-        f = ColorFilter(ColorConfig(
-            brightness=1.0,
-            contrast=0.5,
-        ))
+        f = ColorFilter(ColorConfig(brightness=1.0, contrast=0.5))
         result = f.filter("\x1b[31m")
         ega_red = PALETTES["ega"][1]
         adjusted = _adjust_color(*ega_red, 1.0, 0.5)
@@ -475,20 +441,12 @@ class TestColorFilterBrightnessContrast:
 
 class TestColorFilterCustomBackground:
     def test_custom_background_in_reset(self) -> None:
-        f = ColorFilter(ColorConfig(
-            brightness=1.0,
-            contrast=1.0,
-            background_color=(32, 32, 48),
-        ))
+        f = ColorFilter(ColorConfig(brightness=1.0, contrast=1.0, background_color=(32, 32, 48)))
         result = f.filter("\x1b[0m")
         assert "\x1b[48;2;32;32;48m" in result
 
     def test_custom_background_on_initial(self) -> None:
-        f = ColorFilter(ColorConfig(
-            brightness=1.0,
-            contrast=1.0,
-            background_color=(32, 32, 48),
-        ))
+        f = ColorFilter(ColorConfig(brightness=1.0, contrast=1.0, background_color=(32, 32, 48)))
         result = f.filter("hello")
         assert result.startswith("\x1b[48;2;32;32;48m")
 
@@ -496,11 +454,7 @@ class TestColorFilterCustomBackground:
 class TestColorFilterDifferentPalettes:
     @pytest.mark.parametrize("name", list(PALETTES.keys()))
     def test_palette_red_foreground(self, name: str) -> None:
-        f = ColorFilter(ColorConfig(
-            palette_name=name,
-            brightness=1.0,
-            contrast=1.0,
-        ))
+        f = ColorFilter(ColorConfig(palette_name=name, brightness=1.0, contrast=1.0))
         result = f.filter("\x1b[31m")
         rgb = PALETTES[name][1]
         assert f"38;2;{rgb[0]};{rgb[1]};{rgb[2]}" in result

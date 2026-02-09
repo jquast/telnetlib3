@@ -91,12 +91,12 @@ def test_repr():
 
 
 def test_illegal_2byte_iac():
-    """Given an illegal 2byte IAC command, raise ValueError."""
+    """Given an illegal 2-byte IAC command, byte is treated as in-band data."""
     writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
     writer.feed_byte(IAC)
-    with pytest.raises(ValueError):
-        # IAC SGA(b'\x03'): not a legal 2-byte cmd
-        writer.feed_byte(SGA)
+    # IAC SGA(b'\x03'): not a legal 2-byte cmd, treated as data
+    result = writer.feed_byte(SGA)
+    assert result is True
 
 
 def test_legal_2byte_iac():
@@ -147,12 +147,11 @@ def test_sb_interrupted():
         writer.feed_byte(bytes([val]))
     assert b"".join(writer._sb_buffer) == b""
 
-    # so, even if you sent an IAC + SE, that is no longer
-    # legal for this state.
+    # After interruption, IAC SE outside SB is treated as data.
     writer.feed_byte(b"x")
     writer.feed_byte(IAC)
-    with pytest.raises(ValueError, match="not a legal 2-byte cmd"):
-        writer.feed_byte(SE)
+    result = writer.feed_byte(SE)
+    assert result is True
 
 
 async def test_iac_do_twice_replies_once(bind_host, unused_tcp_port):
