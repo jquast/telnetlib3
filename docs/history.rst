@@ -1,7 +1,23 @@
 History
 =======
+2.4.0
+  * new: :func:`~telnetlib3.mud.zmp_decode`,
+    :func:`~telnetlib3.mud.atcp_decode`, and
+    :func:`~telnetlib3.mud.aardwolf_decode` decode functions for ZMP (option
+    93), ATCP (option 200), and Aardwolf (option 102) MUD protocols.
+  * new: :meth:`~telnetlib3.stream_writer.TelnetWriter.handle_zmp`,
+    :meth:`~telnetlib3.stream_writer.TelnetWriter.handle_atcp`,
+    :meth:`~telnetlib3.stream_writer.TelnetWriter.handle_aardwolf`,
+    :meth:`~telnetlib3.stream_writer.TelnetWriter.handle_msp`, and
+    :meth:`~telnetlib3.stream_writer.TelnetWriter.handle_mxp` callbacks for
+    receiving MUD extended protocol subnegotiations, with accumulated data
+    stored in ``zmp_data``, ``atcp_data``, and ``aardwolf_data`` attributes.
+  * enhancement: ``telnetlib3-fingerprint`` now always probes extended MUD
+    options (MSP, MXP, ZMP, AARDWOLF, ATCP) during server scans and captures
+    ZMP, ATCP, and Aardwolf data in session output.
 
-2.3.0
+
+2.3.0 *unreleased*
   * bugfix: repeat "socket.send() raised exception." exceptions
   * bugfix: server incorrectly accepted ``DO TSPEED`` and ``DO SNDLOC``
     with ``WILL`` responses. These are client-only options per :rfc:`1079`
@@ -29,22 +45,6 @@ History
     for fingerprinting of connected clients.
   * new: ``telnetlib3-fingerprint`` CLI for fingerprinting the given remote
     server, probing telnet option support and capturing banners.
-  * new: ``--always-will``, ``--always-do``, ``--scan-type``, ``--mssp-wait``,
-    ``--banner-quiet-time``, ``--banner-max-wait`` options for ``telnetlib3-fingerprint``.
-  * new: :func:`~telnetlib3.mud.zmp_decode`,
-    :func:`~telnetlib3.mud.atcp_decode`, and
-    :func:`~telnetlib3.mud.aardwolf_decode` decode functions for ZMP (option
-    93), ATCP (option 200), and Aardwolf (option 102) MUD protocols.
-  * new: :meth:`~telnetlib3.stream_writer.TelnetWriter.handle_zmp`,
-    :meth:`~telnetlib3.stream_writer.TelnetWriter.handle_atcp`,
-    :meth:`~telnetlib3.stream_writer.TelnetWriter.handle_aardwolf`,
-    :meth:`~telnetlib3.stream_writer.TelnetWriter.handle_msp`, and
-    :meth:`~telnetlib3.stream_writer.TelnetWriter.handle_mxp` callbacks for
-    receiving MUD extended protocol subnegotiations, with accumulated data
-    stored in ``zmp_data``, ``atcp_data``, and ``aardwolf_data`` attributes.
-  * enhancement: ``telnetlib3-fingerprint`` now always probes extended MUD
-    options (MSP, MXP, ZMP, AARDWOLF, ATCP) during server scans and captures
-    ZMP, ATCP, and Aardwolf data in session output.
   * enhancement: reversed ``WILL``/``DO`` for directional options (e.g. ``WILL
     NAWS`` from server, ``DO TTYPE`` from client) now gracefully refused with
     ``DONT``/``WONT`` instead of raising ``ValueError``.
@@ -52,6 +52,8 @@ History
     ``SEND (all)`` / ``env send: (empty)`` instead of raw byte dumps.
   * enhancement: ``telnetlib3-fingerprint`` now probes MSDP and MSSP options
     and captures MSSP server status data in session output.
+  * new: ``--always-will``, ``--always-do``, ``--scan-type``, ``--mssp-wait``,
+    ``--banner-quiet-time``, ``--banner-max-wait`` options for ``telnetlib3-fingerprint``.
 
 2.2.0
   * bugfix: workaround for Microsoft Telnet client crash on
