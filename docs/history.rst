@@ -1,6 +1,7 @@
 History
 =======
-2.4.0 *unreleased*
+
+2.4.0
   * new: :mod:`telnetlib3.color_filter` module — translates 16-color ANSI SGR
     codes to 24-bit RGB from hardware palettes (EGA, CGA, VGA, Amiga, xterm).
     Enabled by default. New client CLI options: ``--colormatch``,
