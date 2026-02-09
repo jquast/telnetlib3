@@ -128,7 +128,7 @@ def _print_json(data: dict[str, Any]) -> None:
     print(raw, file=sys.stdout)
 
 
-def _detect_yn_prompt(banner: bytes) -> bytes:
+def _detect_yn_prompt(banner: bytes) -> bytes:  # pylint: disable=too-many-return-statements
     r"""
     Return an appropriate first-prompt response based on banner content.
 
