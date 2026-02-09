@@ -27,6 +27,7 @@ from . import fingerprinting
 from . import server_fingerprinting
 if sys.platform != "win32":
     from . import fingerprinting_display  # noqa: F401
+from . import encodings  # noqa: F401 - registers custom codecs (petscii, atarist)
 from . import sync
 from .server_base import *  # noqa
 from .server import *  # noqa

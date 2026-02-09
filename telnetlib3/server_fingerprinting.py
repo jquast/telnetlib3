@@ -86,6 +86,10 @@ _COLOR_RE = re.compile(rb"(?i)color\s*\?")
 # Many BBS/MUD systems present a charset selection menu at connect time.
 _MENU_UTF8_RE = re.compile(rb"(\d+)\s*\)\s*UTF-?8", re.IGNORECASE)
 
+# Match numbered menu items offering ANSI, e.g. "(1) Ansi" or "[2] ANSI".
+# Brackets may be parentheses or square brackets (mixed allowed).
+_MENU_ANSI_RE = re.compile(rb"[\[(](\d+)[\])]\s*ANSI", re.IGNORECASE)
+
 # Match "gb/big5" encoding selection prompts common on Chinese BBS systems.
 _GB_BIG5_RE = re.compile(rb"(?i)(?:^|[^a-zA-Z0-9])gb\s*/\s*big\s*5(?:[^a-zA-Z0-9]|$)")
 
@@ -139,6 +143,10 @@ def _detect_yn_prompt(banner: bytes) -> bytes:
     ``5) UTF-8``), returns the digit followed by ``b"\r\n"`` to select
     the UTF-8 charset option.
 
+    If the banner contains a bracketed numbered menu item for ANSI
+    (e.g. ``(1) Ansi`` or ``[2] ANSI``), returns the digit followed
+    by ``b"\r\n"`` to select the ANSI option.
+
     If the banner contains a ``gb/big5`` encoding selection prompt
     (common on Chinese BBS systems), returns ``b"big5\r\n"`` to select
     Big5 encoding.
@@ -163,6 +171,9 @@ def _detect_yn_prompt(banner: bytes) -> bytes:
     menu_match = _MENU_UTF8_RE.search(banner)
     if menu_match:
         return menu_match.group(1) + b"\r\n"
+    ansi_match = _MENU_ANSI_RE.search(banner)
+    if ansi_match:
+        return ansi_match.group(1) + b"\r\n"
     if _GB_BIG5_RE.search(banner):
         return b"big5\r\n"
     if _WHO_RE.search(banner):
