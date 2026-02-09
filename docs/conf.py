@@ -60,7 +60,8 @@ master_doc = "index"
 
 # General information about the project.
 project = "telnetlib3"
-copyright = "2013 Jeff Quast"
+import datetime
+copyright = f"2013-{datetime.datetime.now().year} Jeff Quast"
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the

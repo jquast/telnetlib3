@@ -775,6 +775,11 @@ async def test_probe_skipped_when_closing(tmp_path):
             id="menu_utf8_multidigit",
         ),
         pytest.param(b"1) ASCII\r\n2) Latin-1\r\n", b"\r\n", id="menu_no_utf8"),
+        pytest.param(b"gb/big5", b"big5\r\n", id="gb_big5"),
+        pytest.param(b"GB/Big5\r\n", b"big5\r\n", id="gb_big5_mixed_case"),
+        pytest.param(b"Select: GB / Big5 ", b"big5\r\n", id="gb_big5_spaces"),
+        pytest.param(b"gb/big 5\r\n", b"big5\r\n", id="gb_big5_space_before_5"),
+        pytest.param(b"bigfoot5", b"\r\n", id="big5_inside_word_not_matched"),
     ],
 )
 def test_detect_yn_prompt(banner, expected):

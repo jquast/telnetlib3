@@ -87,8 +87,11 @@ def gmcp_decode(buf: bytes, encoding: str = "utf-8") -> tuple[str, Any]:
         return (_decode_best_effort(buf, encoding), None)
 
     package = _decode_best_effort(parts[0], encoding)
+    text = _decode_best_effort(parts[1], encoding).strip()
+    if not text:
+        return (package, None)
     try:
-        data = json.loads(_decode_best_effort(parts[1], encoding))
+        data = json.loads(text)
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid JSON in GMCP payload: {exc}") from exc
     return (package, data)
