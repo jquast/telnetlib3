@@ -1,10 +1,12 @@
-"""Custom BBS/retro-computing codecs for telnetlib3.
+"""
+Custom BBS/retro-computing codecs for telnetlib3.
 
 Registers petscii and atarist codecs with Python's codecs module on import.
 These encodings are then available for use with ``bytes.decode()`` and the
 ``--encoding`` CLI flag of ``telnetlib3-fingerprint``.
 """
 
+# std imports
 import codecs
 import importlib
 

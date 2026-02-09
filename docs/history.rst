@@ -27,6 +27,7 @@ History
     auto-answers yes/no, color, UTF-8 menu, ``who``, and ``help`` prompts.
   * enhancement: ``--banner-max-bytes`` option for ``telnetlib3-fingerprint``;
     default raised from 1024 to 65536.
+  * enhancement: new ``--encoding=petscii`` and ``--encoding=atarist``
   * bugfix: rare LINEMODE ACK loop with misbehaving servers that re-send
     unchanged MODE without ACK.
   * bugfix: unknown IAC commands no longer raise ``ValueError``; treated as
@@ -36,7 +37,7 @@ History
   * change: ``wcwidth`` is now a required dependency.
 
 
-2.3.0 *unreleased*
+2.3.0
   * bugfix: repeat "socket.send() raised exception." exceptions
   * bugfix: server incorrectly accepted ``DO TSPEED`` and ``DO SNDLOC``
     with ``WILL`` responses. These are client-only options per :rfc:`1079`

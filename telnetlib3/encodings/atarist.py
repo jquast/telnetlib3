@@ -1,9 +1,11 @@
-"""Atari ST codec.
+"""
+Atari ST codec.
 
 Generated from ftp://ftp.unicode.org/Public/MAPPINGS/VENDORS/MISC/ATARIST.TXT
 """
 # pylint: disable=redefined-builtin
 
+# std imports
 import codecs
 
 
@@ -11,9 +13,11 @@ class Codec(codecs.Codec):
     """Atari ST character map codec."""
 
     def encode(self, input, errors='strict'):
+        """Encode input string using Atari ST character map."""
         return codecs.charmap_encode(input, errors, ENCODING_TABLE)
 
     def decode(self, input, errors='strict'):
+        """Decode input bytes using Atari ST character map."""
         return codecs.charmap_decode(input, errors, DECODING_TABLE)
 
 
@@ -21,6 +25,7 @@ class IncrementalEncoder(codecs.IncrementalEncoder):
     """Atari ST incremental encoder."""
 
     def encode(self, input, final=False):
+        """Encode input string incrementally."""
         return codecs.charmap_encode(input, self.errors, ENCODING_TABLE)[0]
 
 
@@ -28,6 +33,7 @@ class IncrementalDecoder(codecs.IncrementalDecoder):
     """Atari ST incremental decoder."""
 
     def decode(self, input, final=False):
+        """Decode input bytes incrementally."""
         return codecs.charmap_decode(input, self.errors, DECODING_TABLE)[0]
 
 

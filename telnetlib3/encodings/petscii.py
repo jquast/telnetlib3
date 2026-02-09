@@ -1,4 +1,5 @@
-"""PETSCII (Commodore 64/128) encoding -- shifted (lowercase) mode.
+"""
+PETSCII (Commodore 64/128) encoding -- shifted (lowercase) mode.
 
 PETSCII is the character encoding used by Commodore computers (C64, C128,
 VIC-20, Plus/4, etc.).  This codec implements the "shifted" character set
@@ -16,8 +17,8 @@ Graphics characters use the closest available Unicode approximations from
 the Box Drawing, Block Elements, and Geometric Shapes blocks.
 """
 
+# std imports
 import codecs
-
 
 # Decoding Table -- PETSCII shifted (lowercase) mode, 256 entries.
 #
@@ -305,9 +306,11 @@ class Codec(codecs.Codec):
     """PETSCII character map codec."""
 
     def encode(self, input, errors='strict'):  # pylint: disable=redefined-builtin
+        """Encode input string using PETSCII character map."""
         return codecs.charmap_encode(input, errors, ENCODING_TABLE)
 
     def decode(self, input, errors='strict'):  # pylint: disable=redefined-builtin
+        """Decode input bytes using PETSCII character map."""
         return codecs.charmap_decode(input, errors, DECODING_TABLE)
 
 
@@ -315,6 +318,7 @@ class IncrementalEncoder(codecs.IncrementalEncoder):
     """PETSCII incremental encoder."""
 
     def encode(self, input, final=False):  # pylint: disable=redefined-builtin
+        """Encode input string incrementally."""
         return codecs.charmap_encode(input, self.errors, ENCODING_TABLE)[0]
 
 
@@ -322,6 +326,7 @@ class IncrementalDecoder(codecs.IncrementalDecoder):
     """PETSCII incremental decoder."""
 
     def decode(self, input, final=False):  # pylint: disable=redefined-builtin
+        """Decode input bytes incrementally."""
         return codecs.charmap_decode(input, self.errors, DECODING_TABLE)[0]
 
 
