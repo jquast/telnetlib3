@@ -790,6 +790,41 @@ async def test_probe_skipped_when_closing(tmp_path):
         pytest.param(b"Select: GB / Big5 ", b"big5\r\n", id="gb_big5_spaces"),
         pytest.param(b"gb/big 5\r\n", b"big5\r\n", id="gb_big5_space_before_5"),
         pytest.param(b"bigfoot5", b"\r\n", id="big5_inside_word_not_matched"),
+        pytest.param(
+            b"Press [.ESC.] twice within 15 seconds to CONTINUE...",
+            b"\x1b\x1b",
+            id="esc_twice_mystic",
+        ),
+        pytest.param(
+            b"Press [ESC] twice to continue",
+            b"\x1b\x1b",
+            id="esc_twice_no_dots",
+        ),
+        pytest.param(
+            b"Press ESC twice to continue",
+            b"\x1b\x1b",
+            id="esc_twice_bare",
+        ),
+        pytest.param(
+            b"\x1b[33mPress [.ESC.] twice within 10 seconds\x1b[0m",
+            b"\x1b\x1b",
+            id="esc_twice_ansi_wrapped",
+        ),
+        pytest.param(
+            b"\x1b[1;1H\x1b[2JPress [.ESC.] twice within 15 seconds to CONTINUE...",
+            b"\x1b\x1b",
+            id="esc_twice_after_clear_screen",
+        ),
+        pytest.param(
+            b"\x1b[31mColor? \x1b[0m",
+            b"y\r\n",
+            id="color_ansi_wrapped",
+        ),
+        pytest.param(
+            b"\x1b[1mContinue? (y/n)\x1b[0m ",
+            b"y\r\n",
+            id="yn_ansi_wrapped",
+        ),
     ],
 )
 def test_detect_yn_prompt(banner, expected):
@@ -838,6 +873,28 @@ async def test_fingerprinting_shell_yes_no_prompt(tmp_path):
     )
 
     assert b"yes\r\n" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_esc_twice_prompt(tmp_path):
+    """Banner with ESC-twice botcheck sends two raw ESC bytes."""
+    save_path = str(tmp_path / "result.json")
+    reader = MockReader([b"Press [.ESC.] twice within 15 seconds to CONTINUE..."])
+    writer = MockWriter(will_options=[fps.SGA])
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"\x1b\x1b" in writer._writes
 
 
 @pytest.mark.asyncio

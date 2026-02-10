@@ -93,6 +93,14 @@ _MENU_ANSI_RE = re.compile(rb"[\[(](\d+)[\])]\s*ANSI", re.IGNORECASE)
 # Match "gb/big5" encoding selection prompts common on Chinese BBS systems.
 _GB_BIG5_RE = re.compile(rb"(?i)(?:^|[^a-zA-Z0-9])gb\s*/\s*big\s*5(?:[^a-zA-Z0-9]|$)")
 
+# Strip ANSI/VT100 escape sequences from raw bytes for pattern matching.
+_ANSI_STRIP_RE = re.compile(
+    rb"\x1b(?:\[[0-9;?]*[A-Za-z]|\][^\x07]*\x07|[()][012AB]|[=>NOHMDEc78])"
+)
+
+# Match "Press [.ESC.] twice" botcheck prompts (e.g. Mystic BBS).
+_ESC_TWICE_RE = re.compile(rb"(?i)press\s+\[?\.?esc\.?\]?\s+twice")
+
 logger = logging.getLogger("telnetlib3.server_fingerprint")
 
 
@@ -132,6 +140,12 @@ def _detect_yn_prompt(banner: bytes) -> bytes:  # pylint: disable=too-many-retur
     r"""
     Return an appropriate first-prompt response based on banner content.
 
+    ANSI escape sequences are stripped before pattern matching so that
+    embedded color/cursor codes do not interfere with detection.
+
+    If the banner contains a ``Press [.ESC.] twice`` botcheck prompt
+    (e.g. Mystic BBS), returns ``b"\x1b\x1b"`` (two raw ESC bytes).
+
     If the banner contains a ``yes/no`` or ``y/n`` confirmation prompt
     (case-insensitive, delimited by non-alphanumeric characters), returns
     ``b"yes\r\n"`` or ``b"y\r\n"`` respectively.
@@ -160,25 +174,28 @@ def _detect_yn_prompt(banner: bytes) -> bytes:  # pylint: disable=too-many-retur
     :param banner: Raw banner bytes collected before the first prompt.
     :returns: Response bytes to send.
     """
-    match = _YN_RE.search(banner)
+    stripped = _ANSI_STRIP_RE.sub(b"", banner)
+    if _ESC_TWICE_RE.search(stripped):
+        return b"\x1b\x1b"
+    match = _YN_RE.search(stripped)
     if match:
         token = match.group(1).lower()
         if token == b"yes/no":
             return b"yes\r\n"
         return b"y\r\n"
-    if _COLOR_RE.search(banner):
+    if _COLOR_RE.search(stripped):
         return b"y\r\n"
-    menu_match = _MENU_UTF8_RE.search(banner)
+    menu_match = _MENU_UTF8_RE.search(stripped)
     if menu_match:
         return menu_match.group(1) + b"\r\n"
-    ansi_match = _MENU_ANSI_RE.search(banner)
+    ansi_match = _MENU_ANSI_RE.search(stripped)
     if ansi_match:
         return ansi_match.group(1) + b"\r\n"
-    if _GB_BIG5_RE.search(banner):
+    if _GB_BIG5_RE.search(stripped):
         return b"big5\r\n"
-    if _WHO_RE.search(banner):
+    if _WHO_RE.search(stripped):
         return b"who\r\n"
-    if _HELP_RE.search(banner):
+    if _HELP_RE.search(stripped):
         return b"help\r\n"
     return b"\r\n"
 
