@@ -22,6 +22,9 @@ import datetime
 import subprocess
 from typing import Any
 
+# 3rd party
+from wcwidth.escape_sequences import ZERO_WIDTH_PATTERN as _ZERO_WIDTH_STR_PATTERN
+
 # local
 from . import fingerprinting as _fps
 from .telopt import (
@@ -94,9 +97,8 @@ _MENU_ANSI_RE = re.compile(rb"[\[(](\d+)[\])]\s*ANSI", re.IGNORECASE)
 _GB_BIG5_RE = re.compile(rb"(?i)(?:^|[^a-zA-Z0-9])gb\s*/\s*big\s*5(?:[^a-zA-Z0-9]|$)")
 
 # Strip ANSI/VT100 escape sequences from raw bytes for pattern matching.
-_ANSI_STRIP_RE = re.compile(
-    rb"\x1b(?:\[[0-9;?]*[A-Za-z]|\][^\x07]*\x07|[()][012AB]|[=>NOHMDEc78])"
-)
+# Re-use wcwidth's comprehensive pattern (CSI, OSC, DCS, APC, PM, charset, Fe, Fp).
+_ANSI_STRIP_RE = re.compile(_ZERO_WIDTH_STR_PATTERN.pattern.encode("ascii"))
 
 # Match "Press [.ESC.] twice" botcheck prompts (e.g. Mystic BBS).
 _ESC_TWICE_RE = re.compile(rb"(?i)press\s+\[?\.?esc\.?\]?\s+twice")

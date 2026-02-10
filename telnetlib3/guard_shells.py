@@ -4,9 +4,9 @@ Guard shells for connection limiting and robot detection.
 When running a telnet server on a public IPv4 address, or even on large private networks,
 various network scanners, scrapers, worms, bots, and other automatons will connect.
 
-The ``robot_check`` function can reliably detect whether the remote end is a real terminal
-emulator by measuring the rendered width of a wide Unicode character. Real terminals
-render it as width 2, while bots typically see width 1 or timeout.
+The ``robot_check`` function detects whether the remote end is a real terminal emulator
+by requesting a cursor position report (CPR) after writing a single space character.
+Real terminals respond to CPR, while bots typically timeout.
 
 These shells are used when normal shell access is denied due to connection limits or
 failed robot checks.
@@ -30,8 +30,8 @@ __all__ = ("robot_check", "robot_shell", "busy_shell", "ConnectionCounter")
 
 logger = logging.getLogger("telnetlib3.guard")
 
-# Wide character test - U+231A WATCH should render as width 2
-_WIDE_TEST_CHAR = "\u231a"
+# Narrow test character - a plain space works on any terminal
+_TEST_CHAR = " "
 
 # Input limit for guard shells
 _MAX_INPUT = 2048
@@ -214,13 +214,13 @@ async def robot_check(
     timeout: float = 5.0,
 ) -> bool:
     """
-    Check if client can render wide characters.
+    Check if client responds to cursor position report.
 
-    :returns: True if client passes (renders wide char as width 2).
+    :returns: True if client passes (responds to CPR with expected width).
     """
     with _latin1_reading(reader):
-        width = await _measure_width(reader, writer, _WIDE_TEST_CHAR, timeout)
-    return bool(width == 2)
+        width = await _measure_width(reader, writer, _TEST_CHAR, timeout)
+    return bool(width == 1)
 
 
 async def _ask_question(
