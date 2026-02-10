@@ -103,6 +103,12 @@ _ANSI_STRIP_RE = re.compile(_ZERO_WIDTH_STR_PATTERN.pattern.encode("ascii"))
 # Match "Press [.ESC.] twice" botcheck prompts (e.g. Mystic BBS).
 _ESC_TWICE_RE = re.compile(rb"(?i)press\s+\[?\.?esc\.?\]?\s+twice")
 
+# Match DSR (Device Status Report) request: ESC [ 6 n.
+# Servers send this to detect ANSI-capable terminals; we reply with a
+# Cursor Position Report (CPR) so the server sees us as ANSI-capable.
+_DSR_RE = re.compile(rb"\x1b\[6n")
+_CPR_RESPONSE = b"\x1b[1;1R"
+
 logger = logging.getLogger("telnetlib3.server_fingerprint")
 
 
@@ -287,7 +293,8 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
 
     # 2. Read banner (pre-return) — wait until output stops
     banner_before = await _read_banner_until_quiet(
-        reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait, max_bytes=banner_max_bytes
+        reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait,
+        max_bytes=banner_max_bytes, writer=writer,
     )
 
     # 3. Send return (or "yes"/"y" if the banner contains a y/n prompt)
@@ -295,7 +302,8 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
     writer.write(prompt_response)
     await writer.drain()
     banner_after = await _read_banner_until_quiet(
-        reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait, max_bytes=banner_max_bytes
+        reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait,
+        max_bytes=banner_max_bytes, writer=writer,
     )
 
     # 4. Snapshot option states before probing
@@ -651,6 +659,7 @@ async def _read_banner_until_quiet(
     quiet_time: float = 2.0,
     max_wait: float = 8.0,
     max_bytes: int = _BANNER_MAX_BYTES,
+    writer: TelnetWriter | None = None,
 ) -> bytes:
     """
     Read banner data until output stops for *quiet_time* seconds.
@@ -659,10 +668,17 @@ async def _read_banner_until_quiet(
     *quiet_time* seconds (or *max_wait* total elapses), returns everything
     collected so far.
 
+    When *writer* is provided, any DSR (Device Status Report) request
+    ``ESC [ 6 n`` found in the incoming data is answered with a CPR
+    (Cursor Position Report) ``ESC [ 1 ; 1 R`` so the server detects
+    an ANSI-capable terminal.
+
     :param reader: :class:`~telnetlib3.stream_reader.TelnetReader` instance.
     :param quiet_time: Seconds of silence before considering banner complete.
     :param max_wait: Maximum total seconds to wait for banner data.
     :param max_bytes: Maximum bytes per read call.
+    :param writer: Optional :class:`~telnetlib3.stream_writer.TelnetWriter`
+        used to send CPR replies to DSR requests.
     :returns: Banner bytes (may be empty).
     """
     chunks: list[bytes] = []
@@ -676,6 +692,9 @@ async def _read_banner_until_quiet(
             chunk = await asyncio.wait_for(reader.read(max_bytes), timeout=remaining)
             if not chunk:
                 break
+            if writer is not None and _DSR_RE.search(chunk):
+                writer.write(_CPR_RESPONSE)
+                await writer.drain()
             chunks.append(chunk)
         except (asyncio.TimeoutError, EOFError):
             break

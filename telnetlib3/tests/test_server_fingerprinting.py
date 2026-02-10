@@ -987,3 +987,70 @@ class TestCullDisplay:
     def test_empty_bytes_culled(self):
         result = sfp._cull_display({"data_bytes": b""})
         assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_read_banner_until_quiet_responds_to_dsr():
+    """DSR (ESC[6n) in banner data triggers a CPR response (ESC[1;1R)."""
+    reader = MockReader([b"Hello\x1b[6nWorld"])
+    writer = MockWriter()
+    result = await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=0.05, writer=writer,
+    )
+    assert result == b"Hello\x1b[6nWorld"
+    assert b"\x1b[1;1R" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_read_banner_until_quiet_multiple_dsr():
+    """Multiple DSR requests each get a CPR response."""
+    reader = MockReader([b"\x1b[6n", b"banner\x1b[6n"])
+    writer = MockWriter()
+    await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=0.05, writer=writer,
+    )
+    cpr_count = sum(1 for w in writer._writes if w == b"\x1b[1;1R")
+    assert cpr_count == 2
+
+
+@pytest.mark.asyncio
+async def test_read_banner_until_quiet_no_dsr_no_write():
+    """No DSR in banner means no CPR writes."""
+    reader = MockReader([b"Welcome to BBS\r\n"])
+    writer = MockWriter()
+    await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=0.05, writer=writer,
+    )
+    assert not writer._writes
+
+
+@pytest.mark.asyncio
+async def test_read_banner_until_quiet_no_writer_ignores_dsr():
+    """Without a writer, DSR is silently ignored."""
+    reader = MockReader([b"Hello\x1b[6n"])
+    result = await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=0.05,
+    )
+    assert result == b"Hello\x1b[6n"
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_dsr_response(tmp_path):
+    """Full session responds to DSR in the pre-return banner."""
+    save_path = str(tmp_path / "result.json")
+    reader = MockReader([b"\x1b[6nWelcome to BBS\r\n"])
+    writer = MockWriter(will_options=[fps.SGA])
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"\x1b[1;1R" in writer._writes
