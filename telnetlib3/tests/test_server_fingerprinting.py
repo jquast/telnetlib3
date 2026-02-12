@@ -28,6 +28,11 @@ class MockOption(dict):
         return self.get(opt) is True
 
 
+class _MockProtocol:
+    def __init__(self):
+        self.force_binary = False
+
+
 class MockWriter:
     def __init__(self, extra=None, will_options=None, wont_options=None):
         self._extra = extra or {"peername": ("127.0.0.1", 12345)}
@@ -45,6 +50,7 @@ class MockWriter:
         self.aardwolf_data: list[dict[str, object]] = []
         self.mxp_data: list[bytes] = []
         self.comport_data: dict[str, object] | None = None
+        self.protocol = _MockProtocol()
         self._closing = False
 
     def get_extra_info(self, key, default=None):
@@ -869,7 +875,25 @@ async def test_probe_skipped_when_closing(tmp_path):
     ],
 )
 def test_detect_yn_prompt(banner, expected):
-    assert sfp._detect_yn_prompt(banner) == expected
+    assert sfp._detect_yn_prompt(banner).response == expected
+
+
+@pytest.mark.parametrize(
+    "banner, expected_encoding",
+    [
+        pytest.param(b"5) UTF-8\r\n", "utf-8", id="utf8_menu"),
+        pytest.param(b"[2] utf-8\r\n", "utf-8", id="utf8_brackets"),
+        pytest.param(b"1) UTF8", "utf-8", id="utf8_no_hyphen"),
+        pytest.param(b"gb/big5", "big5", id="gb_big5"),
+        pytest.param(b"GB/Big5\r\n", "big5", id="gb_big5_mixed"),
+        pytest.param(b"(1) Ansi\r\n", None, id="ansi_no_encoding"),
+        pytest.param(b"yes/no", None, id="yn_no_encoding"),
+        pytest.param(b"Color? ", None, id="color_no_encoding"),
+        pytest.param(b"nothing special", None, id="none_no_encoding"),
+    ],
+)
+def test_detect_yn_prompt_encoding(banner, expected_encoding):
+    assert sfp._detect_yn_prompt(banner).encoding == expected_encoding
 
 
 @pytest.mark.asyncio
@@ -988,6 +1012,8 @@ async def test_fingerprinting_shell_multi_prompt(tmp_path):
 
     assert b"y\r\n" in writer._writes
     assert b"2\r\n" in writer._writes
+    assert writer.environ_encoding == "utf-8"
+    assert writer.protocol.force_binary is True
 
 
 @pytest.mark.asyncio

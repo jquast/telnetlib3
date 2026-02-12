@@ -20,7 +20,7 @@ import asyncio
 import logging
 import datetime
 import subprocess
-from typing import Any
+from typing import Any, NamedTuple
 
 # 3rd party
 import wcwidth as _wcwidth
@@ -217,43 +217,53 @@ def _print_json(data: dict[str, Any]) -> None:
     print(raw, file=sys.stdout)
 
 
+class _PromptResult(NamedTuple):
+    """Result of prompt detection with optional encoding override."""
+
+    response: bytes | None
+    encoding: str | None = None
+
+
 def _detect_yn_prompt(  # pylint: disable=too-many-return-statements
     banner: bytes,
-) -> bytes | None:
+) -> _PromptResult:
     r"""
     Return an appropriate first-prompt response based on banner content.
 
     ANSI escape sequences are stripped before pattern matching so that
     embedded color/cursor codes do not interfere with detection.
 
-    Returns ``None`` when no recognizable prompt is found.  The caller
-    should fall back to sending a bare ``\r\n`` in that case.
+    Returns a :class:`_PromptResult` whose *response* is ``None`` when
+    no recognizable prompt is found — the caller should fall back to
+    sending a bare ``\r\n``.  When a UTF-8 charset menu is selected,
+    *encoding* is set to ``"utf-8"`` so the caller can update the
+    session encoding.
 
     :param banner: Raw banner bytes collected before the first prompt.
-    :returns: Response bytes to send, or ``None`` if no prompt detected.
+    :returns: Prompt result with response bytes and optional encoding.
     """
     stripped = _ANSI_STRIP_RE.sub(b"", banner)
     if _ESC_TWICE_RE.search(stripped):
-        return b"\x1b\x1b"
+        return _PromptResult(b"\x1b\x1b")
     match = _YN_RE.search(stripped)
     if match:
         token = match.group(1).lower()
         if token == b"yes/no":
-            return b"yes\r\n"
-        return b"y\r\n"
+            return _PromptResult(b"yes\r\n")
+        return _PromptResult(b"y\r\n")
     if _COLOR_RE.search(stripped):
-        return b"y\r\n"
+        return _PromptResult(b"y\r\n")
     menu_match = _MENU_UTF8_RE.search(stripped)
     if menu_match:
-        return menu_match.group(1) + b"\r\n"
+        return _PromptResult(menu_match.group(1) + b"\r\n", encoding="utf-8")
     ansi_match = _MENU_ANSI_RE.search(stripped)
     if ansi_match:
-        return ansi_match.group(1) + b"\r\n"
+        return _PromptResult(ansi_match.group(1) + b"\r\n")
     if _GB_BIG5_RE.search(stripped):
-        return b"big5\r\n"
+        return _PromptResult(b"big5\r\n", encoding="big5")
     if _RETURN_PROMPT_RE.search(stripped):
-        return b"\r\n"
-    return None
+        return _PromptResult(b"\r\n")
+    return _PromptResult(None)
 
 
 async def fingerprinting_client_shell(
@@ -358,13 +368,22 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
     after_chunks: list[bytes] = []
     latest_banner = banner_before
     for _prompt_round in range(_MAX_PROMPT_REPLIES):
-        detected = _detect_yn_prompt(latest_banner)
+        prompt_result = _detect_yn_prompt(latest_banner)
+        detected = prompt_result.response
         prompt_response = _reencode_prompt(
             detected if detected is not None else b"\r\n",
             writer.environ_encoding,
         )
         writer.write(prompt_response)
         await writer.drain()
+        # When the server presents a charset menu and we select an
+        # encoding (e.g. UTF-8 or Big5), switch the session encoding
+        # so that subsequent banner data is decoded correctly.
+        if prompt_result.encoding:
+            writer.environ_encoding = prompt_result.encoding
+            protocol = writer.protocol
+            if protocol is not None:
+                protocol.force_binary = True
         previous_banner = latest_banner
         latest_banner = await _read_banner_until_quiet(
             reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait,
@@ -380,7 +399,7 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
         # Stop when no prompt was detected AND the new banner has no
         # prompt either (servers like Mystic BBS send a non-interactive
         # preamble before the real botcheck prompt).
-        if detected is None and _detect_yn_prompt(latest_banner) is None:
+        if detected is None and _detect_yn_prompt(latest_banner).response is None:
             break
     banner_after = b"".join(after_chunks)
 
