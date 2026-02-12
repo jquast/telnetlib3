@@ -84,6 +84,32 @@ class MockReader:
         return chunk[:n]
 
 
+class InteractiveMockReader:
+    """MockReader that gates chunks behind writer responses.
+
+    The first chunk is available immediately.  Each subsequent chunk is
+    released only after the writer has accumulated one more write than
+    before, simulating a server that waits for client input before
+    sending the next prompt.
+    """
+
+    def __init__(self, chunks, writer):
+        self._chunks = list(chunks)
+        self._writer = writer
+        self._idx = 0
+
+    async def read(self, n):
+        if self._idx >= len(self._chunks):
+            await asyncio.sleep(10)
+            return b""
+        needed_writes = self._idx
+        while len(self._writer._writes) < needed_writes:
+            await asyncio.sleep(0.001)
+        chunk = self._chunks[self._idx]
+        self._idx += 1
+        return chunk[:n]
+
+
 _BINARY_PROBE = {"BINARY": {"status": "WILL", "opt": fps.BINARY}}
 
 
@@ -963,6 +989,89 @@ async def test_fingerprinting_shell_help_prompt(tmp_path):
     )
 
     assert b"help\r\n" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_multi_prompt(tmp_path):
+    """Server asks color first, then presents a UTF-8 charset menu."""
+    save_path = str(tmp_path / "result.json")
+    writer = MockWriter(will_options=[fps.SGA])
+    reader = InteractiveMockReader([
+        b"Color? ",
+        b"Select charset:\r\n1) ASCII\r\n2) UTF-8\r\n",
+        b"Welcome!\r\n",
+    ], writer)
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"y\r\n" in writer._writes
+    assert b"2\r\n" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_multi_prompt_stops_on_bare_return(tmp_path):
+    """Loop stops after a bare \\r\\n response (no prompt detected)."""
+    save_path = str(tmp_path / "result.json")
+    writer = MockWriter(will_options=[fps.SGA])
+    reader = InteractiveMockReader([
+        b"Color? ",
+        b"Welcome!\r\n",
+    ], writer)
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"y\r\n" in writer._writes
+    prompt_writes = [w for w in writer._writes if w in (b"y\r\n", b"\r\n")]
+    assert len(prompt_writes) == 2
+    assert prompt_writes == [b"y\r\n", b"\r\n"]
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_multi_prompt_max_three(tmp_path):
+    """Loop does not exceed _MAX_PROMPT_REPLIES rounds."""
+    save_path = str(tmp_path / "result.json")
+    writer = MockWriter(will_options=[fps.SGA])
+    reader = InteractiveMockReader([
+        b"Color? ",
+        b"Color? ",
+        b"Color? ",
+        b"Color? ",
+    ], writer)
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    y_writes = [w for w in writer._writes if w == b"y\r\n"]
+    assert len(y_writes) == sfp._MAX_PROMPT_REPLIES
 
 
 class TestCullDisplay:

@@ -205,6 +205,32 @@ and utf-8 support.
 The same applies to clients -- ``open_connection(..., encoding=False)``
 returns a ``(TelnetReader, TelnetWriter)`` pair that works with ``bytes``.
 
+Retro BBS Encodings
+~~~~~~~~~~~~~~~~~~~
+
+telnetlib3 includes custom codecs for retro computing platforms commonly
+found on telnet BBS systems:
+
+- **ATASCII** (``--encoding=atascii``) -- Atari 8-bit computers (400, 800,
+  XL, XE).  Graphics characters at 0x00-0x1F, card suits, box drawing, and
+  an inverse-video range at 0x80-0xFF.  The ATASCII end-of-line character
+  (0x9B) maps to newline.  Aliases: ``atari8bit``, ``atari_8bit``.
+- **PETSCII** (``--encoding=petscii``) -- Commodore 64/128 shifted
+  (lowercase) mode.  Lowercase a-z at 0x41-0x5A, uppercase A-Z at
+  0xC1-0xDA.  Aliases: ``cbm``, ``commodore``, ``c64``, ``c128``.
+- **Atari ST** (``--encoding=atarist``) -- Atari ST character set with
+  extended Latin, Greek, and math symbols.  Alias: ``atari``.
+
+These encodings use bytes 0x80-0xFF for standard glyphs, which conflicts
+with the telnet protocol's default 7-bit NVT mode.  When any of these
+encodings is selected, ``--force-binary`` is automatically enabled so that
+high-bit bytes are transmitted without requiring BINARY option negotiation::
+
+    telnetlib3-client --encoding=atascii area52.tk 5200
+    telnetlib3-client --encoding=petscii bbs.example.com 6400
+
+``telnetlib3-fingerprint`` also decode banners with these encodings.
+
 Line Endings
 ~~~~~~~~~~~~
 

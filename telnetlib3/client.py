@@ -646,7 +646,7 @@ def _get_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--colormatch",
-        default="ega",
+        default="vga",
         metavar="PALETTE",
         help=(
             "translate basic 16-color ANSI codes to exact 24-bit RGB values"
@@ -716,6 +716,13 @@ def _parse_background_color(value: str) -> Tuple[int, int, int]:
 
 
 def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
+    # Auto-enable force_binary for retro BBS encodings that use high-bit bytes.
+    from .encodings import FORCE_BINARY_ENCODINGS  # pylint: disable=import-outside-toplevel
+
+    force_binary = args.force_binary
+    if args.encoding.lower().replace('-', '_') in FORCE_BINARY_ENCODINGS:
+        force_binary = True
+
     return {
         "host": args.host,
         "port": args.port,
@@ -726,7 +733,7 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "tspeed": (args.speed, args.speed),
         "shell": accessories.function_lookup(args.shell),
         "term": args.term,
-        "force_binary": args.force_binary,
+        "force_binary": force_binary,
         "encoding_errors": args.encoding_errors,
         "connect_minwait": args.connect_minwait,
         "connect_timeout": args.connect_timeout,

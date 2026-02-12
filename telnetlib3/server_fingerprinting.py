@@ -68,6 +68,7 @@ _NEGOTIATION_SETTLE = 0.5
 _BANNER_WAIT = 3.0
 _POST_RETURN_WAIT = 3.0
 _PROBE_TIMEOUT = 0.5
+_MAX_PROMPT_REPLIES = 3
 _JQ = shutil.which("jq")
 
 # Match "yes/no" or "y/n" surrounded by non-alphanumeric chars (or at
@@ -297,14 +298,24 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
         max_bytes=banner_max_bytes, writer=writer,
     )
 
-    # 3. Send return (or "yes"/"y" if the banner contains a y/n prompt)
-    prompt_response = _detect_yn_prompt(banner_before)
-    writer.write(prompt_response)
-    await writer.drain()
-    banner_after = await _read_banner_until_quiet(
-        reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait,
-        max_bytes=banner_max_bytes, writer=writer,
-    )
+    # 3. Respond to prompts — some servers ask multiple questions in
+    #    sequence (e.g. "color?" then a UTF-8 charset menu).  Loop up to
+    #    _MAX_PROMPT_REPLIES times, stopping early when no prompt is detected
+    #    or the connection is lost.
+    after_chunks: list[bytes] = []
+    latest_banner = banner_before
+    for _prompt_round in range(_MAX_PROMPT_REPLIES):
+        prompt_response = _detect_yn_prompt(latest_banner)
+        writer.write(prompt_response)
+        await writer.drain()
+        latest_banner = await _read_banner_until_quiet(
+            reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait,
+            max_bytes=banner_max_bytes, writer=writer,
+        )
+        after_chunks.append(latest_banner)
+        if prompt_response == b"\r\n" or writer.is_closing() or not latest_banner:
+            break
+    banner_after = b"".join(after_chunks)
 
     # 4. Snapshot option states before probing
     session_data: dict[str, Any] = {"option_states": _collect_server_option_states(writer)}

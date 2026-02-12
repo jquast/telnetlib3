@@ -1,5 +1,7 @@
 History
 =======
+2.5.0
+  * bugfix: "robot" guard now allows retro computer users.
 
 2.4.0
   * new: :mod:`telnetlib3.color_filter` module — translates 16-color ANSI SGR
@@ -28,7 +30,13 @@ History
     auto-answers yes/no, color, UTF-8 menu, ``who``, and ``help`` prompts.
   * enhancement: ``--banner-max-bytes`` option for ``telnetlib3-fingerprint``;
     default raised from 1024 to 65536.
-  * enhancement: new ``--encoding=petscii`` and ``--encoding=atarist``
+  * new: ATASCII (Atari 8-bit) codec -- ``--encoding=atascii`` for connecting
+    to Atari BBS systems.  Maps all 256 byte values to Unicode including
+    graphics characters, card suits, and the inverse-video range (0x80-0xFF).
+    ATASCII EOL (0x9B) maps to newline.  Aliases: ``atari8bit``, ``atari_8bit``.
+  * enhancement: ``--encoding=atascii``, ``--encoding=petscii``, and
+    ``--encoding=atarist`` now auto-enable ``--force-binary`` for both client
+    and server, since these encodings use bytes 0x80-0xFF for standard glyphs.
   * bugfix: rare LINEMODE ACK loop with misbehaving servers that re-send
     unchanged MODE without ACK.
   * bugfix: unknown IAC commands no longer raise ``ValueError``; treated as
