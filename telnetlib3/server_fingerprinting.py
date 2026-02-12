@@ -23,6 +23,7 @@ import subprocess
 from typing import Any
 
 # 3rd party
+import wcwidth as _wcwidth
 from wcwidth.escape_sequences import ZERO_WIDTH_PATTERN as _ZERO_WIDTH_STR_PATTERN
 
 # local
@@ -68,17 +69,12 @@ _NEGOTIATION_SETTLE = 0.5
 _BANNER_WAIT = 3.0
 _POST_RETURN_WAIT = 3.0
 _PROBE_TIMEOUT = 0.5
-_MAX_PROMPT_REPLIES = 3
+_MAX_PROMPT_REPLIES = 5
 _JQ = shutil.which("jq")
 
 # Match "yes/no" or "y/n" surrounded by non-alphanumeric chars (or at
 # string boundaries).  Used to auto-answer confirmation prompts.
 _YN_RE = re.compile(rb"(?i)(?:^|[^a-zA-Z0-9])(yes/no|y/n)(?:[^a-zA-Z0-9]|$)")
-
-# Match MUD/BBS login prompts that offer 'who' as a command.
-# Quoted: "enter a name (or 'who')", or bare WHO without surrounding
-# alphanumerics: "\nWHO                to see players connected.\n"
-_WHO_RE = re.compile(rb"(?i)(?:'who'|\"who\"|(?:^|[^a-zA-Z0-9])who(?:[^a-zA-Z0-9]|$))")
 
 # Same pattern for 'help' — offered as a login-screen command on many MUDs.
 _HELP_RE = re.compile(rb"(?i)(?:'help'|\"help\"|(?:^|[^a-zA-Z0-9])help(?:[^a-zA-Z0-9]|$))")
@@ -86,13 +82,18 @@ _HELP_RE = re.compile(rb"(?i)(?:'help'|\"help\"|(?:^|[^a-zA-Z0-9])help(?:[^a-zA-
 # Match "color?" prompts — many MUDs ask if the user wants color.
 _COLOR_RE = re.compile(rb"(?i)color\s*\?")
 
-# Match numbered menu items offering UTF-8, e.g. "5) UTF-8" or "3) utf8".
-# Many BBS/MUD systems present a charset selection menu at connect time.
-_MENU_UTF8_RE = re.compile(rb"(\d+)\s*\)\s*UTF-?8", re.IGNORECASE)
+# Match numbered menu items offering UTF-8, e.g. "5) UTF-8", "[3] UTF-8",
+# or "2. UTF-8".  Many BBS/MUD systems present a charset selection menu at
+# connect time.  The optional \S+/ prefix handles "Something/UTF-8" labels.
+_MENU_UTF8_RE = re.compile(
+    rb"[\[(]?(\d+)(?:[\])]|\.)\s*(?:\S+\s*/\s*)?UTF-?8", re.IGNORECASE
+)
 
-# Match numbered menu items offering ANSI, e.g. "(1) Ansi" or "[2] ANSI".
-# Brackets may be parentheses or square brackets (mixed allowed).
-_MENU_ANSI_RE = re.compile(rb"[\[(](\d+)[\])]\s*ANSI", re.IGNORECASE)
+# Match numbered menu items offering ANSI, e.g. "(1) Ansi", "[2] ANSI",
+# or "3. English/ANSI".  Brackets and dot delimiters are accepted.
+_MENU_ANSI_RE = re.compile(
+    rb"[\[(]?(\d+)(?:[\])]|\.)\s*(?:\S+\s*/\s*)?ANSI", re.IGNORECASE
+)
 
 # Match "gb/big5" encoding selection prompts common on Chinese BBS systems.
 _GB_BIG5_RE = re.compile(rb"(?i)(?:^|[^a-zA-Z0-9])gb\s*/\s*big\s*5(?:[^a-zA-Z0-9]|$)")
@@ -102,13 +103,52 @@ _GB_BIG5_RE = re.compile(rb"(?i)(?:^|[^a-zA-Z0-9])gb\s*/\s*big\s*5(?:[^a-zA-Z0-9
 _ANSI_STRIP_RE = re.compile(_ZERO_WIDTH_STR_PATTERN.pattern.encode("ascii"))
 
 # Match "Press [.ESC.] twice" botcheck prompts (e.g. Mystic BBS).
-_ESC_TWICE_RE = re.compile(rb"(?i)press\s+\[?\.?esc\.?\]?\s+twice")
+_ESC_TWICE_RE = re.compile(rb"(?i)press\s+[\[<]?\.?esc\.?[\]>]?\s+twice")
 
 # Match DSR (Device Status Report) request: ESC [ 6 n.
 # Servers send this to detect ANSI-capable terminals; we reply with a
 # Cursor Position Report (CPR) so the server sees us as ANSI-capable.
 _DSR_RE = re.compile(rb"\x1b\[6n")
-_CPR_RESPONSE = b"\x1b[1;1R"
+
+
+class _VirtualCursor:
+    """Track virtual cursor column to generate position-aware CPR responses.
+
+    The server's robot-check sends DSR, writes a test character, then sends
+    DSR again.  It compares the two cursor positions to verify the character
+    rendered at the expected width.  By tracking what the server writes
+    between DSR requests and advancing the column using :func:`wcwidth.wcwidth`,
+    the scanner produces CPR responses that satisfy the width check.
+    """
+
+    def __init__(self) -> None:
+        self.col = 1
+
+    def cpr(self) -> bytes:
+        """Return a CPR response (``ESC [ row ; col R``) at the current position."""
+        return f"\x1b[1;{self.col}R".encode("ascii")
+
+    def advance(self, data: bytes) -> None:
+        """Advance cursor column for *data* (non-DSR text from the server).
+
+        ANSI escape sequences are stripped first so they do not contribute
+        to cursor movement.  Backspace and carriage return are handled.
+        """
+        stripped = _ANSI_STRIP_RE.sub(b"", data)
+        try:
+            text = stripped.decode("utf-8", errors="replace")
+        except Exception:
+            text = stripped.decode("latin-1")
+        for ch in text:
+            cp = ord(ch)
+            if cp == 0x08:  # backspace
+                self.col = max(1, self.col - 1)
+            elif cp == 0x0D:  # \r
+                self.col = 1
+            elif cp >= 0x20:
+                w = _wcwidth.wcwidth(ch)
+                if w > 0:
+                    self.col += w
 
 logger = logging.getLogger("telnetlib3.server_fingerprint")
 
@@ -174,9 +214,8 @@ def _detect_yn_prompt(banner: bytes) -> bytes:  # pylint: disable=too-many-retur
     (common on Chinese BBS systems), returns ``b"big5\r\n"`` to select
     Big5 encoding.
 
-    If the banner contains a MUD/BBS login prompt offering ``'who'`` as
-    an alternative (e.g. "enter a name (or 'who')"), returns
-    ``b"who\r\n"``.  Similarly, ``'help'`` prompts return ``b"help\r\n"``.
+    If the banner contains a MUD/BBS login prompt offering ``'help'``
+    as a command, returns ``b"help\r\n"``.
 
     Otherwise returns a bare ``b"\r\n"``.
 
@@ -202,8 +241,6 @@ def _detect_yn_prompt(banner: bytes) -> bytes:  # pylint: disable=too-many-retur
         return ansi_match.group(1) + b"\r\n"
     if _GB_BIG5_RE.search(stripped):
         return b"big5\r\n"
-    if _WHO_RE.search(stripped):
-        return b"who\r\n"
     if _HELP_RE.search(stripped):
         return b"help\r\n"
     return b"\r\n"
@@ -288,15 +325,21 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
 ) -> None:
     """Run the fingerprint session (inner helper for error handling)."""
     start_time = time.time()
+    cursor = _VirtualCursor()
 
-    # 1. Let straggler negotiation settle
-    await asyncio.sleep(_NEGOTIATION_SETTLE)
+    # 1. Let straggler negotiation settle — read (and respond to DSR)
+    #    instead of sleeping blind so early DSR requests get a CPR reply.
+    settle_data = await _read_banner_until_quiet(
+        reader, quiet_time=_NEGOTIATION_SETTLE, max_wait=_NEGOTIATION_SETTLE,
+        max_bytes=banner_max_bytes, writer=writer, cursor=cursor,
+    )
 
     # 2. Read banner (pre-return) — wait until output stops
-    banner_before = await _read_banner_until_quiet(
+    banner_before_raw = await _read_banner_until_quiet(
         reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait,
-        max_bytes=banner_max_bytes, writer=writer,
+        max_bytes=banner_max_bytes, writer=writer, cursor=cursor,
     )
+    banner_before = settle_data + banner_before_raw
 
     # 3. Respond to prompts — some servers ask multiple questions in
     #    sequence (e.g. "color?" then a UTF-8 charset menu).  Loop up to
@@ -310,10 +353,15 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
         await writer.drain()
         latest_banner = await _read_banner_until_quiet(
             reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait,
-            max_bytes=banner_max_bytes, writer=writer,
+            max_bytes=banner_max_bytes, writer=writer, cursor=cursor,
         )
         after_chunks.append(latest_banner)
-        if prompt_response == b"\r\n" or writer.is_closing() or not latest_banner:
+        if writer.is_closing() or not latest_banner:
+            break
+        # Stop when no prompt was detected AND the new banner has no
+        # prompt either (servers like Mystic BBS send a non-interactive
+        # preamble before the real botcheck prompt).
+        if prompt_response == b"\r\n" and _detect_yn_prompt(latest_banner) == b"\r\n":
             break
     banner_after = b"".join(after_chunks)
 
@@ -627,11 +675,16 @@ def _format_banner(data: bytes, encoding: str = "utf-8") -> str:
     Default ``"utf-8"`` is intentional -- banners are typically UTF-8
     regardless of ``environ_encoding``; callers may override.
 
+    Uses ``surrogateescape`` so high bytes (common in CP437 BBS art)
+    are preserved as surrogates (e.g. byte ``0xB1`` → ``U+DCB1``)
+    rather than replaced with ``U+FFFD``.  JSON serialization escapes
+    them as ``\\udcXX``, which round-trips through :func:`json.load`.
+
     :param data: Raw bytes from the server.
     :param encoding: Character encoding to use for decoding.
-    :returns: Decoded text string (undecodable bytes replaced).
+    :returns: Decoded text string (raw bytes preserved as surrogates).
     """
-    return data.decode(encoding, errors="replace")
+    return data.decode(encoding, errors="surrogateescape")
 
 
 async def _await_mssp_data(writer: TelnetWriter, deadline: float) -> None:
@@ -665,12 +718,34 @@ async def _read_banner(
     return data
 
 
+def _respond_to_dsr(
+    chunk: bytes, writer: TelnetWriter, cursor: _VirtualCursor | None
+) -> None:
+    """Send CPR response(s) for each DSR found in *chunk*.
+
+    When *cursor* is provided, text between DSR sequences advances the
+    virtual cursor column so each CPR reflects the correct position.
+    Without a cursor, a static ``ESC [ 1 ; 1 R`` is sent for every DSR.
+    """
+    if cursor is None:
+        for _ in _DSR_RE.finditer(chunk):
+            writer.write(b"\x1b[1;1R")
+        return
+    pos = 0
+    for match in _DSR_RE.finditer(chunk):
+        cursor.advance(chunk[pos:match.start()])
+        writer.write(cursor.cpr())
+        pos = match.end()
+    cursor.advance(chunk[pos:])
+
+
 async def _read_banner_until_quiet(
     reader: TelnetReader,
     quiet_time: float = 2.0,
     max_wait: float = 8.0,
     max_bytes: int = _BANNER_MAX_BYTES,
     writer: TelnetWriter | None = None,
+    cursor: _VirtualCursor | None = None,
 ) -> bytes:
     """
     Read banner data until output stops for *quiet_time* seconds.
@@ -681,8 +756,13 @@ async def _read_banner_until_quiet(
 
     When *writer* is provided, any DSR (Device Status Report) request
     ``ESC [ 6 n`` found in the incoming data is answered with a CPR
-    (Cursor Position Report) ``ESC [ 1 ; 1 R`` so the server detects
-    an ANSI-capable terminal.
+    (Cursor Position Report) so the server detects an ANSI-capable
+    terminal.
+
+    When *cursor* is provided, the CPR response reflects the tracked
+    virtual cursor column (advanced by :func:`wcwidth.wcwidth` for each
+    printable character).  This defeats robot-check guards that verify
+    cursor movement after writing a test character.
 
     :param reader: :class:`~telnetlib3.stream_reader.TelnetReader` instance.
     :param quiet_time: Seconds of silence before considering banner complete.
@@ -690,6 +770,7 @@ async def _read_banner_until_quiet(
     :param max_bytes: Maximum bytes per read call.
     :param writer: Optional :class:`~telnetlib3.stream_writer.TelnetWriter`
         used to send CPR replies to DSR requests.
+    :param cursor: Optional :class:`_VirtualCursor` for position-aware CPR.
     :returns: Banner bytes (may be empty).
     """
     chunks: list[bytes] = []
@@ -704,8 +785,10 @@ async def _read_banner_until_quiet(
             if not chunk:
                 break
             if writer is not None and _DSR_RE.search(chunk):
-                writer.write(_CPR_RESPONSE)
+                _respond_to_dsr(chunk, writer, cursor)
                 await writer.drain()
+            elif cursor is not None:
+                cursor.advance(chunk)
             chunks.append(chunk)
         except (asyncio.TimeoutError, EOFError):
             break

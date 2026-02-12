@@ -15,6 +15,7 @@ from typing import Any, Type, Union, Callable, Optional, cast
 
 # local
 from ._types import ShellCallback
+from .accessories import TRACE, hexdump
 from .telopt import DO, WILL, theNULL, name_commands
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
@@ -44,7 +45,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         encoding: Union[str, bool] = "utf8",
         encoding_errors: str = "strict",
         force_binary: bool = False,
-        connect_minwait: float = 1.0,
+        connect_minwait: float = 0,
         connect_maxwait: float = 4.0,
         limit: Optional[int] = None,
         waiter_closed: Optional[asyncio.Future[None]] = None,
@@ -212,6 +213,8 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         Buffer incoming data and schedule async processing to keep the event loop responsive. Apply
         read-side backpressure using transport.pause_reading()/resume_reading().
         """
+        if self.log.isEnabledFor(TRACE):
+            self.log.log(TRACE, "recv %d bytes\n%s", len(data), hexdump(data, prefix="<<  "))
         self._last_received = datetime.datetime.now()
 
         # Enqueue and account for buffered size

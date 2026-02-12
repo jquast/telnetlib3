@@ -239,7 +239,25 @@ def test_server_fingerprint_hash_consistency():
 def test_format_banner():
     assert sfp._format_banner(b"Hello\r\nWorld") == "Hello\r\nWorld"
     assert not sfp._format_banner(b"")
-    assert sfp._format_banner(b"\xff\xfe\xfd") == "\ufffd\ufffd\ufffd"
+
+
+def test_format_banner_surrogateescape():
+    """High bytes are preserved as surrogates, not replaced with U+FFFD."""
+    result = sfp._format_banner(b"\xff\xfe\xb1")
+    assert "\ufffd" not in result
+    assert result == "\udcff\udcfe\udcb1"
+    raw = result.encode("ascii", errors="surrogateescape")
+    assert raw == b"\xff\xfe\xb1"
+
+
+def test_format_banner_json_roundtrip():
+    """Surrogates survive JSON serialization and can recover raw bytes."""
+    banner = sfp._format_banner(b"Hello\xb1\xb2World")
+    encoded = json.dumps(banner)
+    decoded = json.loads(encoded)
+    assert decoded == banner
+    raw = decoded.encode("ascii", errors="surrogateescape")
+    assert raw == b"Hello\xb1\xb2World"
 
 
 @pytest.mark.asyncio
@@ -752,21 +770,7 @@ async def test_probe_skipped_when_closing(tmp_path):
         pytest.param(b"Type yes/no please", b"yes\r\n", id="yes_no_space_delimited"),
         pytest.param(b"systemd/network", b"\r\n", id="false_positive_word"),
         pytest.param(b"beyond", b"\r\n", id="substring_y_n_not_matched"),
-        pytest.param(
-            b"Please enter a name: (or 'who' or 'finger'):", b"who\r\n", id="who_single_quotes"
-        ),
-        pytest.param(b'Enter your name (or "who"):', b"who\r\n", id="who_double_quotes"),
-        pytest.param(b"What is your name? (or 'WHO')", b"who\r\n", id="who_uppercase"),
         pytest.param(b"Enter your name:", b"\r\n", id="name_prompt_no_who"),
-        pytest.param(
-            b"connect <name> <password>\r\n"
-            b"WHO                to see players connected.\r\n"
-            b"QUIT               to disconnect.\r\n",
-            b"who\r\n",
-            id="who_bare_command_listing",
-        ),
-        pytest.param(b"Type WHO to list users", b"who\r\n", id="who_bare_mid_sentence"),
-        pytest.param(b"somehow", b"\r\n", id="who_inside_word_not_matched"),
         pytest.param(b"Type 'help' for a list of commands:", b"help\r\n", id="help_single_quotes"),
         pytest.param(b'Enter your name (or "help"):', b"help\r\n", id="help_double_quotes"),
         pytest.param(
@@ -780,8 +784,8 @@ async def test_probe_skipped_when_closing(tmp_path):
             b"connect <name>\r\n"
             b"WHO                to see players connected.\r\n"
             b"HELP               to see available commands.\r\n",
-            b"who\r\n",
-            id="who_preferred_over_help",
+            b"help\r\n",
+            id="help_from_command_listing",
         ),
         pytest.param(b"Color? ", b"y\r\n", id="color_question"),
         pytest.param(b"Do you want color? ", b"y\r\n", id="color_in_sentence"),
@@ -800,16 +804,27 @@ async def test_probe_skipped_when_closing(tmp_path):
             b"12\r\n",
             id="menu_utf8_multidigit",
         ),
+        pytest.param(b"[5] UTF-8\r\nSelect: ", b"5\r\n", id="menu_utf8_brackets"),
+        pytest.param(b"[2] utf-8\r\n", b"2\r\n", id="menu_utf8_brackets_lower"),
+        pytest.param(b"3. UTF-8\r\n", b"3\r\n", id="menu_utf8_dot"),
         pytest.param(b"1) ASCII\r\n2) Latin-1\r\n", b"\r\n", id="menu_no_utf8"),
         pytest.param(b"(1) Ansi\r\n(2) VT100\r\n", b"1\r\n", id="menu_ansi_parens"),
         pytest.param(b"[1] ANSI\r\n[2] VT100\r\n", b"1\r\n", id="menu_ansi_brackets"),
         pytest.param(b"(3) ansi\r\n", b"3\r\n", id="menu_ansi_lowercase"),
         pytest.param(b"[12] Ansi\r\n", b"12\r\n", id="menu_ansi_multidigit"),
         pytest.param(b"(1] ANSI\r\n", b"1\r\n", id="menu_ansi_mixed_brackets"),
+        pytest.param(b"3. ANSI\r\n", b"3\r\n", id="menu_ansi_dot"),
+        pytest.param(b"3. English/ANSI\r\n", b"3\r\n", id="menu_english_ansi"),
+        pytest.param(b"2. English/ANSI\r\n", b"2\r\n", id="menu_english_ansi_2"),
         pytest.param(
             b"1) ASCII\r\n2) UTF-8\r\n(3) Ansi\r\n",
             b"2\r\n",
             id="menu_utf8_preferred_over_ansi",
+        ),
+        pytest.param(
+            b"1. ASCII\r\n2. UTF-8\r\n3. English/ANSI\r\n",
+            b"2\r\n",
+            id="menu_utf8_dot_preferred_over_ansi_dot",
         ),
         pytest.param(b"gb/big5", b"big5\r\n", id="gb_big5"),
         pytest.param(b"GB/Big5\r\n", b"big5\r\n", id="gb_big5_mixed_case"),
@@ -830,6 +845,11 @@ async def test_probe_skipped_when_closing(tmp_path):
             b"Press ESC twice to continue",
             b"\x1b\x1b",
             id="esc_twice_bare",
+        ),
+        pytest.param(
+            b"Press <Esc> twice for the BBS ... ",
+            b"\x1b\x1b",
+            id="esc_twice_angle_brackets",
         ),
         pytest.param(
             b"\x1b[33mPress [.ESC.] twice within 10 seconds\x1b[0m",
@@ -947,27 +967,6 @@ async def test_fingerprinting_shell_no_yn_prompt(tmp_path):
     assert b"yes\r\n" not in writer._writes
 
 
-@pytest.mark.asyncio
-async def test_fingerprinting_shell_who_prompt(tmp_path):
-    """Banner with 'who' option causes 'who\\r\\n' response."""
-    save_path = str(tmp_path / "result.json")
-    reader = MockReader([b"Please enter a name: (or 'who' or 'finger'):"])
-    writer = MockWriter(will_options=[fps.SGA])
-
-    await sfp.fingerprinting_client_shell(
-        reader,
-        writer,
-        host="localhost",
-        port=23,
-        save_path=save_path,
-        silent=True,
-        banner_quiet_time=0.01,
-        banner_max_wait=0.01,
-        mssp_wait=0.01,
-    )
-
-    assert b"who\r\n" in writer._writes
-
 
 @pytest.mark.asyncio
 async def test_fingerprinting_shell_help_prompt(tmp_path):
@@ -1047,16 +1046,14 @@ async def test_fingerprinting_shell_multi_prompt_stops_on_bare_return(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_fingerprinting_shell_multi_prompt_max_three(tmp_path):
+async def test_fingerprinting_shell_multi_prompt_max_replies(tmp_path):
     """Loop does not exceed _MAX_PROMPT_REPLIES rounds."""
     save_path = str(tmp_path / "result.json")
     writer = MockWriter(will_options=[fps.SGA])
-    reader = InteractiveMockReader([
-        b"Color? ",
-        b"Color? ",
-        b"Color? ",
-        b"Color? ",
-    ], writer)
+    reader = InteractiveMockReader(
+        [b"Color? "] * (sfp._MAX_PROMPT_REPLIES + 1),
+        writer,
+    )
 
     await sfp.fingerprinting_client_shell(
         reader,
@@ -1163,3 +1160,114 @@ async def test_fingerprinting_shell_dsr_response(tmp_path):
     )
 
     assert b"\x1b[1;1R" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_settle_dsr_response(tmp_path):
+    """DSR arriving during negotiation settle gets an immediate CPR reply."""
+    save_path = str(tmp_path / "result.json")
+    reader = MockReader([b"\x1b[6nWelcome\r\n"])
+    writer = MockWriter(will_options=[fps.SGA])
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"\x1b[1;1R" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_delayed_prompt(tmp_path):
+    """Bare-return banner followed by ESC-twice prompt still gets answered."""
+    save_path = str(tmp_path / "result.json")
+    writer = MockWriter(will_options=[fps.SGA])
+    reader = InteractiveMockReader([
+        b"Starting BBS-DOS...\r\n",
+        b"Press [.ESC.] twice within 15 seconds to CONTINUE...",
+        b"Welcome!\r\n",
+    ], writer)
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"\x1b\x1b" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_read_banner_virtual_cursor_defeats_robot_check():
+    """DSR-space-DSR produces CPR col=1 then col=2 (width=1)."""
+    reader = MockReader([b"\x1b[6n \x1b[6n"])
+    writer = MockWriter()
+    cursor = sfp._VirtualCursor()
+    await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=0.05, writer=writer, cursor=cursor,
+    )
+    cpr_writes = [w for w in writer._writes if b"R" in w]
+    assert cpr_writes[0] == b"\x1b[1;1R"
+    assert cpr_writes[1] == b"\x1b[1;2R"
+
+
+@pytest.mark.asyncio
+async def test_read_banner_virtual_cursor_separate_chunks():
+    """DSR in separate chunks still tracks cursor correctly."""
+    reader = MockReader([b"\x1b[6n", b" \x1b[6n"])
+    writer = MockWriter()
+    cursor = sfp._VirtualCursor()
+    await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=0.05, writer=writer, cursor=cursor,
+    )
+    cpr_writes = [w for w in writer._writes if b"R" in w]
+    assert cpr_writes[0] == b"\x1b[1;1R"
+    assert cpr_writes[1] == b"\x1b[1;2R"
+
+
+@pytest.mark.asyncio
+async def test_read_banner_virtual_cursor_wide_char():
+    """Wide CJK character advances cursor by 2."""
+    reader = MockReader([b"\x1b[6n\xe4\xb8\xad\x1b[6n"])
+    writer = MockWriter()
+    cursor = sfp._VirtualCursor()
+    await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=0.05, writer=writer, cursor=cursor,
+    )
+    cpr_writes = [w for w in writer._writes if b"R" in w]
+    assert cpr_writes[0] == b"\x1b[1;1R"
+    assert cpr_writes[1] == b"\x1b[1;3R"
+
+
+def test_virtual_cursor_backspace():
+    """Backspace moves cursor left."""
+    cursor = sfp._VirtualCursor()
+    cursor.advance(b"AB\x08")
+    assert cursor.col == 2
+
+
+def test_virtual_cursor_cr():
+    """Carriage return resets cursor to column 1."""
+    cursor = sfp._VirtualCursor()
+    cursor.advance(b"Hello\r")
+    assert cursor.col == 1
+
+
+def test_virtual_cursor_ansi_stripped():
+    """ANSI color codes do not advance cursor."""
+    cursor = sfp._VirtualCursor()
+    cursor.advance(b"\x1b[31mX\x1b[0m")
+    assert cursor.col == 2

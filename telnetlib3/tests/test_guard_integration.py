@@ -1,5 +1,6 @@
 # std imports
 import asyncio
+import functools
 
 # 3rd party
 import pytest
@@ -9,10 +10,12 @@ from telnetlib3.guard_shells import (
     ConnectionCounter,
     _read_line,
     busy_shell,
+    robot_check,
     robot_shell,
     _latin1_reading,
 )
 from telnetlib3.stream_reader import TelnetReaderUnicode
+from telnetlib3 import server_fingerprinting as sfp
 
 
 async def test_connection_counter_integration():
@@ -402,3 +405,50 @@ async def test_without_latin1_reading_strict_crashes():
 
     with pytest.raises(UnicodeDecodeError):
         await reader.read(-1)
+
+
+async def test_fingerprint_scanner_defeats_robot_check(unused_tcp_port):
+    """Fingerprint scanner's virtual cursor defeats the server's robot_check."""
+    from telnetlib3.tests.accessories import create_server  # noqa: PLC0415
+    from telnetlib3.guard_shells import _measure_width, _TEST_CHAR  # noqa: PLC0415
+
+    measured_width: list[int | None] = []
+
+    async def guarded_shell(reader, writer):
+        with _latin1_reading(reader):
+            width = await _measure_width(reader, writer, _TEST_CHAR, timeout=5.0)
+        measured_width.append(width)
+        if width == 1:
+            writer.write("Robot check passed!\r\n")
+            await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    async with create_server(
+        host="127.0.0.1",
+        port=unused_tcp_port,
+        shell=guarded_shell,
+        connect_maxwait=0.5,
+    ):
+        import telnetlib3  # noqa: PLC0415
+
+        shell = functools.partial(
+            sfp.fingerprinting_client_shell,
+            host="127.0.0.1",
+            port=unused_tcp_port,
+            silent=True,
+            banner_quiet_time=1.0,
+            banner_max_wait=5.0,
+        )
+        reader, writer = await telnetlib3.open_connection(
+            host="127.0.0.1",
+            port=unused_tcp_port,
+            encoding=False,
+            shell=shell,
+            connect_minwait=0.5,
+        )
+        # Shell runs as a background task — wait for it to finish.
+        await asyncio.wait_for(writer.protocol.waiter_closed, timeout=10.0)
+
+    assert measured_width, "server shell never ran"
+    assert measured_width[0] == 1, f"expected width=1, got {measured_width[0]}"

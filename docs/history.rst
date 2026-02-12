@@ -1,7 +1,23 @@
 History
 =======
 2.5.0
-  * bugfix: "robot" guard now allows retro computer users.
+  * change: ``connect_minwait`` default reduced from 1.0s to 0 across
+    ``BaseClient``, ``open_connection()``, and the ``telnetlib3-client`` CLI.
+    The shell now starts immediately after connection; negotiation continues
+    asynchronously.  Use ``--connect-minwait`` to restore a delay if needed.
+  * enhancement: ``telnetlib3-fingerprint`` responds to DSR (``ESC[6n``)
+    during banner collection with a CPR reply, so servers that probe for
+    ANSI capability no longer disconnect prematurely.
+  * enhancement: ``telnetlib3-fingerprint`` answers up to 3 sequential
+    prompts (e.g. color, charset menu) instead of only one.
+  * enhancement: ``telnetlib3-fingerprint`` answers Mystic BBS "Press
+    [.ESC.] twice" botcheck prompts.
+  * enhancement: ``telnetlib3-fingerprint`` strips ANSI escape sequences
+    before prompt pattern matching, fixing detection through color codes.
+  * enhancement: default ``--colormatch`` palette changed from EGA to VGA.
+  * bugfix: "robot" guard now uses a narrow character (space) instead of a
+    wide Unicode character, allowing retro terminal emulators to pass.
+  * removed: unused ``get_next_ascii()`` from :mod:`telnetlib3.server_shell`.
 
 2.4.0
   * new: :mod:`telnetlib3.color_filter` module — translates 16-color ANSI SGR

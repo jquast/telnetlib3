@@ -373,7 +373,7 @@ async def open_connection(  # pylint: disable=too-many-locals
     tspeed: Tuple[int, int] = (38400, 38400),
     xdisploc: str = "",
     shell: Optional[ShellCallback] = None,
-    connect_minwait: float = 2.0,
+    connect_minwait: float = 0,
     connect_maxwait: float = 3.0,
     connect_timeout: Optional[float] = None,
     waiter_closed: Optional[asyncio.Future[None]] = None,
@@ -614,7 +614,7 @@ def _get_argument_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--force-binary", action="store_true", help="force encoding", default=True)
     parser.add_argument(
-        "--connect-minwait", default=1.0, type=float, help="shell delay for negotiation"
+        "--connect-minwait", default=0, type=float, help="shell delay for negotiation"
     )
     parser.add_argument(
         "--connect-maxwait", default=4.0, type=float, help="timeout for pending negotiation"
@@ -940,7 +940,7 @@ async def run_fingerprint_client() -> None:
             shell=shell,
             encoding=False,
             term=ttype,
-            connect_minwait=2.0,
+            connect_minwait=0,
             connect_maxwait=4.0,
             connect_timeout=args.connect_timeout,
             waiter_closed=waiter_closed,
