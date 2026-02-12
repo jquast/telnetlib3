@@ -76,9 +76,6 @@ _JQ = shutil.which("jq")
 # string boundaries).  Used to auto-answer confirmation prompts.
 _YN_RE = re.compile(rb"(?i)(?:^|[^a-zA-Z0-9])(yes/no|y/n)(?:[^a-zA-Z0-9]|$)")
 
-# Same pattern for 'help' — offered as a login-screen command on many MUDs.
-_HELP_RE = re.compile(rb"(?i)(?:'help'|\"help\"|(?:^|[^a-zA-Z0-9])help(?:[^a-zA-Z0-9]|$))")
-
 # Match "color?" prompts — many MUDs ask if the user wants color.
 _COLOR_RE = re.compile(rb"(?i)color\s*\?")
 
@@ -105,10 +102,45 @@ _ANSI_STRIP_RE = re.compile(_ZERO_WIDTH_STR_PATTERN.pattern.encode("ascii"))
 # Match "Press [.ESC.] twice" botcheck prompts (e.g. Mystic BBS).
 _ESC_TWICE_RE = re.compile(rb"(?i)press\s+[\[<]?\.?esc\.?[\]>]?\s+twice")
 
+# Match "HIT RETURN", "PRESS RETURN", "PRESS ENTER", "HIT ENTER", etc.
+# Common on Worldgroup/MajorBBS and other vintage BBS systems.
+_RETURN_PROMPT_RE = re.compile(
+    rb"(?i)(?:hit|press)\s+(?:return|enter)\s*[:\.]?"
+)
+
 # Match DSR (Device Status Report) request: ESC [ 6 n.
 # Servers send this to detect ANSI-capable terminals; we reply with a
 # Cursor Position Report (CPR) so the server sees us as ANSI-capable.
 _DSR_RE = re.compile(rb"\x1b\[6n")
+
+
+#: Encodings where standard telnet CR+LF must be re-encoded to the
+#: codec's native EOL byte.  The codec's ``encode()`` handles the
+#: actual CR → LF normalization; we just gate the re-encoding step.
+_RETRO_EOL_ENCODINGS = frozenset({
+    'atascii', 'atari8bit', 'atari_8bit',
+})
+
+
+def _reencode_prompt(response: bytes, encoding: str) -> bytes:
+    """Re-encode an ASCII prompt response for the server's encoding.
+
+    For retro encodings (ATASCII), the standard ``\\r\\n`` line ending
+    is re-encoded through the codec so the server receives its native
+    EOL byte.  For all other encodings the response is returned as-is.
+
+    :param response: ASCII prompt response bytes (e.g. ``b"yes\\r\\n"``).
+    :param encoding: Remote server encoding name.
+    :returns: Response bytes suitable for the server's encoding.
+    """
+    normalized = encoding.lower().replace('-', '_')
+    if normalized not in _RETRO_EOL_ENCODINGS:
+        return response
+    try:
+        text = response.decode('ascii')
+        return text.encode(encoding)
+    except (UnicodeDecodeError, UnicodeEncodeError, LookupError):
+        return response
 
 
 class _VirtualCursor:
@@ -185,42 +217,20 @@ def _print_json(data: dict[str, Any]) -> None:
     print(raw, file=sys.stdout)
 
 
-def _detect_yn_prompt(banner: bytes) -> bytes:  # pylint: disable=too-many-return-statements
+def _detect_yn_prompt(  # pylint: disable=too-many-return-statements
+    banner: bytes,
+) -> bytes | None:
     r"""
     Return an appropriate first-prompt response based on banner content.
 
     ANSI escape sequences are stripped before pattern matching so that
     embedded color/cursor codes do not interfere with detection.
 
-    If the banner contains a ``Press [.ESC.] twice`` botcheck prompt
-    (e.g. Mystic BBS), returns ``b"\x1b\x1b"`` (two raw ESC bytes).
-
-    If the banner contains a ``yes/no`` or ``y/n`` confirmation prompt
-    (case-insensitive, delimited by non-alphanumeric characters), returns
-    ``b"yes\r\n"`` or ``b"y\r\n"`` respectively.
-
-    If the banner contains a ``color?`` prompt (case-insensitive),
-    returns ``b"y\r\n"`` to accept color.
-
-    If the banner contains a numbered menu item for UTF-8 (e.g.
-    ``5) UTF-8``), returns the digit followed by ``b"\r\n"`` to select
-    the UTF-8 charset option.
-
-    If the banner contains a bracketed numbered menu item for ANSI
-    (e.g. ``(1) Ansi`` or ``[2] ANSI``), returns the digit followed
-    by ``b"\r\n"`` to select the ANSI option.
-
-    If the banner contains a ``gb/big5`` encoding selection prompt
-    (common on Chinese BBS systems), returns ``b"big5\r\n"`` to select
-    Big5 encoding.
-
-    If the banner contains a MUD/BBS login prompt offering ``'help'``
-    as a command, returns ``b"help\r\n"``.
-
-    Otherwise returns a bare ``b"\r\n"``.
+    Returns ``None`` when no recognizable prompt is found.  The caller
+    should fall back to sending a bare ``\r\n`` in that case.
 
     :param banner: Raw banner bytes collected before the first prompt.
-    :returns: Response bytes to send.
+    :returns: Response bytes to send, or ``None`` if no prompt detected.
     """
     stripped = _ANSI_STRIP_RE.sub(b"", banner)
     if _ESC_TWICE_RE.search(stripped):
@@ -241,9 +251,9 @@ def _detect_yn_prompt(banner: bytes) -> bytes:  # pylint: disable=too-many-retur
         return ansi_match.group(1) + b"\r\n"
     if _GB_BIG5_RE.search(stripped):
         return b"big5\r\n"
-    if _HELP_RE.search(stripped):
-        return b"help\r\n"
-    return b"\r\n"
+    if _RETURN_PROMPT_RE.search(stripped):
+        return b"\r\n"
+    return None
 
 
 async def fingerprinting_client_shell(
@@ -348,9 +358,14 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
     after_chunks: list[bytes] = []
     latest_banner = banner_before
     for _prompt_round in range(_MAX_PROMPT_REPLIES):
-        prompt_response = _detect_yn_prompt(latest_banner)
+        detected = _detect_yn_prompt(latest_banner)
+        prompt_response = _reencode_prompt(
+            detected if detected is not None else b"\r\n",
+            writer.environ_encoding,
+        )
         writer.write(prompt_response)
         await writer.drain()
+        previous_banner = latest_banner
         latest_banner = await _read_banner_until_quiet(
             reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait,
             max_bytes=banner_max_bytes, writer=writer, cursor=cursor,
@@ -358,10 +373,14 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
         after_chunks.append(latest_banner)
         if writer.is_closing() or not latest_banner:
             break
+        # Stop when the server repeats the same banner — it is not
+        # advancing through prompts, just re-displaying the login screen.
+        if latest_banner == previous_banner:
+            break
         # Stop when no prompt was detected AND the new banner has no
         # prompt either (servers like Mystic BBS send a non-interactive
         # preamble before the real botcheck prompt).
-        if prompt_response == b"\r\n" and _detect_yn_prompt(latest_banner) == b"\r\n":
+        if detected is None and _detect_yn_prompt(latest_banner) is None:
             break
     banner_after = b"".join(after_chunks)
 

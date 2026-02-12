@@ -17,6 +17,14 @@ History
   * enhancement: default ``--colormatch`` palette changed from EGA to VGA.
   * bugfix: "robot" guard now uses a narrow character (space) instead of a
     wide Unicode character, allowing retro terminal emulators to pass.
+  * enhancement: ``telnetlib3-fingerprint`` detects "HIT RETURN" and "PRESS
+    ENTER" prompts and responds automatically during banner collection.
+  * bugfix: ATASCII codec now normalizes CR and CRLF to the native ATASCII
+    EOL (0x9B) during encoding, so the Return key works correctly with
+    ``telnetlib3-client --encoding=atascii``.
+  * bugfix: ``telnetlib3-fingerprint`` re-encodes prompt responses for retro
+    encodings (ATASCII) so that servers receive the correct EOL byte instead
+    of ASCII CR/LF.
   * removed: unused ``get_next_ascii()`` from :mod:`telnetlib3.server_shell`.
 
 2.4.0

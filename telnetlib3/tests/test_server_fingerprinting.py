@@ -759,8 +759,8 @@ async def test_probe_skipped_when_closing(tmp_path):
 @pytest.mark.parametrize(
     "banner,expected",
     [
-        pytest.param(b"Welcome\r\n", b"\r\n", id="no_prompt"),
-        pytest.param(b"", b"\r\n", id="empty"),
+        pytest.param(b"Welcome\r\n", None, id="no_prompt"),
+        pytest.param(b"", None, id="empty"),
         pytest.param(b"Continue? (yes/no) ", b"yes\r\n", id="yes_no_parens"),
         pytest.param(b"Continue? (y/n) ", b"y\r\n", id="y_n_parens"),
         pytest.param(b"Accept terms? [Yes/No]:", b"yes\r\n", id="yes_no_brackets"),
@@ -768,30 +768,14 @@ async def test_probe_skipped_when_closing(tmp_path):
         pytest.param(b"Accept YES/NO now", b"yes\r\n", id="yes_no_uppercase"),
         pytest.param(b"Confirm y/n\r\n> ", b"y\r\n", id="y_n_trailing_newline"),
         pytest.param(b"Type yes/no please", b"yes\r\n", id="yes_no_space_delimited"),
-        pytest.param(b"systemd/network", b"\r\n", id="false_positive_word"),
-        pytest.param(b"beyond", b"\r\n", id="substring_y_n_not_matched"),
-        pytest.param(b"Enter your name:", b"\r\n", id="name_prompt_no_who"),
-        pytest.param(b"Type 'help' for a list of commands:", b"help\r\n", id="help_single_quotes"),
-        pytest.param(b'Enter your name (or "help"):', b"help\r\n", id="help_double_quotes"),
-        pytest.param(
-            b"HELP               to see available commands.\r\n",
-            b"help\r\n",
-            id="help_bare_command_listing",
-        ),
-        pytest.param(b"Type HELP for info", b"help\r\n", id="help_bare_mid_sentence"),
-        pytest.param(b"helpful tips", b"\r\n", id="help_inside_word_not_matched"),
-        pytest.param(
-            b"connect <name>\r\n"
-            b"WHO                to see players connected.\r\n"
-            b"HELP               to see available commands.\r\n",
-            b"help\r\n",
-            id="help_from_command_listing",
-        ),
+        pytest.param(b"systemd/network", None, id="false_positive_word"),
+        pytest.param(b"beyond", None, id="substring_y_n_not_matched"),
+        pytest.param(b"Enter your name:", None, id="name_prompt_no_who"),
         pytest.param(b"Color? ", b"y\r\n", id="color_question"),
         pytest.param(b"Do you want color? ", b"y\r\n", id="color_in_sentence"),
         pytest.param(b"ANSI COLOR? ", b"y\r\n", id="color_uppercase"),
         pytest.param(b"color ? ", b"y\r\n", id="color_space_before_question"),
-        pytest.param(b"colorful display", b"\r\n", id="color_no_question_mark"),
+        pytest.param(b"colorful display", None, id="color_no_question_mark"),
         pytest.param(
             b"Select charset:\r\n1) ASCII\r\n2) ISO-8859-1\r\n5) UTF-8\r\n",
             b"5\r\n",
@@ -807,7 +791,7 @@ async def test_probe_skipped_when_closing(tmp_path):
         pytest.param(b"[5] UTF-8\r\nSelect: ", b"5\r\n", id="menu_utf8_brackets"),
         pytest.param(b"[2] utf-8\r\n", b"2\r\n", id="menu_utf8_brackets_lower"),
         pytest.param(b"3. UTF-8\r\n", b"3\r\n", id="menu_utf8_dot"),
-        pytest.param(b"1) ASCII\r\n2) Latin-1\r\n", b"\r\n", id="menu_no_utf8"),
+        pytest.param(b"1) ASCII\r\n2) Latin-1\r\n", None, id="menu_no_utf8"),
         pytest.param(b"(1) Ansi\r\n(2) VT100\r\n", b"1\r\n", id="menu_ansi_parens"),
         pytest.param(b"[1] ANSI\r\n[2] VT100\r\n", b"1\r\n", id="menu_ansi_brackets"),
         pytest.param(b"(3) ansi\r\n", b"3\r\n", id="menu_ansi_lowercase"),
@@ -830,7 +814,7 @@ async def test_probe_skipped_when_closing(tmp_path):
         pytest.param(b"GB/Big5\r\n", b"big5\r\n", id="gb_big5_mixed_case"),
         pytest.param(b"Select: GB / Big5 ", b"big5\r\n", id="gb_big5_spaces"),
         pytest.param(b"gb/big 5\r\n", b"big5\r\n", id="gb_big5_space_before_5"),
-        pytest.param(b"bigfoot5", b"\r\n", id="big5_inside_word_not_matched"),
+        pytest.param(b"bigfoot5", None, id="big5_inside_word_not_matched"),
         pytest.param(
             b"Press [.ESC.] twice within 15 seconds to CONTINUE...",
             b"\x1b\x1b",
@@ -860,6 +844,17 @@ async def test_probe_skipped_when_closing(tmp_path):
             b"\x1b[1;1H\x1b[2JPress [.ESC.] twice within 15 seconds to CONTINUE...",
             b"\x1b\x1b",
             id="esc_twice_after_clear_screen",
+        ),
+        pytest.param(b"HIT RETURN:", b"\r\n", id="hit_return"),
+        pytest.param(b"Hit Return.", b"\r\n", id="hit_return_lower"),
+        pytest.param(b"PRESS RETURN:", b"\r\n", id="press_return"),
+        pytest.param(b"Press Enter:", b"\r\n", id="press_enter"),
+        pytest.param(b"press enter", b"\r\n", id="press_enter_lower"),
+        pytest.param(b"Hit Enter to continue", b"\r\n", id="hit_enter"),
+        pytest.param(
+            b"\x1b[1mHIT RETURN:\x1b[0m",
+            b"\r\n",
+            id="hit_return_ansi_wrapped",
         ),
         pytest.param(
             b"\x1b[31mColor? \x1b[0m",
@@ -969,28 +964,6 @@ async def test_fingerprinting_shell_no_yn_prompt(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_fingerprinting_shell_help_prompt(tmp_path):
-    """Banner with 'help' option causes 'help\\r\\n' response."""
-    save_path = str(tmp_path / "result.json")
-    reader = MockReader([b"Type 'help' for a list of commands:"])
-    writer = MockWriter(will_options=[fps.SGA])
-
-    await sfp.fingerprinting_client_shell(
-        reader,
-        writer,
-        host="localhost",
-        port=23,
-        save_path=save_path,
-        silent=True,
-        banner_quiet_time=0.01,
-        banner_max_wait=0.01,
-        mssp_wait=0.01,
-    )
-
-    assert b"help\r\n" in writer._writes
-
-
-@pytest.mark.asyncio
 async def test_fingerprinting_shell_multi_prompt(tmp_path):
     """Server asks color first, then presents a UTF-8 charset menu."""
     save_path = str(tmp_path / "result.json")
@@ -1050,10 +1023,9 @@ async def test_fingerprinting_shell_multi_prompt_max_replies(tmp_path):
     """Loop does not exceed _MAX_PROMPT_REPLIES rounds."""
     save_path = str(tmp_path / "result.json")
     writer = MockWriter(will_options=[fps.SGA])
-    reader = InteractiveMockReader(
-        [b"Color? "] * (sfp._MAX_PROMPT_REPLIES + 1),
-        writer,
-    )
+    banners = [f"Color? (round {i}) ".encode()
+                for i in range(sfp._MAX_PROMPT_REPLIES + 1)]
+    reader = InteractiveMockReader(banners, writer)
 
     await sfp.fingerprinting_client_shell(
         reader,
@@ -1271,3 +1243,17 @@ def test_virtual_cursor_ansi_stripped():
     cursor = sfp._VirtualCursor()
     cursor.advance(b"\x1b[31mX\x1b[0m")
     assert cursor.col == 2
+
+
+@pytest.mark.parametrize("response,encoding,expected", [
+    pytest.param(b"\r\n", "atascii", b"\x9b", id="atascii_bare_return"),
+    pytest.param(b"yes\r\n", "atascii", b"\xf9\xe5\xf3\x9b", id="atascii_yes"),
+    pytest.param(b"y\r\n", "atascii", b"\xf9\x9b", id="atascii_y"),
+    pytest.param(b"\r\n", "ascii", b"\r\n", id="ascii_unchanged"),
+    pytest.param(b"\r\n", "utf-8", b"\r\n", id="utf8_unchanged"),
+    pytest.param(b"yes\r\n", "utf-8", b"yes\r\n", id="utf8_yes_unchanged"),
+    pytest.param(b"\x1b\x1b", "atascii", b"\x1b\x1b", id="atascii_esc_esc"),
+])
+def test_reencode_prompt(response, encoding, expected):
+    import telnetlib3  # noqa: F401 - registers codecs
+    assert sfp._reencode_prompt(response, encoding) == expected
