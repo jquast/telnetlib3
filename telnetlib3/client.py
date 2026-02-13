@@ -615,9 +615,13 @@ async def run_client() -> None:
 
         shell_callback = _color_shell
 
-    # Wrap shell to inject raw_mode flag for terminal mode handling
+    # Wrap shell to inject raw_mode flag and input translation for retro encodings
     raw_mode: bool = args.get("raw_mode", False)
     if raw_mode:
+        from .client_shell import _INPUT_XLAT  # pylint: disable=import-outside-toplevel
+
+        enc_key = (args.get("encoding", "") or "").lower()
+        input_xlat = _INPUT_XLAT.get(enc_key, {})
         _inner_shell = shell_callback
 
         async def _raw_shell(
@@ -625,6 +629,8 @@ async def run_client() -> None:
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
             writer_arg._raw_mode = True  # type: ignore[union-attr]
+            if input_xlat:
+                writer_arg._input_xlat = input_xlat  # type: ignore[union-attr]
             await _inner_shell(reader, writer_arg)
 
         shell_callback = _raw_shell

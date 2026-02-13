@@ -6,7 +6,7 @@
 import sys
 import asyncio
 import collections
-from typing import Any, Tuple, Union, Optional
+from typing import Any, Dict, Tuple, Union, Optional
 
 # local
 from . import accessories
@@ -14,6 +14,22 @@ from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
 __all__ = ("telnet_client_shell",)
+
+# Input byte translation tables for retro encodings in raw mode.
+# Maps terminal keyboard bytes to the raw bytes the BBS expects.
+# Applied BEFORE decoding/encoding, bypassing the codec entirely for
+# characters that can't round-trip through Unicode (e.g. ATASCII 0x7E
+# shares its Unicode codepoint U+25C0 with 0xFE).
+_INPUT_XLAT: Dict[str, Dict[int, int]] = {
+    "atascii": {
+        0x7F: 0x7E,  # DEL → ATASCII backspace (byte 0x7E)
+        0x08: 0x7E,  # BS  → ATASCII backspace (byte 0x7E)
+    },
+    "petscii": {
+        0x7F: 0x14,  # DEL → PETSCII DEL (byte 0x14)
+        0x08: 0x14,  # BS  → PETSCII DEL (byte 0x14)
+    },
+}
 
 
 if sys.platform == "win32":
@@ -266,7 +282,15 @@ else:
                                 except Exception:  # pylint: disable=broad-exception-caught
                                     pass
                             break
-                        telnet_writer.write(inp.decode())
+                        _xlat = getattr(telnet_writer, '_input_xlat', None)
+                        if _xlat and any(b in _xlat for b in inp):
+                            for b in inp:
+                                if b in _xlat:
+                                    telnet_writer._write(bytes([_xlat[b]]))
+                                else:
+                                    telnet_writer.write(bytes([b]).decode())
+                        else:
+                            telnet_writer.write(inp.decode())
                         stdin_task = accessories.make_reader_task(stdin)
                         wait_for.add(stdin_task)
                     else:
