@@ -181,6 +181,42 @@ class TelnetClient(client_base.BaseClient):
         env = {k: v for k, v in all_env.items() if k in self._send_environ}
         return {key: env.get(key, "") for key in keys} or env
 
+    @staticmethod
+    def _normalize_charset_name(name: str) -> str:
+        """Normalize server-advertised charset names for :func:`codecs.lookup`.
+
+        Servers sometimes advertise non-standard encoding names that Python's
+        codec registry does not recognise.  This tries progressively simpler
+        variations until one resolves:
+
+        1. Original name (spaces → hyphens)
+        2. Leading zeros stripped from numeric parts (``iso-8859-02`` → ``iso-8859-2``)
+        3. Hyphens removed entirely (``cp-1250`` → ``cp1250``)
+        4. Hyphens removed from all but the first segment (``iso-8859-2`` kept)
+
+        :param name: Raw charset name from the server.
+        :returns: Normalized name suitable for :func:`codecs.lookup`.
+        """
+        import re  # pylint: disable=import-outside-toplevel
+        base = name.strip().replace(' ', '-')
+        # Strip leading zeros from numeric segments: iso-8859-02 → iso-8859-2
+        no_leading_zeros = re.sub(r'-0+(\d)', r'-\1', base)
+        # All hyphens removed: cp-1250 → cp1250
+        no_hyphens = base.replace('-', '')
+        # Keep first hyphen-segment, collapse the rest: iso-8859-2 stays
+        parts = no_leading_zeros.split('-')
+        if len(parts) > 2:
+            partial = parts[0] + '-' + ''.join(parts[1:])
+        else:
+            partial = no_leading_zeros
+        for candidate in (base, no_leading_zeros, no_hyphens, partial):
+            try:
+                codecs.lookup(candidate)
+                return candidate
+            except LookupError:
+                continue
+        return base
+
     def send_charset(self, offered: List[str]) -> str:
         """
         Callback for responding to CHARSET requests.
@@ -218,7 +254,9 @@ class TelnetClient(client_base.BaseClient):
 
         for offer in offered:
             try:
-                canon = codecs.lookup(offer).name
+                canon = codecs.lookup(
+                    self._normalize_charset_name(offer)
+                ).name
 
                 # Record first viable encoding
                 if first_viable is None:

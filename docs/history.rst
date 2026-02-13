@@ -25,6 +25,14 @@ History
   * bugfix: ``telnetlib3-fingerprint`` re-encodes prompt responses for retro
     encodings (ATASCII) so that servers receive the correct EOL byte instead
     of ASCII CR/LF.
+  * bugfix: ``telnetlib3-fingerprint`` no longer crashes with
+    ``LookupError: unknown encoding`` when the server negotiates a charset
+    that Python cannot look up (e.g. ``atascii`` without the codec registered).
+    Banner formatting now falls back to ``latin-1``.
+  * bugfix: CHARSET negotiation now normalises non-standard encoding names
+    advertised by servers — ``iso-8859-02`` → ``iso-8859-2``,
+    ``cp-1250`` → ``cp1250``, etc. — so they resolve in Python's codec
+    registry instead of being silently rejected.
   * removed: unused ``get_next_ascii()`` from :mod:`telnetlib3.server_shell`.
 
 2.4.0

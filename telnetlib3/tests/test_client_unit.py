@@ -62,6 +62,36 @@ async def test_send_charset_null_default():
     assert c.send_charset(["utf-8"]) == "utf-8"
 
 
+@pytest.mark.parametrize(
+    "offered,expected",
+    [
+        pytest.param(["iso-8859-02"], "iso-8859-02", id="iso_leading_zero"),
+        pytest.param(["iso 8859-02"], "iso 8859-02", id="iso_space_leading_zero"),
+        pytest.param(["cp-1250"], "cp-1250", id="cp_hyphen"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_send_charset_normalization(offered, expected):
+    c = _make_client(encoding=False)
+    c.default_encoding = None
+    assert c.send_charset(offered) == expected
+
+
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        pytest.param("iso-8859-02", "iso-8859-2", id="iso_leading_zero"),
+        pytest.param("iso 8859-02", "iso-8859-2", id="iso_space_leading_zero"),
+        pytest.param("cp-1250", "cp1250", id="cp_hyphen"),
+        pytest.param("UTF-8", "UTF-8", id="passthrough"),
+        pytest.param("iso-8859-15", "iso-8859-15", id="no_leading_zero"),
+        pytest.param("x-penn-def", "x-penn-def", id="unknown_passthrough"),
+    ],
+)
+def test_normalize_charset_name(name, expected):
+    assert cl.TelnetClient._normalize_charset_name(name) == expected
+
+
 @pytest.mark.asyncio
 async def test_send_env():
     c = _make_client(term="xterm", cols=132, rows=43)

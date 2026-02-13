@@ -72,9 +72,11 @@ _PROBE_TIMEOUT = 0.5
 _MAX_PROMPT_REPLIES = 5
 _JQ = shutil.which("jq")
 
-# Match "yes/no" or "y/n" surrounded by non-alphanumeric chars (or at
-# string boundaries).  Used to auto-answer confirmation prompts.
-_YN_RE = re.compile(rb"(?i)(?:^|[^a-zA-Z0-9])(yes/no|y/n)(?:[^a-zA-Z0-9]|$)")
+# Match "yes/no", "y/n", or "(Yes|No)" surrounded by non-alphanumeric
+# chars (or at string boundaries).  Used to auto-answer confirmation prompts.
+_YN_RE = re.compile(
+    rb"(?i)(?:^|[^a-zA-Z0-9])(yes/no|y/n|\(yes\|no\))(?:[^a-zA-Z0-9]|$)"
+)
 
 # Match "color?" prompts — many MUDs ask if the user wants color.
 _COLOR_RE = re.compile(rb"(?i)color\s*\?")
@@ -248,7 +250,7 @@ def _detect_yn_prompt(  # pylint: disable=too-many-return-statements
     match = _YN_RE.search(stripped)
     if match:
         token = match.group(1).lower()
-        if token == b"yes/no":
+        if token in (b"yes/no", b"(yes|no)"):
             return _PromptResult(b"yes\r\n")
         return _PromptResult(b"y\r\n")
     if _COLOR_RE.search(stripped):
@@ -718,11 +720,17 @@ def _format_banner(data: bytes, encoding: str = "utf-8") -> str:
     rather than replaced with ``U+FFFD``.  JSON serialization escapes
     them as ``\\udcXX``, which round-trips through :func:`json.load`.
 
+    Falls back to ``latin-1`` when the requested encoding is unavailable
+    (e.g. a server-advertised charset that Python does not recognise).
+
     :param data: Raw bytes from the server.
     :param encoding: Character encoding to use for decoding.
     :returns: Decoded text string (raw bytes preserved as surrogates).
     """
-    return data.decode(encoding, errors="surrogateescape")
+    try:
+        return data.decode(encoding, errors="surrogateescape")
+    except LookupError:
+        return data.decode("latin-1")
 
 
 async def _await_mssp_data(writer: TelnetWriter, deadline: float) -> None:

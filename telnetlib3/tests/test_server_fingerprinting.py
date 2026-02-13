@@ -266,6 +266,19 @@ def test_format_banner_json_roundtrip():
     assert raw == b"Hello\xb1\xb2World"
 
 
+def test_format_banner_unknown_encoding_fallback():
+    """Unknown encoding falls back to latin-1 instead of raising LookupError."""
+    result = sfp._format_banner(b"Hello\xb1World", encoding="x-no-such-codec")
+    assert result == "Hello\xb1World"
+    assert result == b"Hello\xb1World".decode("latin-1")
+
+
+def test_format_banner_atascii():
+    """ATASCII encoding decodes banner bytes through the registered codec."""
+    result = sfp._format_banner(b"Hello\x9b", encoding="atascii")
+    assert result == "Hello\n"
+
+
 @pytest.mark.asyncio
 async def test_read_banner():
     reader = MockReader([b"Welcome to BBS\r\n"])
@@ -774,6 +787,8 @@ async def test_probe_skipped_when_closing(tmp_path):
         pytest.param(b"Accept YES/NO now", b"yes\r\n", id="yes_no_uppercase"),
         pytest.param(b"Confirm y/n\r\n> ", b"y\r\n", id="y_n_trailing_newline"),
         pytest.param(b"Type yes/no please", b"yes\r\n", id="yes_no_space_delimited"),
+        pytest.param(b"Continue? (Yes|No) ", b"yes\r\n", id="yes_pipe_no_parens"),
+        pytest.param(b"Accept? (YES|NO):", b"yes\r\n", id="yes_pipe_no_upper"),
         pytest.param(b"systemd/network", None, id="false_positive_word"),
         pytest.param(b"beyond", None, id="substring_y_n_not_matched"),
         pytest.param(b"Enter your name:", None, id="name_prompt_no_who"),
