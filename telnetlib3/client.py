@@ -575,7 +575,16 @@ async def run_client() -> None:
             PALETTES,
             ColorConfig,
             ColorFilter,
+            PetsciiColorFilter,
         )
+
+        # Auto-select PETSCII filter for petscii encoding or explicit c64 palette
+        encoding_name: str = args.get("encoding", "") or ""
+        is_petscii = encoding_name.lower() in ("petscii", "cbm", "commodore", "c64", "c128")
+        if colormatch == "petscii":
+            colormatch = "c64"
+        if is_petscii and colormatch == "ega":
+            colormatch = "c64"
 
         if colormatch not in PALETTES:
             print(
@@ -590,7 +599,10 @@ async def run_client() -> None:
             background_color=args["background_color"],
             reverse_video=args["reverse_video"],
         )
-        color_filter = ColorFilter(color_config)
+        if is_petscii or colormatch == "c64":
+            color_filter_obj: object = PetsciiColorFilter(color_config)
+        else:
+            color_filter_obj = ColorFilter(color_config)
         original_shell = shell_callback
 
         async def _color_shell(
@@ -598,10 +610,24 @@ async def run_client() -> None:
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
             # pylint: disable-next=protected-access
-            writer_arg._color_filter = color_filter  # type: ignore[union-attr]
+            writer_arg._color_filter = color_filter_obj  # type: ignore[union-attr]
             await original_shell(reader, writer_arg)
 
         shell_callback = _color_shell
+
+    # Wrap shell to inject raw_mode flag for terminal mode handling
+    raw_mode: bool = args.get("raw_mode", False)
+    if raw_mode:
+        _inner_shell = shell_callback
+
+        async def _raw_shell(
+            reader: Union[TelnetReader, TelnetReaderUnicode],
+            writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
+        ) -> None:
+            writer_arg._raw_mode = True  # type: ignore[union-attr]
+            await _inner_shell(reader, writer_arg)
+
+        shell_callback = _raw_shell
 
     # Build connection kwargs explicitly to avoid pylint false positive
     connection_kwargs: Dict[str, Any] = {
@@ -651,6 +677,13 @@ def _get_argument_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument("--force-binary", action="store_true", help="force encoding", default=True)
+    parser.add_argument(
+        "--raw-mode",
+        action="store_true",
+        default=False,
+        help="force raw terminal mode (no line buffering, no local echo). "
+        "Auto-enabled for atascii and petscii encodings.",
+    )
     parser.add_argument(
         "--connect-minwait", default=0, type=float, help="shell delay for negotiation"
     )
@@ -758,8 +791,10 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
     from .encodings import FORCE_BINARY_ENCODINGS  # pylint: disable=import-outside-toplevel
 
     force_binary = args.force_binary
+    raw_mode = args.raw_mode
     if args.encoding.lower().replace('-', '_') in FORCE_BINARY_ENCODINGS:
         force_binary = True
+        raw_mode = True
 
     return {
         "host": args.host,
@@ -783,6 +818,7 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "color_contrast": args.color_contrast,
         "background_color": _parse_background_color(args.background_color),
         "reverse_video": args.reverse_video,
+        "raw_mode": raw_mode,
     }
 
 

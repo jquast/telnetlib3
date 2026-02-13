@@ -279,6 +279,43 @@ def test_format_banner_atascii():
     assert result == "Hello\n"
 
 
+def test_format_banner_petscii_color():
+    """PETSCII color codes are translated to ANSI 24-bit RGB in banners."""
+    result = sfp._format_banner(b"\x1c\xc8\xc9", encoding="petscii")
+    assert "\x1b[38;2;" in result
+    assert "HI" in result
+    assert "\x1c" not in result
+
+
+def test_format_banner_petscii_rvs():
+    """PETSCII RVS ON/OFF are translated to ANSI reverse in banners."""
+    result = sfp._format_banner(b"\x12\xc8\xc9\x92", encoding="petscii")
+    assert "\x1b[7m" in result
+    assert "\x1b[27m" in result
+
+
+@pytest.mark.parametrize(
+    "data,expected",
+    [
+        pytest.param(b"\x1b[0;0 D", "cp437", id="cp437_font0"),
+        pytest.param(b"\x1b[0;36 D", "atascii", id="atascii_font36"),
+        pytest.param(b"\x1b[0;32 D", "petscii", id="petscii_c64_upper"),
+        pytest.param(b"\x1b[0;40 D", "cp437", id="topaz_plus_font40"),
+        pytest.param(b"\x1b[1;36 D", "atascii", id="atascii_secondary"),
+        pytest.param(b"hello world", None, id="no_sequence"),
+        pytest.param(b"\x1b[0;255 D", None, id="unknown_font_id"),
+    ],
+)
+def test_detect_syncterm_font(data, expected):
+    assert sfp.detect_syncterm_font(data) == expected
+
+
+def test_syncterm_font_in_banner():
+    """Font sequence embedded in banner data is detected."""
+    data = b"Welcome\x1b[0;36 Dto the BBS"
+    assert sfp.detect_syncterm_font(data) == "atascii"
+
+
 @pytest.mark.asyncio
 async def test_read_banner():
     reader = MockReader([b"Welcome to BBS\r\n"])
@@ -886,6 +923,21 @@ async def test_probe_skipped_when_closing(tmp_path):
             b"\x1b[1mContinue? (y/n)\x1b[0m ",
             b"y\r\n",
             id="yn_ansi_wrapped",
+        ),
+        pytest.param(
+            b"More: (Y)es, (N)o, (C)ontinuous?",
+            b"C\r\n",
+            id="more_continuous",
+        ),
+        pytest.param(
+            b"\x1b[33mMore: (Y)es, (N)o, (C)ontinuous?\x1b[0m",
+            b"C\r\n",
+            id="more_continuous_ansi",
+        ),
+        pytest.param(
+            b"more (Y/N/C)ontinuous: ",
+            b"C\r\n",
+            id="more_ync_compact",
         ),
     ],
 )

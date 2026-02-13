@@ -110,10 +110,90 @@ _RETURN_PROMPT_RE = re.compile(
     rb"(?i)(?:hit|press)\s+(?:return|enter)\s*[:\.]?"
 )
 
+# Match "More: (Y)es, (N)o, (C)ontinuous?" pagination prompts.
+# Answer "C" (Continuous) to disable pagination and collect the full banner.
+_MORE_PROMPT_RE = re.compile(
+    rb"(?i)more[:\s]*\(?[yY]\)?.*\(?[cC]\)?\s*(?:ontinuous|ont)"
+)
+
 # Match DSR (Device Status Report) request: ESC [ 6 n.
 # Servers send this to detect ANSI-capable terminals; we reply with a
 # Cursor Position Report (CPR) so the server sees us as ANSI-capable.
 _DSR_RE = re.compile(rb"\x1b\[6n")
+
+# Match SyncTERM/CTerm font selection: CSI Ps1 ; Ps2 SP D
+# Reference: https://syncterm.bbsdev.net/cterm.html
+# Ps1 = font page (0 = primary), Ps2 = font ID (0-255).
+_SYNCTERM_FONT_RE = re.compile(rb"\x1b\[(\d+);(\d+) D")
+
+#: Map SyncTERM font IDs to Python codec names.
+#: Font IDs from CTerm spec / Synchronet SBBS / x84 SYNCTERM_FONTMAP.
+SYNCTERM_FONT_ENCODINGS: dict[int, str] = {
+    0: "cp437",
+    1: "cp1251",
+    2: "koi8-r",
+    3: "iso-8859-2",
+    4: "iso-8859-4",
+    5: "cp866",
+    6: "iso-8859-9",
+    8: "iso-8859-8",
+    9: "koi8-u",
+    10: "iso-8859-15",
+    11: "iso-8859-4",
+    12: "koi8-r",
+    13: "iso-8859-4",
+    14: "iso-8859-5",
+    16: "iso-8859-15",
+    17: "cp850",
+    18: "cp850",
+    20: "cp1251",
+    21: "iso-8859-7",
+    22: "koi8-r",
+    23: "iso-8859-4",
+    24: "iso-8859-1",
+    25: "cp866",
+    26: "cp437",
+    27: "cp866",
+    29: "cp866",
+    30: "iso-8859-1",
+    31: "cp1131",
+    32: "petscii",
+    33: "petscii",
+    34: "petscii",
+    35: "petscii",
+    36: "atascii",
+    37: "cp437",
+    38: "cp437",
+    39: "cp437",
+    40: "cp437",
+    41: "cp437",
+    42: "cp437",
+}
+
+#: Encodings that require ``force_binary`` for high-bit bytes.
+_SYNCTERM_BINARY_ENCODINGS = frozenset({
+    "petscii", "atascii",
+})
+
+
+log = logging.getLogger(__name__)
+
+
+def detect_syncterm_font(data: bytes) -> str | None:
+    """Extract encoding from a SyncTERM font selection sequence in *data*.
+
+    Scans *data* for ``CSI Ps1 ; Ps2 SP D`` and returns the corresponding
+    Python codec name from :data:`SYNCTERM_FONT_ENCODINGS`, or ``None``
+    if no font sequence is found or the font ID is unrecognised.
+
+    :param data: Raw bytes that may contain escape sequences.
+    :returns: Encoding name or ``None``.
+    """
+    match = _SYNCTERM_FONT_RE.search(data)
+    if match is None:
+        return None
+    font_id = int(match.group(2))
+    return SYNCTERM_FONT_ENCODINGS.get(font_id)
 
 
 #: Encodings where standard telnet CR+LF must be re-encoded to the
@@ -247,6 +327,8 @@ def _detect_yn_prompt(  # pylint: disable=too-many-return-statements
     stripped = _ANSI_STRIP_RE.sub(b"", banner)
     if _ESC_TWICE_RE.search(stripped):
         return _PromptResult(b"\x1b\x1b")
+    if _MORE_PROMPT_RE.search(stripped):
+        return _PromptResult(b"C\r\n")
     match = _YN_RE.search(stripped)
     if match:
         token = match.group(1).lower()
@@ -427,8 +509,14 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
         {
             "scan_type": scan_type,
             "encoding": writer.environ_encoding,
-            "banner_before_return": _format_banner(banner_before, encoding=writer.environ_encoding),
-            "banner_after_return": _format_banner(banner_after, encoding=writer.environ_encoding),
+            "banner_before_return": _format_banner(
+                banner_before,
+                encoding=writer.environ_encoding,
+            ),
+            "banner_after_return": _format_banner(
+                banner_after,
+                encoding=writer.environ_encoding,
+            ),
             "timing": {"probe": probe_time, "total": time.time() - start_time},
         }
     )
@@ -723,14 +811,24 @@ def _format_banner(data: bytes, encoding: str = "utf-8") -> str:
     Falls back to ``latin-1`` when the requested encoding is unavailable
     (e.g. a server-advertised charset that Python does not recognise).
 
+    When *encoding* is ``petscii``, inline PETSCII color control codes
+    are translated to ANSI 24-bit RGB SGR sequences using the VIC-II
+    C64 palette so the saved banner is human-readable with colors.
+
     :param data: Raw bytes from the server.
     :param encoding: Character encoding to use for decoding.
     :returns: Decoded text string (raw bytes preserved as surrogates).
     """
     try:
-        return data.decode(encoding, errors="surrogateescape")
+        text = data.decode(encoding, errors="surrogateescape")
     except LookupError:
-        return data.decode("latin-1")
+        text = data.decode("latin-1")
+
+    if encoding.lower() in ("petscii", "cbm", "commodore", "c64", "c128"):
+        from .color_filter import PetsciiColorFilter  # pylint: disable=import-outside-toplevel
+        text = PetsciiColorFilter().filter(text)
+
+    return text
 
 
 async def _await_mssp_data(writer: TelnetWriter, deadline: float) -> None:
@@ -835,6 +933,15 @@ async def _read_banner_until_quiet(
                 await writer.drain()
             elif cursor is not None:
                 cursor.advance(chunk)
+            if writer is not None:
+                font_enc = detect_syncterm_font(chunk)
+                if font_enc is not None:
+                    log.debug("SyncTERM font switch detected: %s", font_enc)
+                    writer.environ_encoding = font_enc
+                    protocol = writer.protocol
+                    if (protocol is not None
+                            and font_enc in _SYNCTERM_BINARY_ENCODINGS):
+                        protocol.force_binary = True
             chunks.append(chunk)
         except (asyncio.TimeoutError, EOFError):
             break

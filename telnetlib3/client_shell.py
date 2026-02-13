@@ -73,11 +73,14 @@ else:
 
         def determine_mode(self, mode: "Terminal.ModeDef") -> "Terminal.ModeDef":
             """Return copy of 'mode' with changes suggested for telnet connection."""
-            if not self.telnet_writer.will_echo:
-                # return mode as-is
+            raw_mode = getattr(self.telnet_writer, '_raw_mode', False)
+            if not self.telnet_writer.will_echo and not raw_mode:
                 self.telnet_writer.log.debug("local echo, linemode")
                 return mode
-            self.telnet_writer.log.debug("server echo, kludge mode")
+            if raw_mode and not self.telnet_writer.will_echo:
+                self.telnet_writer.log.debug("raw mode forced, no server echo")
+            else:
+                self.telnet_writer.log.debug("server echo, kludge mode")
 
             # "Raw mode", see tty.py function setraw.  This allows sending
             # of ^J, ^C, ^S, ^\, and others, which might otherwise
@@ -171,8 +174,10 @@ else:
 
         with Terminal(telnet_writer=telnet_writer) as term:
             linesep = "\n"
-            if term._istty and telnet_writer.will_echo:  # pylint: disable=protected-access
-                linesep = "\r\n"
+            if term._istty:  # pylint: disable=protected-access
+                _raw = getattr(telnet_writer, '_raw_mode', False)
+                if telnet_writer.will_echo or _raw:
+                    linesep = "\r\n"
             stdin, stdout = await term.make_stdio()
             escape_name = accessories.name_unicode(keyboard_escape)
             stdout.write(f"Escape character is '{escape_name}'.{linesep}".encode())
@@ -302,6 +307,8 @@ else:
                         _cf = getattr(telnet_writer, "_color_filter", None)
                         if _cf is not None:
                             out = _cf.filter(out)
+                        if getattr(telnet_writer, '_raw_mode', False):
+                            out = out.replace('\r\n', '\n').replace('\n', '\r\n')
                         stdout.write(out.encode() or b":?!?:")
                         telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
                         wait_for.add(telnet_task)

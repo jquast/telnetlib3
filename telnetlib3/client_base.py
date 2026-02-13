@@ -217,6 +217,9 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             self.log.log(TRACE, "recv %d bytes\n%s", len(data), hexdump(data, prefix="<<  "))
         self._last_received = datetime.datetime.now()
 
+        # Detect SyncTERM font switching sequences and auto-switch encoding.
+        self._detect_syncterm_font(data)
+
         # Enqueue and account for buffered size
         self._rx_queue.append(data)
         self._rx_bytes += len(data)
@@ -235,6 +238,21 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 except Exception:  # pylint: disable=broad-exception-caught
                     # Some transports may not support pause_reading; ignore.
                     pass
+
+    def _detect_syncterm_font(self, data: bytes) -> None:
+        """Scan *data* for SyncTERM font selection and switch encoding."""
+        if self.writer is None:
+            return
+        from .server_fingerprinting import (  # pylint: disable=import-outside-toplevel
+            detect_syncterm_font,
+            _SYNCTERM_BINARY_ENCODINGS,
+        )
+        encoding = detect_syncterm_font(data)
+        if encoding is not None:
+            self.log.debug("SyncTERM font switch: %s", encoding)
+            self.writer.environ_encoding = encoding
+            if encoding in _SYNCTERM_BINARY_ENCODINGS:
+                self.force_binary = True
 
     # public properties
 

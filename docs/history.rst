@@ -33,6 +33,27 @@ History
     advertised by servers — ``iso-8859-02`` → ``iso-8859-2``,
     ``cp-1250`` → ``cp1250``, etc. — so they resolve in Python's codec
     registry instead of being silently rejected.
+  * bugfix: ATASCII codec now maps bytes 0x0D and 0x0A to CR and LF instead
+    of graphics characters, matching PETSCII and Atari ST behaviour.  This
+    fixes garbled output (``🮂`` and ``◣`` in place of line breaks) when
+    connecting to Atari BBS systems over telnet.
+  * new: SyncTERM/CTerm font selection sequence detection
+    (``CSI Ps1 ; Ps2 SP D``).  Both ``telnetlib3-fingerprint`` and
+    ``telnetlib3-client`` now detect font switching and auto-switch
+    ``environ_encoding`` to the matching codec (e.g. font 36 = ATASCII,
+    32-35 = PETSCII, 0 = CP437, 40 = Topaz/CP437).
+  * enhancement: ``telnetlib3-fingerprint`` detects "More: (Y)es, (N)o,
+    (C)ontinuous?" pagination prompts and answers "C" (Continuous) to collect
+    the full banner without stalling.
+  * new: ``--raw-mode`` CLI option for ``telnetlib3-client`` — forces raw
+    terminal mode (no line buffering, no local echo) regardless of server
+    ECHO negotiation.  Auto-enabled for ATASCII and PETSCII encodings so
+    retro BBS connections work character-at-a-time like ``stty raw -echo``.
+  * new: PETSCII color translation — inline C64 color control codes are
+    translated to ANSI 24-bit RGB using the VIC-II palette (Pepto's colodore
+    reference).  ``telnetlib3-client --encoding=petscii`` displays colors;
+    ``telnetlib3-fingerprint`` saves colored banners.  RVS ON/OFF are
+    translated to ANSI reverse video.  New palette ``--colormatch=c64``.
   * removed: unused ``get_next_ascii()`` from :mod:`telnetlib3.server_shell`.
 
 2.4.0
