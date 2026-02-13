@@ -402,6 +402,8 @@ async def fingerprinting_client_shell(
         ``fingerprint_names.json`` without requiring moderation.
     :param environ_encoding: Encoding for NEW_ENVIRON data.  Default
         ``"ascii"`` per :rfc:`1572`; use ``"cp037"`` for EBCDIC hosts.
+        When set to something other than ``"ascii"``, SyncTERM font
+        switches will not override this encoding.
     :param scan_type: ``"quick"`` probes CORE + MUD options only (default);
         ``"full"`` includes all LEGACY options.
     :param mssp_wait: Max seconds since connect to wait for MSSP data.
@@ -411,6 +413,7 @@ async def fingerprinting_client_shell(
     :param banner_max_bytes: Maximum bytes per banner read call.
     """
     writer.environ_encoding = environ_encoding
+    writer._encoding_explicit = environ_encoding != "ascii"
     try:
         await _fingerprint_session(
             reader,
@@ -962,9 +965,14 @@ async def _read_banner_until_quiet(
                 font_enc = detect_syncterm_font(chunk)
                 if font_enc is not None:
                     log.debug("SyncTERM font switch detected: %s", font_enc)
-                    writer.environ_encoding = font_enc
-                    if cursor is not None:
-                        cursor.encoding = font_enc
+                    if getattr(writer, '_encoding_explicit', False):
+                        log.debug(
+                            "ignoring font switch, explicit encoding: %s",
+                            writer.environ_encoding)
+                    else:
+                        writer.environ_encoding = font_enc
+                        if cursor is not None:
+                            cursor.encoding = font_enc
                     protocol = writer.protocol
                     if (protocol is not None
                             and font_enc in _SYNCTERM_BINARY_ENCODINGS):

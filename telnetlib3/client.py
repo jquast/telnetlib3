@@ -543,28 +543,31 @@ async def run_client() -> None:
     always_will: set[bytes] = args["always_will"]
     always_do: set[bytes] = args["always_do"]
 
-    # Wrap client factory to inject always_will/always_do before negotiation
-    client_factory: Optional[Callable[..., client_base.BaseClient]] = None
-    if always_will or always_do:
+    # Wrap client factory to inject always_will/always_do and encoding
+    # flags before negotiation starts.
+    encoding_explicit = args["encoding"] not in ("utf8", "utf-8", False)
 
-        def _client_factory(**kwargs: Any) -> client_base.BaseClient:
-            client: TelnetClient
-            if sys.platform != "win32" and sys.stdin.isatty():
-                client = TelnetTerminalClient(**kwargs)
-            else:
-                client = TelnetClient(**kwargs)
-            orig_connection_made = client.connection_made
+    def _client_factory(**kwargs: Any) -> client_base.BaseClient:
+        client: TelnetClient
+        if sys.platform != "win32" and sys.stdin.isatty():
+            client = TelnetTerminalClient(**kwargs)
+        else:
+            client = TelnetClient(**kwargs)
+        orig_connection_made = client.connection_made
 
-            def _patched_connection_made(transport: asyncio.BaseTransport) -> None:
-                orig_connection_made(transport)
-                assert client.writer is not None
+        def _patched_connection_made(transport: asyncio.BaseTransport) -> None:
+            orig_connection_made(transport)
+            assert client.writer is not None
+            if always_will:
                 client.writer.always_will = always_will
+            if always_do:
                 client.writer.always_do = always_do
+            client.writer._encoding_explicit = encoding_explicit
 
-            client.connection_made = _patched_connection_made  # type: ignore[method-assign]
-            return client
+        client.connection_made = _patched_connection_made  # type: ignore[method-assign]
+        return client
 
-        client_factory = _client_factory
+    client_factory: Optional[Callable[..., client_base.BaseClient]] = _client_factory
 
     # Wrap the shell callback to inject color filter when enabled
     colormatch: str = args["colormatch"]
@@ -1009,6 +1012,7 @@ async def run_fingerprint_client() -> None:
             orig_connection_made(transport)
             assert client.writer is not None
             client.writer.environ_encoding = environ_encoding
+            client.writer._encoding_explicit = environ_encoding != "ascii"
             client.writer.always_will = fp_always_will
             client.writer.always_do = fp_always_do
 

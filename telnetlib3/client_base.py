@@ -240,7 +240,12 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                     pass
 
     def _detect_syncterm_font(self, data: bytes) -> None:
-        """Scan *data* for SyncTERM font selection and switch encoding."""
+        """Scan *data* for SyncTERM font selection and switch encoding.
+
+        When :attr:`_encoding_explicit` is set on the writer (indicating
+        the user passed ``--encoding``), the font switch is logged but
+        does not override the encoding.
+        """
         if self.writer is None:
             return
         from .server_fingerprinting import (  # pylint: disable=import-outside-toplevel
@@ -250,7 +255,12 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         encoding = detect_syncterm_font(data)
         if encoding is not None:
             self.log.debug("SyncTERM font switch: %s", encoding)
-            self.writer.environ_encoding = encoding
+            if getattr(self.writer, '_encoding_explicit', False):
+                self.log.debug(
+                    "ignoring font switch, explicit encoding: %s",
+                    self.writer.environ_encoding)
+            else:
+                self.writer.environ_encoding = encoding
             if encoding in _SYNCTERM_BINARY_ENCODINGS:
                 self.force_binary = True
 
