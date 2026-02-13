@@ -239,13 +239,22 @@ class _VirtualCursor:
     rendered at the expected width.  By tracking what the server writes
     between DSR requests and advancing the column using :func:`wcwidth.wcwidth`,
     the scanner produces CPR responses that satisfy the width check.
+
+    When *encoding* is set to a single-byte encoding like ``cp437``, raw
+    bytes are decoded with that encoding before measuring — this gives
+    correct column widths for servers that use SyncTERM font switching
+    where the raw bytes are not valid UTF-8.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, encoding: str = "utf-8") -> None:
         self.col = 1
+        self.encoding = encoding
+        self.dsr_requests = 0
+        self.dsr_replies = 0
 
     def cpr(self) -> bytes:
         """Return a CPR response (``ESC [ row ; col R``) at the current position."""
+        self.dsr_replies += 1
         return f"\x1b[1;{self.col}R".encode("ascii")
 
     def advance(self, data: bytes) -> None:
@@ -253,11 +262,13 @@ class _VirtualCursor:
 
         ANSI escape sequences are stripped first so they do not contribute
         to cursor movement.  Backspace and carriage return are handled.
+        Bytes are decoded using :attr:`encoding` so that single-byte
+        encodings like CP437 produce the correct character widths.
         """
         stripped = _ANSI_STRIP_RE.sub(b"", data)
         try:
-            text = stripped.decode("utf-8", errors="replace")
-        except Exception:
+            text = stripped.decode(self.encoding, errors="replace")
+        except (LookupError, Exception):
             text = stripped.decode("latin-1")
         for ch in text:
             cp = ord(ch)
@@ -437,7 +448,7 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
 ) -> None:
     """Run the fingerprint session (inner helper for error handling)."""
     start_time = time.time()
-    cursor = _VirtualCursor()
+    cursor = _VirtualCursor(encoding=writer.environ_encoding)
 
     # 1. Let straggler negotiation settle — read (and respond to DSR)
     #    instead of sleeping blind so early DSR requests get a CPR reply.
@@ -473,6 +484,7 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
         # so that subsequent banner data is decoded correctly.
         if prompt_result.encoding:
             writer.environ_encoding = prompt_result.encoding
+            cursor.encoding = prompt_result.encoding
             protocol = writer.protocol
             if protocol is not None:
                 protocol.force_binary = True
@@ -526,6 +538,8 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
                 encoding=writer.environ_encoding,
             ),
             "timing": {"probe": probe_time, "total": time.time() - start_time},
+            "dsr_requests": cursor.dsr_requests,
+            "dsr_replies": cursor.dsr_replies,
         }
     )
     if writer.mssp_data is not None:
@@ -887,6 +901,7 @@ def _respond_to_dsr(
         return
     pos = 0
     for match in _DSR_RE.finditer(chunk):
+        cursor.dsr_requests += 1
         cursor.advance(chunk[pos:match.start()])
         writer.write(cursor.cpr())
         pos = match.end()
@@ -948,6 +963,8 @@ async def _read_banner_until_quiet(
                 if font_enc is not None:
                     log.debug("SyncTERM font switch detected: %s", font_enc)
                     writer.environ_encoding = font_enc
+                    if cursor is not None:
+                        cursor.encoding = font_enc
                     protocol = writer.protocol
                     if (protocol is not None
                             and font_enc in _SYNCTERM_BINARY_ENCODINGS):
