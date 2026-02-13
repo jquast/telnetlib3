@@ -110,6 +110,12 @@ _RETURN_PROMPT_RE = re.compile(
     rb"(?i)(?:hit|press)\s+(?:return|enter)\s*[:\.]?"
 )
 
+# Match "press del/backspace" prompts from PETSCII BBS systems.
+# Respond with PETSCII DEL byte (0x14).
+_DEL_BACKSPACE_RE = re.compile(
+    rb"(?i)press\s+(?:del(?:/backspace)?|backspace(?:/del)?)\s*[:\.]?"
+)
+
 # Match "More: (Y)es, (N)o, (C)ontinuous?" pagination prompts.
 # Answer "C" (Continuous) to disable pagination and collect the full banner.
 _MORE_PROMPT_RE = re.compile(
@@ -345,6 +351,8 @@ def _detect_yn_prompt(  # pylint: disable=too-many-return-statements
         return _PromptResult(ansi_match.group(1) + b"\r\n")
     if _GB_BIG5_RE.search(stripped):
         return _PromptResult(b"big5\r\n", encoding="big5")
+    if _DEL_BACKSPACE_RE.search(stripped):
+        return _PromptResult(b"\x14")
     if _RETURN_PROMPT_RE.search(stripped):
         return _PromptResult(b"\r\n")
     return _PromptResult(None)
@@ -827,6 +835,8 @@ def _format_banner(data: bytes, encoding: str = "utf-8") -> str:
     if encoding.lower() in ("petscii", "cbm", "commodore", "c64", "c128"):
         from .color_filter import PetsciiColorFilter  # pylint: disable=import-outside-toplevel
         text = PetsciiColorFilter().filter(text)
+        # PETSCII uses CR (0x0D) as line terminator; normalize to LF.
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
 
     return text
 

@@ -573,14 +573,16 @@ async def run_client() -> None:
         # local
         from .color_filter import (  # pylint: disable=import-outside-toplevel
             PALETTES,
+            AtasciiControlFilter,
             ColorConfig,
             ColorFilter,
             PetsciiColorFilter,
         )
 
-        # Auto-select PETSCII filter for petscii encoding or explicit c64 palette
+        # Auto-select encoding-specific filters
         encoding_name: str = args.get("encoding", "") or ""
         is_petscii = encoding_name.lower() in ("petscii", "cbm", "commodore", "c64", "c128")
+        is_atascii = encoding_name.lower() in ("atascii", "atari8bit", "atari_8bit")
         if colormatch == "petscii":
             colormatch = "c64"
         if is_petscii and colormatch == "ega":
@@ -601,6 +603,8 @@ async def run_client() -> None:
         )
         if is_petscii or colormatch == "c64":
             color_filter_obj: object = PetsciiColorFilter(color_config)
+        elif is_atascii:
+            color_filter_obj = AtasciiControlFilter()
         else:
             color_filter_obj = ColorFilter(color_config)
         original_shell = shell_callback
@@ -618,10 +622,18 @@ async def run_client() -> None:
     # Wrap shell to inject raw_mode flag and input translation for retro encodings
     raw_mode: bool = args.get("raw_mode", False)
     if raw_mode:
-        from .client_shell import _INPUT_XLAT  # pylint: disable=import-outside-toplevel
+        from .client_shell import (  # pylint: disable=import-outside-toplevel
+            InputFilter,
+            _INPUT_SEQ_XLAT,
+            _INPUT_XLAT,
+        )
 
         enc_key = (args.get("encoding", "") or "").lower()
-        input_xlat = _INPUT_XLAT.get(enc_key, {})
+        byte_xlat = _INPUT_XLAT.get(enc_key, {})
+        seq_xlat = _INPUT_SEQ_XLAT.get(enc_key, {})
+        input_filter: Optional[InputFilter] = (
+            InputFilter(seq_xlat, byte_xlat) if (seq_xlat or byte_xlat) else None
+        )
         _inner_shell = shell_callback
 
         async def _raw_shell(
@@ -629,8 +641,8 @@ async def run_client() -> None:
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
             writer_arg._raw_mode = True  # type: ignore[union-attr]
-            if input_xlat:
-                writer_arg._input_xlat = input_xlat  # type: ignore[union-attr]
+            if input_filter is not None:
+                writer_arg._input_filter = input_filter  # type: ignore[union-attr]
             await _inner_shell(reader, writer_arg)
 
         shell_callback = _raw_shell

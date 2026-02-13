@@ -41,7 +41,13 @@ from typing import Dict, List, Match, Tuple, Optional, NamedTuple
 # 3rd party
 from wcwidth.sgr_state import _SGR_PATTERN
 
-__all__ = ("ColorConfig", "ColorFilter", "PetsciiColorFilter", "PALETTES")
+__all__ = (
+    "AtasciiControlFilter",
+    "ColorConfig",
+    "ColorFilter",
+    "PetsciiColorFilter",
+    "PALETTES",
+)
 
 # Type alias for a 16-color palette: 16 (R, G, B) tuples indexed 0-15.
 # Index 0-7: normal colors (black, red, green, yellow, blue, magenta, cyan, white)
@@ -471,11 +477,26 @@ _PETSCII_COLOR_CODES: Dict[str, int] = {
     '\x9f': 3,   # CYN (cyan)
 }
 
-# All PETSCII control chars handled by the filter (colors + RVS ON/OFF).
-_PETSCII_FILTER_CHARS = frozenset(_PETSCII_COLOR_CODES) | {'\x12', '\x92'}
+# PETSCII cursor/screen control codes → ANSI escape sequences.
+_PETSCII_CURSOR_CODES: Dict[str, str] = {
+    '\x11': '\x1b[B',    # cursor down
+    '\x91': '\x1b[A',    # cursor up
+    '\x1d': '\x1b[C',    # cursor right
+    '\x9d': '\x1b[D',    # cursor left
+    '\x13': '\x1b[H',    # HOME (cursor to top-left)
+    '\x93': '\x1b[2J',   # CLR (clear screen)
+    '\x14': '\x08\x1b[P',  # DEL (destructive backspace)
+}
+
+# All PETSCII control chars handled by the filter.
+_PETSCII_FILTER_CHARS = (
+    frozenset(_PETSCII_COLOR_CODES)
+    | frozenset(_PETSCII_CURSOR_CODES)
+    | {'\x12', '\x92'}
+)
 
 # Precompiled pattern matching any single PETSCII control character that
-# the filter should consume (color codes + RVS ON + RVS OFF).
+# the filter should consume (color codes, cursor codes, RVS ON/OFF).
 _PETSCII_CTRL_RE = re.compile(
     '[' + re.escape(''.join(sorted(_PETSCII_FILTER_CHARS))) + ']'
 )
@@ -483,15 +504,17 @@ _PETSCII_CTRL_RE = re.compile(
 
 class PetsciiColorFilter:
     """
-    Translate PETSCII inline color control codes to ANSI 24-bit RGB.
+    Translate PETSCII control codes to ANSI sequences.
 
-    PETSCII uses single-byte control codes embedded in the text stream to
-    change the foreground color.  This filter replaces them with ANSI
-    ``\\x1b[38;2;R;G;Bm`` sequences using the VIC-II C64 palette so that
-    modern terminals display the intended colors.
+    PETSCII uses single-byte control codes embedded in the text stream for
+    color changes, cursor movement, and screen control.  This filter
+    translates them to ANSI equivalents:
 
-    Reverse video (RVS ON ``\\x12``, RVS OFF ``\\x92``) is translated to
-    ``\\x1b[7m`` / ``\\x1b[27m``.
+    - **Colors**: 16 VIC-II palette colors → ``\\x1b[38;2;R;G;Bm`` (24-bit RGB)
+    - **Reverse video**: RVS ON/OFF → ``\\x1b[7m`` / ``\\x1b[27m``
+    - **Cursor**: up/down/left/right → ``\\x1b[A/B/C/D``
+    - **Screen**: HOME → ``\\x1b[H``, CLR → ``\\x1b[2J``
+    - **DEL**: destructive backspace → ``\\x08\\x1b[P``
 
     :param config: Color configuration (uses ``brightness`` and ``contrast``
         for palette adjustment; ``palette_name`` is ignored — always C64).
@@ -516,14 +539,14 @@ class PetsciiColorFilter:
 
     def filter(self, text: str) -> str:
         """
-        Replace PETSCII color codes and RVS ON/OFF with ANSI sequences.
+        Replace PETSCII control codes with ANSI sequences.
 
-        Color control characters are consumed (removed from output) and
-        replaced by 24-bit RGB foreground SGR sequences.  All other
-        characters pass through unchanged.
+        PETSCII control characters (colors, cursor, screen) are replaced
+        with their ANSI equivalents.  All other characters pass through
+        unchanged.
 
         :param text: Decoded PETSCII text (Unicode string).
-        :returns: Text with PETSCII colors translated to ANSI SGR.
+        :returns: Text with PETSCII controls translated to ANSI.
         """
         if not _PETSCII_CTRL_RE.search(text):
             return text
@@ -535,6 +558,9 @@ class PetsciiColorFilter:
         idx = _PETSCII_COLOR_CODES.get(ch)
         if idx is not None:
             return self._sgr_for_index(idx)
+        cursor = _PETSCII_CURSOR_CODES.get(ch)
+        if cursor is not None:
+            return cursor
         if ch == '\x12':
             return '\x1b[7m'
         if ch == '\x92':
@@ -546,6 +572,66 @@ class PetsciiColorFilter:
         Flush buffered state.
 
         PETSCII color codes are single-byte, so no buffering is needed.
+
+        :returns: Always ``""``.
+        """
+        return ""
+
+
+# ATASCII decoded control character glyphs → ANSI terminal sequences.
+# The atascii codec decodes control bytes to Unicode glyphs; this map
+# translates those glyphs to the terminal actions they represent.
+_ATASCII_CONTROL_CODES: Dict[str, str] = {
+    '\u25c0': '\x08\x1b[P',       # ◀  backspace/delete (0x7E / 0xFE)
+    '\u25b6': '\t',                # ▶  tab (0x7F / 0xFF)
+    '\u21b0': '\x1b[2J\x1b[H',    # ↰  clear screen (0x7D / 0xFD)
+    '\u2191': '\x1b[A',            # ↑  cursor up (0x1C / 0x9C)
+    '\u2193': '\x1b[B',            # ↓  cursor down (0x1D / 0x9D)
+    '\u2190': '\x1b[D',            # ←  cursor left (0x1E / 0x9E)
+    '\u2192': '\x1b[C',            # →  cursor right (0x1F / 0x9F)
+}
+
+_ATASCII_CTRL_RE = re.compile(
+    '[' + re.escape(''.join(sorted(_ATASCII_CONTROL_CODES))) + ']'
+)
+
+
+class AtasciiControlFilter:
+    """
+    Translate decoded ATASCII control character glyphs to ANSI sequences.
+
+    The ``atascii`` codec decodes ATASCII control bytes into Unicode glyphs
+    (e.g. byte 0x7E → U+25C0 ◀).  This filter replaces those glyphs with
+    the ANSI terminal sequences that produce the intended effect:
+
+    - **Backspace/delete**: ◀ → ``\\x08\\x1b[P`` (destructive backspace)
+    - **Tab**: ▶ → ``\\t``
+    - **Clear screen**: ↰ → ``\\x1b[2J\\x1b[H``
+    - **Cursor movement**: ↑↓←→ → ``\\x1b[A/B/D/C``
+    """
+
+    def filter(self, text: str) -> str:
+        """
+        Replace ATASCII control glyphs with ANSI sequences.
+
+        :param text: Decoded ATASCII text (Unicode string).
+        :returns: Text with control glyphs translated to ANSI.
+        """
+        if not _ATASCII_CTRL_RE.search(text):
+            return text
+        return _ATASCII_CTRL_RE.sub(self._replace, text)
+
+    @staticmethod
+    def _replace(match: Match[str]) -> str:
+        """Regex callback for a single ATASCII control glyph."""
+        return _ATASCII_CONTROL_CODES.get(match.group(), '')
+
+    @staticmethod
+    def flush() -> str:
+        """
+        Flush buffered state.
+
+        ATASCII control glyphs are single characters, so no buffering is needed.
 
         :returns: Always ``""``.
         """

@@ -49,11 +49,18 @@ History
     terminal mode (no line buffering, no local echo) regardless of server
     ECHO negotiation.  Auto-enabled for ATASCII and PETSCII encodings so
     retro BBS connections work character-at-a-time like ``stty raw -echo``.
-  * new: PETSCII color translation — inline C64 color control codes are
+  * new: PETSCII control code translation — inline C64 color codes are
     translated to ANSI 24-bit RGB using the VIC-II palette (Pepto's colodore
-    reference).  ``telnetlib3-client --encoding=petscii`` displays colors;
-    ``telnetlib3-fingerprint`` saves colored banners.  RVS ON/OFF are
-    translated to ANSI reverse video.  New palette ``--colormatch=c64``.
+    reference); cursor movement (up/down/left/right), HOME, CLR, and DEL
+    are translated to ANSI cursor sequences; RVS ON/OFF to ANSI reverse
+    video.  ``telnetlib3-client --encoding=petscii`` displays colors and
+    cursor art; ``telnetlib3-fingerprint`` saves translated banners.
+    New palette ``--colormatch=c64``.
+  * bugfix: PETSCII newline handling — bare CR (0x0D, the PETSCII line
+    terminator) is now normalized to CRLF in raw terminal mode and to LF
+    in ``telnetlib3-fingerprint`` banners.  Previously, bare CR only moved
+    the cursor to column 0 without advancing the row, causing every line
+    to overwrite the previous one on PETSCII BBS connections.
   * removed: unused ``get_next_ascii()`` from :mod:`telnetlib3.server_shell`.
 
 2.4.0

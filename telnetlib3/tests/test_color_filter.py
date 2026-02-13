@@ -6,6 +6,7 @@ import pytest
 # local
 from telnetlib3.color_filter import (
     PALETTES,
+    AtasciiControlFilter,
     ColorConfig,
     ColorFilter,
     PetsciiColorFilter,
@@ -521,10 +522,20 @@ class TestPetsciiColorFilter:
         f = self._make_filter()
         assert f.filter("hello world") == "hello world"
 
-    def test_non_color_control_chars_unchanged(self) -> None:
+    def test_non_petscii_control_chars_unchanged(self) -> None:
         f = self._make_filter()
-        result = f.filter("A\x07B\x13C")
-        assert "A\x07B\x13C" == result
+        result = f.filter("A\x07B\x0bC")
+        assert "A\x07B\x0bC" == result
+
+    def test_cursor_controls_translated(self) -> None:
+        f = self._make_filter()
+        assert f.filter("A\x13B") == "A\x1b[HB"
+        assert f.filter("A\x93B") == "A\x1b[2JB"
+        assert f.filter("A\x11B") == "A\x1b[BB"
+        assert f.filter("A\x91B") == "A\x1b[AB"
+        assert f.filter("A\x1dB") == "A\x1b[CB"
+        assert f.filter("A\x9dB") == "A\x1b[DB"
+        assert f.filter("A\x14B") == "A\x08\x1b[PB"
 
     def test_flush_returns_empty(self) -> None:
         f = self._make_filter()
@@ -541,3 +552,42 @@ class TestPetsciiColorFilter:
         f = PetsciiColorFilter()
         result = f.filter("\x1c")
         assert "\x1b[38;2;" in result
+
+
+class TestAtasciiControlFilter:
+    @pytest.mark.parametrize("glyph,expected", [
+        ('\u25c0', '\x08\x1b[P'),
+        ('\u25b6', '\t'),
+        ('\u21b0', '\x1b[2J\x1b[H'),
+        ('\u2191', '\x1b[A'),
+        ('\u2193', '\x1b[B'),
+        ('\u2190', '\x1b[D'),
+        ('\u2192', '\x1b[C'),
+    ])
+    def test_control_glyph_translated(self, glyph: str, expected: str) -> None:
+        f = AtasciiControlFilter()
+        result = f.filter(f"before{glyph}after")
+        assert f"before{expected}after" == result
+
+    def test_backspace_erases(self) -> None:
+        f = AtasciiControlFilter()
+        result = f.filter("DINGO\u25c0\u25c0\u25c0\u25c0\u25c0")
+        assert result == "DINGO" + "\x08\x1b[P" * 5
+
+    def test_plain_text_unchanged(self) -> None:
+        f = AtasciiControlFilter()
+        assert f.filter("hello world") == "hello world"
+
+    def test_atascii_graphics_unchanged(self) -> None:
+        f = AtasciiControlFilter()
+        text = "\u2663\u2665\u2666\u2660"
+        assert f.filter(text) == text
+
+    def test_flush_returns_empty(self) -> None:
+        f = AtasciiControlFilter()
+        assert f.flush() == ""
+
+    def test_multiple_controls_in_one_string(self) -> None:
+        f = AtasciiControlFilter()
+        result = f.filter("\u2191\u2193\u2190\u2192")
+        assert result == "\x1b[A\x1b[B\x1b[D\x1b[C"

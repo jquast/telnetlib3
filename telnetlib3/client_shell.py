@@ -13,7 +13,7 @@ from . import accessories
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
-__all__ = ("telnet_client_shell",)
+__all__ = ("InputFilter", "telnet_client_shell")
 
 # Input byte translation tables for retro encodings in raw mode.
 # Maps terminal keyboard bytes to the raw bytes the BBS expects.
@@ -24,12 +24,107 @@ _INPUT_XLAT: Dict[str, Dict[int, int]] = {
     "atascii": {
         0x7F: 0x7E,  # DEL → ATASCII backspace (byte 0x7E)
         0x08: 0x7E,  # BS  → ATASCII backspace (byte 0x7E)
+        0x0D: 0x9B,  # CR  → ATASCII EOL (byte 0x9B)
+        0x0A: 0x9B,  # LF  → ATASCII EOL (byte 0x9B)
     },
     "petscii": {
         0x7F: 0x14,  # DEL → PETSCII DEL (byte 0x14)
         0x08: 0x14,  # BS  → PETSCII DEL (byte 0x14)
     },
 }
+
+# Multi-byte escape sequence translation tables for retro encodings.
+# Maps common ANSI terminal escape sequences (arrow keys, delete, etc.)
+# to the raw bytes the BBS expects.  Inspired by blessed's
+# DEFAULT_SEQUENCE_MIXIN but kept minimal for the sequences that matter.
+_INPUT_SEQ_XLAT: Dict[str, Dict[bytes, bytes]] = {
+    "atascii": {
+        b"\x1b[A": b"\x1c",    # cursor up (CSI)
+        b"\x1b[B": b"\x1d",    # cursor down
+        b"\x1b[C": b"\x1f",    # cursor right
+        b"\x1b[D": b"\x1e",    # cursor left
+        b"\x1bOA": b"\x1c",    # cursor up (SS3 / application mode)
+        b"\x1bOB": b"\x1d",    # cursor down
+        b"\x1bOC": b"\x1f",    # cursor right
+        b"\x1bOD": b"\x1e",    # cursor left
+        b"\x1b[3~": b"\x7e",   # delete → ATASCII backspace
+        b"\t": b"\x7f",        # tab → ATASCII tab
+    },
+    "petscii": {
+        b"\x1b[A": b"\x91",    # cursor up (CSI)
+        b"\x1b[B": b"\x11",    # cursor down
+        b"\x1b[C": b"\x1d",    # cursor right
+        b"\x1b[D": b"\x9d",    # cursor left
+        b"\x1bOA": b"\x91",    # cursor up (SS3 / application mode)
+        b"\x1bOB": b"\x11",    # cursor down
+        b"\x1bOC": b"\x1d",    # cursor right
+        b"\x1bOD": b"\x9d",    # cursor left
+        b"\x1b[3~": b"\x14",   # delete → PETSCII DEL
+        b"\x1b[H": b"\x13",    # home → PETSCII HOME
+        b"\x1b[2~": b"\x94",   # insert → PETSCII INSERT
+    },
+}
+
+
+class InputFilter:
+    """
+    Translate terminal escape sequences and single bytes to retro encoding bytes.
+
+    Combines single-byte translation (backspace, delete) with multi-byte
+    escape sequence matching (arrow keys, function keys).  Uses prefix-based
+    buffering inspired by blessed's ``get_leading_prefixes`` to handle
+    sequences split across reads.
+
+    :param seq_xlat: Multi-byte escape sequence → replacement bytes.
+    :param byte_xlat: Single input byte → replacement byte.
+    """
+
+    def __init__(
+        self, seq_xlat: Dict[bytes, bytes], byte_xlat: Dict[int, int]
+    ) -> None:
+        self._byte_xlat = byte_xlat
+        # Sort sequences longest-first so \x1b[3~ matches before \x1b[3
+        self._seq_sorted: Tuple[Tuple[bytes, bytes], ...] = tuple(
+            sorted(seq_xlat.items(), key=lambda kv: len(kv[0]), reverse=True)
+        )
+        # Prefix set for partial-match buffering (blessed's get_leading_prefixes)
+        self._prefixes: frozenset[bytes] = frozenset(
+            seq[:i] for seq in seq_xlat for i in range(1, len(seq))
+        )
+        self._buf = b""
+
+    def feed(self, data: bytes) -> bytes:
+        """
+        Process input bytes, returning raw bytes to send to the remote host.
+
+        Escape sequences are matched against the configured table and replaced.
+        Partial sequences are buffered until the next call.  Single bytes are
+        translated via the byte translation table.
+
+        :param data: Raw bytes from terminal stdin.
+        :returns: Translated bytes ready to send to the remote BBS.
+        """
+        self._buf += data
+        result = bytearray()
+        while self._buf:
+            # Try multi-byte sequence match at current position
+            matched = False
+            for seq, repl in self._seq_sorted:
+                if self._buf[:len(seq)] == seq:
+                    result.extend(repl)
+                    self._buf = self._buf[len(seq):]
+                    matched = True
+                    break
+            if matched:
+                continue
+            # Check if buffer is a prefix of any known sequence — wait for more
+            if self._buf in self._prefixes:
+                break
+            # No sequence match, emit single byte with translation
+            b = self._buf[0]
+            self._buf = self._buf[1:]
+            result.append(self._byte_xlat.get(b, b))
+        return bytes(result)
 
 
 if sys.platform == "win32":
@@ -282,13 +377,11 @@ else:
                                 except Exception:  # pylint: disable=broad-exception-caught
                                     pass
                             break
-                        _xlat = getattr(telnet_writer, '_input_xlat', None)
-                        if _xlat and any(b in _xlat for b in inp):
-                            for b in inp:
-                                if b in _xlat:
-                                    telnet_writer._write(bytes([_xlat[b]]))
-                                else:
-                                    telnet_writer.write(bytes([b]).decode())
+                        _inf = getattr(telnet_writer, '_input_filter', None)
+                        if _inf is not None:
+                            translated = _inf.feed(inp)
+                            if translated:
+                                telnet_writer._write(translated)
                         else:
                             telnet_writer.write(inp.decode())
                         stdin_task = accessories.make_reader_task(stdin)
@@ -332,7 +425,12 @@ else:
                         if _cf is not None:
                             out = _cf.filter(out)
                         if getattr(telnet_writer, '_raw_mode', False):
-                            out = out.replace('\r\n', '\n').replace('\n', '\r\n')
+                            # Normalize all line endings to LF, then to CRLF
+                            # for the raw terminal (OPOST disabled).  PETSCII
+                            # BBSes send bare CR (0x0D) as line terminator.
+                            out = (out.replace('\r\n', '\n')
+                                      .replace('\r', '\n')
+                                      .replace('\n', '\r\n'))
                         stdout.write(out.encode() or b":?!?:")
                         telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
                         wait_for.add(telnet_task)

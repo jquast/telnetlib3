@@ -294,6 +294,19 @@ def test_format_banner_petscii_rvs():
     assert "\x1b[27m" in result
 
 
+def test_format_banner_petscii_newline():
+    """PETSCII CR line terminators are normalized to LF in banners."""
+    result = sfp._format_banner(b"\xc8\xc9\x0d\xca\xcb", encoding="petscii")
+    assert "HI\nJK" == result
+
+
+def test_format_banner_petscii_cursor():
+    """PETSCII cursor controls are translated to ANSI in banners."""
+    result = sfp._format_banner(b"\x13\xc8\xc9", encoding="petscii")
+    assert "\x1b[H" in result
+    assert "HI" in result
+
+
 @pytest.mark.parametrize(
     "data,expected",
     [
@@ -939,6 +952,36 @@ async def test_probe_skipped_when_closing(tmp_path):
             b"C\r\n",
             id="more_ync_compact",
         ),
+        pytest.param(
+            b"\x0cpress del/backspace:",
+            b"\x14",
+            id="petscii_del_backspace",
+        ),
+        pytest.param(
+            b"\x0c\r\npress del/backspace:",
+            b"\x14",
+            id="petscii_del_backspace_crlf",
+        ),
+        pytest.param(
+            b"press backspace:",
+            b"\x14",
+            id="petscii_backspace_only",
+        ),
+        pytest.param(
+            b"press del:",
+            b"\x14",
+            id="petscii_del_only",
+        ),
+        pytest.param(
+            b"PRESS DEL/BACKSPACE.",
+            b"\x14",
+            id="petscii_del_backspace_upper",
+        ),
+        pytest.param(
+            b"press backspace/del:",
+            b"\x14",
+            id="petscii_backspace_del_reversed",
+        ),
     ],
 )
 def test_detect_yn_prompt(banner, expected):
@@ -1340,8 +1383,8 @@ def test_virtual_cursor_ansi_stripped():
 
 @pytest.mark.parametrize("response,encoding,expected", [
     pytest.param(b"\r\n", "atascii", b"\x9b", id="atascii_bare_return"),
-    pytest.param(b"yes\r\n", "atascii", b"\xf9\xe5\xf3\x9b", id="atascii_yes"),
-    pytest.param(b"y\r\n", "atascii", b"\xf9\x9b", id="atascii_y"),
+    pytest.param(b"yes\r\n", "atascii", b"yes\x9b", id="atascii_yes"),
+    pytest.param(b"y\r\n", "atascii", b"y\x9b", id="atascii_y"),
     pytest.param(b"\r\n", "ascii", b"\r\n", id="ascii_unchanged"),
     pytest.param(b"\r\n", "utf-8", b"\r\n", id="utf8_unchanged"),
     pytest.param(b"yes\r\n", "utf-8", b"yes\r\n", id="utf8_yes_unchanged"),
