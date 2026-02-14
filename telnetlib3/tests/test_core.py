@@ -478,7 +478,6 @@ async def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port):
         writer.write("Press Return to continue:")
         inp = await reader.readline()
         if inp:
-            writer.echo(inp)
             writer.write("\ngoodbye.\n")
         await writer.drain()
         writer.close()
