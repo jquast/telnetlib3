@@ -1,53 +1,25 @@
 History
 =======
 2.5.0
-  * change: ``telnetlib3-client`` now defaults to raw terminal mode (no line
-    buffering, no local echo), which is correct for most BBS and MUD servers.
-    Use ``--line-mode`` to restore line-buffered local-echo behavior.
-  * change: ``telnetlib3-server --pty-exec`` now defaults to raw PTY mode.
-    Use ``--line-mode`` to restore cooked PTY mode with echo.  The previous
-    ``--pty-raw`` flag is accepted as a silent no-op for compatibility.
+  * change: ``telnetlib3-client`` now defaults to raw terminal mode (no line buffering, no local
+    echo), which is correct for most servers.  Use ``--line-mode`` to restore line-buffered
+    local-echo behavior.
+  * change: ``telnetlib3-server --pty-exec`` now defaults to raw PTY mode.  Use ``--line-mode`` to
+    restore cooked PTY mode with echo.
   * change: ``connect_minwait`` default reduced to 0 across
-    :class:`~telnetlib3.client_base.BaseClient`,
-    :func:`~telnetlib3.client.open_connection`, and ``telnetlib3-client``.
-    Negotiation continues asynchronously.  Use ``--connect-minwait`` to
-    restore a delay if needed.
-  * change: default ``--colormatch`` palette changed from EGA to VGA.
-  * new: :class:`~telnetlib3.color_filter.PetsciiColorFilter` -- C64 color
-    codes are translated to ANSI 24-bit RGB using the VIC-II palette
-    (Pepto's colodore reference); cursor movement, HOME, CLR, and DEL are
-    translated to ANSI sequences; RVS ON/OFF to ANSI reverse video.
-    New palette ``--colormatch=c64``.
-  * new: :class:`~telnetlib3.color_filter.AtasciiControlFilter` -- decoded
-    ATASCII control character glyphs (cursor movement, backspace, clear
-    screen, tab) are translated to ANSI terminal sequences.
-  * new: :class:`~telnetlib3.client_shell.InputFilter` -- keyboard input
-    translation for retro encodings.  Arrow keys, backspace, delete, and
-    enter are mapped to the correct raw bytes for ATASCII and PETSCII.
-  * new: SyncTERM/CTerm font selection sequence detection
-    (``CSI Ps1 ; Ps2 SP D``).  Both ``telnetlib3-fingerprint`` and
-    ``telnetlib3-client`` detect font switching and auto-switch encoding
-    to the matching codec (e.g. font 36 = ATASCII, 32-35 = PETSCII,
-    0 = CP437).  Explicit ``--encoding`` takes precedence.
-  * new: :data:`~telnetlib3.accessories.TRACE` log level (5, below
-    ``DEBUG``) with :func:`~telnetlib3.accessories.hexdump` style output
-    for all sent and received bytes.  Use ``--loglevel=trace``.
-  * enhancement: ``telnetlib3-fingerprint`` responds to DSR (``ESC[6n``)
-    with position-aware CPR replies using a virtual cursor, so servers that
-    probe for ANSI capability or measure character width no longer
-    disconnect or reject the scanner.
-  * enhancement: ``telnetlib3-fingerprint`` answers up to 5 sequential
-    prompts (e.g. color, charset menu, pagination) instead of only one.
-  * enhancement: ``telnetlib3-fingerprint`` answers Mystic BBS "Press
-    [.ESC.] twice" botcheck prompts inline during banner collection.
-  * enhancement: ``telnetlib3-fingerprint`` strips ANSI escape sequences
-    before prompt pattern matching, fixing detection through color codes.
-  * enhancement: ``telnetlib3-fingerprint`` detects "HIT RETURN", "PRESS
-    ENTER", "More: (Y)es (N)o (C)ontinuous", "Press the BACKSPACE key",
-    and "press DEL/backspace" prompts and responds automatically.
-  * enhancement: ``telnetlib3-fingerprint`` banner formatting uses
-    ``surrogateescape`` error handler, preserving raw high bytes (e.g. CP437
-    art) as surrogates instead of replacing them with U+FFFD.
+    :class:`~telnetlib3.client_base.BaseClient`, :func:`~telnetlib3.client.open_connection`, and
+    ``telnetlib3-client``.  Negotiation continues asynchronously.  Use ``--connect-minwait`` to
+    restore a delay if needed, or, use :meth:`~telnetlib3.stream_writer.TelnetWriter.wait_for` in
+    server or client shells to await a specific negotiation state.
+  * new: Color, keyboard input translation and ``--encoding`` support for ATASCII (ATARI ASCII) and
+    PETSCII (Commodore ASCII).
+  * new: SyncTERM/CTerm font selection sequence detection (``CSI Ps1 ; Ps2 SP D``).  Both
+    ``telnetlib3-fingerprint`` and ``telnetlib3-client`` detect font switching and auto-switch
+    encoding to the matching codec (e.g. font 36 = ATASCII, 32-35 = PETSCII, 0 = CP437).  Explicit
+    ``--encoding`` takes precedence.
+  * new: :data:`~telnetlib3.accessories.TRACE` log level (5, below ``DEBUG``) with
+    :func:`~telnetlib3.accessories.hexdump` style output for all sent and received bytes.  Use
+    ``--loglevel=trace``.
   * bugfix: :func:`~telnetlib3.guard_shells.robot_check` now uses a narrow
     character (space) instead of a wide Unicode character, allowing retro
     terminal emulators to pass.
@@ -66,7 +38,12 @@ History
   * bugfix: :meth:`~telnetlib3.client.TelnetClient.send_charset` normalises
     non-standard encoding names (``iso-8859-02`` to ``iso-8859-2``,
     ``cp-1250`` to ``cp1250``, etc.).
-  * removed: ``get_next_ascii()`` from :mod:`telnetlib3.server_shell`.
+  * enhancement: ``telnetlib3-fingerprint`` responds more like a terminal and to more
+    y/n prompts about colors, encoding, etc. to collect more banners for https://bbs.modem.xyz/
+    project.
+  * enhancement: ``telnetlib3-fingerprint`` banner formatting uses
+    ``surrogateescape`` error handler, preserving raw high bytes (e.g. CP437
+    art) as surrogates instead of replacing them with U+FFFD.
 
 2.4.0
   * new: :mod:`telnetlib3.color_filter` module — translates 16-color ANSI SGR
