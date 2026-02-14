@@ -1,67 +1,72 @@
 History
 =======
 2.5.0
-  * change: ``connect_minwait`` default reduced from 1.0s to 0 across
-    ``BaseClient``, ``open_connection()``, and the ``telnetlib3-client`` CLI.
-    The shell now starts immediately after connection; negotiation continues
-    asynchronously.  Use ``--connect-minwait`` to restore a delay if needed.
-  * enhancement: ``telnetlib3-fingerprint`` responds to DSR (``ESC[6n``)
-    during banner collection with a CPR reply, so servers that probe for
-    ANSI capability no longer disconnect prematurely.
-  * enhancement: ``telnetlib3-fingerprint`` answers up to 3 sequential
-    prompts (e.g. color, charset menu) instead of only one.
-  * enhancement: ``telnetlib3-fingerprint`` answers Mystic BBS "Press
-    [.ESC.] twice" botcheck prompts.
-  * enhancement: ``telnetlib3-fingerprint`` strips ANSI escape sequences
-    before prompt pattern matching, fixing detection through color codes.
-  * enhancement: default ``--colormatch`` palette changed from EGA to VGA.
-  * bugfix: "robot" guard now uses a narrow character (space) instead of a
-    wide Unicode character, allowing retro terminal emulators to pass.
-  * enhancement: ``telnetlib3-fingerprint`` detects "HIT RETURN" and "PRESS
-    ENTER" prompts and responds automatically during banner collection.
-  * bugfix: ATASCII codec now normalizes CR and CRLF to the native ATASCII
-    EOL (0x9B) during encoding, so the Return key works correctly with
-    ``telnetlib3-client --encoding=atascii``.
-  * bugfix: ``telnetlib3-fingerprint`` re-encodes prompt responses for retro
-    encodings (ATASCII) so that servers receive the correct EOL byte instead
-    of ASCII CR/LF.
-  * bugfix: ``telnetlib3-fingerprint`` no longer crashes with
-    ``LookupError: unknown encoding`` when the server negotiates a charset
-    that Python cannot look up (e.g. ``atascii`` without the codec registered).
-    Banner formatting now falls back to ``latin-1``.
-  * bugfix: CHARSET negotiation now normalises non-standard encoding names
-    advertised by servers — ``iso-8859-02`` → ``iso-8859-2``,
-    ``cp-1250`` → ``cp1250``, etc. — so they resolve in Python's codec
-    registry instead of being silently rejected.
-  * bugfix: ATASCII codec now maps bytes 0x0D and 0x0A to CR and LF instead
-    of graphics characters, matching PETSCII and Atari ST behaviour.  This
-    fixes garbled output (``🮂`` and ``◣`` in place of line breaks) when
-    connecting to Atari BBS systems over telnet.
+  * change: ``telnetlib3-client`` now defaults to raw terminal mode (no line
+    buffering, no local echo), which is correct for most BBS and MUD servers.
+    Use ``--line-mode`` to restore line-buffered local-echo behavior.
+  * change: ``telnetlib3-server --pty-exec`` now defaults to raw PTY mode.
+    Use ``--line-mode`` to restore cooked PTY mode with echo.  The previous
+    ``--pty-raw`` flag is accepted as a silent no-op for compatibility.
+  * change: ``connect_minwait`` default reduced to 0 across
+    :class:`~telnetlib3.client_base.BaseClient`,
+    :func:`~telnetlib3.client.open_connection`, and ``telnetlib3-client``.
+    Negotiation continues asynchronously.  Use ``--connect-minwait`` to
+    restore a delay if needed.
+  * change: default ``--colormatch`` palette changed from EGA to VGA.
+  * new: :class:`~telnetlib3.color_filter.PetsciiColorFilter` -- C64 color
+    codes are translated to ANSI 24-bit RGB using the VIC-II palette
+    (Pepto's colodore reference); cursor movement, HOME, CLR, and DEL are
+    translated to ANSI sequences; RVS ON/OFF to ANSI reverse video.
+    New palette ``--colormatch=c64``.
+  * new: :class:`~telnetlib3.color_filter.AtasciiControlFilter` -- decoded
+    ATASCII control character glyphs (cursor movement, backspace, clear
+    screen, tab) are translated to ANSI terminal sequences.
+  * new: :class:`~telnetlib3.client_shell.InputFilter` -- keyboard input
+    translation for retro encodings.  Arrow keys, backspace, delete, and
+    enter are mapped to the correct raw bytes for ATASCII and PETSCII.
   * new: SyncTERM/CTerm font selection sequence detection
     (``CSI Ps1 ; Ps2 SP D``).  Both ``telnetlib3-fingerprint`` and
-    ``telnetlib3-client`` now detect font switching and auto-switch
-    ``environ_encoding`` to the matching codec (e.g. font 36 = ATASCII,
-    32-35 = PETSCII, 0 = CP437, 40 = Topaz/CP437).
-  * enhancement: ``telnetlib3-fingerprint`` detects "More: (Y)es, (N)o,
-    (C)ontinuous?" pagination prompts and answers "C" (Continuous) to collect
-    the full banner without stalling.
-  * new: ``--raw-mode`` CLI option for ``telnetlib3-client`` — forces raw
-    terminal mode (no line buffering, no local echo) regardless of server
-    ECHO negotiation.  Auto-enabled for ATASCII and PETSCII encodings so
-    retro BBS connections work character-at-a-time like ``stty raw -echo``.
-  * new: PETSCII control code translation — inline C64 color codes are
-    translated to ANSI 24-bit RGB using the VIC-II palette (Pepto's colodore
-    reference); cursor movement (up/down/left/right), HOME, CLR, and DEL
-    are translated to ANSI cursor sequences; RVS ON/OFF to ANSI reverse
-    video.  ``telnetlib3-client --encoding=petscii`` displays colors and
-    cursor art; ``telnetlib3-fingerprint`` saves translated banners.
-    New palette ``--colormatch=c64``.
-  * bugfix: PETSCII newline handling — bare CR (0x0D, the PETSCII line
-    terminator) is now normalized to CRLF in raw terminal mode and to LF
-    in ``telnetlib3-fingerprint`` banners.  Previously, bare CR only moved
-    the cursor to column 0 without advancing the row, causing every line
-    to overwrite the previous one on PETSCII BBS connections.
-  * removed: unused ``get_next_ascii()`` from :mod:`telnetlib3.server_shell`.
+    ``telnetlib3-client`` detect font switching and auto-switch encoding
+    to the matching codec (e.g. font 36 = ATASCII, 32-35 = PETSCII,
+    0 = CP437).  Explicit ``--encoding`` takes precedence.
+  * new: :data:`~telnetlib3.accessories.TRACE` log level (5, below
+    ``DEBUG``) with :func:`~telnetlib3.accessories.hexdump` style output
+    for all sent and received bytes.  Use ``--loglevel=trace``.
+  * enhancement: ``telnetlib3-fingerprint`` responds to DSR (``ESC[6n``)
+    with position-aware CPR replies using a virtual cursor, so servers that
+    probe for ANSI capability or measure character width no longer
+    disconnect or reject the scanner.
+  * enhancement: ``telnetlib3-fingerprint`` answers up to 5 sequential
+    prompts (e.g. color, charset menu, pagination) instead of only one.
+  * enhancement: ``telnetlib3-fingerprint`` answers Mystic BBS "Press
+    [.ESC.] twice" botcheck prompts inline during banner collection.
+  * enhancement: ``telnetlib3-fingerprint`` strips ANSI escape sequences
+    before prompt pattern matching, fixing detection through color codes.
+  * enhancement: ``telnetlib3-fingerprint`` detects "HIT RETURN", "PRESS
+    ENTER", "More: (Y)es (N)o (C)ontinuous", "Press the BACKSPACE key",
+    and "press DEL/backspace" prompts and responds automatically.
+  * enhancement: ``telnetlib3-fingerprint`` banner formatting uses
+    ``surrogateescape`` error handler, preserving raw high bytes (e.g. CP437
+    art) as surrogates instead of replacing them with U+FFFD.
+  * bugfix: :func:`~telnetlib3.guard_shells.robot_check` now uses a narrow
+    character (space) instead of a wide Unicode character, allowing retro
+    terminal emulators to pass.
+  * bugfix: ATASCII codec now maps bytes 0x0D and 0x0A to CR and LF instead
+    of graphics characters, fixing garbled output when connecting to Atari
+    BBS systems.
+  * bugfix: ATASCII codec normalizes CR and CRLF to the native ATASCII
+    EOL (0x9B) during encoding, so the Return key works correctly.
+  * bugfix: PETSCII bare CR (0x0D) is now normalized to CRLF in raw
+    terminal mode and to LF in ``telnetlib3-fingerprint`` banners.
+  * bugfix: ``telnetlib3-fingerprint`` re-encodes prompt responses for retro
+    encodings so servers receive the correct EOL byte.
+  * bugfix: ``telnetlib3-fingerprint`` no longer crashes with
+    ``LookupError`` when the server negotiates an unknown charset.
+    Banner formatting falls back to ``latin-1``.
+  * bugfix: :meth:`~telnetlib3.client.TelnetClient.send_charset` normalises
+    non-standard encoding names (``iso-8859-02`` to ``iso-8859-2``,
+    ``cp-1250`` to ``cp1250``, etc.).
+  * removed: ``get_next_ascii()`` from :mod:`telnetlib3.server_shell`.
 
 2.4.0
   * new: :mod:`telnetlib3.color_filter` module — translates 16-color ANSI SGR

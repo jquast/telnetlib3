@@ -500,7 +500,7 @@ async def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port):
             logfile_output = f.read().splitlines()
         assert stdout == (
             b"Escape character is '^]'.\n"
-            b"Press Return to continue:\r\ngoodbye.\n"
+            b"Press Return to continue:\r\ngoodbye.\r\n"
             b"\x1b[m\nConnection closed by foreign host.\n"
         )
         assert len(logfile_output) in (2, 3), logfile

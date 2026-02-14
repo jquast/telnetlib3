@@ -72,10 +72,10 @@ program.
     telnetlib3-server
     # or custom port and ip and shell
     telnetlib3-server 0.0.0.0 1984 --shell=bin.server_wargame.shell
-    # run an external program with a pseudo-terminal
-    telnetlib3-server --pty-exec /bin/bash --pty-raw -- --login
-    # or a simple linemode program, bc (calculator)
-    telnetlib3-server --pty-exec /bin/bc
+    # run an external program with a pseudo-terminal (raw mode is default)
+    telnetlib3-server --pty-exec /bin/bash -- --login
+    # or a linemode program, bc (calculator)
+    telnetlib3-server --pty-exec /bin/bc --line-mode
 
 
 There are also fingerprinting CLIs, ``telnetlib3-fingerprint`` and

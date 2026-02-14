@@ -588,7 +588,7 @@ async def run_client() -> None:
         is_atascii = encoding_name.lower() in ("atascii", "atari8bit", "atari_8bit")
         if colormatch == "petscii":
             colormatch = "c64"
-        if is_petscii and colormatch == "ega":
+        if is_petscii and colormatch != "c64":
             colormatch = "c64"
 
         if colormatch not in PALETTES:
@@ -699,11 +699,12 @@ def _get_argument_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--force-binary", action="store_true", help="force encoding", default=True)
     parser.add_argument(
-        "--raw-mode",
+        "--line-mode",
         action="store_true",
         default=False,
-        help="force raw terminal mode (no line buffering, no local echo). "
-        "Auto-enabled for atascii and petscii encodings.",
+        help="use line-buffered input with local echo instead of raw terminal "
+        "mode.  By default the client uses raw mode (no line buffering, no "
+        "local echo) which is correct for most BBS and MUD servers.",
     )
     parser.add_argument(
         "--connect-minwait", default=0, type=float, help="shell delay for negotiation"
@@ -812,7 +813,7 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
     from .encodings import FORCE_BINARY_ENCODINGS  # pylint: disable=import-outside-toplevel
 
     force_binary = args.force_binary
-    raw_mode = args.raw_mode
+    raw_mode = not args.line_mode
     if args.encoding.lower().replace('-', '_') in FORCE_BINARY_ENCODINGS:
         force_binary = True
         raw_mode = True
