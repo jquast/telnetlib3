@@ -82,16 +82,18 @@ _YN_RE = re.compile(
 _COLOR_RE = re.compile(rb"(?i)color\s*\?")
 
 # Match numbered menu items offering UTF-8, e.g. "5) UTF-8", "[3] UTF-8",
-# or "2. UTF-8".  Many BBS/MUD systems present a charset selection menu at
-# connect time.  The optional \S+/ prefix handles "Something/UTF-8" labels.
+# "2. UTF-8", or "1 ... UTF-8".  Many BBS/MUD systems present a charset
+# selection menu at connect time.  The optional \S+/ prefix handles
+# "Something/UTF-8" labels.
 _MENU_UTF8_RE = re.compile(
-    rb"[\[(]?(\d+)(?:[\])]|\.)\s*(?:\S+\s*/\s*)?UTF-?8", re.IGNORECASE
+    rb"[\[(]?(\d+)\s*(?:[\])]|\.{1,3})\s*(?:\S+\s*/\s*)?UTF-?8", re.IGNORECASE
 )
 
 # Match numbered menu items offering ANSI, e.g. "(1) Ansi", "[2] ANSI",
-# or "3. English/ANSI".  Brackets and dot delimiters are accepted.
+# "3. English/ANSI", or "1 ... English/ANSI".  Brackets, dot, and
+# ellipsis delimiters are accepted.
 _MENU_ANSI_RE = re.compile(
-    rb"[\[(]?(\d+)(?:[\])]|\.)\s*(?:\S+\s*/\s*)?ANSI", re.IGNORECASE
+    rb"[\[(]?(\d+)\s*(?:[\])]|\.{1,3})\s*(?:\S+\s*/\s*)?ANSI", re.IGNORECASE
 )
 
 # Match "gb/big5" encoding selection prompts common on Chinese BBS systems.
@@ -104,16 +106,22 @@ _ANSI_STRIP_RE = re.compile(_ZERO_WIDTH_STR_PATTERN.pattern.encode("ascii"))
 # Match "Press [.ESC.] twice" botcheck prompts (e.g. Mystic BBS).
 _ESC_TWICE_RE = re.compile(rb"(?i)press\s+[\[<]?\.?esc\.?[\]>]?\s+twice")
 
+# Match single "Press [ESC]" prompts without "twice" (e.g. Herbie's BBS).
+_ESC_ONCE_RE = re.compile(rb"(?i)press\s+[\[<]?\.?esc\.?[\]>]?(?!\s+twice)")
+
 # Match "HIT RETURN", "PRESS RETURN", "PRESS ENTER", "HIT ENTER", etc.
 # Common on Worldgroup/MajorBBS and other vintage BBS systems.
 _RETURN_PROMPT_RE = re.compile(
     rb"(?i)(?:hit|press)\s+(?:return|enter)\s*[:\.]?"
 )
 
-# Match "press del/backspace" prompts from PETSCII BBS systems.
-# Respond with PETSCII DEL byte (0x14).
+# Match "press del/backspace" and "hit your backspace/delete" prompts from
+# PETSCII BBS systems (e.g. Image BBS C/G detect).  Respond with PETSCII
+# DEL byte (0x14).
 _DEL_BACKSPACE_RE = re.compile(
-    rb"(?i)press\s+(?:del(?:/backspace)?|backspace(?:/del)?)\s*[:\.]?"
+    rb"(?i)(?:press|hit)\s+(?:your\s+)?"
+    rb"(?:del(?:ete)?(?:\s*/\s*backspace)?|backspace(?:\s*/\s*del(?:ete)?)?)"
+    rb"(?:\s+key)?\s*[:\.]?"
 )
 
 # Match "More: (Y)es, (N)o, (C)ontinuous?" pagination prompts.
@@ -344,6 +352,8 @@ def _detect_yn_prompt(  # pylint: disable=too-many-return-statements
     stripped = _ANSI_STRIP_RE.sub(b"", banner)
     if _ESC_TWICE_RE.search(stripped):
         return _PromptResult(b"\x1b\x1b")
+    if _ESC_ONCE_RE.search(stripped):
+        return _PromptResult(b"\x1b")
     if _MORE_PROMPT_RE.search(stripped):
         return _PromptResult(b"C\r\n")
     match = _YN_RE.search(stripped)
@@ -476,6 +486,13 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
     for _prompt_round in range(_MAX_PROMPT_REPLIES):
         prompt_result = _detect_yn_prompt(latest_banner)
         detected = prompt_result.response
+        # Skip if the ESC response was already sent inline during banner
+        # collection (time-sensitive botcheck countdowns).
+        if detected in (b"\x1b\x1b", b"\x1b") and getattr(
+            writer, '_esc_inline', False
+        ):
+            writer._esc_inline = False  # type: ignore[attr-defined]
+            detected = None
         prompt_response = _reencode_prompt(
             detected if detected is not None else b"\r\n",
             writer.environ_encoding,
@@ -936,6 +953,10 @@ async def _read_banner_until_quiet(
     printable character).  This defeats robot-check guards that verify
     cursor movement after writing a test character.
 
+    Time-sensitive prompts — ``Press [.ESC.] twice`` botcheck countdowns
+    — are detected inline and responded to immediately so the reply
+    arrives before the countdown expires.
+
     :param reader: :class:`~telnetlib3.stream_reader.TelnetReader` instance.
     :param quiet_time: Seconds of silence before considering banner complete.
     :param max_wait: Maximum total seconds to wait for banner data.
@@ -946,6 +967,7 @@ async def _read_banner_until_quiet(
     :returns: Banner bytes (may be empty).
     """
     chunks: list[bytes] = []
+    esc_responded = False
     loop = asyncio.get_event_loop()
     deadline = loop.time() + max_wait
     while loop.time() < deadline:
@@ -977,6 +999,18 @@ async def _read_banner_until_quiet(
                     if (protocol is not None
                             and font_enc in _SYNCTERM_BINARY_ENCODINGS):
                         protocol.force_binary = True
+                if not esc_responded:
+                    stripped_chunk = _ANSI_STRIP_RE.sub(b"", chunk)
+                    if _ESC_TWICE_RE.search(stripped_chunk):
+                        writer.write(b"\x1b\x1b")
+                        await writer.drain()
+                        esc_responded = True
+                        writer._esc_inline = True  # type: ignore[attr-defined]
+                    elif _ESC_ONCE_RE.search(stripped_chunk):
+                        writer.write(b"\x1b")
+                        await writer.drain()
+                        esc_responded = True
+                        writer._esc_inline = True  # type: ignore[attr-defined]
             chunks.append(chunk)
         except (asyncio.TimeoutError, EOFError):
             break

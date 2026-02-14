@@ -862,6 +862,7 @@ async def test_probe_skipped_when_closing(tmp_path):
         pytest.param(b"[5] UTF-8\r\nSelect: ", b"5\r\n", id="menu_utf8_brackets"),
         pytest.param(b"[2] utf-8\r\n", b"2\r\n", id="menu_utf8_brackets_lower"),
         pytest.param(b"3. UTF-8\r\n", b"3\r\n", id="menu_utf8_dot"),
+        pytest.param(b"   5 ... UTF-8\r\n", b"5\r\n", id="menu_utf8_ellipsis"),
         pytest.param(b"1) ASCII\r\n2) Latin-1\r\n", None, id="menu_no_utf8"),
         pytest.param(b"(1) Ansi\r\n(2) VT100\r\n", b"1\r\n", id="menu_ansi_parens"),
         pytest.param(b"[1] ANSI\r\n[2] VT100\r\n", b"1\r\n", id="menu_ansi_brackets"),
@@ -871,6 +872,16 @@ async def test_probe_skipped_when_closing(tmp_path):
         pytest.param(b"3. ANSI\r\n", b"3\r\n", id="menu_ansi_dot"),
         pytest.param(b"3. English/ANSI\r\n", b"3\r\n", id="menu_english_ansi"),
         pytest.param(b"2. English/ANSI\r\n", b"2\r\n", id="menu_english_ansi_2"),
+        pytest.param(
+            b"   1 ... English/ANSI     The standard\r\n",
+            b"1\r\n",
+            id="menu_ansi_ellipsis",
+        ),
+        pytest.param(
+            b"   2 .. English/ANSI\r\n",
+            b"2\r\n",
+            id="menu_ansi_double_dot",
+        ),
         pytest.param(
             b"1) ASCII\r\n2) UTF-8\r\n(3) Ansi\r\n",
             b"2\r\n",
@@ -915,6 +926,26 @@ async def test_probe_skipped_when_closing(tmp_path):
             b"\x1b[1;1H\x1b[2JPress [.ESC.] twice within 15 seconds to CONTINUE...",
             b"\x1b\x1b",
             id="esc_twice_after_clear_screen",
+        ),
+        pytest.param(
+            b"Please press [ESC] to continue",
+            b"\x1b",
+            id="esc_once_brackets",
+        ),
+        pytest.param(
+            b"Press ESC to continue",
+            b"\x1b",
+            id="esc_once_bare",
+        ),
+        pytest.param(
+            b"press <Esc> to continue",
+            b"\x1b",
+            id="esc_once_angle_brackets",
+        ),
+        pytest.param(
+            b"\x1b[33mPress [ESC] to continue\x1b[0m",
+            b"\x1b",
+            id="esc_once_ansi_wrapped",
         ),
         pytest.param(b"HIT RETURN:", b"\r\n", id="hit_return"),
         pytest.param(b"Hit Return.", b"\r\n", id="hit_return_lower"),
@@ -981,6 +1012,16 @@ async def test_probe_skipped_when_closing(tmp_path):
             b"press backspace/del:",
             b"\x14",
             id="petscii_backspace_del_reversed",
+        ),
+        pytest.param(
+            b"PLEASE HIT YOUR BACKSPACE/DELETE\r\nKEY FOR C/G DETECT:",
+            b"\x14",
+            id="petscii_hit_your_backspace_delete",
+        ),
+        pytest.param(
+            b"hit your delete/backspace key:",
+            b"\x14",
+            id="petscii_hit_your_delete_backspace_key",
         ),
     ],
 )
@@ -1290,6 +1331,88 @@ async def test_fingerprinting_settle_dsr_response(tmp_path):
     )
 
     assert b"\x1b[1;1R" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_ansi_ellipsis_menu(tmp_path):
+    """Worldgroup/MajorBBS ellipsis menu '1 ... English/ANSI' selects '1'."""
+    save_path = str(tmp_path / "result.json")
+    writer = MockWriter(will_options=[fps.SGA, fps.ECHO])
+    reader = InteractiveMockReader([
+        (b"Please choose one of these languages/protocols:\r\n\r\n"
+         b"   1 ... English/ANSI     The standard English language version\r\n"
+         b"   2 ... English/RIP      The English version of RIPscrip graphics\r\n"
+         b"\r\nChoose a number from 1 to 2: "),
+        b"Welcome!\r\n",
+    ], writer)
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"1\r\n" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_read_banner_inline_esc_twice():
+    """ESC-twice botcheck is responded to inline during banner collection."""
+    reader = MockReader([
+        b"Mystic BBS v1.12\r\n",
+        b"Press [.ESC.] twice within 15 seconds to CONTINUE...\r\n",
+        b"Press [.ESC.] twice within 14 seconds to CONTINUE...\r\n",
+    ])
+    writer = MockWriter()
+    await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=0.05, writer=writer,
+    )
+    assert b"\x1b\x1b" in writer._writes
+    esc_count = sum(1 for w in writer._writes if w == b"\x1b\x1b")
+    assert esc_count == 1
+
+
+@pytest.mark.asyncio
+async def test_read_banner_inline_esc_once():
+    """ESC-once prompt is responded to inline during banner collection."""
+    reader = MockReader([b"Press [ESC] to continue\r\n"])
+    writer = MockWriter()
+    await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=0.05, writer=writer,
+    )
+    assert b"\x1b" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_esc_inline_no_duplicate(tmp_path):
+    """Inline ESC response prevents duplicate in the prompt loop."""
+    save_path = str(tmp_path / "result.json")
+    writer = MockWriter(will_options=[fps.SGA])
+    reader = InteractiveMockReader([
+        b"Press [.ESC.] twice within 15 seconds to CONTINUE...\r\n",
+        b"Welcome to Mystic BBS!\r\nLogin: ",
+    ], writer)
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    esc_writes = [w for w in writer._writes if w == b"\x1b\x1b"]
+    assert len(esc_writes) == 1
 
 
 @pytest.mark.asyncio
