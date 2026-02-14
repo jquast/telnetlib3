@@ -18,7 +18,6 @@ if TYPE_CHECKING:  # pragma: no cover
 
 # local
 from . import slc
-from .accessories import TRACE, hexdump
 from .mud import (
     zmp_decode,
     atcp_decode,
@@ -100,6 +99,7 @@ from .telopt import (
     name_commands,
     option_from_name,
 )
+from .accessories import TRACE, hexdump
 
 __all__ = ("TelnetWriter", "TelnetWriterUnicode")
 

@@ -91,12 +91,12 @@ class MockReader:
 
 
 class InteractiveMockReader:
-    """MockReader that gates chunks behind writer responses.
+    """
+    MockReader that gates chunks behind writer responses.
 
-    The first chunk is available immediately.  Each subsequent chunk is
-    released only after the writer has accumulated one more write than
-    before, simulating a server that waits for client input before
-    sending the next prompt.
+    The first chunk is available immediately.  Each subsequent chunk is released only after the
+    writer has accumulated one more write than before, simulating a server that waits for client
+    input before sending the next prompt.
     """
 
     def __init__(self, chunks, writer):
@@ -1162,7 +1162,6 @@ async def test_fingerprinting_shell_no_yn_prompt(tmp_path):
     assert b"yes\r\n" not in writer._writes
 
 
-
 @pytest.mark.asyncio
 async def test_fingerprinting_shell_multi_prompt(tmp_path):
     """Server asks color first, then presents a UTF-8 charset menu."""
@@ -1226,7 +1225,7 @@ async def test_fingerprinting_shell_multi_prompt_max_replies(tmp_path):
     save_path = str(tmp_path / "result.json")
     writer = MockWriter(will_options=[fps.SGA])
     banners = [f"Color? (round {i}) ".encode()
-                for i in range(sfp._MAX_PROMPT_REPLIES + 1)]
+               for i in range(sfp._MAX_PROMPT_REPLIES + 1)]
     reader = InteractiveMockReader(banners, writer)
 
     await sfp.fingerprinting_client_shell(
@@ -1360,7 +1359,7 @@ async def test_fingerprinting_settle_dsr_response(tmp_path):
 
 @pytest.mark.asyncio
 async def test_fingerprinting_shell_ansi_ellipsis_menu(tmp_path):
-    """Worldgroup/MajorBBS ellipsis menu '1 ... English/ANSI' selects '1'."""
+    """Worldgroup/MajorBBS ellipsis-menu selects first numbered option."""
     save_path = str(tmp_path / "result.json")
     writer = MockWriter(will_options=[fps.SGA, fps.ECHO])
     reader = InteractiveMockReader([
@@ -1539,5 +1538,6 @@ def test_virtual_cursor_ansi_stripped():
     pytest.param(b"\x1b\x1b", "atascii", b"\x1b\x1b", id="atascii_esc_esc"),
 ])
 def test_reencode_prompt(response, encoding, expected):
+    # local
     import telnetlib3  # noqa: F401 - registers codecs
     assert sfp._reencode_prompt(response, encoding) == expected

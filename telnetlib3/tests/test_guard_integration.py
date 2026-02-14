@@ -6,6 +6,7 @@ import functools
 import pytest
 
 # local
+from telnetlib3 import server_fingerprinting as sfp
 from telnetlib3.guard_shells import (
     ConnectionCounter,
     _read_line,
@@ -15,7 +16,6 @@ from telnetlib3.guard_shells import (
     _latin1_reading,
 )
 from telnetlib3.stream_reader import TelnetReaderUnicode
-from telnetlib3 import server_fingerprinting as sfp
 
 
 async def test_connection_counter_integration():
@@ -409,8 +409,9 @@ async def test_without_latin1_reading_strict_crashes():
 
 async def test_fingerprint_scanner_defeats_robot_check(unused_tcp_port):
     """Fingerprint scanner's virtual cursor defeats the server's robot_check."""
+    # local
+    from telnetlib3.guard_shells import _TEST_CHAR, _measure_width  # noqa: PLC0415
     from telnetlib3.tests.accessories import create_server  # noqa: PLC0415
-    from telnetlib3.guard_shells import _measure_width, _TEST_CHAR  # noqa: PLC0415
 
     measured_width: list[int | None] = []
 
@@ -430,6 +431,7 @@ async def test_fingerprint_scanner_defeats_robot_check(unused_tcp_port):
         shell=guarded_shell,
         connect_maxwait=0.5,
     ):
+        # local
         import telnetlib3  # noqa: PLC0415
 
         shell = functools.partial(

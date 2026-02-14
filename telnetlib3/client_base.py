@@ -15,8 +15,8 @@ from typing import Any, Type, Union, Callable, Optional, cast
 
 # local
 from ._types import ShellCallback
-from .accessories import TRACE, hexdump
 from .telopt import DO, WILL, theNULL, name_commands
+from .accessories import TRACE, hexdump
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
@@ -240,7 +240,8 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                     pass
 
     def _detect_syncterm_font(self, data: bytes) -> None:
-        """Scan *data* for SyncTERM font selection and switch encoding.
+        """
+        Scan *data* for SyncTERM font selection and switch encoding.
 
         When :attr:`_encoding_explicit` is set on the writer (indicating
         the user passed ``--encoding``), the font switch is logged but
@@ -248,9 +249,10 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         """
         if self.writer is None:
             return
+        # local
         from .server_fingerprinting import (  # pylint: disable=import-outside-toplevel
-            detect_syncterm_font,
             _SYNCTERM_BINARY_ENCODINGS,
+            detect_syncterm_font,
         )
         encoding = detect_syncterm_font(data)
         if encoding is not None:

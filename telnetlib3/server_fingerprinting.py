@@ -103,7 +103,7 @@ _MENU_ANSI_RE = re.compile(
 _GB_BIG5_RE = re.compile(rb"(?i)(?:^|[^a-zA-Z0-9])gb\s*/\s*big\s*5(?:[^a-zA-Z0-9]|$)")
 
 # Strip ANSI/VT100 escape sequences from raw bytes for pattern matching.
-# Re-use wcwidth's comprehensive pattern (CSI, OSC, DCS, APC, PM, charset, Fe, Fp).
+# Reuse wcwidth's comprehensive pattern (CSI, OSC, DCS, APC, PM, charset, Fe, Fp).
 _ANSI_STRIP_RE = re.compile(_ZERO_WIDTH_STR_PATTERN.pattern.encode("ascii"))
 
 # Match "Press [.ESC.] twice" botcheck prompts (e.g. Mystic BBS).
@@ -203,7 +203,8 @@ log = logging.getLogger(__name__)
 
 
 def detect_syncterm_font(data: bytes) -> str | None:
-    """Extract encoding from a SyncTERM font selection sequence in *data*.
+    """
+    Extract encoding from a SyncTERM font selection sequence in *data*.
 
     Scans *data* for ``CSI Ps1 ; Ps2 SP D`` and returns the corresponding
     Python codec name from :data:`SYNCTERM_FONT_ENCODINGS`, or ``None``
@@ -228,13 +229,14 @@ _RETRO_EOL_ENCODINGS = frozenset({
 
 
 def _reencode_prompt(response: bytes, encoding: str) -> bytes:
-    """Re-encode an ASCII prompt response for the server's encoding.
+    r"""
+    Re-encode an ASCII prompt response for the server's encoding.
 
-    For retro encodings (ATASCII), the standard ``\\r\\n`` line ending
+    For retro encodings (ATASCII), the standard ``\r\n`` line ending
     is re-encoded through the codec so the server receives its native
     EOL byte.  For all other encodings the response is returned as-is.
 
-    :param response: ASCII prompt response bytes (e.g. ``b"yes\\r\\n"``).
+    :param response: ASCII prompt response bytes (e.g. ``b"yes\r\n"``).
     :param encoding: Remote server encoding name.
     :returns: Response bytes suitable for the server's encoding.
     """
@@ -249,7 +251,8 @@ def _reencode_prompt(response: bytes, encoding: str) -> bytes:
 
 
 class _VirtualCursor:
-    """Track virtual cursor column to generate position-aware CPR responses.
+    """
+    Track virtual cursor column to generate position-aware CPR responses.
 
     The server's robot-check sends DSR, writes a test character, then sends
     DSR again.  It compares the two cursor positions to verify the character
@@ -275,7 +278,8 @@ class _VirtualCursor:
         return f"\x1b[1;{self.col}R".encode("ascii")
 
     def advance(self, data: bytes) -> None:
-        """Advance cursor column for *data* (non-DSR text from the server).
+        """
+        Advance cursor column for *data* (non-DSR text from the server).
 
         ANSI escape sequences are stripped first so they do not contribute
         to cursor movement.  Backspace and carriage return are handled.
@@ -285,6 +289,7 @@ class _VirtualCursor:
         stripped = _ANSI_STRIP_RE.sub(b"", data)
         try:
             text = stripped.decode(self.encoding, errors="replace")
+        # pylint: disable-next=broad-exception-caught,overlapping-except
         except (LookupError, Exception):
             text = stripped.decode("latin-1")
         for ch in text:
@@ -297,6 +302,7 @@ class _VirtualCursor:
                 w = _wcwidth.wcwidth(ch)
                 if w > 0:
                     self.col += w
+
 
 logger = logging.getLogger("telnetlib3.server_fingerprint")
 
@@ -434,7 +440,7 @@ async def fingerprinting_client_shell(
     :param banner_max_bytes: Maximum bytes per banner read call.
     """
     writer.environ_encoding = environ_encoding
-    writer._encoding_explicit = environ_encoding != "ascii"
+    writer._encoding_explicit = environ_encoding != "ascii"  # pylint: disable=protected-access
     try:
         await _fingerprint_session(
             reader,
@@ -455,7 +461,7 @@ async def fingerprinting_client_shell(
         writer.close()
 
 
-async def _fingerprint_session(  # pylint: disable=too-many-locals
+async def _fingerprint_session(  # noqa: E501 ; pylint: disable=too-many-locals,too-many-branches,too-many-statements
     reader: TelnetReader,
     writer: TelnetWriter,
     *,
@@ -502,6 +508,7 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
         if detected in (b"\x1b\x1b", b"\x1b") and getattr(
             writer, '_esc_inline', False
         ):
+            # pylint: disable-next=protected-access
             writer._esc_inline = False  # type: ignore[attr-defined]
             detected = None
         prompt_response = _reencode_prompt(
@@ -850,7 +857,7 @@ def _save_server_fingerprint_data(
 
 
 def _format_banner(data: bytes, encoding: str = "utf-8") -> str:
-    """
+    r"""
     Format raw banner bytes for JSON serialization.
 
     Default ``"utf-8"`` is intentional -- banners are typically UTF-8
@@ -859,7 +866,7 @@ def _format_banner(data: bytes, encoding: str = "utf-8") -> str:
     Uses ``surrogateescape`` so high bytes (common in CP437 BBS art)
     are preserved as surrogates (e.g. byte ``0xB1`` → ``U+DCB1``)
     rather than replaced with ``U+FFFD``.  JSON serialization escapes
-    them as ``\\udcXX``, which round-trips through :func:`json.load`.
+    them as ``\udcXX``, which round-trips through :func:`json.load`.
 
     Falls back to ``latin-1`` when the requested encoding is unavailable
     (e.g. a server-advertised charset that Python does not recognise).
@@ -878,6 +885,7 @@ def _format_banner(data: bytes, encoding: str = "utf-8") -> str:
         text = data.decode("latin-1")
 
     if encoding.lower() in ("petscii", "cbm", "commodore", "c64", "c128"):
+        # local
         from .color_filter import PetsciiColorFilter  # pylint: disable=import-outside-toplevel
         text = PetsciiColorFilter().filter(text)
         # PETSCII uses CR (0x0D) as line terminator; normalize to LF.
@@ -920,7 +928,8 @@ async def _read_banner(
 def _respond_to_dsr(
     chunk: bytes, writer: TelnetWriter, cursor: _VirtualCursor | None
 ) -> None:
-    """Send CPR response(s) for each DSR found in *chunk*.
+    """
+    Send CPR response(s) for each DSR found in *chunk*.
 
     When *cursor* is provided, text between DSR sequences advances the
     virtual cursor column so each CPR reflects the correct position.
@@ -939,7 +948,7 @@ def _respond_to_dsr(
     cursor.advance(chunk[pos:])
 
 
-async def _read_banner_until_quiet(
+async def _read_banner_until_quiet(  # pylint: disable=too-many-positional-arguments
     reader: TelnetReader,
     quiet_time: float = 2.0,
     max_wait: float = 8.0,
@@ -1016,11 +1025,13 @@ async def _read_banner_until_quiet(
                         writer.write(b"\x1b\x1b")
                         await writer.drain()
                         esc_responded = True
+                        # pylint: disable-next=protected-access
                         writer._esc_inline = True  # type: ignore[attr-defined]
                     elif _ESC_ONCE_RE.search(stripped_chunk):
                         writer.write(b"\x1b")
                         await writer.drain()
                         esc_responded = True
+                        # pylint: disable-next=protected-access
                         writer._esc_inline = True  # type: ignore[attr-defined]
             chunks.append(chunk)
         except (asyncio.TimeoutError, EOFError):

@@ -450,7 +450,7 @@ async def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port):
         await proc.expect(pexpect.EOF, async_=True, timeout=5)
         assert proc.before == (
             b"Escape character is '^]'.\r\n"
-            b"hello, space cadet.\r\r\n"
+            b"hello, space cadet.\r\n"
             b"\x1b[m\r\n"
             b"Connection closed by foreign host.\r\n"
         )

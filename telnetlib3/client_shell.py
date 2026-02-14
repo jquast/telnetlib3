@@ -66,7 +66,7 @@ _INPUT_SEQ_XLAT: Dict[str, Dict[bytes, bytes]] = {
 }
 
 
-class InputFilter:
+class InputFilter:  # pylint: disable=too-few-public-methods
     """
     Translate terminal escape sequences and single bytes to retro encoding bytes.
 
@@ -82,6 +82,7 @@ class InputFilter:
     def __init__(
         self, seq_xlat: Dict[bytes, bytes], byte_xlat: Dict[int, int]
     ) -> None:
+        """Initialize input filter with sequence and byte translation tables."""
         self._byte_xlat = byte_xlat
         # Sort sequences longest-first so \x1b[3~ matches before \x1b[3
         self._seq_sorted: Tuple[Tuple[bytes, bytes], ...] = tuple(
@@ -97,9 +98,9 @@ class InputFilter:
         """
         Process input bytes, returning raw bytes to send to the remote host.
 
-        Escape sequences are matched against the configured table and replaced.
-        Partial sequences are buffered until the next call.  Single bytes are
-        translated via the byte translation table.
+        Escape sequences are matched against the configured table and replaced. Partial sequences
+        are buffered until the next call.  Single bytes are translated via the byte translation
+        table.
 
         :param data: Raw bytes from terminal stdin.
         :returns: Translated bytes ready to send to the remote BBS.
@@ -381,7 +382,7 @@ else:
                         if _inf is not None:
                             translated = _inf.feed(inp)
                             if translated:
-                                telnet_writer._write(translated)
+                                telnet_writer._write(translated)  # pylint: disable=protected-access
                         else:
                             telnet_writer.write(inp.decode())
                         stdin_task = accessories.make_reader_task(stdin)

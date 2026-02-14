@@ -183,7 +183,8 @@ class TelnetClient(client_base.BaseClient):
 
     @staticmethod
     def _normalize_charset_name(name: str) -> str:
-        """Normalize server-advertised charset names for :func:`codecs.lookup`.
+        """
+        Normalize server-advertised charset names for :func:`codecs.lookup`.
 
         Servers sometimes advertise non-standard encoding names that Python's
         codec registry does not recognise.  This tries progressively simpler
@@ -197,6 +198,7 @@ class TelnetClient(client_base.BaseClient):
         :param name: Raw charset name from the server.
         :returns: Normalized name suitable for :func:`codecs.lookup`.
         """
+        # std imports
         import re  # pylint: disable=import-outside-toplevel
         base = name.strip().replace(' ', '-')
         # Strip leading zeros from numeric segments: iso-8859-02 → iso-8859-2
@@ -530,7 +532,7 @@ async def open_connection(  # pylint: disable=too-many-locals
     return protocol.reader, protocol.writer
 
 
-async def run_client() -> None:
+async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-statements
     """Command-line 'telnetlib3-client' entry point, via setuptools."""
     args = _transform_args(_get_argument_parser().parse_args())
     config_msg = f"Client configuration: {accessories.repr_mapping(args)}"
@@ -562,7 +564,7 @@ async def run_client() -> None:
                 client.writer.always_will = always_will
             if always_do:
                 client.writer.always_do = always_do
-            client.writer._encoding_explicit = encoding_explicit
+            client.writer._encoding_explicit = encoding_explicit  # pylint: disable=protected-access
 
         client.connection_made = _patched_connection_made  # type: ignore[method-assign]
         return client
@@ -576,10 +578,10 @@ async def run_client() -> None:
         # local
         from .color_filter import (  # pylint: disable=import-outside-toplevel
             PALETTES,
-            AtasciiControlFilter,
             ColorConfig,
             ColorFilter,
             PetsciiColorFilter,
+            AtasciiControlFilter,
         )
 
         # Auto-select encoding-specific filters
@@ -625,10 +627,11 @@ async def run_client() -> None:
     # Wrap shell to inject raw_mode flag and input translation for retro encodings
     raw_mode: bool = args.get("raw_mode", False)
     if raw_mode:
+        # local
         from .client_shell import (  # pylint: disable=import-outside-toplevel
-            InputFilter,
-            _INPUT_SEQ_XLAT,
             _INPUT_XLAT,
+            _INPUT_SEQ_XLAT,
+            InputFilter,
         )
 
         enc_key = (args.get("encoding", "") or "").lower()
@@ -643,8 +646,10 @@ async def run_client() -> None:
             reader: Union[TelnetReader, TelnetReaderUnicode],
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
+            # pylint: disable-next=protected-access
             writer_arg._raw_mode = True  # type: ignore[union-attr]
             if input_filter is not None:
+                # pylint: disable-next=protected-access
                 writer_arg._input_filter = input_filter  # type: ignore[union-attr]
             await _inner_shell(reader, writer_arg)
 
@@ -810,6 +815,7 @@ def _parse_background_color(value: str) -> Tuple[int, int, int]:
 
 def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
     # Auto-enable force_binary for retro BBS encodings that use high-bit bytes.
+    # local
     from .encodings import FORCE_BINARY_ENCODINGS  # pylint: disable=import-outside-toplevel
 
     force_binary = args.force_binary
@@ -1013,6 +1019,7 @@ async def run_fingerprint_client() -> None:
             orig_connection_made(transport)
             assert client.writer is not None
             client.writer.environ_encoding = environ_encoding
+            # pylint: disable-next=protected-access
             client.writer._encoding_explicit = environ_encoding != "ascii"
             client.writer.always_will = fp_always_will
             client.writer.always_do = fp_always_do

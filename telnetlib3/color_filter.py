@@ -503,24 +503,25 @@ _PETSCII_CTRL_RE = re.compile(
 
 
 class PetsciiColorFilter:
-    """
+    r"""
     Translate PETSCII control codes to ANSI sequences.
 
     PETSCII uses single-byte control codes embedded in the text stream for
     color changes, cursor movement, and screen control.  This filter
     translates them to ANSI equivalents:
 
-    - **Colors**: 16 VIC-II palette colors → ``\\x1b[38;2;R;G;Bm`` (24-bit RGB)
-    - **Reverse video**: RVS ON/OFF → ``\\x1b[7m`` / ``\\x1b[27m``
-    - **Cursor**: up/down/left/right → ``\\x1b[A/B/C/D``
-    - **Screen**: HOME → ``\\x1b[H``, CLR → ``\\x1b[2J``
-    - **DEL**: destructive backspace → ``\\x08\\x1b[P``
+    - **Colors**: 16 VIC-II palette colors → ``\x1b[38;2;R;G;Bm`` (24-bit RGB)
+    - **Reverse video**: RVS ON/OFF → ``\x1b[7m`` / ``\x1b[27m``
+    - **Cursor**: up/down/left/right → ``\x1b[A/B/C/D``
+    - **Screen**: HOME → ``\x1b[H``, CLR → ``\x1b[2J``
+    - **DEL**: destructive backspace → ``\x08\x1b[P``
 
     :param config: Color configuration (uses ``brightness`` and ``contrast``
         for palette adjustment; ``palette_name`` is ignored — always C64).
     """
 
     def __init__(self, config: Optional[ColorConfig] = None) -> None:
+        """Initialize PETSCII filter with optional color configuration."""
         palette = PALETTES["c64"]
         if config is not None:
             brightness = config.brightness
@@ -541,9 +542,8 @@ class PetsciiColorFilter:
         """
         Replace PETSCII control codes with ANSI sequences.
 
-        PETSCII control characters (colors, cursor, screen) are replaced
-        with their ANSI equivalents.  All other characters pass through
-        unchanged.
+        PETSCII control characters (colors, cursor, screen) are replaced with their ANSI
+        equivalents.  All other characters pass through unchanged.
 
         :param text: Decoded PETSCII text (Unicode string).
         :returns: Text with PETSCII controls translated to ANSI.
@@ -597,17 +597,17 @@ _ATASCII_CTRL_RE = re.compile(
 
 
 class AtasciiControlFilter:
-    """
+    r"""
     Translate decoded ATASCII control character glyphs to ANSI sequences.
 
     The ``atascii`` codec decodes ATASCII control bytes into Unicode glyphs
     (e.g. byte 0x7E → U+25C0 ◀).  This filter replaces those glyphs with
     the ANSI terminal sequences that produce the intended effect:
 
-    - **Backspace/delete**: ◀ → ``\\x08\\x1b[P`` (destructive backspace)
-    - **Tab**: ▶ → ``\\t``
-    - **Clear screen**: ↰ → ``\\x1b[2J\\x1b[H``
-    - **Cursor movement**: ↑↓←→ → ``\\x1b[A/B/D/C``
+    - **Backspace/delete**: ◀ → ``\x08\x1b[P`` (destructive backspace)
+    - **Tab**: ▶ → ``\t``
+    - **Clear screen**: ↰ → ``\x1b[2J\x1b[H``
+    - **Cursor movement**: ↑↓←→ → ``\x1b[A/B/D/C``
     """
 
     def filter(self, text: str) -> str:

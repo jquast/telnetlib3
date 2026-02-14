@@ -6,10 +6,10 @@ import pytest
 # local
 from telnetlib3.color_filter import (
     PALETTES,
-    AtasciiControlFilter,
     ColorConfig,
     ColorFilter,
     PetsciiColorFilter,
+    AtasciiControlFilter,
     _adjust_color,
     _is_foreground_code,
     _sgr_code_to_palette_index,

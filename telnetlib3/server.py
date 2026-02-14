@@ -1041,6 +1041,7 @@ def parse_server_args() -> Dict[str, Any]:
         result["pty_raw"] = False
 
     # Auto-enable force_binary for retro BBS encodings that use high-bit bytes.
+    # local
     from .encodings import FORCE_BINARY_ENCODINGS  # pylint: disable=import-outside-toplevel
 
     if result["encoding"].lower().replace('-', '_') in FORCE_BINARY_ENCODINGS:

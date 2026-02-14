@@ -13,8 +13,8 @@ from typing import Any, Type, Union, Callable, Optional
 
 # local
 from ._types import ShellCallback
-from .accessories import TRACE, hexdump
 from .telopt import theNULL
+from .accessories import TRACE, hexdump
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
