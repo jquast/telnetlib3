@@ -532,7 +532,7 @@ async def open_connection(  # pylint: disable=too-many-locals
     return protocol.reader, protocol.writer
 
 
-async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-statements
+async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-statements,too-complex
     """Command-line 'telnetlib3-client' entry point, via setuptools."""
     args = _transform_args(_get_argument_parser().parse_args())
     config_msg = f"Client configuration: {accessories.repr_mapping(args)}"

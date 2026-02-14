@@ -461,7 +461,7 @@ async def fingerprinting_client_shell(
         writer.close()
 
 
-async def _fingerprint_session(  # noqa: E501 ; pylint: disable=too-many-locals,too-many-branches,too-many-statements
+async def _fingerprint_session(  # noqa: E501 ; pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-complex
     reader: TelnetReader,
     writer: TelnetWriter,
     *,
@@ -948,7 +948,7 @@ def _respond_to_dsr(
     cursor.advance(chunk[pos:])
 
 
-async def _read_banner_until_quiet(  # pylint: disable=too-many-positional-arguments
+async def _read_banner_until_quiet(  # noqa: E501 ; pylint: disable=too-many-positional-arguments,too-complex,too-many-nested-blocks
     reader: TelnetReader,
     quiet_time: float = 2.0,
     max_wait: float = 8.0,
