@@ -72,10 +72,13 @@ _PROBE_TIMEOUT = 0.5
 _MAX_PROMPT_REPLIES = 5
 _JQ = shutil.which("jq")
 
-# Match "yes/no", "y/n", or "(Yes|No)" surrounded by non-alphanumeric
-# chars (or at string boundaries).  Used to auto-answer confirmation prompts.
+# Match "yes/no", "y/n", "(Yes|No)", or "(Yn)"/"[Yn]" surrounded by
+# non-alphanumeric chars (or at string boundaries).  The "(Yn)" form is
+# a common BBS convention where the capital letter indicates the default.
 _YN_RE = re.compile(
     rb"(?i)(?:^|[^a-zA-Z0-9])(yes/no|y/n|\(yes\|no\))(?:[^a-zA-Z0-9]|$)"
+    rb"|[(\[][Yy][Nn][)\]]"
+    rb"|[(\[][yY][nN][)\]]"
 )
 
 # Match "color?" prompts — many MUDs ask if the user wants color.
@@ -113,6 +116,12 @@ _ESC_ONCE_RE = re.compile(rb"(?i)press\s+[\[<]?\.?esc\.?[\]>]?(?!\s+twice)")
 # Common on Worldgroup/MajorBBS and other vintage BBS systems.
 _RETURN_PROMPT_RE = re.compile(
     rb"(?i)(?:hit|press)\s+(?:return|enter)\s*[:\.]?"
+)
+
+# Match "Press the BACKSPACE key" prompts — standard telnet terminal
+# detection (e.g. TelnetBible.com).  Respond with ASCII BS (0x08).
+_BACKSPACE_KEY_RE = re.compile(
+    rb"(?i)press\s+the\s+backspace\s+key"
 )
 
 # Match "press del/backspace" and "hit your backspace/delete" prompts from
@@ -358,8 +367,8 @@ def _detect_yn_prompt(  # pylint: disable=too-many-return-statements
         return _PromptResult(b"C\r\n")
     match = _YN_RE.search(stripped)
     if match:
-        token = match.group(1).lower()
-        if token in (b"yes/no", b"(yes|no)"):
+        token = match.group(1)
+        if token is not None and token.lower() in (b"yes/no", b"(yes|no)"):
             return _PromptResult(b"yes\r\n")
         return _PromptResult(b"y\r\n")
     if _COLOR_RE.search(stripped):
@@ -372,6 +381,8 @@ def _detect_yn_prompt(  # pylint: disable=too-many-return-statements
         return _PromptResult(ansi_match.group(1) + b"\r\n")
     if _GB_BIG5_RE.search(stripped):
         return _PromptResult(b"big5\r\n", encoding="big5")
+    if _BACKSPACE_KEY_RE.search(stripped):
+        return _PromptResult(b"\x08")
     if _DEL_BACKSPACE_RE.search(stripped):
         return _PromptResult(b"\x14")
     if _RETURN_PROMPT_RE.search(stripped):

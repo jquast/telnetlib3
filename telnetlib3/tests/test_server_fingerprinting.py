@@ -969,6 +969,21 @@ async def test_probe_skipped_when_closing(tmp_path):
             id="yn_ansi_wrapped",
         ),
         pytest.param(
+            b"Do you support the ANSI color standard (Yn)? ",
+            b"y\r\n",
+            id="yn_paren_capital_y",
+        ),
+        pytest.param(
+            b"Continue? [Yn]",
+            b"y\r\n",
+            id="yn_bracket_capital_y",
+        ),
+        pytest.param(
+            b"Do something (yN)",
+            b"y\r\n",
+            id="yn_paren_capital_n",
+        ),
+        pytest.param(
             b"More: (Y)es, (N)o, (C)ontinuous?",
             b"C\r\n",
             id="more_continuous",
@@ -982,6 +997,16 @@ async def test_probe_skipped_when_closing(tmp_path):
             b"more (Y/N/C)ontinuous: ",
             b"C\r\n",
             id="more_ync_compact",
+        ),
+        pytest.param(
+            b"Press the BACKSPACE key to detect your terminal type: ",
+            b"\x08",
+            id="backspace_key_telnetbible",
+        ),
+        pytest.param(
+            b"\x1b[1mPress the BACKSPACE key\x1b[0m",
+            b"\x08",
+            id="backspace_key_ansi_wrapped",
         ),
         pytest.param(
             b"\x0cpress del/backspace:",
