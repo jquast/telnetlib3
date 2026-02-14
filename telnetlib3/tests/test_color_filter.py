@@ -8,6 +8,8 @@ from telnetlib3.color_filter import (
     PALETTES,
     ColorConfig,
     ColorFilter,
+    PetsciiColorFilter,
+    AtasciiControlFilter,
     _adjust_color,
     _is_foreground_code,
     _sgr_code_to_palette_index,
@@ -27,7 +29,7 @@ class TestPaletteData:
             assert 0 <= b <= 255
 
     def test_all_expected_palettes_exist(self) -> None:
-        assert set(PALETTES.keys()) == {"ega", "cga", "vga", "amiga", "xterm"}
+        assert set(PALETTES.keys()) == {"ega", "cga", "vga", "amiga", "xterm", "c64"}
 
 
 class TestColorConfig:
@@ -452,9 +454,140 @@ class TestColorFilterCustomBackground:
 
 
 class TestColorFilterDifferentPalettes:
-    @pytest.mark.parametrize("name", list(PALETTES.keys()))
+    @pytest.mark.parametrize("name", [n for n in PALETTES if n != "c64"])
     def test_palette_red_foreground(self, name: str) -> None:
         f = ColorFilter(ColorConfig(palette_name=name, brightness=1.0, contrast=1.0))
         result = f.filter("\x1b[31m")
         rgb = PALETTES[name][1]
         assert f"38;2;{rgb[0]};{rgb[1]};{rgb[2]}" in result
+
+
+class TestPetsciiColorFilter:
+    def _make_filter(self, **kwargs: object) -> PetsciiColorFilter:
+        cfg = ColorConfig(brightness=1.0, contrast=1.0, **kwargs)  # type: ignore[arg-type]
+        return PetsciiColorFilter(cfg)
+
+    @pytest.mark.parametrize("ctrl_char,palette_idx", [
+        ('\x05', 1),
+        ('\x1c', 2),
+        ('\x1e', 5),
+        ('\x1f', 6),
+        ('\x81', 8),
+        ('\x90', 0),
+        ('\x95', 9),
+        ('\x96', 10),
+        ('\x97', 11),
+        ('\x98', 12),
+        ('\x99', 13),
+        ('\x9a', 14),
+        ('\x9b', 15),
+        ('\x9c', 4),
+        ('\x9e', 7),
+        ('\x9f', 3),
+    ])
+    def test_color_code_to_24bit(self, ctrl_char: str, palette_idx: int) -> None:
+        f = self._make_filter()
+        result = f.filter(f"hello{ctrl_char}world")
+        rgb = PALETTES["c64"][palette_idx]
+        assert f"\x1b[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m" in result
+        assert ctrl_char not in result
+        assert "hello" in result
+        assert "world" in result
+
+    def test_rvs_on(self) -> None:
+        f = self._make_filter()
+        result = f.filter("before\x12after")
+        assert "\x1b[7m" in result
+        assert "\x12" not in result
+
+    def test_rvs_off(self) -> None:
+        f = self._make_filter()
+        result = f.filter("before\x92after")
+        assert "\x1b[27m" in result
+        assert "\x92" not in result
+
+    def test_mixed_colors_and_rvs(self) -> None:
+        f = self._make_filter()
+        result = f.filter("\x1c\x12hello\x92\x05world")
+        red_rgb = PALETTES["c64"][2]
+        white_rgb = PALETTES["c64"][1]
+        assert f"\x1b[38;2;{red_rgb[0]};{red_rgb[1]};{red_rgb[2]}m" in result
+        assert "\x1b[7m" in result
+        assert "\x1b[27m" in result
+        assert f"\x1b[38;2;{white_rgb[0]};{white_rgb[1]};{white_rgb[2]}m" in result
+        assert "hello" in result
+        assert "world" in result
+
+    def test_plain_text_unchanged(self) -> None:
+        f = self._make_filter()
+        assert f.filter("hello world") == "hello world"
+
+    def test_non_petscii_control_chars_unchanged(self) -> None:
+        f = self._make_filter()
+        result = f.filter("A\x07B\x0bC")
+        assert "A\x07B\x0bC" == result
+
+    def test_cursor_controls_translated(self) -> None:
+        f = self._make_filter()
+        assert f.filter("A\x13B") == "A\x1b[HB"
+        assert f.filter("A\x93B") == "A\x1b[2JB"
+        assert f.filter("A\x11B") == "A\x1b[BB"
+        assert f.filter("A\x91B") == "A\x1b[AB"
+        assert f.filter("A\x1dB") == "A\x1b[CB"
+        assert f.filter("A\x9dB") == "A\x1b[DB"
+        assert f.filter("A\x14B") == "A\x08\x1b[PB"
+
+    def test_flush_returns_empty(self) -> None:
+        f = self._make_filter()
+        assert f.flush() == ""
+
+    def test_brightness_contrast_applied(self) -> None:
+        f_full = PetsciiColorFilter(ColorConfig(brightness=1.0, contrast=1.0))
+        f_dim = PetsciiColorFilter(ColorConfig(brightness=0.5, contrast=0.5))
+        result_full = f_full.filter("\x1c")
+        result_dim = f_dim.filter("\x1c")
+        assert result_full != result_dim
+
+    def test_default_config(self) -> None:
+        f = PetsciiColorFilter()
+        result = f.filter("\x1c")
+        assert "\x1b[38;2;" in result
+
+
+class TestAtasciiControlFilter:
+    @pytest.mark.parametrize("glyph,expected", [
+        ('\u25c0', '\x08\x1b[P'),
+        ('\u25b6', '\t'),
+        ('\u21b0', '\x1b[2J\x1b[H'),
+        ('\u2191', '\x1b[A'),
+        ('\u2193', '\x1b[B'),
+        ('\u2190', '\x1b[D'),
+        ('\u2192', '\x1b[C'),
+    ])
+    def test_control_glyph_translated(self, glyph: str, expected: str) -> None:
+        f = AtasciiControlFilter()
+        result = f.filter(f"before{glyph}after")
+        assert f"before{expected}after" == result
+
+    def test_backspace_erases(self) -> None:
+        f = AtasciiControlFilter()
+        result = f.filter("DINGO\u25c0\u25c0\u25c0\u25c0\u25c0")
+        assert result == "DINGO" + "\x08\x1b[P" * 5
+
+    def test_plain_text_unchanged(self) -> None:
+        f = AtasciiControlFilter()
+        assert f.filter("hello world") == "hello world"
+
+    def test_atascii_graphics_unchanged(self) -> None:
+        f = AtasciiControlFilter()
+        text = "\u2663\u2665\u2666\u2660"
+        assert f.filter(text) == text
+
+    def test_flush_returns_empty(self) -> None:
+        f = AtasciiControlFilter()
+        assert f.flush() == ""
+
+    def test_multiple_controls_in_one_string(self) -> None:
+        f = AtasciiControlFilter()
+        result = f.filter("\u2191\u2193\u2190\u2192")
+        assert result == "\x1b[A\x1b[B\x1b[D\x1b[C"

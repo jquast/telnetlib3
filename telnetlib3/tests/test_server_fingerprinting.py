@@ -28,6 +28,11 @@ class MockOption(dict):
         return self.get(opt) is True
 
 
+class _MockProtocol:
+    def __init__(self):
+        self.force_binary = False
+
+
 class MockWriter:
     def __init__(self, extra=None, will_options=None, wont_options=None):
         self._extra = extra or {"peername": ("127.0.0.1", 12345)}
@@ -45,6 +50,7 @@ class MockWriter:
         self.aardwolf_data: list[dict[str, object]] = []
         self.mxp_data: list[bytes] = []
         self.comport_data: dict[str, object] | None = None
+        self.protocol = _MockProtocol()
         self._closing = False
 
     def get_extra_info(self, key, default=None):
@@ -79,6 +85,32 @@ class MockReader:
         if self._idx >= len(self._chunks):
             await asyncio.sleep(10)
             return b""
+        chunk = self._chunks[self._idx]
+        self._idx += 1
+        return chunk[:n]
+
+
+class InteractiveMockReader:
+    """
+    MockReader that gates chunks behind writer responses.
+
+    The first chunk is available immediately.  Each subsequent chunk is released only after the
+    writer has accumulated one more write than before, simulating a server that waits for client
+    input before sending the next prompt.
+    """
+
+    def __init__(self, chunks, writer):
+        self._chunks = list(chunks)
+        self._writer = writer
+        self._idx = 0
+
+    async def read(self, n):
+        if self._idx >= len(self._chunks):
+            await asyncio.sleep(10)
+            return b""
+        needed_writes = self._idx
+        while len(self._writer._writes) < needed_writes:
+            await asyncio.sleep(0.001)
         chunk = self._chunks[self._idx]
         self._idx += 1
         return chunk[:n]
@@ -213,7 +245,88 @@ def test_server_fingerprint_hash_consistency():
 def test_format_banner():
     assert sfp._format_banner(b"Hello\r\nWorld") == "Hello\r\nWorld"
     assert not sfp._format_banner(b"")
-    assert sfp._format_banner(b"\xff\xfe\xfd") == "\ufffd\ufffd\ufffd"
+
+
+def test_format_banner_surrogateescape():
+    """High bytes are preserved as surrogates, not replaced with U+FFFD."""
+    result = sfp._format_banner(b"\xff\xfe\xb1")
+    assert "\ufffd" not in result
+    assert result == "\udcff\udcfe\udcb1"
+    raw = result.encode("ascii", errors="surrogateescape")
+    assert raw == b"\xff\xfe\xb1"
+
+
+def test_format_banner_json_roundtrip():
+    """Surrogates survive JSON serialization and can recover raw bytes."""
+    banner = sfp._format_banner(b"Hello\xb1\xb2World")
+    encoded = json.dumps(banner)
+    decoded = json.loads(encoded)
+    assert decoded == banner
+    raw = decoded.encode("ascii", errors="surrogateescape")
+    assert raw == b"Hello\xb1\xb2World"
+
+
+def test_format_banner_unknown_encoding_fallback():
+    """Unknown encoding falls back to latin-1 instead of raising LookupError."""
+    result = sfp._format_banner(b"Hello\xb1World", encoding="x-no-such-codec")
+    assert result == "Hello\xb1World"
+    assert result == b"Hello\xb1World".decode("latin-1")
+
+
+def test_format_banner_atascii():
+    """ATASCII encoding decodes banner bytes through the registered codec."""
+    result = sfp._format_banner(b"Hello\x9b", encoding="atascii")
+    assert result == "Hello\n"
+
+
+def test_format_banner_petscii_color():
+    """PETSCII color codes are translated to ANSI 24-bit RGB in banners."""
+    result = sfp._format_banner(b"\x1c\xc8\xc9", encoding="petscii")
+    assert "\x1b[38;2;" in result
+    assert "HI" in result
+    assert "\x1c" not in result
+
+
+def test_format_banner_petscii_rvs():
+    """PETSCII RVS ON/OFF are translated to ANSI reverse in banners."""
+    result = sfp._format_banner(b"\x12\xc8\xc9\x92", encoding="petscii")
+    assert "\x1b[7m" in result
+    assert "\x1b[27m" in result
+
+
+def test_format_banner_petscii_newline():
+    """PETSCII CR line terminators are normalized to LF in banners."""
+    result = sfp._format_banner(b"\xc8\xc9\x0d\xca\xcb", encoding="petscii")
+    assert "HI\nJK" == result
+
+
+def test_format_banner_petscii_cursor():
+    """PETSCII cursor controls are translated to ANSI in banners."""
+    result = sfp._format_banner(b"\x13\xc8\xc9", encoding="petscii")
+    assert "\x1b[H" in result
+    assert "HI" in result
+
+
+@pytest.mark.parametrize(
+    "data,expected",
+    [
+        pytest.param(b"\x1b[0;0 D", "cp437", id="cp437_font0"),
+        pytest.param(b"\x1b[0;36 D", "atascii", id="atascii_font36"),
+        pytest.param(b"\x1b[0;32 D", "petscii", id="petscii_c64_upper"),
+        pytest.param(b"\x1b[0;40 D", "cp437", id="topaz_plus_font40"),
+        pytest.param(b"\x1b[1;36 D", "atascii", id="atascii_secondary"),
+        pytest.param(b"hello world", None, id="no_sequence"),
+        pytest.param(b"\x1b[0;255 D", None, id="unknown_font_id"),
+    ],
+)
+def test_detect_syncterm_font(data, expected):
+    assert sfp.detect_syncterm_font(data) == expected
+
+
+def test_syncterm_font_in_banner():
+    """Font sequence embedded in banner data is detected."""
+    data = b"Welcome\x1b[0;36 Dto the BBS"
+    assert sfp.detect_syncterm_font(data) == "atascii"
 
 
 @pytest.mark.asyncio
@@ -715,8 +828,8 @@ async def test_probe_skipped_when_closing(tmp_path):
 @pytest.mark.parametrize(
     "banner,expected",
     [
-        pytest.param(b"Welcome\r\n", b"\r\n", id="no_prompt"),
-        pytest.param(b"", b"\r\n", id="empty"),
+        pytest.param(b"Welcome\r\n", None, id="no_prompt"),
+        pytest.param(b"", None, id="empty"),
         pytest.param(b"Continue? (yes/no) ", b"yes\r\n", id="yes_no_parens"),
         pytest.param(b"Continue? (y/n) ", b"y\r\n", id="y_n_parens"),
         pytest.param(b"Accept terms? [Yes/No]:", b"yes\r\n", id="yes_no_brackets"),
@@ -724,44 +837,16 @@ async def test_probe_skipped_when_closing(tmp_path):
         pytest.param(b"Accept YES/NO now", b"yes\r\n", id="yes_no_uppercase"),
         pytest.param(b"Confirm y/n\r\n> ", b"y\r\n", id="y_n_trailing_newline"),
         pytest.param(b"Type yes/no please", b"yes\r\n", id="yes_no_space_delimited"),
-        pytest.param(b"systemd/network", b"\r\n", id="false_positive_word"),
-        pytest.param(b"beyond", b"\r\n", id="substring_y_n_not_matched"),
-        pytest.param(
-            b"Please enter a name: (or 'who' or 'finger'):", b"who\r\n", id="who_single_quotes"
-        ),
-        pytest.param(b'Enter your name (or "who"):', b"who\r\n", id="who_double_quotes"),
-        pytest.param(b"What is your name? (or 'WHO')", b"who\r\n", id="who_uppercase"),
-        pytest.param(b"Enter your name:", b"\r\n", id="name_prompt_no_who"),
-        pytest.param(
-            b"connect <name> <password>\r\n"
-            b"WHO                to see players connected.\r\n"
-            b"QUIT               to disconnect.\r\n",
-            b"who\r\n",
-            id="who_bare_command_listing",
-        ),
-        pytest.param(b"Type WHO to list users", b"who\r\n", id="who_bare_mid_sentence"),
-        pytest.param(b"somehow", b"\r\n", id="who_inside_word_not_matched"),
-        pytest.param(b"Type 'help' for a list of commands:", b"help\r\n", id="help_single_quotes"),
-        pytest.param(b'Enter your name (or "help"):', b"help\r\n", id="help_double_quotes"),
-        pytest.param(
-            b"HELP               to see available commands.\r\n",
-            b"help\r\n",
-            id="help_bare_command_listing",
-        ),
-        pytest.param(b"Type HELP for info", b"help\r\n", id="help_bare_mid_sentence"),
-        pytest.param(b"helpful tips", b"\r\n", id="help_inside_word_not_matched"),
-        pytest.param(
-            b"connect <name>\r\n"
-            b"WHO                to see players connected.\r\n"
-            b"HELP               to see available commands.\r\n",
-            b"who\r\n",
-            id="who_preferred_over_help",
-        ),
+        pytest.param(b"Continue? (Yes|No) ", b"yes\r\n", id="yes_pipe_no_parens"),
+        pytest.param(b"Accept? (YES|NO):", b"yes\r\n", id="yes_pipe_no_upper"),
+        pytest.param(b"systemd/network", None, id="false_positive_word"),
+        pytest.param(b"beyond", None, id="substring_y_n_not_matched"),
+        pytest.param(b"Enter your name:", None, id="name_prompt_no_who"),
         pytest.param(b"Color? ", b"y\r\n", id="color_question"),
         pytest.param(b"Do you want color? ", b"y\r\n", id="color_in_sentence"),
         pytest.param(b"ANSI COLOR? ", b"y\r\n", id="color_uppercase"),
         pytest.param(b"color ? ", b"y\r\n", id="color_space_before_question"),
-        pytest.param(b"colorful display", b"\r\n", id="color_no_question_mark"),
+        pytest.param(b"colorful display", None, id="color_no_question_mark"),
         pytest.param(
             b"Select charset:\r\n1) ASCII\r\n2) ISO-8859-1\r\n5) UTF-8\r\n",
             b"5\r\n",
@@ -774,26 +859,217 @@ async def test_probe_skipped_when_closing(tmp_path):
             b"12\r\n",
             id="menu_utf8_multidigit",
         ),
-        pytest.param(b"1) ASCII\r\n2) Latin-1\r\n", b"\r\n", id="menu_no_utf8"),
+        pytest.param(b"[5] UTF-8\r\nSelect: ", b"5\r\n", id="menu_utf8_brackets"),
+        pytest.param(b"[2] utf-8\r\n", b"2\r\n", id="menu_utf8_brackets_lower"),
+        pytest.param(b"3. UTF-8\r\n", b"3\r\n", id="menu_utf8_dot"),
+        pytest.param(b"   5 ... UTF-8\r\n", b"5\r\n", id="menu_utf8_ellipsis"),
+        pytest.param(b"1) ASCII\r\n2) Latin-1\r\n", None, id="menu_no_utf8"),
         pytest.param(b"(1) Ansi\r\n(2) VT100\r\n", b"1\r\n", id="menu_ansi_parens"),
         pytest.param(b"[1] ANSI\r\n[2] VT100\r\n", b"1\r\n", id="menu_ansi_brackets"),
         pytest.param(b"(3) ansi\r\n", b"3\r\n", id="menu_ansi_lowercase"),
         pytest.param(b"[12] Ansi\r\n", b"12\r\n", id="menu_ansi_multidigit"),
         pytest.param(b"(1] ANSI\r\n", b"1\r\n", id="menu_ansi_mixed_brackets"),
+        pytest.param(b"3. ANSI\r\n", b"3\r\n", id="menu_ansi_dot"),
+        pytest.param(b"3. English/ANSI\r\n", b"3\r\n", id="menu_english_ansi"),
+        pytest.param(b"2. English/ANSI\r\n", b"2\r\n", id="menu_english_ansi_2"),
+        pytest.param(
+            b"   1 ... English/ANSI     The standard\r\n",
+            b"1\r\n",
+            id="menu_ansi_ellipsis",
+        ),
+        pytest.param(
+            b"   2 .. English/ANSI\r\n",
+            b"2\r\n",
+            id="menu_ansi_double_dot",
+        ),
         pytest.param(
             b"1) ASCII\r\n2) UTF-8\r\n(3) Ansi\r\n",
             b"2\r\n",
             id="menu_utf8_preferred_over_ansi",
         ),
+        pytest.param(
+            b"1. ASCII\r\n2. UTF-8\r\n3. English/ANSI\r\n",
+            b"2\r\n",
+            id="menu_utf8_dot_preferred_over_ansi_dot",
+        ),
         pytest.param(b"gb/big5", b"big5\r\n", id="gb_big5"),
         pytest.param(b"GB/Big5\r\n", b"big5\r\n", id="gb_big5_mixed_case"),
         pytest.param(b"Select: GB / Big5 ", b"big5\r\n", id="gb_big5_spaces"),
         pytest.param(b"gb/big 5\r\n", b"big5\r\n", id="gb_big5_space_before_5"),
-        pytest.param(b"bigfoot5", b"\r\n", id="big5_inside_word_not_matched"),
+        pytest.param(b"bigfoot5", None, id="big5_inside_word_not_matched"),
+        pytest.param(
+            b"Press [.ESC.] twice within 15 seconds to CONTINUE...",
+            b"\x1b\x1b",
+            id="esc_twice_mystic",
+        ),
+        pytest.param(
+            b"Press [ESC] twice to continue",
+            b"\x1b\x1b",
+            id="esc_twice_no_dots",
+        ),
+        pytest.param(
+            b"Press ESC twice to continue",
+            b"\x1b\x1b",
+            id="esc_twice_bare",
+        ),
+        pytest.param(
+            b"Press <Esc> twice for the BBS ... ",
+            b"\x1b\x1b",
+            id="esc_twice_angle_brackets",
+        ),
+        pytest.param(
+            b"\x1b[33mPress [.ESC.] twice within 10 seconds\x1b[0m",
+            b"\x1b\x1b",
+            id="esc_twice_ansi_wrapped",
+        ),
+        pytest.param(
+            b"\x1b[1;1H\x1b[2JPress [.ESC.] twice within 15 seconds to CONTINUE...",
+            b"\x1b\x1b",
+            id="esc_twice_after_clear_screen",
+        ),
+        pytest.param(
+            b"Please press [ESC] to continue",
+            b"\x1b",
+            id="esc_once_brackets",
+        ),
+        pytest.param(
+            b"Press ESC to continue",
+            b"\x1b",
+            id="esc_once_bare",
+        ),
+        pytest.param(
+            b"press <Esc> to continue",
+            b"\x1b",
+            id="esc_once_angle_brackets",
+        ),
+        pytest.param(
+            b"\x1b[33mPress [ESC] to continue\x1b[0m",
+            b"\x1b",
+            id="esc_once_ansi_wrapped",
+        ),
+        pytest.param(b"HIT RETURN:", b"\r\n", id="hit_return"),
+        pytest.param(b"Hit Return.", b"\r\n", id="hit_return_lower"),
+        pytest.param(b"PRESS RETURN:", b"\r\n", id="press_return"),
+        pytest.param(b"Press Enter:", b"\r\n", id="press_enter"),
+        pytest.param(b"press enter", b"\r\n", id="press_enter_lower"),
+        pytest.param(b"Hit Enter to continue", b"\r\n", id="hit_enter"),
+        pytest.param(
+            b"\x1b[1mHIT RETURN:\x1b[0m",
+            b"\r\n",
+            id="hit_return_ansi_wrapped",
+        ),
+        pytest.param(
+            b"\x1b[31mColor? \x1b[0m",
+            b"y\r\n",
+            id="color_ansi_wrapped",
+        ),
+        pytest.param(
+            b"\x1b[1mContinue? (y/n)\x1b[0m ",
+            b"y\r\n",
+            id="yn_ansi_wrapped",
+        ),
+        pytest.param(
+            b"Do you support the ANSI color standard (Yn)? ",
+            b"y\r\n",
+            id="yn_paren_capital_y",
+        ),
+        pytest.param(
+            b"Continue? [Yn]",
+            b"y\r\n",
+            id="yn_bracket_capital_y",
+        ),
+        pytest.param(
+            b"Do something (yN)",
+            b"y\r\n",
+            id="yn_paren_capital_n",
+        ),
+        pytest.param(
+            b"More: (Y)es, (N)o, (C)ontinuous?",
+            b"C\r\n",
+            id="more_continuous",
+        ),
+        pytest.param(
+            b"\x1b[33mMore: (Y)es, (N)o, (C)ontinuous?\x1b[0m",
+            b"C\r\n",
+            id="more_continuous_ansi",
+        ),
+        pytest.param(
+            b"more (Y/N/C)ontinuous: ",
+            b"C\r\n",
+            id="more_ync_compact",
+        ),
+        pytest.param(
+            b"Press the BACKSPACE key to detect your terminal type: ",
+            b"\x08",
+            id="backspace_key_telnetbible",
+        ),
+        pytest.param(
+            b"\x1b[1mPress the BACKSPACE key\x1b[0m",
+            b"\x08",
+            id="backspace_key_ansi_wrapped",
+        ),
+        pytest.param(
+            b"\x0cpress del/backspace:",
+            b"\x14",
+            id="petscii_del_backspace",
+        ),
+        pytest.param(
+            b"\x0c\r\npress del/backspace:",
+            b"\x14",
+            id="petscii_del_backspace_crlf",
+        ),
+        pytest.param(
+            b"press backspace:",
+            b"\x14",
+            id="petscii_backspace_only",
+        ),
+        pytest.param(
+            b"press del:",
+            b"\x14",
+            id="petscii_del_only",
+        ),
+        pytest.param(
+            b"PRESS DEL/BACKSPACE.",
+            b"\x14",
+            id="petscii_del_backspace_upper",
+        ),
+        pytest.param(
+            b"press backspace/del:",
+            b"\x14",
+            id="petscii_backspace_del_reversed",
+        ),
+        pytest.param(
+            b"PLEASE HIT YOUR BACKSPACE/DELETE\r\nKEY FOR C/G DETECT:",
+            b"\x14",
+            id="petscii_hit_your_backspace_delete",
+        ),
+        pytest.param(
+            b"hit your delete/backspace key:",
+            b"\x14",
+            id="petscii_hit_your_delete_backspace_key",
+        ),
     ],
 )
 def test_detect_yn_prompt(banner, expected):
-    assert sfp._detect_yn_prompt(banner) == expected
+    assert sfp._detect_yn_prompt(banner).response == expected
+
+
+@pytest.mark.parametrize(
+    "banner, expected_encoding",
+    [
+        pytest.param(b"5) UTF-8\r\n", "utf-8", id="utf8_menu"),
+        pytest.param(b"[2] utf-8\r\n", "utf-8", id="utf8_brackets"),
+        pytest.param(b"1) UTF8", "utf-8", id="utf8_no_hyphen"),
+        pytest.param(b"gb/big5", "big5", id="gb_big5"),
+        pytest.param(b"GB/Big5\r\n", "big5", id="gb_big5_mixed"),
+        pytest.param(b"(1) Ansi\r\n", None, id="ansi_no_encoding"),
+        pytest.param(b"yes/no", None, id="yn_no_encoding"),
+        pytest.param(b"Color? ", None, id="color_no_encoding"),
+        pytest.param(b"nothing special", None, id="none_no_encoding"),
+    ],
+)
+def test_detect_yn_prompt_encoding(banner, expected_encoding):
+    assert sfp._detect_yn_prompt(banner).encoding == expected_encoding
 
 
 @pytest.mark.asyncio
@@ -841,6 +1117,28 @@ async def test_fingerprinting_shell_yes_no_prompt(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_fingerprinting_shell_esc_twice_prompt(tmp_path):
+    """Banner with ESC-twice botcheck sends two raw ESC bytes."""
+    save_path = str(tmp_path / "result.json")
+    reader = MockReader([b"Press [.ESC.] twice within 15 seconds to CONTINUE..."])
+    writer = MockWriter(will_options=[fps.SGA])
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"\x1b\x1b" in writer._writes
+
+
+@pytest.mark.asyncio
 async def test_fingerprinting_shell_no_yn_prompt(tmp_path):
     """Banner without y/n prompt sends bare '\\r\\n'."""
     save_path = str(tmp_path / "result.json")
@@ -865,11 +1163,15 @@ async def test_fingerprinting_shell_no_yn_prompt(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_fingerprinting_shell_who_prompt(tmp_path):
-    """Banner with 'who' option causes 'who\\r\\n' response."""
+async def test_fingerprinting_shell_multi_prompt(tmp_path):
+    """Server asks color first, then presents a UTF-8 charset menu."""
     save_path = str(tmp_path / "result.json")
-    reader = MockReader([b"Please enter a name: (or 'who' or 'finger'):"])
     writer = MockWriter(will_options=[fps.SGA])
+    reader = InteractiveMockReader([
+        b"Color? ",
+        b"Select charset:\r\n1) ASCII\r\n2) UTF-8\r\n",
+        b"Welcome!\r\n",
+    ], writer)
 
     await sfp.fingerprinting_client_shell(
         reader,
@@ -883,15 +1185,21 @@ async def test_fingerprinting_shell_who_prompt(tmp_path):
         mssp_wait=0.01,
     )
 
-    assert b"who\r\n" in writer._writes
+    assert b"y\r\n" in writer._writes
+    assert b"2\r\n" in writer._writes
+    assert writer.environ_encoding == "utf-8"
+    assert writer.protocol.force_binary is True
 
 
 @pytest.mark.asyncio
-async def test_fingerprinting_shell_help_prompt(tmp_path):
-    """Banner with 'help' option causes 'help\\r\\n' response."""
+async def test_fingerprinting_shell_multi_prompt_stops_on_bare_return(tmp_path):
+    """Loop stops after a bare \\r\\n response (no prompt detected)."""
     save_path = str(tmp_path / "result.json")
-    reader = MockReader([b"Type 'help' for a list of commands:"])
     writer = MockWriter(will_options=[fps.SGA])
+    reader = InteractiveMockReader([
+        b"Color? ",
+        b"Welcome!\r\n",
+    ], writer)
 
     await sfp.fingerprinting_client_shell(
         reader,
@@ -905,7 +1213,35 @@ async def test_fingerprinting_shell_help_prompt(tmp_path):
         mssp_wait=0.01,
     )
 
-    assert b"help\r\n" in writer._writes
+    assert b"y\r\n" in writer._writes
+    prompt_writes = [w for w in writer._writes if w in (b"y\r\n", b"\r\n")]
+    assert len(prompt_writes) == 2
+    assert prompt_writes == [b"y\r\n", b"\r\n"]
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_multi_prompt_max_replies(tmp_path):
+    """Loop does not exceed _MAX_PROMPT_REPLIES rounds."""
+    save_path = str(tmp_path / "result.json")
+    writer = MockWriter(will_options=[fps.SGA])
+    banners = [f"Color? (round {i}) ".encode()
+               for i in range(sfp._MAX_PROMPT_REPLIES + 1)]
+    reader = InteractiveMockReader(banners, writer)
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    y_writes = [w for w in writer._writes if w == b"y\r\n"]
+    assert len(y_writes) == sfp._MAX_PROMPT_REPLIES
 
 
 class TestCullDisplay:
@@ -930,3 +1266,278 @@ class TestCullDisplay:
     def test_empty_bytes_culled(self):
         result = sfp._cull_display({"data_bytes": b""})
         assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_read_banner_until_quiet_responds_to_dsr():
+    """DSR (ESC[6n) in banner data triggers a CPR response (ESC[1;1R)."""
+    reader = MockReader([b"Hello\x1b[6nWorld"])
+    writer = MockWriter()
+    result = await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=0.05, writer=writer,
+    )
+    assert result == b"Hello\x1b[6nWorld"
+    assert b"\x1b[1;1R" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_read_banner_until_quiet_multiple_dsr():
+    """Multiple DSR requests each get a CPR response."""
+    reader = MockReader([b"\x1b[6n", b"banner\x1b[6n"])
+    writer = MockWriter()
+    await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=0.05, writer=writer,
+    )
+    cpr_count = sum(1 for w in writer._writes if w == b"\x1b[1;1R")
+    assert cpr_count == 2
+
+
+@pytest.mark.asyncio
+async def test_read_banner_until_quiet_no_dsr_no_write():
+    """No DSR in banner means no CPR writes."""
+    reader = MockReader([b"Welcome to BBS\r\n"])
+    writer = MockWriter()
+    await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=0.05, writer=writer,
+    )
+    assert not writer._writes
+
+
+@pytest.mark.asyncio
+async def test_read_banner_until_quiet_no_writer_ignores_dsr():
+    """Without a writer, DSR is silently ignored."""
+    reader = MockReader([b"Hello\x1b[6n"])
+    result = await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=0.05,
+    )
+    assert result == b"Hello\x1b[6n"
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_dsr_response(tmp_path):
+    """Full session responds to DSR in the pre-return banner."""
+    save_path = str(tmp_path / "result.json")
+    reader = MockReader([b"\x1b[6nWelcome to BBS\r\n"])
+    writer = MockWriter(will_options=[fps.SGA])
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"\x1b[1;1R" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_settle_dsr_response(tmp_path):
+    """DSR arriving during negotiation settle gets an immediate CPR reply."""
+    save_path = str(tmp_path / "result.json")
+    reader = MockReader([b"\x1b[6nWelcome\r\n"])
+    writer = MockWriter(will_options=[fps.SGA])
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"\x1b[1;1R" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_ansi_ellipsis_menu(tmp_path):
+    """Worldgroup/MajorBBS ellipsis-menu selects first numbered option."""
+    save_path = str(tmp_path / "result.json")
+    writer = MockWriter(will_options=[fps.SGA, fps.ECHO])
+    reader = InteractiveMockReader([
+        (b"Please choose one of these languages/protocols:\r\n\r\n"
+         b"   1 ... English/ANSI     The standard English language version\r\n"
+         b"   2 ... English/RIP      The English version of RIPscrip graphics\r\n"
+         b"\r\nChoose a number from 1 to 2: "),
+        b"Welcome!\r\n",
+    ], writer)
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"1\r\n" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_read_banner_inline_esc_twice():
+    """ESC-twice botcheck is responded to inline during banner collection."""
+    reader = MockReader([
+        b"Mystic BBS v1.12\r\n",
+        b"Press [.ESC.] twice within 15 seconds to CONTINUE...\r\n",
+        b"Press [.ESC.] twice within 14 seconds to CONTINUE...\r\n",
+    ])
+    writer = MockWriter()
+    await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=0.05, writer=writer,
+    )
+    assert b"\x1b\x1b" in writer._writes
+    esc_count = sum(1 for w in writer._writes if w == b"\x1b\x1b")
+    assert esc_count == 1
+
+
+@pytest.mark.asyncio
+async def test_read_banner_inline_esc_once():
+    """ESC-once prompt is responded to inline during banner collection."""
+    reader = MockReader([b"Press [ESC] to continue\r\n"])
+    writer = MockWriter()
+    await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=0.05, writer=writer,
+    )
+    assert b"\x1b" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_esc_inline_no_duplicate(tmp_path):
+    """Inline ESC response prevents duplicate in the prompt loop."""
+    save_path = str(tmp_path / "result.json")
+    writer = MockWriter(will_options=[fps.SGA])
+    reader = InteractiveMockReader([
+        b"Press [.ESC.] twice within 15 seconds to CONTINUE...\r\n",
+        b"Welcome to Mystic BBS!\r\nLogin: ",
+    ], writer)
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    esc_writes = [w for w in writer._writes if w == b"\x1b\x1b"]
+    assert len(esc_writes) == 1
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_delayed_prompt(tmp_path):
+    """Bare-return banner followed by ESC-twice prompt still gets answered."""
+    save_path = str(tmp_path / "result.json")
+    writer = MockWriter(will_options=[fps.SGA])
+    reader = InteractiveMockReader([
+        b"Starting BBS-DOS...\r\n",
+        b"Press [.ESC.] twice within 15 seconds to CONTINUE...",
+        b"Welcome!\r\n",
+    ], writer)
+
+    await sfp.fingerprinting_client_shell(
+        reader,
+        writer,
+        host="localhost",
+        port=23,
+        save_path=save_path,
+        silent=True,
+        banner_quiet_time=0.01,
+        banner_max_wait=0.01,
+        mssp_wait=0.01,
+    )
+
+    assert b"\x1b\x1b" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_read_banner_virtual_cursor_defeats_robot_check():
+    """DSR-space-DSR produces CPR col=1 then col=2 (width=1)."""
+    reader = MockReader([b"\x1b[6n \x1b[6n"])
+    writer = MockWriter()
+    cursor = sfp._VirtualCursor()
+    await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=0.05, writer=writer, cursor=cursor,
+    )
+    cpr_writes = [w for w in writer._writes if b"R" in w]
+    assert cpr_writes[0] == b"\x1b[1;1R"
+    assert cpr_writes[1] == b"\x1b[1;2R"
+
+
+@pytest.mark.asyncio
+async def test_read_banner_virtual_cursor_separate_chunks():
+    """DSR in separate chunks still tracks cursor correctly."""
+    reader = MockReader([b"\x1b[6n", b" \x1b[6n"])
+    writer = MockWriter()
+    cursor = sfp._VirtualCursor()
+    await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=0.05, writer=writer, cursor=cursor,
+    )
+    cpr_writes = [w for w in writer._writes if b"R" in w]
+    assert cpr_writes[0] == b"\x1b[1;1R"
+    assert cpr_writes[1] == b"\x1b[1;2R"
+
+
+@pytest.mark.asyncio
+async def test_read_banner_virtual_cursor_wide_char():
+    """Wide CJK character advances cursor by 2."""
+    reader = MockReader([b"\x1b[6n\xe4\xb8\xad\x1b[6n"])
+    writer = MockWriter()
+    cursor = sfp._VirtualCursor()
+    await sfp._read_banner_until_quiet(
+        reader, quiet_time=0.01, max_wait=0.05, writer=writer, cursor=cursor,
+    )
+    cpr_writes = [w for w in writer._writes if b"R" in w]
+    assert cpr_writes[0] == b"\x1b[1;1R"
+    assert cpr_writes[1] == b"\x1b[1;3R"
+
+
+def test_virtual_cursor_backspace():
+    """Backspace moves cursor left."""
+    cursor = sfp._VirtualCursor()
+    cursor.advance(b"AB\x08")
+    assert cursor.col == 2
+
+
+def test_virtual_cursor_cr():
+    """Carriage return resets cursor to column 1."""
+    cursor = sfp._VirtualCursor()
+    cursor.advance(b"Hello\r")
+    assert cursor.col == 1
+
+
+def test_virtual_cursor_ansi_stripped():
+    """ANSI color codes do not advance cursor."""
+    cursor = sfp._VirtualCursor()
+    cursor.advance(b"\x1b[31mX\x1b[0m")
+    assert cursor.col == 2
+
+
+@pytest.mark.parametrize("response,encoding,expected", [
+    pytest.param(b"\r\n", "atascii", b"\x9b", id="atascii_bare_return"),
+    pytest.param(b"yes\r\n", "atascii", b"yes\x9b", id="atascii_yes"),
+    pytest.param(b"y\r\n", "atascii", b"y\x9b", id="atascii_y"),
+    pytest.param(b"\r\n", "ascii", b"\r\n", id="ascii_unchanged"),
+    pytest.param(b"\r\n", "utf-8", b"\r\n", id="utf8_unchanged"),
+    pytest.param(b"yes\r\n", "utf-8", b"yes\r\n", id="utf8_yes_unchanged"),
+    pytest.param(b"\x1b\x1b", "atascii", b"\x1b\x1b", id="atascii_esc_esc"),
+])
+def test_reencode_prompt(response, encoding, expected):
+    # local
+    import telnetlib3  # noqa: F401 - registers codecs
+    assert sfp._reencode_prompt(response, encoding) == expected

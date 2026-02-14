@@ -269,22 +269,6 @@ async def test_readline2(input_chars, expected):
 
 
 @pytest.mark.parametrize(
-    "input_chars,closing,expected",
-    [
-        pytest.param(["a"], False, "a", id="normal"),
-        pytest.param(["\x1b", "A", "x"], False, "x", id="skips_escape"),
-        pytest.param([], True, None, id="returns_none_when_closing"),
-        pytest.param(["\x1b", "1", "A", "x"], False, "x", id="escape_non_letter"),
-    ],
-)
-@pytest.mark.asyncio
-async def test_get_next_ascii(input_chars, closing, expected):
-    writer = MockWriter()
-    writer._closing = closing
-    assert await ss.get_next_ascii(MockReader(input_chars), writer) == expected
-
-
-@pytest.mark.parametrize(
     "input_data,expected",
     [
         pytest.param([b"\x1b", b"[", b"1", b"0", b";", b"2", b"0", b"R"], (10, 20), id="valid"),
@@ -357,8 +341,8 @@ async def test_measure_width(monkeypatch, responses, expected):
 @pytest.mark.parametrize(
     "width,expected",
     [
-        pytest.param(2, True, id="width_2"),
-        pytest.param(1, False, id="width_1"),
+        pytest.param(1, True, id="width_1"),
+        pytest.param(2, False, id="width_2"),
         pytest.param(None, False, id="width_none"),
     ],
 )

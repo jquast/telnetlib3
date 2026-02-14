@@ -8,7 +8,52 @@ from collections import OrderedDict
 import pytest
 
 # local
-from telnetlib3.accessories import make_logger, repr_mapping, function_lookup, make_reader_task
+from telnetlib3.accessories import (
+    TRACE,
+    hexdump,
+    make_logger,
+    repr_mapping,
+    function_lookup,
+    make_reader_task,
+)
+
+
+def test_trace_level_registered():
+    assert TRACE == 5
+    assert logging.getLevelName(TRACE) == "TRACE"
+    assert logging.getLevelName("TRACE") == TRACE
+
+
+def test_hexdump_short():
+    data = b"Hello World\r\n"
+    result = hexdump(data)
+    assert "48 65 6c 6c 6f 20 57 6f" in result
+    assert "72 6c 64 0d 0a" in result
+    assert "|Hello World..|" in result
+
+
+def test_hexdump_two_rows():
+    data = bytes(range(32))
+    result = hexdump(data)
+    lines = result.splitlines()
+    assert len(lines) == 2
+    assert lines[0].startswith("00000000")
+    assert lines[1].startswith("00000010")
+
+
+def test_hexdump_prefix():
+    result = hexdump(b"\xff\xfd\x18", prefix=">>  ")
+    assert result.startswith(">>  00000000")
+    assert "ff fd 18" in result
+
+
+def test_hexdump_empty():
+    assert hexdump(b"") == ""
+
+
+def test_make_logger_trace_level():
+    logger = make_logger("acc_trace", loglevel="trace")
+    assert logger.isEnabledFor(TRACE)
 
 
 def test_make_logger_no_file():

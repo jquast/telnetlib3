@@ -450,7 +450,7 @@ async def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port):
         await proc.expect(pexpect.EOF, async_=True, timeout=5)
         assert proc.before == (
             b"Escape character is '^]'.\r\n"
-            b"hello, space cadet.\r\r\n"
+            b"hello, space cadet.\r\n"
             b"\x1b[m\r\n"
             b"Connection closed by foreign host.\r\n"
         )
@@ -478,7 +478,6 @@ async def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port):
         writer.write("Press Return to continue:")
         inp = await reader.readline()
         if inp:
-            writer.echo(inp)
             writer.write("\ngoodbye.\n")
         await writer.drain()
         writer.close()
@@ -500,7 +499,7 @@ async def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port):
             logfile_output = f.read().splitlines()
         assert stdout == (
             b"Escape character is '^]'.\n"
-            b"Press Return to continue:\r\ngoodbye.\n"
+            b"Press Return to continue:\r\ngoodbye.\r\n"
             b"\x1b[m\nConnection closed by foreign host.\n"
         )
         assert len(logfile_output) in (2, 3), logfile

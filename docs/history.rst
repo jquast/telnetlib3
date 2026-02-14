@@ -1,5 +1,49 @@
 History
 =======
+2.5.0
+  * change: ``telnetlib3-client`` now defaults to raw terminal mode (no line buffering, no local
+    echo), which is correct for most servers.  Use ``--line-mode`` to restore line-buffered
+    local-echo behavior.
+  * change: ``telnetlib3-server --pty-exec`` now defaults to raw PTY mode.  Use ``--line-mode`` to
+    restore cooked PTY mode with echo.
+  * change: ``connect_minwait`` default reduced to 0 across
+    :class:`~telnetlib3.client_base.BaseClient`, :func:`~telnetlib3.client.open_connection`, and
+    ``telnetlib3-client``.  Negotiation continues asynchronously.  Use ``--connect-minwait`` to
+    restore a delay if needed, or, use :meth:`~telnetlib3.stream_writer.TelnetWriter.wait_for` in
+    server or client shells to await a specific negotiation state.
+  * new: Color, keyboard input translation and ``--encoding`` support for ATASCII (ATARI ASCII) and
+    PETSCII (Commodore ASCII).
+  * new: SyncTERM/CTerm font selection sequence detection (``CSI Ps1 ; Ps2 SP D``).  Both
+    ``telnetlib3-fingerprint`` and ``telnetlib3-client`` detect font switching and auto-switch
+    encoding to the matching codec (e.g. font 36 = ATASCII, 32-35 = PETSCII, 0 = CP437).  Explicit
+    ``--encoding`` takes precedence.
+  * new: :data:`~telnetlib3.accessories.TRACE` log level (5, below ``DEBUG``) with
+    :func:`~telnetlib3.accessories.hexdump` style output for all sent and received bytes.  Use
+    ``--loglevel=trace``.
+  * bugfix: :func:`~telnetlib3.guard_shells.robot_check` now uses a narrow
+    character (space) instead of a wide Unicode character, allowing retro
+    terminal emulators to pass.
+  * bugfix: ATASCII codec now maps bytes 0x0D and 0x0A to CR and LF instead
+    of graphics characters, fixing garbled output when connecting to Atari
+    BBS systems.
+  * bugfix: ATASCII codec normalizes CR and CRLF to the native ATASCII
+    EOL (0x9B) during encoding, so the Return key works correctly.
+  * bugfix: PETSCII bare CR (0x0D) is now normalized to CRLF in raw
+    terminal mode and to LF in ``telnetlib3-fingerprint`` banners.
+  * bugfix: ``telnetlib3-fingerprint`` re-encodes prompt responses for retro
+    encodings so servers receive the correct EOL byte.
+  * bugfix: ``telnetlib3-fingerprint`` no longer crashes with
+    ``LookupError`` when the server negotiates an unknown charset.
+    Banner formatting falls back to ``latin-1``.
+  * bugfix: :meth:`~telnetlib3.client.TelnetClient.send_charset` normalises
+    non-standard encoding names (``iso-8859-02`` to ``iso-8859-2``,
+    ``cp-1250`` to ``cp1250``, etc.).
+  * enhancement: ``telnetlib3-fingerprint`` responds more like a terminal and to more
+    y/n prompts about colors, encoding, etc. to collect more banners for https://bbs.modem.xyz/
+    project.
+  * enhancement: ``telnetlib3-fingerprint`` banner formatting uses
+    ``surrogateescape`` error handler, preserving raw high bytes (e.g. CP437
+    art) as surrogates instead of replacing them with U+FFFD.
 
 2.4.0
   * new: :mod:`telnetlib3.color_filter` module — translates 16-color ANSI SGR
@@ -28,7 +72,13 @@ History
     auto-answers yes/no, color, UTF-8 menu, ``who``, and ``help`` prompts.
   * enhancement: ``--banner-max-bytes`` option for ``telnetlib3-fingerprint``;
     default raised from 1024 to 65536.
-  * enhancement: new ``--encoding=petscii`` and ``--encoding=atarist``
+  * new: ATASCII (Atari 8-bit) codec -- ``--encoding=atascii`` for connecting
+    to Atari BBS systems.  Maps all 256 byte values to Unicode including
+    graphics characters, card suits, and the inverse-video range (0x80-0xFF).
+    ATASCII EOL (0x9B) maps to newline.  Aliases: ``atari8bit``, ``atari_8bit``.
+  * enhancement: ``--encoding=atascii``, ``--encoding=petscii``, and
+    ``--encoding=atarist`` now auto-enable ``--force-binary`` for both client
+    and server, since these encodings use bytes 0x80-0xFF for standard glyphs.
   * bugfix: rare LINEMODE ACK loop with misbehaving servers that re-send
     unchanged MODE without ACK.
   * bugfix: unknown IAC commands no longer raise ``ValueError``; treated as

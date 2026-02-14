@@ -181,6 +181,44 @@ class TelnetClient(client_base.BaseClient):
         env = {k: v for k, v in all_env.items() if k in self._send_environ}
         return {key: env.get(key, "") for key in keys} or env
 
+    @staticmethod
+    def _normalize_charset_name(name: str) -> str:
+        """
+        Normalize server-advertised charset names for :func:`codecs.lookup`.
+
+        Servers sometimes advertise non-standard encoding names that Python's
+        codec registry does not recognise.  This tries progressively simpler
+        variations until one resolves:
+
+        1. Original name (spaces → hyphens)
+        2. Leading zeros stripped from numeric parts (``iso-8859-02`` → ``iso-8859-2``)
+        3. Hyphens removed entirely (``cp-1250`` → ``cp1250``)
+        4. Hyphens removed from all but the first segment (``iso-8859-2`` kept)
+
+        :param name: Raw charset name from the server.
+        :returns: Normalized name suitable for :func:`codecs.lookup`.
+        """
+        # std imports
+        import re  # pylint: disable=import-outside-toplevel
+        base = name.strip().replace(' ', '-')
+        # Strip leading zeros from numeric segments: iso-8859-02 → iso-8859-2
+        no_leading_zeros = re.sub(r'-0+(\d)', r'-\1', base)
+        # All hyphens removed: cp-1250 → cp1250
+        no_hyphens = base.replace('-', '')
+        # Keep first hyphen-segment, collapse the rest: iso-8859-2 stays
+        parts = no_leading_zeros.split('-')
+        if len(parts) > 2:
+            partial = parts[0] + '-' + ''.join(parts[1:])
+        else:
+            partial = no_leading_zeros
+        for candidate in (base, no_leading_zeros, no_hyphens, partial):
+            try:
+                codecs.lookup(candidate)
+                return candidate
+            except LookupError:
+                continue
+        return base
+
     def send_charset(self, offered: List[str]) -> str:
         """
         Callback for responding to CHARSET requests.
@@ -218,7 +256,9 @@ class TelnetClient(client_base.BaseClient):
 
         for offer in offered:
             try:
-                canon = codecs.lookup(offer).name
+                canon = codecs.lookup(
+                    self._normalize_charset_name(offer)
+                ).name
 
                 # Record first viable encoding
                 if first_viable is None:
@@ -373,7 +413,7 @@ async def open_connection(  # pylint: disable=too-many-locals
     tspeed: Tuple[int, int] = (38400, 38400),
     xdisploc: str = "",
     shell: Optional[ShellCallback] = None,
-    connect_minwait: float = 2.0,
+    connect_minwait: float = 0,
     connect_maxwait: float = 3.0,
     connect_timeout: Optional[float] = None,
     waiter_closed: Optional[asyncio.Future[None]] = None,
@@ -492,7 +532,7 @@ async def open_connection(  # pylint: disable=too-many-locals
     return protocol.reader, protocol.writer
 
 
-async def run_client() -> None:
+async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-statements,too-complex
     """Command-line 'telnetlib3-client' entry point, via setuptools."""
     args = _transform_args(_get_argument_parser().parse_args())
     config_msg = f"Client configuration: {accessories.repr_mapping(args)}"
@@ -505,28 +545,31 @@ async def run_client() -> None:
     always_will: set[bytes] = args["always_will"]
     always_do: set[bytes] = args["always_do"]
 
-    # Wrap client factory to inject always_will/always_do before negotiation
-    client_factory: Optional[Callable[..., client_base.BaseClient]] = None
-    if always_will or always_do:
+    # Wrap client factory to inject always_will/always_do and encoding
+    # flags before negotiation starts.
+    encoding_explicit = args["encoding"] not in ("utf8", "utf-8", False)
 
-        def _client_factory(**kwargs: Any) -> client_base.BaseClient:
-            client: TelnetClient
-            if sys.platform != "win32" and sys.stdin.isatty():
-                client = TelnetTerminalClient(**kwargs)
-            else:
-                client = TelnetClient(**kwargs)
-            orig_connection_made = client.connection_made
+    def _client_factory(**kwargs: Any) -> client_base.BaseClient:
+        client: TelnetClient
+        if sys.platform != "win32" and sys.stdin.isatty():
+            client = TelnetTerminalClient(**kwargs)
+        else:
+            client = TelnetClient(**kwargs)
+        orig_connection_made = client.connection_made
 
-            def _patched_connection_made(transport: asyncio.BaseTransport) -> None:
-                orig_connection_made(transport)
-                assert client.writer is not None
+        def _patched_connection_made(transport: asyncio.BaseTransport) -> None:
+            orig_connection_made(transport)
+            assert client.writer is not None
+            if always_will:
                 client.writer.always_will = always_will
+            if always_do:
                 client.writer.always_do = always_do
+            client.writer._encoding_explicit = encoding_explicit  # pylint: disable=protected-access
 
-            client.connection_made = _patched_connection_made  # type: ignore[method-assign]
-            return client
+        client.connection_made = _patched_connection_made  # type: ignore[method-assign]
+        return client
 
-        client_factory = _client_factory
+    client_factory: Optional[Callable[..., client_base.BaseClient]] = _client_factory
 
     # Wrap the shell callback to inject color filter when enabled
     colormatch: str = args["colormatch"]
@@ -537,7 +580,18 @@ async def run_client() -> None:
             PALETTES,
             ColorConfig,
             ColorFilter,
+            PetsciiColorFilter,
+            AtasciiControlFilter,
         )
+
+        # Auto-select encoding-specific filters
+        encoding_name: str = args.get("encoding", "") or ""
+        is_petscii = encoding_name.lower() in ("petscii", "cbm", "commodore", "c64", "c128")
+        is_atascii = encoding_name.lower() in ("atascii", "atari8bit", "atari_8bit")
+        if colormatch == "petscii":
+            colormatch = "c64"
+        if is_petscii and colormatch != "c64":
+            colormatch = "c64"
 
         if colormatch not in PALETTES:
             print(
@@ -552,7 +606,12 @@ async def run_client() -> None:
             background_color=args["background_color"],
             reverse_video=args["reverse_video"],
         )
-        color_filter = ColorFilter(color_config)
+        if is_petscii or colormatch == "c64":
+            color_filter_obj: object = PetsciiColorFilter(color_config)
+        elif is_atascii:
+            color_filter_obj = AtasciiControlFilter()
+        else:
+            color_filter_obj = ColorFilter(color_config)
         original_shell = shell_callback
 
         async def _color_shell(
@@ -560,10 +619,41 @@ async def run_client() -> None:
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
             # pylint: disable-next=protected-access
-            writer_arg._color_filter = color_filter  # type: ignore[union-attr]
+            writer_arg._color_filter = color_filter_obj  # type: ignore[union-attr]
             await original_shell(reader, writer_arg)
 
         shell_callback = _color_shell
+
+    # Wrap shell to inject raw_mode flag and input translation for retro encodings
+    raw_mode: bool = args.get("raw_mode", False)
+    if raw_mode:
+        # local
+        from .client_shell import (  # pylint: disable=import-outside-toplevel
+            _INPUT_XLAT,
+            _INPUT_SEQ_XLAT,
+            InputFilter,
+        )
+
+        enc_key = (args.get("encoding", "") or "").lower()
+        byte_xlat = _INPUT_XLAT.get(enc_key, {})
+        seq_xlat = _INPUT_SEQ_XLAT.get(enc_key, {})
+        input_filter: Optional[InputFilter] = (
+            InputFilter(seq_xlat, byte_xlat) if (seq_xlat or byte_xlat) else None
+        )
+        _inner_shell = shell_callback
+
+        async def _raw_shell(
+            reader: Union[TelnetReader, TelnetReaderUnicode],
+            writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
+        ) -> None:
+            # pylint: disable-next=protected-access
+            writer_arg._raw_mode = True  # type: ignore[union-attr]
+            if input_filter is not None:
+                # pylint: disable-next=protected-access
+                writer_arg._input_filter = input_filter  # type: ignore[union-attr]
+            await _inner_shell(reader, writer_arg)
+
+        shell_callback = _raw_shell
 
     # Build connection kwargs explicitly to avoid pylint false positive
     connection_kwargs: Dict[str, Any] = {
@@ -614,7 +704,15 @@ def _get_argument_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--force-binary", action="store_true", help="force encoding", default=True)
     parser.add_argument(
-        "--connect-minwait", default=1.0, type=float, help="shell delay for negotiation"
+        "--line-mode",
+        action="store_true",
+        default=False,
+        help="use line-buffered input with local echo instead of raw terminal "
+        "mode.  By default the client uses raw mode (no line buffering, no "
+        "local echo) which is correct for most BBS and MUD servers.",
+    )
+    parser.add_argument(
+        "--connect-minwait", default=0, type=float, help="shell delay for negotiation"
     )
     parser.add_argument(
         "--connect-maxwait", default=4.0, type=float, help="timeout for pending negotiation"
@@ -646,7 +744,7 @@ def _get_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--colormatch",
-        default="ega",
+        default="vga",
         metavar="PALETTE",
         help=(
             "translate basic 16-color ANSI codes to exact 24-bit RGB values"
@@ -716,6 +814,16 @@ def _parse_background_color(value: str) -> Tuple[int, int, int]:
 
 
 def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
+    # Auto-enable force_binary for retro BBS encodings that use high-bit bytes.
+    # local
+    from .encodings import FORCE_BINARY_ENCODINGS  # pylint: disable=import-outside-toplevel
+
+    force_binary = args.force_binary
+    raw_mode = not args.line_mode
+    if args.encoding.lower().replace('-', '_') in FORCE_BINARY_ENCODINGS:
+        force_binary = True
+        raw_mode = True
+
     return {
         "host": args.host,
         "port": args.port,
@@ -726,7 +834,7 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "tspeed": (args.speed, args.speed),
         "shell": accessories.function_lookup(args.shell),
         "term": args.term,
-        "force_binary": args.force_binary,
+        "force_binary": force_binary,
         "encoding_errors": args.encoding_errors,
         "connect_minwait": args.connect_minwait,
         "connect_timeout": args.connect_timeout,
@@ -738,6 +846,7 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "color_contrast": args.color_contrast,
         "background_color": _parse_background_color(args.background_color),
         "reverse_video": args.reverse_video,
+        "raw_mode": raw_mode,
     }
 
 
@@ -910,6 +1019,8 @@ async def run_fingerprint_client() -> None:
             orig_connection_made(transport)
             assert client.writer is not None
             client.writer.environ_encoding = environ_encoding
+            # pylint: disable-next=protected-access
+            client.writer._encoding_explicit = environ_encoding != "ascii"
             client.writer.always_will = fp_always_will
             client.writer.always_do = fp_always_do
 
@@ -933,7 +1044,7 @@ async def run_fingerprint_client() -> None:
             shell=shell,
             encoding=False,
             term=ttype,
-            connect_minwait=2.0,
+            connect_minwait=0,
             connect_maxwait=4.0,
             connect_timeout=args.connect_timeout,
             waiter_closed=waiter_closed,

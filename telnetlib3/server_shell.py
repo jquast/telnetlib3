@@ -248,25 +248,6 @@ def character_dump(kb_limit: int) -> Generator[str, None, None]:
     yield "\033[1G" + "wrote " + str(num_bytes) + " bytes"
 
 
-async def get_next_ascii(
-    reader: Union[TelnetReader, TelnetReaderUnicode],
-    writer: Union[TelnetWriter, TelnetWriterUnicode],
-) -> Optional[str]:
-    """Accept the next non-ANSI-escape character from reader."""
-    _reader = cast(TelnetReaderUnicode, reader)
-    escape_sequence = False
-    while not writer.is_closing():
-        next_char = await _reader.read(1)
-        if next_char == "\x1b":
-            escape_sequence = True
-        elif escape_sequence:
-            if 61 <= ord(next_char) <= 90 or 97 <= ord(next_char) <= 122:
-                escape_sequence = False
-        else:
-            return next_char
-    return None
-
-
 @types.coroutine
 def readline(
     _reader: Union[TelnetReader, TelnetReaderUnicode],

@@ -14,6 +14,7 @@ from typing import Any, Type, Union, Callable, Optional
 # local
 from ._types import ShellCallback
 from .telopt import theNULL
+from .accessories import TRACE, hexdump
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
@@ -194,7 +195,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 loop = asyncio.get_event_loop()
                 loop.create_task(coro)
 
-    def data_received(self, data: bytes) -> None:
+    def data_received(self, data: bytes) -> None:  # pylint: disable=too-complex
         """
         Process bytes received by transport.
 
@@ -211,6 +212,8 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         # more simply by processing a "byte at a time", but, this "batch and seek" solution can be
         # hundreds of times faster though much more complicated.
         #
+        if logger.isEnabledFor(TRACE):
+            logger.log(TRACE, "recv %d bytes\n%s", len(data), hexdump(data, prefix="<<  "))
         self._last_received = datetime.datetime.now()
         self._rx_bytes += len(data)
         assert self.writer is not None

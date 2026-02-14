@@ -20,7 +20,11 @@ import asyncio
 import logging
 import datetime
 import subprocess
-from typing import Any
+from typing import Any, NamedTuple
+
+# 3rd party
+import wcwidth as _wcwidth
+from wcwidth.escape_sequences import ZERO_WIDTH_PATTERN as _ZERO_WIDTH_STR_PATTERN
 
 # local
 from . import fingerprinting as _fps
@@ -65,33 +69,240 @@ _NEGOTIATION_SETTLE = 0.5
 _BANNER_WAIT = 3.0
 _POST_RETURN_WAIT = 3.0
 _PROBE_TIMEOUT = 0.5
+_MAX_PROMPT_REPLIES = 5
 _JQ = shutil.which("jq")
 
-# Match "yes/no" or "y/n" surrounded by non-alphanumeric chars (or at
-# string boundaries).  Used to auto-answer confirmation prompts.
-_YN_RE = re.compile(rb"(?i)(?:^|[^a-zA-Z0-9])(yes/no|y/n)(?:[^a-zA-Z0-9]|$)")
-
-# Match MUD/BBS login prompts that offer 'who' as a command.
-# Quoted: "enter a name (or 'who')", or bare WHO without surrounding
-# alphanumerics: "\nWHO                to see players connected.\n"
-_WHO_RE = re.compile(rb"(?i)(?:'who'|\"who\"|(?:^|[^a-zA-Z0-9])who(?:[^a-zA-Z0-9]|$))")
-
-# Same pattern for 'help' — offered as a login-screen command on many MUDs.
-_HELP_RE = re.compile(rb"(?i)(?:'help'|\"help\"|(?:^|[^a-zA-Z0-9])help(?:[^a-zA-Z0-9]|$))")
+# Match "yes/no", "y/n", "(Yes|No)", or "(Yn)"/"[Yn]" surrounded by
+# non-alphanumeric chars (or at string boundaries).  The "(Yn)" form is
+# a common BBS convention where the capital letter indicates the default.
+_YN_RE = re.compile(
+    rb"(?i)(?:^|[^a-zA-Z0-9])(yes/no|y/n|\(yes\|no\))(?:[^a-zA-Z0-9]|$)"
+    rb"|[(\[][Yy][Nn][)\]]"
+    rb"|[(\[][yY][nN][)\]]"
+)
 
 # Match "color?" prompts — many MUDs ask if the user wants color.
 _COLOR_RE = re.compile(rb"(?i)color\s*\?")
 
-# Match numbered menu items offering UTF-8, e.g. "5) UTF-8" or "3) utf8".
-# Many BBS/MUD systems present a charset selection menu at connect time.
-_MENU_UTF8_RE = re.compile(rb"(\d+)\s*\)\s*UTF-?8", re.IGNORECASE)
+# Match numbered menu items offering UTF-8, e.g. "5) UTF-8", "[3] UTF-8",
+# "2. UTF-8", or "1 ... UTF-8".  Many BBS/MUD systems present a charset
+# selection menu at connect time.  The optional \S+/ prefix handles
+# "Something/UTF-8" labels.
+_MENU_UTF8_RE = re.compile(
+    rb"[\[(]?(\d+)\s*(?:[\])]|\.{1,3})\s*(?:\S+\s*/\s*)?UTF-?8", re.IGNORECASE
+)
 
-# Match numbered menu items offering ANSI, e.g. "(1) Ansi" or "[2] ANSI".
-# Brackets may be parentheses or square brackets (mixed allowed).
-_MENU_ANSI_RE = re.compile(rb"[\[(](\d+)[\])]\s*ANSI", re.IGNORECASE)
+# Match numbered menu items offering ANSI, e.g. "(1) Ansi", "[2] ANSI",
+# "3. English/ANSI", or "1 ... English/ANSI".  Brackets, dot, and
+# ellipsis delimiters are accepted.
+_MENU_ANSI_RE = re.compile(
+    rb"[\[(]?(\d+)\s*(?:[\])]|\.{1,3})\s*(?:\S+\s*/\s*)?ANSI", re.IGNORECASE
+)
 
 # Match "gb/big5" encoding selection prompts common on Chinese BBS systems.
 _GB_BIG5_RE = re.compile(rb"(?i)(?:^|[^a-zA-Z0-9])gb\s*/\s*big\s*5(?:[^a-zA-Z0-9]|$)")
+
+# Strip ANSI/VT100 escape sequences from raw bytes for pattern matching.
+# Reuse wcwidth's comprehensive pattern (CSI, OSC, DCS, APC, PM, charset, Fe, Fp).
+_ANSI_STRIP_RE = re.compile(_ZERO_WIDTH_STR_PATTERN.pattern.encode("ascii"))
+
+# Match "Press [.ESC.] twice" botcheck prompts (e.g. Mystic BBS).
+_ESC_TWICE_RE = re.compile(rb"(?i)press\s+[\[<]?\.?esc\.?[\]>]?\s+twice")
+
+# Match single "Press [ESC]" prompts without "twice" (e.g. Herbie's BBS).
+_ESC_ONCE_RE = re.compile(rb"(?i)press\s+[\[<]?\.?esc\.?[\]>]?(?!\s+twice)")
+
+# Match "HIT RETURN", "PRESS RETURN", "PRESS ENTER", "HIT ENTER", etc.
+# Common on Worldgroup/MajorBBS and other vintage BBS systems.
+_RETURN_PROMPT_RE = re.compile(
+    rb"(?i)(?:hit|press)\s+(?:return|enter)\s*[:\.]?"
+)
+
+# Match "Press the BACKSPACE key" prompts — standard telnet terminal
+# detection (e.g. TelnetBible.com).  Respond with ASCII BS (0x08).
+_BACKSPACE_KEY_RE = re.compile(
+    rb"(?i)press\s+the\s+backspace\s+key"
+)
+
+# Match "press del/backspace" and "hit your backspace/delete" prompts from
+# PETSCII BBS systems (e.g. Image BBS C/G detect).  Respond with PETSCII
+# DEL byte (0x14).
+_DEL_BACKSPACE_RE = re.compile(
+    rb"(?i)(?:press|hit)\s+(?:your\s+)?"
+    rb"(?:del(?:ete)?(?:\s*/\s*backspace)?|backspace(?:\s*/\s*del(?:ete)?)?)"
+    rb"(?:\s+key)?\s*[:\.]?"
+)
+
+# Match "More: (Y)es, (N)o, (C)ontinuous?" pagination prompts.
+# Answer "C" (Continuous) to disable pagination and collect the full banner.
+_MORE_PROMPT_RE = re.compile(
+    rb"(?i)more[:\s]*\(?[yY]\)?.*\(?[cC]\)?\s*(?:ontinuous|ont)"
+)
+
+# Match DSR (Device Status Report) request: ESC [ 6 n.
+# Servers send this to detect ANSI-capable terminals; we reply with a
+# Cursor Position Report (CPR) so the server sees us as ANSI-capable.
+_DSR_RE = re.compile(rb"\x1b\[6n")
+
+# Match SyncTERM/CTerm font selection: CSI Ps1 ; Ps2 SP D
+# Reference: https://syncterm.bbsdev.net/cterm.html
+# Ps1 = font page (0 = primary), Ps2 = font ID (0-255).
+_SYNCTERM_FONT_RE = re.compile(rb"\x1b\[(\d+);(\d+) D")
+
+#: Map SyncTERM font IDs to Python codec names.
+#: Font IDs from CTerm spec / Synchronet SBBS / x84 SYNCTERM_FONTMAP.
+SYNCTERM_FONT_ENCODINGS: dict[int, str] = {
+    0: "cp437",
+    1: "cp1251",
+    2: "koi8-r",
+    3: "iso-8859-2",
+    4: "iso-8859-4",
+    5: "cp866",
+    6: "iso-8859-9",
+    8: "iso-8859-8",
+    9: "koi8-u",
+    10: "iso-8859-15",
+    11: "iso-8859-4",
+    12: "koi8-r",
+    13: "iso-8859-4",
+    14: "iso-8859-5",
+    16: "iso-8859-15",
+    17: "cp850",
+    18: "cp850",
+    20: "cp1251",
+    21: "iso-8859-7",
+    22: "koi8-r",
+    23: "iso-8859-4",
+    24: "iso-8859-1",
+    25: "cp866",
+    26: "cp437",
+    27: "cp866",
+    29: "cp866",
+    30: "iso-8859-1",
+    31: "cp1131",
+    32: "petscii",
+    33: "petscii",
+    34: "petscii",
+    35: "petscii",
+    36: "atascii",
+    37: "cp437",
+    38: "cp437",
+    39: "cp437",
+    40: "cp437",
+    41: "cp437",
+    42: "cp437",
+}
+
+#: Encodings that require ``force_binary`` for high-bit bytes.
+_SYNCTERM_BINARY_ENCODINGS = frozenset({
+    "petscii", "atascii",
+})
+
+
+log = logging.getLogger(__name__)
+
+
+def detect_syncterm_font(data: bytes) -> str | None:
+    """
+    Extract encoding from a SyncTERM font selection sequence in *data*.
+
+    Scans *data* for ``CSI Ps1 ; Ps2 SP D`` and returns the corresponding
+    Python codec name from :data:`SYNCTERM_FONT_ENCODINGS`, or ``None``
+    if no font sequence is found or the font ID is unrecognised.
+
+    :param data: Raw bytes that may contain escape sequences.
+    :returns: Encoding name or ``None``.
+    """
+    match = _SYNCTERM_FONT_RE.search(data)
+    if match is None:
+        return None
+    font_id = int(match.group(2))
+    return SYNCTERM_FONT_ENCODINGS.get(font_id)
+
+
+#: Encodings where standard telnet CR+LF must be re-encoded to the
+#: codec's native EOL byte.  The codec's ``encode()`` handles the
+#: actual CR → LF normalization; we just gate the re-encoding step.
+_RETRO_EOL_ENCODINGS = frozenset({
+    'atascii', 'atari8bit', 'atari_8bit',
+})
+
+
+def _reencode_prompt(response: bytes, encoding: str) -> bytes:
+    r"""
+    Re-encode an ASCII prompt response for the server's encoding.
+
+    For retro encodings (ATASCII), the standard ``\r\n`` line ending
+    is re-encoded through the codec so the server receives its native
+    EOL byte.  For all other encodings the response is returned as-is.
+
+    :param response: ASCII prompt response bytes (e.g. ``b"yes\r\n"``).
+    :param encoding: Remote server encoding name.
+    :returns: Response bytes suitable for the server's encoding.
+    """
+    normalized = encoding.lower().replace('-', '_')
+    if normalized not in _RETRO_EOL_ENCODINGS:
+        return response
+    try:
+        text = response.decode('ascii')
+        return text.encode(encoding)
+    except (UnicodeDecodeError, UnicodeEncodeError, LookupError):
+        return response
+
+
+class _VirtualCursor:
+    """
+    Track virtual cursor column to generate position-aware CPR responses.
+
+    The server's robot-check sends DSR, writes a test character, then sends
+    DSR again.  It compares the two cursor positions to verify the character
+    rendered at the expected width.  By tracking what the server writes
+    between DSR requests and advancing the column using :func:`wcwidth.wcwidth`,
+    the scanner produces CPR responses that satisfy the width check.
+
+    When *encoding* is set to a single-byte encoding like ``cp437``, raw
+    bytes are decoded with that encoding before measuring — this gives
+    correct column widths for servers that use SyncTERM font switching
+    where the raw bytes are not valid UTF-8.
+    """
+
+    def __init__(self, encoding: str = "utf-8") -> None:
+        self.col = 1
+        self.encoding = encoding
+        self.dsr_requests = 0
+        self.dsr_replies = 0
+
+    def cpr(self) -> bytes:
+        """Return a CPR response (``ESC [ row ; col R``) at the current position."""
+        self.dsr_replies += 1
+        return f"\x1b[1;{self.col}R".encode("ascii")
+
+    def advance(self, data: bytes) -> None:
+        """
+        Advance cursor column for *data* (non-DSR text from the server).
+
+        ANSI escape sequences are stripped first so they do not contribute
+        to cursor movement.  Backspace and carriage return are handled.
+        Bytes are decoded using :attr:`encoding` so that single-byte
+        encodings like CP437 produce the correct character widths.
+        """
+        stripped = _ANSI_STRIP_RE.sub(b"", data)
+        try:
+            text = stripped.decode(self.encoding, errors="replace")
+        # pylint: disable-next=broad-exception-caught,overlapping-except
+        except (LookupError, Exception):
+            text = stripped.decode("latin-1")
+        for ch in text:
+            cp = ord(ch)
+            if cp == 0x08:  # backspace
+                self.col = max(1, self.col - 1)
+            elif cp == 0x0D:  # \r
+                self.col = 1
+            elif cp >= 0x20:
+                w = _wcwidth.wcwidth(ch)
+                if w > 0:
+                    self.col += w
+
 
 logger = logging.getLogger("telnetlib3.server_fingerprint")
 
@@ -128,59 +339,61 @@ def _print_json(data: dict[str, Any]) -> None:
     print(raw, file=sys.stdout)
 
 
-def _detect_yn_prompt(banner: bytes) -> bytes:  # pylint: disable=too-many-return-statements
+class _PromptResult(NamedTuple):
+    """Result of prompt detection with optional encoding override."""
+
+    response: bytes | None
+    encoding: str | None = None
+
+
+def _detect_yn_prompt(  # pylint: disable=too-many-return-statements
+    banner: bytes,
+) -> _PromptResult:
     r"""
     Return an appropriate first-prompt response based on banner content.
 
-    If the banner contains a ``yes/no`` or ``y/n`` confirmation prompt
-    (case-insensitive, delimited by non-alphanumeric characters), returns
-    ``b"yes\r\n"`` or ``b"y\r\n"`` respectively.
+    ANSI escape sequences are stripped before pattern matching so that
+    embedded color/cursor codes do not interfere with detection.
 
-    If the banner contains a ``color?`` prompt (case-insensitive),
-    returns ``b"y\r\n"`` to accept color.
-
-    If the banner contains a numbered menu item for UTF-8 (e.g.
-    ``5) UTF-8``), returns the digit followed by ``b"\r\n"`` to select
-    the UTF-8 charset option.
-
-    If the banner contains a bracketed numbered menu item for ANSI
-    (e.g. ``(1) Ansi`` or ``[2] ANSI``), returns the digit followed
-    by ``b"\r\n"`` to select the ANSI option.
-
-    If the banner contains a ``gb/big5`` encoding selection prompt
-    (common on Chinese BBS systems), returns ``b"big5\r\n"`` to select
-    Big5 encoding.
-
-    If the banner contains a MUD/BBS login prompt offering ``'who'`` as
-    an alternative (e.g. "enter a name (or 'who')"), returns
-    ``b"who\r\n"``.  Similarly, ``'help'`` prompts return ``b"help\r\n"``.
-
-    Otherwise returns a bare ``b"\r\n"``.
+    Returns a :class:`_PromptResult` whose *response* is ``None`` when
+    no recognizable prompt is found — the caller should fall back to
+    sending a bare ``\r\n``.  When a UTF-8 charset menu is selected,
+    *encoding* is set to ``"utf-8"`` so the caller can update the
+    session encoding.
 
     :param banner: Raw banner bytes collected before the first prompt.
-    :returns: Response bytes to send.
+    :returns: Prompt result with response bytes and optional encoding.
     """
-    match = _YN_RE.search(banner)
+    stripped = _ANSI_STRIP_RE.sub(b"", banner)
+    if _ESC_TWICE_RE.search(stripped):
+        return _PromptResult(b"\x1b\x1b")
+    if _ESC_ONCE_RE.search(stripped):
+        return _PromptResult(b"\x1b")
+    if _MORE_PROMPT_RE.search(stripped):
+        return _PromptResult(b"C\r\n")
+    match = _YN_RE.search(stripped)
     if match:
-        token = match.group(1).lower()
-        if token == b"yes/no":
-            return b"yes\r\n"
-        return b"y\r\n"
-    if _COLOR_RE.search(banner):
-        return b"y\r\n"
-    menu_match = _MENU_UTF8_RE.search(banner)
+        token = match.group(1)
+        if token is not None and token.lower() in (b"yes/no", b"(yes|no)"):
+            return _PromptResult(b"yes\r\n")
+        return _PromptResult(b"y\r\n")
+    if _COLOR_RE.search(stripped):
+        return _PromptResult(b"y\r\n")
+    menu_match = _MENU_UTF8_RE.search(stripped)
     if menu_match:
-        return menu_match.group(1) + b"\r\n"
-    ansi_match = _MENU_ANSI_RE.search(banner)
+        return _PromptResult(menu_match.group(1) + b"\r\n", encoding="utf-8")
+    ansi_match = _MENU_ANSI_RE.search(stripped)
     if ansi_match:
-        return ansi_match.group(1) + b"\r\n"
-    if _GB_BIG5_RE.search(banner):
-        return b"big5\r\n"
-    if _WHO_RE.search(banner):
-        return b"who\r\n"
-    if _HELP_RE.search(banner):
-        return b"help\r\n"
-    return b"\r\n"
+        return _PromptResult(ansi_match.group(1) + b"\r\n")
+    if _GB_BIG5_RE.search(stripped):
+        return _PromptResult(b"big5\r\n", encoding="big5")
+    if _BACKSPACE_KEY_RE.search(stripped):
+        return _PromptResult(b"\x08")
+    if _DEL_BACKSPACE_RE.search(stripped):
+        return _PromptResult(b"\x14")
+    if _RETURN_PROMPT_RE.search(stripped):
+        return _PromptResult(b"\r\n")
+    return _PromptResult(None)
 
 
 async def fingerprinting_client_shell(
@@ -216,6 +429,8 @@ async def fingerprinting_client_shell(
         ``fingerprint_names.json`` without requiring moderation.
     :param environ_encoding: Encoding for NEW_ENVIRON data.  Default
         ``"ascii"`` per :rfc:`1572`; use ``"cp037"`` for EBCDIC hosts.
+        When set to something other than ``"ascii"``, SyncTERM font
+        switches will not override this encoding.
     :param scan_type: ``"quick"`` probes CORE + MUD options only (default);
         ``"full"`` includes all LEGACY options.
     :param mssp_wait: Max seconds since connect to wait for MSSP data.
@@ -225,6 +440,7 @@ async def fingerprinting_client_shell(
     :param banner_max_bytes: Maximum bytes per banner read call.
     """
     writer.environ_encoding = environ_encoding
+    writer._encoding_explicit = environ_encoding != "ascii"  # pylint: disable=protected-access
     try:
         await _fingerprint_session(
             reader,
@@ -245,7 +461,7 @@ async def fingerprinting_client_shell(
         writer.close()
 
 
-async def _fingerprint_session(  # pylint: disable=too-many-locals
+async def _fingerprint_session(  # noqa: E501 ; pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-complex
     reader: TelnetReader,
     writer: TelnetWriter,
     *,
@@ -262,22 +478,72 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
 ) -> None:
     """Run the fingerprint session (inner helper for error handling)."""
     start_time = time.time()
+    cursor = _VirtualCursor(encoding=writer.environ_encoding)
 
-    # 1. Let straggler negotiation settle
-    await asyncio.sleep(_NEGOTIATION_SETTLE)
+    # 1. Let straggler negotiation settle — read (and respond to DSR)
+    #    instead of sleeping blind so early DSR requests get a CPR reply.
+    settle_data = await _read_banner_until_quiet(
+        reader, quiet_time=_NEGOTIATION_SETTLE, max_wait=_NEGOTIATION_SETTLE,
+        max_bytes=banner_max_bytes, writer=writer, cursor=cursor,
+    )
 
     # 2. Read banner (pre-return) — wait until output stops
-    banner_before = await _read_banner_until_quiet(
-        reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait, max_bytes=banner_max_bytes
+    banner_before_raw = await _read_banner_until_quiet(
+        reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait,
+        max_bytes=banner_max_bytes, writer=writer, cursor=cursor,
     )
+    banner_before = settle_data + banner_before_raw
 
-    # 3. Send return (or "yes"/"y" if the banner contains a y/n prompt)
-    prompt_response = _detect_yn_prompt(banner_before)
-    writer.write(prompt_response)
-    await writer.drain()
-    banner_after = await _read_banner_until_quiet(
-        reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait, max_bytes=banner_max_bytes
-    )
+    # 3. Respond to prompts — some servers ask multiple questions in
+    #    sequence (e.g. "color?" then a UTF-8 charset menu).  Loop up to
+    #    _MAX_PROMPT_REPLIES times, stopping early when no prompt is detected
+    #    or the connection is lost.
+    after_chunks: list[bytes] = []
+    latest_banner = banner_before
+    for _prompt_round in range(_MAX_PROMPT_REPLIES):
+        prompt_result = _detect_yn_prompt(latest_banner)
+        detected = prompt_result.response
+        # Skip if the ESC response was already sent inline during banner
+        # collection (time-sensitive botcheck countdowns).
+        if detected in (b"\x1b\x1b", b"\x1b") and getattr(
+            writer, '_esc_inline', False
+        ):
+            # pylint: disable-next=protected-access
+            writer._esc_inline = False  # type: ignore[attr-defined]
+            detected = None
+        prompt_response = _reencode_prompt(
+            detected if detected is not None else b"\r\n",
+            writer.environ_encoding,
+        )
+        writer.write(prompt_response)
+        await writer.drain()
+        # When the server presents a charset menu and we select an
+        # encoding (e.g. UTF-8 or Big5), switch the session encoding
+        # so that subsequent banner data is decoded correctly.
+        if prompt_result.encoding:
+            writer.environ_encoding = prompt_result.encoding
+            cursor.encoding = prompt_result.encoding
+            protocol = writer.protocol
+            if protocol is not None:
+                protocol.force_binary = True
+        previous_banner = latest_banner
+        latest_banner = await _read_banner_until_quiet(
+            reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait,
+            max_bytes=banner_max_bytes, writer=writer, cursor=cursor,
+        )
+        after_chunks.append(latest_banner)
+        if writer.is_closing() or not latest_banner:
+            break
+        # Stop when the server repeats the same banner — it is not
+        # advancing through prompts, just re-displaying the login screen.
+        if latest_banner == previous_banner:
+            break
+        # Stop when no prompt was detected AND the new banner has no
+        # prompt either (servers like Mystic BBS send a non-interactive
+        # preamble before the real botcheck prompt).
+        if detected is None and _detect_yn_prompt(latest_banner).response is None:
+            break
+    banner_after = b"".join(after_chunks)
 
     # 4. Snapshot option states before probing
     session_data: dict[str, Any] = {"option_states": _collect_server_option_states(writer)}
@@ -301,9 +567,17 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
         {
             "scan_type": scan_type,
             "encoding": writer.environ_encoding,
-            "banner_before_return": _format_banner(banner_before, encoding=writer.environ_encoding),
-            "banner_after_return": _format_banner(banner_after, encoding=writer.environ_encoding),
+            "banner_before_return": _format_banner(
+                banner_before,
+                encoding=writer.environ_encoding,
+            ),
+            "banner_after_return": _format_banner(
+                banner_after,
+                encoding=writer.environ_encoding,
+            ),
             "timing": {"probe": probe_time, "total": time.time() - start_time},
+            "dsr_requests": cursor.dsr_requests,
+            "dsr_replies": cursor.dsr_replies,
         }
     )
     if writer.mssp_data is not None:
@@ -583,17 +857,41 @@ def _save_server_fingerprint_data(
 
 
 def _format_banner(data: bytes, encoding: str = "utf-8") -> str:
-    """
+    r"""
     Format raw banner bytes for JSON serialization.
 
     Default ``"utf-8"`` is intentional -- banners are typically UTF-8
     regardless of ``environ_encoding``; callers may override.
 
+    Uses ``surrogateescape`` so high bytes (common in CP437 BBS art)
+    are preserved as surrogates (e.g. byte ``0xB1`` → ``U+DCB1``)
+    rather than replaced with ``U+FFFD``.  JSON serialization escapes
+    them as ``\udcXX``, which round-trips through :func:`json.load`.
+
+    Falls back to ``latin-1`` when the requested encoding is unavailable
+    (e.g. a server-advertised charset that Python does not recognise).
+
+    When *encoding* is ``petscii``, inline PETSCII color control codes
+    are translated to ANSI 24-bit RGB SGR sequences using the VIC-II
+    C64 palette so the saved banner is human-readable with colors.
+
     :param data: Raw bytes from the server.
     :param encoding: Character encoding to use for decoding.
-    :returns: Decoded text string (undecodable bytes replaced).
+    :returns: Decoded text string (raw bytes preserved as surrogates).
     """
-    return data.decode(encoding, errors="replace")
+    try:
+        text = data.decode(encoding, errors="surrogateescape")
+    except LookupError:
+        text = data.decode("latin-1")
+
+    if encoding.lower() in ("petscii", "cbm", "commodore", "c64", "c128"):
+        # local
+        from .color_filter import PetsciiColorFilter  # pylint: disable=import-outside-toplevel
+        text = PetsciiColorFilter().filter(text)
+        # PETSCII uses CR (0x0D) as line terminator; normalize to LF.
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+
+    return text
 
 
 async def _await_mssp_data(writer: TelnetWriter, deadline: float) -> None:
@@ -627,11 +925,36 @@ async def _read_banner(
     return data
 
 
-async def _read_banner_until_quiet(
+def _respond_to_dsr(
+    chunk: bytes, writer: TelnetWriter, cursor: _VirtualCursor | None
+) -> None:
+    """
+    Send CPR response(s) for each DSR found in *chunk*.
+
+    When *cursor* is provided, text between DSR sequences advances the
+    virtual cursor column so each CPR reflects the correct position.
+    Without a cursor, a static ``ESC [ 1 ; 1 R`` is sent for every DSR.
+    """
+    if cursor is None:
+        for _ in _DSR_RE.finditer(chunk):
+            writer.write(b"\x1b[1;1R")
+        return
+    pos = 0
+    for match in _DSR_RE.finditer(chunk):
+        cursor.dsr_requests += 1
+        cursor.advance(chunk[pos:match.start()])
+        writer.write(cursor.cpr())
+        pos = match.end()
+    cursor.advance(chunk[pos:])
+
+
+async def _read_banner_until_quiet(  # noqa: E501 ; pylint: disable=too-many-positional-arguments,too-complex,too-many-nested-blocks
     reader: TelnetReader,
     quiet_time: float = 2.0,
     max_wait: float = 8.0,
     max_bytes: int = _BANNER_MAX_BYTES,
+    writer: TelnetWriter | None = None,
+    cursor: _VirtualCursor | None = None,
 ) -> bytes:
     """
     Read banner data until output stops for *quiet_time* seconds.
@@ -640,13 +963,31 @@ async def _read_banner_until_quiet(
     *quiet_time* seconds (or *max_wait* total elapses), returns everything
     collected so far.
 
+    When *writer* is provided, any DSR (Device Status Report) request
+    ``ESC [ 6 n`` found in the incoming data is answered with a CPR
+    (Cursor Position Report) so the server detects an ANSI-capable
+    terminal.
+
+    When *cursor* is provided, the CPR response reflects the tracked
+    virtual cursor column (advanced by :func:`wcwidth.wcwidth` for each
+    printable character).  This defeats robot-check guards that verify
+    cursor movement after writing a test character.
+
+    Time-sensitive prompts — ``Press [.ESC.] twice`` botcheck countdowns
+    — are detected inline and responded to immediately so the reply
+    arrives before the countdown expires.
+
     :param reader: :class:`~telnetlib3.stream_reader.TelnetReader` instance.
     :param quiet_time: Seconds of silence before considering banner complete.
     :param max_wait: Maximum total seconds to wait for banner data.
     :param max_bytes: Maximum bytes per read call.
+    :param writer: Optional :class:`~telnetlib3.stream_writer.TelnetWriter`
+        used to send CPR replies to DSR requests.
+    :param cursor: Optional :class:`_VirtualCursor` for position-aware CPR.
     :returns: Banner bytes (may be empty).
     """
     chunks: list[bytes] = []
+    esc_responded = False
     loop = asyncio.get_event_loop()
     deadline = loop.time() + max_wait
     while loop.time() < deadline:
@@ -657,6 +998,41 @@ async def _read_banner_until_quiet(
             chunk = await asyncio.wait_for(reader.read(max_bytes), timeout=remaining)
             if not chunk:
                 break
+            if writer is not None and _DSR_RE.search(chunk):
+                _respond_to_dsr(chunk, writer, cursor)
+                await writer.drain()
+            elif cursor is not None:
+                cursor.advance(chunk)
+            if writer is not None:
+                font_enc = detect_syncterm_font(chunk)
+                if font_enc is not None:
+                    log.debug("SyncTERM font switch detected: %s", font_enc)
+                    if getattr(writer, '_encoding_explicit', False):
+                        log.debug(
+                            "ignoring font switch, explicit encoding: %s",
+                            writer.environ_encoding)
+                    else:
+                        writer.environ_encoding = font_enc
+                        if cursor is not None:
+                            cursor.encoding = font_enc
+                    protocol = writer.protocol
+                    if (protocol is not None
+                            and font_enc in _SYNCTERM_BINARY_ENCODINGS):
+                        protocol.force_binary = True
+                if not esc_responded:
+                    stripped_chunk = _ANSI_STRIP_RE.sub(b"", chunk)
+                    if _ESC_TWICE_RE.search(stripped_chunk):
+                        writer.write(b"\x1b\x1b")
+                        await writer.drain()
+                        esc_responded = True
+                        # pylint: disable-next=protected-access
+                        writer._esc_inline = True  # type: ignore[attr-defined]
+                    elif _ESC_ONCE_RE.search(stripped_chunk):
+                        writer.write(b"\x1b")
+                        await writer.drain()
+                        esc_responded = True
+                        # pylint: disable-next=protected-access
+                        writer._esc_inline = True  # type: ignore[attr-defined]
             chunks.append(chunk)
         except (asyncio.TimeoutError, EOFError):
             break

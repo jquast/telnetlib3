@@ -205,6 +205,50 @@ and utf-8 support.
 The same applies to clients -- ``open_connection(..., encoding=False)``
 returns a ``(TelnetReader, TelnetWriter)`` pair that works with ``bytes``.
 
+Retro BBS Encodings
+~~~~~~~~~~~~~~~~~~~
+
+telnetlib3 includes custom codecs for retro computing platforms commonly
+found on telnet BBS systems:
+
+- **ATASCII** (``--encoding=atascii``) -- Atari 8-bit computers (400, 800,
+  XL, XE).  Graphics characters at 0x00-0x1F, card suits, box drawing, and
+  an inverse-video range at 0x80-0xFF.  The ATASCII end-of-line character
+  (0x9B) maps to newline.  Aliases: ``atari8bit``, ``atari_8bit``.
+- **PETSCII** (``--encoding=petscii``) -- Commodore 64/128 shifted
+  (lowercase) mode.  Lowercase a-z at 0x41-0x5A, uppercase A-Z at
+  0xC1-0xDA.  Aliases: ``cbm``, ``commodore``, ``c64``, ``c128``.
+- **Atari ST** (``--encoding=atarist``) -- Atari ST character set with
+  extended Latin, Greek, and math symbols.  Alias: ``atari``.
+
+These encodings use bytes 0x80-0xFF for standard glyphs, which conflicts
+with the telnet protocol's default 7-bit NVT mode.  When any of these
+encodings is selected, ``--force-binary`` is automatically enabled so that
+high-bit bytes are transmitted without requiring BINARY option negotiation.
+
+PETSCII inline color codes are translated to ANSI 24-bit RGB using the
+VIC-II C64 palette, and cursor control codes (up/down/left/right, HOME,
+CLR, DEL) are translated to ANSI sequences.  ATASCII control character
+glyphs (cursor movement, backspace, clear screen) are similarly translated.
+
+Keyboard input is also mapped: arrow keys, backspace, delete, and enter
+produce the correct raw bytes for each encoding::
+
+    telnetlib3-client --encoding=atascii area52.tk 5200
+    telnetlib3-client --encoding=petscii bbs.example.com 6400
+
+``telnetlib3-fingerprint`` decodes and translates banners with these
+encodings, including PETSCII colors.
+
+SyncTERM Font Detection
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+When a server sends a SyncTERM/CTerm font selection sequence
+(``CSI Ps1 ; Ps2 SP D``), both ``telnetlib3-client`` and
+``telnetlib3-fingerprint`` automatically switch the session encoding
+to match the font (e.g. font 36 = ATASCII, 32-35 = PETSCII, 0 = CP437).
+An explicit ``--encoding`` flag takes precedence over font detection.
+
 Line Endings
 ~~~~~~~~~~~~
 
@@ -229,6 +273,44 @@ as-is -- it does **not** convert ``\n`` to ``\r\n``::
 
 For maximum compatibility with MUD clients, legacy terminals, and standard
 telnet implementations, always use ``\r\n`` with ``write()``.
+
+Raw Mode and Line Mode
+~~~~~~~~~~~~~~~~~~~~~~
+
+``telnetlib3-client`` defaults to **raw terminal mode** -- the local
+terminal is set to raw (no line buffering, no local echo, no signal
+processing), and each keystroke is sent to the server immediately.  This
+is the correct mode for most BBS and MUD servers that handle their own
+echo and line editing.
+
+Use ``--line-mode`` to switch to line-buffered input with local echo,
+which is appropriate for simple command-line services that expect the
+client to perform local line editing::
+
+    # Default: raw mode (correct for most servers)
+    telnetlib3-client bbs.example.com
+
+    # Line mode: local echo and line buffering
+    telnetlib3-client --line-mode simple-service.example.com
+
+Similarly, ``telnetlib3-server --pty-exec`` defaults to raw PTY mode
+(disabling PTY echo), which is correct for programs that handle their own
+terminal I/O (curses, blessed, etc.).  Use ``--line-mode`` for programs
+that expect cooked/canonical PTY mode::
+
+    # Default: raw PTY (correct for curses programs)
+    telnetlib3-server --pty-exec /bin/bash -- --login
+
+    # Line mode: cooked PTY with echo (for simple programs like bc)
+    telnetlib3-server --pty-exec /bin/bc --line-mode
+
+Debugging
+~~~~~~~~~
+
+Use ``--loglevel=trace`` to see hexdump-style output of all bytes sent
+and received on the wire::
+
+    telnetlib3-client --loglevel=trace --logfile=debug.log bbs.example.com
 
 server_binary.py
 ~~~~~~~~~~~~~~~~

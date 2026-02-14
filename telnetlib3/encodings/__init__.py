@@ -1,9 +1,10 @@
 """
 Custom BBS/retro-computing codecs for telnetlib3.
 
-Registers petscii and atarist codecs with Python's codecs module on import.
-These encodings are then available for use with ``bytes.decode()`` and the
-``--encoding`` CLI flag of ``telnetlib3-fingerprint``.
+Registers atascii, petscii, and atarist codecs with Python's codecs module
+on import.  These encodings are then available for use with
+``bytes.decode()`` and the ``--encoding`` CLI flag of
+``telnetlib3-fingerprint``.
 """
 
 # std imports
@@ -44,5 +45,13 @@ def _search_function(encoding):
 
     return info
 
+
+#: Encoding names (and aliases) that require BINARY mode for high-bit bytes.
+#: Used by CLI entry points to auto-enable ``--force-binary``.
+FORCE_BINARY_ENCODINGS = frozenset({
+    'atascii', 'atari8bit', 'atari_8bit',
+    'petscii', 'cbm', 'commodore', 'c64', 'c128',
+    'atarist', 'atari',
+})
 
 codecs.register(_search_function)

@@ -59,7 +59,7 @@ class CONFIG(NamedTuple):
     connect_maxwait: float = 1.5
     pty_exec: Optional[str] = None
     pty_args: Optional[List[str]] = None
-    pty_raw: bool = False
+    pty_raw: bool = True
     robot_check: bool = False
     pty_fork_limit: int = 0
     status_interval: int = 20
@@ -989,11 +989,21 @@ def parse_server_args() -> Dict[str, Any]:
             help="limit concurrent PTY connections (0 disables)",
         )
         parser.add_argument(
+            "--line-mode",
+            action="store_true",
+            default=False,
+            help="use cooked PTY mode with echo for --pty-exec instead of raw "
+            "mode.  By default PTY echo is disabled (raw mode), which is "
+            "correct for programs that handle their own terminal I/O "
+            "(curses, blessed, ucs-detect).",
+        )
+        # Hidden backwards-compat: --pty-raw was the default since 2.5,
+        # keep it as a silent no-op so existing scripts don't break.
+        parser.add_argument(
             "--pty-raw",
             action="store_true",
-            default=_config.pty_raw,
-            help="raw mode for --pty-exec: disable PTY echo for programs that "
-            "handle their own terminal I/O (curses, blessed, ucs-detect)",
+            default=False,
+            help=argparse.SUPPRESS,
         )
     parser.add_argument(
         "--robot-check",
@@ -1021,10 +1031,22 @@ def parse_server_args() -> Dict[str, Any]:
     )
     result = vars(parser.parse_args(argv))
     result["pty_args"] = pty_args if PTY_SUPPORT else None
+    # --pty-raw is a hidden no-op (raw is now the default);
+    # --line-mode opts out of raw mode.
+    result.pop("pty_raw", None)
+    result["pty_raw"] = not result.pop("line_mode", False)
     if not PTY_SUPPORT:
         result["pty_exec"] = None
         result["pty_fork_limit"] = 0
         result["pty_raw"] = False
+
+    # Auto-enable force_binary for retro BBS encodings that use high-bit bytes.
+    # local
+    from .encodings import FORCE_BINARY_ENCODINGS  # pylint: disable=import-outside-toplevel
+
+    if result["encoding"].lower().replace('-', '_') in FORCE_BINARY_ENCODINGS:
+        result["force_binary"] = True
+
     return result
 
 

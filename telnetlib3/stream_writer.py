@@ -99,6 +99,7 @@ from .telopt import (
     name_commands,
     option_from_name,
 )
+from .accessories import TRACE, hexdump
 
 __all__ = ("TelnetWriter", "TelnetWriterUnicode")
 
@@ -891,6 +892,8 @@ class TelnetWriter:
         assert isinstance(buf, (bytes, bytearray)), buf
         assert buf and buf.startswith(IAC), buf
         if not self.is_closing():
+            if self.log.isEnabledFor(TRACE):
+                self.log.log(TRACE, "send IAC %d bytes\n%s", len(buf), hexdump(buf, prefix=">>  "))
             self._transport.write(buf)
             if hasattr(self._protocol, "_tx_bytes"):
                 self._protocol._tx_bytes += len(buf)
@@ -2113,6 +2116,10 @@ class TelnetWriter:
                 # greater than 127, but it was removed for performance.
                 buf = self._escape_iac(buf)
 
+            if self.log.isEnabledFor(TRACE):
+                self.log.log(
+                    TRACE, "send %d bytes\n%s", len(buf), hexdump(buf, prefix=">>  ")
+                )
             self._transport.write(buf)
             if hasattr(self._protocol, "_tx_bytes"):
                 self._protocol._tx_bytes += len(buf)

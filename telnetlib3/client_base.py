@@ -16,6 +16,7 @@ from typing import Any, Type, Union, Callable, Optional, cast
 # local
 from ._types import ShellCallback
 from .telopt import DO, WILL, theNULL, name_commands
+from .accessories import TRACE, hexdump
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
@@ -44,7 +45,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         encoding: Union[str, bool] = "utf8",
         encoding_errors: str = "strict",
         force_binary: bool = False,
-        connect_minwait: float = 1.0,
+        connect_minwait: float = 0,
         connect_maxwait: float = 4.0,
         limit: Optional[int] = None,
         waiter_closed: Optional[asyncio.Future[None]] = None,
@@ -212,7 +213,12 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         Buffer incoming data and schedule async processing to keep the event loop responsive. Apply
         read-side backpressure using transport.pause_reading()/resume_reading().
         """
+        if self.log.isEnabledFor(TRACE):
+            self.log.log(TRACE, "recv %d bytes\n%s", len(data), hexdump(data, prefix="<<  "))
         self._last_received = datetime.datetime.now()
+
+        # Detect SyncTERM font switching sequences and auto-switch encoding.
+        self._detect_syncterm_font(data)
 
         # Enqueue and account for buffered size
         self._rx_queue.append(data)
@@ -232,6 +238,33 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 except Exception:  # pylint: disable=broad-exception-caught
                     # Some transports may not support pause_reading; ignore.
                     pass
+
+    def _detect_syncterm_font(self, data: bytes) -> None:
+        """
+        Scan *data* for SyncTERM font selection and switch encoding.
+
+        When :attr:`_encoding_explicit` is set on the writer (indicating
+        the user passed ``--encoding``), the font switch is logged but
+        does not override the encoding.
+        """
+        if self.writer is None:
+            return
+        # local
+        from .server_fingerprinting import (  # pylint: disable=import-outside-toplevel
+            _SYNCTERM_BINARY_ENCODINGS,
+            detect_syncterm_font,
+        )
+        encoding = detect_syncterm_font(data)
+        if encoding is not None:
+            self.log.debug("SyncTERM font switch: %s", encoding)
+            if getattr(self.writer, '_encoding_explicit', False):
+                self.log.debug(
+                    "ignoring font switch, explicit encoding: %s",
+                    self.writer.environ_encoding)
+            else:
+                self.writer.environ_encoding = encoding
+            if encoding in _SYNCTERM_BINARY_ENCODINGS:
+                self.force_binary = True
 
     # public properties
 

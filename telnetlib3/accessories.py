@@ -9,14 +9,20 @@ import logging
 import importlib
 from typing import TYPE_CHECKING, Any, Dict, Union, Mapping, Callable, Optional
 
+#: Custom TRACE log level, below DEBUG (10).
+TRACE = 5
+logging.addLevelName(TRACE, "TRACE")
+
 if TYPE_CHECKING:  # pragma: no cover
     # local
     from .stream_reader import TelnetReader, TelnetReaderUnicode
 
 __all__ = (
+    "TRACE",
     "encoding_from_lang",
     "name_unicode",
     "eightbits",
+    "hexdump",
     "make_logger",
     "repr_mapping",
     "function_lookup",
@@ -96,6 +102,29 @@ def eightbits(number: int) -> str:
     return f"0b{int(value):08d}"
 
 
+def hexdump(data: bytes, prefix: str = "") -> str:
+    """
+    Format *data* as ``hexdump -C`` style output.
+
+    Each 16-byte row shows the offset, hex bytes grouped 8+8,
+    and printable ASCII on the right::
+
+        00000000  48 65 6c 6c 6f 20 57 6f  72 6c 64 0d 0a         |Hello World..|
+
+    :param data: Raw bytes to format.
+    :param prefix: String prepended to every line (e.g. ``">>  "``).
+    :rtype: str
+    """
+    lines: list[str] = []
+    for offset in range(0, len(data), 16):
+        chunk = data[offset : offset + 16]
+        hex_left = " ".join(f"{b:02x}" for b in chunk[:8])
+        hex_right = " ".join(f"{b:02x}" for b in chunk[8:])
+        ascii_part = "".join(chr(b) if 0x20 <= b < 0x7F else "." for b in chunk)
+        lines.append(f"{prefix}{offset:08x}  {hex_left:<23s}  {hex_right:<23s}  |{ascii_part}|")
+    return "\n".join(lines)
+
+
 _DEFAULT_LOGFMT = " ".join(
     ("%(asctime)s", "%(levelname)s", "%(filename)s:%(lineno)d", "%(message)s")
 )
@@ -105,7 +134,9 @@ def make_logger(
     name: str, loglevel: str = "info", logfile: Optional[str] = None, logfmt: str = _DEFAULT_LOGFMT
 ) -> logging.Logger:
     """Create and return simple logger for given arguments."""
-    lvl = getattr(logging, loglevel.upper())
+    lvl = getattr(logging, loglevel.upper(), None)
+    if lvl is None:
+        lvl = logging.getLevelName(loglevel.upper())
 
     _cfg: Dict[str, Any] = {"format": logfmt}
     if logfile:

@@ -6,14 +6,126 @@
 import sys
 import asyncio
 import collections
-from typing import Any, Tuple, Union, Optional
+from typing import Any, Dict, Tuple, Union, Optional
 
 # local
 from . import accessories
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
-__all__ = ("telnet_client_shell",)
+__all__ = ("InputFilter", "telnet_client_shell")
+
+# Input byte translation tables for retro encodings in raw mode.
+# Maps terminal keyboard bytes to the raw bytes the BBS expects.
+# Applied BEFORE decoding/encoding, bypassing the codec entirely for
+# characters that can't round-trip through Unicode (e.g. ATASCII 0x7E
+# shares its Unicode codepoint U+25C0 with 0xFE).
+_INPUT_XLAT: Dict[str, Dict[int, int]] = {
+    "atascii": {
+        0x7F: 0x7E,  # DEL → ATASCII backspace (byte 0x7E)
+        0x08: 0x7E,  # BS  → ATASCII backspace (byte 0x7E)
+        0x0D: 0x9B,  # CR  → ATASCII EOL (byte 0x9B)
+        0x0A: 0x9B,  # LF  → ATASCII EOL (byte 0x9B)
+    },
+    "petscii": {
+        0x7F: 0x14,  # DEL → PETSCII DEL (byte 0x14)
+        0x08: 0x14,  # BS  → PETSCII DEL (byte 0x14)
+    },
+}
+
+# Multi-byte escape sequence translation tables for retro encodings.
+# Maps common ANSI terminal escape sequences (arrow keys, delete, etc.)
+# to the raw bytes the BBS expects.  Inspired by blessed's
+# DEFAULT_SEQUENCE_MIXIN but kept minimal for the sequences that matter.
+_INPUT_SEQ_XLAT: Dict[str, Dict[bytes, bytes]] = {
+    "atascii": {
+        b"\x1b[A": b"\x1c",    # cursor up (CSI)
+        b"\x1b[B": b"\x1d",    # cursor down
+        b"\x1b[C": b"\x1f",    # cursor right
+        b"\x1b[D": b"\x1e",    # cursor left
+        b"\x1bOA": b"\x1c",    # cursor up (SS3 / application mode)
+        b"\x1bOB": b"\x1d",    # cursor down
+        b"\x1bOC": b"\x1f",    # cursor right
+        b"\x1bOD": b"\x1e",    # cursor left
+        b"\x1b[3~": b"\x7e",   # delete → ATASCII backspace
+        b"\t": b"\x7f",        # tab → ATASCII tab
+    },
+    "petscii": {
+        b"\x1b[A": b"\x91",    # cursor up (CSI)
+        b"\x1b[B": b"\x11",    # cursor down
+        b"\x1b[C": b"\x1d",    # cursor right
+        b"\x1b[D": b"\x9d",    # cursor left
+        b"\x1bOA": b"\x91",    # cursor up (SS3 / application mode)
+        b"\x1bOB": b"\x11",    # cursor down
+        b"\x1bOC": b"\x1d",    # cursor right
+        b"\x1bOD": b"\x9d",    # cursor left
+        b"\x1b[3~": b"\x14",   # delete → PETSCII DEL
+        b"\x1b[H": b"\x13",    # home → PETSCII HOME
+        b"\x1b[2~": b"\x94",   # insert → PETSCII INSERT
+    },
+}
+
+
+class InputFilter:  # pylint: disable=too-few-public-methods
+    """
+    Translate terminal escape sequences and single bytes to retro encoding bytes.
+
+    Combines single-byte translation (backspace, delete) with multi-byte
+    escape sequence matching (arrow keys, function keys).  Uses prefix-based
+    buffering inspired by blessed's ``get_leading_prefixes`` to handle
+    sequences split across reads.
+
+    :param seq_xlat: Multi-byte escape sequence → replacement bytes.
+    :param byte_xlat: Single input byte → replacement byte.
+    """
+
+    def __init__(
+        self, seq_xlat: Dict[bytes, bytes], byte_xlat: Dict[int, int]
+    ) -> None:
+        """Initialize input filter with sequence and byte translation tables."""
+        self._byte_xlat = byte_xlat
+        # Sort sequences longest-first so \x1b[3~ matches before \x1b[3
+        self._seq_sorted: Tuple[Tuple[bytes, bytes], ...] = tuple(
+            sorted(seq_xlat.items(), key=lambda kv: len(kv[0]), reverse=True)
+        )
+        # Prefix set for partial-match buffering (blessed's get_leading_prefixes)
+        self._prefixes: frozenset[bytes] = frozenset(
+            seq[:i] for seq in seq_xlat for i in range(1, len(seq))
+        )
+        self._buf = b""
+
+    def feed(self, data: bytes) -> bytes:
+        """
+        Process input bytes, returning raw bytes to send to the remote host.
+
+        Escape sequences are matched against the configured table and replaced. Partial sequences
+        are buffered until the next call.  Single bytes are translated via the byte translation
+        table.
+
+        :param data: Raw bytes from terminal stdin.
+        :returns: Translated bytes ready to send to the remote BBS.
+        """
+        self._buf += data
+        result = bytearray()
+        while self._buf:
+            # Try multi-byte sequence match at current position
+            matched = False
+            for seq, repl in self._seq_sorted:
+                if self._buf[:len(seq)] == seq:
+                    result.extend(repl)
+                    self._buf = self._buf[len(seq):]
+                    matched = True
+                    break
+            if matched:
+                continue
+            # Check if buffer is a prefix of any known sequence — wait for more
+            if self._buf in self._prefixes:
+                break
+            # No sequence match, emit single byte with translation
+            b = self._buf[0]
+            self._buf = self._buf[1:]
+            result.append(self._byte_xlat.get(b, b))
+        return bytes(result)
 
 
 if sys.platform == "win32":
@@ -73,11 +185,14 @@ else:
 
         def determine_mode(self, mode: "Terminal.ModeDef") -> "Terminal.ModeDef":
             """Return copy of 'mode' with changes suggested for telnet connection."""
-            if not self.telnet_writer.will_echo:
-                # return mode as-is
+            raw_mode = getattr(self.telnet_writer, '_raw_mode', False)
+            if not self.telnet_writer.will_echo and not raw_mode:
                 self.telnet_writer.log.debug("local echo, linemode")
                 return mode
-            self.telnet_writer.log.debug("server echo, kludge mode")
+            if raw_mode and not self.telnet_writer.will_echo:
+                self.telnet_writer.log.debug("raw mode forced, no server echo")
+            else:
+                self.telnet_writer.log.debug("server echo, kludge mode")
 
             # "Raw mode", see tty.py function setraw.  This allows sending
             # of ^J, ^C, ^S, ^\, and others, which might otherwise
@@ -171,8 +286,10 @@ else:
 
         with Terminal(telnet_writer=telnet_writer) as term:
             linesep = "\n"
-            if term._istty and telnet_writer.will_echo:  # pylint: disable=protected-access
-                linesep = "\r\n"
+            if term._istty:  # pylint: disable=protected-access
+                _raw = getattr(telnet_writer, '_raw_mode', False)
+                if telnet_writer.will_echo or _raw:
+                    linesep = "\r\n"
             stdin, stdout = await term.make_stdio()
             escape_name = accessories.name_unicode(keyboard_escape)
             stdout.write(f"Escape character is '{escape_name}'.{linesep}".encode())
@@ -261,7 +378,13 @@ else:
                                 except Exception:  # pylint: disable=broad-exception-caught
                                     pass
                             break
-                        telnet_writer.write(inp.decode())
+                        _inf = getattr(telnet_writer, '_input_filter', None)
+                        if _inf is not None:
+                            translated = _inf.feed(inp)
+                            if translated:
+                                telnet_writer._write(translated)  # pylint: disable=protected-access
+                        else:
+                            telnet_writer.write(inp.decode())
                         stdin_task = accessories.make_reader_task(stdin)
                         wait_for.add(stdin_task)
                     else:
@@ -302,6 +425,13 @@ else:
                         _cf = getattr(telnet_writer, "_color_filter", None)
                         if _cf is not None:
                             out = _cf.filter(out)
+                        if getattr(telnet_writer, '_raw_mode', False):
+                            # Normalize all line endings to LF, then to CRLF
+                            # for the raw terminal (OPOST disabled).  PETSCII
+                            # BBSes send bare CR (0x0D) as line terminator.
+                            out = (out.replace('\r\n', '\n')
+                                      .replace('\r', '\n')
+                                      .replace('\n', '\r\n'))
                         stdout.write(out.encode() or b":?!?:")
                         telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
                         wait_for.add(telnet_task)
