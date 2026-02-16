@@ -550,6 +550,7 @@ def _pty_run_client(bind_host, port, extra_argv, server_ssl_ctx=None):
     if stop_event_holder:
         srv_loop.call_soon_threadsafe(stop_event_holder[0].set)
     srv_thread.join(timeout=3)
+    srv_loop.close()
 
     assert os.WEXITSTATUS(status) == 0, f"Child exited {os.WEXITSTATUS(status)}.\nOutput:\n{output}"
     assert "pty-marker-ok" in output, f"Marker not found in output:\n{output}"
@@ -737,6 +738,7 @@ def test_cli_run_fingerprint_client_ssl(bind_host, unused_tcp_port, server_ssl_c
     if stop_event_holder:
         srv_loop.call_soon_threadsafe(stop_event_holder[0].set)
     srv_thread.join(timeout=3)
+    srv_loop.close()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only tests")
@@ -837,3 +839,4 @@ def test_cli_run_fingerprint_client_ssl_cafile(
     if stop_event_holder:
         srv_loop.call_soon_threadsafe(stop_event_holder[0].set)
     srv_thread.join(timeout=3)
+    srv_loop.close()
