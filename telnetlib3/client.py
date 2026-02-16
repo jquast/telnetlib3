@@ -1061,6 +1061,7 @@ async def run_fingerprint_client() -> None:
             # pylint: disable-next=protected-access
             client.writer._encoding_explicit = environ_encoding != "ascii"
             # pylint: disable-next=import-outside-toplevel
+            # local
             from .fingerprinting import EXTENDED_OPTIONS
 
             mud_opts = {opt for opt, _, _ in EXTENDED_OPTIONS}

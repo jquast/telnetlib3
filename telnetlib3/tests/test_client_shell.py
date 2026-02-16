@@ -324,8 +324,8 @@ import subprocess  # noqa: E402
 
 # local
 from telnetlib3.tests.accessories import (  # noqa: E402
-    asyncio_server,
     bind_host,
+    asyncio_server,
     unused_tcp_port,
 )
 
