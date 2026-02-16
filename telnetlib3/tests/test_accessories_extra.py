@@ -48,7 +48,7 @@ def test_hexdump_prefix():
 
 
 def test_hexdump_empty():
-    assert hexdump(b"") == ""
+    assert not hexdump(b"")
 
 
 def test_make_logger_trace_level():

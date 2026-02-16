@@ -10,7 +10,7 @@ import pytest
 # local
 from telnetlib3.client import _transform_args, _get_argument_parser
 from telnetlib3.telopt import DO, IAC, WONT, TTYPE
-from telnetlib3.tests.accessories import (  # pylint: disable=unused-import; pylint: disable=unused-import,
+from telnetlib3.tests.accessories import (
     bind_host,
     create_server,
     open_connection,

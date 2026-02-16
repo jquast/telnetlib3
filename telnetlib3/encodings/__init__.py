@@ -10,14 +10,15 @@ on import.  These encodings are then available for use with
 # std imports
 import codecs
 import importlib
+from typing import Optional
 
-_cache = {}
-_aliases = {}
+_cache: dict[str, Optional[codecs.CodecInfo]] = {}
+_aliases: dict[str, codecs.CodecInfo] = {}
 
 
-def _search_function(encoding):
+def _search_function(encoding: str) -> Optional[codecs.CodecInfo]:
     """Codec search function registered with codecs.register()."""
-    normalized = encoding.lower().replace('-', '_')
+    normalized = encoding.lower().replace("-", "_")
 
     if normalized in _aliases:
         return _aliases[normalized]
@@ -26,20 +27,20 @@ def _search_function(encoding):
         return _cache[normalized]
 
     try:
-        mod = importlib.import_module(f'.{normalized}', package=__name__)
+        mod = importlib.import_module(f".{normalized}", package=__name__)
     except ImportError:
         _cache[normalized] = None
         return None
 
     try:
-        info = mod.getregentry()
+        info: codecs.CodecInfo = mod.getregentry()
     except AttributeError:
         _cache[normalized] = None
         return None
 
     _cache[normalized] = info
 
-    if hasattr(mod, 'getaliases'):
+    if hasattr(mod, "getaliases"):
         for alias in mod.getaliases():
             _aliases[alias] = info
 
@@ -48,10 +49,19 @@ def _search_function(encoding):
 
 #: Encoding names (and aliases) that require BINARY mode for high-bit bytes.
 #: Used by CLI entry points to auto-enable ``--force-binary``.
-FORCE_BINARY_ENCODINGS = frozenset({
-    'atascii', 'atari8bit', 'atari_8bit',
-    'petscii', 'cbm', 'commodore', 'c64', 'c128',
-    'atarist', 'atari',
-})
+FORCE_BINARY_ENCODINGS = frozenset(
+    {
+        "atascii",
+        "atari8bit",
+        "atari_8bit",
+        "petscii",
+        "cbm",
+        "commodore",
+        "c64",
+        "c128",
+        "atarist",
+        "atari",
+    }
+)
 
 codecs.register(_search_function)

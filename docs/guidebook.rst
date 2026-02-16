@@ -277,25 +277,24 @@ telnet implementations, always use ``\r\n`` with ``write()``.
 Raw Mode and Line Mode
 ~~~~~~~~~~~~~~~~~~~~~~
 
-``telnetlib3-client`` defaults to **raw terminal mode** -- the local
-terminal is set to raw (no line buffering, no local echo, no signal
-processing), and each keystroke is sent to the server immediately.  This
-is the correct mode for most BBS and MUD servers that handle their own
-echo and line editing.
+By default ``telnetlib3-client`` matches the terminal's mode by the
+server's stated telnet negotiation.  It starts in line mode (local echo,
+line buffering) and switches dynamically depending on server:
 
-Use ``--line-mode`` to switch to line-buffered input with local echo,
-which is appropriate for simple command-line services that expect the
-client to perform local line editing::
+- Nothing: line mode with local echo
+- ``WILL ECHO`` + ``WILL SGA``: kludge mode (raw, no local echo)
+- ``WILL ECHO``: raw mode, server echoes
+- ``WILL SGA``: character-at-a-time with local echo
 
-    # Default: raw mode (correct for most servers)
-    telnetlib3-client bbs.example.com
+Use ``--raw-mode`` to force raw mode (no line buffering, no local echo),
+which is needed for some legacy BBS systems that don't negotiate ``WILL
+ECHO``.  This is set true when ``--encoding=petscii`` or ``atascii``.
 
-    # Line mode: local echo and line buffering
-    telnetlib3-client --line-mode simple-service.example.com
+Conversely, Use ``--line-mode`` to force line-buffered input with local echo.
 
 Similarly, ``telnetlib3-server --pty-exec`` defaults to raw PTY mode
 (disabling PTY echo), which is correct for programs that handle their own
-terminal I/O (curses, blessed, etc.).  Use ``--line-mode`` for programs
+terminal I/O (bash, curses, etc.).  Use ``--line-mode`` for programs
 that expect cooked/canonical PTY mode::
 
     # Default: raw PTY (correct for curses programs)

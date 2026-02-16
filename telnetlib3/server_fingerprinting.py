@@ -95,9 +95,7 @@ _MENU_UTF8_RE = re.compile(
 # Match numbered menu items offering ANSI, e.g. "(1) Ansi", "[2] ANSI",
 # "3. English/ANSI", or "1 ... English/ANSI".  Brackets, dot, and
 # ellipsis delimiters are accepted.
-_MENU_ANSI_RE = re.compile(
-    rb"[\[(]?(\d+)\s*(?:[\])]|\.{1,3})\s*(?:\S+\s*/\s*)?ANSI", re.IGNORECASE
-)
+_MENU_ANSI_RE = re.compile(rb"[\[(]?(\d+)\s*(?:[\])]|\.{1,3})\s*(?:\S+\s*/\s*)?ANSI", re.IGNORECASE)
 
 # Match "gb/big5" encoding selection prompts common on Chinese BBS systems.
 _GB_BIG5_RE = re.compile(rb"(?i)(?:^|[^a-zA-Z0-9])gb\s*/\s*big\s*5(?:[^a-zA-Z0-9]|$)")
@@ -114,15 +112,11 @@ _ESC_ONCE_RE = re.compile(rb"(?i)press\s+[\[<]?\.?esc\.?[\]>]?(?!\s+twice)")
 
 # Match "HIT RETURN", "PRESS RETURN", "PRESS ENTER", "HIT ENTER", etc.
 # Common on Worldgroup/MajorBBS and other vintage BBS systems.
-_RETURN_PROMPT_RE = re.compile(
-    rb"(?i)(?:hit|press)\s+(?:return|enter)\s*[:\.]?"
-)
+_RETURN_PROMPT_RE = re.compile(rb"(?i)(?:hit|press)\s+(?:return|enter)\s*[:\.]?")
 
 # Match "Press the BACKSPACE key" prompts — standard telnet terminal
 # detection (e.g. TelnetBible.com).  Respond with ASCII BS (0x08).
-_BACKSPACE_KEY_RE = re.compile(
-    rb"(?i)press\s+the\s+backspace\s+key"
-)
+_BACKSPACE_KEY_RE = re.compile(rb"(?i)press\s+the\s+backspace\s+key")
 
 # Match "press del/backspace" and "hit your backspace/delete" prompts from
 # PETSCII BBS systems (e.g. Image BBS C/G detect).  Respond with PETSCII
@@ -135,9 +129,7 @@ _DEL_BACKSPACE_RE = re.compile(
 
 # Match "More: (Y)es, (N)o, (C)ontinuous?" pagination prompts.
 # Answer "C" (Continuous) to disable pagination and collect the full banner.
-_MORE_PROMPT_RE = re.compile(
-    rb"(?i)more[:\s]*\(?[yY]\)?.*\(?[cC]\)?\s*(?:ontinuous|ont)"
-)
+_MORE_PROMPT_RE = re.compile(rb"(?i)more[:\s]*\(?[yY]\)?.*\(?[cC]\)?\s*(?:ontinuous|ont)")
 
 # Match DSR (Device Status Report) request: ESC [ 6 n.
 # Servers send this to detect ANSI-capable terminals; we reply with a
@@ -194,9 +186,7 @@ SYNCTERM_FONT_ENCODINGS: dict[int, str] = {
 }
 
 #: Encodings that require ``force_binary`` for high-bit bytes.
-_SYNCTERM_BINARY_ENCODINGS = frozenset({
-    "petscii", "atascii",
-})
+_SYNCTERM_BINARY_ENCODINGS = frozenset({"petscii", "atascii"})
 
 
 log = logging.getLogger(__name__)
@@ -223,9 +213,7 @@ def detect_syncterm_font(data: bytes) -> str | None:
 #: Encodings where standard telnet CR+LF must be re-encoded to the
 #: codec's native EOL byte.  The codec's ``encode()`` handles the
 #: actual CR → LF normalization; we just gate the re-encoding step.
-_RETRO_EOL_ENCODINGS = frozenset({
-    'atascii', 'atari8bit', 'atari_8bit',
-})
+_RETRO_EOL_ENCODINGS = frozenset({"atascii", "atari8bit", "atari_8bit"})
 
 
 def _reencode_prompt(response: bytes, encoding: str) -> bytes:
@@ -240,11 +228,11 @@ def _reencode_prompt(response: bytes, encoding: str) -> bytes:
     :param encoding: Remote server encoding name.
     :returns: Response bytes suitable for the server's encoding.
     """
-    normalized = encoding.lower().replace('-', '_')
+    normalized = encoding.lower().replace("-", "_")
     if normalized not in _RETRO_EOL_ENCODINGS:
         return response
     try:
-        text = response.decode('ascii')
+        text = response.decode("ascii")
         return text.encode(encoding)
     except (UnicodeDecodeError, UnicodeEncodeError, LookupError):
         return response
@@ -346,9 +334,7 @@ class _PromptResult(NamedTuple):
     encoding: str | None = None
 
 
-def _detect_yn_prompt(  # pylint: disable=too-many-return-statements
-    banner: bytes,
-) -> _PromptResult:
+def _detect_yn_prompt(banner: bytes) -> _PromptResult:  # pylint: disable=too-many-return-statements
     r"""
     Return an appropriate first-prompt response based on banner content.
 
@@ -483,14 +469,22 @@ async def _fingerprint_session(  # noqa: E501 ; pylint: disable=too-many-locals,
     # 1. Let straggler negotiation settle — read (and respond to DSR)
     #    instead of sleeping blind so early DSR requests get a CPR reply.
     settle_data = await _read_banner_until_quiet(
-        reader, quiet_time=_NEGOTIATION_SETTLE, max_wait=_NEGOTIATION_SETTLE,
-        max_bytes=banner_max_bytes, writer=writer, cursor=cursor,
+        reader,
+        quiet_time=_NEGOTIATION_SETTLE,
+        max_wait=_NEGOTIATION_SETTLE,
+        max_bytes=banner_max_bytes,
+        writer=writer,
+        cursor=cursor,
     )
 
     # 2. Read banner (pre-return) — wait until output stops
     banner_before_raw = await _read_banner_until_quiet(
-        reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait,
-        max_bytes=banner_max_bytes, writer=writer, cursor=cursor,
+        reader,
+        quiet_time=banner_quiet_time,
+        max_wait=banner_max_wait,
+        max_bytes=banner_max_bytes,
+        writer=writer,
+        cursor=cursor,
     )
     banner_before = settle_data + banner_before_raw
 
@@ -505,15 +499,12 @@ async def _fingerprint_session(  # noqa: E501 ; pylint: disable=too-many-locals,
         detected = prompt_result.response
         # Skip if the ESC response was already sent inline during banner
         # collection (time-sensitive botcheck countdowns).
-        if detected in (b"\x1b\x1b", b"\x1b") and getattr(
-            writer, '_esc_inline', False
-        ):
+        if detected in (b"\x1b\x1b", b"\x1b") and getattr(writer, "_esc_inline", False):
             # pylint: disable-next=protected-access
             writer._esc_inline = False  # type: ignore[attr-defined]
             detected = None
         prompt_response = _reencode_prompt(
-            detected if detected is not None else b"\r\n",
-            writer.environ_encoding,
+            detected if detected is not None else b"\r\n", writer.environ_encoding
         )
         writer.write(prompt_response)
         await writer.drain()
@@ -528,8 +519,12 @@ async def _fingerprint_session(  # noqa: E501 ; pylint: disable=too-many-locals,
                 protocol.force_binary = True
         previous_banner = latest_banner
         latest_banner = await _read_banner_until_quiet(
-            reader, quiet_time=banner_quiet_time, max_wait=banner_max_wait,
-            max_bytes=banner_max_bytes, writer=writer, cursor=cursor,
+            reader,
+            quiet_time=banner_quiet_time,
+            max_wait=banner_max_wait,
+            max_bytes=banner_max_bytes,
+            writer=writer,
+            cursor=cursor,
         )
         after_chunks.append(latest_banner)
         if writer.is_closing() or not latest_banner:
@@ -567,14 +562,8 @@ async def _fingerprint_session(  # noqa: E501 ; pylint: disable=too-many-locals,
         {
             "scan_type": scan_type,
             "encoding": writer.environ_encoding,
-            "banner_before_return": _format_banner(
-                banner_before,
-                encoding=writer.environ_encoding,
-            ),
-            "banner_after_return": _format_banner(
-                banner_after,
-                encoding=writer.environ_encoding,
-            ),
+            "banner_before_return": _format_banner(banner_before, encoding=writer.environ_encoding),
+            "banner_after_return": _format_banner(banner_after, encoding=writer.environ_encoding),
             "timing": {"probe": probe_time, "total": time.time() - start_time},
             "dsr_requests": cursor.dsr_requests,
             "dsr_replies": cursor.dsr_replies,
@@ -887,9 +876,10 @@ def _format_banner(data: bytes, encoding: str = "utf-8") -> str:
     if encoding.lower() in ("petscii", "cbm", "commodore", "c64", "c128"):
         # local
         from .color_filter import PetsciiColorFilter  # pylint: disable=import-outside-toplevel
+
         text = PetsciiColorFilter().filter(text)
         # PETSCII uses CR (0x0D) as line terminator; normalize to LF.
-        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
 
     return text
 
@@ -925,9 +915,7 @@ async def _read_banner(
     return data
 
 
-def _respond_to_dsr(
-    chunk: bytes, writer: TelnetWriter, cursor: _VirtualCursor | None
-) -> None:
+def _respond_to_dsr(chunk: bytes, writer: TelnetWriter, cursor: _VirtualCursor | None) -> None:
     """
     Send CPR response(s) for each DSR found in *chunk*.
 
@@ -942,7 +930,7 @@ def _respond_to_dsr(
     pos = 0
     for match in _DSR_RE.finditer(chunk):
         cursor.dsr_requests += 1
-        cursor.advance(chunk[pos:match.start()])
+        cursor.advance(chunk[pos : match.start()])
         writer.write(cursor.cpr())
         pos = match.end()
     cursor.advance(chunk[pos:])
@@ -1007,17 +995,16 @@ async def _read_banner_until_quiet(  # noqa: E501 ; pylint: disable=too-many-pos
                 font_enc = detect_syncterm_font(chunk)
                 if font_enc is not None:
                     log.debug("SyncTERM font switch detected: %s", font_enc)
-                    if getattr(writer, '_encoding_explicit', False):
+                    if getattr(writer, "_encoding_explicit", False):
                         log.debug(
-                            "ignoring font switch, explicit encoding: %s",
-                            writer.environ_encoding)
+                            "ignoring font switch, explicit encoding: %s", writer.environ_encoding
+                        )
                     else:
                         writer.environ_encoding = font_enc
                         if cursor is not None:
                             cursor.encoding = font_enc
                     protocol = writer.protocol
-                    if (protocol is not None
-                            and font_enc in _SYNCTERM_BINARY_ENCODINGS):
+                    if protocol is not None and font_enc in _SYNCTERM_BINARY_ENCODINGS:
                         protocol.force_binary = True
                 if not esc_responded:
                     stripped_chunk = _ANSI_STRIP_RE.sub(b"", chunk)

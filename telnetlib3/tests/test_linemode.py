@@ -8,7 +8,7 @@ import telnetlib3
 import telnetlib3.stream_writer
 from telnetlib3.slc import LMODE_MODE, LMODE_MODE_ACK, LMODE_MODE_LOCAL
 from telnetlib3.telopt import DO, SB, SE, IAC, WILL, LINEMODE
-from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+from telnetlib3.tests.accessories import (
     bind_host,
     create_server,
     unused_tcp_port,

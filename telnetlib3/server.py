@@ -999,12 +999,7 @@ def parse_server_args() -> Dict[str, Any]:
         )
         # Hidden backwards-compat: --pty-raw was the default since 2.5,
         # keep it as a silent no-op so existing scripts don't break.
-        parser.add_argument(
-            "--pty-raw",
-            action="store_true",
-            default=False,
-            help=argparse.SUPPRESS,
-        )
+        parser.add_argument("--pty-raw", action="store_true", default=False, help=argparse.SUPPRESS)
     parser.add_argument(
         "--robot-check",
         action="store_true",
@@ -1044,7 +1039,7 @@ def parse_server_args() -> Dict[str, Any]:
     # local
     from .encodings import FORCE_BINARY_ENCODINGS  # pylint: disable=import-outside-toplevel
 
-    if result["encoding"].lower().replace('-', '_') in FORCE_BINARY_ENCODINGS:
+    if result["encoding"].lower().replace("-", "_") in FORCE_BINARY_ENCODINGS:
         result["force_binary"] = True
 
     return result

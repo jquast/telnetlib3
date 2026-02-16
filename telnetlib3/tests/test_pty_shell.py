@@ -22,7 +22,7 @@ from telnetlib3.server_pty_shell import (
     _platform_check,
     _wait_for_terminal_info,
 )
-from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+from telnetlib3.tests.accessories import (
     bind_host,
     create_server,
     open_connection,

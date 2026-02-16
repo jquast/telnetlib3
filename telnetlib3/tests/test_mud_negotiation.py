@@ -7,7 +7,23 @@ import collections
 import pytest
 
 # local
-from telnetlib3.telopt import DO, SB, SE, IAC, MSP, MXP, ZMP, ATCP, GMCP, MSDP, MSSP, WILL, AARDWOLF
+from telnetlib3.telopt import (
+    DO,
+    SB,
+    SE,
+    IAC,
+    MSP,
+    MXP,
+    ZMP,
+    ATCP,
+    DONT,
+    GMCP,
+    MSDP,
+    MSSP,
+    WILL,
+    WONT,
+    AARDWOLF,
+)
 from telnetlib3.stream_writer import TelnetWriter
 
 
@@ -361,11 +377,47 @@ def test_handle_do_mxp_sets_pending_sb():
     assert w.pending_option.get(SB + MXP) is True
 
 
-def test_handle_will_mxp_client_sets_pending_sb():
+def test_handle_will_mxp_client_declines():
     w, t, _p = new_writer(server=False, client=True)
     w.handle_will(MXP)
+    assert IAC + DONT + MXP in t.writes
+    assert w.remote_option.get(MXP) is not True
+
+
+def test_handle_will_mxp_client_always_do():
+    w, t, _p = new_writer(server=False, client=True)
+    w.always_do.add(MXP)
+    w.handle_will(MXP)
     assert IAC + DO + MXP in t.writes
-    assert w.pending_option.get(SB + MXP) is True
+    assert w.remote_option.get(MXP) is True
+
+
+_MUD_ALL = [GMCP, MSDP, MSSP, MSP, MXP, ZMP, AARDWOLF, ATCP]
+_MUD_ALL_IDS = ["GMCP", "MSDP", "MSSP", "MSP", "MXP", "ZMP", "AARDWOLF", "ATCP"]
+
+
+@pytest.mark.parametrize("opt", _MUD_ALL, ids=_MUD_ALL_IDS)
+def test_handle_will_mud_client_declines(opt):
+    w, t, _p = new_writer(server=False, client=True)
+    w.handle_will(opt)
+    assert IAC + DONT + opt in t.writes
+
+
+@pytest.mark.parametrize("opt", _MUD_ALL, ids=_MUD_ALL_IDS)
+def test_handle_do_mud_client_declines(opt):
+    w, t, _p = new_writer(server=False, client=True)
+    result = w.handle_do(opt)
+    assert result is False
+    assert IAC + WONT + opt in t.writes
+
+
+@pytest.mark.parametrize("opt", _MUD_ALL, ids=_MUD_ALL_IDS)
+def test_handle_do_mud_client_always_will(opt):
+    w, t, _p = new_writer(server=False, client=True)
+    w.always_will.add(opt)
+    result = w.handle_do(opt)
+    assert result is True
+    assert IAC + WILL + opt in t.writes
 
 
 def test_sb_zmp_dispatch():

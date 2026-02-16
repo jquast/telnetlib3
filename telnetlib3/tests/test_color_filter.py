@@ -467,24 +467,27 @@ class TestPetsciiColorFilter:
         cfg = ColorConfig(brightness=1.0, contrast=1.0, **kwargs)  # type: ignore[arg-type]
         return PetsciiColorFilter(cfg)
 
-    @pytest.mark.parametrize("ctrl_char,palette_idx", [
-        ('\x05', 1),
-        ('\x1c', 2),
-        ('\x1e', 5),
-        ('\x1f', 6),
-        ('\x81', 8),
-        ('\x90', 0),
-        ('\x95', 9),
-        ('\x96', 10),
-        ('\x97', 11),
-        ('\x98', 12),
-        ('\x99', 13),
-        ('\x9a', 14),
-        ('\x9b', 15),
-        ('\x9c', 4),
-        ('\x9e', 7),
-        ('\x9f', 3),
-    ])
+    @pytest.mark.parametrize(
+        "ctrl_char,palette_idx",
+        [
+            ("\x05", 1),
+            ("\x1c", 2),
+            ("\x1e", 5),
+            ("\x1f", 6),
+            ("\x81", 8),
+            ("\x90", 0),
+            ("\x95", 9),
+            ("\x96", 10),
+            ("\x97", 11),
+            ("\x98", 12),
+            ("\x99", 13),
+            ("\x9a", 14),
+            ("\x9b", 15),
+            ("\x9c", 4),
+            ("\x9e", 7),
+            ("\x9f", 3),
+        ],
+    )
     def test_color_code_to_24bit(self, ctrl_char: str, palette_idx: int) -> None:
         f = self._make_filter()
         result = f.filter(f"hello{ctrl_char}world")
@@ -539,7 +542,7 @@ class TestPetsciiColorFilter:
 
     def test_flush_returns_empty(self) -> None:
         f = self._make_filter()
-        assert f.flush() == ""
+        assert not f.flush()
 
     def test_brightness_contrast_applied(self) -> None:
         f_full = PetsciiColorFilter(ColorConfig(brightness=1.0, contrast=1.0))
@@ -555,15 +558,18 @@ class TestPetsciiColorFilter:
 
 
 class TestAtasciiControlFilter:
-    @pytest.mark.parametrize("glyph,expected", [
-        ('\u25c0', '\x08\x1b[P'),
-        ('\u25b6', '\t'),
-        ('\u21b0', '\x1b[2J\x1b[H'),
-        ('\u2191', '\x1b[A'),
-        ('\u2193', '\x1b[B'),
-        ('\u2190', '\x1b[D'),
-        ('\u2192', '\x1b[C'),
-    ])
+    @pytest.mark.parametrize(
+        "glyph,expected",
+        [
+            ("\u25c0", "\x08\x1b[P"),
+            ("\u25b6", "\t"),
+            ("\u21b0", "\x1b[2J\x1b[H"),
+            ("\u2191", "\x1b[A"),
+            ("\u2193", "\x1b[B"),
+            ("\u2190", "\x1b[D"),
+            ("\u2192", "\x1b[C"),
+        ],
+    )
     def test_control_glyph_translated(self, glyph: str, expected: str) -> None:
         f = AtasciiControlFilter()
         result = f.filter(f"before{glyph}after")
@@ -585,7 +591,7 @@ class TestAtasciiControlFilter:
 
     def test_flush_returns_empty(self) -> None:
         f = AtasciiControlFilter()
-        assert f.flush() == ""
+        assert not f.flush()
 
     def test_multiple_controls_in_one_string(self) -> None:
         f = AtasciiControlFilter()

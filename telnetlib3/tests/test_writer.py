@@ -26,7 +26,7 @@ from telnetlib3.telopt import (
     CMD_EOR,
     option_from_name,
 )
-from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+from telnetlib3.tests.accessories import (
     bind_host,
     create_server,
     open_connection,

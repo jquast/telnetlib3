@@ -200,8 +200,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 fut.add_done_callback(
                     lambda fut_obj: (
                         self.waiter_closed.set_result(weakref.proxy(self))
-                        if self.waiter_closed is not None
-                        and not self.waiter_closed.done()
+                        if self.waiter_closed is not None and not self.waiter_closed.done()
                         else None
                     )
                 )
@@ -254,13 +253,14 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             _SYNCTERM_BINARY_ENCODINGS,
             detect_syncterm_font,
         )
+
         encoding = detect_syncterm_font(data)
         if encoding is not None:
             self.log.debug("SyncTERM font switch: %s", encoding)
-            if getattr(self.writer, '_encoding_explicit', False):
+            if getattr(self.writer, "_encoding_explicit", False):
                 self.log.debug(
-                    "ignoring font switch, explicit encoding: %s",
-                    self.writer.environ_encoding)
+                    "ignoring font switch, explicit encoding: %s", self.writer.environ_encoding
+                )
             else:
                 self.writer.environ_encoding = encoding
             if encoding in _SYNCTERM_BINARY_ENCODINGS:

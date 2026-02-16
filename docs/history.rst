@@ -1,5 +1,15 @@
 History
 =======
+2.6.0
+  * change: ``telnetlib3-client`` now sets terminal mode to the server's
+    preference via ``WILL ECHO`` and ``WILL SGA`` negotiation.  Use
+    ``--raw-mode`` to restore legacy raw mode for servers that don't negotiate.
+    The Python API (``open_connection``, ``create_server``) is unchanged.
+  * change: ``telnetlib3-client`` declines MUD protocol options (GMCP, MSDP,
+    MSSP, MSP, MXP, ZMP, AARDWOLF, ATCP) by default.  Use ``--always-do`` or
+    ``--always-will`` to opt in.
+  * bugfix: log output "staircase text" in raw terminal mode.
+
 2.5.0
   * change: ``telnetlib3-client`` now defaults to raw terminal mode (no line buffering, no local
     echo), which is correct for most servers.  Use ``--line-mode`` to restore line-buffered
