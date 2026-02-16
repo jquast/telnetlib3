@@ -424,7 +424,7 @@ else:
         if getattr(writer, "_ascii_eol", False):
             out = out.replace(_ATASCII_CR_CHAR, "\r").replace(_ATASCII_LF_CHAR, "\n")
         if in_raw_mode:
-            out = out.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+            out = out.replace("\r\n", "\n").replace("\n", "\r\n")
         else:
             # Cooked mode: PTY ONLCR converts \n → \r\n, so strip \r before \n
             # to avoid doubling (\r\n → \r\r\n).
