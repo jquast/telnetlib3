@@ -57,7 +57,7 @@ server_wait_for_client.py
 
 https://github.com/jquast/telnetlib3/blob/master/bin/server_wait_for_client.py
 
-Demonstrates direct use of :func:`~telnetlib3.create_server` and the
+Demonstrates direct use of :func:`~telnetlib3.server.create_server` and the
 :meth:`~telnetlib3.server.Server.wait_for_client` API for accessing client
 protocols without using a shell callback. This is a standalone script because
 it needs server-level control that cannot be expressed as a ``--shell=``
@@ -133,7 +133,7 @@ Run with::
 Server API Reference
 --------------------
 
-The :func:`~telnetlib3.create_server` function returns a
+The :func:`~telnetlib3.server.create_server` function returns a
 :class:`~telnetlib3.server.Server` instance with these key methods and
 properties:
 
@@ -208,7 +208,7 @@ These work with Python ``str`` -- you read and write strings::
         data = await reader.read(1)        # returns str
 
 To work with raw bytes instead, pass ``encoding=False`` to
-:func:`~telnetlib3.create_server` or :func:`~telnetlib3.open_connection`.
+:func:`~telnetlib3.server.create_server` or :func:`~telnetlib3.client.open_connection`.
 The shell then receives :class:`~telnetlib3.stream_reader.TelnetReader` and
 :class:`~telnetlib3.stream_writer.TelnetWriter`, which work with ``bytes``::
 
@@ -226,7 +226,7 @@ xmodem transfers, or working with legacy systems that predate unicode
 and utf-8 support.
 
 The same applies to clients --
-:func:`open_connection(..., encoding=False) <telnetlib3.open_connection>`
+:func:`open_connection(..., encoding=False) <telnetlib3.client.open_connection>`
 returns a (:class:`~telnetlib3.stream_reader.TelnetReader`,
 :class:`~telnetlib3.stream_writer.TelnetWriter`) pair that works with
 ``bytes``.
@@ -416,7 +416,7 @@ server_tls.py
 https://github.com/jquast/telnetlib3/blob/master/bin/server_tls.py
 
 A TLS-encrypted echo shell callback.  Demonstrates the ``ssl=`` parameter on
-:func:`~telnetlib3.create_server`.
+:func:`~telnetlib3.server.create_server`.
 
 .. literalinclude:: ../bin/server_tls.py
    :language: python
@@ -433,7 +433,7 @@ server_binary.py
 https://github.com/jquast/telnetlib3/blob/master/bin/server_binary.py
 
 A shell callback that echoes client input as hex bytes.
-Demonstrates using ``encoding=False`` on :func:`~telnetlib3.create_server`
+Demonstrates using ``encoding=False`` on :func:`~telnetlib3.server.create_server`
 for raw byte I/O.
 
 .. literalinclude:: ../bin/server_binary.py
