@@ -2,13 +2,13 @@
 
 # std imports
 import os
-import sys
 import ssl
-import asyncio
+import sys
+import time as _time
 import codecs
 import signal
+import asyncio
 import warnings
-import time as _time
 
 # 3rd party
 import pytest
@@ -18,9 +18,9 @@ import trustme
 from telnetlib3.tests.accessories import (
     bind_host,
     create_server,
-    init_subproc_coverage,
     open_connection,
     unused_tcp_port,
+    init_subproc_coverage,
 )
 
 
@@ -436,14 +436,10 @@ def _run_in_pty(child_func, timeout: float = _MAX_SUBPROC_SECONDS) -> str:
                 os.waitpid(pid, 0)
             except OSError:
                 pass
-            raise AssertionError(
-                f"Child hung after {timeout}s.\nOutput:\n{output}"
-            )
+            raise AssertionError(f"Child hung after {timeout}s.\nOutput:\n{output}")
         _time.sleep(0.05)
 
-    assert os.WEXITSTATUS(status) == 0, (
-        f"Child exited {os.WEXITSTATUS(status)}.\nOutput:\n{output}"
-    )
+    assert os.WEXITSTATUS(status) == 0, f"Child exited {os.WEXITSTATUS(status)}.\nOutput:\n{output}"
     return output
 
 
@@ -555,18 +551,14 @@ def _pty_run_client(bind_host, port, extra_argv, server_ssl_ctx=None):
         srv_loop.call_soon_threadsafe(stop_event_holder[0].set)
     srv_thread.join(timeout=3)
 
-    assert os.WEXITSTATUS(status) == 0, (
-        f"Child exited {os.WEXITSTATUS(status)}.\nOutput:\n{output}"
-    )
+    assert os.WEXITSTATUS(status) == 0, f"Child exited {os.WEXITSTATUS(status)}.\nOutput:\n{output}"
     assert "pty-marker-ok" in output, f"Marker not found in output:\n{output}"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only tests")
 def test_cli_run_client_ssl_no_verify(bind_host, unused_tcp_port, server_ssl_ctx):
     """run_client() with --ssl-no-verify exercises TLS context + ssl kwarg."""
-    _pty_run_client(
-        bind_host, unused_tcp_port, ["--ssl-no-verify"], server_ssl_ctx
-    )
+    _pty_run_client(bind_host, unused_tcp_port, ["--ssl-no-verify"], server_ssl_ctx)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only tests")
@@ -578,9 +570,7 @@ def test_cli_run_client_raw_mode(bind_host, unused_tcp_port):
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only tests")
 def test_cli_run_client_ascii_eol_ansi_keys(bind_host, unused_tcp_port):
     """run_client() with --raw-mode --ascii-eol --ansi-keys."""
-    _pty_run_client(
-        bind_host, unused_tcp_port, ["--raw-mode", "--ascii-eol", "--ansi-keys"]
-    )
+    _pty_run_client(bind_host, unused_tcp_port, ["--raw-mode", "--ascii-eol", "--ansi-keys"])
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only tests")
@@ -677,10 +667,7 @@ def test_cli_run_fingerprint_client_ssl(bind_host, unused_tcp_port, server_ssl_c
 
         async def _wrapper():
             srv = await srv_loop.create_server(
-                lambda: _EchoClose(b"fingerprint-ok\r\n"),
-                bind_host,
-                port,
-                ssl=server_ssl_ctx,
+                lambda: _EchoClose(b"fingerprint-ok\r\n"), bind_host, port, ssl=server_ssl_ctx
             )
             stop_evt = asyncio.Event()
             stop_event_holder.append(stop_evt)
@@ -747,6 +734,106 @@ def test_cli_run_fingerprint_client_ssl(bind_host, unused_tcp_port, server_ssl_c
         _time.sleep(0.05)
 
     # Shut down server gracefully
+    if stop_event_holder:
+        srv_loop.call_soon_threadsafe(stop_event_holder[0].set)
+    srv_thread.join(timeout=3)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only tests")
+def test_cli_run_client_raw_mode_atascii(bind_host, unused_tcp_port):
+    """run_client() with --raw-mode --encoding=atascii exercises input_filter."""
+    _pty_run_client(bind_host, unused_tcp_port, ["--raw-mode", "--encoding=atascii"])
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only tests")
+def test_cli_run_fingerprint_client_ssl_cafile(
+    bind_host, unused_tcp_port, server_ssl_ctx, ca, tmp_path
+):
+    """run_fingerprint_client() with --ssl --ssl-cafile exercises cafile path."""
+    import pty  # pylint: disable=import-outside-toplevel
+    import threading  # pylint: disable=import-outside-toplevel
+
+    port = unused_tcp_port
+
+    ca_pem = tmp_path / "ca.pem"
+    ca.cert_pem.write_to_path(str(ca_pem))
+
+    srv_loop = asyncio.new_event_loop()
+    ready = threading.Event()
+    stop_event_holder: list[asyncio.Event] = []
+
+    def _run_server():
+        asyncio.set_event_loop(srv_loop)
+
+        async def _wrapper():
+            srv = await srv_loop.create_server(
+                lambda: _EchoClose(b"fingerprint-ok\r\n"), bind_host, port, ssl=server_ssl_ctx
+            )
+            stop_evt = asyncio.Event()
+            stop_event_holder.append(stop_evt)
+            ready.set()
+            try:
+                await stop_evt.wait()
+            finally:
+                srv.close()
+                await srv.wait_closed()
+
+        srv_loop.run_until_complete(_wrapper())
+
+    srv_thread = threading.Thread(target=_run_server, daemon=True)
+    srv_thread.start()
+    ready.wait(timeout=5)
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        pid, master_fd = pty.fork()
+
+    if pid == 0:
+        cov = init_subproc_coverage("tls-fp-cafile-pty")
+        exit_code = 0
+        try:
+            sys.argv = [
+                "telnetlib3-fingerprint",
+                "--ssl",
+                "--ssl-cafile",
+                str(ca_pem),
+                "--connect-timeout=3",
+                bind_host,
+                str(port),
+            ]
+            from telnetlib3.client import run_fingerprint_client  # noqa: PLC0415
+
+            asyncio.run(run_fingerprint_client())
+        except SystemExit:
+            pass
+        except BaseException:
+            import traceback  # pylint: disable=import-outside-toplevel
+
+            traceback.print_exc()
+            exit_code = 1
+        finally:
+            if cov is not None:
+                cov.stop()
+                cov.save()
+        os._exit(exit_code)
+
+    output = _read_until_eof(master_fd)
+    os.close(master_fd)
+
+    start = _time.monotonic()
+    while True:
+        pid_result, status = os.waitpid(pid, os.WNOHANG)
+        if pid_result != 0:
+            break
+        if _time.monotonic() - start > _MAX_SUBPROC_SECONDS:
+            try:
+                os.kill(pid, signal.SIGKILL)
+                os.waitpid(pid, 0)
+            except OSError:
+                pass
+            break
+        _time.sleep(0.05)
+
     if stop_event_holder:
         srv_loop.call_soon_threadsafe(stop_event_holder[0].set)
     srv_thread.join(timeout=3)
