@@ -100,6 +100,14 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             return
         self._closing = True
 
+        # Drain any pending rx data before signalling EOF to prevent
+        # _process_rx from calling feed_data() after feed_eof().
+        self._rx_queue.clear()
+        self._rx_bytes = 0
+        if self._rx_task is not None and not self._rx_task.done():
+            self._rx_task.cancel()
+            self._rx_task = None
+
         # inform yielding readers about closed connection
         assert self.reader is not None
         if exc is None:
@@ -454,6 +462,12 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         any_cmd = False
         try:
             while self._rx_queue:
+                # Stop processing if connection was closed (feed_eof already called)
+                if self._closing:
+                    self._rx_queue.clear()
+                    self._rx_bytes = 0
+                    break
+
                 chunk = self._rx_queue.popleft()
                 self._rx_bytes -= len(chunk)
 
