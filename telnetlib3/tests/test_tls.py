@@ -74,7 +74,6 @@ async def test_tls_end_to_end(bind_host, unused_tcp_port, server_ssl_ctx, client
             await asyncio.wait_for(_waiter, 2.0)
             result = await asyncio.wait_for(reader.readexactly(len(expect_output)), 2.0)
             assert result == expect_output
-            writer.close()
 
 
 async def test_tls_ca_verification(bind_host, unused_tcp_port, server_ssl_ctx):
@@ -451,11 +450,15 @@ def _run_in_pty(child_func, timeout: float = _MAX_SUBPROC_SECONDS) -> str:
 class _EchoClose(asyncio.Protocol):
     """Write a message then close after a short delay."""
 
+    _transports: "list[asyncio.BaseTransport] | None" = None
+
     def __init__(self, msg: bytes, ssl_ctx: "ssl.SSLContext | None" = None):
         self._msg = msg
         self.ssl_ctx = ssl_ctx
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
+        if self._transports is not None:
+            self._transports.append(transport)
         transport.write(self._msg)
         asyncio.get_event_loop().call_later(0.3, transport.close)
 
@@ -470,6 +473,7 @@ def _pty_run_client(bind_host, port, extra_argv, server_ssl_ctx=None):
     srv_loop = asyncio.new_event_loop()
     ready = threading.Event()
     stop_event_holder: list[asyncio.Event] = []
+    accepted_transports: list[asyncio.BaseTransport] = []
 
     def _run_server():
         asyncio.set_event_loop(srv_loop)
@@ -478,15 +482,22 @@ def _pty_run_client(bind_host, port, extra_argv, server_ssl_ctx=None):
             kwargs = {}
             if server_ssl_ctx is not None:
                 kwargs["ssl"] = server_ssl_ctx
-            srv = await srv_loop.create_server(
-                lambda: _EchoClose(marker + b"\r\n"), bind_host, port, **kwargs
-            )
+
+            def _factory():
+                proto = _EchoClose(marker + b"\r\n")
+                proto._transports = accepted_transports
+                return proto
+
+            srv = await srv_loop.create_server(_factory, bind_host, port, **kwargs)
             stop_evt = asyncio.Event()
             stop_event_holder.append(stop_evt)
             ready.set()
             try:
                 await stop_evt.wait()
             finally:
+                for tr in accepted_transports:
+                    if not tr.is_closing():
+                        tr.close()
                 srv.close()
                 await srv.wait_closed()
 
@@ -636,7 +647,7 @@ def test_cli_run_server_ssl(bind_host, unused_tcp_port, ca, tmp_path, client_ssl
                 connect_minwait=0.05,
                 connect_maxwait=0.5,
             ) as (reader, writer):
-                writer.close()
+                pass
 
         asyncio.run(_connect_and_close())
     finally:
@@ -662,20 +673,27 @@ def test_cli_run_fingerprint_client_ssl(bind_host, unused_tcp_port, server_ssl_c
     srv_loop = asyncio.new_event_loop()
     ready = threading.Event()
     stop_event_holder: list[asyncio.Event] = []
+    accepted_transports: list[asyncio.BaseTransport] = []
 
     def _run_server():
         asyncio.set_event_loop(srv_loop)
 
         async def _wrapper():
-            srv = await srv_loop.create_server(
-                lambda: _EchoClose(b"fingerprint-ok\r\n"), bind_host, port, ssl=server_ssl_ctx
-            )
+            def _factory():
+                proto = _EchoClose(b"fingerprint-ok\r\n")
+                proto._transports = accepted_transports
+                return proto
+
+            srv = await srv_loop.create_server(_factory, bind_host, port, ssl=server_ssl_ctx)
             stop_evt = asyncio.Event()
             stop_event_holder.append(stop_evt)
             ready.set()
             try:
                 await stop_evt.wait()
             finally:
+                for tr in accepted_transports:
+                    if not tr.is_closing():
+                        tr.close()
                 srv.close()
                 await srv.wait_closed()
 
@@ -763,20 +781,27 @@ def test_cli_run_fingerprint_client_ssl_cafile(
     srv_loop = asyncio.new_event_loop()
     ready = threading.Event()
     stop_event_holder: list[asyncio.Event] = []
+    accepted_transports: list[asyncio.BaseTransport] = []
 
     def _run_server():
         asyncio.set_event_loop(srv_loop)
 
         async def _wrapper():
-            srv = await srv_loop.create_server(
-                lambda: _EchoClose(b"fingerprint-ok\r\n"), bind_host, port, ssl=server_ssl_ctx
-            )
+            def _factory():
+                proto = _EchoClose(b"fingerprint-ok\r\n")
+                proto._transports = accepted_transports
+                return proto
+
+            srv = await srv_loop.create_server(_factory, bind_host, port, ssl=server_ssl_ctx)
             stop_evt = asyncio.Event()
             stop_event_holder.append(stop_evt)
             ready.set()
             try:
                 await stop_evt.wait()
             finally:
+                for tr in accepted_transports:
+                    if not tr.is_closing():
+                        tr.close()
                 srv.close()
                 await srv.wait_closed()
 
