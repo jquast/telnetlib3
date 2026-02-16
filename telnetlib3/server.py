@@ -14,6 +14,7 @@ after an idle period.
 from __future__ import annotations
 
 # std imports
+import ssl as ssl_module
 import sys
 import codecs
 import signal
@@ -815,6 +816,7 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
     cols: int = 80,
     rows: int = 25,
     timeout: int = 300,
+    ssl: Optional[ssl_module.SSLContext] = None,
 ) -> Server:
     """
     Create a TCP Telnet server.
@@ -872,6 +874,10 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
         greater of this value has elapsed.  A client that is not answering
         option negotiation will delay the start of the shell by this amount.
     :param limit: The buffer limit for the reader stream.
+    :param ssl: An :class:`ssl.SSLContext` for TLS-encrypted connections
+        (TELNETS, :rfc:`855` over TLS).  When provided, the server performs a
+        TLS handshake before any telnet data is exchanged.  ``None`` (default)
+        creates a plain TCP server.
 
     :return: A :class:`Server` instance that wraps the asyncio.Server
         and provides access to connected client protocols via
@@ -913,7 +919,7 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
         telnet_server._register_protocol(protocol)  # pylint: disable=protected-access
         return protocol
 
-    server = await loop.create_server(factory, host, port)
+    server = await loop.create_server(factory, host, port, ssl=ssl)
     telnet_server._server = server  # pylint: disable=protected-access
 
     return telnet_server
@@ -1015,6 +1021,18 @@ def parse_server_args() -> Dict[str, Any]:
         "not negotiated, which is correct for MUD clients but may "
         "confuse some other clients.",
     )
+    parser.add_argument(
+        "--ssl-certfile",
+        default=None,
+        metavar="PATH",
+        help="path to PEM certificate file for TLS (enables TELNETS)",
+    )
+    parser.add_argument(
+        "--ssl-keyfile",
+        default=None,
+        metavar="PATH",
+        help="path to PEM private key file for TLS",
+    )
     result = vars(parser.parse_args(argv))
     result["pty_args"] = pty_args if PTY_SUPPORT else None
     # --pty-raw is a hidden no-op (raw is now the default);
@@ -1031,6 +1049,16 @@ def parse_server_args() -> Dict[str, Any]:
 
     if result["encoding"].lower().replace("-", "_") in FORCE_BINARY_ENCODINGS:
         result["force_binary"] = True
+
+    # Build SSLContext from --ssl-certfile / --ssl-keyfile
+    ssl_certfile = result.pop("ssl_certfile", None)
+    ssl_keyfile = result.pop("ssl_keyfile", None)
+    if ssl_certfile:
+        ctx = ssl_module.SSLContext(ssl_module.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(ssl_certfile, keyfile=ssl_keyfile)
+        result["ssl"] = ctx
+    else:
+        result["ssl"] = None
 
     return result
 
@@ -1054,6 +1082,7 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
     status_interval: int = _config.status_interval,
     never_send_ga: bool = _config.never_send_ga,
     protocol_factory: Optional[Type[asyncio.Protocol]] = None,
+    ssl: Optional[ssl_module.SSLContext] = None,
 ) -> None:
     """
     Program entry point for server daemon.
@@ -1137,6 +1166,7 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
         never_send_ga=never_send_ga,
         timeout=timeout,
         connect_maxwait=connect_maxwait,
+        ssl=ssl,
     )
 
     # SIGTERM cases server to gracefully stop

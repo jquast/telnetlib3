@@ -3,8 +3,15 @@ Guidebook
 =========
 
 This guide provides examples for using telnetlib3 to build telnet servers
-and clients. All examples are available as standalone scripts in the
-``bin/`` directory of the repository.
+and clients. All examples are available in the ``bin/`` directory of the
+repository.
+
+Most examples are **shell callbacks** -- async functions that receive a
+``(reader, writer)`` pair. You do not need a standalone script to run them;
+just point ``telnetlib3-server --shell=`` (or ``telnetlib3-client --shell=``)
+at the callback::
+
+    telnetlib3-server --shell=bin.server_wargame.shell
 
 These examples are not distributed with the package -- they are only available
 in the github repository. You can retrieve them by cloning the repository, or
@@ -19,7 +26,7 @@ Asyncio Interface
 
 The primary interface for telnetlib3 uses Python's asyncio library for
 asynchronous I/O. This allows handling many concurrent connections
-efficiently in a single thread.
+efficiently in a single process or thread.
 
 Server Examples
 ---------------
@@ -29,16 +36,16 @@ server_wargame.py
 
 https://github.com/jquast/telnetlib3/blob/master/bin/server_wargame.py
 
-A minimal telnet server that demonstrates the basic shell callback pattern.
-The server asks a simple question and responds based on user input.
+A minimal shell callback that asks a simple question and responds based on
+user input.
 
 .. literalinclude:: ../bin/server_wargame.py
    :language: python
-   :lines: 17-35
+   :lines: 23-31
 
-Run the server::
+Run with::
 
-    python bin/server_wargame.py
+    telnetlib3-server --shell=bin.server_wargame.shell
 
 Then connect with::
 
@@ -50,9 +57,11 @@ server_wait_for_client.py
 
 https://github.com/jquast/telnetlib3/blob/master/bin/server_wait_for_client.py
 
-Demonstrates the ``Server.wait_for_client()`` API for accessing
-client protocols without using a shell callback. This pattern is useful when
-you need direct control over client handling.
+Demonstrates direct use of :func:`~telnetlib3.create_server` and the
+:meth:`~telnetlib3.server.Server.wait_for_client` API for accessing client
+protocols without using a shell callback. This is a standalone script because
+it needs server-level control that cannot be expressed as a ``--shell=``
+callback.
 
 .. literalinclude:: ../bin/server_wait_for_client.py
    :language: python
@@ -65,11 +74,13 @@ server_broadcast.py
 https://github.com/jquast/telnetlib3/blob/master/bin/server_broadcast.py
 
 A chat-style server that broadcasts messages from one client to all others.
-Demonstrates:
+This is a standalone script because it uses
+:meth:`~telnetlib3.server.Server.wait_for_client` and
+:attr:`~telnetlib3.server.Server.clients` shared state. Demonstrates:
 
-- Using ``server.clients`` to access all connected protocols
+- Using :attr:`~telnetlib3.server.Server.clients` to access all connected protocols
 - Handling multiple clients with asyncio tasks
-- Using ``wait_for()`` to check negotiation states
+- Using :meth:`~telnetlib3.stream_writer.TelnetWriter.wait_for` to check negotiation states
 
 .. literalinclude:: ../bin/server_broadcast.py
    :language: python
@@ -81,7 +92,7 @@ server_wait_for_negotiation.py
 
 https://github.com/jquast/telnetlib3/blob/master/bin/server_wait_for_negotiation.py
 
-Demonstrates using ``writer.wait_for()`` to await specific
+A shell callback demonstrating :meth:`~telnetlib3.stream_writer.TelnetWriter.wait_for` to await specific
 telnet option negotiation states before proceeding. This is useful when your
 application depends on certain terminal capabilities being negotiated.
 
@@ -93,7 +104,11 @@ The server waits for:
 
 .. literalinclude:: ../bin/server_wait_for_negotiation.py
    :language: python
-   :lines: 19-54
+   :lines: 19-44
+
+Run with::
+
+    telnetlib3-server --shell=bin.server_wait_for_negotiation.shell
 
 
 Client Examples
@@ -104,24 +119,29 @@ client_wargame.py
 
 https://github.com/jquast/telnetlib3/blob/master/bin/client_wargame.py
 
-A telnet client that connects to a server and automatically answers
+A shell callback that connects to a server and automatically answers
 questions. Demonstrates the client shell callback pattern.
 
 .. literalinclude:: ../bin/client_wargame.py
    :language: python
-   :lines: 18-41
+   :lines: 17-28
+
+Run with::
+
+    telnetlib3-client --shell=bin.client_wargame.shell localhost 6023
 
 Server API Reference
 --------------------
 
-The ``create_server()`` function returns a ``Server`` instance with these
-key methods and properties:
+The :func:`~telnetlib3.create_server` function returns a
+:class:`~telnetlib3.server.Server` instance with these key methods and
+properties:
 
 wait_for_client()
 ~~~~~~~~~~~~~~~~~
 
-``Server.wait_for_client()`` waits for a client to connect and complete
-initial negotiation::
+:meth:`~telnetlib3.server.Server.wait_for_client` waits for a client to
+connect and complete initial negotiation::
 
     server = await telnetlib3.create_server(port=6023)
     client = await server.wait_for_client()
@@ -130,8 +150,8 @@ initial negotiation::
 clients
 ~~~~~~~
 
-The ``Server.clients`` property provides access to all currently connected
-client protocols::
+The :attr:`~telnetlib3.server.Server.clients` property provides access to all
+currently connected client protocols::
 
     # Broadcast to all clients
     for client in server.clients:
@@ -140,8 +160,8 @@ client protocols::
 wait_for()
 ~~~~~~~~~~
 
-``TelnetWriter.wait_for()`` waits for specific telnet option negotiation
-states::
+:meth:`~telnetlib3.stream_writer.TelnetWriter.wait_for` waits for specific
+telnet option negotiation states::
 
     # Wait for BINARY mode
     await asyncio.wait_for(
@@ -166,7 +186,8 @@ Option names are strings: ``"BINARY"``, ``"ECHO"``, ``"NAWS"``, ``"TTYPE"``, etc
 wait_for_condition()
 ~~~~~~~~~~~~~~~~~~~~
 
-The ``wait_for_condition()`` method waits for a custom condition::
+The :meth:`~telnetlib3.stream_writer.TelnetWriter.wait_for_condition` method
+waits for a custom condition::
 
     from telnetlib3.telopt import ECHO
 
@@ -178,7 +199,8 @@ Encoding and Binary Mode
 ------------------------
 
 By default, telnetlib3 uses ``encoding="utf8"``, which means the shell
-callback receives ``TelnetReaderUnicode`` and ``TelnetWriterUnicode``.
+callback receives :class:`~telnetlib3.stream_reader.TelnetReaderUnicode` and
+:class:`~telnetlib3.stream_writer.TelnetWriterUnicode`.
 These work with Python ``str`` -- you read and write strings::
 
     async def shell(reader, writer):
@@ -186,8 +208,9 @@ These work with Python ``str`` -- you read and write strings::
         data = await reader.read(1)        # returns str
 
 To work with raw bytes instead, pass ``encoding=False`` to
-``create_server()`` or ``open_connection()``. The shell then receives
-``TelnetReader`` and ``TelnetWriter``, which work with ``bytes``::
+:func:`~telnetlib3.create_server` or :func:`~telnetlib3.open_connection`.
+The shell then receives :class:`~telnetlib3.stream_reader.TelnetReader` and
+:class:`~telnetlib3.stream_writer.TelnetWriter`, which work with ``bytes``::
 
     async def binary_shell(reader, writer):
         writer.write(b"Hello, world!\r\n")  # bytes
@@ -202,8 +225,11 @@ Binary mode is useful for specific low-level conditions, like performing
 xmodem transfers, or working with legacy systems that predate unicode
 and utf-8 support.
 
-The same applies to clients -- ``open_connection(..., encoding=False)``
-returns a ``(TelnetReader, TelnetWriter)`` pair that works with ``bytes``.
+The same applies to clients --
+:func:`open_connection(..., encoding=False) <telnetlib3.open_connection>`
+returns a (:class:`~telnetlib3.stream_reader.TelnetReader`,
+:class:`~telnetlib3.stream_writer.TelnetWriter`) pair that works with
+``bytes``.
 
 Retro BBS Encodings
 ~~~~~~~~~~~~~~~~~~~
@@ -311,17 +337,112 @@ and received on the wire::
 
     telnetlib3-client --loglevel=trace --logfile=debug.log bbs.example.com
 
+TLS / SSL
+~~~~~~~~~
+
+Telnet over TLS (TELNETS, IANA port 992) secures the connection using
+standard TLS encryption.  The TLS handshake is handled at the transport
+layer — the telnet protocol sees plaintext exactly as it would over plain
+TCP.  This is *not* STARTTLS (upgrade-in-place); the connection is
+encrypted from the start.
+
+**Server-side**
+
+Generate a self-signed certificate for testing::
+
+    openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem \
+        -days 365 -nodes -subj '/CN=localhost'
+
+Run a TLS server from the CLI::
+
+    telnetlib3-server --ssl-certfile cert.pem --ssl-keyfile key.pem 0.0.0.0 6023
+
+Or programmatically::
+
+    import ssl
+    import telnetlib3
+
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain("cert.pem", keyfile="key.pem")
+
+    server = await telnetlib3.create_server(host="0.0.0.0", port=6023, shell=shell, ssl=ctx)
+
+For production, use certificates from Let's Encrypt or another trusted CA.
+
+**Client-side**
+
+Connect to a server with a CA-signed certificate (e.g. ``dunemud.net``)::
+
+    telnetlib3-client --ssl dunemud.net 6788
+
+The system CA store is used automatically, just like ``curl`` or a browser.
+
+Connect to a server with a self-signed certificate::
+
+    telnetlib3-client --ssl --ssl-cafile cert.pem localhost 6023
+
+Or programmatically with full control::
+
+    import ssl
+    import telnetlib3
+
+    # CA-signed server — just pass ssl=True
+    reader, writer = await telnetlib3.open_connection("dunemud.net", 6788, ssl=True)
+
+    # Self-signed — load the server's cert explicitly
+    ctx = ssl.create_default_context(cafile="cert.pem")
+    reader, writer = await telnetlib3.open_connection("localhost", 6023, ssl=ctx)
+
+**Fingerprinting TLS servers**::
+
+    telnetlib3-fingerprint --ssl dunemud.net 6788
+    telnetlib3-fingerprint --ssl --ssl-cafile cert.pem localhost 6023
+
+To skip certificate verification (e.g. for servers with self-signed or expired
+certificates)::
+
+    telnetlib3-client --ssl-no-verify example.com 6023
+    telnetlib3-fingerprint --ssl-no-verify example.com 6023
+
+.. warning::
+
+   ``--ssl-no-verify`` is **insecure**.  The connection is encrypted, but the
+   server's identity is not verified — a man-in-the-middle could intercept
+   traffic.  Only use this for testing or when you trust the network path.
+
+server_tls.py
+~~~~~~~~~~~~~
+
+https://github.com/jquast/telnetlib3/blob/master/bin/server_tls.py
+
+A TLS-encrypted echo shell callback.  Demonstrates the ``ssl=`` parameter on
+:func:`~telnetlib3.create_server`.
+
+.. literalinclude:: ../bin/server_tls.py
+   :language: python
+   :lines: 24-36
+
+Run with::
+
+    telnetlib3-server --ssl-certfile cert.pem --ssl-keyfile key.pem \
+        --shell=bin.server_tls.shell
+
 server_binary.py
 ~~~~~~~~~~~~~~~~
 
 https://github.com/jquast/telnetlib3/blob/master/bin/server_binary.py
 
-A telnet server in binary mode that echoes client input as hex bytes.
-Demonstrates using ``encoding=False`` for raw byte I/O.
+A shell callback that echoes client input as hex bytes.
+Demonstrates using ``encoding=False`` on :func:`~telnetlib3.create_server`
+for raw byte I/O.
 
 .. literalinclude:: ../bin/server_binary.py
    :language: python
-   :lines: 34-51
+   :lines: 22-32
+
+Run with::
+
+    telnetlib3-server --encoding=false --shell=bin.server_binary.shell
 
 Blocking Interface
 ==================
@@ -485,7 +606,8 @@ Key differences from miniboa:
 
 .. note::
 
-   The ``send()`` method normalizes newlines to ``\r\n`` for miniboa
+   The :meth:`~telnetlib3.sync.ServerConnection.send` method normalizes
+   newlines to ``\r\n`` for miniboa
    compatibility.  Both ``\n`` and ``\r\n`` in the input produce a single
    ``\r\n`` on the wire::
 
@@ -629,7 +751,9 @@ MUD clients like Mudlet, TinTin++, and BlowTorch:
 
 The :mod:`telnetlib3.mud` module provides encode/decode functions for all three
 protocols using :class:`~telnetlib3.stream_writer.TelnetWriter` methods
-``send_gmcp()``, ``send_msdp()``, and ``send_mssp()``.
+:meth:`~telnetlib3.stream_writer.TelnetWriter.send_gmcp`,
+:meth:`~telnetlib3.stream_writer.TelnetWriter.send_msdp`, and
+:meth:`~telnetlib3.stream_writer.TelnetWriter.send_mssp`.
 
 Running
 -------
@@ -650,8 +774,8 @@ Legacy telnetlib Compatibility
 ==============================
 
 Python's ``telnetlib`` was removed in Python 3.13 (`PEP 594
-<https://peps.python.org/pep-0594/>`_). telnetlib3 includes a verbatim copy
-from Python 3.12 with its original test suite::
+<https://peps.python.org/pep-0594/>`_). telnetlib3 includes a verbatim copy from Python 3.12 with its original test
+suite::
 
     # OLD:
     from telnetlib import Telnet
@@ -667,20 +791,20 @@ Modern Alternative
 
 :mod:`telnetlib3.sync` provides a modern blocking interface:
 
-======================  ==============================
+======================  ================================================
 Old telnetlib           :mod:`telnetlib3.sync`
-======================  ==============================
-``Telnet(host)``        ``TelnetConnection(host)``
-``tn.read_until()``     ``conn.read_until()``
-``tn.read_some()``      ``conn.read_some()``
-``tn.write()``          ``conn.write()``
-``tn.close()``          ``conn.close()``
-======================  ==============================
+======================  ================================================
+``Telnet(host)``        :class:`~telnetlib3.sync.TelnetConnection`
+``tn.read_until()``     :meth:`~telnetlib3.sync.TelnetConnection.read_until`
+``tn.read_some()``      :meth:`~telnetlib3.sync.TelnetConnection.read_some`
+``tn.write()``          :meth:`~telnetlib3.sync.TelnetConnection.write`
+``tn.close()``          :meth:`~telnetlib3.sync.TelnetConnection.close`
+======================  ================================================
 
 Enhancements over legacy telnetlib:
 
 - Full RFC 854 protocol negotiation (NAWS, TTYPE, BINARY, ECHO, SGA)
-- ``wait_for()`` to await negotiation states
-- ``get_extra_info()`` for terminal type, size, and other metadata
-- ``writer`` property for protocol state inspection
-- Server support via ``BlockingTelnetServer``
+- :meth:`~telnetlib3.sync.TelnetConnection.wait_for` to await negotiation states
+- :meth:`~telnetlib3.sync.TelnetConnection.get_extra_info` for terminal type, size, and other metadata
+- :attr:`~telnetlib3.sync.TelnetConnection.writer` property for protocol state inspection
+- Server support via :class:`~telnetlib3.sync.BlockingTelnetServer`
