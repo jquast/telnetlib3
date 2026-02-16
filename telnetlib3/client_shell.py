@@ -10,10 +10,17 @@ from typing import Any, Dict, Tuple, Union, Optional
 
 # local
 from . import accessories
+from .accessories import TRACE
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
 __all__ = ("InputFilter", "telnet_client_shell")
+
+# ATASCII graphics characters that map to byte 0x0D and 0x0A respectively.
+# When --ascii-eol is active, these are replaced with \r and \n before
+# terminal display so that BBSes using ASCII CR/LF render correctly.
+_ATASCII_CR_CHAR = "\U0001fb82"  # UPPER ONE QUARTER BLOCK (from byte 0x0D)
+_ATASCII_LF_CHAR = "\u25e3"  # BLACK LOWER LEFT TRIANGLE (from byte 0x0A)
 
 # Input byte translation tables for retro encodings in raw mode.
 # Maps terminal keyboard bytes to the raw bytes the BBS expects.
@@ -39,34 +46,34 @@ _INPUT_XLAT: Dict[str, Dict[int, int]] = {
 # DEFAULT_SEQUENCE_MIXIN but kept minimal for the sequences that matter.
 _INPUT_SEQ_XLAT: Dict[str, Dict[bytes, bytes]] = {
     "atascii": {
-        b"\x1b[A": b"\x1c",    # cursor up (CSI)
-        b"\x1b[B": b"\x1d",    # cursor down
-        b"\x1b[C": b"\x1f",    # cursor right
-        b"\x1b[D": b"\x1e",    # cursor left
-        b"\x1bOA": b"\x1c",    # cursor up (SS3 / application mode)
-        b"\x1bOB": b"\x1d",    # cursor down
-        b"\x1bOC": b"\x1f",    # cursor right
-        b"\x1bOD": b"\x1e",    # cursor left
-        b"\x1b[3~": b"\x7e",   # delete → ATASCII backspace
-        b"\t": b"\x7f",        # tab → ATASCII tab
+        b"\x1b[A": b"\x1c",  # cursor up (CSI)
+        b"\x1b[B": b"\x1d",  # cursor down
+        b"\x1b[C": b"\x1f",  # cursor right
+        b"\x1b[D": b"\x1e",  # cursor left
+        b"\x1bOA": b"\x1c",  # cursor up (SS3 / application mode)
+        b"\x1bOB": b"\x1d",  # cursor down
+        b"\x1bOC": b"\x1f",  # cursor right
+        b"\x1bOD": b"\x1e",  # cursor left
+        b"\x1b[3~": b"\x7e",  # delete → ATASCII backspace
+        b"\t": b"\x7f",  # tab → ATASCII tab
     },
     "petscii": {
-        b"\x1b[A": b"\x91",    # cursor up (CSI)
-        b"\x1b[B": b"\x11",    # cursor down
-        b"\x1b[C": b"\x1d",    # cursor right
-        b"\x1b[D": b"\x9d",    # cursor left
-        b"\x1bOA": b"\x91",    # cursor up (SS3 / application mode)
-        b"\x1bOB": b"\x11",    # cursor down
-        b"\x1bOC": b"\x1d",    # cursor right
-        b"\x1bOD": b"\x9d",    # cursor left
-        b"\x1b[3~": b"\x14",   # delete → PETSCII DEL
-        b"\x1b[H": b"\x13",    # home → PETSCII HOME
-        b"\x1b[2~": b"\x94",   # insert → PETSCII INSERT
+        b"\x1b[A": b"\x91",  # cursor up (CSI)
+        b"\x1b[B": b"\x11",  # cursor down
+        b"\x1b[C": b"\x1d",  # cursor right
+        b"\x1b[D": b"\x9d",  # cursor left
+        b"\x1bOA": b"\x91",  # cursor up (SS3 / application mode)
+        b"\x1bOB": b"\x11",  # cursor down
+        b"\x1bOC": b"\x1d",  # cursor right
+        b"\x1bOD": b"\x9d",  # cursor left
+        b"\x1b[3~": b"\x14",  # delete → PETSCII DEL
+        b"\x1b[H": b"\x13",  # home → PETSCII HOME
+        b"\x1b[2~": b"\x94",  # insert → PETSCII INSERT
     },
 }
 
 
-class InputFilter:  # pylint: disable=too-few-public-methods
+class InputFilter:
     """
     Translate terminal escape sequences and single bytes to retro encoding bytes.
 
@@ -75,15 +82,22 @@ class InputFilter:  # pylint: disable=too-few-public-methods
     buffering inspired by blessed's ``get_leading_prefixes`` to handle
     sequences split across reads.
 
+    When a partial match is buffered (e.g. a bare ESC), :attr:`has_pending`
+    becomes ``True``.  The caller should start an ``esc_delay`` timer and
+    call :meth:`flush` if no further input arrives before the timer fires.
+
     :param seq_xlat: Multi-byte escape sequence → replacement bytes.
     :param byte_xlat: Single input byte → replacement byte.
+    :param esc_delay: Seconds to wait before flushing a buffered prefix
+        (default 0.35, matching blessed's ``DEFAULT_ESCDELAY``).
     """
 
     def __init__(
-        self, seq_xlat: Dict[bytes, bytes], byte_xlat: Dict[int, int]
+        self, seq_xlat: Dict[bytes, bytes], byte_xlat: Dict[int, int], esc_delay: float = 0.35
     ) -> None:
         """Initialize input filter with sequence and byte translation tables."""
         self._byte_xlat = byte_xlat
+        self.esc_delay = esc_delay
         # Sort sequences longest-first so \x1b[3~ matches before \x1b[3
         self._seq_sorted: Tuple[Tuple[bytes, bytes], ...] = tuple(
             sorted(seq_xlat.items(), key=lambda kv: len(kv[0]), reverse=True)
@@ -93,6 +107,27 @@ class InputFilter:  # pylint: disable=too-few-public-methods
             seq[:i] for seq in seq_xlat for i in range(1, len(seq))
         )
         self._buf = b""
+
+    @property
+    def has_pending(self) -> bool:
+        """Return ``True`` when the internal buffer holds a partial sequence."""
+        return bool(self._buf)
+
+    def flush(self) -> bytes:
+        """
+        Flush buffered bytes, applying single-byte translation.
+
+        Called when the ``esc_delay`` timer fires without new input,
+        meaning the buffered prefix is not a real escape sequence.
+
+        :returns: Translated bytes from the buffer (may be empty).
+        """
+        result = bytearray()
+        while self._buf:
+            b = self._buf[0]
+            self._buf = self._buf[1:]
+            result.append(self._byte_xlat.get(b, b))
+        return bytes(result)
 
     def feed(self, data: bytes) -> bytes:
         """
@@ -111,9 +146,9 @@ class InputFilter:  # pylint: disable=too-few-public-methods
             # Try multi-byte sequence match at current position
             matched = False
             for seq, repl in self._seq_sorted:
-                if self._buf[:len(seq)] == seq:
+                if self._buf[: len(seq)] == seq:
                     result.extend(repl)
-                    self._buf = self._buf[len(seq):]
+                    self._buf = self._buf[len(seq) :]
                     matched = True
                     break
             if matched:
@@ -138,7 +173,6 @@ if sys.platform == "win32":
         raise NotImplementedError("win32 not yet supported as telnet client. Please contribute!")
 
 else:
-    # std imports
     import os
     import signal
     import termios
@@ -160,6 +194,54 @@ else:
             self._fileno = sys.stdin.fileno()
             self._istty = os.path.sameopenfile(0, 1)
             self._save_mode: Optional[Terminal.ModeDef] = None
+            self.software_echo = False
+            self._remove_winch = False
+            self._winch_handle: Optional[asyncio.TimerHandle] = None
+
+        def setup_winch(self) -> None:
+            """Register SIGWINCH handler to send NAWS on terminal resize."""
+            if not self._istty or not hasattr(signal, "SIGWINCH"):
+                return
+            try:
+                loop = asyncio.get_event_loop()
+                writer = self.telnet_writer
+
+                def _send_naws() -> None:
+                    from .telopt import NAWS  # pylint: disable=import-outside-toplevel
+
+                    try:
+                        if writer.local_option.enabled(NAWS) and not writer.is_closing():
+                            writer._send_naws()  # pylint: disable=protected-access
+                    except Exception:  # pylint: disable=broad-exception-caught
+                        pass
+
+                def _on_winch() -> None:
+                    if self._winch_handle is not None and not self._winch_handle.cancelled():
+                        try:
+                            self._winch_handle.cancel()
+                        except Exception:  # pylint: disable=broad-exception-caught
+                            pass
+                    self._winch_handle = loop.call_later(0.05, _send_naws)
+
+                loop.add_signal_handler(signal.SIGWINCH, _on_winch)
+                self._remove_winch = True
+            except Exception:  # pylint: disable=broad-exception-caught
+                self._remove_winch = False
+
+        def cleanup_winch(self) -> None:
+            """Remove SIGWINCH handler and cancel pending timer."""
+            if self._istty and self._remove_winch:
+                try:
+                    asyncio.get_event_loop().remove_signal_handler(signal.SIGWINCH)
+                except Exception:  # pylint: disable=broad-exception-caught
+                    pass
+                self._remove_winch = False
+            if self._winch_handle is not None:
+                try:
+                    self._winch_handle.cancel()
+                except Exception:  # pylint: disable=broad-exception-caught
+                    pass
+                self._winch_handle = None
 
         def __enter__(self) -> "Terminal":
             self._save_mode = self.get_mode()
@@ -169,6 +251,7 @@ else:
             return self
 
         def __exit__(self, *_: Any) -> None:
+            self.cleanup_winch()
             if self._istty:
                 assert self._save_mode is not None
                 termios.tcsetattr(self._fileno, termios.TCSAFLUSH, list(self._save_mode))
@@ -183,53 +266,28 @@ else:
             """Set terminal mode attributes."""
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSAFLUSH, list(mode))
 
-        def determine_mode(self, mode: "Terminal.ModeDef") -> "Terminal.ModeDef":
-            """Return copy of 'mode' with changes suggested for telnet connection."""
-            raw_mode = getattr(self.telnet_writer, '_raw_mode', False)
-            if not self.telnet_writer.will_echo and not raw_mode:
-                self.telnet_writer.log.debug("local echo, linemode")
-                return mode
-            if raw_mode and not self.telnet_writer.will_echo:
-                self.telnet_writer.log.debug("raw mode forced, no server echo")
-            else:
-                self.telnet_writer.log.debug("server echo, kludge mode")
+        def _make_raw(
+            self, mode: "Terminal.ModeDef", suppress_echo: bool = True
+        ) -> "Terminal.ModeDef":
+            """
+            Return copy of *mode* with raw terminal attributes set.
 
-            # "Raw mode", see tty.py function setraw.  This allows sending
-            # of ^J, ^C, ^S, ^\, and others, which might otherwise
-            # interrupt with signals or map to another character.  We also
-            # trust the remote server to manage CR/LF without mapping.
-            #
+            :param suppress_echo: When True, disable local ECHO (server echoes). When False, keep
+                  local ECHO enabled (character-at-a-time with local echo, e.g. SGA without ECHO).
+            """
             iflag = mode.iflag & ~(
-                termios.BRKINT
-                | termios.ICRNL  # Do not send INTR signal on break
-                | termios.INPCK  # Do not map CR to NL on input
-                | termios.ISTRIP  # Disable input parity checking
-                | termios.IXON  # Do not strip input characters to 7 bits
-            )  # Disable START/STOP output control
-
-            # Disable parity generation and detection,
-            # Select eight bits per byte character size.
+                termios.BRKINT | termios.ICRNL | termios.INPCK | termios.ISTRIP | termios.IXON
+            )
             cflag = mode.cflag & ~(termios.CSIZE | termios.PARENB)
             cflag = cflag | termios.CS8
-
-            # Disable canonical input (^H and ^C processing),
-            # disable any other special control characters,
-            # disable checking for INTR, QUIT, and SUSP input.
-            lflag = mode.lflag & ~(termios.ICANON | termios.IEXTEN | termios.ISIG | termios.ECHO)
-
-            # Disable post-output processing,
-            # such as mapping LF('\n') to CRLF('\r\n') in output.
+            lflag_mask = termios.ICANON | termios.IEXTEN | termios.ISIG
+            if suppress_echo:
+                lflag_mask |= termios.ECHO
+            lflag = mode.lflag & ~lflag_mask
             oflag = mode.oflag & ~(termios.OPOST | termios.ONLCR)
-
-            # "A pending read is not satisfied until MIN bytes are received
-            #  (i.e., the pending read until MIN bytes are received), or a
-            #  signal is received.  A program that uses this case to read
-            #  record-based terminal I/O may block indefinitely in the read
-            #  operation."
             cc = list(mode.cc)
             cc[termios.VMIN] = 1
             cc[termios.VTIME] = 0
-
             return self.ModeDef(
                 iflag=iflag,
                 oflag=oflag,
@@ -239,6 +297,87 @@ else:
                 ospeed=mode.ospeed,
                 cc=cc,
             )
+
+        def _server_will_sga(self) -> bool:
+            """Whether server has negotiated WILL SGA."""
+            from .telopt import SGA  # pylint: disable=import-outside-toplevel
+
+            return bool(self.telnet_writer.client and self.telnet_writer.remote_option.enabled(SGA))
+
+        def check_auto_mode(
+            self, switched_to_raw: bool, last_will_echo: bool
+        ) -> "tuple[bool, bool, bool] | None":
+            """
+            Check if auto-mode switching is needed.
+
+            :param switched_to_raw: Whether terminal has already switched to raw mode.
+            :param last_will_echo: Previous value of server's WILL ECHO state.
+            :returns: ``(switched_to_raw, last_will_echo, local_echo)`` tuple
+                if mode changed, or ``None`` if no change needed.
+            """
+            if not self._istty:
+                return None
+            _wecho = self.telnet_writer.will_echo
+            _wsga = self._server_will_sga()
+            _should_switch = not switched_to_raw and (_wecho or _wsga)
+            _echo_changed = switched_to_raw and _wecho != last_will_echo
+            if not (_should_switch or _echo_changed):
+                return None
+            assert self._save_mode is not None
+            self.set_mode(self._make_raw(self._save_mode, suppress_echo=True))
+            self.telnet_writer.log.debug(
+                "auto: %s (server %s ECHO)",
+                (
+                    "switching to raw mode"
+                    if _should_switch
+                    else ("disabling" if _wecho else "enabling") + " software echo"
+                ),
+                "WILL" if _wecho else "WONT",
+            )
+            return (True if _should_switch else switched_to_raw, _wecho, not _wecho)
+
+        def determine_mode(self, mode: "Terminal.ModeDef") -> "Terminal.ModeDef":
+            """
+            Return copy of 'mode' with changes suggested for telnet connection.
+
+            Auto mode (``_raw_mode is None``): follows the server's negotiation.
+
+            =================  ========  ==========  ================================
+            Server negotiates  ICANON    ECHO        Behavior
+            =================  ========  ==========  ================================
+            Nothing            on        on          Line mode, local echo
+            WILL SGA only      **off**   on          Character-at-a-time, local echo
+            WILL ECHO only     **off**   **off**     Raw mode, server echoes (rare)
+            WILL SGA + ECHO    **off**   **off**     Full kludge mode (most common)
+            =================  ========  ==========  ================================
+            """
+            raw_mode = getattr(self.telnet_writer, "_raw_mode", False)
+            will_echo = self.telnet_writer.will_echo
+            will_sga = self._server_will_sga()
+            # Auto mode (None): follow server negotiation
+            if raw_mode is None:
+                if will_echo and will_sga:
+                    self.telnet_writer.log.debug("auto: server echo + SGA, kludge mode")
+                    return self._make_raw(mode)
+                if will_echo:
+                    self.telnet_writer.log.debug("auto: server echo, raw mode")
+                    return self._make_raw(mode)
+                if will_sga:
+                    self.telnet_writer.log.debug("auto: SGA without echo, character-at-a-time")
+                    self.software_echo = True
+                    return self._make_raw(mode, suppress_echo=True)
+                self.telnet_writer.log.debug("auto: no server echo yet, line mode")
+                return mode
+            # Explicit line mode (False)
+            if not raw_mode:
+                self.telnet_writer.log.debug("local echo, linemode")
+                return mode
+            # Explicit raw mode (True)
+            if not will_echo:
+                self.telnet_writer.log.debug("raw mode forced, no server echo")
+            else:
+                self.telnet_writer.log.debug("server echo, kludge mode")
+            return self._make_raw(mode)
 
         async def make_stdio(self) -> Tuple[asyncio.StreamReader, asyncio.StreamWriter]:
             """Return (reader, writer) pair for sys.stdin, sys.stdout."""
@@ -268,7 +407,81 @@ else:
 
             return reader, writer
 
-    # pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-many-nested-blocks
+    def _transform_output(
+        out: str, writer: Union[TelnetWriter, TelnetWriterUnicode], in_raw_mode: bool
+    ) -> str:
+        r"""
+        Apply color filter, ASCII EOL substitution, and CRLF normalization.
+
+        :param out: Server output text to transform.
+        :param writer: Telnet writer (checked for ``_color_filter`` and ``_ascii_eol``).
+        :param in_raw_mode: When ``True``, normalize line endings to ``\r\n``.
+        :returns: Transformed output string.
+        """
+        _cf = getattr(writer, "_color_filter", None)
+        if _cf is not None:
+            out = _cf.filter(out)
+        if getattr(writer, "_ascii_eol", False):
+            out = out.replace(_ATASCII_CR_CHAR, "\r").replace(_ATASCII_LF_CHAR, "\n")
+        if in_raw_mode:
+            out = out.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+        else:
+            # Cooked mode: PTY ONLCR converts \n → \r\n, so strip \r before \n
+            # to avoid doubling (\r\n → \r\r\n).
+            out = out.replace("\r\n", "\n")
+        return out
+
+    def _send_stdin(
+        inp: bytes,
+        telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
+        stdout: asyncio.StreamWriter,
+        local_echo: bool,
+    ) -> "tuple[Optional[asyncio.Task[None]], bool]":
+        """
+        Send stdin input to server and optionally echo locally.
+
+        :param inp: Raw bytes from terminal stdin.
+        :param telnet_writer: Telnet writer for sending to server.
+        :param stdout: Local stdout writer for software echo.
+        :param local_echo: When ``True``, echo input bytes to stdout.
+        :returns: ``(esc_timer_task_or_None, has_pending)`` tuple.
+        """
+        _inf = getattr(telnet_writer, "_input_filter", None)
+        pending = False
+        new_timer: Optional[asyncio.Task[None]] = None
+        if _inf is not None:
+            translated = _inf.feed(inp)
+            if translated:
+                telnet_writer._write(translated)  # pylint: disable=protected-access
+            if _inf.has_pending:
+                pending = True
+                new_timer = asyncio.ensure_future(asyncio.sleep(_inf.esc_delay))
+        else:
+            telnet_writer._write(inp)  # pylint: disable=protected-access
+        if local_echo:
+            _echo_buf = bytearray()
+            for _b in inp:
+                if _b in (0x7F, 0x08):
+                    _echo_buf.extend(b"\b \b")
+                elif _b == 0x0D:
+                    _echo_buf.extend(b"\r\n")
+                elif _b >= 0x20:
+                    _echo_buf.append(_b)
+            if _echo_buf:
+                stdout.write(bytes(_echo_buf))
+        return new_timer, pending
+
+    def _flush_color_filter(
+        writer: Union[TelnetWriter, TelnetWriterUnicode], stdout: asyncio.StreamWriter
+    ) -> None:
+        """Flush any pending color filter output to stdout."""
+        _cf = getattr(writer, "_color_filter", None)
+        if _cf is not None:
+            _flush = _cf.flush()
+            if _flush:
+                stdout.write(_flush.encode())
+
+    # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     async def telnet_client_shell(
         telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
         telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
@@ -286,57 +499,32 @@ else:
 
         with Terminal(telnet_writer=telnet_writer) as term:
             linesep = "\n"
+            switched_to_raw = False
+            last_will_echo = False
+            local_echo = term.software_echo
             if term._istty:  # pylint: disable=protected-access
-                _raw = getattr(telnet_writer, '_raw_mode', False)
-                if telnet_writer.will_echo or _raw:
+                raw_mode = getattr(telnet_writer, "_raw_mode", False)
+                if telnet_writer.will_echo or raw_mode is True:
                     linesep = "\r\n"
             stdin, stdout = await term.make_stdio()
             escape_name = accessories.name_unicode(keyboard_escape)
             stdout.write(f"Escape character is '{escape_name}'.{linesep}".encode())
+            term.setup_winch()
 
-            # Setup SIGWINCH handler to send NAWS on terminal resize (POSIX only).
-            # We debounce to avoid flooding on continuous resizes.
-            loop = asyncio.get_event_loop()
-            winch_pending: dict[str, Optional[asyncio.TimerHandle]] = {"h": None}
-            remove_winch = False
-            if term._istty:  # pylint: disable=protected-access
-                try:
-
-                    def _send_naws() -> None:
-                        # local
-                        from .telopt import NAWS  # pylint: disable=import-outside-toplevel
-
-                        try:
-                            if (
-                                telnet_writer.local_option.enabled(NAWS)
-                                and not telnet_writer.is_closing()
-                            ):
-                                telnet_writer._send_naws()  # pylint: disable=protected-access
-                        except Exception:  # pylint: disable=broad-exception-caught
-                            pass
-
-                    def _on_winch() -> None:
-                        h = winch_pending.get("h")
-                        if h is not None and not h.cancelled():
-                            try:
-                                h.cancel()
-                            except Exception:  # pylint: disable=broad-exception-caught
-                                pass
-                        winch_pending["h"] = loop.call_later(0.05, _send_naws)
-
-                    if hasattr(signal, "SIGWINCH"):
-                        loop.add_signal_handler(signal.SIGWINCH, _on_winch)
-                        remove_winch = True
-                except Exception:  # pylint: disable=broad-exception-caught
-                    remove_winch = False
+            def _handle_close(msg: str) -> None:
+                _flush_color_filter(telnet_writer, stdout)
+                stdout.write(f"\033[m{linesep}{msg}{linesep}".encode())
+                term.cleanup_winch()
 
             stdin_task = accessories.make_reader_task(stdin)
             telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
+            esc_timer_task: Optional[asyncio.Task[None]] = None
             wait_for = set([stdin_task, telnet_task])
+            # -- event loop: multiplex stdin, server output, and ESC_DELAY timer --
             while wait_for:
                 done, _ = await asyncio.wait(wait_for, return_when=asyncio.FIRST_COMPLETED)
 
-                # Prefer handling stdin events first to avoid starvation under heavy output
+                # Prefer handling stdin events first to avoid starvation
                 if stdin_task in done:
                     task = stdin_task
                     done.discard(task)
@@ -344,94 +532,65 @@ else:
                     task = done.pop()
                 wait_for.discard(task)
 
-                telnet_writer.log.debug("task=%s, wait_for=%s", task, wait_for)
+                telnet_writer.log.log(TRACE, "task=%s, wait_for=%s", task, wait_for)
+
+                # ESC_DELAY timer fired — flush buffered partial sequence
+                if task is esc_timer_task:
+                    esc_timer_task = None
+                    _inf = getattr(telnet_writer, "_input_filter", None)
+                    if _inf is not None and _inf.has_pending:
+                        flushed = _inf.flush()
+                        if flushed:
+                            telnet_writer._write(flushed)  # pylint: disable=protected-access
+                    continue
 
                 # client input
                 if task == stdin_task:
+                    # Cancel ESC_DELAY timer — new input resolves buffering
+                    if esc_timer_task is not None and esc_timer_task in wait_for:
+                        esc_timer_task.cancel()
+                        wait_for.discard(esc_timer_task)
+                        esc_timer_task = None
                     inp = task.result()
-                    if inp:
-                        if keyboard_escape in inp.decode():
-                            # on ^], close connection to remote host
-                            try:
-                                telnet_writer.close()
-                            except Exception:  # pylint: disable=broad-exception-caught
-                                pass
-                            if telnet_task in wait_for:
-                                telnet_task.cancel()
-                                wait_for.remove(telnet_task)
-                            _cf = getattr(telnet_writer, "_color_filter", None)
-                            if _cf is not None:
-                                _flush = _cf.flush()
-                                if _flush:
-                                    stdout.write(_flush.encode())
-                            stdout.write(f"\033[m{linesep}Connection closed.{linesep}".encode())
-                            # Cleanup resize handler on local escape close
-                            if term._istty and remove_winch:  # pylint: disable=protected-access
-                                try:
-                                    loop.remove_signal_handler(signal.SIGWINCH)
-                                except Exception:  # pylint: disable=broad-exception-caught
-                                    pass
-                            h = winch_pending.get("h")
-                            if h is not None:
-                                try:
-                                    h.cancel()
-                                except Exception:  # pylint: disable=broad-exception-caught
-                                    pass
-                            break
-                        _inf = getattr(telnet_writer, '_input_filter', None)
-                        if _inf is not None:
-                            translated = _inf.feed(inp)
-                            if translated:
-                                telnet_writer._write(translated)  # pylint: disable=protected-access
-                        else:
-                            telnet_writer.write(inp.decode())
-                        stdin_task = accessories.make_reader_task(stdin)
-                        wait_for.add(stdin_task)
-                    else:
+                    if not inp:
                         telnet_writer.log.debug("EOF from client stdin")
+                        continue
+                    if keyboard_escape in inp.decode():
+                        try:
+                            telnet_writer.close()
+                        except Exception:  # pylint: disable=broad-exception-caught
+                            pass
+                        if telnet_task in wait_for:
+                            telnet_task.cancel()
+                            wait_for.remove(telnet_task)
+                        _handle_close("Connection closed.")
+                        break
+                    new_timer, has_pending = _send_stdin(inp, telnet_writer, stdout, local_echo)
+                    if has_pending and esc_timer_task not in wait_for:
+                        esc_timer_task = new_timer
+                        if esc_timer_task is not None:
+                            wait_for.add(esc_timer_task)
+                    stdin_task = accessories.make_reader_task(stdin)
+                    wait_for.add(stdin_task)
 
                 # server output
-                if task == telnet_task:
+                elif task == telnet_task:
                     out = task.result()
-
-                    # TODO: We should not require to check for '_eof' value,
-                    # but for some systems, htc.zapto.org, it is required,
-                    # where b'' is received even though connection is on?.
                     if not out and telnet_reader._eof:  # pylint: disable=protected-access
                         if stdin_task in wait_for:
                             stdin_task.cancel()
                             wait_for.remove(stdin_task)
-                        _cf = getattr(telnet_writer, "_color_filter", None)
-                        if _cf is not None:
-                            _flush = _cf.flush()
-                            if _flush:
-                                stdout.write(_flush.encode())
-                        stdout.write(
-                            f"\033[m{linesep}Connection closed by foreign host.{linesep}".encode()
-                        )
-                        # Cleanup resize handler on remote close
-                        if term._istty and remove_winch:  # pylint: disable=protected-access
-                            try:
-                                loop.remove_signal_handler(signal.SIGWINCH)
-                            except Exception:  # pylint: disable=broad-exception-caught
-                                pass
-                        h = winch_pending.get("h")
-                        if h is not None:
-                            try:
-                                h.cancel()
-                            except Exception:  # pylint: disable=broad-exception-caught
-                                pass
-                    else:
-                        _cf = getattr(telnet_writer, "_color_filter", None)
-                        if _cf is not None:
-                            out = _cf.filter(out)
-                        if getattr(telnet_writer, '_raw_mode', False):
-                            # Normalize all line endings to LF, then to CRLF
-                            # for the raw terminal (OPOST disabled).  PETSCII
-                            # BBSes send bare CR (0x0D) as line terminator.
-                            out = (out.replace('\r\n', '\n')
-                                      .replace('\r', '\n')
-                                      .replace('\n', '\r\n'))
-                        stdout.write(out.encode() or b":?!?:")
-                        telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
-                        wait_for.add(telnet_task)
+                        _handle_close("Connection closed by foreign host.")
+                        continue
+                    raw_mode = getattr(telnet_writer, "_raw_mode", False)
+                    in_raw = raw_mode is True or (raw_mode is None and switched_to_raw)
+                    out = _transform_output(out, telnet_writer, in_raw)
+                    if raw_mode is None:
+                        mode_result = term.check_auto_mode(switched_to_raw, last_will_echo)
+                        if mode_result is not None:
+                            if not switched_to_raw:
+                                linesep = "\r\n"
+                            switched_to_raw, last_will_echo, local_echo = mode_result
+                    stdout.write(out.encode() or b":?!?:")
+                    telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
+                    wait_for.add(telnet_task)

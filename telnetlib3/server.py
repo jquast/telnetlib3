@@ -32,7 +32,6 @@ from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
 # Check if PTY support is available (Unix-only modules: pty, termios, fcntl)
 try:
-    # std imports
     import pty  # noqa: F401 pylint:disable=unused-import
     import fcntl  # noqa: F401 pylint:disable=unused-import
     import termios  # noqa: F401 pylint:disable=unused-import
@@ -134,7 +133,6 @@ class TelnetServer(server_base.BaseServer):
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         """Handle new connection and wire up telnet option callbacks."""
-        # local
         from .telopt import (  # pylint: disable=import-outside-toplevel
             NAWS,
             TTYPE,
@@ -177,7 +175,6 @@ class TelnetServer(server_base.BaseServer):
 
     def begin_negotiation(self) -> None:
         """Begin telnet negotiation by requesting terminal type."""
-        # local
         from .telopt import DO, TTYPE  # pylint: disable=import-outside-toplevel
 
         super().begin_negotiation()
@@ -196,7 +193,6 @@ class TelnetServer(server_base.BaseServer):
         MUD clients (Mudlet, TinTin++, etc.) interpret ``WILL ECHO`` as
         "password mode" and mask input.  See ``_negotiate_echo()``.
         """
-        # local
         from .telopt import (  # pylint: disable=import-outside-toplevel
             DO,
             SGA,
@@ -218,7 +214,6 @@ class TelnetServer(server_base.BaseServer):
 
     def check_negotiation(self, final: bool = False) -> bool:
         """Check if negotiation is complete including encoding."""
-        # local
         from .telopt import (  # pylint: disable=import-outside-toplevel
             DO,
             SB,
@@ -431,7 +426,6 @@ class TelnetServer(server_base.BaseServer):
         :data:`~.fingerprinting.ENVIRON_EXTENDED` for a larger set used
         during client fingerprinting.
         """
-        # local
         from .telopt import VAR, USERVAR  # pylint: disable=import-outside-toplevel
 
         return [
@@ -589,7 +583,6 @@ class TelnetServer(server_base.BaseServer):
             return
         self._environ_requested = True
 
-        # local
         from .telopt import DO, NEW_ENVIRON  # pylint: disable=import-outside-toplevel
 
         ttype1 = self.get_extra_info("ttype1") or ""
@@ -619,7 +612,6 @@ class TelnetServer(server_base.BaseServer):
             return
         self._echo_negotiated = True
 
-        # local
         from .telopt import ECHO, WILL  # pylint: disable=import-outside-toplevel
         from .fingerprinting import _is_maybe_mud  # pylint: disable=import-outside-toplevel
 
@@ -631,7 +623,6 @@ class TelnetServer(server_base.BaseServer):
 
     def _check_encoding(self) -> bool:
         # Periodically check for completion of ``waiter_encoding``.
-        # local
         from .telopt import DO, SB, BINARY, CHARSET  # pylint: disable=import-outside-toplevel
 
         assert self.writer is not None
@@ -999,12 +990,7 @@ def parse_server_args() -> Dict[str, Any]:
         )
         # Hidden backwards-compat: --pty-raw was the default since 2.5,
         # keep it as a silent no-op so existing scripts don't break.
-        parser.add_argument(
-            "--pty-raw",
-            action="store_true",
-            default=False,
-            help=argparse.SUPPRESS,
-        )
+        parser.add_argument("--pty-raw", action="store_true", default=False, help=argparse.SUPPRESS)
     parser.add_argument(
         "--robot-check",
         action="store_true",
@@ -1041,10 +1027,9 @@ def parse_server_args() -> Dict[str, Any]:
         result["pty_raw"] = False
 
     # Auto-enable force_binary for retro BBS encodings that use high-bit bytes.
-    # local
     from .encodings import FORCE_BINARY_ENCODINGS  # pylint: disable=import-outside-toplevel
 
-    if result["encoding"].lower().replace('-', '_') in FORCE_BINARY_ENCODINGS:
+    if result["encoding"].lower().replace("-", "_") in FORCE_BINARY_ENCODINGS:
         result["force_binary"] = True
 
     return result
@@ -1083,14 +1068,12 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
     if pty_exec:
         if not PTY_SUPPORT:
             raise NotImplementedError("PTY support is not available on this platform (Windows?)")
-        # local
         from .server_pty_shell import make_pty_shell  # pylint: disable=import-outside-toplevel
 
         shell = make_pty_shell(pty_exec, pty_args, raw_mode=pty_raw)
 
     # Wrap shell with guards if enabled
     if robot_check or pty_fork_limit:
-        # local
         # pylint: disable=import-outside-toplevel
         from .guard_shells import robot_shell  # pylint: disable=import-outside-toplevel
         from .guard_shells import ConnectionCounter, busy_shell

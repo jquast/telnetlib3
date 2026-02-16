@@ -7,7 +7,6 @@ import asyncio
 import pytest
 
 try:
-    # 3rd party
     import uvloop
 
     HAS_UVLOOP = True
@@ -16,7 +15,7 @@ except ImportError:
 
 # local
 import telnetlib3
-from telnetlib3.tests.accessories import bind_host, unused_tcp_port  # pylint: disable=unused-import
+from telnetlib3.tests.accessories import bind_host, unused_tcp_port
 
 pytestmark = pytest.mark.skipif(not HAS_UVLOOP, reason="uvloop not installed")
 

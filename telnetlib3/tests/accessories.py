@@ -20,7 +20,6 @@ def init_subproc_coverage(run_note=None):
     :returns: Coverage instance or None.
     """
     try:
-        # 3rd party
         import coverage
     except ImportError:
         return None
@@ -76,7 +75,6 @@ async def connection_context(reader, writer):
 async def create_server(*args, **kwargs):
     """Create a telnetlib3 server with automatic cleanup."""
     # local import to avoid circular import
-    # local
     import telnetlib3
 
     server = await telnetlib3.create_server(*args, **kwargs)
@@ -91,7 +89,6 @@ async def create_server(*args, **kwargs):
 async def open_connection(*args, **kwargs):
     """Open a telnetlib3 connection with automatic cleanup."""
     # local import to avoid circular import
-    # local
     import telnetlib3
 
     # Force deterministic client: TelnetTerminalClient reads the real terminal
@@ -99,7 +96,6 @@ async def open_connection(*args, **kwargs):
     # tests get consistent behavior regardless of whether stdin is a TTY.
     if "client_factory" not in kwargs:
         # local import to avoid circular import
-        # local
         from telnetlib3.client import TelnetClient
 
         kwargs["client_factory"] = TelnetClient

@@ -22,7 +22,7 @@ from telnetlib3.server_pty_shell import (
     _platform_check,
     _wait_for_terminal_info,
 )
-from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+from telnetlib3.tests.accessories import (
     bind_host,
     create_server,
     open_connection,
@@ -84,7 +84,6 @@ def mock_session():
 @_ignore_forkpty_deprecation
 async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capture):
     """Test PTY shell with various helper modes: cat, env, stty_size."""
-    # local
     from telnetlib3 import make_pty_shell
 
     # Test 1: cat mode - echo input back
@@ -173,7 +172,6 @@ async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capt
 @_ignore_forkpty_deprecation
 async def test_pty_shell_lifecycle(bind_host, unused_tcp_port, require_no_capture):
     """Test PTY shell lifecycle: child exit and client disconnect."""
-    # local
     from telnetlib3 import make_pty_shell
 
     # Test 1: child exit closes connection gracefully
@@ -252,7 +250,6 @@ def test_platform_check_not_windows():
 
 def test_make_pty_shell_returns_callable():
     """Test that make_pty_shell returns a callable."""
-    # local
     from telnetlib3 import make_pty_shell
 
     shell = make_pty_shell(sys.executable)
@@ -327,7 +324,6 @@ async def test_pty_session_naws_behavior(mock_session):
     winch_calls = []
 
     def mock_killpg_winch(pgid, sig):
-        # std imports
         import signal as signal_mod
 
         if sig == signal_mod.SIGWINCH:
@@ -675,7 +671,6 @@ async def test_pty_session_isalive_scenarios(child_pid, waitpid_behavior, expect
 
 async def test_pty_session_terminate_scenarios():
     """Test _terminate handles various termination scenarios."""
-    # std imports
     import signal
 
     reader = MagicMock()

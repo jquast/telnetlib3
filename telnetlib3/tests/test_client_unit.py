@@ -6,7 +6,7 @@ import pytest
 
 # local
 from telnetlib3 import client as cl
-from telnetlib3.tests.accessories import (  # noqa: F401  # pylint: disable=unused-import
+from telnetlib3.tests.accessories import (  # noqa: F401
     bind_host,
     create_server,
 )
@@ -126,7 +126,6 @@ async def test_send_xdisploc():
 
 @pytest.mark.skipif(sys.platform == "win32", reason="requires fcntl")
 def test_terminal_client_winsize_success(monkeypatch):
-    # std imports
     import fcntl
     import struct
 
@@ -137,7 +136,6 @@ def test_terminal_client_winsize_success(monkeypatch):
 
 @pytest.mark.skipif(sys.platform == "win32", reason="requires fcntl")
 def test_terminal_client_winsize_ioerror(monkeypatch):
-    # std imports
     import fcntl
 
     monkeypatch.setenv("LINES", "30")
@@ -153,7 +151,6 @@ def test_terminal_client_winsize_ioerror(monkeypatch):
 @pytest.mark.skipif(sys.platform == "win32", reason="requires fcntl")
 @pytest.mark.asyncio
 async def test_terminal_client_send_naws(monkeypatch):
-    # std imports
     import fcntl
 
     monkeypatch.setenv("LINES", "48")
@@ -165,7 +162,6 @@ async def test_terminal_client_send_naws(monkeypatch):
 @pytest.mark.skipif(sys.platform == "win32", reason="requires fcntl")
 @pytest.mark.asyncio
 async def test_terminal_client_send_env(monkeypatch):
-    # std imports
     import fcntl
 
     def _raise(*args, **kwargs):

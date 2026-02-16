@@ -11,7 +11,6 @@ from telnetlib3.guard_shells import (
     ConnectionCounter,
     _read_line,
     busy_shell,
-    robot_check,
     robot_shell,
     _latin1_reading,
 )
@@ -409,7 +408,6 @@ async def test_without_latin1_reading_strict_crashes():
 
 async def test_fingerprint_scanner_defeats_robot_check(unused_tcp_port):
     """Fingerprint scanner's virtual cursor defeats the server's robot_check."""
-    # local
     from telnetlib3.guard_shells import _TEST_CHAR, _measure_width  # noqa: PLC0415
     from telnetlib3.tests.accessories import create_server  # noqa: PLC0415
 
@@ -426,12 +424,8 @@ async def test_fingerprint_scanner_defeats_robot_check(unused_tcp_port):
         await writer.wait_closed()
 
     async with create_server(
-        host="127.0.0.1",
-        port=unused_tcp_port,
-        shell=guarded_shell,
-        connect_maxwait=0.5,
+        host="127.0.0.1", port=unused_tcp_port, shell=guarded_shell, connect_maxwait=0.5
     ):
-        # local
         import telnetlib3  # noqa: PLC0415
 
         shell = functools.partial(
@@ -443,11 +437,7 @@ async def test_fingerprint_scanner_defeats_robot_check(unused_tcp_port):
             banner_max_wait=5.0,
         )
         reader, writer = await telnetlib3.open_connection(
-            host="127.0.0.1",
-            port=unused_tcp_port,
-            encoding=False,
-            shell=shell,
-            connect_minwait=0.5,
+            host="127.0.0.1", port=unused_tcp_port, encoding=False, shell=shell, connect_minwait=0.5
         )
         # Shell runs as a background task — wait for it to finish.
         await asyncio.wait_for(writer.protocol.waiter_closed, timeout=10.0)

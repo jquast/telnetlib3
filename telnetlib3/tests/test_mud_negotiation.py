@@ -7,7 +7,23 @@ import collections
 import pytest
 
 # local
-from telnetlib3.telopt import DO, SB, SE, IAC, MSP, MXP, ZMP, ATCP, GMCP, MSDP, MSSP, WILL, AARDWOLF
+from telnetlib3.telopt import (
+    DO,
+    SB,
+    SE,
+    IAC,
+    MSP,
+    MXP,
+    ZMP,
+    ATCP,
+    DONT,
+    GMCP,
+    MSDP,
+    MSSP,
+    WILL,
+    WONT,
+    AARDWOLF,
+)
 from telnetlib3.stream_writer import TelnetWriter
 
 
@@ -136,7 +152,6 @@ def test_sb_msdp_dispatch():
     w.set_ext_callback(MSDP, callback)
     w.pending_option[SB + MSDP] = True
 
-    # local
     from telnetlib3.telopt import MSDP_VAL, MSDP_VAR
 
     payload = MSDP_VAR + b"HEALTH" + MSDP_VAL + b"100"
@@ -157,7 +172,6 @@ def test_sb_mssp_dispatch():
     w.set_ext_callback(MSSP, callback)
     w.pending_option[SB + MSSP] = True
 
-    # local
     from telnetlib3.telopt import MSSP_VAL, MSSP_VAR
 
     payload = MSSP_VAR + b"NAME" + MSSP_VAL + b"TestMUD"
@@ -179,7 +193,6 @@ def test_sb_mssp_dispatch_stores_data():
     w, t, p = new_writer(server=True)
     w.pending_option[SB + MSSP] = True
 
-    # local
     from telnetlib3.telopt import MSSP_VAL, MSSP_VAR
 
     payload = MSSP_VAR + b"NAME" + MSSP_VAL + b"TestMUD" + MSSP_VAR + b"PLAYERS" + MSSP_VAL + b"5"
@@ -193,7 +206,6 @@ def test_sb_mssp_latin1_fallback():
     w, t, p = new_writer(server=True)
     w.pending_option[SB + MSSP] = True
 
-    # local
     from telnetlib3.telopt import MSSP_VAL, MSSP_VAR
 
     # 0xC9 is 'É' in latin-1 but invalid as a lone UTF-8 lead byte
@@ -220,7 +232,6 @@ def test_sb_msdp_latin1_fallback():
     w, t, p = new_writer(server=True)
     w.pending_option[SB + MSDP] = True
 
-    # local
     from telnetlib3.telopt import MSDP_VAL, MSDP_VAR
 
     received_args: list[object] = []
@@ -249,7 +260,6 @@ def test_send_msdp():
     w, t, p = new_writer(server=True)
     w.local_option[MSDP] = True
 
-    # local
     from telnetlib3.telopt import MSDP_VAL, MSDP_VAR
 
     w.send_msdp({"HEALTH": "100"})
@@ -261,7 +271,6 @@ def test_send_mssp():
     w, t, p = new_writer(server=True)
     w.local_option[MSSP] = True
 
-    # local
     from telnetlib3.telopt import MSSP_VAL, MSSP_VAR
 
     w.send_mssp({"NAME": "TestMUD"})
@@ -361,11 +370,47 @@ def test_handle_do_mxp_sets_pending_sb():
     assert w.pending_option.get(SB + MXP) is True
 
 
-def test_handle_will_mxp_client_sets_pending_sb():
+def test_handle_will_mxp_client_declines():
     w, t, _p = new_writer(server=False, client=True)
     w.handle_will(MXP)
+    assert IAC + DONT + MXP in t.writes
+    assert w.remote_option.get(MXP) is not True
+
+
+def test_handle_will_mxp_client_always_do():
+    w, t, _p = new_writer(server=False, client=True)
+    w.always_do.add(MXP)
+    w.handle_will(MXP)
     assert IAC + DO + MXP in t.writes
-    assert w.pending_option.get(SB + MXP) is True
+    assert w.remote_option.get(MXP) is True
+
+
+_MUD_ALL = [GMCP, MSDP, MSSP, MSP, MXP, ZMP, AARDWOLF, ATCP]
+_MUD_ALL_IDS = ["GMCP", "MSDP", "MSSP", "MSP", "MXP", "ZMP", "AARDWOLF", "ATCP"]
+
+
+@pytest.mark.parametrize("opt", _MUD_ALL, ids=_MUD_ALL_IDS)
+def test_handle_will_mud_client_declines(opt):
+    w, t, _p = new_writer(server=False, client=True)
+    w.handle_will(opt)
+    assert IAC + DONT + opt in t.writes
+
+
+@pytest.mark.parametrize("opt", _MUD_ALL, ids=_MUD_ALL_IDS)
+def test_handle_do_mud_client_declines(opt):
+    w, t, _p = new_writer(server=False, client=True)
+    result = w.handle_do(opt)
+    assert result is False
+    assert IAC + WONT + opt in t.writes
+
+
+@pytest.mark.parametrize("opt", _MUD_ALL, ids=_MUD_ALL_IDS)
+def test_handle_do_mud_client_always_will(opt):
+    w, t, _p = new_writer(server=False, client=True)
+    w.always_will.add(opt)
+    result = w.handle_do(opt)
+    assert result is True
+    assert IAC + WILL + opt in t.writes
 
 
 def test_sb_zmp_dispatch():

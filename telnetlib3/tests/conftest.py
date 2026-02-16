@@ -4,7 +4,6 @@
 import pytest
 
 try:
-    # 3rd party
     from pytest_codspeed import BenchmarkFixture  # noqa: F401  pylint:disable=unused-import
 except ImportError:
     # Provide a no-op benchmark fixture when pytest-codspeed is not installed

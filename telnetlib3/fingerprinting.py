@@ -200,7 +200,6 @@ class FingerprintingTelnetServer:  # pylint: disable=too-few-public-methods
         # pylint: disable-next=no-member
         base: list[Union[str, bytes]] = super().on_request_environ()  # type: ignore[misc]
         # Insert extended keys before the trailing VAR/USERVAR sentinels
-        # local
         from .telopt import VAR, USERVAR  # pylint: disable=import-outside-toplevel
 
         extra = [k for k in ENVIRON_EXTENDED if k not in base]
@@ -849,7 +848,6 @@ def _validate_suggestion(text: str) -> Optional[str]:
 
 def _cooked_input(prompt: str) -> str:
     """Call :func:`input` with echo and canonical mode temporarily enabled."""
-    # std imports
     import termios  # pylint: disable=import-outside-toplevel
 
     fd = sys.stdin.fileno()
@@ -1044,7 +1042,6 @@ async def fingerprinting_server_shell(
     :param writer: TelnetWriter instance.
     """
     # pylint: disable=import-outside-toplevel
-    # local
     from .server_pty_shell import pty_shell
 
     writer = cast(TelnetWriterUnicode, writer)
@@ -1096,7 +1093,6 @@ def fingerprinting_post_script(filepath: str) -> None:
 
     :param filepath: Path to the saved fingerprint JSON file.
     """
-    # local
     # pylint: disable-next=import-outside-toplevel,cyclic-import
     from .fingerprinting_display import fingerprinting_post_script as _fps
 
@@ -1117,7 +1113,6 @@ def fingerprint_server_main() -> None:
     """
     # pylint: disable=import-outside-toplevel,global-statement
     # local import is required to prevent circular imports
-    # local
     from .server import _config, run_server, parse_server_args  # noqa: PLC0415
 
     global DATA_DIR

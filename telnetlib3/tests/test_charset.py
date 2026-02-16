@@ -9,7 +9,7 @@ import telnetlib3
 import telnetlib3.stream_writer
 from telnetlib3.telopt import DO, SB, SE, IAC, WILL, WONT, TTYPE, CHARSET, REQUEST, ACCEPTED
 from telnetlib3.stream_writer import TelnetWriter
-from telnetlib3.tests.accessories import (  # pylint: disable=unused-import
+from telnetlib3.tests.accessories import (
     bind_host,
     create_server,
     asyncio_server,

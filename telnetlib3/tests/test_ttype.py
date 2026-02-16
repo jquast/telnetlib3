@@ -7,7 +7,7 @@ import asyncio
 import telnetlib3
 import telnetlib3.stream_writer
 from telnetlib3.telopt import IS, SB, SE, IAC, WILL, TTYPE
-from telnetlib3.tests.accessories import (  # pylint: disable=unused-import; pylint: disable=unused-import,
+from telnetlib3.tests.accessories import (
     bind_host,
     create_server,
     unused_tcp_port,

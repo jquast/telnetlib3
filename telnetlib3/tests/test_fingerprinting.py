@@ -15,14 +15,13 @@ from telnetlib3 import slc
 from telnetlib3 import fingerprinting as fps
 
 if sys.platform != "win32":
-    # local
     from telnetlib3 import server_pty_shell
     from telnetlib3 import fingerprinting_display as fpd
 else:
     server_pty_shell = None  # type: ignore[assignment]
 
 # local
-from telnetlib3.tests.accessories import (  # noqa: F401  # pylint: disable=unused-import
+from telnetlib3.tests.accessories import (  # noqa: F401
     bind_host,
     create_server,
     open_connection,
@@ -957,7 +956,6 @@ async def test_server_shell_with_post_script(monkeypatch, tmp_path):
     ],
 )
 def test_cooked_input(monkeypatch, input_fn, expected):
-    # std imports
     import termios
 
     fake_attrs = [0, 0, 0, 0, 0, 0, [b"\x00"] * 32]
@@ -1061,7 +1059,6 @@ def test_fingerprint_server_main_data_dir_flag(tmp_path, monkeypatch):
     monkeypatch.setattr("telnetlib3.fingerprinting.asyncio.run", _noop_asyncio_run)
 
     captured: dict = {}
-    # local
     from telnetlib3.server import parse_server_args
 
     original_parse = parse_server_args

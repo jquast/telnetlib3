@@ -98,7 +98,6 @@ class TelnetClient(client_base.BaseClient):
         and character set negotiation.
         """
         # pylint: disable=import-outside-toplevel
-        # local
         from telnetlib3.telopt import NAWS, TTYPE, TSPEED, CHARSET, XDISPLOC, NEW_ENVIRON
 
         super().connection_made(transport)
@@ -198,17 +197,17 @@ class TelnetClient(client_base.BaseClient):
         :param name: Raw charset name from the server.
         :returns: Normalized name suitable for :func:`codecs.lookup`.
         """
-        # std imports
         import re  # pylint: disable=import-outside-toplevel
-        base = name.strip().replace(' ', '-')
+
+        base = name.strip().replace(" ", "-")
         # Strip leading zeros from numeric segments: iso-8859-02 → iso-8859-2
-        no_leading_zeros = re.sub(r'-0+(\d)', r'-\1', base)
+        no_leading_zeros = re.sub(r"-0+(\d)", r"-\1", base)
         # All hyphens removed: cp-1250 → cp1250
-        no_hyphens = base.replace('-', '')
+        no_hyphens = base.replace("-", "")
         # Keep first hyphen-segment, collapse the rest: iso-8859-2 stays
-        parts = no_leading_zeros.split('-')
+        parts = no_leading_zeros.split("-")
         if len(parts) > 2:
-            partial = parts[0] + '-' + ''.join(parts[1:])
+            partial = parts[0] + "-" + "".join(parts[1:])
         else:
             partial = no_leading_zeros
         for candidate in (base, no_leading_zeros, no_hyphens, partial):
@@ -256,9 +255,7 @@ class TelnetClient(client_base.BaseClient):
 
         for offer in offered:
             try:
-                canon = codecs.lookup(
-                    self._normalize_charset_name(offer)
-                ).name
+                canon = codecs.lookup(self._normalize_charset_name(offer)).name
 
                 # Record first viable encoding
                 if first_viable is None:
@@ -382,7 +379,6 @@ class TelnetTerminalClient(TelnetClient):
     @staticmethod
     def _winsize() -> Tuple[int, int]:
         try:
-            # std imports
             import fcntl  # pylint: disable=import-outside-toplevel
             import termios  # pylint: disable=import-outside-toplevel
 
@@ -575,7 +571,6 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
     colormatch: str = args["colormatch"]
     shell_callback = args["shell"]
     if colormatch.lower() != "none":
-        # local
         from .color_filter import (  # pylint: disable=import-outside-toplevel
             PALETTES,
             ColorConfig,
@@ -625,9 +620,8 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
         shell_callback = _color_shell
 
     # Wrap shell to inject raw_mode flag and input translation for retro encodings
-    raw_mode: bool = args.get("raw_mode", False)
-    if raw_mode:
-        # local
+    raw_mode_val: Optional[bool] = args.get("raw_mode", False)
+    if raw_mode_val is not False:
         from .client_shell import (  # pylint: disable=import-outside-toplevel
             _INPUT_XLAT,
             _INPUT_SEQ_XLAT,
@@ -635,11 +629,16 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
         )
 
         enc_key = (args.get("encoding", "") or "").lower()
-        byte_xlat = _INPUT_XLAT.get(enc_key, {})
-        seq_xlat = _INPUT_SEQ_XLAT.get(enc_key, {})
+        byte_xlat = dict(_INPUT_XLAT.get(enc_key, {}))
+        if args.get("ascii_eol"):
+            # --ascii-eol: don't translate CR/LF to encoding-native EOL
+            byte_xlat.pop(0x0D, None)
+            byte_xlat.pop(0x0A, None)
+        seq_xlat = {} if args.get("ansi_keys") else _INPUT_SEQ_XLAT.get(enc_key, {})
         input_filter: Optional[InputFilter] = (
             InputFilter(seq_xlat, byte_xlat) if (seq_xlat or byte_xlat) else None
         )
+        ascii_eol: bool = args.get("ascii_eol", False)
         _inner_shell = shell_callback
 
         async def _raw_shell(
@@ -647,7 +646,10 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
             # pylint: disable-next=protected-access
-            writer_arg._raw_mode = True  # type: ignore[union-attr]
+            writer_arg._raw_mode = raw_mode_val  # type: ignore[union-attr]
+            if ascii_eol:
+                # pylint: disable-next=protected-access
+                writer_arg._ascii_eol = True  # type: ignore[union-attr]
             if input_filter is not None:
                 # pylint: disable-next=protected-access
                 writer_arg._input_filter = input_filter  # type: ignore[union-attr]
@@ -703,13 +705,21 @@ def _get_argument_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument("--force-binary", action="store_true", help="force encoding", default=True)
-    parser.add_argument(
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--raw-mode",
+        action="store_true",
+        default=False,
+        help="force raw terminal mode (no line buffering, no local echo). "
+        "Correct for BBS and retro systems. Default: auto-detect from "
+        "server negotiation.",
+    )
+    mode_group.add_argument(
         "--line-mode",
         action="store_true",
         default=False,
-        help="use line-buffered input with local echo instead of raw terminal "
-        "mode.  By default the client uses raw mode (no line buffering, no "
-        "local echo) which is correct for most BBS and MUD servers.",
+        help="force line-buffered input with local echo. Appropriate for "
+        "simple command-line services.",
     )
     parser.add_argument(
         "--connect-minwait", default=0, type=float, help="shell delay for negotiation"
@@ -779,6 +789,22 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         default=False,
         help="swap foreground/background for light-background terminals",
     )
+    parser.add_argument(
+        "--ascii-eol",
+        action="store_true",
+        default=False,
+        help="use ASCII CR/LF for line endings instead of encoding-native "
+        "EOL (e.g. ATASCII 0x9B).  Use for BBSes that display retro "
+        "graphics but use standard CR/LF for line breaks.",
+    )
+    parser.add_argument(
+        "--ansi-keys",
+        action="store_true",
+        default=False,
+        help="transmit raw ANSI escape sequences for arrow and function "
+        "keys instead of encoding-specific control codes.  Use for "
+        "BBSes that expect ANSI cursor sequences.",
+    )
     return parser
 
 
@@ -790,7 +816,6 @@ def _parse_option_arg(value: str) -> bytes:
     :returns: Single-byte option value.
     :raises ValueError: When *value* is not a known name or valid integer.
     """
-    # local
     from .telopt import option_from_name  # pylint: disable=import-outside-toplevel
 
     try:
@@ -815,12 +840,17 @@ def _parse_background_color(value: str) -> Tuple[int, int, int]:
 
 def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
     # Auto-enable force_binary for retro BBS encodings that use high-bit bytes.
-    # local
     from .encodings import FORCE_BINARY_ENCODINGS  # pylint: disable=import-outside-toplevel
 
     force_binary = args.force_binary
-    raw_mode = not args.line_mode
-    if args.encoding.lower().replace('-', '_') in FORCE_BINARY_ENCODINGS:
+    # Three-state: True (forced raw), False (forced line), None (auto-detect)
+    if args.raw_mode:
+        raw_mode: Optional[bool] = True
+    elif args.line_mode:
+        raw_mode = False
+    else:
+        raw_mode = None
+    if args.encoding.lower().replace("-", "_") in FORCE_BINARY_ENCODINGS:
         force_binary = True
         raw_mode = True
 
@@ -847,6 +877,8 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "background_color": _parse_background_color(args.background_color),
         "reverse_video": args.reverse_video,
         "raw_mode": raw_mode,
+        "ascii_eol": args.ascii_eol,
+        "ansi_keys": args.ansi_keys,
     }
 
 
@@ -957,7 +989,6 @@ async def run_fingerprint_client() -> None:
     :func:`~telnetlib3.server_fingerprinting.fingerprinting_client_shell`
     via :func:`functools.partial`, and runs the connection.
     """
-    # local
     from . import fingerprinting  # pylint: disable=import-outside-toplevel
     from . import server_fingerprinting  # pylint: disable=import-outside-toplevel
 
@@ -1021,8 +1052,12 @@ async def run_fingerprint_client() -> None:
             client.writer.environ_encoding = environ_encoding
             # pylint: disable-next=protected-access
             client.writer._encoding_explicit = environ_encoding != "ascii"
-            client.writer.always_will = fp_always_will
-            client.writer.always_do = fp_always_do
+            # pylint: disable-next=import-outside-toplevel
+            from .fingerprinting import EXTENDED_OPTIONS
+
+            mud_opts = {opt for opt, _, _ in EXTENDED_OPTIONS}
+            client.writer.always_will = fp_always_will | mud_opts
+            client.writer.always_do = fp_always_do | mud_opts
 
         def patched_send_env(keys: Sequence[str]) -> Dict[str, Any]:
             result = orig_send_env(keys)

@@ -14,7 +14,6 @@ TRACE = 5
 logging.addLevelName(TRACE, "TRACE")
 
 if TYPE_CHECKING:  # pragma: no cover
-    # local
     from .stream_reader import TelnetReader, TelnetReaderUnicode
 
 __all__ = (
@@ -142,6 +141,11 @@ def make_logger(
     if logfile:
         _cfg["filename"] = logfile
     logging.basicConfig(**_cfg)
+    for handler in logging.getLogger().handlers:
+        if isinstance(handler, logging.StreamHandler) and not isinstance(
+            handler, logging.FileHandler
+        ):
+            handler.terminator = "\r\n"
     logging.getLogger().setLevel(lvl)
     logging.getLogger(name).setLevel(lvl)
     return logging.getLogger(name)

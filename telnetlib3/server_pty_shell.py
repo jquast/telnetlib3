@@ -105,7 +105,6 @@ class PTYSession:
         :raises PTYSpawnError: If the child process fails to exec.
         """
         # pylint: disable=import-outside-toplevel
-        # std imports
         import pty
         import fcntl
 
@@ -222,7 +221,6 @@ class PTYSession:
         """Child process setup before exec."""
         # Note: pty.fork() already calls setsid() for the child, so we don't need to
         # pylint: disable=import-outside-toplevel
-        # std imports
         import fcntl
         import termios
 
@@ -263,7 +261,6 @@ class PTYSession:
     def _setup_parent(self) -> None:
         """Parent process setup after fork."""
         # pylint: disable=import-outside-toplevel
-        # std imports
         import fcntl
 
         assert self.master_fd is not None
@@ -295,7 +292,6 @@ class PTYSession:
     def _set_window_size(self, rows: int, cols: int) -> None:
         """Set PTY window size and send SIGWINCH to child."""
         # pylint: disable=import-outside-toplevel
-        # std imports
         import fcntl
         import signal
         import termios
@@ -312,7 +308,6 @@ class PTYSession:
     async def run(self) -> None:
         """Bridge loop between telnet and PTY."""
         # pylint: disable=import-outside-toplevel
-        # std imports
         import errno
 
         loop = asyncio.get_event_loop()
@@ -532,7 +527,6 @@ class PTYSession:
         :returns: True if child was terminated, False otherwise.
         """
         # pylint: disable=import-outside-toplevel
-        # std imports
         import signal
 
         if not self._isalive():

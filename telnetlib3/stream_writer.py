@@ -106,6 +106,9 @@ __all__ = ("TelnetWriter", "TelnetWriterUnicode")
 #: MUD options that allow empty SB payloads (e.g. ``IAC SB MXP IAC SE``).
 _EMPTY_SB_OK = frozenset({MXP, MSP, ZMP, AARDWOLF, ATCP})
 
+#: MUD protocol options that a plain telnet client should decline by default.
+_MUD_PROTOCOL_OPTIONS = frozenset({GMCP, MSDP, MSSP, MSP, MXP, ZMP, AARDWOLF, ATCP})
+
 
 class TelnetWriter:
     """
@@ -231,6 +234,11 @@ class TelnetWriter:
         #: (even when not natively supported).  Overrides the default
         #: DONT rejection in :meth:`handle_will`.
         self.always_do: set[bytes] = set()
+
+        #: Whether the encoding was explicitly set (not just the default
+        #: ``"ascii"``).  Used by fingerprinting and client connection logic
+        #: to decide whether to negotiate CHARSET.
+        self._encoding_explicit: bool = False
 
         #: Set of option byte(s) for WILL received from remote end
         #: that were rejected with DONT (unhandled options).
@@ -1825,6 +1833,17 @@ class TelnetWriter:
             AARDWOLF,
             ATCP,
         ):
+            # Client declines MUD protocols unless explicitly opted in.
+            if self.client and opt in _MUD_PROTOCOL_OPTIONS:
+                if opt in self.always_will:
+                    if not self.local_option.enabled(opt):
+                        self.iac(WILL, opt)
+                    return True
+                self.log.debug("DO %s: MUD protocol, declining on client.", name_command(opt))
+                if not self.local_option.enabled(opt):
+                    self.iac(WONT, opt)
+                return False
+
             # first time we've agreed, respond accordingly.
             if not self.local_option.enabled(opt):
                 self.iac(WILL, opt)
@@ -1923,6 +1942,15 @@ class TelnetWriter:
                 self.log.debug("recv WILL %s on client end, refusing.", name_command(opt))
                 self.iac(DONT, opt)
                 return
+            # Client declines MUD protocols unless explicitly opted in.
+            if self.client and opt in _MUD_PROTOCOL_OPTIONS:
+                if opt in self.always_do:
+                    if not self.remote_option.enabled(opt):
+                        self.iac(DO, opt)
+                        self.remote_option[opt] = True
+                    return
+                self.iac(DONT, opt)
+                return
             if not self.remote_option.enabled(opt):
                 self.iac(DO, opt)
                 self.remote_option[opt] = True
@@ -2005,7 +2033,7 @@ class TelnetWriter:
         else:
             self.iac(DONT, opt)
             self.rejected_will.add(opt)
-            self.log.warning("Unhandled: WILL %s.", name_command(opt))
+            self.log.debug("Unhandled: WILL %s.", name_command(opt))
             if self.pending_option.enabled(DO + opt):
                 self.pending_option[DO + opt] = False
 
@@ -2117,9 +2145,7 @@ class TelnetWriter:
                 buf = self._escape_iac(buf)
 
             if self.log.isEnabledFor(TRACE):
-                self.log.log(
-                    TRACE, "send %d bytes\n%s", len(buf), hexdump(buf, prefix=">>  ")
-                )
+                self.log.log(TRACE, "send %d bytes\n%s", len(buf), hexdump(buf, prefix=">>  "))
             self._transport.write(buf)
             if hasattr(self._protocol, "_tx_bytes"):
                 self._protocol._tx_bytes += len(buf)

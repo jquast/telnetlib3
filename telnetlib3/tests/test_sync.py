@@ -1,7 +1,5 @@
 """Tests for the synchronous (blocking) interface."""
 
-# pylint: disable=unused-import
-
 # std imports
 import time
 import threading

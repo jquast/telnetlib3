@@ -132,8 +132,13 @@ def test_get_slcdata_contains_expected_sections():
 @pytest.mark.skipif(sys.platform == "win32", reason="requires termios")
 async def test_terminal_determine_mode(monkeypatch):
     monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(fileno=lambda: 0))
+    _mock_opt = types.SimpleNamespace(enabled=lambda key: False)
     tw = types.SimpleNamespace(
-        will_echo=False, log=types.SimpleNamespace(debug=lambda *a, **k: None)
+        will_echo=False,
+        _raw_mode=None,
+        client=True,
+        remote_option=_mock_opt,
+        log=types.SimpleNamespace(debug=lambda *a, **k: None),
     )
     term = cs.Terminal(tw)
     mode = cs.Terminal.ModeDef(0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 38400, 38400, [0] * 32)

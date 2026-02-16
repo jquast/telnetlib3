@@ -93,7 +93,6 @@ class TelnetAlike(telnetlib.Telnet):
         """Provide a real OS-level file descriptor so selectors and any code that calls fileno() can
         work, even though the network I/O is mocked."""
         s = getattr(self, "_fileno_sock", None)
-        # pylint: disable=attribute-defined-outside-init
         if s is None:
             try:
                 s1, s2 = socket.socketpair()
@@ -109,7 +108,6 @@ class TelnetAlike(telnetlib.Telnet):
 
     def close(self):
         # Close the internal fileno() provider sockets, but leave the mocked self.sock alone
-        # pylint: disable=attribute-defined-outside-init
         try:
             if getattr(self, "_fileno_sock", None) is not None:
                 try:
@@ -183,7 +181,6 @@ def make_telnet(reads=(), cls=TelnetAlike):
         assert isinstance(x, bytes)
     with mocktest_socket(reads):
         telnet = cls("dummy", 0)
-        # pylint: disable=attribute-defined-outside-init
         telnet._messages = ""  # debuglevel output
     return telnet
 
@@ -440,7 +437,6 @@ class TestOption:
         # Issue 10695
         with mocktest_socket([]):
             telnet = TelnetAlike("dummy", "0")
-            # pylint: disable=attribute-defined-outside-init
             telnet._messages = ""
         telnet.set_debuglevel(1)
         telnet.msg("test")

@@ -1,4 +1,3 @@
-# pylint: disable=unused-import
 # std imports
 import asyncio
 
