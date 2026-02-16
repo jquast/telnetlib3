@@ -1,14 +1,20 @@
 History
 =======
 2.6.0
-  * change: ``telnetlib3-client`` now sets terminal mode to the server's
+  * new: TLS support (TELNETS).  :func:`~telnetlib3.client.open_connection`
+    accepts an ``ssl`` parameter (``True``, or an :class:`ssl.SSLContext`).
+    :func:`~telnetlib3.server.create_server` accepts an ``ssl`` parameter
+    (:class:`ssl.SSLContext`).  New CLI options: ``--ssl``, ``--ssl-cafile``,
+    ``--ssl-no-verify`` for ``telnetlib3-client``; ``--ssl-certfile``,
+    ``--ssl-keyfile`` for ``telnetlib3-server``.
+  * bugfix: ``telnetlib3-client`` now sets terminal mode to the server's
     preference via ``WILL ECHO`` and ``WILL SGA`` negotiation.  Use
     ``--raw-mode`` to restore legacy raw mode for servers that don't negotiate.
-    The Python API (``open_connection``, ``create_server``) is unchanged.
-  * change: ``telnetlib3-client`` declines MUD protocol options (GMCP, MSDP,
+  * bugfix: ``telnetlib3-client`` declines MUD protocol options (GMCP, MSDP,
     MSSP, MSP, MXP, ZMP, AARDWOLF, ATCP) by default.  Use ``--always-do`` or
     ``--always-will`` to opt in.
   * bugfix: log output "staircase text" in raw terminal mode.
+  * bugfix: graceful EOF handling — connection close no longer prints a traceback.
 
 2.5.0
   * change: ``telnetlib3-client`` now defaults to raw terminal mode (no line buffering, no local
