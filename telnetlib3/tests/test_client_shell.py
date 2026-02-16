@@ -322,11 +322,7 @@ import contextlib  # noqa: E402
 import subprocess  # noqa: E402
 
 # local
-from telnetlib3.tests.accessories import (  # noqa: E402
-    bind_host,
-    asyncio_server,
-    unused_tcp_port,
-)
+from telnetlib3.tests.accessories import bind_host, asyncio_server, unused_tcp_port  # noqa: E402
 
 _IAC = b"\xff"
 _WILL = b"\xfb"

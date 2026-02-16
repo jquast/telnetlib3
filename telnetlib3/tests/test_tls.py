@@ -9,12 +9,7 @@ import pytest
 import trustme
 
 # local
-from telnetlib3.tests.accessories import (
-    bind_host,
-    create_server,
-    open_connection,
-    unused_tcp_port,
-)
+from telnetlib3.tests.accessories import bind_host, create_server, open_connection, unused_tcp_port
 
 
 @pytest.fixture()
@@ -52,9 +47,7 @@ async def test_tls_end_to_end(bind_host, unused_tcp_port, server_ssl_ctx, client
         await writer.drain()
         _waiter.set_result(True)
 
-    async with create_server(
-        host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx
-    ):
+    async with create_server(host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx):
         async with open_connection(
             bind_host,
             unused_tcp_port,
@@ -79,9 +72,7 @@ async def test_tls_ca_verification(bind_host, unused_tcp_port, server_ssl_ctx):
     async def shell(reader, writer):
         _shell_called.set_result(True)
 
-    async with create_server(
-        host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx
-    ):
+    async with create_server(host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx):
         untrusted_ctx = ssl.create_default_context()
         with pytest.raises(ssl.SSLCertVerificationError):
             async with open_connection(
@@ -96,16 +87,13 @@ async def test_tls_ca_verification(bind_host, unused_tcp_port, server_ssl_ctx):
                 pass
 
 
-async def test_tls_ssl_true_uses_default_context(
-    bind_host, unused_tcp_port, server_ssl_ctx
-):
+async def test_tls_ssl_true_uses_default_context(bind_host, unused_tcp_port, server_ssl_ctx):
     """Ssl=True creates a default context (rejects untrusted certs)."""
+
     async def shell(reader, writer):
         pass
 
-    async with create_server(
-        host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx
-    ):
+    async with create_server(host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx):
         with pytest.raises(ssl.SSLCertVerificationError):
             async with open_connection(
                 bind_host,
@@ -119,19 +107,14 @@ async def test_tls_ssl_true_uses_default_context(
                 pass
 
 
-async def test_plain_client_rejected_by_tls_server(
-    bind_host, unused_tcp_port, server_ssl_ctx
-):
+async def test_plain_client_rejected_by_tls_server(bind_host, unused_tcp_port, server_ssl_ctx):
     """Plain TCP client cannot connect to a TLS server."""
+
     async def shell(reader, writer):
         pass
 
-    async with create_server(
-        host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx
-    ):
-        reader, writer = await asyncio.open_connection(
-            host=bind_host, port=unused_tcp_port
-        )
+    async with create_server(host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx):
+        reader, writer = await asyncio.open_connection(host=bind_host, port=unused_tcp_port)
         try:
             writer.write(b"hello\r\n")
             await writer.drain()
@@ -203,9 +186,7 @@ async def test_fingerprint_ssl_cli_args():
     """--ssl flag is accepted by fingerprint argument parser."""
     from telnetlib3.client import _get_fingerprint_argument_parser
 
-    args = _get_fingerprint_argument_parser().parse_args(
-        ["--ssl", "example.com", "992"]
-    )
+    args = _get_fingerprint_argument_parser().parse_args(["--ssl", "example.com", "992"])
     assert args.ssl is True
     assert args.ssl_cafile is None
 
@@ -236,11 +217,7 @@ async def test_tls_fingerprint_end_to_end(
         _waiter.set_result(True)
 
     async with create_server(
-        host=bind_host,
-        port=unused_tcp_port,
-        shell=shell,
-        encoding=False,
-        ssl=server_ssl_ctx,
+        host=bind_host, port=unused_tcp_port, shell=shell, encoding=False, ssl=server_ssl_ctx
     ):
         async with open_connection(
             bind_host,

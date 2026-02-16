@@ -516,11 +516,7 @@ async def open_connection(  # pylint: disable=too-many-locals
     elif isinstance(ssl, ssl_module.SSLContext):
         ssl_context = ssl
 
-    conn_kwargs: Dict[str, Any] = {
-        "family": family,
-        "flags": flags,
-        "local_addr": local_addr,
-    }
+    conn_kwargs: Dict[str, Any] = {"family": family, "flags": flags, "local_addr": local_addr}
     if ssl_context is not None:
         conn_kwargs["ssl"] = ssl_context
         conn_kwargs["server_hostname"] = server_hostname or host or "localhost"
@@ -528,10 +524,7 @@ async def open_connection(  # pylint: disable=too-many-locals
     try:
         _, protocol = await asyncio.wait_for(
             asyncio.get_event_loop().create_connection(
-                connection_factory,
-                host or "localhost",
-                port,
-                **conn_kwargs,
+                connection_factory, host or "localhost", port, **conn_kwargs
             ),
             timeout=connect_timeout,
         )
@@ -822,10 +815,7 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         "BBSes that expect ANSI cursor sequences.",
     )
     parser.add_argument(
-        "--ssl",
-        action="store_true",
-        default=False,
-        help="connect using TLS (TELNETS)",
+        "--ssl", action="store_true", default=False, help="connect using TLS (TELNETS)"
     )
     parser.add_argument(
         "--ssl-cafile",
@@ -1029,10 +1019,7 @@ def _get_fingerprint_argument_parser() -> argparse.ArgumentParser:
         "--banner-max-bytes", default=65536, type=int, help="max bytes per banner read call"
     )
     parser.add_argument(
-        "--ssl",
-        action="store_true",
-        default=False,
-        help="connect using TLS (TELNETS)",
+        "--ssl", action="store_true", default=False, help="connect using TLS (TELNETS)"
     )
     parser.add_argument(
         "--ssl-cafile",
@@ -1060,10 +1047,8 @@ async def run_fingerprint_client() -> None:
     :func:`~telnetlib3.server_fingerprinting.fingerprinting_client_shell`
     via :func:`functools.partial`, and runs the connection.
     """
-    # pylint: disable=too-many-statements
     # pylint: disable=import-outside-toplevel
-    from . import fingerprinting
-    from . import server_fingerprinting
+    from . import fingerprinting, server_fingerprinting
 
     args = _get_fingerprint_argument_parser().parse_args()
 

@@ -1014,10 +1014,7 @@ def parse_server_args() -> Dict[str, Any]:
         help="path to PEM certificate file for TLS (enables TELNETS)",
     )
     parser.add_argument(
-        "--ssl-keyfile",
-        default=None,
-        metavar="PATH",
-        help="path to PEM private key file for TLS",
+        "--ssl-keyfile", default=None, metavar="PATH", help="path to PEM private key file for TLS"
     )
     result = vars(parser.parse_args(argv))
     result["pty_args"] = pty_args if PTY_SUPPORT else None
