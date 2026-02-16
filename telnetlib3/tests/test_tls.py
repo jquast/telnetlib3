@@ -494,12 +494,15 @@ def _threaded_echo_server(host, port, msg=b"ok\r\n", ssl_ctx=None):
             try:
                 await stop_evt.wait()
             finally:
-                # Close accepted transports before the server socket so that
+                # Abort accepted transports before the server socket so that
                 # no orphaned sockets trigger ResourceWarning at GC time.
+                # abort() forces immediate close (no SSL shutdown handshake),
+                # which is critical because close() on an SSL transport needs
+                # multiple event loop ticks and the peer may already be gone.
                 for proto in accepted:
                     tr = proto._transport
                     if tr is not None and not tr.is_closing():
-                        tr.close()
+                        tr.abort()
                 srv.close()
                 await srv.wait_closed()
 
