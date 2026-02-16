@@ -9,6 +9,8 @@ import codecs
 import signal
 import asyncio
 import warnings
+import contextlib
+import threading
 
 # 3rd party
 import pytest
@@ -450,121 +452,93 @@ def _run_in_pty(child_func, timeout: float = _MAX_SUBPROC_SECONDS) -> str:
 class _EchoClose(asyncio.Protocol):
     """Write a message then close after a short delay."""
 
-    _transports: "list[asyncio.BaseTransport] | None" = None
-
-    def __init__(self, msg: bytes, ssl_ctx: "ssl.SSLContext | None" = None):
+    def __init__(self, msg: bytes):
         self._msg = msg
-        self.ssl_ctx = ssl_ctx
+        self._transport: asyncio.BaseTransport | None = None
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
-        if self._transports is not None:
-            self._transports.append(transport)
+        self._transport = transport
         transport.write(self._msg)
         asyncio.get_event_loop().call_later(0.3, transport.close)
 
 
-def _pty_run_client(bind_host, port, extra_argv, server_ssl_ctx=None):
-    """Start a plain/TLS server, fork, run run_client() in child with coverage."""
-    import pty  # pylint: disable=import-outside-toplevel
-    import threading  # pylint: disable=import-outside-toplevel
+@contextlib.contextmanager
+def _threaded_echo_server(host, port, msg=b"ok\r\n", ssl_ctx=None):
+    """Run a simple echo-and-close TCP server on a background thread.
 
-    marker = b"pty-marker-ok"
+    Tracks accepted transports and closes them on exit to prevent
+    ResourceWarning from ``_SelectorTransport.__del__``.
 
+    Yields once the server is ready to accept connections.
+    """
     srv_loop = asyncio.new_event_loop()
     ready = threading.Event()
-    stop_event_holder: list[asyncio.Event] = []
-    accepted_transports: list[asyncio.BaseTransport] = []
+    stop_holder: list[asyncio.Event] = []
+    accepted: list[asyncio.BaseTransport] = []
 
-    def _run_server():
+    def _run():
         asyncio.set_event_loop(srv_loop)
 
-        async def _wrapper():
-            kwargs = {}
-            if server_ssl_ctx is not None:
-                kwargs["ssl"] = server_ssl_ctx
-
+        async def _serve():
             def _factory():
-                proto = _EchoClose(marker + b"\r\n")
-                proto._transports = accepted_transports
+                proto = _EchoClose(msg)
+                accepted.append(proto)
                 return proto
 
-            srv = await srv_loop.create_server(_factory, bind_host, port, **kwargs)
+            kwargs = {"ssl": ssl_ctx} if ssl_ctx else {}
+            srv = await srv_loop.create_server(_factory, host, port, **kwargs)
             stop_evt = asyncio.Event()
-            stop_event_holder.append(stop_evt)
+            stop_holder.append(stop_evt)
             ready.set()
             try:
                 await stop_evt.wait()
             finally:
-                for tr in accepted_transports:
-                    if not tr.is_closing():
+                # Close accepted transports before the server socket so that
+                # no orphaned sockets trigger ResourceWarning at GC time.
+                for proto in accepted:
+                    tr = proto._transport
+                    if tr is not None and not tr.is_closing():
                         tr.close()
                 srv.close()
                 await srv.wait_closed()
 
-        srv_loop.run_until_complete(_wrapper())
+        srv_loop.run_until_complete(_serve())
 
-    srv_thread = threading.Thread(target=_run_server, daemon=True)
-    srv_thread.start()
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
     ready.wait(timeout=5)
+    try:
+        yield
+    finally:
+        if stop_holder:
+            srv_loop.call_soon_threadsafe(stop_holder[0].set)
+        thread.join(timeout=3)
+        srv_loop.close()
 
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=DeprecationWarning)
-        pid, master_fd = pty.fork()
 
-    if pid == 0:
-        cov = init_subproc_coverage("tls-pty-client")
-        exit_code = 0
-        try:
-            sys.argv = [
-                "telnetlib3-client",
-                bind_host,
-                str(port),
-                "--connect-minwait=0.05",
-                "--connect-maxwait=0.5",
-                "--colormatch=none",
-            ] + extra_argv
-            from telnetlib3.client import run_client  # pylint: disable=import-outside-toplevel
+def _pty_run_client(bind_host, port, extra_argv, server_ssl_ctx=None):
+    """Start a plain/TLS echo server, fork, run run_client() in the child."""
+    marker = b"pty-marker-ok"
 
-            asyncio.run(run_client())
-        except SystemExit:
-            pass
-        except BaseException:
-            import traceback  # pylint: disable=import-outside-toplevel
+    with _threaded_echo_server(bind_host, port, marker + b"\r\n", server_ssl_ctx):
+        output = _run_in_pty(lambda: _child_run_client(bind_host, port, extra_argv))
 
-            traceback.print_exc()
-            exit_code = 1
-        finally:
-            if cov is not None:
-                cov.stop()
-                cov.save()
-        os._exit(exit_code)
-
-    # Parent: read child output, wait for exit
-    output = _read_until_eof(master_fd)
-    os.close(master_fd)
-
-    start = _time.monotonic()
-    while True:
-        pid_result, status = os.waitpid(pid, os.WNOHANG)
-        if pid_result != 0:
-            break
-        if _time.monotonic() - start > _MAX_SUBPROC_SECONDS:
-            try:
-                os.kill(pid, signal.SIGKILL)
-                os.waitpid(pid, 0)
-            except OSError:
-                pass
-            raise AssertionError(f"Child hung.\nOutput:\n{output}")
-        _time.sleep(0.05)
-
-    # Shut down server gracefully
-    if stop_event_holder:
-        srv_loop.call_soon_threadsafe(stop_event_holder[0].set)
-    srv_thread.join(timeout=3)
-    srv_loop.close()
-
-    assert os.WEXITSTATUS(status) == 0, f"Child exited {os.WEXITSTATUS(status)}.\nOutput:\n{output}"
     assert "pty-marker-ok" in output, f"Marker not found in output:\n{output}"
+
+
+def _child_run_client(bind_host, port, extra_argv):
+    """Child-process body for _pty_run_client (runs inside _run_in_pty)."""
+    sys.argv = [
+        "telnetlib3-client",
+        bind_host,
+        str(port),
+        "--connect-minwait=0.05",
+        "--connect-maxwait=0.5",
+        "--colormatch=none",
+    ] + extra_argv
+    from telnetlib3.client import run_client  # pylint: disable=import-outside-toplevel
+
+    asyncio.run(run_client())
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only tests")
@@ -665,98 +639,22 @@ def test_cli_run_server_ssl(bind_host, unused_tcp_port, ca, tmp_path, client_ssl
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only tests")
 def test_cli_run_fingerprint_client_ssl(bind_host, unused_tcp_port, server_ssl_ctx):
     """run_fingerprint_client() with --ssl-no-verify exercises TLS context path."""
-    import pty  # pylint: disable=import-outside-toplevel
-    import threading  # pylint: disable=import-outside-toplevel
-
     port = unused_tcp_port
 
-    srv_loop = asyncio.new_event_loop()
-    ready = threading.Event()
-    stop_event_holder: list[asyncio.Event] = []
-    accepted_transports: list[asyncio.BaseTransport] = []
+    def _child():
+        sys.argv = [
+            "telnetlib3-fingerprint",
+            "--ssl-no-verify",
+            "--connect-timeout=3",
+            bind_host,
+            str(port),
+        ]
+        from telnetlib3.client import run_fingerprint_client  # noqa: PLC0415
 
-    def _run_server():
-        asyncio.set_event_loop(srv_loop)
+        asyncio.run(run_fingerprint_client())
 
-        async def _wrapper():
-            def _factory():
-                proto = _EchoClose(b"fingerprint-ok\r\n")
-                proto._transports = accepted_transports
-                return proto
-
-            srv = await srv_loop.create_server(_factory, bind_host, port, ssl=server_ssl_ctx)
-            stop_evt = asyncio.Event()
-            stop_event_holder.append(stop_evt)
-            ready.set()
-            try:
-                await stop_evt.wait()
-            finally:
-                for tr in accepted_transports:
-                    if not tr.is_closing():
-                        tr.close()
-                srv.close()
-                await srv.wait_closed()
-
-        srv_loop.run_until_complete(_wrapper())
-
-    srv_thread = threading.Thread(target=_run_server, daemon=True)
-    srv_thread.start()
-    ready.wait(timeout=5)
-
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=DeprecationWarning)
-        pid, master_fd = pty.fork()
-
-    if pid == 0:
-        cov = init_subproc_coverage("tls-fp-client-pty")
-        exit_code = 0
-        try:
-            sys.argv = [
-                "telnetlib3-fingerprint",
-                "--ssl-no-verify",
-                "--connect-timeout=3",
-                bind_host,
-                str(port),
-            ]
-            from telnetlib3.client import run_fingerprint_client  # noqa: PLC0415
-
-            asyncio.run(run_fingerprint_client())
-        except SystemExit:
-            pass
-        except BaseException:
-            import traceback  # pylint: disable=import-outside-toplevel
-
-            traceback.print_exc()
-            exit_code = 1
-        finally:
-            if cov is not None:
-                cov.stop()
-                cov.save()
-        os._exit(exit_code)
-
-    # Parent: read child output, wait for exit
-    output = _read_until_eof(master_fd)
-    os.close(master_fd)
-
-    start = _time.monotonic()
-    while True:
-        pid_result, status = os.waitpid(pid, os.WNOHANG)
-        if pid_result != 0:
-            break
-        if _time.monotonic() - start > _MAX_SUBPROC_SECONDS:
-            try:
-                os.kill(pid, signal.SIGKILL)
-                os.waitpid(pid, 0)
-            except OSError:
-                pass
-            break
-        _time.sleep(0.05)
-
-    # Shut down server gracefully
-    if stop_event_holder:
-        srv_loop.call_soon_threadsafe(stop_event_holder[0].set)
-    srv_thread.join(timeout=3)
-    srv_loop.close()
+    with _threaded_echo_server(bind_host, port, b"fingerprint-ok\r\n", server_ssl_ctx):
+        _run_in_pty(_child)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only tests")
@@ -770,98 +668,24 @@ def test_cli_run_fingerprint_client_ssl_cafile(
     bind_host, unused_tcp_port, server_ssl_ctx, ca, tmp_path
 ):
     """run_fingerprint_client() with --ssl --ssl-cafile exercises cafile path."""
-    import pty  # pylint: disable=import-outside-toplevel
-    import threading  # pylint: disable=import-outside-toplevel
-
     port = unused_tcp_port
 
     ca_pem = tmp_path / "ca.pem"
     ca.cert_pem.write_to_path(str(ca_pem))
 
-    srv_loop = asyncio.new_event_loop()
-    ready = threading.Event()
-    stop_event_holder: list[asyncio.Event] = []
-    accepted_transports: list[asyncio.BaseTransport] = []
+    def _child():
+        sys.argv = [
+            "telnetlib3-fingerprint",
+            "--ssl",
+            "--ssl-cafile",
+            str(ca_pem),
+            "--connect-timeout=3",
+            bind_host,
+            str(port),
+        ]
+        from telnetlib3.client import run_fingerprint_client  # noqa: PLC0415
 
-    def _run_server():
-        asyncio.set_event_loop(srv_loop)
+        asyncio.run(run_fingerprint_client())
 
-        async def _wrapper():
-            def _factory():
-                proto = _EchoClose(b"fingerprint-ok\r\n")
-                proto._transports = accepted_transports
-                return proto
-
-            srv = await srv_loop.create_server(_factory, bind_host, port, ssl=server_ssl_ctx)
-            stop_evt = asyncio.Event()
-            stop_event_holder.append(stop_evt)
-            ready.set()
-            try:
-                await stop_evt.wait()
-            finally:
-                for tr in accepted_transports:
-                    if not tr.is_closing():
-                        tr.close()
-                srv.close()
-                await srv.wait_closed()
-
-        srv_loop.run_until_complete(_wrapper())
-
-    srv_thread = threading.Thread(target=_run_server, daemon=True)
-    srv_thread.start()
-    ready.wait(timeout=5)
-
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=DeprecationWarning)
-        pid, master_fd = pty.fork()
-
-    if pid == 0:
-        cov = init_subproc_coverage("tls-fp-cafile-pty")
-        exit_code = 0
-        try:
-            sys.argv = [
-                "telnetlib3-fingerprint",
-                "--ssl",
-                "--ssl-cafile",
-                str(ca_pem),
-                "--connect-timeout=3",
-                bind_host,
-                str(port),
-            ]
-            from telnetlib3.client import run_fingerprint_client  # noqa: PLC0415
-
-            asyncio.run(run_fingerprint_client())
-        except SystemExit:
-            pass
-        except BaseException:
-            import traceback  # pylint: disable=import-outside-toplevel
-
-            traceback.print_exc()
-            exit_code = 1
-        finally:
-            if cov is not None:
-                cov.stop()
-                cov.save()
-        os._exit(exit_code)
-
-    output = _read_until_eof(master_fd)
-    os.close(master_fd)
-
-    start = _time.monotonic()
-    while True:
-        pid_result, status = os.waitpid(pid, os.WNOHANG)
-        if pid_result != 0:
-            break
-        if _time.monotonic() - start > _MAX_SUBPROC_SECONDS:
-            try:
-                os.kill(pid, signal.SIGKILL)
-                os.waitpid(pid, 0)
-            except OSError:
-                pass
-            break
-        _time.sleep(0.05)
-
-    if stop_event_holder:
-        srv_loop.call_soon_threadsafe(stop_event_holder[0].set)
-    srv_thread.join(timeout=3)
-    srv_loop.close()
+    with _threaded_echo_server(bind_host, port, b"fingerprint-ok\r\n", server_ssl_ctx):
+        _run_in_pty(_child)
