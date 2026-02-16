@@ -9,8 +9,8 @@ import codecs
 import signal
 import asyncio
 import warnings
-import contextlib
 import threading
+import contextlib
 
 # 3rd party
 import pytest
@@ -464,7 +464,8 @@ class _EchoClose(asyncio.Protocol):
 
 @contextlib.contextmanager
 def _threaded_echo_server(host, port, msg=b"ok\r\n", ssl_ctx=None):
-    """Run a simple echo-and-close TCP server on a background thread.
+    """
+    Run a simple echo-and-close TCP server on a background thread.
 
     Tracks accepted transports and closes them on exit to prevent
     ResourceWarning from ``_SelectorTransport.__del__``.
