@@ -92,8 +92,8 @@ server_wait_for_negotiation.py
 
 https://github.com/jquast/telnetlib3/blob/master/bin/server_wait_for_negotiation.py
 
-A shell callback demonstrating :meth:`~telnetlib3.stream_writer.TelnetWriter.wait_for` to await specific
-telnet option negotiation states before proceeding. This is useful when your
+A shell callback demonstrating :meth:`~telnetlib3.stream_writer.TelnetWriter.wait_for` to
+await specific telnet option negotiation states before proceeding. This is useful when your
 application depends on certain terminal capabilities being negotiated.
 
 The server waits for:
@@ -805,6 +805,7 @@ Enhancements over legacy telnetlib:
 
 - Full RFC 854 protocol negotiation (NAWS, TTYPE, BINARY, ECHO, SGA)
 - :meth:`~telnetlib3.sync.TelnetConnection.wait_for` to await negotiation states
-- :meth:`~telnetlib3.sync.TelnetConnection.get_extra_info` for terminal type, size, and other metadata
+- :meth:`~telnetlib3.sync.TelnetConnection.get_extra_info` for terminal type, size
+  and other metadata
 - :attr:`~telnetlib3.sync.TelnetConnection.writer` property for protocol state inspection
 - Server support via :class:`~telnetlib3.sync.BlockingTelnetServer`

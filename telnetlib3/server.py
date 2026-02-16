@@ -144,7 +144,6 @@ class TelnetServer(server_base.BaseServer):
         )
 
         super().connection_made(transport)
-        assert self.writer is not None
 
         # begin timeout timer
         self.set_timeout()
@@ -179,7 +178,6 @@ class TelnetServer(server_base.BaseServer):
         from .telopt import DO, TTYPE  # pylint: disable=import-outside-toplevel
 
         super().begin_negotiation()
-        assert self.writer is not None
         self.writer.iac(DO, TTYPE)
 
     def begin_advanced_negotiation(self) -> None:
@@ -204,7 +202,6 @@ class TelnetServer(server_base.BaseServer):
         )
 
         super().begin_advanced_negotiation()
-        assert self.writer is not None
         self.writer.iac(WILL, SGA)
         # WILL ECHO is deferred -- see _negotiate_echo()
         self.writer.iac(WILL, BINARY)
@@ -223,7 +220,6 @@ class TelnetServer(server_base.BaseServer):
             NEW_ENVIRON,
         )
 
-        assert self.writer is not None
         # If TTYPE cycle stalled or client refused TTYPE, trigger
         # deferred ECHO and NEW_ENVIRON negotiation now.  Only when
         # advanced negotiation is active -- a raw TCP client that
@@ -329,7 +325,6 @@ class TelnetServer(server_base.BaseServer):
             )
 
         # may we encode in the direction indicated?
-        assert self.writer is not None
         _outgoing_only = outgoing and not incoming
         _incoming_only = not outgoing and incoming
         _bidirectional = outgoing and incoming
@@ -391,7 +386,6 @@ class TelnetServer(server_base.BaseServer):
         ``duration`` value of ``0``.
         """
         logger.debug("Timeout after %1.2fs", self.idle)
-        assert self.writer is not None
         if isinstance(self.writer, TelnetWriterUnicode):
             self.writer.write("\r\nTimeout.\r\n")
         else:
@@ -510,7 +504,6 @@ class TelnetServer(server_base.BaseServer):
 
     def on_ttype(self, ttype: str) -> None:
         """Callback for TTYPE response, :rfc:`930`."""
-        assert self.writer is not None
         # TTYPE may be requested multiple times, we honor this system and
         # attempt to cause the client to cycle, as their first response may
         # not be their most significant. All responses held as 'ttype{n}',
@@ -595,7 +588,6 @@ class TelnetServer(server_base.BaseServer):
             )
             return
 
-        assert self.writer is not None
         self.writer.iac(DO, NEW_ENVIRON)
 
     def _negotiate_echo(self) -> None:
@@ -616,7 +608,6 @@ class TelnetServer(server_base.BaseServer):
         from .telopt import ECHO, WILL  # pylint: disable=import-outside-toplevel
         from .fingerprinting import _is_maybe_mud  # pylint: disable=import-outside-toplevel
 
-        assert self.writer is not None
         if _is_maybe_mud(self.writer):
             logger.info("skipping WILL ECHO for MUD client")
             return
@@ -626,7 +617,6 @@ class TelnetServer(server_base.BaseServer):
         # Periodically check for completion of ``waiter_encoding``.
         from .telopt import DO, SB, BINARY, CHARSET  # pylint: disable=import-outside-toplevel
 
-        assert self.writer is not None
         # Check if we need to request client to use BINARY mode for client-to-server communication
         if (
             self.writer.outbinary
@@ -667,7 +657,6 @@ class Server:
 
     def close(self) -> None:
         """Close the server, stop accepting new connections, and close all clients."""
-        assert self._server is not None
         self._server.close()
         # Close all connected client transports
         for protocol in list(self._protocols):
@@ -677,7 +666,6 @@ class Server:
 
     async def wait_closed(self) -> None:
         """Wait until the server and all client connections are closed."""
-        assert self._server is not None
         await self._server.wait_closed()
         # Yield to event loop for pending close callbacks
         await asyncio.sleep(0)
@@ -687,12 +675,10 @@ class Server:
     @property
     def sockets(self) -> Optional[Tuple["socket.socket", ...]]:
         """Return list of socket objects the server is listening on."""
-        assert self._server is not None
         return self._server.sockets
 
     def is_serving(self) -> bool:
         """Return True if the server is accepting new connections."""
-        assert self._server is not None
         return self._server.is_serving()
 
     @property

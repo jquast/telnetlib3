@@ -99,7 +99,7 @@ async def test_tls_ca_verification(bind_host, unused_tcp_port, server_ssl_ctx):
 async def test_tls_ssl_true_uses_default_context(
     bind_host, unused_tcp_port, server_ssl_ctx
 ):
-    """ssl=True creates a default context (rejects untrusted certs)."""
+    """Ssl=True creates a default context (rejects untrusted certs)."""
     async def shell(reader, writer):
         pass
 
@@ -129,28 +129,34 @@ async def test_plain_client_rejected_by_tls_server(
     async with create_server(
         host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx
     ):
-        with pytest.raises((ConnectionResetError, OSError)):
-            reader, writer = await asyncio.open_connection(
-                host=bind_host, port=unused_tcp_port
-            )
-            # Send some data to trigger TLS handshake failure on server side
+        reader, writer = await asyncio.open_connection(
+            host=bind_host, port=unused_tcp_port
+        )
+        try:
             writer.write(b"hello\r\n")
             await writer.drain()
-            await asyncio.wait_for(reader.read(1024), 2.0)
+            data = await asyncio.wait_for(reader.read(1024), 2.0)
+            # Server rejects non-TLS data: either raises or returns EOF
+            assert data == b""
+        except (ConnectionResetError, OSError):
+            pass
+        finally:
+            writer.close()
+            await writer.wait_closed()
 
 
 async def test_server_ssl_cli_args():
     """--ssl-certfile and --ssl-keyfile produce SSLContext in parsed args."""
-    import tempfile
     import os
-
-    from telnetlib3.server import parse_server_args
 
     # Create dummy cert/key files (content doesn't matter for arg parsing test,
     # but SSLContext.load_cert_chain will fail — we test the arg parsing path
     # separately by mocking).
     # Instead, test that without --ssl-certfile, ssl is None.
     import sys
+    import tempfile
+
+    from telnetlib3.server import parse_server_args
 
     orig_argv = sys.argv
     try:
@@ -163,7 +169,7 @@ async def test_server_ssl_cli_args():
 
 async def test_client_ssl_cli_args():
     """--ssl flag produces SSLContext in transformed args."""
-    from telnetlib3.client import _get_argument_parser, _transform_args
+    from telnetlib3.client import _transform_args, _get_argument_parser
 
     args = _get_argument_parser().parse_args(["--ssl", "example.com", "992"])
     result = _transform_args(args)
@@ -172,7 +178,7 @@ async def test_client_ssl_cli_args():
 
 async def test_client_ssl_cafile_cli_args(tmp_path, ca):
     """--ssl --ssl-cafile produces SSLContext with custom CA."""
-    from telnetlib3.client import _get_argument_parser, _transform_args
+    from telnetlib3.client import _transform_args, _get_argument_parser
 
     ca_pem = tmp_path / "ca.pem"
     ca.cert_pem.write_to_path(str(ca_pem))
@@ -186,7 +192,7 @@ async def test_client_ssl_cafile_cli_args(tmp_path, ca):
 
 async def test_client_no_ssl_cli_args():
     """Without --ssl, ssl key is absent or None."""
-    from telnetlib3.client import _get_argument_parser, _transform_args
+    from telnetlib3.client import _transform_args, _get_argument_parser
 
     args = _get_argument_parser().parse_args(["example.com"])
     result = _transform_args(args)

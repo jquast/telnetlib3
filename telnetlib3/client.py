@@ -102,7 +102,6 @@ class TelnetClient(client_base.BaseClient):
         from telnetlib3.telopt import NAWS, TTYPE, TSPEED, CHARSET, XDISPLOC, NEW_ENVIRON
 
         super().connection_made(transport)
-        assert self.writer is not None
 
         # Wire extended rfc callbacks for requests of
         # terminal attributes, environment values, etc.
@@ -243,7 +242,6 @@ class TelnetClient(client_base.BaseClient):
         # Get client's desired encoding canonical name
         desired_name = None
         if self.default_encoding:
-            assert isinstance(self.default_encoding, str)
             try:
                 desired_name = codecs.lookup(self.default_encoding).name
             except LookupError:
@@ -335,7 +333,6 @@ class TelnetClient(client_base.BaseClient):
                 "encoding arguments 'outgoing' and 'incoming' are required: toggle at least one."
             )
 
-        assert self.writer is not None
         # may we encode in the direction indicated?
         _outgoing_only = outgoing and not incoming
         _incoming_only = not outgoing and incoming
@@ -494,7 +491,6 @@ async def open_connection(  # pylint: disable=too-many-locals
             client_factory = TelnetTerminalClient
 
     def connection_factory() -> client_base.BaseClient:
-        assert client_factory is not None
         return client_factory(
             encoding=encoding,
             encoding_errors=encoding_errors,
@@ -546,8 +542,6 @@ async def open_connection(  # pylint: disable=too-many-locals
 
     await protocol._waiter_connected  # pylint: disable=protected-access
 
-    assert protocol.reader is not None
-    assert protocol.writer is not None
     return protocol.reader, protocol.writer
 
 
@@ -578,7 +572,6 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
 
         def _patched_connection_made(transport: asyncio.BaseTransport) -> None:
             orig_connection_made(transport)
-            assert client.writer is not None
             if always_will:
                 client.writer.always_will = always_will
             if always_do:
@@ -701,8 +694,6 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
     _, writer = await open_connection(args["host"], args["port"], **connection_kwargs)
 
     # repl loop
-    assert writer.protocol is not None
-    assert isinstance(writer.protocol, client_base.BaseClient)
     await writer.protocol.waiter_closed
 
 
@@ -1069,8 +1060,10 @@ async def run_fingerprint_client() -> None:
     :func:`~telnetlib3.server_fingerprinting.fingerprinting_client_shell`
     via :func:`functools.partial`, and runs the connection.
     """
-    from . import fingerprinting  # pylint: disable=import-outside-toplevel
-    from . import server_fingerprinting  # pylint: disable=import-outside-toplevel
+    # pylint: disable=too-many-statements
+    # pylint: disable=import-outside-toplevel
+    from . import fingerprinting
+    from . import server_fingerprinting
 
     args = _get_fingerprint_argument_parser().parse_args()
 
@@ -1128,14 +1121,10 @@ async def run_fingerprint_client() -> None:
 
         def patched_connection_made(transport: asyncio.BaseTransport) -> None:
             orig_connection_made(transport)
-            assert client.writer is not None
             client.writer.environ_encoding = environ_encoding
             # pylint: disable-next=protected-access
             client.writer._encoding_explicit = environ_encoding != "ascii"
-            # pylint: disable-next=import-outside-toplevel
-            from .fingerprinting import EXTENDED_OPTIONS
-
-            mud_opts = {opt for opt, _, _ in EXTENDED_OPTIONS}
+            mud_opts = {opt for opt, _, _ in fingerprinting.EXTENDED_OPTIONS}
             client.writer.always_will = fp_always_will | mud_opts
             client.writer.always_do = fp_always_do | mud_opts
 
@@ -1184,8 +1173,6 @@ async def run_fingerprint_client() -> None:
         log.error("%s:%d: %s", args.host, args.port, err)
         raise
 
-    assert writer.protocol is not None
-    assert isinstance(writer.protocol, client_base.BaseClient)
     await writer.protocol.waiter_closed
 
 
