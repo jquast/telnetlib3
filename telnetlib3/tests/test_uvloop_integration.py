@@ -7,7 +7,6 @@ import asyncio
 import pytest
 
 try:
-    # 3rd party
     import uvloop
 
     HAS_UVLOOP = True

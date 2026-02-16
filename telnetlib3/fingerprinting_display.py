@@ -415,7 +415,6 @@ def _build_telnet_rows(  # pylint: disable=too-many-locals,unused-argument
 
 def _make_terminal(**kwargs: Any) -> Any:
     """Create a blessed Terminal, falling back to ``ansi`` on setupterm failure."""
-    # 3rd party
     from blessed import Terminal  # pylint: disable=import-outside-toplevel,import-error
 
     with warnings.catch_warnings(record=True) as caught:
@@ -525,7 +524,6 @@ def _display_compact_summary(  # pylint: disable=too-complex,too-many-branches
 ) -> bool:
     """Display compact fingerprint summary using prettytable."""
     try:
-        # 3rd party
         from ucs_detect import (  # pylint: disable=import-outside-toplevel
             _collect_side_by_side_lines,
         )
@@ -884,7 +882,6 @@ def _strip_empty_features(d: Dict[str, Any]) -> None:
 
 def _normalize_color_hex(hex_color: str) -> str:
     """Normalize X11 color hex to standard 6-digit format."""
-    # 3rd party
     from blessed.colorspace import (  # pylint: disable=import-outside-toplevel,import-error
         hex_to_rgb,
         rgb_to_hex,
@@ -1072,7 +1069,6 @@ def _show_database(
 ) -> None:
     """Display scrollable database of all known fingerprints."""
     try:
-        # 3rd party
         from prettytable import PrettyTable  # pylint: disable=import-outside-toplevel
     except ImportError:
         echo("prettytable not installed.\n")
@@ -1279,7 +1275,6 @@ def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
     _setup_term_environ(data)
 
     try:
-        # 3rd party
         import blessed  # noqa: F401  # pylint: disable=import-outside-toplevel,unused-import
     except ImportError:
         print(json.dumps(data, indent=2, sort_keys=True))

@@ -133,7 +133,6 @@ class TelnetConnection:
         # is programmatic, not a terminal app, so it should use the cols/rows
         # parameters rather than reading the real terminal size.
         if "client_factory" not in kwargs:
-            # local
             from .client import TelnetClient  # pylint: disable=import-outside-toplevel
 
             kwargs["client_factory"] = TelnetClient

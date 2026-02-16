@@ -248,7 +248,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         """
         if self.writer is None:
             return
-        # local
         from .server_fingerprinting import (  # pylint: disable=import-outside-toplevel
             _SYNCTERM_BINARY_ENCODINGS,
             detect_syncterm_font,
@@ -345,7 +344,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         combined when derived.
         """
         # pylint: disable=import-outside-toplevel
-        # local
         from .telopt import TTYPE, CHARSET, NEW_ENVIRON
 
         # First check if there are any pending options

@@ -15,7 +15,6 @@ import collections
 from pathlib import Path
 
 try:
-    # 3rd party
     from wcwidth import iter_sequences, strip_sequences
 
     _HAS_WCWIDTH = True

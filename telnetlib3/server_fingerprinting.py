@@ -874,7 +874,6 @@ def _format_banner(data: bytes, encoding: str = "utf-8") -> str:
         text = data.decode("latin-1")
 
     if encoding.lower() in ("petscii", "cbm", "commodore", "c64", "c128"):
-        # local
         from .color_filter import PetsciiColorFilter  # pylint: disable=import-outside-toplevel
 
         text = PetsciiColorFilter().filter(text)

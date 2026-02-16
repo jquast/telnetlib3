@@ -1442,7 +1442,6 @@ def test_virtual_cursor_ansi_stripped():
     ],
 )
 def test_reencode_prompt(response, encoding, expected):
-    # local
     import telnetlib3  # noqa: F401
 
     assert sfp._reencode_prompt(response, encoding) == expected

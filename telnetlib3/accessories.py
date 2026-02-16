@@ -14,7 +14,6 @@ TRACE = 5
 logging.addLevelName(TRACE, "TRACE")
 
 if TYPE_CHECKING:  # pragma: no cover
-    # local
     from .stream_reader import TelnetReader, TelnetReaderUnicode
 
 __all__ = (

@@ -98,7 +98,6 @@ class TelnetClient(client_base.BaseClient):
         and character set negotiation.
         """
         # pylint: disable=import-outside-toplevel
-        # local
         from telnetlib3.telopt import NAWS, TTYPE, TSPEED, CHARSET, XDISPLOC, NEW_ENVIRON
 
         super().connection_made(transport)
@@ -198,7 +197,6 @@ class TelnetClient(client_base.BaseClient):
         :param name: Raw charset name from the server.
         :returns: Normalized name suitable for :func:`codecs.lookup`.
         """
-        # std imports
         import re  # pylint: disable=import-outside-toplevel
 
         base = name.strip().replace(" ", "-")
@@ -381,7 +379,6 @@ class TelnetTerminalClient(TelnetClient):
     @staticmethod
     def _winsize() -> Tuple[int, int]:
         try:
-            # std imports
             import fcntl  # pylint: disable=import-outside-toplevel
             import termios  # pylint: disable=import-outside-toplevel
 
@@ -574,7 +571,6 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
     colormatch: str = args["colormatch"]
     shell_callback = args["shell"]
     if colormatch.lower() != "none":
-        # local
         from .color_filter import (  # pylint: disable=import-outside-toplevel
             PALETTES,
             ColorConfig,
@@ -626,7 +622,6 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
     # Wrap shell to inject raw_mode flag and input translation for retro encodings
     raw_mode_val: Optional[bool] = args.get("raw_mode", False)
     if raw_mode_val is not False:
-        # local
         from .client_shell import (  # pylint: disable=import-outside-toplevel
             _INPUT_XLAT,
             _INPUT_SEQ_XLAT,
@@ -821,7 +816,6 @@ def _parse_option_arg(value: str) -> bytes:
     :returns: Single-byte option value.
     :raises ValueError: When *value* is not a known name or valid integer.
     """
-    # local
     from .telopt import option_from_name  # pylint: disable=import-outside-toplevel
 
     try:
@@ -846,7 +840,6 @@ def _parse_background_color(value: str) -> Tuple[int, int, int]:
 
 def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
     # Auto-enable force_binary for retro BBS encodings that use high-bit bytes.
-    # local
     from .encodings import FORCE_BINARY_ENCODINGS  # pylint: disable=import-outside-toplevel
 
     force_binary = args.force_binary
@@ -996,7 +989,6 @@ async def run_fingerprint_client() -> None:
     :func:`~telnetlib3.server_fingerprinting.fingerprinting_client_shell`
     via :func:`functools.partial`, and runs the connection.
     """
-    # local
     from . import fingerprinting  # pylint: disable=import-outside-toplevel
     from . import server_fingerprinting  # pylint: disable=import-outside-toplevel
 

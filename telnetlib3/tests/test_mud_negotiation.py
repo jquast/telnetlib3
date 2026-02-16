@@ -152,7 +152,6 @@ def test_sb_msdp_dispatch():
     w.set_ext_callback(MSDP, callback)
     w.pending_option[SB + MSDP] = True
 
-    # local
     from telnetlib3.telopt import MSDP_VAL, MSDP_VAR
 
     payload = MSDP_VAR + b"HEALTH" + MSDP_VAL + b"100"
@@ -173,7 +172,6 @@ def test_sb_mssp_dispatch():
     w.set_ext_callback(MSSP, callback)
     w.pending_option[SB + MSSP] = True
 
-    # local
     from telnetlib3.telopt import MSSP_VAL, MSSP_VAR
 
     payload = MSSP_VAR + b"NAME" + MSSP_VAL + b"TestMUD"
@@ -195,7 +193,6 @@ def test_sb_mssp_dispatch_stores_data():
     w, t, p = new_writer(server=True)
     w.pending_option[SB + MSSP] = True
 
-    # local
     from telnetlib3.telopt import MSSP_VAL, MSSP_VAR
 
     payload = MSSP_VAR + b"NAME" + MSSP_VAL + b"TestMUD" + MSSP_VAR + b"PLAYERS" + MSSP_VAL + b"5"
@@ -209,7 +206,6 @@ def test_sb_mssp_latin1_fallback():
     w, t, p = new_writer(server=True)
     w.pending_option[SB + MSSP] = True
 
-    # local
     from telnetlib3.telopt import MSSP_VAL, MSSP_VAR
 
     # 0xC9 is 'É' in latin-1 but invalid as a lone UTF-8 lead byte
@@ -236,7 +232,6 @@ def test_sb_msdp_latin1_fallback():
     w, t, p = new_writer(server=True)
     w.pending_option[SB + MSDP] = True
 
-    # local
     from telnetlib3.telopt import MSDP_VAL, MSDP_VAR
 
     received_args: list[object] = []
@@ -265,7 +260,6 @@ def test_send_msdp():
     w, t, p = new_writer(server=True)
     w.local_option[MSDP] = True
 
-    # local
     from telnetlib3.telopt import MSDP_VAL, MSDP_VAR
 
     w.send_msdp({"HEALTH": "100"})
@@ -277,7 +271,6 @@ def test_send_mssp():
     w, t, p = new_writer(server=True)
     w.local_option[MSSP] = True
 
-    # local
     from telnetlib3.telopt import MSSP_VAL, MSSP_VAR
 
     w.send_mssp({"NAME": "TestMUD"})

@@ -40,7 +40,6 @@ def _make_writer(
     will_echo: bool = False, raw_mode: "bool | None" = False, will_sga: bool = False
 ) -> object:
     """Build a minimal mock writer with the attributes Terminal needs."""
-    # local
     from telnetlib3.telopt import SGA  # pylint: disable=import-outside-toplevel
 
     writer = types.SimpleNamespace(

@@ -173,7 +173,6 @@ if sys.platform == "win32":
         raise NotImplementedError("win32 not yet supported as telnet client. Please contribute!")
 
 else:
-    # std imports
     import os
     import signal
     import termios
@@ -208,7 +207,6 @@ else:
                 writer = self.telnet_writer
 
                 def _send_naws() -> None:
-                    # local
                     from .telopt import NAWS  # pylint: disable=import-outside-toplevel
 
                     try:
@@ -302,7 +300,6 @@ else:
 
         def _server_will_sga(self) -> bool:
             """Whether server has negotiated WILL SGA."""
-            # local
             from .telopt import SGA  # pylint: disable=import-outside-toplevel
 
             return bool(self.telnet_writer.client and self.telnet_writer.remote_option.enabled(SGA))

@@ -687,7 +687,6 @@ class Telnet:
         for i in indices:
             if not hasattr(list[i], "search"):
                 if not re:
-                    # std imports
                     import re  # pylint: disable=import-outside-toplevel
                 list[i] = re.compile(list[i])
         if timeout is not None:

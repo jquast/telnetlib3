@@ -1190,7 +1190,6 @@ def test_linemode_mode_without_negotiation_ignored():
 
 def test_name_option_distinguishes_commands_from_options():
     """name_option renders IAC command bytes as repr, not their command names."""
-    # local
     from telnetlib3.telopt import name_option, name_command
 
     assert name_option(WONT) == repr(WONT)
