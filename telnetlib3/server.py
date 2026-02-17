@@ -22,9 +22,7 @@ import socket
 import asyncio
 import logging
 import argparse
-from typing import (
-    Any, Dict, List, Type, Tuple, Union, Callable, Optional, Sequence, NamedTuple
-)
+from typing import Any, Dict, List, Type, Tuple, Union, Callable, Optional, Sequence, NamedTuple
 
 # local
 from . import accessories, server_base
@@ -657,9 +655,7 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
     """
 
     def __init__(
-        self,
-        ssl_context: ssl_module.SSLContext,
-        real_factory: Callable[[], asyncio.Protocol],
+        self, ssl_context: ssl_module.SSLContext, real_factory: Callable[[], asyncio.Protocol]
     ) -> None:
         self._ssl_context = ssl_context
         self._real_factory = real_factory
@@ -683,7 +679,7 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
         peek_sock = socket.fromfd(tsock.fileno(), socket.AF_INET, socket.SOCK_STREAM)
         try:
             data = peek_sock.recv(1, socket.MSG_PEEK)
-        except (BlockingIOError, OSError):
+        except OSError:
             asyncio.get_event_loop().call_soon(self._detect_tls)
             return
         finally:
@@ -705,12 +701,9 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
             # start_tls uses call_connection_made=False, so we must call
             # connection_made ourselves with the returned SSL transport.
             ssl_transport = await loop.start_tls(
-                self._transport,
-                protocol,
-                self._ssl_context,
-                server_side=True,
+                self._transport, protocol, self._ssl_context, server_side=True
             )
-        except (ssl_module.SSLError, OSError, ConnectionResetError) as exc:
+        except (ssl_module.SSLError, OSError) as exc:
             logger.debug("TLS handshake failed: %s", exc)
             if not self._transport.is_closing():
                 self._transport.close()
@@ -726,13 +719,12 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
         protocol.connection_made(self._transport)
         self._transport.resume_reading()
 
-    def data_received(self, data: bytes) -> None:
+    def data_received(self, data: bytes) -> None:  # pragma: no cover
         """Not expected — reading is paused during detection."""
-        pass  # pragma: no cover
 
     def connection_lost(self, exc: Optional[Exception]) -> None:
         """Connection dropped before detection completed."""
-        pass
+        _ = exc
 
 
 class Server:
@@ -973,7 +965,6 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
         raise ValueError("tls_auto=True requires an ssl SSLContext")
 
     protocol_factory = protocol_factory or TelnetServer
-    loop = asyncio.get_event_loop()
 
     telnet_server = Server(None)
 
@@ -1010,19 +1001,23 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
 
     if tls_auto:
         assert ssl is not None
-        ssl_context = ssl
 
         def factory() -> asyncio.Protocol:
-            return _TLSAutoDetectProtocol(ssl_context, _make_telnet_protocol)
+            return _TLSAutoDetectProtocol(ssl, _make_telnet_protocol)
 
-        server = await loop.create_server(factory, host, port)
+        # pylint: disable=protected-access
+        telnet_server._server = await asyncio.get_event_loop().create_server(
+            factory, host, port
+        )
     else:
 
         def factory() -> asyncio.Protocol:
             return _make_telnet_protocol()
 
-        server = await loop.create_server(factory, host, port, ssl=ssl)
-    telnet_server._server = server  # pylint: disable=protected-access
+        # pylint: disable=protected-access
+        telnet_server._server = await asyncio.get_event_loop().create_server(
+            factory, host, port, ssl=ssl
+        )
 
     return telnet_server
 

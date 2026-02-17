@@ -685,3 +685,25 @@ async def test_telnet_server_shell_lf_input():
     await ss.telnet_server_shell(reader, writer)
     written = "".join(writer.written)
     assert "Goodbye." in written
+
+
+@pytest.mark.asyncio
+async def test_telnet_server_shell_tls_banner():
+    """Plain connection shows 'Ready.', TLS shows 'Ready (secure: ...)'."""
+    reader = MockReader(list("quit\r"))
+    writer = MockWriter()
+    await ss.telnet_server_shell(reader, writer)
+    written = "".join(writer.written)
+    assert "Ready.\r\n" in written
+    assert "secure" not in written
+
+    class _FakeSSL:
+        def version(self):
+            return "TLSv1.3"
+
+    reader2 = MockReader(list("quit\r"))
+    writer2 = MockWriter()
+    writer2._extra["ssl_object"] = _FakeSSL()
+    await ss.telnet_server_shell(reader2, writer2)
+    written2 = "".join(writer2.written)
+    assert "Ready (secure: TLSv1.3)." in written2
