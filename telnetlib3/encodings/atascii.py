@@ -297,7 +297,6 @@ DECODING_TABLE = (
 )
 
 
-
 def _normalize_eol(text: str) -> str:
     r"""
     Normalize CR and CRLF to LF for ATASCII encoding.

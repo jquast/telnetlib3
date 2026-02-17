@@ -300,7 +300,6 @@ DECODING_TABLE = (
 )
 
 
-
 class Codec(codecs.Codec):
     """PETSCII character map codec."""
 

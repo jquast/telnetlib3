@@ -1003,13 +1003,12 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
         return protocol
 
     if tls_auto:
+
         def factory() -> asyncio.Protocol:
             return _TLSAutoDetectProtocol(ssl, _make_telnet_protocol)
 
         # pylint: disable=protected-access
-        telnet_server._server = await asyncio.get_event_loop().create_server(
-            factory, host, port
-        )
+        telnet_server._server = await asyncio.get_event_loop().create_server(factory, host, port)
     else:
 
         def factory() -> asyncio.Protocol:
