@@ -6,7 +6,9 @@ History
     :func:`~telnetlib3.server.create_server` accepts an ``ssl`` parameter
     (:class:`ssl.SSLContext`).  New CLI options: ``--ssl``, ``--ssl-cafile``,
     ``--ssl-no-verify`` for ``telnetlib3-client``; ``--ssl-certfile``,
-    ``--ssl-keyfile`` for ``telnetlib3-server``.
+    ``--ssl-keyfile`` and ``--tls-auto`` for ``telnetlib3-server``.
+  * new: the default server shell now displays ``Ready (secure: TLSv1.3).``
+    for TLS connections (the protocol version shown is negotiated dynamically).
   * bugfix: ``telnetlib3-client`` now sets terminal mode to the server's
     preference via ``WILL ECHO`` and ``WILL SGA`` negotiation.  Use
     ``--raw-mode`` to restore legacy raw mode for servers that don't negotiate.
