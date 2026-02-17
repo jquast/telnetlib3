@@ -23,6 +23,7 @@ from telnetlib3.client_shell import (  # noqa: E402
     Terminal,
     InputFilter,
     _send_stdin,
+    _transform_output,
 )
 
 
@@ -322,11 +323,7 @@ import contextlib  # noqa: E402
 import subprocess  # noqa: E402
 
 # local
-from telnetlib3.tests.accessories import (  # noqa: E402
-    bind_host,
-    asyncio_server,
-    unused_tcp_port,
-)
+from telnetlib3.tests.accessories import bind_host, asyncio_server, unused_tcp_port  # noqa: E402
 
 _IAC = b"\xff"
 _WILL = b"\xfb"
@@ -678,3 +675,37 @@ async def test_send_stdin_no_filter() -> None:
     assert not pending
     assert new_timer is None
     writer._write.assert_called_once_with(b"hello")
+
+
+def _make_transform_writer(**kwargs: object) -> object:
+    """Build a minimal writer for _transform_output tests."""
+    return types.SimpleNamespace(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "inp,in_raw,expected",
+    [
+        ("hello", True, "hello"),
+        ("hello\r\n", True, "hello\r\n"),
+        ("hello\n", True, "hello\r\n"),
+        ("\r", True, "\r"),
+        ("A\rB", True, "A\rB"),
+        ("\x1b[K\r\x1b[38m", True, "\x1b[K\r\x1b[38m"),
+        ("\r\n", True, "\r\n"),
+        ("\r\r\n", True, "\r\r\n"),
+        ("hello\r\n", False, "hello\n"),
+        ("hello\n", False, "hello\n"),
+        ("\r", False, "\r"),
+    ],
+)
+def test_transform_output_line_endings(inp: str, in_raw: bool, expected: str) -> None:
+    writer = _make_transform_writer()
+    assert _transform_output(inp, writer, in_raw) == expected
+
+
+def test_transform_output_bare_cr_preserved_raw() -> None:
+    """Bare CR (cursor return) must not become CRLF in raw mode."""
+    writer = _make_transform_writer()
+    out = _transform_output("\x1b[34;1H\x1b[K\r\x1b[38;2;17;17;17mX\x1b[6n", writer, True)
+    assert "\r\n" not in out
+    assert "\r" in out

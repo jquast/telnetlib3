@@ -246,14 +246,12 @@ else:
         def __enter__(self) -> "Terminal":
             self._save_mode = self.get_mode()
             if self._istty:
-                assert self._save_mode is not None
                 self.set_mode(self.determine_mode(self._save_mode))
             return self
 
         def __exit__(self, *_: Any) -> None:
             self.cleanup_winch()
             if self._istty:
-                assert self._save_mode is not None
                 termios.tcsetattr(self._fileno, termios.TCSAFLUSH, list(self._save_mode))
 
         def get_mode(self) -> Optional["Terminal.ModeDef"]:
@@ -323,7 +321,6 @@ else:
             _echo_changed = switched_to_raw and _wecho != last_will_echo
             if not (_should_switch or _echo_changed):
                 return None
-            assert self._save_mode is not None
             self.set_mode(self._make_raw(self._save_mode, suppress_echo=True))
             self.telnet_writer.log.debug(
                 "auto: %s (server %s ECHO)",
@@ -424,7 +421,7 @@ else:
         if getattr(writer, "_ascii_eol", False):
             out = out.replace(_ATASCII_CR_CHAR, "\r").replace(_ATASCII_LF_CHAR, "\n")
         if in_raw_mode:
-            out = out.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+            out = out.replace("\r\n", "\n").replace("\n", "\r\n")
         else:
             # Cooked mode: PTY ONLCR converts \n → \r\n, so strip \r before \n
             # to avoid doubling (\r\n → \r\r\n).

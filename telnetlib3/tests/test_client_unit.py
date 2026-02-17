@@ -6,10 +6,7 @@ import pytest
 
 # local
 from telnetlib3 import client as cl
-from telnetlib3.tests.accessories import (  # noqa: F401
-    bind_host,
-    create_server,
-)
+from telnetlib3.tests.accessories import bind_host, create_server  # noqa: F401
 
 _CLIENT_DEFAULTS = {
     "encoding": "utf8",

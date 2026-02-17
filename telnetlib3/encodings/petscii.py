@@ -299,8 +299,6 @@ DECODING_TABLE = (
     "\u03c0"  # 0xFF PI
 )
 
-assert len(DECODING_TABLE) == 256
-
 
 class Codec(codecs.Codec):
     """PETSCII character map codec."""

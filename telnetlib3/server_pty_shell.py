@@ -263,7 +263,6 @@ class PTYSession:
         # pylint: disable=import-outside-toplevel
         import fcntl
 
-        assert self.master_fd is not None
         flags = fcntl.fcntl(self.master_fd, fcntl.F_GETFL)
         fcntl.fcntl(self.master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
         self.writer.set_ext_callback(NAWS, self._on_naws)
@@ -314,8 +313,6 @@ class PTYSession:
         pty_read_event = asyncio.Event()
         pty_data_queue: asyncio.Queue[bytes] = asyncio.Queue()
 
-        assert self.child_pid is not None
-        assert self.master_fd is not None
         pid, _ = os.waitpid(self.child_pid, os.WNOHANG)
         if pid:
             return
@@ -532,7 +529,6 @@ class PTYSession:
         if not self._isalive():
             return True
 
-        assert self.child_pid is not None
         signals = [signal.SIGHUP, signal.SIGCONT, signal.SIGINT]
         if force:
             signals.append(signal.SIGKILL)

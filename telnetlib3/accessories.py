@@ -42,7 +42,7 @@ PATIENCE_MESSAGES = [
 
 def get_version() -> str:
     """Return the current version of telnetlib3."""
-    return "2.5.0"  # keep in sync with pyproject.toml and docs/conf.py !!
+    return "2.6.0"  # keep in sync with pyproject.toml and docs/conf.py !!
 
 
 def encoding_from_lang(lang: str) -> Optional[str]:
@@ -161,7 +161,6 @@ def function_lookup(pymod_path: str) -> Callable[..., Any]:
     module_name, func_name = pymod_path.rsplit(".", 1)
     module = importlib.import_module(module_name)
     shell_function: Callable[..., Any] = getattr(module, func_name)
-    assert callable(shell_function), shell_function
     return shell_function
 
 

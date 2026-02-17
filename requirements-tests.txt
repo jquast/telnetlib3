@@ -6,3 +6,4 @@ pytest-cov
 pytest-timeout
 pexpect
 uvloop
+trustme

@@ -33,9 +33,7 @@ class IncrementalEncoder(codecs.IncrementalEncoder):
 class IncrementalDecoder(codecs.IncrementalDecoder):
     """Atari ST incremental decoder."""
 
-    def decode(  # type: ignore[override]
-        self, input: bytes, final: bool = False
-    ) -> str:
+    def decode(self, input: bytes, final: bool = False) -> str:  # type: ignore[override]
         """Decode input bytes incrementally."""
         return codecs.charmap_decode(input, self.errors, DECODING_TABLE)[  # type: ignore[arg-type]
             0

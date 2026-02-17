@@ -5,6 +5,7 @@ from __future__ import annotations
 
 # std imports
 import os
+import ssl as ssl_module
 import sys
 import codecs
 import struct
@@ -101,7 +102,6 @@ class TelnetClient(client_base.BaseClient):
         from telnetlib3.telopt import NAWS, TTYPE, TSPEED, CHARSET, XDISPLOC, NEW_ENVIRON
 
         super().connection_made(transport)
-        assert self.writer is not None
 
         # Wire extended rfc callbacks for requests of
         # terminal attributes, environment values, etc.
@@ -242,7 +242,6 @@ class TelnetClient(client_base.BaseClient):
         # Get client's desired encoding canonical name
         desired_name = None
         if self.default_encoding:
-            assert isinstance(self.default_encoding, str)
             try:
                 desired_name = codecs.lookup(self.default_encoding).name
             except LookupError:
@@ -334,7 +333,6 @@ class TelnetClient(client_base.BaseClient):
                 "encoding arguments 'outgoing' and 'incoming' are required: toggle at least one."
             )
 
-        assert self.writer is not None
         # may we encode in the direction indicated?
         _outgoing_only = outgoing and not incoming
         _incoming_only = not outgoing and incoming
@@ -416,6 +414,8 @@ async def open_connection(  # pylint: disable=too-many-locals
     _waiter_connected: Optional[asyncio.Future[None]] = None,
     limit: Optional[int] = None,
     send_environ: Optional[Sequence[str]] = None,
+    ssl: Union[bool, ssl_module.SSLContext, None] = None,
+    server_hostname: Optional[str] = None,
 ) -> Tuple[Union[TelnetReader, TelnetReaderUnicode], Union[TelnetWriter, TelnetWriterUnicode]]:
     """
     Connect to a TCP Telnet server as a Telnet client.
@@ -476,6 +476,12 @@ async def open_connection(  # pylint: disable=too-many-locals
     :param shell: An async function that is called after negotiation completes,
         receiving arguments ``(reader, writer)``.
     :param limit: The buffer limit for reader stream.
+    :param ssl: TLS configuration.  ``True`` creates a default
+        :func:`ssl.create_default_context` that verifies CA certificates.
+        An :class:`ssl.SSLContext` gives full control.  ``None`` (default)
+        uses plain TCP.
+    :param server_hostname: Hostname for TLS certificate verification.  When
+        ``ssl`` is truthy and *server_hostname* is ``None``, defaults to *host*.
     :return: The reader is a :class:`~.TelnetReader` instance, the writer is a
         :class:`~.TelnetWriter` instance.
     """
@@ -485,7 +491,6 @@ async def open_connection(  # pylint: disable=too-many-locals
             client_factory = TelnetTerminalClient
 
     def connection_factory() -> client_base.BaseClient:
-        assert client_factory is not None
         return client_factory(
             encoding=encoding,
             encoding_errors=encoding_errors,
@@ -504,15 +509,22 @@ async def open_connection(  # pylint: disable=too-many-locals
             send_environ=send_environ,
         )
 
+    # Resolve TLS context
+    ssl_context: Union[ssl_module.SSLContext, None] = None
+    if ssl is True:
+        ssl_context = ssl_module.create_default_context()
+    elif isinstance(ssl, ssl_module.SSLContext):
+        ssl_context = ssl
+
+    conn_kwargs: Dict[str, Any] = {"family": family, "flags": flags, "local_addr": local_addr}
+    if ssl_context is not None:
+        conn_kwargs["ssl"] = ssl_context
+        conn_kwargs["server_hostname"] = server_hostname or host or "localhost"
+
     try:
         _, protocol = await asyncio.wait_for(
             asyncio.get_event_loop().create_connection(
-                connection_factory,
-                host or "localhost",
-                port,
-                family=family,
-                flags=flags,
-                local_addr=local_addr,
+                connection_factory, host or "localhost", port, **conn_kwargs
             ),
             timeout=connect_timeout,
         )
@@ -523,8 +535,6 @@ async def open_connection(  # pylint: disable=too-many-locals
 
     await protocol._waiter_connected  # pylint: disable=protected-access
 
-    assert protocol.reader is not None
-    assert protocol.writer is not None
     return protocol.reader, protocol.writer
 
 
@@ -555,7 +565,6 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
 
         def _patched_connection_made(transport: asyncio.BaseTransport) -> None:
             orig_connection_made(transport)
-            assert client.writer is not None
             if always_will:
                 client.writer.always_will = always_will
             if always_do:
@@ -669,6 +678,8 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
         "connect_timeout": args["connect_timeout"],
         "send_environ": args["send_environ"],
     }
+    if args.get("ssl"):
+        connection_kwargs["ssl"] = args["ssl"]
     if client_factory is not None:
         connection_kwargs["client_factory"] = client_factory
 
@@ -676,8 +687,6 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
     _, writer = await open_connection(args["host"], args["port"], **connection_kwargs)
 
     # repl loop
-    assert writer.protocol is not None
-    assert isinstance(writer.protocol, client_base.BaseClient)
     await writer.protocol.waiter_closed
 
 
@@ -805,6 +814,24 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         "keys instead of encoding-specific control codes.  Use for "
         "BBSes that expect ANSI cursor sequences.",
     )
+    parser.add_argument(
+        "--ssl", action="store_true", default=False, help="connect using TLS (TELNETS)"
+    )
+    parser.add_argument(
+        "--ssl-cafile",
+        default=None,
+        metavar="PATH",
+        help="path to CA or self-signed certificate PEM file for TLS verification",
+    )
+    parser.add_argument(
+        "--ssl-no-verify",
+        action="store_true",
+        default=False,
+        help="skip certificate verification for TLS (implies --ssl). "
+        "WARNING: this is insecure -- connections are encrypted but "
+        "the server identity is not verified, allowing "
+        "man-in-the-middle attacks",
+    )
     return parser
 
 
@@ -854,6 +881,18 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         force_binary = True
         raw_mode = True
 
+    # Build TLS context from --ssl / --ssl-cafile / --ssl-no-verify
+    ssl_ctx: Union[ssl_module.SSLContext, None] = None
+    if args.ssl or args.ssl_no_verify:
+        if args.ssl_no_verify:
+            ssl_ctx = ssl_module.SSLContext(ssl_module.PROTOCOL_TLS_CLIENT)
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl_module.CERT_NONE
+        elif args.ssl_cafile:
+            ssl_ctx = ssl_module.create_default_context(cafile=args.ssl_cafile)
+        else:
+            ssl_ctx = ssl_module.create_default_context()
+
     return {
         "host": args.host,
         "port": args.port,
@@ -879,6 +918,7 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "raw_mode": raw_mode,
         "ascii_eol": args.ascii_eol,
         "ansi_keys": args.ansi_keys,
+        "ssl": ssl_ctx,
     }
 
 
@@ -978,6 +1018,24 @@ def _get_fingerprint_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--banner-max-bytes", default=65536, type=int, help="max bytes per banner read call"
     )
+    parser.add_argument(
+        "--ssl", action="store_true", default=False, help="connect using TLS (TELNETS)"
+    )
+    parser.add_argument(
+        "--ssl-cafile",
+        default=None,
+        metavar="PATH",
+        help="path to CA or self-signed certificate PEM file for TLS verification",
+    )
+    parser.add_argument(
+        "--ssl-no-verify",
+        action="store_true",
+        default=False,
+        help="skip certificate verification for TLS (implies --ssl). "
+        "WARNING: this is insecure -- connections are encrypted but "
+        "the server identity is not verified, allowing "
+        "man-in-the-middle attacks",
+    )
     return parser
 
 
@@ -989,8 +1047,8 @@ async def run_fingerprint_client() -> None:
     :func:`~telnetlib3.server_fingerprinting.fingerprinting_client_shell`
     via :func:`functools.partial`, and runs the connection.
     """
-    from . import fingerprinting  # pylint: disable=import-outside-toplevel
-    from . import server_fingerprinting  # pylint: disable=import-outside-toplevel
+    # pylint: disable=import-outside-toplevel
+    from . import fingerprinting, server_fingerprinting
 
     args = _get_fingerprint_argument_parser().parse_args()
 
@@ -1048,14 +1106,10 @@ async def run_fingerprint_client() -> None:
 
         def patched_connection_made(transport: asyncio.BaseTransport) -> None:
             orig_connection_made(transport)
-            assert client.writer is not None
             client.writer.environ_encoding = environ_encoding
             # pylint: disable-next=protected-access
             client.writer._encoding_explicit = environ_encoding != "ascii"
-            # pylint: disable-next=import-outside-toplevel
-            from .fingerprinting import EXTENDED_OPTIONS
-
-            mud_opts = {opt for opt, _, _ in EXTENDED_OPTIONS}
+            mud_opts = {opt for opt, _, _ in fingerprinting.EXTENDED_OPTIONS}
             client.writer.always_will = fp_always_will | mud_opts
             client.writer.always_do = fp_always_do | mud_opts
 
@@ -1069,27 +1123,41 @@ async def run_fingerprint_client() -> None:
             client.send_env = patched_send_env  # type: ignore[method-assign]
         return client
 
+    # Build TLS context for fingerprint client
+    fp_ssl: Union[ssl_module.SSLContext, None] = None
+    if args.ssl or args.ssl_no_verify:
+        if args.ssl_no_verify:
+            fp_ssl = ssl_module.SSLContext(ssl_module.PROTOCOL_TLS_CLIENT)
+            fp_ssl.check_hostname = False
+            fp_ssl.verify_mode = ssl_module.CERT_NONE
+        elif args.ssl_cafile:
+            fp_ssl = ssl_module.create_default_context(cafile=args.ssl_cafile)
+        else:
+            fp_ssl = ssl_module.create_default_context()
+
     waiter_closed: asyncio.Future[None] = asyncio.get_event_loop().create_future()
 
+    fp_conn_kwargs: Dict[str, Any] = {
+        "host": args.host,
+        "port": args.port,
+        "client_factory": fingerprint_client_factory,
+        "shell": shell,
+        "encoding": False,
+        "term": ttype,
+        "connect_minwait": 0,
+        "connect_maxwait": 4.0,
+        "connect_timeout": args.connect_timeout,
+        "waiter_closed": waiter_closed,
+    }
+    if fp_ssl is not None:
+        fp_conn_kwargs["ssl"] = fp_ssl
+
     try:
-        _, writer = await open_connection(
-            host=args.host,
-            port=args.port,
-            client_factory=fingerprint_client_factory,
-            shell=shell,
-            encoding=False,
-            term=ttype,
-            connect_minwait=0,
-            connect_maxwait=4.0,
-            connect_timeout=args.connect_timeout,
-            waiter_closed=waiter_closed,
-        )
+        _, writer = await open_connection(**fp_conn_kwargs)
     except OSError as err:
         log.error("%s:%d: %s", args.host, args.port, err)
         raise
 
-    assert writer.protocol is not None
-    assert isinstance(writer.protocol, client_base.BaseClient)
     await writer.protocol.waiter_closed
 
 

@@ -153,7 +153,12 @@ async def telnet_server_shell(  # pylint: disable=too-complex,too-many-branches,
     _reader = cast(TelnetReaderUnicode, reader)
     writer = cast(TelnetWriterUnicode, writer)
 
-    writer.write("Ready." + CR + LF)
+    ssl_obj = writer.get_extra_info("ssl_object")
+    if ssl_obj is not None:
+        version = ssl_obj.version() or "TLS"
+        writer.write(f"Ready (secure: {version})." + CR + LF)
+    else:
+        writer.write("Ready." + CR + LF)
 
     command = None
     while not writer.is_closing():
