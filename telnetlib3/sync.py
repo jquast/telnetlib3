@@ -257,7 +257,12 @@ class TelnetConnection:
         """
         self._ensure_connected()
         timeout = timeout if timeout is not None else self._timeout
-        future = asyncio.run_coroutine_threadsafe(self._writer.drain(), self._loop)
+        coro = self._writer.drain()
+        try:
+            future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        except RuntimeError:
+            coro.close()
+            raise
         try:
             future.result(timeout=timeout)
         except concurrent.futures.TimeoutError as exc:
@@ -708,7 +713,12 @@ class ServerConnection:
         """
         if self._closed:
             raise RuntimeError("Connection closed")
-        future = asyncio.run_coroutine_threadsafe(self._writer.drain(), self._loop)
+        coro = self._writer.drain()
+        try:
+            future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        except RuntimeError:
+            coro.close()
+            raise
         try:
             future.result(timeout=timeout)
         except concurrent.futures.TimeoutError as exc:
