@@ -697,6 +697,9 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
         assert self._transport is not None
         loop = asyncio.get_event_loop()
         protocol = self._real_factory()
+        # Resume reading before start_tls so it can read the ClientHello.
+        # Python 3.11+ does this internally, but 3.9/3.10 do not.
+        self._transport.resume_reading()
         try:
             # start_tls uses call_connection_made=False, so we must call
             # connection_made ourselves with the returned SSL transport.
