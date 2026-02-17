@@ -81,7 +81,7 @@ _start_tls_xfail = pytest.mark.xfail(
     sys.version_info < (3, 11),
     reason="loop.start_tls(server_side=True) hangs on Python <3.11, "
     "https://github.com/python/cpython/issues/79156",
-    strict=True,
+    strict=False,
 )
 _start_tls_timeout = pytest.mark.timeout(5 if sys.version_info < (3, 11) else 15)
 

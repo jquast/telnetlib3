@@ -691,15 +691,16 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
             self._handoff_plain()
 
     async def _upgrade_to_tls(self) -> None:
-        """Upgrade the plain transport to TLS, then hand off."""
-        if sys.version_info < (3, 11):
-            logger.warning(
-                "tls_auto with TLS clients requires Python 3.11+: "
-                "loop.start_tls(server_side=True) hangs due to a bug in "
-                "the _SSLPipe-based SSLProtocol (rewired in 3.11). "
-                "https://github.com/python/cpython/issues/79156 -- "
-                "The TLS handshake will likely time out."
-            )
+        """
+        Upgrade the plain transport to TLS, then hand off.
+
+        .. note::
+
+            On Python < 3.11, ``loop.start_tls(server_side=True)`` may hang
+            due to a bug in the ``_SSLPipe``-based ``SSLProtocol``
+            (rewritten in 3.11).  See
+            https://github.com/python/cpython/issues/79156
+        """
         loop = asyncio.get_event_loop()
         protocol = self._real_factory()
         try:
