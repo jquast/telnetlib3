@@ -1,6 +1,5 @@
 """Tests for TLS (TELNETS) support."""
 
-# std imports
 import os
 import ssl
 import sys
@@ -12,11 +11,9 @@ import warnings
 import threading
 import contextlib
 
-# 3rd party
 import pytest
 import trustme
 
-# local
 from telnetlib3.tests.accessories import (
     bind_host,
     create_server,
@@ -28,13 +25,11 @@ from telnetlib3.tests.accessories import (
 
 @pytest.fixture()
 def ca():
-    """Ephemeral CA for issuing test certificates."""
     return trustme.CA()
 
 
 @pytest.fixture()
 def server_ssl_ctx(ca):
-    """Server-side SSLContext with CA-issued certificate."""
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ca.issue_cert("127.0.0.1", "localhost").configure_cert(ctx)
     return ctx
@@ -42,97 +37,155 @@ def server_ssl_ctx(ca):
 
 @pytest.fixture()
 def client_ssl_ctx(ca):
-    """Client-side SSLContext that trusts the ephemeral CA."""
     ctx = ssl.create_default_context()
     ca.configure_trust(ctx)
     return ctx
 
 
-async def test_tls_end_to_end(bind_host, unused_tcp_port, server_ssl_ctx, client_ssl_ctx):
-    """TLS server accepts TLS client, shell runs, data exchanged."""
-    _waiter = asyncio.Future()
-    send_input = "ping"
-    expect_output = "pong"
+def _echo_shell(send, reply):
+    """Return a shell coroutine that expects *send* and writes *reply*."""
+    waiter: asyncio.Future[bool] = asyncio.Future()
 
     async def shell(reader, writer):
-        inp = await reader.readexactly(len(send_input))
-        assert inp == send_input
-        writer.write(expect_output)
+        inp = await reader.readexactly(len(send))
+        assert inp == send
+        writer.write(reply)
         await writer.drain()
-        _waiter.set_result(True)
+        waiter.set_result(True)
 
-    async with create_server(host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx):
-        async with open_connection(
-            bind_host,
-            unused_tcp_port,
-            ssl=client_ssl_ctx,
-            server_hostname="localhost",
-            encoding="ascii",
-            connect_minwait=0.05,
-            connect_maxwait=0.5,
-        ) as (reader, writer):
+    return shell, waiter
+
+
+_FAST_CLIENT = dict(encoding="ascii", connect_minwait=0.05, connect_maxwait=0.5)
+
+
+async def _ping_pong(bind_host, port, server_kw, client_kw):
+    """Start server with *server_kw*, connect with *client_kw*, exchange ping/pong."""
+    shell, waiter = _echo_shell("ping", "pong")
+    async with create_server(host=bind_host, port=port, shell=shell, **server_kw):
+        async with open_connection(bind_host, port, **_FAST_CLIENT, **client_kw) as (
+            reader,
+            writer,
+        ):
             writer.write("ping")
             await writer.drain()
-            await asyncio.wait_for(_waiter, 2.0)
-            result = await asyncio.wait_for(reader.readexactly(len(expect_output)), 2.0)
-            assert result == expect_output
+            await asyncio.wait_for(waiter, 2.0)
+            result = await asyncio.wait_for(reader.readexactly(4), 2.0)
+            assert result == "pong"
 
 
-async def test_tls_ca_verification(bind_host, unused_tcp_port, server_ssl_ctx):
-    """Client without CA trust rejects the server certificate."""
-    _shell_called = asyncio.Future()
+@pytest.mark.parametrize(
+    "server_kw, client_kw",
+    [
+        pytest.param(
+            {"ssl": "server_ssl_ctx"},
+            {"ssl": "client_ssl_ctx", "server_hostname": "localhost"},
+            id="tls-only",
+        ),
+        pytest.param(
+            {"ssl": "server_ssl_ctx", "tls_auto": True},
+            {"ssl": "client_ssl_ctx", "server_hostname": "localhost"},
+            id="tls-auto-tls-client",
+        ),
+        pytest.param(
+            {"ssl": "server_ssl_ctx", "tls_auto": True},
+            {},
+            id="tls-auto-plain-client",
+        ),
+    ],
+)
+async def test_ping_pong(
+    bind_host, unused_tcp_port, server_ssl_ctx, client_ssl_ctx, server_kw, client_kw
+):
+    """Server accepts client, shell runs, ping/pong data exchanged."""
+    fixtures = {"server_ssl_ctx": server_ssl_ctx, "client_ssl_ctx": client_ssl_ctx}
+    resolved_server = {
+        k: fixtures.get(v, v) if isinstance(v, str) else v for k, v in server_kw.items()
+    }
+    resolved_client = {
+        k: fixtures.get(v, v) if isinstance(v, str) else v for k, v in client_kw.items()
+    }
+    await _ping_pong(bind_host, unused_tcp_port, resolved_server, resolved_client)
+
+
+async def test_tls_auto_both_clients(
+    bind_host, unused_tcp_port, server_ssl_ctx, client_ssl_ctx
+):
+    """Both TLS and plain clients connect sequentially to a tls_auto server."""
+    _tls_ok: asyncio.Future[bool] = asyncio.Future()
+    _plain_ok: asyncio.Future[bool] = asyncio.Future()
 
     async def shell(reader, writer):
-        _shell_called.set_result(True)
+        inp = await reader.readexactly(3)
+        if inp == "tls":
+            _tls_ok.set_result(True)
+        elif inp == "raw":
+            _plain_ok.set_result(True)
+        writer.write("ok")
+        await writer.drain()
 
-    async with create_server(host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx):
-        untrusted_ctx = ssl.create_default_context()
+    async with create_server(
+        host=bind_host, port=unused_tcp_port, shell=shell,
+        ssl=server_ssl_ctx, tls_auto=True,
+    ):
+        async with open_connection(
+            bind_host, unused_tcp_port, ssl=client_ssl_ctx,
+            server_hostname="localhost", **_FAST_CLIENT,
+        ) as (reader, writer):
+            writer.write("tls")
+            await writer.drain()
+            await asyncio.wait_for(_tls_ok, 2.0)
+
+        async with open_connection(
+            bind_host, unused_tcp_port, **_FAST_CLIENT,
+        ) as (reader, writer):
+            writer.write("raw")
+            await writer.drain()
+            await asyncio.wait_for(_plain_ok, 2.0)
+
+
+@pytest.mark.parametrize(
+    "client_ssl",
+    [
+        pytest.param(lambda: ssl.create_default_context(), id="untrusted-ctx"),
+        pytest.param(lambda: True, id="ssl-true"),
+    ],
+)
+async def test_tls_cert_rejection(
+    bind_host, unused_tcp_port, server_ssl_ctx, client_ssl
+):
+    """Client without CA trust or with ssl=True rejects the server cert."""
+    async def shell(reader, writer):
+        pass
+
+    async with create_server(
+        host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx
+    ):
         with pytest.raises(ssl.SSLCertVerificationError):
             async with open_connection(
-                bind_host,
-                unused_tcp_port,
-                ssl=untrusted_ctx,
-                server_hostname="localhost",
-                encoding="ascii",
-                connect_minwait=0.05,
-                connect_maxwait=0.5,
+                bind_host, unused_tcp_port, ssl=client_ssl(),
+                server_hostname="localhost", **_FAST_CLIENT,
             ):
                 pass
 
 
-async def test_tls_ssl_true_uses_default_context(bind_host, unused_tcp_port, server_ssl_ctx):
-    """Ssl=True creates a default context (rejects untrusted certs)."""
-
+async def test_plain_client_rejected_by_tls_server(
+    bind_host, unused_tcp_port, server_ssl_ctx
+):
+    """Plain TCP client cannot connect to a TLS-only server."""
     async def shell(reader, writer):
         pass
 
-    async with create_server(host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx):
-        with pytest.raises(ssl.SSLCertVerificationError):
-            async with open_connection(
-                bind_host,
-                unused_tcp_port,
-                ssl=True,
-                server_hostname="localhost",
-                encoding="ascii",
-                connect_minwait=0.05,
-                connect_maxwait=0.5,
-            ):
-                pass
-
-
-async def test_plain_client_rejected_by_tls_server(bind_host, unused_tcp_port, server_ssl_ctx):
-    """Plain TCP client cannot connect to a TLS server."""
-
-    async def shell(reader, writer):
-        pass
-
-    async with create_server(host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx):
-        reader, writer = await asyncio.open_connection(host=bind_host, port=unused_tcp_port)
+    async with create_server(
+        host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx
+    ):
+        reader, writer = await asyncio.open_connection(
+            host=bind_host, port=unused_tcp_port
+        )
         try:
             writer.write(b"hello\r\n")
             await writer.drain()
             data = await asyncio.wait_for(reader.read(1024), 2.0)
-            # Server rejects non-TLS data: either raises or returns EOF
             assert data == b""
         except (ConnectionResetError, OSError):
             pass
@@ -141,35 +194,176 @@ async def test_plain_client_rejected_by_tls_server(bind_host, unused_tcp_port, s
             await writer.wait_closed()
 
 
-async def test_server_ssl_cli_args():
-    """--ssl-certfile and --ssl-keyfile produce SSLContext in parsed args."""
-    import os
+async def test_tls_server_hostname_defaults_to_host(
+    bind_host, unused_tcp_port, server_ssl_ctx, client_ssl_ctx
+):
+    """When server_hostname is omitted, it defaults to host."""
+    waiter: asyncio.Future[bool] = asyncio.Future()
 
-    # Create dummy cert/key files (content doesn't matter for arg parsing test,
-    # but SSLContext.load_cert_chain will fail — we test the arg parsing path
-    # separately by mocking).
-    # Instead, test that without --ssl-certfile, ssl is None.
-    import sys
-    import tempfile
+    async def shell(reader, writer):
+        waiter.set_result(True)
 
+    async with create_server(
+        host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx
+    ):
+        async with open_connection(
+            "localhost", unused_tcp_port, ssl=client_ssl_ctx, **_FAST_CLIENT,
+        ) as (reader, writer):
+            await asyncio.wait_for(waiter, 2.0)
+            writer.close()
+
+
+async def test_tls_fingerprint_end_to_end(
+    bind_host, unused_tcp_port, server_ssl_ctx, client_ssl_ctx
+):
+    """Fingerprint client connects to TLS server via open_connection."""
+    waiter: asyncio.Future[bool] = asyncio.Future()
+
+    async def shell(reader, writer):
+        writer.write(b"banner\r\n")
+        await writer.drain()
+        waiter.set_result(True)
+
+    async with create_server(
+        host=bind_host, port=unused_tcp_port, shell=shell,
+        encoding=False, ssl=server_ssl_ctx,
+    ):
+        async with open_connection(
+            bind_host, unused_tcp_port, ssl=client_ssl_ctx,
+            server_hostname="localhost", encoding=False,
+            connect_minwait=0.05, connect_maxwait=0.5,
+        ) as (reader, writer):
+            await asyncio.wait_for(waiter, 2.0)
+            data = await asyncio.wait_for(reader.read(1024), 2.0)
+            assert b"banner" in data
+            writer.close()
+
+
+async def test_tls_auto_requires_ssl_context():
+    """tls_auto=True without ssl raises ValueError."""
+    with pytest.raises(ValueError, match="tls_auto.*requires"):
+        async with create_server(host="localhost", port=0, tls_auto=True):
+            pass
+
+
+def _write_cert_files(ca, tmp_path):
+    """Write PEM cert+key files, return (cert_path, key_path)."""
+    cert = ca.issue_cert("127.0.0.1", "localhost")
+    cert_pem = tmp_path / "cert.pem"
+    key_pem = tmp_path / "key.pem"
+    cert.private_key_pem.write_to_path(str(key_pem))
+    with open(str(cert_pem), "wb") as f:
+        for blob in cert.cert_chain_pems:
+            f.write(blob.bytes())
+    return str(cert_pem), str(key_pem)
+
+
+@contextlib.contextmanager
+def _override_argv(argv):
+    """Temporarily replace sys.argv."""
+    orig = sys.argv
+    sys.argv = argv
+    try:
+        yield
+    finally:
+        sys.argv = orig
+
+
+@pytest.mark.parametrize(
+    "extra_argv, expect_key, expect_val",
+    [
+        pytest.param([], "ssl", None, id="no-ssl"),
+        pytest.param([], "tls_auto", False, id="no-tls-auto"),
+    ],
+)
+async def test_server_cli_defaults(extra_argv, expect_key, expect_val):
+    """Server arg parser defaults for SSL/TLS options."""
     from telnetlib3.server import parse_server_args
 
-    orig_argv = sys.argv
-    try:
-        sys.argv = ["prog", "localhost", "6023"]
+    with _override_argv(["prog", "localhost", "6023"] + extra_argv):
         result = parse_server_args()
-        assert result["ssl"] is None
-    finally:
-        sys.argv = orig_argv
+    assert result[expect_key] == expect_val
 
 
-async def test_client_ssl_cli_args():
-    """--ssl flag produces SSLContext in transformed args."""
+async def test_server_ssl_certfile_cli_args(tmp_path, ca):
+    """--ssl-certfile produces SSLContext in parsed server args."""
+    from telnetlib3.server import parse_server_args
+
+    cert_pem, key_pem = _write_cert_files(ca, tmp_path)
+    with _override_argv([
+        "prog", "--ssl-certfile", cert_pem, "--ssl-keyfile", key_pem,
+        "localhost", "6023",
+    ]):
+        result = parse_server_args()
+    assert isinstance(result["ssl"], ssl.SSLContext)
+
+
+async def test_tls_auto_cli_args(tmp_path, ca):
+    """--tls-auto flag is parsed and passed through."""
+    from telnetlib3.server import parse_server_args
+
+    cert_pem, key_pem = _write_cert_files(ca, tmp_path)
+    with _override_argv([
+        "prog", "--ssl-certfile", cert_pem, "--ssl-keyfile", key_pem,
+        "--tls-auto", "localhost", "6023",
+    ]):
+        result = parse_server_args()
+    assert result["tls_auto"] is True
+    assert isinstance(result["ssl"], ssl.SSLContext)
+
+
+@pytest.mark.parametrize(
+    "argv, key, check",
+    [
+        pytest.param(
+            ["--ssl", "example.com", "992"],
+            "ssl", lambda v: isinstance(v, ssl.SSLContext),
+            id="client-ssl",
+        ),
+        pytest.param(
+            ["example.com"],
+            "ssl", lambda v: v is None,
+            id="client-no-ssl",
+        ),
+        pytest.param(
+            ["--ssl-no-verify", "example.com", "992"],
+            "ssl",
+            lambda v: isinstance(v, ssl.SSLContext) and not v.check_hostname and v.verify_mode == ssl.CERT_NONE,  # noqa: E501
+            id="client-no-verify",
+        ),
+        pytest.param(
+            ["--raw-mode", "example.com"],
+            "raw_mode", lambda v: v is True,
+            id="raw-mode",
+        ),
+        pytest.param(
+            ["--line-mode", "example.com"],
+            "raw_mode", lambda v: v is False,
+            id="line-mode",
+        ),
+        pytest.param(
+            ["example.com"],
+            "raw_mode", lambda v: v is None,
+            id="default-mode",
+        ),
+        pytest.param(
+            ["--ascii-eol", "example.com"],
+            "ascii_eol", lambda v: v is True,
+            id="ascii-eol",
+        ),
+        pytest.param(
+            ["--ansi-keys", "example.com"],
+            "ansi_keys", lambda v: v is True,
+            id="ansi-keys",
+        ),
+    ],
+)
+async def test_client_cli_args(argv, key, check):
+    """Client argument parser produces expected transformed values."""
     from telnetlib3.client import _transform_args, _get_argument_parser
 
-    args = _get_argument_parser().parse_args(["--ssl", "example.com", "992"])
-    result = _transform_args(args)
-    assert isinstance(result["ssl"], ssl.SSLContext)
+    result = _transform_args(_get_argument_parser().parse_args(argv))
+    assert check(result.get(key))
 
 
 async def test_client_ssl_cafile_cli_args(tmp_path, ca):
@@ -178,28 +372,19 @@ async def test_client_ssl_cafile_cli_args(tmp_path, ca):
 
     ca_pem = tmp_path / "ca.pem"
     ca.cert_pem.write_to_path(str(ca_pem))
-
     args = _get_argument_parser().parse_args(
         ["--ssl", "--ssl-cafile", str(ca_pem), "example.com", "992"]
     )
-    result = _transform_args(args)
-    assert isinstance(result["ssl"], ssl.SSLContext)
-
-
-async def test_client_no_ssl_cli_args():
-    """Without --ssl, ssl key is absent or None."""
-    from telnetlib3.client import _transform_args, _get_argument_parser
-
-    args = _get_argument_parser().parse_args(["example.com"])
-    result = _transform_args(args)
-    assert result.get("ssl") is None
+    assert isinstance(_transform_args(args)["ssl"], ssl.SSLContext)
 
 
 async def test_fingerprint_ssl_cli_args():
     """--ssl flag is accepted by fingerprint argument parser."""
     from telnetlib3.client import _get_fingerprint_argument_parser
 
-    args = _get_fingerprint_argument_parser().parse_args(["--ssl", "example.com", "992"])
+    args = _get_fingerprint_argument_parser().parse_args(
+        ["--ssl", "example.com", "992"]
+    )
     assert args.ssl is True
     assert args.ssl_cafile is None
 
@@ -210,7 +395,6 @@ async def test_fingerprint_ssl_cafile_cli_args(tmp_path, ca):
 
     ca_pem = tmp_path / "ca.pem"
     ca.cert_pem.write_to_path(str(ca_pem))
-
     args = _get_fingerprint_argument_parser().parse_args(
         ["--ssl", "--ssl-cafile", str(ca_pem), "example.com", "992"]
     )
@@ -218,164 +402,19 @@ async def test_fingerprint_ssl_cafile_cli_args(tmp_path, ca):
     assert args.ssl_cafile == str(ca_pem)
 
 
-async def test_client_ssl_no_verify_cli_args():
-    """--ssl-no-verify disables certificate verification."""
-    from telnetlib3.client import _transform_args, _get_argument_parser
-
-    args = _get_argument_parser().parse_args(["--ssl-no-verify", "example.com", "992"])
-    result = _transform_args(args)
-    ctx = result["ssl"]
-    assert isinstance(ctx, ssl.SSLContext)
-    assert ctx.check_hostname is False
-    assert ctx.verify_mode == ssl.CERT_NONE
-
-
-async def test_client_raw_mode_cli_args():
-    """--raw-mode sets raw_mode to True."""
-    from telnetlib3.client import _transform_args, _get_argument_parser
-
-    args = _get_argument_parser().parse_args(["--raw-mode", "example.com"])
-    result = _transform_args(args)
-    assert result["raw_mode"] is True
-
-
-async def test_client_line_mode_cli_args():
-    """--line-mode sets raw_mode to False."""
-    from telnetlib3.client import _transform_args, _get_argument_parser
-
-    args = _get_argument_parser().parse_args(["--line-mode", "example.com"])
-    result = _transform_args(args)
-    assert result["raw_mode"] is False
-
-
-async def test_client_default_mode_cli_args():
-    """Neither --raw-mode nor --line-mode sets raw_mode to None."""
-    from telnetlib3.client import _transform_args, _get_argument_parser
-
-    args = _get_argument_parser().parse_args(["example.com"])
-    result = _transform_args(args)
-    assert result["raw_mode"] is None
-
-
-async def test_client_ascii_eol_cli_args():
-    """--ascii-eol is passed through _transform_args."""
-    from telnetlib3.client import _transform_args, _get_argument_parser
-
-    args = _get_argument_parser().parse_args(["--ascii-eol", "example.com"])
-    result = _transform_args(args)
-    assert result["ascii_eol"] is True
-
-
-async def test_client_ansi_keys_cli_args():
-    """--ansi-keys is passed through _transform_args."""
-    from telnetlib3.client import _transform_args, _get_argument_parser
-
-    args = _get_argument_parser().parse_args(["--ansi-keys", "example.com"])
-    result = _transform_args(args)
-    assert result["ansi_keys"] is True
-
-
-async def test_server_ssl_certfile_cli_args(tmp_path, ca):
-    """--ssl-certfile produces SSLContext in parsed server args."""
-    import sys
-
-    from telnetlib3.server import parse_server_args
-
-    cert = ca.issue_cert("localhost")
-    cert_pem = tmp_path / "cert.pem"
-    key_pem = tmp_path / "key.pem"
-    cert.private_key_pem.write_to_path(str(key_pem))
-    with open(str(cert_pem), "wb") as f:
-        for blob in cert.cert_chain_pems:
-            f.write(blob.bytes())
-
-    orig_argv = sys.argv
-    try:
-        sys.argv = [
-            "prog",
-            "--ssl-certfile",
-            str(cert_pem),
-            "--ssl-keyfile",
-            str(key_pem),
-            "localhost",
-            "6023",
-        ]
-        result = parse_server_args()
-        assert isinstance(result["ssl"], ssl.SSLContext)
-    finally:
-        sys.argv = orig_argv
-
-
-async def test_parse_option_arg_by_name():
-    """_parse_option_arg resolves option names."""
+@pytest.mark.parametrize(
+    "input_val, expected",
+    [
+        pytest.param("TTYPE", bytes([24]), id="by-name"),
+        pytest.param("91", bytes([91]), id="by-number"),
+    ],
+)
+async def test_parse_option_arg(input_val, expected):
+    """_parse_option_arg resolves option names and numbers."""
     from telnetlib3.client import _parse_option_arg
 
-    result = _parse_option_arg("TTYPE")
-    assert result == bytes([24])
+    assert _parse_option_arg(input_val) == expected
 
-
-async def test_parse_option_arg_by_number():
-    """_parse_option_arg resolves numeric values."""
-    from telnetlib3.client import _parse_option_arg
-
-    result = _parse_option_arg("91")
-    assert result == bytes([91])
-
-
-async def test_tls_server_hostname_defaults_to_host(
-    bind_host, unused_tcp_port, server_ssl_ctx, client_ssl_ctx
-):
-    """When server_hostname is omitted, it defaults to host."""
-    _waiter = asyncio.Future()
-
-    async def shell(reader, writer):
-        _waiter.set_result(True)
-
-    async with create_server(host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx):
-        async with open_connection(
-            "localhost",
-            unused_tcp_port,
-            ssl=client_ssl_ctx,
-            encoding="ascii",
-            connect_minwait=0.05,
-            connect_maxwait=0.5,
-        ) as (reader, writer):
-            await asyncio.wait_for(_waiter, 2.0)
-            writer.close()
-
-
-async def test_tls_fingerprint_end_to_end(
-    bind_host, unused_tcp_port, server_ssl_ctx, client_ssl_ctx
-):
-    """Fingerprint client can connect to TLS server via open_connection."""
-    _waiter = asyncio.Future()
-
-    async def shell(reader, writer):
-        writer.write(b"banner\r\n")
-        await writer.drain()
-        _waiter.set_result(True)
-
-    async with create_server(
-        host=bind_host, port=unused_tcp_port, shell=shell, encoding=False, ssl=server_ssl_ctx
-    ):
-        async with open_connection(
-            bind_host,
-            unused_tcp_port,
-            ssl=client_ssl_ctx,
-            server_hostname="localhost",
-            encoding=False,
-            connect_minwait=0.05,
-            connect_maxwait=0.5,
-        ) as (reader, writer):
-            await asyncio.wait_for(_waiter, 2.0)
-            data = await asyncio.wait_for(reader.read(1024), 2.0)
-            assert b"banner" in data
-            writer.close()
-
-
-# ---------------------------------------------------------------------------
-# pty.fork()-based test helper (blessed pattern — coverage in child process)
-# ---------------------------------------------------------------------------
 
 _MAX_SUBPROC_SECONDS = 8
 
@@ -437,16 +476,15 @@ def _run_in_pty(child_func, timeout: float = _MAX_SUBPROC_SECONDS) -> str:
                 os.waitpid(pid, 0)
             except OSError:
                 pass
-            raise AssertionError(f"Child hung after {timeout}s.\nOutput:\n{output}")
+            raise AssertionError(
+                f"Child hung after {timeout}s.\nOutput:\n{output}"
+            )
         _time.sleep(0.05)
 
-    assert os.WEXITSTATUS(status) == 0, f"Child exited {os.WEXITSTATUS(status)}.\nOutput:\n{output}"
+    assert os.WEXITSTATUS(status) == 0, (
+        f"Child exited {os.WEXITSTATUS(status)}.\nOutput:\n{output}"
+    )
     return output
-
-
-# ---------------------------------------------------------------------------
-# PTY fork tests for CLI entry points
-# ---------------------------------------------------------------------------
 
 
 class _EchoClose(asyncio.Protocol):
@@ -464,14 +502,7 @@ class _EchoClose(asyncio.Protocol):
 
 @contextlib.contextmanager
 def _threaded_echo_server(host, port, msg=b"ok\r\n", ssl_ctx=None):
-    """
-    Run a simple echo-and-close TCP server on a background thread.
-
-    Tracks accepted transports and closes them on exit to prevent
-    ResourceWarning from ``_SelectorTransport.__del__``.
-
-    Yields once the server is ready to accept connections.
-    """
+    """Run a simple echo-and-close TCP server on a background thread."""
     srv_loop = asyncio.new_event_loop()
     ready = threading.Event()
     stop_holder: list[asyncio.Event] = []
@@ -494,11 +525,6 @@ def _threaded_echo_server(host, port, msg=b"ok\r\n", ssl_ctx=None):
             try:
                 await stop_evt.wait()
             finally:
-                # Abort accepted transports before the server socket so that
-                # no orphaned sockets trigger ResourceWarning at GC time.
-                # abort() forces immediate close (no SSL shutdown handshake),
-                # which is critical because close() on an SSL transport needs
-                # multiple event loop ticks and the peer may already be gone.
                 for proto in accepted:
                     tr = proto._transport
                     if tr is not None and not tr.is_closing():
@@ -524,58 +550,54 @@ def _pty_run_client(bind_host, port, extra_argv, server_ssl_ctx=None):
     """Start a plain/TLS echo server, fork, run run_client() in the child."""
     marker = b"pty-marker-ok"
 
+    def _child():
+        sys.argv = [
+            "telnetlib3-client", bind_host, str(port),
+            "--connect-minwait=0.05", "--connect-maxwait=0.5",
+            "--colormatch=none",
+        ] + extra_argv
+        from telnetlib3.client import run_client  # pylint: disable=import-outside-toplevel
+
+        asyncio.run(run_client())
+
     with _threaded_echo_server(bind_host, port, marker + b"\r\n", server_ssl_ctx):
-        output = _run_in_pty(lambda: _child_run_client(bind_host, port, extra_argv))
+        output = _run_in_pty(_child)
 
     assert "pty-marker-ok" in output, f"Marker not found in output:\n{output}"
 
 
-def _child_run_client(bind_host, port, extra_argv):
-    """Child-process body for _pty_run_client (runs inside _run_in_pty)."""
-    sys.argv = [
-        "telnetlib3-client",
-        bind_host,
-        str(port),
-        "--connect-minwait=0.05",
-        "--connect-maxwait=0.5",
-        "--colormatch=none",
-    ] + extra_argv
-    from telnetlib3.client import run_client  # pylint: disable=import-outside-toplevel
-
-    asyncio.run(run_client())
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only tests")
+@pytest.mark.parametrize(
+    "extra_argv, use_ssl",
+    [
+        pytest.param(["--ssl-no-verify"], True, id="ssl-no-verify"),
+        pytest.param(["--raw-mode"], False, id="raw-mode"),
+        pytest.param(
+            ["--raw-mode", "--ascii-eol", "--ansi-keys"], False,
+            id="ascii-eol-ansi-keys",
+        ),
+        pytest.param(
+            ["--raw-mode", "--encoding=atascii"], False, id="atascii",
+        ),
+    ],
+)
+def test_cli_run_client(
+    bind_host, unused_tcp_port, server_ssl_ctx, extra_argv, use_ssl
+):
+    """run_client() with various CLI flags exercises expected code paths."""
+    ssl_ctx = server_ssl_ctx if use_ssl else None
+    _pty_run_client(bind_host, unused_tcp_port, extra_argv, ssl_ctx)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only tests")
-def test_cli_run_client_ssl_no_verify(bind_host, unused_tcp_port, server_ssl_ctx):
-    """run_client() with --ssl-no-verify exercises TLS context + ssl kwarg."""
-    _pty_run_client(bind_host, unused_tcp_port, ["--ssl-no-verify"], server_ssl_ctx)
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only tests")
-def test_cli_run_client_raw_mode(bind_host, unused_tcp_port):
-    """run_client() with --raw-mode exercises raw_mode_val code path."""
-    _pty_run_client(bind_host, unused_tcp_port, ["--raw-mode"])
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only tests")
-def test_cli_run_client_ascii_eol_ansi_keys(bind_host, unused_tcp_port):
-    """run_client() with --raw-mode --ascii-eol --ansi-keys."""
-    _pty_run_client(bind_host, unused_tcp_port, ["--raw-mode", "--ascii-eol", "--ansi-keys"])
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only tests")
-def test_cli_run_server_ssl(bind_host, unused_tcp_port, ca, tmp_path, client_ssl_ctx):
+def test_cli_run_server_ssl(
+    bind_host, unused_tcp_port, ca, tmp_path, client_ssl_ctx
+):
     """run_server() with --ssl-certfile exercises the ssl pass-through."""
     import pty  # pylint: disable=import-outside-toplevel
 
     port = unused_tcp_port
-    cert = ca.issue_cert(bind_host, "localhost")
-    cert_pem = tmp_path / "cert.pem"
-    key_pem = tmp_path / "key.pem"
-    cert.private_key_pem.write_to_path(str(key_pem))
-    with open(str(cert_pem), "wb") as f:
-        for blob in cert.cert_chain_pems:
-            f.write(blob.bytes())
+    cert_pem, key_pem = _write_cert_files(ca, tmp_path)
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -586,15 +608,10 @@ def test_cli_run_server_ssl(bind_host, unused_tcp_port, ca, tmp_path, client_ssl
         exit_code = 0
         try:
             sys.argv = [
-                "telnetlib3-server",
-                bind_host,
-                str(port),
-                "--ssl-certfile",
-                str(cert_pem),
-                "--ssl-keyfile",
-                str(key_pem),
-                "--connect-maxwait=0.05",
-                "--loglevel=warning",
+                "telnetlib3-server", bind_host, str(port),
+                "--ssl-certfile", cert_pem,
+                "--ssl-keyfile", key_pem,
+                "--connect-maxwait=0.05", "--loglevel=warning",
             ]
             from telnetlib3.server import main  # pylint: disable=import-outside-toplevel
 
@@ -617,13 +634,8 @@ def test_cli_run_server_ssl(bind_host, unused_tcp_port, ca, tmp_path, client_ssl
 
         async def _connect_and_close():
             async with open_connection(
-                bind_host,
-                port,
-                ssl=client_ssl_ctx,
-                server_hostname="localhost",
-                encoding="ascii",
-                connect_minwait=0.05,
-                connect_maxwait=0.5,
+                bind_host, port, ssl=client_ssl_ctx,
+                server_hostname="localhost", **_FAST_CLIENT,
             ) as (reader, writer):
                 pass
 
@@ -640,56 +652,40 @@ def test_cli_run_server_ssl(bind_host, unused_tcp_port, ca, tmp_path, client_ssl
         os.close(master_fd)
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only tests")
-def test_cli_run_fingerprint_client_ssl(bind_host, unused_tcp_port, server_ssl_ctx):
-    """run_fingerprint_client() with --ssl-no-verify exercises TLS context path."""
-    port = unused_tcp_port
-
+def _pty_run_fingerprint(bind_host, port, extra_argv, server_ssl_ctx):
+    """Run fingerprint client in PTY against echo server."""
     def _child():
         sys.argv = [
-            "telnetlib3-fingerprint",
-            "--ssl-no-verify",
-            "--connect-timeout=3",
-            bind_host,
-            str(port),
-        ]
+            "telnetlib3-fingerprint", "--connect-timeout=3",
+            bind_host, str(port),
+        ] + extra_argv
         from telnetlib3.client import run_fingerprint_client  # noqa: PLC0415
 
         asyncio.run(run_fingerprint_client())
 
-    with _threaded_echo_server(bind_host, port, b"fingerprint-ok\r\n", server_ssl_ctx):
+    with _threaded_echo_server(
+        bind_host, port, b"fingerprint-ok\r\n", server_ssl_ctx
+    ):
         _run_in_pty(_child)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only tests")
-def test_cli_run_client_raw_mode_atascii(bind_host, unused_tcp_port):
-    """run_client() with --raw-mode --encoding=atascii exercises input_filter."""
-    _pty_run_client(bind_host, unused_tcp_port, ["--raw-mode", "--encoding=atascii"])
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only tests")
-def test_cli_run_fingerprint_client_ssl_cafile(
-    bind_host, unused_tcp_port, server_ssl_ctx, ca, tmp_path
+@pytest.mark.parametrize(
+    "extra_argv_factory",
+    [
+        pytest.param(lambda ca_pem: ["--ssl-no-verify"], id="no-verify"),
+        pytest.param(
+            lambda ca_pem: ["--ssl", "--ssl-cafile", ca_pem], id="cafile",
+        ),
+    ],
+)
+def test_cli_run_fingerprint_client_ssl(
+    bind_host, unused_tcp_port, server_ssl_ctx, ca, tmp_path, extra_argv_factory
 ):
-    """run_fingerprint_client() with --ssl --ssl-cafile exercises cafile path."""
-    port = unused_tcp_port
-
-    ca_pem = tmp_path / "ca.pem"
-    ca.cert_pem.write_to_path(str(ca_pem))
-
-    def _child():
-        sys.argv = [
-            "telnetlib3-fingerprint",
-            "--ssl",
-            "--ssl-cafile",
-            str(ca_pem),
-            "--connect-timeout=3",
-            bind_host,
-            str(port),
-        ]
-        from telnetlib3.client import run_fingerprint_client  # noqa: PLC0415
-
-        asyncio.run(run_fingerprint_client())
-
-    with _threaded_echo_server(bind_host, port, b"fingerprint-ok\r\n", server_ssl_ctx):
-        _run_in_pty(_child)
+    """run_fingerprint_client() with TLS flags exercises context paths."""
+    ca_pem = str(tmp_path / "ca.pem")
+    ca.cert_pem.write_to_path(ca_pem)
+    extra_argv = extra_argv_factory(ca_pem)
+    _pty_run_fingerprint(
+        bind_host, unused_tcp_port, extra_argv, server_ssl_ctx
+    )
