@@ -227,22 +227,6 @@ def test_send_linemode_asserts_when_not_negotiated():
         w.send_linemode()
 
 
-def test_set_callback_validations():
-    w, *_ = new_writer(server=True)
-    # invalid IAC cmd
-    with pytest.raises(AssertionError):
-        w.set_iac_callback(cmd=b"\x00", func=lambda c: None)
-    # invalid SLC byte
-    with pytest.raises(AssertionError):
-        w.set_slc_callback(slc_byte=b"\x00", func=lambda c: None)
-    # invalid ext send callback
-    with pytest.raises(AssertionError):
-        w.set_ext_send_callback(cmd=GA, func=lambda: None)
-    # invalid ext callback
-    with pytest.raises(AssertionError):
-        w.set_ext_callback(cmd=GA, func=lambda: None)
-
-
 def test_handle_logout_paths():
     # server DO -> close
     ws, ts, _ = new_writer(server=True)
@@ -406,10 +390,6 @@ def test_handle_sb_charset_paths_and_notimpl_and_illegal():
 
 
 def test_handle_sb_xdisploc_wrong_side_asserts_and_send_and_is():
-    # SEND must be client side
-    ws, *_ = new_writer(server=True)
-    with pytest.raises(AssertionError):
-        ws._handle_sb_xdisploc(collections.deque([XDISPLOC, SEND]))
     # client SEND -> IS response
     wc, tc, _ = new_writer(server=False, client=True)
     wc.set_ext_send_callback(XDISPLOC, lambda: "host:0")
@@ -424,10 +404,6 @@ def test_handle_sb_xdisploc_wrong_side_asserts_and_send_and_is():
 
 
 def test_handle_sb_tspeed_wrong_side_asserts_and_send_and_is():
-    # SEND must be client side
-    ws, *_ = new_writer(server=True)
-    with pytest.raises(AssertionError):
-        ws._handle_sb_tspeed(collections.deque([TSPEED, SEND]))
     # client SEND -> IS response
     wc, tc, _ = new_writer(server=False, client=True)
     wc.set_ext_send_callback(TSPEED, lambda: (9600, 9600))
@@ -445,10 +421,6 @@ def test_handle_sb_tspeed_wrong_side_asserts_and_send_and_is():
 
 
 def test_handle_sb_environ_wrong_side_send_and_is():
-    # SEND must be client side
-    ws, *_ = new_writer(server=True)
-    with pytest.raises(AssertionError):
-        ws._handle_sb_environ(collections.deque([NEW_ENVIRON, SEND]))
     # client SEND -> respond IS using ext_send_callback
     wc, tc, _ = new_writer(server=False, client=True)
     wc.set_ext_send_callback(NEW_ENVIRON, lambda keys: {"USER": "root"})

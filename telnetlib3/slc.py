@@ -103,8 +103,6 @@ class SLC:
         #   The default byte mask ``SLC_DEFAULT`` and value ``b'\x00'`` infer
         #   our willingness to support the option, but with no default value.
         #   The value must be negotiated by client to activate the callback.
-        assert isinstance(mask, bytes) and isinstance(value, bytes), (mask, value)
-        assert len(mask) == 1 and len(value) == 1, (mask, value)
         self.mask = mask
         self.val = value
 
@@ -150,17 +148,14 @@ class SLC:
 
     def set_value(self, value: bytes) -> None:
         """Set SLC keyboard ascii value to ``byte``."""
-        assert isinstance(value, bytes) and len(value) == 1, value
         self.val = value
 
     def set_mask(self, mask: bytes) -> None:
         """Set SLC option mask, ``mask``."""
-        assert isinstance(mask, bytes) and len(mask) == 1
         self.mask = mask
 
     def set_flag(self, flag: bytes) -> None:
         """Set SLC option flag, ``flag``."""
-        assert isinstance(flag, bytes) and len(flag) == 1
         self.mask = bytes([ord(self.mask) | ord(flag)])
 
     def __str__(self) -> str:
@@ -304,7 +299,6 @@ class Linemode:
         Valid bit flags of mask are: ``LMODE_MODE_TRAPSIG``, ``LMODE_MODE_ACK``,
         ``LMODE_MODE_SOFT_TAB``, and ``LMODE_MODE_LIT_ECHO``.
         """
-        assert isinstance(mask, bytes) and len(mask) == 1, (repr(mask), mask)
         self.mask = mask
 
     def __eq__(self, other: object) -> bool:
@@ -368,8 +362,6 @@ class Forwardmask:
         :param value: Bytemask ``value`` received by server after ``IAC SB
             LINEMODE DO FORWARDMASK``. It must be a bytearray of length 16 or 32.
         """
-        assert isinstance(value, (bytes, bytearray)), value
-        assert len(value) in (16, 32), len(value)
         self.value = value
         self.ack = ack
 

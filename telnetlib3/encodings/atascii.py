@@ -296,7 +296,6 @@ DECODING_TABLE = (
     "\u25b6"  # 0xFF = inverse of 0x7F (tab)
 )
 
-assert len(DECODING_TABLE) == 256
 
 
 def _normalize_eol(text: str) -> str:

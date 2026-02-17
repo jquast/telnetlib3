@@ -84,11 +84,7 @@ def test_repr_mapping_quotes_roundtrip():
 def test_function_lookup_success_and_not_callable():
     fn = function_lookup("telnetlib3.accessories.get_version")
     assert callable(fn)
-    # call to ensure the returned object is usable
     assert isinstance(fn(), str)
-
-    with pytest.raises(AssertionError):
-        function_lookup("telnetlib3.accessories.__all__")
 
 
 class _DummyReader:

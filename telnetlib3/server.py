@@ -663,14 +663,12 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         """Pause reading and schedule a peek to detect TLS."""
-        assert isinstance(transport, asyncio.Transport)
         self._transport = transport
         transport.pause_reading()
         asyncio.get_event_loop().call_soon(self._detect_tls)
 
     def _detect_tls(self) -> None:
         """Peek at the first byte without consuming it."""
-        assert self._transport is not None
         tsock = self._transport.get_extra_info("socket")
         if tsock is None:
             self._handoff_plain()
@@ -694,12 +692,16 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
 
     async def _upgrade_to_tls(self) -> None:
         """Upgrade the plain transport to TLS, then hand off."""
-        assert self._transport is not None
+        if sys.version_info < (3, 11):
+            logger.warning(
+                "tls_auto with TLS clients requires Python 3.11+: "
+                "loop.start_tls(server_side=True) hangs due to a bug in "
+                "the _SSLPipe-based SSLProtocol (rewired in 3.11). "
+                "https://github.com/python/cpython/issues/79156 -- "
+                "The TLS handshake will likely time out."
+            )
         loop = asyncio.get_event_loop()
         protocol = self._real_factory()
-        # Resume reading before start_tls so it can read the ClientHello.
-        # Python 3.11+ does this internally, but 3.9/3.10 do not.
-        self._transport.resume_reading()
         try:
             # start_tls uses call_connection_made=False, so we must call
             # connection_made ourselves with the returned SSL transport.
@@ -711,12 +713,10 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
             if not self._transport.is_closing():
                 self._transport.close()
             return
-        assert ssl_transport is not None
         protocol.connection_made(ssl_transport)
 
     def _handoff_plain(self) -> None:
         """Hand off to the real protocol as a plain telnet connection."""
-        assert self._transport is not None
         protocol = self._real_factory()
         self._transport.set_protocol(protocol)
         protocol.connection_made(self._transport)
@@ -1003,8 +1003,6 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
         return protocol
 
     if tls_auto:
-        assert ssl is not None
-
         def factory() -> asyncio.Protocol:
             return _TLSAutoDetectProtocol(ssl, _make_telnet_protocol)
 

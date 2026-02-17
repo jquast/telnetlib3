@@ -706,11 +706,9 @@ class TelnetWriter:
             if not self._sb_buffer:
                 self.log.debug("begin sub-negotiation SB %s", name_command(byte))
             self._sb_buffer.append(byte)
-            assert len(self._sb_buffer) < (1 << 15)  # 32k SB buffer
 
         elif self.cmd_received:
             # parse 3rd and final byte of IAC DO, DONT, WILL, WONT.
-            assert isinstance(self.cmd_received, bytes)
             cmd, opt = self.cmd_received, byte
             self.log.debug("recv IAC %s %s", name_command(cmd), name_option(opt))
             try:
@@ -759,7 +757,6 @@ class TelnetWriter:
             # Inform caller which SLC function occurred by this attribute.
             self.slc_received = slc_name
             if callback:
-                assert slc_name is not None
                 self.log.debug(
                     "slc.snoop(%r): %s, callback is %s.",
                     byte,
@@ -820,7 +817,6 @@ class TelnetWriter:
             depends on telnet negotiation willingness for local echo, only an RFC- compliant telnet
             client will correctly set or unset echo accordingly by demand.
         """
-        assert self.server, "Client never performs echo of input received."
         if self.will_echo:
             self.write(data=data)
 
@@ -897,8 +893,6 @@ class TelnetWriter:
         byte value 255 is sent, it is escaped as ``IAC + IAC``.  This
         method ensures it is not escaped.
         """
-        assert isinstance(buf, (bytes, bytearray)), buf
-        assert buf and buf.startswith(IAC), buf
         if not self.is_closing():
             if self.log.isEnabledFor(TRACE):
                 self.log.log(TRACE, "send IAC %d bytes\n%s", len(buf), hexdump(buf, prefix=">>  "))
@@ -1135,8 +1129,6 @@ class TelnetWriter:
 
         Returns True if request is valid for telnet state, and was sent.
         """
-        assert self.server, "SB NEW_ENVIRON SEND may only be sent by server"
-
         if not self.remote_option.enabled(NEW_ENVIRON):
             self.log.debug("cannot send SB NEW_ENVIRON SEND IS without receipt of WILL NEW_ENVIRON")
             return False
@@ -1177,7 +1169,6 @@ class TelnetWriter:
 
         Returns True if request is valid for telnet state, and was sent.
         """
-        assert self.server, "SB XDISPLOC SEND may only be sent by server end"
         if not self.remote_option.enabled(XDISPLOC):
             self.log.debug("cannot send SB XDISPLOC SEND without receipt of WILL XDISPLOC")
             return False
@@ -1197,7 +1188,6 @@ class TelnetWriter:
 
         Returns True if request is valid for telnet state, and was sent.
         """
-        assert self.server, "SB TTYPE SEND may only be sent by server end"
         if not self.remote_option.enabled(TTYPE):
             self.log.debug("cannot send SB TTYPE SEND without receipt of WILL TTYPE")
             return False
@@ -1218,7 +1208,6 @@ class TelnetWriter:
         ``fmask``.  When fmask is None, a forwardmask is generated for the SLC
         characters registered by :attr:`~.slctab`.
         """
-        assert self.server, "DO FORWARDMASK may only be sent by server end"
         if not self.remote_option.enabled(LINEMODE):
             self.log.debug("cannot send SB LINEMODE DO without receipt of WILL LINEMODE")
         else:
@@ -1232,8 +1221,6 @@ class TelnetWriter:
                     tabset=self.slctab,
                     ack=forwardmask_enabled,
                 )
-
-            assert isinstance(fmask, slc.Forwardmask), fmask
 
             self.log.debug("send IAC SB LINEMODE DO LMODE_FORWARDMASK::")
             for maskbit_descr in fmask.description_table():
@@ -1303,23 +1290,6 @@ class TelnetWriter:
         These callbacks receive a single argument, the IAC ``cmd`` which
         triggered it.
         """
-        assert callable(func), "Argument func must be callable"
-        assert cmd in (
-            BRK,
-            IP,
-            AO,
-            AYT,
-            EC,
-            EL,
-            CMD_EOR,
-            EOF,
-            SUSP,
-            ABORT,
-            NOP,
-            DM,
-            GA,
-            TM,
-        ), name_command(cmd)
         self._iac_callback[cmd] = func
 
     def handle_nop(self, cmd: bytes) -> None:  # pylint:disable=unused-argument
@@ -1441,10 +1411,6 @@ class TelnetWriter:
             signaling mechanism used by client can be tested by evaluating this
             argument.
         """
-        assert callable(func), "Argument func must be callable"
-        assert (
-            isinstance(slc_byte, bytes) and 0 < ord(slc_byte) < slc.NSLC + 1
-        ), f"Unknown SLC byte: {slc_byte!r}"
         self._slc_callback[slc_byte] = func
 
     def handle_ew(self, _slc: bytes) -> None:
@@ -1506,8 +1472,6 @@ class TelnetWriter:
               sets requested by server, callback must return one of those
               strings given, :rfc:`2066`.
         """
-        assert cmd in (SNDLOC, NAWS, TSPEED, TTYPE, XDISPLOC, NEW_ENVIRON, CHARSET), cmd
-        assert callable(func), "Argument func must be callable"
         self._ext_send_callback[cmd] = func
 
     def set_ext_callback(self, cmd: bytes, func: Callable[..., Any]) -> None:
@@ -1557,25 +1521,6 @@ class TelnetWriter:
 
         :param func: The callback function to register.
         """
-        assert cmd in (
-            LOGOUT,
-            SNDLOC,
-            NAWS,
-            TSPEED,
-            TTYPE,
-            XDISPLOC,
-            NEW_ENVIRON,
-            CHARSET,
-            GMCP,
-            MSDP,
-            MSSP,
-            MSP,
-            MXP,
-            ZMP,
-            AARDWOLF,
-            ATCP,
-        ), cmd
-        assert callable(func), "Argument func must be callable"
         self._ext_callback[cmd] = func
 
     def handle_xdisploc(self, xdisploc: str) -> None:
@@ -1712,13 +1657,11 @@ class TelnetWriter:
         Given the available encodings presented by the server, select and return only one. Returning
         an empty string indicates that no selection is made (request is ignored).
         """
-        assert not self.server
         self.log.debug("Character Set requested")
         return ""
 
     def handle_send_server_charset(self) -> list[str]:
         """Send character set (encodings) offered to client, :rfc:`2066`."""
-        assert self.server
         return ["UTF-8"]
 
     def handle_logout(self, cmd: bytes) -> None:
@@ -1730,19 +1673,15 @@ class TelnetWriter:
         # Close the transport on receipt of DO, Reply DONT on receipt
         # of WILL.  Nothing is done on receipt of DONT or WONT LOGOFF.
         if cmd == DO:
-            assert self.server, (cmd, LOGOUT)
             self.log.debug("client requests DO LOGOUT")
             self._transport.close()
         elif cmd == DONT:
-            assert self.server, (cmd, LOGOUT)
             self.log.debug("client requests DONT LOGOUT")
         elif cmd == WILL:
-            assert self.client, (cmd, LOGOUT)
             self.log.debug("recv WILL TIMEOUT (timeout warning)")
             self.log.debug("send IAC DONT LOGOUT")
             self.iac(DONT, LOGOUT)
         elif cmd == WONT:
-            assert self.client, (cmd, LOGOUT)
             self.log.debug("recv IAC WONT LOGOUT (server refuses logout")
 
     # public derivable methods DO, DONT, WILL, and WONT negotiation
@@ -1881,7 +1820,6 @@ class TelnetWriter:
         """
         self.log.debug("handle_dont(%s)", name_command(opt))
         if opt == LOGOUT:
-            assert self.server, "cannot recv DONT LOGOUT on client end"
             self._ext_callback[LOGOUT](DONT)
         # many implementations (wrongly!) sent a WONT in reply to DONT. It
         # sounds reasonable, but it can and will cause telnet loops. (ruby?)
@@ -2057,7 +1995,6 @@ class TelnetWriter:
             self.log.debug("WONT TIMING-MARK")
             self.remote_option[opt] = False
         elif opt == LOGOUT:
-            assert not (self.server), "cannot recv WONT LOGOUT on server end"
             if not self.pending_option.enabled(DO + LOGOUT):
                 self.log.warning("Server sent WONT LOGOUT unsolicited")
             self._ext_callback[LOGOUT](WONT)
@@ -2153,8 +2090,7 @@ class TelnetWriter:
     # Private sub-negotiation (SB) routines
 
     def _handle_sb_charset(self, buf: collections.deque[bytes]) -> None:
-        cmd = buf.popleft()
-        assert cmd == CHARSET
+        buf.popleft()
         opt = buf.popleft()
         if opt == REQUEST:
             # "<Sep>  is a separator octet, the value of which is chosen by the
@@ -2193,13 +2129,10 @@ class TelnetWriter:
         """Callback handles IAC-SB-TSPEED-<buf>-SE."""
         cmd = buf.popleft()
         opt = buf.popleft()
-        assert cmd == TSPEED, (cmd, name_command(cmd))
-        assert opt in (IS, SEND), opt
         opt_kind = {IS: "IS", SEND: "SEND"}.get(opt)
         self.log.debug("recv %s %s: %r", name_command(cmd), opt_kind, b"".join(buf))
 
         if opt == IS:
-            assert self.server, f"SE: cannot recv from server: {name_command(cmd)} {opt_kind}"
             rx_str, tx_str = str(), str()
             while len(buf):
                 value = buf.popleft()
@@ -2221,9 +2154,7 @@ class TelnetWriter:
                 return
             self._ext_callback[TSPEED](rx_int, tx_int)
         elif opt == SEND:
-            assert self.client, f"SE: cannot recv from client: {name_command(cmd)} {opt_kind}"
             rx, tx = self._ext_send_callback[TSPEED]()
-            assert (type(rx), type(tx)) == (int, int), (rx, tx)
             brx = f"{rx}".encode("ascii")
             btx = f"{tx}".encode("ascii")
             response = [IAC, SB, TSPEED, IS, brx, b",", btx, IAC, SE]
@@ -2237,18 +2168,14 @@ class TelnetWriter:
         cmd = buf.popleft()
         opt = buf.popleft()
 
-        assert cmd == XDISPLOC, (cmd, name_command(cmd))
-        assert opt in (IS, SEND), opt
         opt_kind = {IS: "IS", SEND: "SEND"}.get(opt)
         self.log.debug("recv %s %s: %r", name_command(cmd), opt_kind, b"".join(buf))
 
         if opt == IS:
-            assert self.server, f"SE: cannot recv from server: {name_command(cmd)} {opt!r}"
             xdisploc_str = b"".join(buf).decode("ascii")
             self.log.debug("recv IAC SB XDISPLOC IS %r IAC SE", xdisploc_str)
             self._ext_callback[XDISPLOC](xdisploc_str)
         elif opt == SEND:
-            assert self.client, f"SE: cannot recv from client: {name_command(cmd)} {opt!r}"
             xdisploc_str = self._ext_send_callback[XDISPLOC]().encode("ascii")
             response = [IAC, SB, XDISPLOC, IS, xdisploc_str, IAC, SE]
             self.log.debug("send IAC SB XDISPLOC IS %r IAC SE", xdisploc_str)
@@ -2261,8 +2188,6 @@ class TelnetWriter:
         cmd = buf.popleft()
         opt = buf.popleft()
 
-        assert cmd == TTYPE, name_command(cmd)
-        assert opt in (IS, SEND), opt
         opt_kind = {IS: "IS", SEND: "SEND"}.get(opt)
         self.log.debug("recv %s %s: %r", name_command(cmd), opt_kind, b"".join(buf))
 
@@ -2274,7 +2199,6 @@ class TelnetWriter:
             self.log.debug("recv IAC SB TTYPE IS %r", ttype_str)
             self._ext_callback[TTYPE](ttype_str)
         elif opt == SEND:
-            assert self.client, f"SE: cannot recv from client: {name_command(cmd)} {opt!r}"
             ttype_str = self._ext_send_callback[TTYPE]().encode("ascii")
             response = [IAC, SB, TTYPE, IS, ttype_str, IAC, SE]
             self.log.debug("send IAC SB TTYPE IS %r IAC SE", ttype_str)
@@ -2299,8 +2223,6 @@ class TelnetWriter:
         cmd = buf.popleft()
         opt = buf.popleft()
 
-        assert cmd == NEW_ENVIRON, (cmd, name_command(cmd))
-        assert opt in (IS, SEND, INFO), opt
         opt_kind = {IS: "IS", INFO: "INFO", SEND: "SEND"}.get(opt)
         raw = b"".join(buf)
 
@@ -2315,7 +2237,6 @@ class TelnetWriter:
             self.log.debug("recv %s %s (all)", name_command(cmd), opt_kind)
 
         if opt in (IS, INFO):
-            assert self.server, f"SE: cannot recv from server: {name_command(cmd)} {opt_kind}"
             if opt == IS:
                 if not self.pending_option.enabled(SB + cmd):
                     self.log.debug("%s %s unsolicited", name_command(cmd), opt_kind)
@@ -2328,7 +2249,6 @@ class TelnetWriter:
             if env:
                 self._ext_callback[cmd](env)
         elif opt == SEND:
-            assert self.client, f"SE: cannot recv from client: {name_command(cmd)} {opt_kind}"
             # client-side, we do _not_ honor the 'send all VAR' or 'send all
             # USERVAR' requests -- it is a small bit of a security issue.
             reply_env = self._ext_send_callback[NEW_ENVIRON](list(env.keys()))
@@ -2346,7 +2266,7 @@ class TelnetWriter:
 
     def _handle_sb_sndloc(self, buf: collections.deque[bytes]) -> None:
         """Fire callback for IAC-SB-SNDLOC-<buf>-SE (:rfc:`779`)."""
-        assert buf.popleft() == SNDLOC
+        buf.popleft()
         location_str = b"".join(buf).decode("ascii")
         self._ext_callback[SNDLOC](location_str)
 
@@ -2374,9 +2294,7 @@ class TelnetWriter:
 
     def _handle_sb_naws(self, buf: collections.deque[bytes]) -> None:
         """Fire callback for IAC-SB-NAWS-<cols_rows[4]>-SE (:rfc:`1073`)."""
-        cmd = buf.popleft()
-        assert cmd == NAWS, name_command(cmd)
-        assert len(buf) == 4, f"bad NAWS length {len(buf)}: {buf!r}"
+        buf.popleft()
         if not self.remote_option.enabled(NAWS):
             self.log.info(
                 "received IAC SB NAWS without receipt of IAC WILL NAWS -- assuming NAWS-enabled"
@@ -2784,7 +2702,6 @@ class TelnetWriter:
             else:
                 # set current flag to the flag indicated in default tab
                 default_slc = self.default_slc_tab.get(func)
-                assert default_slc is not None
                 self.slctab[func].set_mask(default_slc.mask)
             # set current value to value indicated in default tab
             self.default_slc_tab.get(func, slc.SLC_nosupport())
@@ -3156,7 +3073,6 @@ class TelnetWriterUnicode(TelnetWriter):
         local echo: only an RFC-compliant telnet client will correctly set or
         unset echo accordingly by demand.
         """
-        assert self.server, "Client never performs echo of input received."
         if self.will_echo:
             self.write(string=string, errors=errors)
 

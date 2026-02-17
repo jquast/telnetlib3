@@ -145,10 +145,9 @@ def test_echo_server_only_and_will_echo_controls_write():
     w.echo(b"x")
     assert t.writes[-1] == b"x"
 
-    # client perspective: echo should assert
+    # client perspective: echo is a no-op (will_echo is False)
     w2, t2, _ = new_writer(server=False, client=True)
-    with pytest.raises(AssertionError):
-        w2.echo(b"x")
+    w2.echo(b"x")
     assert not t2.writes
 
 

@@ -109,7 +109,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             self._rx_task = None
 
         # inform yielding readers about closed connection
-        assert self.reader is not None
         if exc is None:
             self.log.info("Connection closed to %s", self)
             self.reader.feed_eof()
@@ -123,7 +122,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         # close transport (may already be closed), set waiter_closed and
         # cancel Future _waiter_connected.
-        assert self._transport is not None
         self._transport.close()
         if not self._waiter_connected.done():
             # strangely, for symmetry, our '_waiter_connected' must be set if
@@ -191,7 +189,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         if future.cancelled() or future.exception() is not None:
             return
         if self.shell is not None:
-            assert self.reader is not None and self.writer is not None
             coro = self.shell(self.reader, self.writer)
             if asyncio.iscoroutine(coro):
                 # When a shell is defined as a coroutine, we must ensure
@@ -278,13 +275,11 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     @property
     def duration(self) -> float:
         """Time elapsed since client connected, in seconds as float."""
-        assert self._when_connected is not None
         return (datetime.datetime.now() - self._when_connected).total_seconds()
 
     @property
     def idle(self) -> float:
         """Time elapsed since data last received, in seconds as float."""
-        assert self._last_received is not None
         return (datetime.datetime.now() - self._last_received).total_seconds()
 
     # public protocol methods
@@ -355,7 +350,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         from .telopt import TTYPE, CHARSET, NEW_ENVIRON
 
         # First check if there are any pending options
-        assert self.writer is not None
         if any(self.writer.pending_option.values()):
             return False
 
@@ -384,8 +378,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         # This mirrors the previous optimized logic, but is called from an async task.
         self._last_received = datetime.datetime.now()
 
-        assert self.writer is not None
-        assert self.reader is not None
         writer = self.writer
         reader = self.reader
 
@@ -495,7 +487,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 self._check_negotiation_timer()
 
     def _check_negotiation_timer(self) -> None:
-        assert self._check_later is not None
         self._check_later.cancel()
         self._tasks.remove(self._check_later)
 
@@ -507,7 +498,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             self._waiter_connected.set_result(None)
         elif final:
             self.log.debug("negotiation failed after %1.2fs.", self.duration)
-            assert self.writer is not None
             _failed = [
                 name_commands(cmd_option)
                 for (cmd_option, pending) in self.writer.pending_option.items()

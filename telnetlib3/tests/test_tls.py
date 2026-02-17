@@ -77,6 +77,15 @@ async def _ping_pong(bind_host, port, server_kw, client_kw):
             assert result == "pong"
 
 
+_start_tls_xfail = pytest.mark.xfail(
+    sys.version_info < (3, 11),
+    reason="loop.start_tls(server_side=True) hangs on Python <3.11, "
+    "https://github.com/python/cpython/issues/79156",
+    strict=True,
+)
+_start_tls_timeout = pytest.mark.timeout(5 if sys.version_info < (3, 11) else 15)
+
+
 @pytest.mark.parametrize(
     "server_kw, client_kw",
     [
@@ -89,6 +98,7 @@ async def _ping_pong(bind_host, port, server_kw, client_kw):
             {"ssl": "server_ssl_ctx", "tls_auto": True},
             {"ssl": "client_ssl_ctx", "server_hostname": "localhost"},
             id="tls-auto-tls-client",
+            marks=[_start_tls_xfail, _start_tls_timeout],
         ),
         pytest.param({"ssl": "server_ssl_ctx", "tls_auto": True}, {}, id="tls-auto-plain-client"),
     ],
@@ -107,6 +117,8 @@ async def test_ping_pong(
     await _ping_pong(bind_host, unused_tcp_port, resolved_server, resolved_client)
 
 
+@_start_tls_xfail
+@_start_tls_timeout
 async def test_tls_auto_both_clients(bind_host, unused_tcp_port, server_ssl_ctx, client_ssl_ctx):
     """Both TLS and plain clients connect sequentially to a tls_auto server."""
     _tls_ok: asyncio.Future[bool] = asyncio.Future()

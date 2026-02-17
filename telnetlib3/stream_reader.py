@@ -93,13 +93,11 @@ class TelnetReader:
 
     def set_transport(self, transport: asyncio.BaseTransport) -> None:
         """Set the transport for flow control."""
-        assert self._transport is None, "Transport already set"
         self._transport = transport
 
     def _maybe_resume_transport(self) -> None:
         if self._paused and len(self._buffer) <= self._limit:
             self._paused = False
-            assert self._transport is not None
             self._transport.resume_reading()  # type: ignore[attr-defined]
 
     def feed_eof(self) -> None:
@@ -126,8 +124,6 @@ class TelnetReader:
 
     def feed_data(self, data: bytes) -> None:
         """Feed data bytes to the reader buffer."""
-        assert not self._eof, "feed_data after feed_eof"
-
         if not data:
             return
 
@@ -161,13 +157,10 @@ class TelnetReader:
                 f"already waiting for incoming data"
             )
 
-        assert not self._eof, "_wait_for_data after EOF"
-
         # Waiting for data while paused will make deadlock, so prevent it.
         # This is essential for readexactly(n) for case when n > self._limit.
         if self._paused:
             self._paused = False
-            assert self._transport is not None
             self._transport.resume_reading()  # type: ignore[attr-defined]
 
         self._waiter = asyncio.get_running_loop().create_future()
@@ -583,7 +576,6 @@ class TelnetReaderUnicode(TelnetReader):
         """
         super().__init__(limit=limit)
 
-        assert callable(fn_encoding), fn_encoding
         self.fn_encoding = fn_encoding
         self.encoding_errors = encoding_errors
 

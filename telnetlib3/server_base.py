@@ -79,8 +79,6 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     def timeout_connection(self) -> None:
         """Close the connection due to timeout."""
-        assert self.reader is not None
-        assert self.writer is not None
         self.reader.feed_eof()
         self.writer.close()
 
@@ -104,7 +102,6 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         if self._closing:
             return
         self._closing = True
-        assert self.reader is not None
 
         # inform yielding readers about closed connection
         if exc is None:
@@ -189,7 +186,6 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         if future.cancelled() or future.exception() is not None:
             return
         if self.shell is not None:
-            assert self.reader is not None and self.writer is not None
             coro = self.shell(self.reader, self.writer)
             if asyncio.iscoroutine(coro):
                 loop = asyncio.get_event_loop()
@@ -216,8 +212,6 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             logger.log(TRACE, "recv %d bytes\n%s", len(data), hexdump(data, prefix="<<  "))
         self._last_received = datetime.datetime.now()
         self._rx_bytes += len(data)
-        assert self.writer is not None
-        assert self.reader is not None
         writer = self.writer
         reader = self.reader
 
@@ -281,13 +275,11 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     @property
     def duration(self) -> float:
         """Time elapsed since client connected, in seconds as float."""
-        assert self._when_connected is not None
         return (datetime.datetime.now() - self._when_connected).total_seconds()
 
     @property
     def idle(self) -> float:
         """Time elapsed since data last received, in seconds as float."""
-        assert self._last_received is not None
         return (datetime.datetime.now() - self._last_received).total_seconds()
 
     @property
@@ -358,7 +350,6 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         """
         # Generally, this separates a bare TCP connect() from a True
         # RFC-compliant telnet client with responding IAC interpreter.
-        assert self.writer is not None
         server_do = sum(enabled for _, enabled in self.writer.remote_option.items())
         client_will = sum(enabled for _, enabled in self.writer.local_option.items())
         return bool(server_do or client_will)
@@ -385,7 +376,6 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
         # negotiation is complete (returns True) when all negotiation options
         # that have been requested have been acknowledged.
-        assert self.writer is not None
         return not any(self.writer.pending_option.values())
 
     # private methods
