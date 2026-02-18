@@ -737,7 +737,7 @@ MUD Server
 
 The public telnetlib3 demonstration MUD Server is::
 
-    telnet 1984.ws 6066
+    telnet 1984.ws 6063
 
 telnetlib3 supports the common MUD (Multi-User Dungeon) protocols used by
 MUD clients like Mudlet, TinTin++, and BlowTorch:
