@@ -637,6 +637,20 @@ property::
     print(f"Mode: {writer.mode}")  # 'local', 'remote', or 'kludge'
     print(f"ECHO enabled: {writer.remote_option.enabled(ECHO)}")
 
+Go-Ahead (GA)
+--------------
+
+When a client does not negotiate Suppress Go-Ahead (SGA), the server sends
+``IAC GA`` after output to signal that the client may transmit. This is
+correct behavior for MUD clients like Mudlet that expect prompt detection
+via GA.
+
+If GA causes unwanted output for your use case, disable it::
+
+    telnetlib3-server --never-send-ga
+
+For PTY shells, GA is sent after 500ms of output idle time -- Go ahead (GA) isn't typically used
+with interactive programs, it is probably best to disable it.
 
 Fingerprinting Server
 =====================

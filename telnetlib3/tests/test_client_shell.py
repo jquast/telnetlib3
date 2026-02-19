@@ -95,7 +95,6 @@ def test_determine_mode_unchanged(will_echo: bool, raw_mode: "bool | None", will
 @pytest.mark.parametrize(
     "will_echo,raw_mode,will_sga",
     [
-        (True, None, False),
         (False, None, True),
         (True, None, True),
         (False, True, False),
@@ -108,6 +107,16 @@ def test_determine_mode_goes_raw(will_echo: bool, raw_mode: "bool | None", will_
     result = term.determine_mode(mode)
     assert result is not mode
     assert not result.lflag & termios.ICANON
+    assert not result.lflag & termios.ECHO
+
+
+def test_determine_mode_echo_only_stays_linemode() -> None:
+    """WILL ECHO without WILL SGA keeps ICANON (line mode) but suppresses local ECHO."""
+    term = _make_term(_make_writer(will_echo=True, raw_mode=None, will_sga=False))
+    mode = _cooked_mode()
+    result = term.determine_mode(mode)
+    assert result is not mode
+    assert result.lflag & termios.ICANON
     assert not result.lflag & termios.ECHO
 
 
@@ -146,7 +155,7 @@ def test_echo_toggle_password_flow() -> None:
     writer.will_echo = True
     r2 = term.determine_mode(mode)
     assert not r2.lflag & termios.ECHO
-    assert not r2.lflag & termios.ICANON
+    assert r2.lflag & termios.ICANON
 
     writer.will_echo = False
     r3 = term.determine_mode(mode)
@@ -454,7 +463,7 @@ def _pty_client(cmd: "list[str]"):
         (
             b"hello from server\r\n",
             0.5,
-            None,
+            ["--no-repl"],
             [b"Escape character", b"hello from server", b"Connection closed by foreign host."],
         ),
         (b"raw server\r\n", 0.1, ["--raw-mode"], [b"raw server"]),
@@ -485,8 +494,8 @@ async def test_simple_server_output(
 @pytest.mark.parametrize(
     "prompt,response,extra_args,send,expected",
     [
-        (b"login: ", b"\r\nwelcome!\r\n", None, b"user\r", [b"login:", b"welcome!"]),
-        (b"prompt> ", b"\r\ngot it\r\n", ["--line-mode"], b"hello\r", [b"got it", b"hello"]),
+        (b"login: ", b"\r\nwelcome!\r\n", ["--no-repl"], b"user\r", [b"login:", b"welcome!"]),
+        (b"prompt> ", b"\r\ngot it\r\n", ["--line-mode", "--no-repl"], b"hello\r", [b"got it", b"hello"]),
     ],
 )
 async def test_echo_sga_interaction(
@@ -551,7 +560,7 @@ async def test_password_hidden_then_echo_restored(bind_host: str, unused_tcp_por
                 asyncio.get_event_loop().call_later(0.2, self._transport.close)
 
     async with asyncio_server(Proto, bind_host, unused_tcp_port):
-        cmd = _client_cmd(bind_host, unused_tcp_port)
+        cmd = _client_cmd(bind_host, unused_tcp_port, ["--no-repl"])
 
         def _interact(master_fd, proc):
             buf = _pty_read(master_fd, marker=b"Name:", timeout=10.0)
@@ -596,7 +605,7 @@ async def test_backspace_visual_erase(bind_host: str, unused_tcp_port: int) -> N
                 asyncio.get_event_loop().call_later(0.2, self._transport.close)
 
     async with asyncio_server(Proto, bind_host, unused_tcp_port):
-        cmd = _client_cmd(bind_host, unused_tcp_port)
+        cmd = _client_cmd(bind_host, unused_tcp_port, ["--no-repl"])
 
         def _interact(master_fd, proc):
             buf = _pty_read(master_fd, marker=b"login:", timeout=10.0)
@@ -619,6 +628,41 @@ def test_check_auto_mode_not_istty() -> None:
     term = _make_term(writer)
     term._istty = False
     assert term.check_auto_mode(switched_to_raw=False, last_will_echo=False) is None
+
+
+def test_check_auto_mode_echo_only_stays_linemode() -> None:
+    """WILL ECHO without SGA suppresses local echo but does not switch to raw."""
+    writer = _make_writer(will_echo=True, will_sga=False, raw_mode=None)
+    term = _make_term(writer)
+    term._istty = True
+    term._save_mode = _cooked_mode()
+    _set_modes: list[Terminal.ModeDef] = []
+    term.set_mode = lambda m: _set_modes.append(m)  # type: ignore[method-assign]
+    result = term.check_auto_mode(switched_to_raw=False, last_will_echo=False)
+    assert result is not None
+    switched_to_raw, last_will_echo, local_echo = result
+    assert switched_to_raw is False
+    assert last_will_echo is True
+    assert local_echo is False
+    assert len(_set_modes) == 1
+    assert _set_modes[0].lflag & termios.ICANON
+    assert not _set_modes[0].lflag & termios.ECHO
+
+
+def test_check_auto_mode_sga_goes_raw() -> None:
+    """WILL SGA switches to raw mode."""
+    writer = _make_writer(will_echo=False, will_sga=True, raw_mode=None)
+    term = _make_term(writer)
+    term._istty = True
+    term._save_mode = _cooked_mode()
+    _set_modes: list[Terminal.ModeDef] = []
+    term.set_mode = lambda m: _set_modes.append(m)  # type: ignore[method-assign]
+    result = term.check_auto_mode(switched_to_raw=False, last_will_echo=False)
+    assert result is not None
+    switched_to_raw, _, _ = result
+    assert switched_to_raw is True
+    assert len(_set_modes) == 1
+    assert not _set_modes[0].lflag & termios.ICANON
 
 
 async def test_setup_winch_registers_handler() -> None:

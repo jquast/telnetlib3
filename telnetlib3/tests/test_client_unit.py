@@ -193,6 +193,24 @@ def test_transform_args():
     assert result2["send_environ"] == ("TERM", "LANG")
 
 
+def test_transform_args_history_file():
+    parser = cl._get_argument_parser()
+    result = cl._transform_args(parser.parse_args(["myhost"]))
+    assert result["history_file"] is not None
+    assert "telnetlib3" in result["history_file"]
+    assert result["history_file"].endswith("history")
+
+    result_custom = cl._transform_args(
+        parser.parse_args(["myhost", "--history-file", "/tmp/my-history"])
+    )
+    assert result_custom["history_file"] == "/tmp/my-history"
+
+    result_disabled = cl._transform_args(
+        parser.parse_args(["myhost", "--history-file", ""])
+    )
+    assert result_disabled["history_file"] is None
+
+
 @pytest.mark.asyncio
 async def test_open_connection_default_factory(bind_host, unused_tcp_port, monkeypatch):
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)

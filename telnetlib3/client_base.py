@@ -254,7 +254,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         if self.writer is None:
             return
         from .server_fingerprinting import (  # pylint: disable=import-outside-toplevel
-            _SYNCTERM_BINARY_ENCODINGS,
             detect_syncterm_font,
         )
 
@@ -267,8 +266,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 )
             else:
                 self.writer.environ_encoding = encoding
-            if encoding in _SYNCTERM_BINARY_ENCODINGS:
-                self.force_binary = True
+            self.force_binary = True
 
     # public properties
 

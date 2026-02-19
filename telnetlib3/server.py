@@ -420,11 +420,23 @@ class TelnetServer(server_base.BaseServer):
         session setup.  Override this method or see
         :data:`~.fingerprinting.ENVIRON_EXTENDED` for a larger set used
         during client fingerprinting.
+
+        .. note::
+
+            ``USER`` is excluded when the client is Microsoft telnet
+            (ttype1=ANSI, ttype2=VT100) because requesting it crashes
+            ``telnet.exe``.  See GitHub issue #24.
         """
         from .telopt import VAR, USERVAR  # pylint: disable=import-outside-toplevel
 
-        return [
-            "USER",
+        ttype1 = self.get_extra_info("ttype1") or ""
+        ttype2 = self.get_extra_info("ttype2") or ""
+        is_ms_telnet = ttype1 == "ANSI" and ttype2 == "VT100"
+
+        result: List[Union[str, bytes]] = []
+        if not is_ms_telnet:
+            result.append("USER")
+        result.extend([
             "LOGNAME",
             "DISPLAY",
             "LANG",
@@ -436,7 +448,8 @@ class TelnetServer(server_base.BaseServer):
             # Request any other VAR/USERVAR the client wants to send
             VAR,
             USERVAR,
-        ]
+        ])
+        return result
 
     def on_environ(self, mapping: Dict[str, str]) -> None:
         """Callback receives NEW_ENVIRON response, :rfc:`1572`."""
@@ -456,6 +469,14 @@ class TelnetServer(server_base.BaseServer):
         logger.debug("on_environ received: %r", u_mapping)
 
         self._extra.update(u_mapping)
+
+        # When the client provides LANG (with encoding suffix) or CHARSET,
+        # presume BINARY capability even without explicit BINARY negotiation.
+        has_charset = bool(u_mapping.get("CHARSET"))
+        lang_val = u_mapping.get("LANG", "")
+        has_lang_encoding = "." in lang_val and lang_val != "C"
+        if (has_charset or has_lang_encoding) and self.writer is not None:
+            self.writer._force_binary_on_protocol()  # pylint: disable=protected-access
 
     def on_request_charset(self) -> List[str]:
         """
@@ -563,14 +584,14 @@ class TelnetServer(server_base.BaseServer):
 
     def _negotiate_environ(self) -> None:
         """
-        Send ``DO NEW_ENVIRON`` unless the client is Microsoft telnet.
+        Send ``DO NEW_ENVIRON``.
 
         Called from :meth:`on_ttype` as soon as we have enough information:
 
         - After ``ttype1`` when it is not ``"ANSI"``.
-        - After ``ttype2`` when ``ttype1`` *is* ``"ANSI"`` -- if ``ttype2``
-          is ``"VT100"`` the client is Microsoft Windows telnet and
-          ``NEW_ENVIRON`` is skipped entirely (GitHub issue #24).
+        - After ``ttype2`` when ``ttype1`` *is* ``"ANSI"`` -- this gives
+          :meth:`on_request_environ` enough context to detect Microsoft
+          telnet and exclude ``USER`` (GitHub issue #24).
         - From :meth:`check_negotiation` when TTYPE stalls or is refused.
         """
         if self._environ_requested:
@@ -578,15 +599,6 @@ class TelnetServer(server_base.BaseServer):
         self._environ_requested = True
 
         from .telopt import DO, NEW_ENVIRON  # pylint: disable=import-outside-toplevel
-
-        ttype1 = self.get_extra_info("ttype1") or ""
-        ttype2 = self.get_extra_info("ttype2") or ""
-
-        if ttype1 == "ANSI" and ttype2 == "VT100":
-            logger.info(
-                "skipping NEW_ENVIRON for Microsoft telnet (ttype1=%r, ttype2=%r)", ttype1, ttype2
-            )
-            return
 
         self.writer.iac(DO, NEW_ENVIRON)
 
@@ -1145,10 +1157,9 @@ def parse_server_args() -> Dict[str, Any]:
         result["pty_fork_limit"] = 0
         result["pty_raw"] = False
 
-    # Auto-enable force_binary for retro BBS encodings that use high-bit bytes.
-    from .encodings import FORCE_BINARY_ENCODINGS  # pylint: disable=import-outside-toplevel
-
-    if result["encoding"].lower().replace("-", "_") in FORCE_BINARY_ENCODINGS:
+    # Auto-enable force_binary for any non-ASCII encoding that uses high-bit bytes.
+    enc_key = result["encoding"].lower().replace("-", "_")
+    if enc_key not in ("us_ascii", "ascii"):
         result["force_binary"] = True
 
     # Build SSLContext from --ssl-certfile / --ssl-keyfile

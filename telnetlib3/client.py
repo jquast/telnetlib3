@@ -609,6 +609,7 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             contrast=args["color_contrast"],
             background_color=args["background_color"],
             reverse_video=args["reverse_video"],
+            ice_colors=args["ice_colors"],
         )
         if is_petscii or colormatch == "c64":
             color_filter_obj: object = PetsciiColorFilter(color_config)
@@ -665,6 +666,20 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             await _inner_shell(reader, writer_arg)
 
         shell_callback = _raw_shell
+
+    # Wrap shell to inject _repl_enabled flag for linemode REPL
+    if not args.get("no_repl", False):
+        _inner_repl = shell_callback
+
+        async def _repl_shell(
+            reader: Union[TelnetReader, TelnetReaderUnicode],
+            writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
+        ) -> None:
+            writer_arg._repl_enabled = True  # type: ignore[union-attr]
+            writer_arg._history_file = args.get("history_file")  # type: ignore[union-attr]
+            await _inner_repl(reader, writer_arg)
+
+        shell_callback = _repl_shell
 
     # Build connection kwargs explicitly to avoid pylint false positive
     connection_kwargs: Dict[str, Any] = {
@@ -769,7 +784,7 @@ def _get_argument_parser() -> argparse.ArgumentParser:
             "translate basic 16-color ANSI codes to exact 24-bit RGB values"
             " from a named hardware palette, bypassing the terminal's custom"
             " palette to preserve intended MUD/BBS artwork colors"
-            " (ega, cga, vga, amiga, xterm, none)"
+            " (ega, cga, vga, xterm, none)"
         ),
     )
     parser.add_argument(
@@ -797,6 +812,13 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="swap foreground/background for light-background terminals",
+    )
+    parser.add_argument(
+        "--ice-colors",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="treat SGR 5 (blink) as bright background (iCE colors)"
+        " for BBS/ANSI art (default: enabled)",
     )
     parser.add_argument(
         "--ascii-eol",
@@ -832,6 +854,20 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         "the server identity is not verified, allowing "
         "man-in-the-middle attacks",
     )
+    parser.add_argument(
+        "--no-repl",
+        action="store_true",
+        default=False,
+        help="disable prompt_toolkit REPL input line in linemode "
+        "(use standard line-buffered input instead)",
+    )
+    parser.add_argument(
+        "--history-file",
+        default=None,
+        help="path for persistent REPL command history "
+        "(default: ~/.local/share/telnetlib3/history, "
+        "empty string to disable)",
+    )
     return parser
 
 
@@ -865,8 +901,17 @@ def _parse_background_color(value: str) -> Tuple[int, int, int]:
     return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
 
+def _resolve_history_file(value: Optional[str]) -> Optional[str]:
+    """Resolve ``--history-file`` to an absolute path or ``None``."""
+    if value is not None:
+        return str(value) if value else None
+    from .client_tui import HISTORY_FILE  # pylint: disable=import-outside-toplevel
+
+    return str(HISTORY_FILE)
+
+
 def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
-    # Auto-enable force_binary for retro BBS encodings that use high-bit bytes.
+    # Auto-enable force_binary for any non-ASCII encoding that uses high-bit bytes.
     from .encodings import FORCE_BINARY_ENCODINGS  # pylint: disable=import-outside-toplevel
 
     force_binary = args.force_binary
@@ -877,8 +922,10 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         raw_mode = False
     else:
         raw_mode = None
-    if args.encoding.lower().replace("-", "_") in FORCE_BINARY_ENCODINGS:
+    enc_key = args.encoding.lower().replace("-", "_")
+    if enc_key not in ("us_ascii", "ascii"):
         force_binary = True
+    if enc_key in FORCE_BINARY_ENCODINGS:
         raw_mode = True
 
     # Build TLS context from --ssl / --ssl-cafile / --ssl-no-verify
@@ -919,11 +966,27 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "ascii_eol": args.ascii_eol,
         "ansi_keys": args.ansi_keys,
         "ssl": ssl_ctx,
+        "no_repl": args.no_repl,
+        "history_file": _resolve_history_file(args.history_file),
     }
 
 
 def main() -> None:
-    """Entry point for telnetlib3-client command."""
+    """Entry point for telnetlib3-client command.
+
+    When invoked without a positional host argument and ``textual`` is
+    installed, launches the TUI session manager instead.
+    """
+    has_host = any(not arg.startswith("-") for arg in sys.argv[1:])
+    if not has_host:
+        try:
+            from telnetlib3.client_tui import tui_main  # pylint: disable=import-outside-toplevel
+
+            tui_main()
+            return
+        except ImportError:
+            pass  # textual not installed, fall through to argparse error
+
     try:
         asyncio.run(run_client())
     except OSError as err:

@@ -185,9 +185,6 @@ SYNCTERM_FONT_ENCODINGS: dict[int, str] = {
     42: "cp437",
 }
 
-#: Encodings that require ``force_binary`` for high-bit bytes.
-_SYNCTERM_BINARY_ENCODINGS = frozenset({"petscii", "atascii"})
-
 
 log = logging.getLogger(__name__)
 
@@ -502,6 +499,11 @@ async def _fingerprint_session(  # noqa: E501 ; pylint: disable=too-many-locals,
         if detected in (b"\x1b\x1b", b"\x1b") and getattr(writer, "_esc_inline", False):
             # pylint: disable-next=protected-access
             writer._esc_inline = False  # type: ignore[attr-defined]
+            detected = None
+        # Skip if the charset menu response was already sent inline.
+        if prompt_result.encoding and getattr(writer, "_menu_inline", False):
+            # pylint: disable-next=protected-access
+            writer._menu_inline = False  # type: ignore[attr-defined]
             detected = None
         prompt_response = _reencode_prompt(
             detected if detected is not None else b"\r\n", writer.environ_encoding
@@ -961,8 +963,8 @@ async def _read_banner_until_quiet(  # noqa: E501 ; pylint: disable=too-many-pos
     cursor movement after writing a test character.
 
     Time-sensitive prompts — ``Press [.ESC.] twice`` botcheck countdowns
-    — are detected inline and responded to immediately so the reply
-    arrives before the countdown expires.
+    and charset selection menus — are detected inline and responded to
+    immediately so the reply arrives before the server times out.
 
     :param reader: :class:`~telnetlib3.stream_reader.TelnetReader` instance.
     :param quiet_time: Seconds of silence before considering banner complete.
@@ -974,7 +976,9 @@ async def _read_banner_until_quiet(  # noqa: E501 ; pylint: disable=too-many-pos
     :returns: Banner bytes (may be empty).
     """
     chunks: list[bytes] = []
+    stripped_accum = bytearray()
     esc_responded = False
+    menu_responded = False
     loop = asyncio.get_event_loop()
     deadline = loop.time() + max_wait
     while loop.time() < deadline:
@@ -996,17 +1000,19 @@ async def _read_banner_until_quiet(  # noqa: E501 ; pylint: disable=too-many-pos
                     log.debug("SyncTERM font switch detected: %s", font_enc)
                     if getattr(writer, "_encoding_explicit", False):
                         log.debug(
-                            "ignoring font switch, explicit encoding: %s", writer.environ_encoding
+                            "ignoring font switch, explicit encoding: %s",
+                            writer.environ_encoding,
                         )
                     else:
                         writer.environ_encoding = font_enc
                         if cursor is not None:
                             cursor.encoding = font_enc
                     protocol = writer.protocol
-                    if protocol is not None and font_enc in _SYNCTERM_BINARY_ENCODINGS:
+                    if protocol is not None:
                         protocol.force_binary = True
+                stripped_chunk = _ANSI_STRIP_RE.sub(b"", chunk)
+                stripped_accum.extend(stripped_chunk)
                 if not esc_responded:
-                    stripped_chunk = _ANSI_STRIP_RE.sub(b"", chunk)
                     if _ESC_TWICE_RE.search(stripped_chunk):
                         writer.write(b"\x1b\x1b")
                         await writer.drain()
@@ -1019,6 +1025,25 @@ async def _read_banner_until_quiet(  # noqa: E501 ; pylint: disable=too-many-pos
                         esc_responded = True
                         # pylint: disable-next=protected-access
                         writer._esc_inline = True  # type: ignore[attr-defined]
+                if not menu_responded:
+                    menu_match = _MENU_UTF8_RE.search(stripped_accum)
+                    if menu_match:
+                        response = menu_match.group(1) + b"\r\n"
+                        writer.write(
+                            _reencode_prompt(response, writer.environ_encoding)
+                        )
+                        await writer.drain()
+                        menu_responded = True
+                        log.debug("inline UTF-8 menu response: %r", response)
+                        if not getattr(writer, "_encoding_explicit", False):
+                            writer.environ_encoding = "utf-8"
+                            if cursor is not None:
+                                cursor.encoding = "utf-8"
+                        protocol = writer.protocol
+                        if protocol is not None:
+                            protocol.force_binary = True
+                        # pylint: disable-next=protected-access
+                        writer._menu_inline = True  # type: ignore[attr-defined]
             chunks.append(chunk)
         except (asyncio.TimeoutError, EOFError):
             break

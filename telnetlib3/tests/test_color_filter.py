@@ -29,7 +29,7 @@ class TestPaletteData:
             assert 0 <= b <= 255
 
     def test_all_expected_palettes_exist(self) -> None:
-        assert set(PALETTES.keys()) == {"ega", "cga", "vga", "amiga", "xterm", "c64"}
+        assert set(PALETTES.keys()) == {"ega", "cga", "vga", "xterm", "c64"}
 
 
 class TestColorConfig:
@@ -40,6 +40,7 @@ class TestColorConfig:
         assert cfg.contrast == 0.8
         assert cfg.background_color == (16, 16, 16)
         assert cfg.reverse_video is False
+        assert cfg.ice_colors is True
 
 
 class TestSgrCodeToPaletteIndex:
@@ -334,6 +335,77 @@ class TestColorFilterBoldAsBright:
         result = f.filter(f"\x1b[1;{code}m")
         bright_rgb = PALETTES["ega"][normal_idx + 8]
         assert f"38;2;{bright_rgb[0]};{bright_rgb[1]};{bright_rgb[2]}" in result
+
+
+class TestColorFilterIceColors:
+    def _make_filter(self, ice_colors: bool = True) -> ColorFilter:
+        return ColorFilter(ColorConfig(brightness=1.0, contrast=1.0, ice_colors=ice_colors))
+
+    def test_blink_bg_uses_bright_bg(self) -> None:
+        f = self._make_filter()
+        result = f.filter("\x1b[5;40m")
+        bright_black = PALETTES["ega"][8]
+        assert f"48;2;{bright_black[0]};{bright_black[1]};{bright_black[2]}" in result
+
+    def test_bg_before_blink_in_same_seq(self) -> None:
+        f = self._make_filter()
+        result = f.filter("\x1b[40;5m")
+        bright_black = PALETTES["ega"][8]
+        assert f"48;2;{bright_black[0]};{bright_black[1]};{bright_black[2]}" in result
+
+    def test_blink_persists_across_sequences(self) -> None:
+        f = self._make_filter()
+        f.filter("\x1b[5m")
+        result = f.filter("\x1b[40m")
+        bright_black = PALETTES["ega"][8]
+        assert f"48;2;{bright_black[0]};{bright_black[1]};{bright_black[2]}" in result
+
+    def test_blink_off_reverts_to_normal(self) -> None:
+        f = self._make_filter()
+        f.filter("\x1b[5m")
+        f.filter("\x1b[25m")
+        result = f.filter("\x1b[40m")
+        normal_black = PALETTES["ega"][0]
+        assert f"48;2;{normal_black[0]};{normal_black[1]};{normal_black[2]}" in result
+
+    def test_reset_clears_blink(self) -> None:
+        f = self._make_filter()
+        f.filter("\x1b[5m")
+        f.filter("\x1b[0m")
+        result = f.filter("\x1b[40m")
+        normal_black = PALETTES["ega"][0]
+        assert f"48;2;{normal_black[0]};{normal_black[1]};{normal_black[2]}" in result
+
+    def test_blink_does_not_affect_foreground(self) -> None:
+        f = self._make_filter()
+        result = f.filter("\x1b[5;30m")
+        normal_black = PALETTES["ega"][0]
+        assert f"38;2;{normal_black[0]};{normal_black[1]};{normal_black[2]}" in result
+
+    def test_blink_does_not_affect_bright_bg(self) -> None:
+        f = self._make_filter()
+        result = f.filter("\x1b[5;100m")
+        bright_black = PALETTES["ega"][8]
+        assert f"48;2;{bright_black[0]};{bright_black[1]};{bright_black[2]}" in result
+
+    @pytest.mark.parametrize(
+        "code,normal_idx",
+        [(40, 0), (41, 1), (42, 2), (43, 3), (44, 4), (45, 5), (46, 6), (47, 7)],
+    )
+    def test_all_blink_bg_use_bright_palette(self, code: int, normal_idx: int) -> None:
+        f = self._make_filter()
+        result = f.filter(f"\x1b[5;{code}m")
+        bright_rgb = PALETTES["ega"][normal_idx + 8]
+        assert f"48;2;{bright_rgb[0]};{bright_rgb[1]};{bright_rgb[2]}" in result
+
+    def test_ice_colors_disabled(self) -> None:
+        f = self._make_filter(ice_colors=False)
+        f.filter("x")
+        result = f.filter("\x1b[5;40m")
+        normal_black = PALETTES["ega"][0]
+        assert f"48;2;{normal_black[0]};{normal_black[1]};{normal_black[2]}" in result
+        params = result.split("\x1b[")[1].split("m")[0]
+        assert "5" in params.split(";")
 
 
 class TestColorFilterChunkedInput:

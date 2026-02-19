@@ -56,6 +56,10 @@ docs = [
 extras = [
     "ucs-detect>=2",
     "prettytable",
+    "prompt_toolkit>=3.0",
+]
+tui = [
+    "textual>=0.44",
 ]
 
 [project.scripts]

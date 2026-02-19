@@ -168,25 +168,44 @@ def _make_server():
 
 
 @pytest.mark.parametrize(
-    "ttype1,ttype2,expect_skip",
+    "ttype1,ttype2",
     [
-        ("ANSI", "VT100", True),
-        ("ANSI", "ANSI", False),
-        ("ansi", "vt100", False),
-        ("xterm", "xterm", False),
-        ("xterm", "xterm-256color", False),
+        ("ANSI", "VT100"),
+        ("ANSI", "ANSI"),
+        ("ansi", "vt100"),
+        ("xterm", "xterm"),
+        ("xterm", "xterm-256color"),
     ],
 )
-async def test_negotiate_environ_ms_telnet(ttype1, ttype2, expect_skip):
-    """NEW_ENVIRON is skipped for Microsoft telnet (ANSI + VT100)."""
+async def test_negotiate_environ_always_sent(ttype1, ttype2):
+    """DO NEW_ENVIRON is always sent regardless of client identity."""
     server = _make_server()
     server._extra["ttype1"] = ttype1
     server._extra["ttype2"] = ttype2
     server._negotiate_environ()
-    if expect_skip:
-        assert not server.writer.pending_option.get(DO + NEW_ENVIRON)
-    else:
-        assert server.writer.pending_option.get(DO + NEW_ENVIRON)
+    assert server.writer.pending_option.get(DO + NEW_ENVIRON)
+
+
+@pytest.mark.parametrize(
+    "ttype1,ttype2,expect_user",
+    [
+        ("ANSI", "VT100", False),
+        ("ANSI", "ANSI", True),
+        ("ansi", "vt100", True),
+        ("xterm", "xterm", True),
+        ("xterm", "xterm-256color", True),
+    ],
+)
+async def test_on_request_environ_user_excluded_for_ms_telnet(
+    ttype1, ttype2, expect_user
+):
+    """USER is excluded from NEW_ENVIRON request for Microsoft telnet."""
+    server = _make_server()
+    server._extra["ttype1"] = ttype1
+    server._extra["ttype2"] = ttype2
+    result = server.on_request_environ()
+    assert ("USER" in result) is expect_user
+    assert "LOGNAME" in result
 
 
 async def test_check_negotiation_ttype_refused_triggers_environ():
@@ -231,3 +250,24 @@ async def test_on_ttype_ansi_defers_environ():
     server.on_ttype("ANSI")
     assert not server._environ_requested
     assert not server.writer.pending_option.get(DO + NEW_ENVIRON)
+
+
+@pytest.mark.parametrize(
+    "env,expect_force",
+    [
+        ({"LANG": "en_US.UTF-8"}, True),
+        ({"LANG": "ja_JP.EUC-JP"}, True),
+        ({"CHARSET": "UTF-8"}, True),
+        ({"CHARSET": "ISO-8859-1", "USER": "test"}, True),
+        ({"LANG": "en_US"}, False),
+        ({"LANG": "C"}, False),
+        ({"USER": "test", "TERM": "xterm"}, False),
+        ({}, False),
+    ],
+)
+async def test_on_environ_force_binary(env, expect_force):
+    """on_environ sets force_binary when LANG has encoding or CHARSET is present."""
+    server = _make_server()
+    assert server.force_binary is False
+    server.on_environ(dict(env))
+    assert server.force_binary is expect_force

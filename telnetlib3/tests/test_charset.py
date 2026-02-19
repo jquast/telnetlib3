@@ -40,6 +40,9 @@ class MockTransport:
 
 
 class MockProtocol:
+    def __init__(self):
+        self.force_binary = False
+
     def get_extra_info(self, name, default=None):
         return default
 
@@ -438,3 +441,33 @@ async def test_charset_explicit_non_latin1_encoding(bind_host, unused_tcp_port):
             connect_maxwait=0.25,
         ) as (reader, writer):
             assert writer.protocol.encoding(incoming=True) == "US-ASCII"
+
+
+def test_charset_accepted_sets_force_binary_on_request_side():
+    """CHARSET ACCEPTED by peer sets force_binary on the requesting side."""
+    w, t, p = new_writer(server=True)
+    w.handle_will(CHARSET)
+    w.remote_option[CHARSET] = True
+    w.local_option[CHARSET] = True
+
+    buf = collections.deque([CHARSET, ACCEPTED, b"UTF-8"])
+    w._handle_sb_charset(buf)
+
+    assert w.environ_encoding == "UTF-8"
+    assert p.force_binary is True
+
+
+def test_charset_accepted_sets_force_binary_on_accepting_side():
+    """Selecting a charset from a REQUEST sets force_binary on the accepting side."""
+    w, t, p = new_writer(server=False, client=True)
+    w.handle_do(CHARSET)
+    w.local_option[CHARSET] = True
+    w.remote_option[CHARSET] = True
+
+    sep = b";"
+    w._ext_send_callback[CHARSET] = lambda offers: "UTF-8"
+    buf = collections.deque([CHARSET, REQUEST, sep, b"UTF-8"])
+    w._handle_sb_charset(buf)
+
+    assert w.environ_encoding == "UTF-8"
+    assert p.force_binary is True
