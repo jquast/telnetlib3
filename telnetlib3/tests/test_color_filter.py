@@ -36,9 +36,9 @@ class TestColorConfig:
     def test_defaults(self) -> None:
         cfg = ColorConfig()
         assert cfg.palette_name == "ega"
-        assert cfg.brightness == 0.9
-        assert cfg.contrast == 0.8
-        assert cfg.background_color == (16, 16, 16)
+        assert cfg.brightness == 1.0
+        assert cfg.contrast == 1.0
+        assert cfg.background_color == (0, 0, 0)
         assert cfg.reverse_video is False
         assert cfg.ice_colors is True
 
@@ -176,25 +176,25 @@ class TestColorFilterBasicTranslation:
 
 class TestColorFilterReset:
     def _make_filter(self) -> ColorFilter:
-        cfg = ColorConfig(brightness=1.0, contrast=1.0, background_color=(16, 16, 16))
+        cfg = ColorConfig(brightness=1.0, contrast=1.0, background_color=(0, 0, 0))
         return ColorFilter(cfg)
 
     def test_explicit_reset(self) -> None:
         f = self._make_filter()
         result = f.filter("\x1b[0m")
         assert "\x1b[0m" in result
-        assert "\x1b[48;2;16;16;16m" in result
+        assert "\x1b[48;2;0;0;0m" in result
 
     def test_empty_reset(self) -> None:
         f = self._make_filter()
         result = f.filter("\x1b[m")
         assert "\x1b[0m" in result
-        assert "\x1b[48;2;16;16;16m" in result
+        assert "\x1b[48;2;0;0;0m" in result
 
     def test_reset_in_compound_sequence(self) -> None:
         f = self._make_filter()
         result = f.filter("\x1b[0;31m")
-        assert "\x1b[48;2;16;16;16m" in result
+        assert "\x1b[48;2;0;0;0m" in result
 
 
 class TestColorFilterPassThrough:
@@ -336,6 +336,12 @@ class TestColorFilterBoldAsBright:
         bright_rgb = PALETTES["ega"][normal_idx + 8]
         assert f"38;2;{bright_rgb[0]};{bright_rgb[1]};{bright_rgb[2]}" in result
 
+    def test_reset_bold_color_in_same_seq(self) -> None:
+        f = self._make_filter()
+        result = f.filter("\x1b[0;1;34m")
+        bright_blue = PALETTES["ega"][12]
+        assert f"38;2;{bright_blue[0]};{bright_blue[1]};{bright_blue[2]}" in result
+
 
 class TestColorFilterIceColors:
     def _make_filter(self, ice_colors: bool = True) -> ColorFilter:
@@ -398,6 +404,12 @@ class TestColorFilterIceColors:
         bright_rgb = PALETTES["ega"][normal_idx + 8]
         assert f"48;2;{bright_rgb[0]};{bright_rgb[1]};{bright_rgb[2]}" in result
 
+    def test_reset_blink_bg_in_same_seq(self) -> None:
+        f = self._make_filter()
+        result = f.filter("\x1b[0;5;41m")
+        bright_red = PALETTES["ega"][9]
+        assert f"48;2;{bright_red[0]};{bright_red[1]};{bright_red[2]}" in result
+
     def test_ice_colors_disabled(self) -> None:
         f = self._make_filter(ice_colors=False)
         f.filter("x")
@@ -445,13 +457,13 @@ class TestColorFilterChunkedInput:
 
 class TestColorFilterInitialBackground:
     def test_first_output_has_background(self) -> None:
-        f = ColorFilter(ColorConfig(brightness=1.0, contrast=1.0, background_color=(16, 16, 16)))
+        f = ColorFilter(ColorConfig(brightness=1.0, contrast=1.0, background_color=(0, 0, 0)))
         result = f.filter("hello")
-        assert result.startswith("\x1b[48;2;16;16;16m")
+        assert result.startswith("\x1b[48;2;0;0;0m")
         assert result.endswith("hello")
 
     def test_second_output_no_extra_background(self) -> None:
-        f = ColorFilter(ColorConfig(brightness=1.0, contrast=1.0, background_color=(16, 16, 16)))
+        f = ColorFilter(ColorConfig(brightness=1.0, contrast=1.0, background_color=(0, 0, 0)))
         f.filter("hello")
         result2 = f.filter("world")
         assert not result2.startswith("\x1b[48;2;")
@@ -475,7 +487,7 @@ class TestColorFilterReverseVideo:
     def _make_filter(self) -> ColorFilter:
         return ColorFilter(
             ColorConfig(
-                brightness=1.0, contrast=1.0, reverse_video=True, background_color=(16, 16, 16)
+                brightness=1.0, contrast=1.0, reverse_video=True, background_color=(0, 0, 0)
             )
         )
 
@@ -494,7 +506,7 @@ class TestColorFilterReverseVideo:
     def test_background_is_inverted(self) -> None:
         f = self._make_filter()
         result = f.filter("x")
-        assert "\x1b[48;2;239;239;239m" in result
+        assert "\x1b[48;2;255;255;255m" in result
 
 
 class TestColorFilterBrightnessContrast:

@@ -753,3 +753,32 @@ def test_transform_output_bare_cr_preserved_raw() -> None:
     out = _transform_output("\x1b[34;1H\x1b[K\r\x1b[38;2;17;17;17mX\x1b[6n", writer, True)
     assert "\r\n" not in out
     assert "\r" in out
+
+
+async def test_cooked_to_raw_transition_preserves_crlf(
+    bind_host: str, unused_tcp_port: int
+) -> None:
+    """First data chunk during cooked→raw transition must keep \\r\\n line endings."""
+
+    class Proto(asyncio.Protocol):
+        def connection_made(self, transport):
+            super().connection_made(transport)
+            transport.write(
+                _IAC + _WILL + _SGA + _IAC + _WILL + _ECHO
+                + b"line1\r\nline2\r\nline3\r\n"
+            )
+            asyncio.get_event_loop().call_later(0.5, transport.close)
+
+    async with asyncio_server(Proto, bind_host, unused_tcp_port):
+        cmd = _client_cmd(bind_host, unused_tcp_port, ["--no-repl"])
+        with _pty_client(cmd) as (proc, master_fd):
+            output = await asyncio.to_thread(_pty_read, master_fd, proc=proc)
+            assert b"line1" in output
+            assert b"line2" in output
+            assert b"line3" in output
+            text = output.decode("utf-8", errors="replace")
+            for line in ("line1", "line2", "line3"):
+                idx = text.find(line)
+                assert idx != -1
+                after = text[idx + len(line):]
+                assert after.startswith("\r\n")

@@ -187,9 +187,9 @@ class ColorConfig(NamedTuple):
     """
 
     palette_name: str = "ega"
-    brightness: float = 0.9
-    contrast: float = 0.8
-    background_color: Tuple[int, int, int] = (16, 16, 16)
+    brightness: float = 1.0
+    contrast: float = 1.0
+    background_color: Tuple[int, int, int] = (0, 0, 0)
     reverse_video: bool = False
     ice_colors: bool = True
 
@@ -374,6 +374,7 @@ class ColorFilter:
 
             # Track bold state
             if p == 1:
+                bold = True
                 output_parts.append("1")
                 i += 1
                 continue
@@ -385,7 +386,9 @@ class ColorFilter:
 
             # Track blink state
             if p == 5:
-                if not ice:
+                if ice:
+                    blink = True
+                else:
                     output_parts.append("5")
                 i += 1
                 continue
@@ -527,8 +530,8 @@ class PetsciiColorFilter:
             brightness = config.brightness
             contrast = config.contrast
         else:
-            brightness = 0.9
-            contrast = 0.8
+            brightness = 1.0
+            contrast = 1.0
         self._adjusted: List[Tuple[int, int, int]] = [
             _adjust_color(r, g, b, brightness, contrast) for r, g, b in palette
         ]

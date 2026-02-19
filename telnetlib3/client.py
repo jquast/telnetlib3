@@ -753,9 +753,9 @@ def _get_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--connect-timeout",
-        default=None,
+        default=10,
         type=float,
-        help="timeout for TCP connection (seconds, default: no timeout)",
+        help="timeout for TCP connection in seconds (default: 10)",
     )
     parser.add_argument(
         "--send-environ",
@@ -789,21 +789,21 @@ def _get_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--color-brightness",
-        default=0.9,
+        default=1.0,
         type=float,
         metavar="FLOAT",
         help="color brightness scale [0.0..1.0], where 1.0 is original",
     )
     parser.add_argument(
         "--color-contrast",
-        default=0.8,
+        default=1.0,
         type=float,
         metavar="FLOAT",
         help="color contrast scale [0.0..1.0], where 1.0 is original",
     )
     parser.add_argument(
         "--background-color",
-        default="#101010",
+        default="#000000",
         metavar="#RRGGBB",
         help="forced background color as hex RGB (near-black by default)",
     )
@@ -962,6 +962,7 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "color_contrast": args.color_contrast,
         "background_color": _parse_background_color(args.background_color),
         "reverse_video": args.reverse_video,
+        "ice_colors": args.ice_colors,
         "raw_mode": raw_mode,
         "ascii_eol": args.ascii_eol,
         "ansi_keys": args.ansi_keys,
@@ -989,6 +990,8 @@ def main() -> None:
 
     try:
         asyncio.run(run_client())
+    except KeyboardInterrupt:
+        pass
     except OSError as err:
         print(f"Error: {err}", file=sys.stderr)
         sys.exit(1)

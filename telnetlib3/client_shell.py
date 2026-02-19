@@ -684,6 +684,12 @@ else:
                                 switched_to_raw, last_will_echo, local_echo = (
                                     mode_result
                                 )
+                                # When transitioning cooked → raw, the data was
+                                # processed for ONLCR (\r\n → \n) but the
+                                # terminal now has ONLCR disabled.  Re-normalize
+                                # so bare \n becomes \r\n for correct display.
+                                if switched_to_raw and not in_raw:
+                                    out = out.replace("\n", "\r\n")
                             if _want_repl():
                                 _reactivate_repl = True
                         stdout.write(out.encode() or b":?!?:")
