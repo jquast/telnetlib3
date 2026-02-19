@@ -1,23 +1,31 @@
 History
 =======
 2.7.0
-  * new: REPL input mode for ``telnetlib3-client`` in line mode — split-screen
-    display with command history, autosuggestion, and password masking.
-    Powered by ``prompt_toolkit`` when installed via ``pip install telnetlib3[extras]``.
-    A basic fallback editor is used otherwise.  Use ``--no-repl`` to disable.
-  * new: persistent REPL command history saved to
-    ``~/.local/share/telnetlib3/history`` (XDG data directory).  History-based
-    auto-suggest shows grey ghost text completions from previous sessions.
-    Password inputs (when the server negotiates WILL ECHO) are never stored.
-    Use ``--history-file`` to set a custom path, or ``--history-file ""``
-    to disable persistence.
-  * change: ``--force-binary`` is now auto-enabled for any non-ASCII encoding
-    (e.g. UTF-8, CP437, Latin-1), not only ATASCII and PETSCII.  Any encoding
-    that can produce bytes above 0x7F requires BINARY mode on the wire.
-  * change: ``force_binary`` is now automatically enabled when CHARSET is
-    negotiated via :rfc:`2066`, or when ``LANG`` (with an encoding suffix) or
-    ``CHARSET`` environment variables are received via NEW_ENVIRON :rfc:`1572`,
-    even without explicit BINARY :rfc:`856` negotiation.
+  * new: REPL line editor for ``telnetlib3-client`` with command history,
+    autosuggestion, and password masking.  Powered by ``prompt_toolkit``
+    (``pip install telnetlib3[extras]``).  Use ``--no-repl`` to disable.
+  * new: persistent REPL history at ``~/.local/share/telnetlib3/history``.
+    Password inputs are never stored.  Use ``--history-file`` to customize.
+  * new: TUI session manager — ``telnetlib3-client`` without a host argument
+    launches a multi-session TUI (requires ``textual``, included in extras).
+  * new: ``--ice-colors`` (default on) treats SGR 5 (blink) as bright
+    background for proper 16-color BBS/ANSI art display.
+  * change: ``--force-binary`` auto-enabled for any non-ASCII encoding.
+  * change: ``force_binary`` auto-enabled when CHARSET is negotiated
+    (:rfc:`2066`) or ``LANG``/``CHARSET`` received via NEW_ENVIRON
+    (:rfc:`1572`).  SyncTERM font detection also enables it unconditionally.
+  * change: ``--connect-timeout`` default changed from no limit to 10 seconds.
+  * change: color defaults — brightness and contrast now 1.0 (was 0.9/0.8),
+    background now ``#000000`` (was ``#101010``).
+  * change: Amiga palette removed from ``--colormatch`` choices.
+  * bugfix: CGA palette brown (index 3) corrected to match IBM CGA hardware.
+  * bugfix: C64 (VIC-II) palette updated to Colodore reference values.
+  * bugfix: Microsoft Telnet (``telnet.exe``) compatibility refined — server
+    now sends ``DO NEW_ENVIRON`` but excludes ``USER`` variable instead of
+    skipping the option entirely, :ghissue:`24`.
+  * enhancement: server fingerprinting responds to inline UTF-8 charset
+    selection menus during banner capture.
+  * enhancement: graceful ``KeyboardInterrupt`` handling (no traceback).
   * document: Go-Ahead (GA) section added to guidebook and README.
 
 2.6.0

@@ -953,7 +953,7 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "force_binary": force_binary,
         "encoding_errors": args.encoding_errors,
         "connect_minwait": args.connect_minwait,
-        "connect_timeout": args.connect_timeout,
+        "connect_timeout": args.connect_timeout or None,
         "send_environ": tuple(v.strip() for v in args.send_environ.split(",") if v.strip()),
         "always_will": {_parse_option_arg(v) for v in args.always_will},
         "always_do": {_parse_option_arg(v) for v in args.always_do},
@@ -1212,7 +1212,7 @@ async def run_fingerprint_client() -> None:
         "term": ttype,
         "connect_minwait": 0,
         "connect_maxwait": 4.0,
-        "connect_timeout": args.connect_timeout,
+        "connect_timeout": args.connect_timeout or None,
         "waiter_closed": waiter_closed,
     }
     if fp_ssl is not None:
