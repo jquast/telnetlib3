@@ -13,7 +13,7 @@ import re
 import json
 import asyncio
 import logging
-from typing import Any, Union, Optional
+from typing import Any, Callable, Union, Optional
 from dataclasses import dataclass
 
 # 3rd party
@@ -34,8 +34,6 @@ _DELAY_RE = re.compile(r"::(\d+(?:\.\d+)?)(ms|s)::")
 _CR_TOKEN = "<CR>"
 _GROUP_RE = re.compile(r"\\(\d+)")
 
-# Echo format for auto-sent commands (dim cyan).
-_ECHO_FMT = "\x1b[36;2m[auto] {}\x1b[m\r\n"
 
 
 @dataclass
@@ -278,7 +276,6 @@ class AutoreplyEngine:
     :param rules: Autoreply rules to match against.
     :param writer: Telnet writer for sending replies.
     :param log: Logger instance.
-    :param stdout: Optional stdout writer for echoing auto-sent commands.
     :param max_lines: SearchBuffer capacity.
     """
 
@@ -287,16 +284,16 @@ class AutoreplyEngine:
         rules: list[AutoreplyRule],
         writer: Union[TelnetWriter, TelnetWriterUnicode],
         log: logging.Logger,
-        stdout: Optional[asyncio.StreamWriter] = None,
         max_lines: int = 100,
+        insert_fn: Optional[Callable[[str], None]] = None,
     ) -> None:
         """Initialize AutoreplyEngine with rules and I/O handles."""
         self._rules = rules
         self._writer = writer
         self._log = log
-        self._stdout = stdout
         self._buffer = SearchBuffer(max_lines=max_lines)
         self._reply_chain: Optional[asyncio.Task[None]] = None
+        self._insert_fn = insert_fn
 
     @property
     def buffer(self) -> SearchBuffer:
@@ -374,13 +371,17 @@ class AutoreplyEngine:
             # Process text segment: split on <CR> and send.
             if text_segment:
                 cr_parts = text_segment.split(_CR_TOKEN)
+                is_last_segment = i >= len(parts) or i + 1 >= len(parts)
                 for j, cmd in enumerate(cr_parts):
                     if j < len(cr_parts) - 1:
                         # This segment ends with <CR> — send it.
                         self._send_command(cmd)
+                    elif cmd and is_last_segment and self._insert_fn is not None:
+                        # Trailing text without <CR> — insert into prompt
+                        # so the user can review before pressing Enter.
+                        self._log.info("autoreply: inserting %r into prompt", cmd)
+                        self._insert_fn(cmd)
                     elif cmd:
-                        # Trailing text without <CR> — send anyway
-                        # (autoreplies typically end with <CR>).
                         self._send_command(cmd)
 
             # Process delay if present.
@@ -402,9 +403,6 @@ class AutoreplyEngine:
             return
         self._log.info("autoreply: sending %r", cmd)
         self._writer.write(cmd + "\r\n")  # type: ignore[arg-type]
-        if self._stdout is not None:
-            echo = _ECHO_FMT.format(cmd)
-            self._stdout.write(echo.encode())
 
     def cancel(self) -> None:
         """Cancel any pending reply chain."""

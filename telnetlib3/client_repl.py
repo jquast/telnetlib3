@@ -532,8 +532,14 @@ if sys.platform != "win32":
             if _ar_rules:
                 from .autoreply import AutoreplyEngine  # pylint: disable=import-outside-toplevel
 
+                def _insert_into_prompt(text: str) -> None:
+                    app = repl._session.app  # pylint: disable=protected-access
+                    if app and app.current_buffer:
+                        app.current_buffer.insert_text(text)
+
                 autoreply_engine = AutoreplyEngine(
-                    _ar_rules, telnet_writer, telnet_writer.log, stdout=stdout
+                    _ar_rules, telnet_writer, telnet_writer.log,
+                    insert_fn=_insert_into_prompt,
                 )
 
             server_done = False
@@ -616,7 +622,7 @@ if sys.platform != "win32":
                 from .autoreply import AutoreplyEngine  # pylint: disable=import-outside-toplevel
 
                 autoreply_engine_b = AutoreplyEngine(
-                    _ar_rules_b, telnet_writer, telnet_writer.log, stdout=stdout
+                    _ar_rules_b, telnet_writer, telnet_writer.log
                 )
 
             server_done = False

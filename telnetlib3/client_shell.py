@@ -630,7 +630,7 @@ else:
                         )
 
                         _ar_engine = AutoreplyEngine(
-                            _ar_rules, telnet_writer, telnet_writer.log, stdout=stdout
+                            _ar_rules, telnet_writer, telnet_writer.log
                         )
                         # pylint: disable-next=protected-access
                         telnet_writer._autoreply_engine = _ar_engine  # type: ignore[union-attr]

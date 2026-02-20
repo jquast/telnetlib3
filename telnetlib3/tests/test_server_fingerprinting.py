@@ -826,154 +826,290 @@ async def test_probe_skipped_when_closing(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "banner,expected",
+    "banner,expected_response,expected_encoding",
     [
-        pytest.param(b"Welcome\r\n", None, id="no_prompt"),
-        pytest.param(b"", None, id="empty"),
-        pytest.param(b"Continue? (yes/no) ", b"yes\r\n", id="yes_no_parens"),
-        pytest.param(b"Continue? (y/n) ", b"y\r\n", id="y_n_parens"),
-        pytest.param(b"Accept terms? [Yes/No]:", b"yes\r\n", id="yes_no_brackets"),
-        pytest.param(b"Accept? [Y/N]:", b"y\r\n", id="y_n_brackets"),
-        pytest.param(b"Accept YES/NO now", b"yes\r\n", id="yes_no_uppercase"),
-        pytest.param(b"Confirm y/n\r\n> ", b"y\r\n", id="y_n_trailing_newline"),
-        pytest.param(b"Type yes/no please", b"yes\r\n", id="yes_no_space_delimited"),
-        pytest.param(b"Continue? (Yes|No) ", b"yes\r\n", id="yes_pipe_no_parens"),
-        pytest.param(b"Accept? (YES|NO):", b"yes\r\n", id="yes_pipe_no_upper"),
-        pytest.param(b"systemd/network", None, id="false_positive_word"),
-        pytest.param(b"beyond", None, id="substring_y_n_not_matched"),
-        pytest.param(b"Enter your name:", None, id="name_prompt_no_who"),
-        pytest.param(b"Color? ", b"y\r\n", id="color_question"),
-        pytest.param(b"Do you want color? ", b"y\r\n", id="color_in_sentence"),
-        pytest.param(b"ANSI COLOR? ", b"y\r\n", id="color_uppercase"),
-        pytest.param(b"color ? ", b"y\r\n", id="color_space_before_question"),
-        pytest.param(b"colorful display", None, id="color_no_question_mark"),
+        pytest.param(b"Welcome\r\n", None, None, id="no_prompt"),
+        pytest.param(b"", None, None, id="empty"),
+        pytest.param(b"nothing special", None, None, id="none_no_encoding"),
+        pytest.param(
+            b"Continue? (yes/no) ", b"yes\r\n", None, id="yes_no_parens"
+        ),
+        pytest.param(b"Continue? (y/n) ", b"y\r\n", None, id="y_n_parens"),
+        pytest.param(
+            b"Accept terms? [Yes/No]:", b"yes\r\n", None, id="yes_no_brackets"
+        ),
+        pytest.param(b"Accept? [Y/N]:", b"y\r\n", None, id="y_n_brackets"),
+        pytest.param(
+            b"Accept YES/NO now", b"yes\r\n", None, id="yes_no_uppercase"
+        ),
+        pytest.param(
+            b"Confirm y/n\r\n> ", b"y\r\n", None, id="y_n_trailing_newline"
+        ),
+        pytest.param(
+            b"Type yes/no please", b"yes\r\n", None, id="yes_no_space_delimited"
+        ),
+        pytest.param(
+            b"Continue? (Yes|No) ", b"yes\r\n", None,
+            id="yes_pipe_no_parens",
+        ),
+        pytest.param(
+            b"Accept? (YES|NO):", b"yes\r\n", None, id="yes_pipe_no_upper"
+        ),
+        pytest.param(b"yes/no", b"yes\r\n", None, id="yn_no_encoding"),
+        pytest.param(b"systemd/network", None, None, id="false_positive_word"),
+        pytest.param(
+            b"beyond", None, None, id="substring_y_n_not_matched"
+        ),
+        pytest.param(
+            b"Enter your name:", None, None, id="name_prompt_no_who"
+        ),
+        pytest.param(b"Color? ", b"y\r\n", None, id="color_question"),
+        pytest.param(
+            b"Do you want color? ", b"y\r\n", None, id="color_in_sentence"
+        ),
+        pytest.param(b"ANSI COLOR? ", b"y\r\n", None, id="color_uppercase"),
+        pytest.param(
+            b"color ? ", b"y\r\n", None, id="color_space_before_question"
+        ),
+        pytest.param(
+            b"colorful display", None, None, id="color_no_question_mark"
+        ),
         pytest.param(
             b"Select charset:\r\n1) ASCII\r\n2) ISO-8859-1\r\n5) UTF-8\r\n",
             b"5\r\n",
+            "utf-8",
             id="menu_utf8",
         ),
-        pytest.param(b"3) utf-8\r\nChoose: ", b"3\r\n", id="menu_utf8_lowercase"),
-        pytest.param(b"Choose encoding: 1) UTF8", b"1\r\n", id="menu_utf8_no_hyphen"),
-        pytest.param(b"12) UTF-8\r\nSelect: ", b"12\r\n", id="menu_utf8_multidigit"),
-        pytest.param(b"[5] UTF-8\r\nSelect: ", b"5\r\n", id="menu_utf8_brackets"),
-        pytest.param(b"[2] utf-8\r\n", b"2\r\n", id="menu_utf8_brackets_lower"),
-        pytest.param(b"3. UTF-8\r\n", b"3\r\n", id="menu_utf8_dot"),
-        pytest.param(b"   5 ... UTF-8\r\n", b"5\r\n", id="menu_utf8_ellipsis"),
-        pytest.param(b"1) ASCII\r\n2) Latin-1\r\n", None, id="menu_no_utf8"),
-        pytest.param(b"(1) Ansi\r\n(2) VT100\r\n", b"1\r\n", id="menu_ansi_parens"),
-        pytest.param(b"[1] ANSI\r\n[2] VT100\r\n", b"1\r\n", id="menu_ansi_brackets"),
-        pytest.param(b"(3) ansi\r\n", b"3\r\n", id="menu_ansi_lowercase"),
-        pytest.param(b"[12] Ansi\r\n", b"12\r\n", id="menu_ansi_multidigit"),
-        pytest.param(b"(1] ANSI\r\n", b"1\r\n", id="menu_ansi_mixed_brackets"),
-        pytest.param(b"3. ANSI\r\n", b"3\r\n", id="menu_ansi_dot"),
-        pytest.param(b"3. English/ANSI\r\n", b"3\r\n", id="menu_english_ansi"),
-        pytest.param(b"2. English/ANSI\r\n", b"2\r\n", id="menu_english_ansi_2"),
         pytest.param(
-            b"   1 ... English/ANSI     The standard\r\n", b"1\r\n", id="menu_ansi_ellipsis"
+            b"3) utf-8\r\nChoose: ", b"3\r\n", "utf-8",
+            id="menu_utf8_lowercase",
         ),
-        pytest.param(b"   2 .. English/ANSI\r\n", b"2\r\n", id="menu_ansi_double_dot"),
         pytest.param(
-            b"1) ASCII\r\n2) UTF-8\r\n(3) Ansi\r\n", b"2\r\n", id="menu_utf8_preferred_over_ansi"
+            b"Choose encoding: 1) UTF8", b"1\r\n", "utf-8",
+            id="menu_utf8_no_hyphen",
+        ),
+        pytest.param(
+            b"12) UTF-8\r\nSelect: ", b"12\r\n", "utf-8",
+            id="menu_utf8_multidigit",
+        ),
+        pytest.param(
+            b"[5] UTF-8\r\nSelect: ", b"5\r\n", "utf-8",
+            id="menu_utf8_brackets",
+        ),
+        pytest.param(
+            b"[2] utf-8\r\n", b"2\r\n", "utf-8",
+            id="menu_utf8_brackets_lower",
+        ),
+        pytest.param(
+            b"3. UTF-8\r\n", b"3\r\n", "utf-8", id="menu_utf8_dot"
+        ),
+        pytest.param(
+            b"   5 ... UTF-8\r\n", b"5\r\n", "utf-8",
+            id="menu_utf8_ellipsis",
+        ),
+        pytest.param(
+            b"1) ASCII\r\n2) Latin-1\r\n", None, None, id="menu_no_utf8"
+        ),
+        pytest.param(
+            b"(1) Ansi\r\n", b"1\r\n", None, id="ansi_no_encoding"
+        ),
+        pytest.param(
+            b"(1) Ansi\r\n(2) VT100\r\n", b"1\r\n", None,
+            id="menu_ansi_parens",
+        ),
+        pytest.param(
+            b"[1] ANSI\r\n[2] VT100\r\n", b"1\r\n", None,
+            id="menu_ansi_brackets",
+        ),
+        pytest.param(
+            b"(3) ansi\r\n", b"3\r\n", None, id="menu_ansi_lowercase"
+        ),
+        pytest.param(
+            b"[12] Ansi\r\n", b"12\r\n", None, id="menu_ansi_multidigit"
+        ),
+        pytest.param(
+            b"(1] ANSI\r\n", b"1\r\n", None, id="menu_ansi_mixed_brackets"
+        ),
+        pytest.param(b"3. ANSI\r\n", b"3\r\n", None, id="menu_ansi_dot"),
+        pytest.param(
+            b"3. English/ANSI\r\n", b"3\r\n", None,
+            id="menu_english_ansi",
+        ),
+        pytest.param(
+            b"2. English/ANSI\r\n", b"2\r\n", None,
+            id="menu_english_ansi_2",
+        ),
+        pytest.param(
+            b"   1 ... English/ANSI     The standard\r\n", b"1\r\n", None,
+            id="menu_ansi_ellipsis",
+        ),
+        pytest.param(
+            b"   2 .. English/ANSI\r\n", b"2\r\n", None,
+            id="menu_ansi_double_dot",
+        ),
+        pytest.param(
+            b"1) ASCII\r\n2) UTF-8\r\n(3) Ansi\r\n", b"2\r\n", "utf-8",
+            id="menu_utf8_preferred_over_ansi",
         ),
         pytest.param(
             b"1. ASCII\r\n2. UTF-8\r\n3. English/ANSI\r\n",
             b"2\r\n",
+            "utf-8",
             id="menu_utf8_dot_preferred_over_ansi_dot",
         ),
-        pytest.param(b"gb/big5", b"big5\r\n", id="gb_big5"),
-        pytest.param(b"GB/Big5\r\n", b"big5\r\n", id="gb_big5_mixed_case"),
-        pytest.param(b"Select: GB / Big5 ", b"big5\r\n", id="gb_big5_spaces"),
-        pytest.param(b"gb/big 5\r\n", b"big5\r\n", id="gb_big5_space_before_5"),
-        pytest.param(b"bigfoot5", None, id="big5_inside_word_not_matched"),
+        pytest.param(b"gb/big5", b"big5\r\n", "big5", id="gb_big5"),
+        pytest.param(
+            b"GB/Big5\r\n", b"big5\r\n", "big5", id="gb_big5_mixed_case"
+        ),
+        pytest.param(
+            b"Select: GB / Big5 ", b"big5\r\n", "big5",
+            id="gb_big5_spaces",
+        ),
+        pytest.param(
+            b"gb/big 5\r\n", b"big5\r\n", "big5",
+            id="gb_big5_space_before_5",
+        ),
+        pytest.param(
+            b"bigfoot5", None, None, id="big5_inside_word_not_matched"
+        ),
         pytest.param(
             b"Press [.ESC.] twice within 15 seconds to CONTINUE...",
             b"\x1b\x1b",
+            None,
             id="esc_twice_mystic",
         ),
-        pytest.param(b"Press [ESC] twice to continue", b"\x1b\x1b", id="esc_twice_no_dots"),
-        pytest.param(b"Press ESC twice to continue", b"\x1b\x1b", id="esc_twice_bare"),
         pytest.param(
-            b"Press <Esc> twice for the BBS ... ", b"\x1b\x1b", id="esc_twice_angle_brackets"
+            b"Press [ESC] twice to continue", b"\x1b\x1b", None,
+            id="esc_twice_no_dots",
+        ),
+        pytest.param(
+            b"Press ESC twice to continue", b"\x1b\x1b", None,
+            id="esc_twice_bare",
+        ),
+        pytest.param(
+            b"Press <Esc> twice for the BBS ... ", b"\x1b\x1b", None,
+            id="esc_twice_angle_brackets",
         ),
         pytest.param(
             b"\x1b[33mPress [.ESC.] twice within 10 seconds\x1b[0m",
             b"\x1b\x1b",
+            None,
             id="esc_twice_ansi_wrapped",
         ),
         pytest.param(
-            b"\x1b[1;1H\x1b[2JPress [.ESC.] twice within 15 seconds to CONTINUE...",
+            b"\x1b[1;1H\x1b[2JPress [.ESC.] twice within 15 seconds"
+            b" to CONTINUE...",
             b"\x1b\x1b",
+            None,
             id="esc_twice_after_clear_screen",
         ),
-        pytest.param(b"Please press [ESC] to continue", b"\x1b", id="esc_once_brackets"),
-        pytest.param(b"Press ESC to continue", b"\x1b", id="esc_once_bare"),
-        pytest.param(b"press <Esc> to continue", b"\x1b", id="esc_once_angle_brackets"),
         pytest.param(
-            b"\x1b[33mPress [ESC] to continue\x1b[0m", b"\x1b", id="esc_once_ansi_wrapped"
+            b"Please press [ESC] to continue", b"\x1b", None,
+            id="esc_once_brackets",
         ),
-        pytest.param(b"HIT RETURN:", b"\r\n", id="hit_return"),
-        pytest.param(b"Hit Return.", b"\r\n", id="hit_return_lower"),
-        pytest.param(b"PRESS RETURN:", b"\r\n", id="press_return"),
-        pytest.param(b"Press Enter:", b"\r\n", id="press_enter"),
-        pytest.param(b"press enter", b"\r\n", id="press_enter_lower"),
-        pytest.param(b"Hit Enter to continue", b"\r\n", id="hit_enter"),
-        pytest.param(b"\x1b[1mHIT RETURN:\x1b[0m", b"\r\n", id="hit_return_ansi_wrapped"),
-        pytest.param(b"\x1b[31mColor? \x1b[0m", b"y\r\n", id="color_ansi_wrapped"),
-        pytest.param(b"\x1b[1mContinue? (y/n)\x1b[0m ", b"y\r\n", id="yn_ansi_wrapped"),
         pytest.param(
-            b"Do you support the ANSI color standard (Yn)? ", b"y\r\n", id="yn_paren_capital_y"
+            b"Press ESC to continue", b"\x1b", None, id="esc_once_bare"
         ),
-        pytest.param(b"Continue? [Yn]", b"y\r\n", id="yn_bracket_capital_y"),
-        pytest.param(b"Do something (yN)", b"y\r\n", id="yn_paren_capital_n"),
-        pytest.param(b"More: (Y)es, (N)o, (C)ontinuous?", b"C\r\n", id="more_continuous"),
         pytest.param(
-            b"\x1b[33mMore: (Y)es, (N)o, (C)ontinuous?\x1b[0m", b"C\r\n", id="more_continuous_ansi"
+            b"press <Esc> to continue", b"\x1b", None,
+            id="esc_once_angle_brackets",
         ),
-        pytest.param(b"more (Y/N/C)ontinuous: ", b"C\r\n", id="more_ync_compact"),
+        pytest.param(
+            b"\x1b[33mPress [ESC] to continue\x1b[0m", b"\x1b", None,
+            id="esc_once_ansi_wrapped",
+        ),
+        pytest.param(b"HIT RETURN:", b"\r\n", None, id="hit_return"),
+        pytest.param(b"Hit Return.", b"\r\n", None, id="hit_return_lower"),
+        pytest.param(b"PRESS RETURN:", b"\r\n", None, id="press_return"),
+        pytest.param(b"Press Enter:", b"\r\n", None, id="press_enter"),
+        pytest.param(b"press enter", b"\r\n", None, id="press_enter_lower"),
+        pytest.param(
+            b"Hit Enter to continue", b"\r\n", None, id="hit_enter"
+        ),
+        pytest.param(
+            b"\x1b[1mHIT RETURN:\x1b[0m", b"\r\n", None,
+            id="hit_return_ansi_wrapped",
+        ),
+        pytest.param(
+            b"\x1b[31mColor? \x1b[0m", b"y\r\n", None,
+            id="color_ansi_wrapped",
+        ),
+        pytest.param(
+            b"\x1b[1mContinue? (y/n)\x1b[0m ", b"y\r\n", None,
+            id="yn_ansi_wrapped",
+        ),
+        pytest.param(
+            b"Do you support the ANSI color standard (Yn)? ",
+            b"y\r\n",
+            None,
+            id="yn_paren_capital_y",
+        ),
+        pytest.param(
+            b"Continue? [Yn]", b"y\r\n", None, id="yn_bracket_capital_y"
+        ),
+        pytest.param(
+            b"Do something (yN)", b"y\r\n", None, id="yn_paren_capital_n"
+        ),
+        pytest.param(
+            b"More: (Y)es, (N)o, (C)ontinuous?", b"C\r\n", None,
+            id="more_continuous",
+        ),
+        pytest.param(
+            b"\x1b[33mMore: (Y)es, (N)o, (C)ontinuous?\x1b[0m",
+            b"C\r\n",
+            None,
+            id="more_continuous_ansi",
+        ),
+        pytest.param(
+            b"more (Y/N/C)ontinuous: ", b"C\r\n", None,
+            id="more_ync_compact",
+        ),
         pytest.param(
             b"Press the BACKSPACE key to detect your terminal type: ",
             b"\x08",
+            None,
             id="backspace_key_telnetbible",
         ),
         pytest.param(
-            b"\x1b[1mPress the BACKSPACE key\x1b[0m", b"\x08", id="backspace_key_ansi_wrapped"
+            b"\x1b[1mPress the BACKSPACE key\x1b[0m", b"\x08", None,
+            id="backspace_key_ansi_wrapped",
         ),
-        pytest.param(b"\x0cpress del/backspace:", b"\x14", id="petscii_del_backspace"),
-        pytest.param(b"\x0c\r\npress del/backspace:", b"\x14", id="petscii_del_backspace_crlf"),
-        pytest.param(b"press backspace:", b"\x14", id="petscii_backspace_only"),
-        pytest.param(b"press del:", b"\x14", id="petscii_del_only"),
-        pytest.param(b"PRESS DEL/BACKSPACE.", b"\x14", id="petscii_del_backspace_upper"),
-        pytest.param(b"press backspace/del:", b"\x14", id="petscii_backspace_del_reversed"),
+        pytest.param(
+            b"\x0cpress del/backspace:", b"\x14", None,
+            id="petscii_del_backspace",
+        ),
+        pytest.param(
+            b"\x0c\r\npress del/backspace:", b"\x14", None,
+            id="petscii_del_backspace_crlf",
+        ),
+        pytest.param(
+            b"press backspace:", b"\x14", None, id="petscii_backspace_only"
+        ),
+        pytest.param(b"press del:", b"\x14", None, id="petscii_del_only"),
+        pytest.param(
+            b"PRESS DEL/BACKSPACE.", b"\x14", None,
+            id="petscii_del_backspace_upper",
+        ),
+        pytest.param(
+            b"press backspace/del:", b"\x14", None,
+            id="petscii_backspace_del_reversed",
+        ),
         pytest.param(
             b"PLEASE HIT YOUR BACKSPACE/DELETE\r\nKEY FOR C/G DETECT:",
             b"\x14",
+            None,
             id="petscii_hit_your_backspace_delete",
         ),
         pytest.param(
-            b"hit your delete/backspace key:", b"\x14", id="petscii_hit_your_delete_backspace_key"
+            b"hit your delete/backspace key:", b"\x14", None,
+            id="petscii_hit_your_delete_backspace_key",
         ),
     ],
 )
-def test_detect_yn_prompt(banner, expected):
-    assert sfp._detect_yn_prompt(banner).response == expected
-
-
-@pytest.mark.parametrize(
-    "banner, expected_encoding",
-    [
-        pytest.param(b"5) UTF-8\r\n", "utf-8", id="utf8_menu"),
-        pytest.param(b"[2] utf-8\r\n", "utf-8", id="utf8_brackets"),
-        pytest.param(b"1) UTF8", "utf-8", id="utf8_no_hyphen"),
-        pytest.param(b"gb/big5", "big5", id="gb_big5"),
-        pytest.param(b"GB/Big5\r\n", "big5", id="gb_big5_mixed"),
-        pytest.param(b"(1) Ansi\r\n", None, id="ansi_no_encoding"),
-        pytest.param(b"yes/no", None, id="yn_no_encoding"),
-        pytest.param(b"Color? ", None, id="color_no_encoding"),
-        pytest.param(b"nothing special", None, id="none_no_encoding"),
-    ],
-)
-def test_detect_yn_prompt_encoding(banner, expected_encoding):
-    assert sfp._detect_yn_prompt(banner).encoding == expected_encoding
+def test_detect_yn_prompt(banner, expected_response, expected_encoding):
+    result = sfp._detect_yn_prompt(banner)
+    assert result.response == expected_response
+    assert result.encoding == expected_encoding
 
 
 @pytest.mark.parametrize(

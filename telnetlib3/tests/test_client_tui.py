@@ -1419,3 +1419,92 @@ class TestSessionListActionConnectInterrupt:
             screen.action_connect()
             await pilot.pause()
         assert terminated
+
+
+@pytest.mark.asyncio
+async def test_arrow_nav_session_list_buttons(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
+    monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
+    sessions = {"srv1": SessionConfig(name="srv1", host="host1", port=23)}
+    save_sessions(sessions)
+    app = _SessionListApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        buttons = list(screen.query("#button-col Button"))
+        buttons[0].focus()
+        await pilot.press("down")
+        await pilot.pause()
+        assert screen.focused is buttons[1]
+        await pilot.press("up")
+        await pilot.pause()
+        assert screen.focused is buttons[0]
+
+
+@pytest.mark.asyncio
+async def test_arrow_nav_session_list_right_to_table(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
+    monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
+    sessions = {"srv1": SessionConfig(name="srv1", host="host1", port=23)}
+    save_sessions(sessions)
+    app = _SessionListApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        buttons = list(screen.query("#button-col Button"))
+        buttons[0].focus()
+        await pilot.press("right")
+        await pilot.pause()
+        table = screen.query_one("#session-table", DataTable)
+        assert screen.focused is table
+
+
+@pytest.mark.asyncio
+async def test_arrow_nav_session_list_left_from_table(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
+    monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
+    sessions = {"srv1": SessionConfig(name="srv1", host="host1", port=23)}
+    save_sessions(sessions)
+    app = _SessionListApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        table = screen.query_one("#session-table", DataTable)
+        table.focus()
+        await pilot.press("left")
+        await pilot.pause()
+        buttons = list(screen.query("#button-col Button"))
+        assert screen.focused is buttons[0]
+
+
+@pytest.mark.asyncio
+async def test_arrow_nav_macro_buttons(tmp_path) -> None:
+    fp = tmp_path / "macros.json"
+    fp.write_text('{"' + _TEST_SK + '": {"macros": []}}')
+    app = _MacroEditApp(str(fp))
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        buttons = list(screen.query("#macro-button-col Button"))
+        buttons[0].focus()
+        await pilot.press("down")
+        await pilot.pause()
+        assert screen.focused is buttons[1]
+
+
+@pytest.mark.asyncio
+async def test_arrow_nav_autoreply_buttons(tmp_path) -> None:
+    fp = tmp_path / "autoreplies.json"
+    fp.write_text('{"' + _TEST_SK + '": {"autoreplies": []}}')
+    app = _AutoreplyEditApp(str(fp))
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        buttons = list(screen.query("#autoreply-button-col Button"))
+        buttons[0].focus()
+        await pilot.press("down")
+        await pilot.pause()
+        assert screen.focused is buttons[1]

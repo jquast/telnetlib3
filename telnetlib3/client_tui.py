@@ -97,6 +97,42 @@ _FLAG_TO_WIDGET: dict[str, str] = {
 }
 
 
+def _handle_arrow_navigation(
+    screen: Screen,  # type: ignore[type-arg]
+    event: events.Key,
+    button_col_selector: str,
+    table_selector: str,
+) -> None:
+    """Arrow key navigation between a button column and a data table.
+
+    :param screen: The screen handling the key event.
+    :param event: The key event.
+    :param button_col_selector: CSS selector for the button column container.
+    :param table_selector: CSS selector for the DataTable.
+    """
+    focused = screen.focused
+    if isinstance(focused, Input):
+        return
+    buttons = list(screen.query(f"{button_col_selector} Button"))
+    table = screen.query_one(table_selector, DataTable)
+
+    if isinstance(focused, Button) and focused in buttons:
+        idx = buttons.index(focused)
+        if event.key == "up" and idx > 0:
+            buttons[idx - 1].focus()
+            event.prevent_default()
+        elif event.key == "down" and idx < len(buttons) - 1:
+            buttons[idx + 1].focus()
+            event.prevent_default()
+        elif event.key == "right":
+            table.focus()
+            event.prevent_default()
+    elif focused is table and event.key == "left":
+        if buttons:
+            buttons[0].focus()
+        event.prevent_default()
+
+
 _TOOLTIP_CACHE: dict[str, str] | None = None
 
 
@@ -428,26 +464,12 @@ class SessionListScreen(Screen[None]):
         row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
         return str(row_key.value)
 
-    # -- Arrow key navigation between buttons --------------------------------
+    # -- Arrow key navigation between buttons and table -----------------------
 
     def on_key(self, event: events.Key) -> None:
-        """Allow arrow keys to move focus between buttons."""
-        if event.key not in ("up", "down"):
-            return
-        focused = self.focused
-        if not isinstance(focused, Button):
-            return
-        buttons = list(self.query("#button-col Button"))
-        try:
-            idx = buttons.index(focused)
-        except ValueError:
-            return
-        if event.key == "up" and idx > 0:
-            buttons[idx - 1].focus()
-            event.prevent_default()
-        elif event.key == "down" and idx < len(buttons) - 1:
-            buttons[idx + 1].focus()
-            event.prevent_default()
+        """Arrow keys navigate between buttons and the session table."""
+        if event.key in ("up", "down", "left", "right"):
+            _handle_arrow_navigation(self, event, "#button-col", "#session-table")
 
     # -- Button handlers ----------------------------------------------------
 
@@ -568,13 +590,15 @@ class SessionListScreen(Screen[None]):
             _tsize = os.get_terminal_size()
             sys.stdout.write(f"\x1b[{_tsize.lines};{_tsize.columns}H\r\n")
             sys.stdout.flush()
-            child_stderr = ""
             try:
+                # stderr must NOT be piped — the child may launch
+                # Textual subprocesses (F8/F9 editors) that write all
+                # output to sys.__stderr__.  A piped stderr would send
+                # that output into the pipe instead of the terminal,
+                # hanging the editor.
                 # pylint: disable-next=consider-using-with
-                proc = subprocess.Popen(cmd, stderr=subprocess.PIPE)
+                proc = subprocess.Popen(cmd)
                 proc.wait()
-                if proc.stderr:
-                    child_stderr = proc.stderr.read().decode("utf-8", errors="replace")
             except KeyboardInterrupt:
                 proc.terminate()
                 proc.wait(timeout=3)
@@ -599,16 +623,6 @@ class SessionListScreen(Screen[None]):
                     "\x1b[?2004l"  # disable bracketed paste
                 )
                 sys.stdout.flush()
-            if proc.returncode and proc.returncode != 0:
-                # After exiting alternate screen the cursor is restored
-                # to its pre-TUI position.  Move to the bottom so the
-                # error and prompt appear at the end of the screen.
-                lines = os.get_terminal_size().lines
-                sys.stdout.write(f"\x1b[{lines};1H")
-                sys.stdout.flush()
-                if child_stderr.strip():
-                    print(f"\n{child_stderr.strip()}")
-                input("\n[Press Enter to return to session manager]")
         self._refresh_table()
 
     # -- Callbacks ----------------------------------------------------------
@@ -1089,11 +1103,15 @@ class MacroEditScreen(Screen["bool | None"]):
     #macro-button-col Button {
         width: 100%; min-width: 0; margin-bottom: 0;
     }
-    #macro-right { width: 1fr; }
+    #macro-right { width: 1fr; height: 100%; }
     #macro-table { height: 1fr; min-height: 4; }
-    #macro-form { height: auto; margin-top: 1; }
-    #macro-form Input { width: 1fr; }
-    #macro-form-buttons { height: 3; }
+    #macro-form { height: auto; }
+    #macro-form { height: auto; padding: 0; }
+    #macro-form .field-row { height: 3; margin: 0; }
+    #macro-form Input { width: 1fr; border: tall grey; }
+    #macro-form Input:focus { border: tall $accent; }
+    #macro-form-buttons { height: 3; align-horizontal: right; }
+    #macro-form-buttons Button { width: auto; min-width: 10; margin-left: 1; }
     .form-label { width: 8; padding-top: 1; }
     """
 
@@ -1214,6 +1232,13 @@ class MacroEditScreen(Screen["bool | None"]):
             k, t = self._macros[idx]
             self._show_form(k, t)
 
+    def on_key(self, event: events.Key) -> None:
+        """Arrow keys navigate between buttons and the macro table."""
+        if event.key in ("up", "down", "left", "right"):
+            _handle_arrow_navigation(
+                self, event, "#macro-button-col", "#macro-table"
+            )
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Enter in an inline form input submits the form."""
         if self._form_visible:
@@ -1282,11 +1307,14 @@ class AutoreplyEditScreen(Screen["bool | None"]):
     #autoreply-button-col Button {
         width: 100%; min-width: 0; margin-bottom: 0;
     }
-    #autoreply-right { width: 1fr; }
+    #autoreply-right { width: 1fr; height: 100%; }
     #autoreply-table { height: 1fr; min-height: 4; }
-    #autoreply-form { height: auto; margin-top: 1; }
-    #autoreply-form Input { width: 1fr; }
-    #autoreply-form-buttons { height: 3; }
+    #autoreply-form { height: auto; padding: 0; }
+    #autoreply-form .field-row { height: 3; margin: 0; }
+    #autoreply-form Input { width: 1fr; border: tall grey; }
+    #autoreply-form Input:focus { border: tall $accent; }
+    #autoreply-form-buttons { height: 3; align-horizontal: right; }
+    #autoreply-form-buttons Button { width: auto; min-width: 10; margin-left: 1; }
     .form-label { width: 8; padding-top: 1; }
     """
 
@@ -1419,6 +1447,13 @@ class AutoreplyEditScreen(Screen["bool | None"]):
             p, r = self._rules[idx]
             self._show_form(p, r)
 
+    def on_key(self, event: events.Key) -> None:
+        """Arrow keys navigate between buttons and the autoreply table."""
+        if event.key in ("up", "down", "left", "right"):
+            _handle_arrow_navigation(
+                self, event, "#autoreply-button-col", "#autoreply-table"
+            )
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Enter in an inline form input submits the form."""
         if self._form_visible:
@@ -1490,12 +1525,18 @@ class _EditorApp(App[None]):
 
 def edit_macros_main(path: str, session_key: str = "") -> None:
     """Launch standalone macro editor TUI."""
+    import faulthandler  # pylint: disable=import-outside-toplevel
+
+    faulthandler.enable()
     app = _EditorApp(MacroEditScreen(path=path, session_key=session_key))
     app.run()
 
 
 def edit_autoreplies_main(path: str, session_key: str = "") -> None:
     """Launch standalone autoreply editor TUI."""
+    import faulthandler  # pylint: disable=import-outside-toplevel
+
+    faulthandler.enable()
     app = _EditorApp(AutoreplyEditScreen(path=path, session_key=session_key))
     app.run()
 

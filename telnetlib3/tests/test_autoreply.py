@@ -422,20 +422,6 @@ async def test_autoreply_engine_multiline_match():
 
 
 @pytest.mark.asyncio
-async def test_autoreply_engine_echo_to_stdout():
-    writer, written = _mock_writer()
-    stdout_data: list[bytes] = []
-    stdout = types.SimpleNamespace(write=lambda data: stdout_data.append(data))
-    rules = [AutoreplyRule(pattern=re.compile(r"ping"), reply="pong<CR>")]
-    engine = AutoreplyEngine(rules, writer, writer.log, stdout=stdout)
-    engine.feed("ping\n")
-    await asyncio.sleep(0.05)
-    echo = b"".join(stdout_data).decode()
-    assert "[auto]" in echo
-    assert "pong" in echo
-
-
-@pytest.mark.asyncio
 async def test_autoreply_engine_multi_command_reply():
     writer, written = _mock_writer()
     rules = [AutoreplyRule(pattern=re.compile(r"multi"), reply="cmd1<CR>cmd2<CR>")]
@@ -492,3 +478,37 @@ def test_send_command_valid():
     engine = AutoreplyEngine([], writer, writer.log)
     engine._send_command("look")
     assert "look\r\n" in written
+
+
+@pytest.mark.asyncio
+async def test_autoreply_insert_fn_no_cr():
+    writer, written = _mock_writer()
+    inserted: list[str] = []
+    rules = [AutoreplyRule(pattern=re.compile(r"Items here: (\w+)"), reply=r"pick up \1")]
+    engine = AutoreplyEngine(rules, writer, writer.log, insert_fn=inserted.append)
+    engine.feed("Items here: sword\n")
+    await asyncio.sleep(0.05)
+    assert not written
+    assert inserted == ["pick up sword"]
+
+
+@pytest.mark.asyncio
+async def test_autoreply_insert_fn_with_cr_sends():
+    writer, written = _mock_writer()
+    inserted: list[str] = []
+    rules = [AutoreplyRule(pattern=re.compile(r"hello"), reply="world<CR>")]
+    engine = AutoreplyEngine(rules, writer, writer.log, insert_fn=inserted.append)
+    engine.feed("hello\n")
+    await asyncio.sleep(0.05)
+    assert any("world\r\n" in w for w in written)
+    assert not inserted
+
+
+@pytest.mark.asyncio
+async def test_autoreply_no_insert_fn_sends_without_cr():
+    writer, written = _mock_writer()
+    rules = [AutoreplyRule(pattern=re.compile(r"hello"), reply="world")]
+    engine = AutoreplyEngine(rules, writer, writer.log)
+    engine.feed("hello\n")
+    await asyncio.sleep(0.05)
+    assert any("world\r\n" in w for w in written)
