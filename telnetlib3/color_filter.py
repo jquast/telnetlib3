@@ -27,9 +27,6 @@ Example usage::
 
     # Custom brightness and contrast
     telnetlib3-client --color-brightness=0.7 --color-contrast=0.6 mud.example.com
-
-    # White-background terminal (reverse video)
-    telnetlib3-client --reverse-video mud.example.com
 """
 
 from __future__ import annotations
@@ -181,7 +178,6 @@ class ColorConfig(NamedTuple):
     :param brightness: Brightness scale factor [0.0..1.0], where 1.0 is original.
     :param contrast: Contrast scale factor [0.0..1.0], where 1.0 is original.
     :param background_color: Forced background RGB as (R, G, B) tuple.
-    :param reverse_video: When True, swap fg/bg for light-background terminals.
     :param ice_colors: When True, treat SGR 5 (blink) as bright background
         (iCE colors), promoting background 40-47 to palette 8-15.
     """
@@ -190,7 +186,6 @@ class ColorConfig(NamedTuple):
     brightness: float = 1.0
     contrast: float = 1.0
     background_color: Tuple[int, int, int] = (0, 0, 0)
-    reverse_video: bool = False
     ice_colors: bool = True
 
 
@@ -271,13 +266,16 @@ class ColorFilter:
             _adjust_color(r, g, b, config.brightness, config.contrast) for r, g, b in palette
         ]
         bg = config.background_color
-        if config.reverse_video:
-            bg = (255 - bg[0], 255 - bg[1], 255 - bg[2])
         self._bg_sgr = f"\x1b[48;2;{bg[0]};{bg[1]};{bg[2]}m"
+        fg = self._adjusted[7]  # default fg = white (palette index 7)
+        self._fg_sgr = f"\x1b[38;2;{fg[0]};{fg[1]};{fg[2]}m"
+        self._reset_bg_parts = ["48", "2", str(bg[0]), str(bg[1]), str(bg[2])]
+        self._reset_fg_parts = ["38", "2", str(fg[0]), str(fg[1]), str(fg[2])]
         self._buffer = ""
         self._initial = True
         self._bold = False
         self._blink = False
+        self._fg_idx = 7  # current fg palette index (0-15), -1 for extended
 
     def filter(self, text: str) -> str:
         """
@@ -324,7 +322,8 @@ class ColorFilter:
         if not params_str:
             self._bold = False
             self._blink = False
-            return f"\x1b[0m{self._bg_sgr}"
+            self._fg_idx = 7
+            return f"\x1b[0m{self._bg_sgr}{self._fg_sgr}"
 
         # Colon-separated extended colors (ITU T.416) — pass through unchanged
         if ":" in params_str:
@@ -333,14 +332,15 @@ class ColorFilter:
         parts = params_str.split(";")
         output_parts: List[str] = []
         i = 0
-        has_reset = False
 
-        # Pre-scan: check if bold (1) or blink (5) appears in this sequence
-        # so that a color code *before* the attribute in the same sequence
-        # still gets the bright treatment, e.g. \x1b[31;1m should brighten red
-        # and \x1b[41;5m should brighten background.
+        # Pre-scan: check if bold (1), blink (5), or explicit foreground
+        # colors appear in this sequence so that a color code *before* the
+        # attribute in the same sequence still gets the bright treatment,
+        # e.g. \x1b[31;1m should brighten red and \x1b[41;5m should
+        # brighten background.
         seq_sets_bold = False
         seq_sets_blink = False
+        seq_has_fg = False
         for part in parts:
             try:
                 val = int(part) if part else 0
@@ -350,6 +350,8 @@ class ColorFilter:
                 seq_sets_bold = True
             elif val == 5:
                 seq_sets_blink = True
+            if (30 <= val <= 37) or (90 <= val <= 97) or val in (38, 39):
+                seq_has_fg = True
 
         # Effective bold/blink for color lookups in this sequence
         bold = self._bold or seq_sets_bold
@@ -365,10 +367,12 @@ class ColorFilter:
                 continue
 
             if p == 0:
-                has_reset = True
                 bold = False
                 blink = False
                 output_parts.append("0")
+                output_parts.extend(self._reset_bg_parts)
+                output_parts.extend(self._reset_fg_parts)
+                self._fg_idx = 7
                 i += 1
                 continue
 
@@ -376,11 +380,18 @@ class ColorFilter:
             if p == 1:
                 bold = True
                 output_parts.append("1")
+                if not seq_has_fg and 0 <= self._fg_idx <= 7:
+                    bright_idx = self._fg_idx + 8
+                    r, g, b = self._adjusted[bright_idx]
+                    output_parts.extend(["38", "2", str(r), str(g), str(b)])
                 i += 1
                 continue
             if p == 22:
                 bold = False
                 output_parts.append("22")
+                if not seq_has_fg and 0 <= self._fg_idx <= 7:
+                    r, g, b = self._adjusted[self._fg_idx]
+                    output_parts.extend(["38", "2", str(r), str(g), str(b)])
                 i += 1
                 continue
 
@@ -401,6 +412,8 @@ class ColorFilter:
 
             # Extended color — pass through 38;5;N or 38;2;R;G;B verbatim
             if p in (38, 48):
+                if p == 38:
+                    self._fg_idx = -1
                 start_i = i
                 i += 1
                 if i < len(parts):
@@ -416,15 +429,24 @@ class ColorFilter:
                 output_parts.extend(parts[start_i:i])
                 continue
 
-            # Default fg/bg — pass through
-            if p in (39, 49):
-                output_parts.append(str(p))
+            # Default fg → palette white; default bg → configured bg
+            if p == 39:
+                self._fg_idx = 7
+                r, g, b = self._adjusted[7]
+                output_parts.extend(["38", "2", str(r), str(g), str(b)])
+                i += 1
+                continue
+            if p == 49:
+                bg = self._config.background_color
+                output_parts.extend(["48", "2", str(bg[0]), str(bg[1]), str(bg[2])])
                 i += 1
                 continue
 
             idx = _sgr_code_to_palette_index(p)
             if idx is not None:
                 is_fg = _is_foreground_code(p)
+                if is_fg:
+                    self._fg_idx = idx
                 # Bold-as-bright: promote normal fg 30-37 to bright 8-15
                 if is_fg and bold and 30 <= p <= 37:
                     idx += 8
@@ -432,8 +454,6 @@ class ColorFilter:
                 if not is_fg and blink and 40 <= p <= 47:
                     idx += 8
                 r, g, b = self._adjusted[idx]
-                if self._config.reverse_video:
-                    is_fg = not is_fg
                 if is_fg:
                     output_parts.extend(["38", "2", str(r), str(g), str(b)])
                 else:
@@ -447,8 +467,6 @@ class ColorFilter:
         self._blink = blink
 
         result = f"\x1b[{';'.join(output_parts)}m" if output_parts else ""
-        if has_reset:
-            result += self._bg_sgr
         return result
 
     def flush(self) -> str:

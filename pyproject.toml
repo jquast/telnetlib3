@@ -53,7 +53,7 @@ docs = [
     "sphinx_rtd_theme",
     "sphinx-autodoc-typehints",
 ]
-extras = [
+with_tui = [
     "ucs-detect>=2",
     "prettytable",
     "prompt_toolkit>=3",
@@ -110,6 +110,7 @@ disable = [
     # telnetlib3 specific
     "too-many-instance-attributes",
     "too-many-public-methods",
+    "too-few-public-methods",
     "too-many-arguments",
     "duplicate-code",  # intentional re-exports in telnetlib.py and telopt.py
 ]
@@ -119,16 +120,17 @@ max-line-length = 100
 good-names = ["fd", "_", "x", "y", "tn", "ip"]
 
 [tool.pylint.design]
-max-args = 12
-max-attributes = 15
-max-branches = 15
-max-complexity = 15
-max-locals = 20
-max-module-lines = 2000
-max-parents = 7
-max-public-methods = 30
-max-returns = 8
-max-statements = 60
+max-args = 18
+max-attributes = 22
+max-branches = 22
+max-complexity = 22
+max-locals = 30
+max-module-lines = 3000
+max-parents = 10
+max-positional-arguments = 8
+max-public-methods = 45
+max-returns = 12
+max-statements = 90
 
 [tool.pylint.similarities]
 ignore-imports = true

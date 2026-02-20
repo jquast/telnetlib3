@@ -790,11 +790,11 @@ class TelnetWriter:
         return self._protocol
 
     def _force_binary_on_protocol(self) -> None:
-        """Enable ``force_binary`` on the attached protocol.
+        """
+        Enable ``force_binary`` on the attached protocol.
 
-        Called when CHARSET is negotiated or LANG is received via
-        NEW_ENVIRON, implying that the peer can handle non-ASCII bytes
-        regardless of whether BINARY mode was explicitly negotiated.
+        Called when CHARSET is negotiated or LANG is received via NEW_ENVIRON, implying that the
+        peer can handle non-ASCII bytes regardless of whether BINARY mode was explicitly negotiated.
         """
         if self._protocol is not None and hasattr(self._protocol, "force_binary"):
             self._protocol.force_binary = True

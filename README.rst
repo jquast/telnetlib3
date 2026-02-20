@@ -111,7 +111,7 @@ REPL Input Mode
 When connecting in line mode, ``telnetlib3-client`` will use an enhanced REPL
 powered by `prompt_toolkit`_ when installed::
 
-    pip install telnetlib3[extras]
+    pip install telnetlib3[with_tui]
 
 Features include:
 

@@ -3,11 +3,11 @@ History
 2.7.0
   * new: REPL line editor for ``telnetlib3-client`` with command history,
     autosuggestion, and password masking.  Powered by ``prompt_toolkit``
-    (``pip install telnetlib3[extras]``).  Use ``--no-repl`` to disable.
+    (``pip install telnetlib3[with_tui]``).  Use ``--no-repl`` to disable.
   * new: persistent REPL history at ``~/.local/share/telnetlib3/history``.
     Password inputs are never stored.  Use ``--history-file`` to customize.
   * new: TUI session manager — ``telnetlib3-client`` without a host argument
-    launches a multi-session TUI (requires ``textual``, included in extras).
+    launches a multi-session TUI (requires ``textual``, included in with_tui).
   * new: ``--ice-colors`` (default on) treats SGR 5 (blink) as bright
     background for proper 16-color BBS/ANSI art display.
   * change: ``--force-binary`` auto-enabled for any non-ASCII encoding.

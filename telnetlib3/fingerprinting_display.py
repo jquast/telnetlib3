@@ -235,8 +235,9 @@ def _format_encoding(
     return None
 
 
-# pylint: disable-next=too-complex,too-many-locals,too-many-branches,too-many-statements
-def _build_terminal_rows(term: Any, data: Dict[str, Any]) -> List[Tuple[str, str]]:
+def _build_terminal_rows(  # pylint: disable=too-complex,too-many-locals,too-many-branches
+    term: Any, data: Dict[str, Any],
+) -> List[Tuple[str, str]]:
     """Build (key, value) tuples for terminal capabilities table."""
     pairs: List[Tuple[str, str]] = []
     terminal_probe = data.get("terminal-probe", {})
@@ -357,7 +358,7 @@ def _build_terminal_rows(term: Any, data: Dict[str, Any]) -> List[Tuple[str, str
     return pairs
 
 
-def _build_telnet_rows(  # pylint: disable=too-many-locals,unused-argument
+def _build_telnet_rows(  # pylint: disable=unused-argument
     term: Any, data: Dict[str, Any]
 ) -> List[Tuple[str, str]]:
     """Build (key, value) tuples for telnet protocol table."""
@@ -519,7 +520,7 @@ def _apply_unicode_borders(tbl: Any) -> None:
     tbl.bottom_right_junction_char = "\u255d"
 
 
-def _display_compact_summary(  # pylint: disable=too-complex,too-many-branches
+def _display_compact_summary(
     data: Dict[str, Any], term: Any = None
 ) -> bool:
     """Display compact fingerprint summary using prettytable."""
@@ -628,7 +629,7 @@ def _fingerprint_similarity(a: Dict[str, Any], b: Dict[str, Any]) -> float:
     return sum(scores) / len(scores) if scores else 1.0
 
 
-def _load_known_fingerprints(  # pylint: disable=too-complex
+def _load_known_fingerprints(
     probe_type: str,
 ) -> Dict[str, Dict[str, Any]]:
     """
@@ -701,7 +702,7 @@ def _find_nearest_match(
     return (best_name, best_score)
 
 
-def _build_seen_counts(  # pylint: disable=too-many-locals
+def _build_seen_counts(
     data: Dict[str, Any], names: Optional[Dict[str, str]] = None, term: Any = None
 ) -> str:
     """Build friendly "seen before" text from folder and session counts."""
@@ -891,7 +892,7 @@ def _normalize_color_hex(hex_color: str) -> str:
     return str(rgb_to_hex(r, g, b))
 
 
-def _filter_terminal_detail(  # pylint: disable=too-complex,too-many-branches
+def _filter_terminal_detail(  # pylint: disable=too-many-branches
     detail: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
     """Filter terminal session data for display."""
@@ -1006,7 +1007,7 @@ def _client_ip(data: Dict[str, Any]) -> str:
     return "unknown"
 
 
-def _build_database_entries(  # pylint: disable=too-many-locals
+def _build_database_entries(
     names: Optional[Dict[str, str]] = None,
 ) -> List[Tuple[str, str, int, int]]:
     """
@@ -1165,7 +1166,7 @@ def _has_unknown_hashes(data: Dict[str, Any], names: Dict[str, str]) -> bool:
     return False
 
 
-def _prompt_fingerprint_identification(  # pylint: disable=too-many-branches
+def _prompt_fingerprint_identification(
     term: Any, data: Dict[str, Any], filepath: str, names: Dict[str, str]
 ) -> None:
     """Prompt user to identify unknown fingerprint hashes."""

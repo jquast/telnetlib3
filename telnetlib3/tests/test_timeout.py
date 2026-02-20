@@ -109,8 +109,8 @@ def test_cli_connect_timeout_arg():
 
 
 def test_cli_connect_timeout_default():
-    """Test --connect-timeout defaults to None."""
+    """Test --connect-timeout defaults to 10."""
     parser = _get_argument_parser()
     args = parser.parse_args(["example.com"])
     result = _transform_args(args)
-    assert result["connect_timeout"] is None
+    assert result["connect_timeout"] == 10

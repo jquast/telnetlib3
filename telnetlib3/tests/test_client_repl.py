@@ -1,19 +1,19 @@
 """Tests for telnetlib3.client_repl and client_shell.ScrollRegion."""
 
+# std imports
 import sys
 import types
 import asyncio
 
+# 3rd party
 import pytest
 
 if sys.platform == "win32":
     pytest.skip("POSIX-only tests", allow_module_level=True)
 
+# local
 from telnetlib3.client_repl import ScrollRegion  # noqa: E402
-from telnetlib3.client_repl import (  # noqa: E402
-    HAS_PROMPT_TOOLKIT,
-    BasicLineRepl,
-)
+from telnetlib3.client_repl import HAS_PROMPT_TOOLKIT, BasicLineRepl  # noqa: E402
 
 
 class _MockTransport:
@@ -36,8 +36,7 @@ def _mock_stdout() -> "asyncio.StreamWriter":
 
 def _mock_writer(will_echo: bool = False) -> object:
     return types.SimpleNamespace(
-        will_echo=will_echo,
-        log=types.SimpleNamespace(debug=lambda *a, **kw: None),
+        will_echo=will_echo, log=types.SimpleNamespace(debug=lambda *a, **kw: None)
     )
 
 
@@ -157,6 +156,7 @@ class TestPromptToolkitRepl:
 
     def test_uses_in_memory_history_by_default(self) -> None:
         from prompt_toolkit.history import InMemoryHistory
+
         from telnetlib3.client_repl import PromptToolkitRepl
 
         writer = _mock_writer()
@@ -170,6 +170,18 @@ class TestPromptToolkitRepl:
         writer = _mock_writer()
         repl = PromptToolkitRepl(writer, writer.log, history_file=history_path)
         assert isinstance(repl._history, _FilteredFileHistory)
+
+    def test_ctrl_bracket_binding_registered(self) -> None:
+        """Ctrl+] key binding is registered on the session."""
+        from prompt_toolkit.keys import Keys
+
+        from telnetlib3.client_repl import PromptToolkitRepl
+
+        writer = _mock_writer()
+        repl = PromptToolkitRepl(writer, writer.log)
+        bindings = repl._session.key_bindings.bindings
+        bound_keys = [b.keys for b in bindings]
+        assert (Keys.ControlSquareClose,) in bound_keys
 
 
 @pytest.mark.skipif(not HAS_PROMPT_TOOLKIT, reason="prompt_toolkit not installed")
@@ -197,9 +209,7 @@ class TestFilteredFileHistory:
 
         password_mode = False
         history_path = str(tmp_path / "history")
-        hist = _FilteredFileHistory(
-            history_path, is_password=lambda: password_mode
-        )
+        hist = _FilteredFileHistory(history_path, is_password=lambda: password_mode)
         hist.store_string("visible")
         content = (tmp_path / "history").read_text()
         assert "+visible" in content
@@ -209,9 +219,7 @@ class TestFilteredFileHistory:
 
         password_mode = False
         history_path = str(tmp_path / "history")
-        hist = _FilteredFileHistory(
-            history_path, is_password=lambda: password_mode
-        )
+        hist = _FilteredFileHistory(history_path, is_password=lambda: password_mode)
         hist.store_string("visible")
         password_mode = True
         hist.store_string("secret")
@@ -229,3 +237,50 @@ class TestFilteredFileHistory:
         hist = _make_history(history_path)
         assert isinstance(hist, _FilteredFileHistory)
         assert (tmp_path / "sub" / "dir").is_dir()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+class TestNawsRestoration:
+
+    @pytest.mark.asyncio
+    async def test_naws_restored_on_exception(self) -> None:
+        """handle_send_naws is restored even if _repl_scaffold body raises."""
+        from telnetlib3.client_repl import _repl_scaffold
+
+        def orig_handler() -> tuple[int, int]:
+            return (24, 80)
+
+        writer = _mock_writer()
+        writer.handle_send_naws = orig_handler
+        writer.local_option = types.SimpleNamespace(enabled=lambda _: False)
+        writer.is_closing = lambda: False
+
+        stdout, _ = _mock_stdout()
+        term = types.SimpleNamespace(on_resize=None)
+
+        with pytest.raises(RuntimeError, match="injected"):
+            async with _repl_scaffold(writer, term, stdout):
+                raise RuntimeError("injected")
+
+        assert writer.handle_send_naws is orig_handler
+
+    @pytest.mark.asyncio
+    async def test_naws_restored_on_normal_exit(self) -> None:
+        """handle_send_naws is restored after normal scaffold exit."""
+        from telnetlib3.client_repl import _repl_scaffold
+
+        def orig_handler() -> tuple[int, int]:
+            return (24, 80)
+
+        writer = _mock_writer()
+        writer.handle_send_naws = orig_handler
+        writer.local_option = types.SimpleNamespace(enabled=lambda _: False)
+        writer.is_closing = lambda: False
+
+        stdout, _ = _mock_stdout()
+        term = types.SimpleNamespace(on_resize=None)
+
+        async with _repl_scaffold(writer, term, stdout) as (scroll, rc):
+            assert writer.handle_send_naws is not orig_handler
+
+        assert writer.handle_send_naws is orig_handler

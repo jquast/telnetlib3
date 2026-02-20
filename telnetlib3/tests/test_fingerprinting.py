@@ -1031,6 +1031,7 @@ def test_protocol_fingerprint_hash_stability():
 def test_fingerprinting_server_on_request_environ():
     """FingerprintingServer includes HOME and SHELL in environ request."""
     srv = fps.FingerprintingServer.__new__(fps.FingerprintingServer)
+    srv._extra = {}
     env = srv.on_request_environ()
     assert "HOME" in env
     assert "SHELL" in env

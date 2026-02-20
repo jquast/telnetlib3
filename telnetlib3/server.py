@@ -436,19 +436,21 @@ class TelnetServer(server_base.BaseServer):
         result: List[Union[str, bytes]] = []
         if not is_ms_telnet:
             result.append("USER")
-        result.extend([
-            "LOGNAME",
-            "DISPLAY",
-            "LANG",
-            "TERM",
-            "COLUMNS",
-            "LINES",
-            "COLORTERM",
-            "EDITOR",
-            # Request any other VAR/USERVAR the client wants to send
-            VAR,
-            USERVAR,
-        ])
+        result.extend(
+            [
+                "LOGNAME",
+                "DISPLAY",
+                "LANG",
+                "TERM",
+                "COLUMNS",
+                "LINES",
+                "COLORTERM",
+                "EDITOR",
+                # Request any other VAR/USERVAR the client wants to send
+                VAR,
+                USERVAR,
+            ]
+        )
         return result
 
     def on_environ(self, mapping: Dict[str, str]) -> None:

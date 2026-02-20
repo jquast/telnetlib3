@@ -437,6 +437,7 @@ async def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port):
         "--connect-minwait=0.05",
         "--connect-maxwait=0.05",
         "--colormatch=none",
+        "--no-repl",
     ]
 
     class HelloServer(asyncio.Protocol):

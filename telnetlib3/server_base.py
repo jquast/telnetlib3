@@ -201,7 +201,6 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         The writer receives a copy of all raw bytes because, as an IAC interpreter, it may likely
         **write** a responding reply.
         """
-        # pylint: disable=too-many-branches
         # This is a "hot path" method, and so it is not broken into "helper functions" to help with
         # performance.  Uses batched processing: scans for IAC (255) and SLC bytes, batching regular
         # data into single feed_data() calls for performance.  This can be done, and previously was,

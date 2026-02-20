@@ -1450,12 +1450,7 @@ def test_reencode_prompt(response, encoding, expected):
 @pytest.mark.asyncio
 async def test_read_banner_inline_utf8_menu():
     """UTF-8 charset menu is responded to inline during banner collection."""
-    reader = MockReader(
-        [
-            b"Welcome to BBS!\r\n",
-            b"Select codepage:\r\n(1) UTF-8\r\n(2) CP437\r\n",
-        ]
-    )
+    reader = MockReader([b"Welcome to BBS!\r\n", b"Select codepage:\r\n(1) UTF-8\r\n(2) CP437\r\n"])
     writer = MockWriter()
     await sfp._read_banner_until_quiet(reader, quiet_time=0.01, max_wait=0.05, writer=writer)
     assert b"1\r\n" in writer._writes
@@ -1466,12 +1461,7 @@ async def test_read_banner_inline_utf8_menu():
 @pytest.mark.asyncio
 async def test_read_banner_inline_utf8_menu_split_chunks():
     """UTF-8 menu text split across chunk boundaries is still detected."""
-    reader = MockReader(
-        [
-            b"Select codepage:\r\n(1) UT",
-            b"F-8\r\n(2) CP437\r\n",
-        ]
-    )
+    reader = MockReader([b"Select codepage:\r\n(1) UT", b"F-8\r\n(2) CP437\r\n"])
     writer = MockWriter()
     await sfp._read_banner_until_quiet(reader, quiet_time=0.01, max_wait=0.05, writer=writer)
     assert b"1\r\n" in writer._writes
@@ -1481,12 +1471,7 @@ async def test_read_banner_inline_utf8_menu_split_chunks():
 @pytest.mark.asyncio
 async def test_read_banner_inline_utf8_menu_only_once():
     """UTF-8 menu response is sent only once even with multiple menu chunks."""
-    reader = MockReader(
-        [
-            b"(1) UTF-8\r\n(2) CP437\r\n",
-            b"Select again:\r\n(1) UTF-8\r\n",
-        ]
-    )
+    reader = MockReader([b"(1) UTF-8\r\n(2) CP437\r\n", b"Select again:\r\n(1) UTF-8\r\n"])
     writer = MockWriter()
     await sfp._read_banner_until_quiet(reader, quiet_time=0.01, max_wait=0.05, writer=writer)
     menu_writes = [w for w in writer._writes if w == b"1\r\n"]
@@ -1498,13 +1483,7 @@ async def test_fingerprinting_shell_utf8_inline_no_duplicate(tmp_path):
     """Inline UTF-8 menu response prevents duplicate in the prompt loop."""
     save_path = str(tmp_path / "result.json")
     writer = MockWriter(will_options=[fps.SGA])
-    reader = InteractiveMockReader(
-        [
-            b"(1) UTF-8\r\n(2) CP437\r\n",
-            b"Welcome!\r\nLogin: ",
-        ],
-        writer,
-    )
+    reader = InteractiveMockReader([b"(1) UTF-8\r\n(2) CP437\r\n", b"Welcome!\r\nLogin: "], writer)
 
     await sfp.fingerprinting_client_shell(
         reader,

@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+# std imports
 import sys
 from dataclasses import asdict
 
+# 3rd party
 import pytest
 
-from telnetlib3.client_tui import (
+textual = pytest.importorskip("textual", reason="textual not installed")
+
+# local
+from telnetlib3.client_tui import (  # noqa: E402
     DEFAULTS_KEY,
     SessionConfig,
     build_command,
@@ -29,8 +34,7 @@ class TestSessionConfig:
 
     def test_roundtrip(self) -> None:
         cfg = SessionConfig(
-            name="test", host="example.com", port=2323,
-            ssl=True, encoding="cp437", mode="raw",
+            name="test", host="example.com", port=2323, ssl=True, encoding="cp437", mode="raw"
         )
         data = asdict(cfg)
         restored = SessionConfig(**data)
@@ -40,6 +44,7 @@ class TestSessionConfig:
         data = asdict(SessionConfig(name="x"))
         data["unknown_future_field"] = 42
         from dataclasses import fields
+
         known = {f.name for f in fields(SessionConfig)}
         filtered = {k: v for k, v in data.items() if k in known}
         cfg = SessionConfig(**filtered)
@@ -83,10 +88,7 @@ class TestBuildCommand:
         assert "--raw-mode" not in cmd
         assert "--line-mode" not in cmd
 
-    @pytest.mark.parametrize("mode,flag", [
-        ("raw", "--raw-mode"),
-        ("line", "--line-mode"),
-    ])
+    @pytest.mark.parametrize("mode,flag", [("raw", "--raw-mode"), ("line", "--line-mode")])
     def test_mode_flags(self, mode: str, flag: str) -> None:
         cfg = SessionConfig(host="h", port=23, mode=mode)
         cmd = build_command(cfg)
@@ -139,13 +141,9 @@ class TestBuildCommand:
         assert "--always-will" not in cmd
 
     def test_display_options(self) -> None:
-        cfg = SessionConfig(
-            host="h", port=23,
-            colormatch="cga", reverse_video=True, background_color="#101010",
-        )
+        cfg = SessionConfig(host="h", port=23, colormatch="cga", background_color="#101010")
         cmd = build_command(cfg)
         assert "--colormatch" in cmd
-        assert "--reverse-video" in cmd
         assert "--background-color" in cmd
 
     def test_no_repl(self) -> None:
@@ -170,15 +168,10 @@ class TestBuildCommand:
         assert "--ascii-eol" in cmd
 
 
-
 class TestDefaultsInheritance:
     def test_new_from_defaults(self) -> None:
         defaults = SessionConfig(
-            name=DEFAULTS_KEY,
-            encoding="cp437",
-            colormatch="cga",
-            mode="raw",
-            loglevel="debug",
+            name=DEFAULTS_KEY, encoding="cp437", colormatch="cga", mode="raw", loglevel="debug"
         )
         new_cfg = SessionConfig(**asdict(defaults))
         new_cfg.name = "new_session"
@@ -191,3 +184,20 @@ class TestDefaultsInheritance:
         assert new_cfg.loglevel == "debug"
         assert new_cfg.name == "new_session"
         assert new_cfg.host == "example.com"
+
+
+class TestPersistenceNegative:
+
+    def test_corrupted_json(self, tmp_path, monkeypatch) -> None:
+        sessions_file = tmp_path / "sessions.json"
+        sessions_file.write_text("{invalid json", encoding="utf-8")
+        monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", sessions_file)
+        monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", tmp_path)
+        monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", tmp_path)
+        with pytest.raises(Exception):
+            load_sessions()
+
+    def test_build_command_missing_host(self) -> None:
+        cfg = SessionConfig(host="", port=23)
+        cmd = build_command(cfg)
+        assert "" in cmd

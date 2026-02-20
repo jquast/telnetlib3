@@ -390,7 +390,7 @@ class TelnetTerminalClient(TelnetClient):
             return (int(os.environ.get("LINES", 25)), int(os.environ.get("COLUMNS", 80)))
 
 
-async def open_connection(  # pylint: disable=too-many-locals
+async def open_connection(
     host: Optional[str] = None,
     port: int = 23,
     *,
@@ -608,7 +608,6 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             brightness=args["color_brightness"],
             contrast=args["color_contrast"],
             background_color=args["background_color"],
-            reverse_video=args["reverse_video"],
             ice_colors=args["ice_colors"],
         )
         if is_petscii or colormatch == "c64":
@@ -675,11 +674,49 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             reader: Union[TelnetReader, TelnetReaderUnicode],
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
+            # pylint: disable=protected-access
             writer_arg._repl_enabled = True  # type: ignore[union-attr]
-            writer_arg._history_file = args.get("history_file")  # type: ignore[union-attr]
+            writer_arg._history_file = (  # type: ignore[union-attr]
+                args.get("history_file"))
             await _inner_repl(reader, writer_arg)
 
         shell_callback = _repl_shell
+
+    # Wrap shell to inject autoreply rules
+    if args.get("autoreplies"):
+        from .autoreply import load_autoreplies  # pylint: disable=import-outside-toplevel
+
+        _autoreply_rules = load_autoreplies(args["autoreplies"])
+        _inner_ar = shell_callback
+
+        async def _autoreply_shell(
+            reader: Union[TelnetReader, TelnetReaderUnicode],
+            writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
+        ) -> None:
+            # pylint: disable=protected-access
+            writer_arg._autoreply_rules = (  # type: ignore[union-attr]
+                _autoreply_rules)
+            await _inner_ar(reader, writer_arg)
+
+        shell_callback = _autoreply_shell
+
+    # Wrap shell to inject macro definitions
+    if args.get("macros"):
+        from .macros import load_macros  # pylint: disable=import-outside-toplevel
+
+        _macro_defs = load_macros(args["macros"])
+        _inner_macro = shell_callback
+
+        async def _macro_shell(
+            reader: Union[TelnetReader, TelnetReaderUnicode],
+            writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
+        ) -> None:
+            # pylint: disable=protected-access
+            writer_arg._macro_defs = (  # type: ignore[union-attr]
+                _macro_defs)
+            await _inner_macro(reader, writer_arg)
+
+        shell_callback = _macro_shell
 
     # Build connection kwargs explicitly to avoid pylint false positive
     connection_kwargs: Dict[str, Any] = {
@@ -808,12 +845,6 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         help="forced background color as hex RGB (near-black by default)",
     )
     parser.add_argument(
-        "--reverse-video",
-        action="store_true",
-        default=False,
-        help="swap foreground/background for light-background terminals",
-    )
-    parser.add_argument(
         "--ice-colors",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -853,6 +884,18 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         "WARNING: this is insecure -- connections are encrypted but "
         "the server identity is not verified, allowing "
         "man-in-the-middle attacks",
+    )
+    parser.add_argument(
+        "--macros",
+        default=None,
+        metavar="FILE",
+        help="JSON file with macro key bindings for REPL mode",
+    )
+    parser.add_argument(
+        "--autoreplies",
+        default=None,
+        metavar="FILE",
+        help="JSON file with autoreply patterns for server output",
     )
     parser.add_argument(
         "--no-repl",
@@ -905,9 +948,10 @@ def _resolve_history_file(value: Optional[str]) -> Optional[str]:
     """Resolve ``--history-file`` to an absolute path or ``None``."""
     if value is not None:
         return str(value) if value else None
-    from .client_tui import HISTORY_FILE  # pylint: disable=import-outside-toplevel
-
-    return str(HISTORY_FILE)
+    xdg_data = os.environ.get(
+        "XDG_DATA_HOME", os.path.join(os.path.expanduser("~"), ".local", "share")
+    )
+    return os.path.join(xdg_data, "telnetlib3", "history")
 
 
 def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
@@ -961,7 +1005,6 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "color_brightness": args.color_brightness,
         "color_contrast": args.color_contrast,
         "background_color": _parse_background_color(args.background_color),
-        "reverse_video": args.reverse_video,
         "ice_colors": args.ice_colors,
         "raw_mode": raw_mode,
         "ascii_eol": args.ascii_eol,
@@ -973,7 +1016,8 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def main() -> None:
-    """Entry point for telnetlib3-client command.
+    """
+    Entry point for telnetlib3-client command.
 
     When invoked without a positional host argument and ``textual`` is
     installed, launches the TUI session manager instead.
@@ -981,9 +1025,10 @@ def main() -> None:
     has_host = any(not arg.startswith("-") for arg in sys.argv[1:])
     if not has_host:
         try:
-            from telnetlib3.client_tui import tui_main  # pylint: disable=import-outside-toplevel
+            import importlib  # pylint: disable=import-outside-toplevel
 
-            tui_main()
+            tui = importlib.import_module("telnetlib3.client_tui")
+            tui.tui_main()
             return
         except ImportError:
             pass  # textual not installed, fall through to argparse error

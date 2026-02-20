@@ -6,7 +6,7 @@
 import sys
 import asyncio
 import collections
-from typing import Any, Callable, Dict, Tuple, Union, Optional
+from typing import Any, Dict, Tuple, Union, Callable, Optional
 
 # local
 from . import accessories
@@ -198,6 +198,7 @@ else:
             self._remove_winch = False
             self._winch_handle: Optional[asyncio.TimerHandle] = None
             self.on_resize: Optional[Callable[[int, int], None]] = None
+            self._stdin_transport: Optional[asyncio.BaseTransport] = None
 
         def setup_winch(self) -> None:
             """Register SIGWINCH handler to send NAWS on terminal resize."""
@@ -209,7 +210,9 @@ else:
 
                 def _handle_resize() -> None:
                     from .telopt import NAWS  # pylint: disable=import-outside-toplevel
-                    from .client_repl import _get_terminal_size  # pylint: disable=import-outside-toplevel
+
+                    # pylint: disable-next=import-outside-toplevel,cyclic-import
+                    from .client_repl import _get_terminal_size
 
                     try:
                         if self.on_resize is not None:
@@ -378,7 +381,7 @@ else:
             WILL SGA + ECHO    **off**   **off**     Full kludge mode (most common)
             =================  ========  ==========  ================================
             """
-            raw_mode = getattr(self.telnet_writer, "_raw_mode", False)
+            raw_mode = _get_raw_mode(self.telnet_writer)
             will_echo = self.telnet_writer.will_echo
             will_sga = self._server_will_sga()
             # Auto mode (None): follow server negotiation
@@ -387,9 +390,7 @@ else:
                     self.telnet_writer.log.debug("auto: server echo + SGA, kludge mode")
                     return self._make_raw(mode)
                 if will_echo:
-                    self.telnet_writer.log.debug(
-                        "auto: server echo without SGA, line mode"
-                    )
+                    self.telnet_writer.log.debug("auto: server echo without SGA, line mode")
                     return self._suppress_echo(mode)
                 if will_sga:
                     self.telnet_writer.log.debug("auto: SGA without echo, character-at-a-time")
@@ -409,7 +410,8 @@ else:
             return self._make_raw(mode)
 
         async def make_stdout(self) -> asyncio.StreamWriter:
-            """Return an asyncio StreamWriter for local terminal output.
+            """
+            Return an asyncio StreamWriter for local terminal output.
 
             This does **not** connect stdin — call :meth:`connect_stdin`
             separately when an asyncio stdin reader is needed (the REPL
@@ -425,11 +427,11 @@ else:
             return asyncio.StreamWriter(writer_transport, writer_protocol, None, loop)
 
         async def connect_stdin(self) -> asyncio.StreamReader:
-            """Connect sys.stdin to an asyncio StreamReader.
+            """
+            Connect sys.stdin to an asyncio StreamReader.
 
-            Must be called **after** any prompt_toolkit session has
-            finished, because prompt_toolkit and asyncio cannot both
-            own the stdin file descriptor at the same time.
+            Must be called **after** any prompt_toolkit session has finished, because prompt_toolkit
+            and asyncio cannot both own the stdin file descriptor at the same time.
             """
             reader = asyncio.StreamReader()
             reader_protocol = asyncio.StreamReaderProtocol(reader)
@@ -517,6 +519,10 @@ else:
                 stdout.write(bytes(_echo_buf))
         return new_timer, pending
 
+    def _get_raw_mode(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> "bool | None":
+        """Return the writer's ``_raw_mode`` attribute (``None``, ``True``, or ``False``)."""
+        return getattr(writer, "_raw_mode", False)
+
     def _flush_color_filter(
         writer: Union[TelnetWriter, TelnetWriterUnicode], stdout: asyncio.StreamWriter
     ) -> None:
@@ -526,6 +532,137 @@ else:
             _flush = _cf.flush()
             if _flush:
                 stdout.write(_flush.encode())
+
+    # pylint: disable=too-many-positional-arguments,too-many-locals,too-many-branches
+    async def _raw_event_loop(
+        telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
+        telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
+        term: "Terminal",
+        stdin: asyncio.StreamReader,
+        stdout: asyncio.StreamWriter,
+        keyboard_escape: str,
+        local_echo: bool,
+        switched_to_raw: bool,
+        last_will_echo: bool,
+        linesep: str,
+        handle_close: Callable[[str], None],
+        want_repl: Callable[[], bool],
+    ) -> "tuple[bool, bool, bool, bool, str]":
+        """
+        Standard byte-at-a-time event loop.
+
+        :returns: ``(reactivate_repl, switched_to_raw, last_will_echo,
+            local_echo, linesep)`` tuple.
+        """
+        stdin_task = accessories.make_reader_task(stdin)
+        telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
+        esc_timer_task: Optional[asyncio.Task[None]] = None
+        wait_for: set[asyncio.Task[Any]] = {stdin_task, telnet_task}
+        reactivate_repl = False
+
+        while wait_for:
+            done, _ = await asyncio.wait(wait_for, return_when=asyncio.FIRST_COMPLETED)
+            if stdin_task in done:
+                task = stdin_task
+                done.discard(task)
+            else:
+                task = done.pop()
+            wait_for.discard(task)
+
+            telnet_writer.log.log(TRACE, "task=%s, wait_for=%s", task, wait_for)
+
+            # ESC_DELAY timer fired — flush buffered partial sequence
+            if task is esc_timer_task:
+                esc_timer_task = None
+                _inf = getattr(telnet_writer, "_input_filter", None)
+                if _inf is not None and _inf.has_pending:
+                    flushed = _inf.flush()
+                    if flushed:
+                        telnet_writer._write(flushed)  # pylint: disable=protected-access
+                continue
+
+            # client input
+            if task == stdin_task:
+                if esc_timer_task is not None and esc_timer_task in wait_for:
+                    esc_timer_task.cancel()
+                    wait_for.discard(esc_timer_task)
+                    esc_timer_task = None
+                inp = task.result()
+                if not inp:
+                    telnet_writer.log.debug("EOF from client stdin")
+                    continue
+                if keyboard_escape in inp.decode():
+                    try:
+                        telnet_writer.close()
+                    except Exception:  # pylint: disable=broad-exception-caught
+                        pass
+                    if telnet_task in wait_for:
+                        telnet_task.cancel()
+                        wait_for.remove(telnet_task)
+                    handle_close("Connection closed.")
+                    break
+                new_timer, has_pending = _send_stdin(inp, telnet_writer, stdout, local_echo)
+                if has_pending and esc_timer_task not in wait_for:
+                    esc_timer_task = new_timer
+                    if esc_timer_task is not None:
+                        wait_for.add(esc_timer_task)
+                stdin_task = accessories.make_reader_task(stdin)
+                wait_for.add(stdin_task)
+
+            # server output
+            elif task == telnet_task:
+                out = task.result()
+                if not out and telnet_reader.at_eof():
+                    if stdin_task in wait_for:
+                        stdin_task.cancel()
+                        wait_for.remove(stdin_task)
+                    handle_close("Connection closed by foreign host.")
+                    continue
+                raw_mode = _get_raw_mode(telnet_writer)
+                in_raw = raw_mode is True or (raw_mode is None and switched_to_raw)
+                out = _transform_output(out, telnet_writer, in_raw)
+                _ar_engine = getattr(telnet_writer, "_autoreply_engine", None)
+                if _ar_engine is None:
+                    _ar_rules = getattr(telnet_writer, "_autoreply_rules", None)
+                    if _ar_rules:
+                        from .autoreply import (  # pylint: disable=import-outside-toplevel
+                            AutoreplyEngine,
+                        )
+
+                        _ar_engine = AutoreplyEngine(
+                            _ar_rules, telnet_writer, telnet_writer.log, stdout=stdout
+                        )
+                        # pylint: disable-next=protected-access
+                        telnet_writer._autoreply_engine = (  # type: ignore[union-attr]
+                            _ar_engine)
+                if _ar_engine is not None:
+                    _ar_engine.feed(out)
+                if raw_mode is None:
+                    mode_result = term.check_auto_mode(switched_to_raw, last_will_echo)
+                    if mode_result is not None:
+                        if not switched_to_raw:
+                            linesep = "\r\n"
+                        switched_to_raw, last_will_echo, local_echo = mode_result
+                        # When transitioning cooked → raw, the data was
+                        # processed for ONLCR (\r\n → \n) but the terminal
+                        # now has ONLCR disabled.  Re-normalize so bare \n
+                        # becomes \r\n for correct display.
+                        if switched_to_raw and not in_raw:
+                            out = out.replace("\n", "\r\n")
+                    if want_repl():
+                        reactivate_repl = True
+                stdout.write(out.encode())
+                if reactivate_repl:
+                    telnet_writer.log.debug("mode returned to local, reactivating REPL")
+                    if stdin_task in wait_for:
+                        stdin_task.cancel()
+                        wait_for.discard(stdin_task)
+                    switched_to_raw = False
+                    break
+                telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
+                wait_for.add(telnet_task)
+
+        return (reactivate_repl, switched_to_raw, last_will_echo, local_echo, linesep)
 
     async def telnet_client_shell(
         telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
@@ -548,7 +685,7 @@ else:
             last_will_echo = False
             local_echo = term.software_echo
             if term._istty:  # pylint: disable=protected-access
-                raw_mode = getattr(telnet_writer, "_raw_mode", False)
+                raw_mode = _get_raw_mode(telnet_writer)
                 if telnet_writer.will_echo or raw_mode is True:
                     linesep = "\r\n"
             stdout = await term.make_stdout()
@@ -557,7 +694,7 @@ else:
             term.setup_winch()
 
             repl_enabled = getattr(telnet_writer, "_repl_enabled", False)
-            raw_mode_val = getattr(telnet_writer, "_raw_mode", False)
+            raw_mode_val = _get_raw_mode(telnet_writer)
             _can_repl = (
                 repl_enabled
                 and raw_mode_val is not True
@@ -574,140 +711,38 @@ else:
 
             # -- outer loop: alternate between REPL and raw event loops --
             while True:
-                # REPL mode: linemode with split-screen input.
-                # stdin is NOT connected — prompt_toolkit manages its own.
                 if _want_repl():
-                    from .client_repl import repl_event_loop  # pylint: disable=import-outside-toplevel
+                    # pylint: disable-next=import-outside-toplevel,cyclic-import
+                    from .client_repl import repl_event_loop
 
                     history_file = getattr(telnet_writer, "_history_file", None)
                     telnet_writer.log.debug("entering REPL (line mode)")
                     mode_switched = await repl_event_loop(
-                        telnet_reader, telnet_writer, term, stdout,
-                        history_file=history_file,
+                        telnet_reader, telnet_writer, term, stdout, history_file=history_file
                     )
                     if not mode_switched:
                         return
-                    telnet_writer.log.debug(
-                        "REPL deactivated, switching to standard event loop"
-                    )
+                    telnet_writer.log.debug("REPL deactivated, switching to standard event loop")
                     continue
 
                 # Standard event loop (byte-at-a-time).
                 stdin = await term.connect_stdin()
-                stdin_task = accessories.make_reader_task(stdin)
-                telnet_task = accessories.make_reader_task(
-                    telnet_reader, size=2**24
+                _reactivate_repl, switched_to_raw, last_will_echo, local_echo, linesep = (
+                    await _raw_event_loop(
+                        telnet_reader,
+                        telnet_writer,
+                        term,
+                        stdin,
+                        stdout,
+                        keyboard_escape,
+                        local_echo,
+                        switched_to_raw,
+                        last_will_echo,
+                        linesep,
+                        _handle_close,
+                        _want_repl,
+                    )
                 )
-                esc_timer_task: Optional[asyncio.Task[None]] = None
-                wait_for = set([stdin_task, telnet_task])
-                _reactivate_repl = False
-
-                while wait_for:
-                    done, _ = await asyncio.wait(
-                        wait_for, return_when=asyncio.FIRST_COMPLETED
-                    )
-
-                    if stdin_task in done:
-                        task = stdin_task
-                        done.discard(task)
-                    else:
-                        task = done.pop()
-                    wait_for.discard(task)
-
-                    telnet_writer.log.log(
-                        TRACE, "task=%s, wait_for=%s", task, wait_for
-                    )
-
-                    # ESC_DELAY timer fired — flush buffered partial sequence
-                    if task is esc_timer_task:
-                        esc_timer_task = None
-                        _inf = getattr(telnet_writer, "_input_filter", None)
-                        if _inf is not None and _inf.has_pending:
-                            flushed = _inf.flush()
-                            if flushed:
-                                telnet_writer._write(flushed)  # pylint: disable=protected-access
-                        continue
-
-                    # client input
-                    if task == stdin_task:
-                        if esc_timer_task is not None and esc_timer_task in wait_for:
-                            esc_timer_task.cancel()
-                            wait_for.discard(esc_timer_task)
-                            esc_timer_task = None
-                        inp = task.result()
-                        if not inp:
-                            telnet_writer.log.debug("EOF from client stdin")
-                            continue
-                        if keyboard_escape in inp.decode():
-                            try:
-                                telnet_writer.close()
-                            except Exception:  # pylint: disable=broad-exception-caught
-                                pass
-                            if telnet_task in wait_for:
-                                telnet_task.cancel()
-                                wait_for.remove(telnet_task)
-                            _handle_close("Connection closed.")
-                            break
-                        new_timer, has_pending = _send_stdin(
-                            inp, telnet_writer, stdout, local_echo
-                        )
-                        if has_pending and esc_timer_task not in wait_for:
-                            esc_timer_task = new_timer
-                            if esc_timer_task is not None:
-                                wait_for.add(esc_timer_task)
-                        stdin_task = accessories.make_reader_task(stdin)
-                        wait_for.add(stdin_task)
-
-                    # server output
-                    elif task == telnet_task:
-                        out = task.result()
-                        if not out and telnet_reader._eof:  # pylint: disable=protected-access
-                            if stdin_task in wait_for:
-                                stdin_task.cancel()
-                                wait_for.remove(stdin_task)
-                            _handle_close("Connection closed by foreign host.")
-                            continue
-                        raw_mode = getattr(telnet_writer, "_raw_mode", False)
-                        in_raw = raw_mode is True or (
-                            raw_mode is None and switched_to_raw
-                        )
-                        out = _transform_output(
-                            out, telnet_writer, in_raw
-                        )
-                        if raw_mode is None:
-                            mode_result = term.check_auto_mode(
-                                switched_to_raw, last_will_echo
-                            )
-                            if mode_result is not None:
-                                if not switched_to_raw:
-                                    linesep = "\r\n"
-                                switched_to_raw, last_will_echo, local_echo = (
-                                    mode_result
-                                )
-                                # When transitioning cooked → raw, the data was
-                                # processed for ONLCR (\r\n → \n) but the
-                                # terminal now has ONLCR disabled.  Re-normalize
-                                # so bare \n becomes \r\n for correct display.
-                                if switched_to_raw and not in_raw:
-                                    out = out.replace("\n", "\r\n")
-                            if _want_repl():
-                                _reactivate_repl = True
-                        stdout.write(out.encode() or b":?!?:")
-                        if _reactivate_repl:
-                            telnet_writer.log.debug(
-                                "mode returned to local, reactivating REPL"
-                            )
-                            if stdin_task in wait_for:
-                                stdin_task.cancel()
-                                wait_for.discard(stdin_task)
-                            switched_to_raw = False
-                            break
-                        telnet_task = accessories.make_reader_task(
-                            telnet_reader, size=2**24
-                        )
-                        wait_for.add(telnet_task)
-
-                # Disconnected or reactivating REPL — close stdin pipe
                 term.disconnect_stdin(stdin)
                 if _reactivate_repl:
                     continue

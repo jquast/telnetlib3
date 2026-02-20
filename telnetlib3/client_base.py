@@ -371,7 +371,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     # private methods
 
-    def _process_chunk(self, data: bytes) -> bool:  # pylint: disable=too-many-branches,too-complex
+    def _process_chunk(self, data: bytes) -> bool:
         """Process a chunk of received bytes; return True if any IAC/SB cmd observed."""
         # This mirrors the previous optimized logic, but is called from an async task.
         self._last_received = datetime.datetime.now()

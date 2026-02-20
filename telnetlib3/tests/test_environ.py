@@ -196,9 +196,7 @@ async def test_negotiate_environ_always_sent(ttype1, ttype2):
         ("xterm", "xterm-256color", True),
     ],
 )
-async def test_on_request_environ_user_excluded_for_ms_telnet(
-    ttype1, ttype2, expect_user
-):
+async def test_on_request_environ_user_excluded_for_ms_telnet(ttype1, ttype2, expect_user):
     """USER is excluded from NEW_ENVIRON request for Microsoft telnet."""
     server = _make_server()
     server._extra["ttype1"] = ttype1

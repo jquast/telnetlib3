@@ -178,7 +178,7 @@ ENVIRON_EXTENDED: list[str] = [
 logger = logging.getLogger("telnetlib3.fingerprint")
 
 
-class FingerprintingTelnetServer:  # pylint: disable=too-few-public-methods
+class FingerprintingTelnetServer:
     """
     Mixin that extends ``on_request_environ`` with :data:`ENVIRON_EXTENDED`.
 

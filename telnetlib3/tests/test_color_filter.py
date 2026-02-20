@@ -39,7 +39,6 @@ class TestColorConfig:
         assert cfg.brightness == 1.0
         assert cfg.contrast == 1.0
         assert cfg.background_color == (0, 0, 0)
-        assert cfg.reverse_video is False
         assert cfg.ice_colors is True
 
 
@@ -182,19 +181,64 @@ class TestColorFilterReset:
     def test_explicit_reset(self) -> None:
         f = self._make_filter()
         result = f.filter("\x1b[0m")
-        assert "\x1b[0m" in result
-        assert "\x1b[48;2;0;0;0m" in result
+        assert "48;2;0;0;0" in result
+        assert "38;2;170;170;170" in result
 
     def test_empty_reset(self) -> None:
         f = self._make_filter()
         result = f.filter("\x1b[m")
         assert "\x1b[0m" in result
-        assert "\x1b[48;2;0;0;0m" in result
+        assert "48;2;0;0;0" in result
+        assert "38;2;170;170;170" in result
 
     def test_reset_in_compound_sequence(self) -> None:
         f = self._make_filter()
         result = f.filter("\x1b[0;31m")
-        assert "\x1b[48;2;0;0;0m" in result
+        assert "48;2;0;0;0" in result
+
+    def test_reset_with_bg_preserves_explicit_bg(self) -> None:
+        """SGR 0;30;42 must not override green bg with configured black bg."""
+        f = self._make_filter()
+        result = f.filter("\x1b[0;30;42m")
+        assert "48;2;0;170;0" in result
+        last_bg = result.rfind("48;2;")
+        assert result[last_bg:].startswith("48;2;0;170;0")
+
+    def test_reset_with_fg_preserves_explicit_fg(self) -> None:
+        """SGR 0;31 must use red, not the injected default white."""
+        f = self._make_filter()
+        result = f.filter("\x1b[0;31m")
+        last_fg = result.rfind("38;2;")
+        assert result[last_fg:].startswith("38;2;170;0;0")
+
+    def test_bold_after_reset_emits_bright_white(self) -> None:
+        """ESC[0m ESC[1m should produce bright white (palette 15)."""
+        f = self._make_filter()
+        f.filter("\x1b[0m")
+        result = f.filter("\x1b[1m")
+        assert "38;2;255;255;255" in result
+
+    def test_bold_after_explicit_fg_emits_bright_color(self) -> None:
+        """ESC[31m ESC[1m should produce bright red (palette 9)."""
+        f = self._make_filter()
+        f.filter("\x1b[31m")
+        result = f.filter("\x1b[1m")
+        assert "38;2;255;85;85" in result
+
+    def test_unbold_restores_normal_fg(self) -> None:
+        """ESC[31m ESC[1m ESC[22m should restore normal red (palette 1)."""
+        f = self._make_filter()
+        f.filter("\x1b[31m")
+        f.filter("\x1b[1m")
+        result = f.filter("\x1b[22m")
+        assert "38;2;170;0;0" in result
+
+    def test_bold_with_explicit_fg_in_same_seq_no_double_inject(self) -> None:
+        """ESC[1;31m should not inject default bright fg."""
+        f = self._make_filter()
+        result = f.filter("\x1b[1;31m")
+        assert "255;85;85" in result
+        assert "255;255;255" not in result
 
 
 class TestColorFilterPassThrough:
@@ -221,25 +265,26 @@ class TestColorFilterPassThrough:
         result = f.filter("\x1b[48;2;10;20;30m")
         assert "48;2;10;20;30" in result
 
-    def test_bold_pass_through(self) -> None:
+    def test_bold_emits_bright_default_fg(self) -> None:
         f = self._make_filter()
         result = f.filter("\x1b[1m")
-        assert "\x1b[1m" in result
+        assert "1" in result
+        assert "38;2;255;255;255" in result
 
     def test_underline_pass_through(self) -> None:
         f = self._make_filter()
         result = f.filter("\x1b[4m")
         assert "\x1b[4m" in result
 
-    def test_default_fg_pass_through(self) -> None:
+    def test_default_fg_translated(self) -> None:
         f = self._make_filter()
         result = f.filter("\x1b[39m")
-        assert "39" in result
+        assert "38;2;170;170;170" in result
 
-    def test_default_bg_pass_through(self) -> None:
+    def test_default_bg_translated(self) -> None:
         f = self._make_filter()
         result = f.filter("\x1b[49m")
-        assert "49" in result
+        assert "48;2;0;0;0" in result
 
     def test_non_sgr_escape_pass_through(self) -> None:
         f = self._make_filter()
@@ -395,8 +440,7 @@ class TestColorFilterIceColors:
         assert f"48;2;{bright_black[0]};{bright_black[1]};{bright_black[2]}" in result
 
     @pytest.mark.parametrize(
-        "code,normal_idx",
-        [(40, 0), (41, 1), (42, 2), (43, 3), (44, 4), (45, 5), (46, 6), (47, 7)],
+        "code,normal_idx", [(40, 0), (41, 1), (42, 2), (43, 3), (44, 4), (45, 5), (46, 6), (47, 7)]
     )
     def test_all_blink_bg_use_bright_palette(self, code: int, normal_idx: int) -> None:
         f = self._make_filter()
@@ -481,32 +525,6 @@ class TestColorFilterPlainText:
         # First call sets initial, but empty input returns ""
         result = f.filter("")
         assert not result
-
-
-class TestColorFilterReverseVideo:
-    def _make_filter(self) -> ColorFilter:
-        return ColorFilter(
-            ColorConfig(
-                brightness=1.0, contrast=1.0, reverse_video=True, background_color=(0, 0, 0)
-            )
-        )
-
-    def test_fg_becomes_bg(self) -> None:
-        f = self._make_filter()
-        result = f.filter("\x1b[31m")
-        rgb = PALETTES["ega"][1]
-        assert f"48;2;{rgb[0]};{rgb[1]};{rgb[2]}" in result
-
-    def test_bg_becomes_fg(self) -> None:
-        f = self._make_filter()
-        result = f.filter("\x1b[41m")
-        rgb = PALETTES["ega"][1]
-        assert f"38;2;{rgb[0]};{rgb[1]};{rgb[2]}" in result
-
-    def test_background_is_inverted(self) -> None:
-        f = self._make_filter()
-        result = f.filter("x")
-        assert "\x1b[48;2;255;255;255m" in result
 
 
 class TestColorFilterBrightnessContrast:

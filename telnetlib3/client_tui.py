@@ -1,4 +1,5 @@
-"""Textual TUI session manager for telnetlib3-client.
+"""
+Textual TUI session manager for telnetlib3-client.
 
 Launched when ``telnetlib3-client`` is invoked without a host argument
 and the ``textual`` package is installed (``pip install telnetlib3[tui]``).
@@ -8,53 +9,67 @@ fingerprint-based capability detection, and subprocess-based connection
 launching.
 """
 
+# pylint: disable=import-error
 from __future__ import annotations
 
-import asyncio
-import datetime
-import json
+# std imports
 import os
-import subprocess
 import sys
-from dataclasses import asdict, dataclass, fields
-from pathlib import Path
-from typing import Any, ClassVar
+import json
+import datetime
+import subprocess
+from typing import ClassVar
+from dataclasses import asdict, fields, dataclass
 
+# 3rd party
 from textual.app import App, ComposeResult
-from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
+from textual.binding import Binding
 from textual.widgets import (
-    Button,
-    ContentSwitcher,
-    DataTable,
-    Footer,
     Input,
     Label,
-    RadioButton,
-    RadioSet,
+    Button,
+    Footer,
     Select,
     Static,
     Switch,
+    RadioSet,
+    DataTable,
+    RadioButton,
+    ContentSwitcher,
+)
+from textual.containers import Vertical, Horizontal
+
+_ENCODINGS = (
+    "utf-8",
+    "cp437",
+    "latin-1",
+    "ascii",
+    "iso-8859-1",
+    "iso-8859-2",
+    "iso-8859-15",
+    "cp1251",
+    "koi8-r",
+    "big5",
+    "gbk",
+    "euc-kr",
+    "shift-jis",
+    "atascii",
+    "petscii",
 )
 
-# ---------------------------------------------------------------------------
-# Constants -- XDG Base Directory paths
-# ---------------------------------------------------------------------------
+_XDG_CONFIG = os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config"))
+_XDG_DATA = os.environ.get(
+    "XDG_DATA_HOME", os.path.join(os.path.expanduser("~"), ".local", "share")
+)
 
-_XDG_CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-_XDG_DATA = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+CONFIG_DIR = os.path.join(_XDG_CONFIG, "telnetlib3")
+DATA_DIR = os.path.join(_XDG_DATA, "telnetlib3")
 
-CONFIG_DIR = _XDG_CONFIG / "telnetlib3"
-DATA_DIR = _XDG_DATA / "telnetlib3"
-
-SESSIONS_FILE = CONFIG_DIR / "sessions.json"
-HISTORY_FILE = DATA_DIR / "history"
+SESSIONS_FILE = os.path.join(CONFIG_DIR, "sessions.json")
+HISTORY_FILE = os.path.join(DATA_DIR, "history")
 DEFAULTS_KEY = "__defaults__"
 
-# ---------------------------------------------------------------------------
-# Tooltip Extraction from argparse
-# ---------------------------------------------------------------------------
 
 # Map CLI flag names (without leading --) to TUI widget IDs.
 _FLAG_TO_WIDGET: dict[str, str] = {
@@ -70,14 +85,12 @@ _FLAG_TO_WIDGET: dict[str, str] = {
     "always-do": "always-do",
     "colormatch": "colormatch",
     "background-color": "background-color",
-    "reverse-video": "reverse-video",
     "ice-colors": "ice-colors",
     "ascii-eol": "ascii-eol",
     "ansi-keys": "ansi-keys",
     "ssl": "ssl",
-
     "ssl-no-verify": "ssl-no-verify",
-    "no-repl": "no-repl",
+    "no-repl": "use-repl",
     "loglevel": "loglevel",
     "logfile": "logfile",
 }
@@ -88,7 +101,7 @@ _TOOLTIP_CACHE: dict[str, str] | None = None
 
 def _build_tooltips() -> dict[str, str]:
     """Extract help text from argparse and return ``{widget_id: help}``."""
-    global _TOOLTIP_CACHE  # noqa: PLW0603
+    global _TOOLTIP_CACHE  # noqa: PLW0603  # pylint: disable=global-statement
     if _TOOLTIP_CACHE is not None:
         return _TOOLTIP_CACHE
     from .client import _get_argument_parser  # pylint: disable=import-outside-toplevel
@@ -106,14 +119,11 @@ def _build_tooltips() -> dict[str, str]:
     _TOOLTIP_CACHE = tips
     return tips
 
-# ---------------------------------------------------------------------------
-# Data Model
-# ---------------------------------------------------------------------------
-
 
 @dataclass
 class SessionConfig:
-    """Persistent configuration for a single telnet session.
+    """
+    Persistent configuration for a single telnet session.
 
     Field defaults mirror the CLI defaults in
     :func:`telnetlib3.client._get_argument_parser`.
@@ -145,7 +155,6 @@ class SessionConfig:
     color_brightness: float = 1.0
     color_contrast: float = 1.0
     background_color: str = "#000000"
-    reverse_video: bool = False
     ice_colors: bool = True
 
     # Input
@@ -166,24 +175,22 @@ class SessionConfig:
     loglevel: str = "warn"
     logfile: str = ""
     no_repl: bool = False
-
-
-# ---------------------------------------------------------------------------
-# JSON Persistence
-# ---------------------------------------------------------------------------
+    macros_file: str = ""
+    autoreplies_file: str = ""
 
 
 def _ensure_dirs() -> None:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    os.makedirs(DATA_DIR, exist_ok=True)
 
 
 def load_sessions() -> dict[str, SessionConfig]:
     """Load session configs from ``~/.config/telnetlib3/sessions.json``."""
     _ensure_dirs()
-    if not SESSIONS_FILE.exists():
+    if not os.path.exists(SESSIONS_FILE):
         return {}
-    data = json.loads(SESSIONS_FILE.read_text(encoding="utf-8"))
+    with open(SESSIONS_FILE, encoding="utf-8") as f:
+        data = json.load(f)
     known = {f.name for f in fields(SessionConfig)}
     result: dict[str, SessionConfig] = {}
     for key, val in data.items():
@@ -196,27 +203,25 @@ def save_sessions(sessions: dict[str, SessionConfig]) -> None:
     """Save session configs to ``~/.config/telnetlib3/sessions.json``."""
     _ensure_dirs()
     data = {key: asdict(cfg) for key, cfg in sessions.items()}
-    SESSIONS_FILE.write_text(
-        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    with open(SESSIONS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+        f.write("\n")
 
 
-
-# ---------------------------------------------------------------------------
-# Command Builder
-# ---------------------------------------------------------------------------
-
-
-def build_command(config: SessionConfig) -> list[str]:
-    """Build ``telnetlib3-client`` CLI arguments from *config*.
+def build_command(  # pylint: disable=too-many-branches,too-complex
+    config: SessionConfig,
+) -> list[str]:
+    """
+    Build ``telnetlib3-client`` CLI arguments from *config*.
 
     Only emits flags that differ from the CLI defaults.
     """
     cmd = [
-        sys.executable, "-c",
+        sys.executable,
+        "-c",
         "from telnetlib3.client import main; main()",
-        config.host, str(config.port),
+        config.host,
+        str(config.port),
     ]
 
     if config.term:
@@ -241,8 +246,6 @@ def build_command(config: SessionConfig) -> list[str]:
         cmd.extend(["--color-contrast", str(config.color_contrast)])
     if config.background_color != "#000000":
         cmd.extend(["--background-color", config.background_color])
-    if config.reverse_video:
-        cmd.append("--reverse-video")
     if not config.ice_colors:
         cmd.append("--no-ice-colors")
     if config.ansi_keys:
@@ -282,14 +285,12 @@ def build_command(config: SessionConfig) -> list[str]:
         cmd.append("--ssl-no-verify")
     if config.no_repl:
         cmd.append("--no-repl")
+    if config.macros_file:
+        cmd.extend(["--macros", config.macros_file])
+    if config.autoreplies_file:
+        cmd.extend(["--autoreplies", config.autoreplies_file])
 
     return cmd
-
-
-
-# ---------------------------------------------------------------------------
-# TUI Screens
-# ---------------------------------------------------------------------------
 
 
 def _relative_time(iso_str: str) -> str:
@@ -362,11 +363,12 @@ class SessionListScreen(Screen[None]):
     """
 
     def __init__(self) -> None:
+        """Initialize session list with empty session dict."""
         super().__init__()
         self._sessions: dict[str, SessionConfig] = {}
 
     def compose(self) -> ComposeResult:
-
+        """Build the session list layout."""
         with Vertical(id="session-panel"):
             with Horizontal(id="session-body"):
                 with Vertical(id="button-col"):
@@ -380,6 +382,7 @@ class SessionListScreen(Screen[None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        """Load sessions and populate the data table."""
         self._sessions = load_sessions()
         table = self.query_one("#session-table", DataTable)
         table.cursor_type = "row"
@@ -417,6 +420,7 @@ class SessionListScreen(Screen[None]):
     # -- Button handlers ----------------------------------------------------
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Dispatch button press to the appropriate action."""
         handlers = {
             "connect-btn": self.action_connect,
             "add-btn": self.action_new_session,
@@ -430,36 +434,37 @@ class SessionListScreen(Screen[None]):
             handler()
 
     def on_data_table_row_selected(self, _event: DataTable.RowSelected) -> None:
+        """Connect on double-click or Enter."""
         self.action_connect()
 
     # -- Actions ------------------------------------------------------------
 
     def action_quit_app(self) -> None:
+        """Exit the application."""
         self.app.exit()
 
     def action_new_session(self) -> None:
+        """Open editor for a new session pre-filled with defaults."""
         defaults = self._sessions.get(DEFAULTS_KEY, SessionConfig())
         new_cfg = SessionConfig(**asdict(defaults))
         new_cfg.name = ""
         new_cfg.host = ""
         new_cfg.last_connected = ""
         self.app.push_screen(
-            SessionEditScreen(config=new_cfg, is_new=True),
-            callback=self._on_edit_result,
+            SessionEditScreen(config=new_cfg, is_new=True), callback=self._on_edit_result
         )
 
     def action_edit_session(self) -> None:
+        """Open editor for the selected session."""
         key = self._selected_key()
         if key is None:
             self.notify("No session selected", severity="warning")
             return
         cfg = self._sessions[key]
-        self.app.push_screen(
-            SessionEditScreen(config=cfg),
-            callback=self._on_edit_result,
-        )
+        self.app.push_screen(SessionEditScreen(config=cfg), callback=self._on_edit_result)
 
     def action_delete_session(self) -> None:
+        """Delete the selected session."""
         key = self._selected_key()
         if key is None:
             self.notify("No session selected", severity="warning")
@@ -470,13 +475,14 @@ class SessionListScreen(Screen[None]):
         self.notify(f"Deleted {key}")
 
     def action_edit_defaults(self) -> None:
+        """Open editor for the default session template."""
         defaults = self._sessions.get(DEFAULTS_KEY, SessionConfig(name=DEFAULTS_KEY))
         self.app.push_screen(
-            SessionEditScreen(config=defaults, is_defaults=True),
-            callback=self._on_defaults_result,
+            SessionEditScreen(config=defaults, is_defaults=True), callback=self._on_defaults_result
         )
 
     def action_connect(self) -> None:
+        """Launch a telnet connection to the selected session."""
         key = self._selected_key()
         if key is None:
             self.notify("No session selected", severity="warning")
@@ -493,13 +499,12 @@ class SessionListScreen(Screen[None]):
         with self.app.suspend():
             # Move to bottom-right and print newline so the TUI
             # scrolls cleanly off screen before the client starts.
-            sys.stdout.write(
-                f"\x1b[{os.get_terminal_size().lines};"
-                f"{os.get_terminal_size().columns}H\r\n"
-            )
+            _tsize = os.get_terminal_size()
+            sys.stdout.write(f"\x1b[{_tsize.lines};{_tsize.columns}H\r\n")
             sys.stdout.flush()
             child_stderr = ""
             try:
+                # pylint: disable-next=consider-using-with
                 proc = subprocess.Popen(cmd, stderr=subprocess.PIPE)
                 proc.wait()
                 if proc.stderr:
@@ -518,14 +523,14 @@ class SessionListScreen(Screen[None]):
                 # have left raw mode, SGR attributes, mouse tracking,
                 # or alternate screen active.
                 sys.stdout.write(
-                    "\x1b[m"        # reset SGR attributes
-                    "\x1b[?25h"     # show cursor
-                    "\x1b[?1049l"   # exit alternate screen
-                    "\x1b[?1000l"   # disable mouse tracking (basic)
-                    "\x1b[?1002l"   # disable button-event tracking
-                    "\x1b[?1003l"   # disable all-motion tracking
-                    "\x1b[?1006l"   # disable SGR mouse format
-                    "\x1b[?2004l"   # disable bracketed paste
+                    "\x1b[m"  # reset SGR attributes
+                    "\x1b[?25h"  # show cursor
+                    "\x1b[?1049l"  # exit alternate screen
+                    "\x1b[?1000l"  # disable mouse tracking (basic)
+                    "\x1b[?1002l"  # disable button-event tracking
+                    "\x1b[?1003l"  # disable all-motion tracking
+                    "\x1b[?1006l"  # disable SGR mouse format
+                    "\x1b[?2004l"  # disable bracketed paste
                 )
                 sys.stdout.flush()
             if proc.returncode and proc.returncode != 0:
@@ -627,6 +632,48 @@ class SessionEditScreen(Screen[SessionConfig | None]):
     #port {
         max-width: 14;
     }
+    #mode-repl-row {
+        height: auto;
+    }
+    #mode-col {
+        width: auto;
+        max-width: 25;
+        height: auto;
+    }
+    #repl-col {
+        width: 1fr;
+        height: auto;
+        padding-top: 1;
+        padding-left: 4;
+    }
+    #keys-eol-row {
+        height: 3;
+    }
+    #enc-label {
+        width: 10;
+        padding-top: 1;
+    }
+    #enc-errors-label {
+        width: 7;
+        padding-top: 1;
+        padding-left: 4;
+    }
+    #encoding {
+        max-width: 20;
+    }
+    #encoding-errors {
+        max-width: 15;
+    }
+    #background-color {
+        max-width: 12;
+    }
+    #colormatch {
+        max-width: 14;
+    }
+    #palette-preview {
+        width: 1fr;
+        padding-top: 1;
+    }
     #bottom-bar {
         height: 3;
         margin-top: 1;
@@ -637,11 +684,9 @@ class SessionEditScreen(Screen[SessionConfig | None]):
     """
 
     def __init__(
-        self,
-        config: SessionConfig,
-        is_defaults: bool = False,
-        is_new: bool = False,
+        self, config: SessionConfig, is_defaults: bool = False, is_new: bool = False
     ) -> None:
+        """Initialize edit screen with session config and mode flags."""
         super().__init__()
         self._config = config
         self._is_defaults = is_defaults
@@ -650,17 +695,19 @@ class SessionEditScreen(Screen[SessionConfig | None]):
     _TAB_IDS: ClassVar[list[tuple[str, str]]] = [
         ("Connection", "tab-connection"),
         ("Terminal", "tab-terminal"),
-        ("Mode", "tab-mode"),
         ("Display", "tab-display"),
         ("Advanced", "tab-advanced"),
     ]
 
     def compose(self) -> ComposeResult:
+        """Build the tabbed session editor layout."""
         cfg = self._config
 
         with Vertical(id="edit-panel"):
-            title = "Edit Defaults" if self._is_defaults else (
-                "Add Session" if self._is_new else f"Edit: {cfg.name or cfg.host}"
+            title = (
+                "Edit Defaults"
+                if self._is_defaults
+                else ("Add Session" if self._is_new else f"Edit: {cfg.name or cfg.host}")
             )
             yield Static(title, id="edit-title")
 
@@ -677,25 +724,27 @@ class SessionEditScreen(Screen[SessionConfig | None]):
                         with Horizontal(classes="field-row"):
                             yield Label("Name", classes="field-label")
                             yield Input(
-                                value=cfg.name, placeholder="session name",
-                                id="name", classes="field-input",
+                                value=cfg.name,
+                                placeholder="session name",
+                                id="name",
+                                classes="field-input",
                             )
                         with Horizontal(classes="field-row"):
                             yield Label("Host:Port", classes="field-label")
                             yield Input(
-                                value=cfg.host, placeholder="hostname",
-                                id="host", classes="field-input",
+                                value=cfg.host,
+                                placeholder="hostname",
+                                id="host",
+                                classes="field-input",
                             )
                             yield Static(":", id="host-port-sep")
-                            yield Input(
-                                value=str(cfg.port), placeholder="23",
-                                id="port",
-                            )
+                            yield Input(value=str(cfg.port), placeholder="23", id="port")
                     with Horizontal(classes="field-row"):
                         yield Label("Connection Timeout", classes="field-label")
                         yield Input(
                             value=str(cfg.connect_timeout),
-                            id="connect-timeout", classes="field-input",
+                            id="connect-timeout",
+                            classes="field-input",
                         )
                     with Horizontal(classes="switch-row"):
                         yield Label("SSL/TLS", classes="field-label")
@@ -709,60 +758,70 @@ class SessionEditScreen(Screen[SessionConfig | None]):
                         yield Input(
                             value=cfg.term,
                             placeholder=os.environ.get("TERM", "unknown"),
-                            id="term", classes="field-input",
+                            id="term",
+                            classes="field-input",
                         )
+                    with Horizontal(id="mode-repl-row"):
+                        with Vertical(id="mode-col"):
+                            yield Label("Terminal Mode")
+                            with RadioSet(id="mode-radio"):
+                                yield RadioButton(
+                                    "Auto-detect", value=cfg.mode == "auto", id="mode-auto"
+                                )
+                                yield RadioButton(
+                                    "Raw mode", value=cfg.mode == "raw", id="mode-raw"
+                                )
+                                yield RadioButton(
+                                    "Line mode", value=cfg.mode == "line", id="mode-line"
+                                )
+                        with Vertical(id="repl-col"):
+                            with Horizontal(classes="switch-row"):
+                                yield Label("Advanced REPL", classes="field-label")
+                                yield Switch(
+                                    value=not cfg.no_repl, id="use-repl", disabled=cfg.mode == "raw"
+                                )
+                    _enc = cfg.encoding or "utf-8"
+                    _is_retro = _enc.lower() in ("atascii", "petscii")
                     with Horizontal(classes="field-row"):
-                        yield Label("Encoding, Errors", classes="field-label")
-                        yield Input(
-                            value=cfg.encoding, id="encoding", classes="field-input",
+                        yield Label("Encoding", id="enc-label")
+                        yield Select(
+                            [(e, e) for e in _ENCODINGS],
+                            value=_enc if _enc in _ENCODINGS else "utf-8",
+                            id="encoding",
+                            allow_blank=False,
                         )
+                        yield Label("Errors", id="enc-errors-label")
                         yield Select(
                             [(v, v) for v in ("replace", "ignore", "strict")],
                             value=cfg.encoding_errors,
                             id="encoding-errors",
                         )
-                    with Horizontal(classes="switch-row"):
-                        yield Label("Disable REPL", classes="field-label")
-                        yield Switch(value=cfg.no_repl, id="no-repl")
-
-                with Vertical(id="tab-mode", classes="tab-pane"):
-                    yield Label("Terminal Mode")
-                    with RadioSet(id="mode-radio"):
-                        yield RadioButton(
-                            "Auto-detect", value=cfg.mode == "auto", id="mode-auto",
-                        )
-                        yield RadioButton(
-                            "Raw mode", value=cfg.mode == "raw", id="mode-raw",
-                        )
-                        yield RadioButton(
-                            "Line mode", value=cfg.mode == "line", id="mode-line",
-                        )
-                    with Horizontal(classes="switch-row"):
-                        yield Label("ANSI Keys", classes="field-label")
-                        yield Switch(value=cfg.ansi_keys, id="ansi-keys")
-                    with Horizontal(classes="switch-row"):
-                        yield Label("ASCII EOL", classes="field-label")
-                        yield Switch(value=cfg.ascii_eol, id="ascii-eol")
+                    with Horizontal(id="keys-eol-row"):
+                        with Horizontal(classes="switch-row"):
+                            yield Label("ANSI Keys", classes="field-label")
+                            yield Switch(
+                                value=cfg.ansi_keys, id="ansi-keys", disabled=not _is_retro
+                            )
+                        with Horizontal(classes="switch-row"):
+                            yield Label("ASCII EOL", classes="field-label")
+                            yield Switch(
+                                value=cfg.ascii_eol, id="ascii-eol", disabled=not _is_retro
+                            )
 
                 with Vertical(id="tab-display", classes="tab-pane"):
                     with Horizontal(classes="field-row"):
                         yield Label("Color Palette", classes="field-label")
                         yield Select(
-                            [(v, v) for v in (
-                                "vga", "ega", "cga", "xterm", "none",
-                            )],
+                            [(v, v) for v in ("vga", "xterm", "none")],
                             value=cfg.colormatch,
                             id="colormatch",
                         )
+                        yield Static("", id="palette-preview")
                     with Horizontal(classes="field-row"):
                         yield Label("Background", classes="field-label")
                         yield Input(
-                            value=cfg.background_color,
-                            id="background-color", classes="field-input",
+                            value=cfg.background_color, id="background-color", classes="field-input"
                         )
-                    with Horizontal(classes="switch-row"):
-                        yield Label("Reverse Video", classes="field-label")
-                        yield Switch(value=cfg.reverse_video, id="reverse-video")
                     with Horizontal(classes="switch-row"):
                         yield Label("iCE Colors", classes="field-label")
                         yield Switch(value=cfg.ice_colors, id="ice-colors")
@@ -771,37 +830,39 @@ class SessionEditScreen(Screen[SessionConfig | None]):
                     with Horizontal(classes="field-row"):
                         yield Label("Send Environ", classes="field-label")
                         yield Input(
-                            value=cfg.send_environ,
-                            id="send-environ", classes="field-input",
+                            value=cfg.send_environ, id="send-environ", classes="field-input"
                         )
                     with Horizontal(classes="field-row"):
                         yield Label("Always WILL", classes="field-label")
                         yield Input(
                             value=cfg.always_will,
                             placeholder="comma-separated option names",
-                            id="always-will", classes="field-input",
+                            id="always-will",
+                            classes="field-input",
                         )
                     with Horizontal(classes="field-row"):
                         yield Label("Always DO", classes="field-label")
                         yield Input(
                             value=cfg.always_do,
                             placeholder="comma-separated option names",
-                            id="always-do", classes="field-input",
+                            id="always-do",
+                            classes="field-input",
                         )
                     with Horizontal(classes="field-row"):
                         yield Label("Log Level, File", classes="field-label")
                         yield Select(
-                            [(v, v) for v in (
-                                "trace", "debug", "info", "warn", "error",
-                                "critical",
-                            )],
+                            [
+                                (v, v)
+                                for v in ("trace", "debug", "info", "warn", "error", "critical")
+                            ],
                             value=cfg.loglevel,
                             id="loglevel",
                         )
                         yield Input(
                             value=cfg.logfile,
                             placeholder="path",
-                            id="logfile", classes="field-input",
+                            id="logfile",
+                            classes="field-input",
                         )
 
             with Horizontal(id="bottom-bar"):
@@ -817,15 +878,55 @@ class SessionEditScreen(Screen[SessionConfig | None]):
                 widget.tooltip = help_text
             except Exception:  # pylint: disable=broad-except
                 pass
+        self._update_palette_preview()
+
+    def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
+        """Disable REPL switch when raw mode is selected."""
+        if event.radio_set.id == "mode-radio":
+            is_raw = event.pressed.id == "mode-raw"
+            repl_switch = self.query_one("#use-repl", Switch)
+            repl_switch.disabled = is_raw
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        """React to Select widget changes."""
+        if event.select.id == "colormatch":
+            self._update_palette_preview()
+        elif event.select.id == "encoding":
+            is_retro = str(event.value).lower() in ("atascii", "petscii")
+            self.query_one("#ansi-keys", Switch).disabled = not is_retro
+            self.query_one("#ascii-eol", Switch).disabled = not is_retro
+
+    def on_switch_changed(self, event: Switch.Changed) -> None:
+        """Update palette preview when ice_colors changes."""
+        if event.switch.id == "ice-colors":
+            self._update_palette_preview()
+
+    def _update_palette_preview(self) -> None:
+        """Render CP437 full-block color preview for the selected palette."""
+        from .color_filter import PALETTES  # pylint: disable=import-outside-toplevel
+
+        palette_name = self.query_one("#colormatch", Select).value
+        preview = self.query_one("#palette-preview", Static)
+        if palette_name == "none" or palette_name not in PALETTES:
+            preview.update("")
+            return
+        palette = PALETTES[palette_name]
+        ice = self.query_one("#ice-colors", Switch).value
+        block = "\u2588"
+        fg_blocks = "".join(f"[rgb({r},{g},{b})]{block}[/]" for r, g, b in palette)
+        bg_count = 16 if ice else 8
+        bg_blocks = "".join(f"[on rgb({r},{g},{b})] [/]" for r, g, b in palette[:bg_count])
+        preview.update(f"FG: {fg_blocks}\nBG: {bg_blocks}")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle save, cancel, and tab switching buttons."""
         btn_id = event.button.id or ""
         if btn_id == "save-btn":
             self._on_save()
         elif btn_id == "cancel-btn":
             self.dismiss(None)
         elif btn_id.startswith("tabbtn-"):
-            tab_id = btn_id[len("tabbtn-"):]
+            tab_id = btn_id[len("tabbtn-") :]
             self.query_one("#tab-content", ContentSwitcher).current = tab_id
             for btn in self.query("#tab-bar Button"):
                 btn.remove_class("active-tab")
@@ -854,8 +955,10 @@ class SessionEditScreen(Screen[SessionConfig | None]):
         cfg.last_connected = self._config.last_connected
 
         cfg.term = self.query_one("#term", Input).value.strip()
-        cfg.encoding = self.query_one("#encoding", Input).value.strip() or "utf8"
-        cfg.encoding_errors = self.query_one("#encoding-errors", Select).value  # type: ignore[assignment]
+        cfg.encoding = self.query_one("#encoding", Select).value  # type: ignore[assignment]
+        cfg.encoding_errors = (  # type: ignore[assignment]
+            self.query_one("#encoding-errors", Select).value
+        )
 
         if self.query_one("#mode-raw", RadioButton).value:
             cfg.mode = "raw"
@@ -868,15 +971,10 @@ class SessionEditScreen(Screen[SessionConfig | None]):
         cfg.ascii_eol = self.query_one("#ascii-eol", Switch).value
 
         cfg.colormatch = self.query_one("#colormatch", Select).value  # type: ignore[assignment]
-        cfg.background_color = (
-            self.query_one("#background-color", Input).value.strip() or "#000000"
-        )
-        cfg.reverse_video = self.query_one("#reverse-video", Switch).value
+        cfg.background_color = self.query_one("#background-color", Input).value.strip() or "#000000"
         cfg.ice_colors = self.query_one("#ice-colors", Switch).value
 
-        cfg.connect_timeout = _float_val(
-            self.query_one("#connect-timeout", Input).value, 10.0
-        )
+        cfg.connect_timeout = _float_val(self.query_one("#connect-timeout", Input).value, 10.0)
 
         cfg.send_environ = (
             self.query_one("#send-environ", Input).value.strip()
@@ -886,14 +984,9 @@ class SessionEditScreen(Screen[SessionConfig | None]):
         cfg.always_do = self.query_one("#always-do", Input).value.strip()
         cfg.loglevel = self.query_one("#loglevel", Select).value  # type: ignore[assignment]
         cfg.logfile = self.query_one("#logfile", Input).value.strip()
-        cfg.no_repl = self.query_one("#no-repl", Switch).value
+        cfg.no_repl = not self.query_one("#use-repl", Switch).value
 
         return cfg
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _int_val(text: str, default: int) -> int:
@@ -910,11 +1003,6 @@ def _float_val(text: str, default: float) -> float:
         return default
 
 
-# ---------------------------------------------------------------------------
-# App
-# ---------------------------------------------------------------------------
-
-
 class TelnetSessionApp(App[None]):
     """Textual TUI for managing telnetlib3 client sessions."""
 
@@ -922,6 +1010,7 @@ class TelnetSessionApp(App[None]):
     ENABLE_COMMAND_PALETTE = False
 
     def on_mount(self) -> None:
+        """Push the session list screen on startup."""
         self.push_screen(SessionListScreen())
 
 

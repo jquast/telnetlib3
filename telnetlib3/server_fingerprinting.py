@@ -444,7 +444,7 @@ async def fingerprinting_client_shell(
         writer.close()
 
 
-async def _fingerprint_session(  # noqa: E501 ; pylint: disable=too-many-locals,too-many-branches,too-many-statements,too-complex
+async def _fingerprint_session(  # pylint: disable=too-many-locals
     reader: TelnetReader,
     writer: TelnetWriter,
     *,
@@ -937,7 +937,7 @@ def _respond_to_dsr(chunk: bytes, writer: TelnetWriter, cursor: _VirtualCursor |
     cursor.advance(chunk[pos:])
 
 
-async def _read_banner_until_quiet(  # noqa: E501 ; pylint: disable=too-many-positional-arguments,too-complex,too-many-nested-blocks
+async def _read_banner_until_quiet(  # pylint: disable=too-many-nested-blocks
     reader: TelnetReader,
     quiet_time: float = 2.0,
     max_wait: float = 8.0,
@@ -1000,8 +1000,7 @@ async def _read_banner_until_quiet(  # noqa: E501 ; pylint: disable=too-many-pos
                     log.debug("SyncTERM font switch detected: %s", font_enc)
                     if getattr(writer, "_encoding_explicit", False):
                         log.debug(
-                            "ignoring font switch, explicit encoding: %s",
-                            writer.environ_encoding,
+                            "ignoring font switch, explicit encoding: %s", writer.environ_encoding
                         )
                     else:
                         writer.environ_encoding = font_enc
@@ -1029,9 +1028,7 @@ async def _read_banner_until_quiet(  # noqa: E501 ; pylint: disable=too-many-pos
                     menu_match = _MENU_UTF8_RE.search(stripped_accum)
                     if menu_match:
                         response = menu_match.group(1) + b"\r\n"
-                        writer.write(
-                            _reencode_prompt(response, writer.environ_encoding)
-                        )
+                        writer.write(_reencode_prompt(response, writer.environ_encoding))
                         await writer.drain()
                         menu_responded = True
                         log.debug("inline UTF-8 menu response: %r", response)

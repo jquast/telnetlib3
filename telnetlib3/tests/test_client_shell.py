@@ -94,12 +94,7 @@ def test_determine_mode_unchanged(will_echo: bool, raw_mode: "bool | None", will
 
 @pytest.mark.parametrize(
     "will_echo,raw_mode,will_sga",
-    [
-        (False, None, True),
-        (True, None, True),
-        (False, True, False),
-        (True, True, False),
-    ],
+    [(False, None, True), (True, None, True), (False, True, False), (True, True, False)],
 )
 def test_determine_mode_goes_raw(will_echo: bool, raw_mode: "bool | None", will_sga: bool) -> None:
     term = _make_term(_make_writer(will_echo=will_echo, raw_mode=raw_mode, will_sga=will_sga))
@@ -495,7 +490,13 @@ async def test_simple_server_output(
     "prompt,response,extra_args,send,expected",
     [
         (b"login: ", b"\r\nwelcome!\r\n", ["--no-repl"], b"user\r", [b"login:", b"welcome!"]),
-        (b"prompt> ", b"\r\ngot it\r\n", ["--line-mode", "--no-repl"], b"hello\r", [b"got it", b"hello"]),
+        (
+            b"prompt> ",
+            b"\r\ngot it\r\n",
+            ["--line-mode", "--no-repl"],
+            b"hello\r",
+            [b"got it", b"hello"],
+        ),
     ],
 )
 async def test_echo_sga_interaction(
@@ -755,6 +756,38 @@ def test_transform_output_bare_cr_preserved_raw() -> None:
     assert "\r" in out
 
 
+def test_transform_output_empty_string() -> None:
+    """Empty server output must write b"", not a debug fallback."""
+    writer = _make_transform_writer()
+    result = _transform_output("", writer, True)
+    assert result == ""
+    assert result.encode() == b""
+
+
+def test_get_raw_mode_missing() -> None:
+    """_get_raw_mode returns False when _raw_mode attribute is absent."""
+    from telnetlib3.client_shell import _get_raw_mode
+
+    writer = _make_transform_writer()
+    assert _get_raw_mode(writer) is False
+
+
+def test_get_raw_mode_none() -> None:
+    """_get_raw_mode returns None when _raw_mode is None (auto mode)."""
+    from telnetlib3.client_shell import _get_raw_mode
+
+    writer = _make_transform_writer(_raw_mode=None)
+    assert _get_raw_mode(writer) is None
+
+
+def test_get_raw_mode_true() -> None:
+    """_get_raw_mode returns True when _raw_mode is True."""
+    from telnetlib3.client_shell import _get_raw_mode
+
+    writer = _make_transform_writer(_raw_mode=True)
+    assert _get_raw_mode(writer) is True
+
+
 async def test_cooked_to_raw_transition_preserves_crlf(
     bind_host: str, unused_tcp_port: int
 ) -> None:
@@ -764,8 +797,7 @@ async def test_cooked_to_raw_transition_preserves_crlf(
         def connection_made(self, transport):
             super().connection_made(transport)
             transport.write(
-                _IAC + _WILL + _SGA + _IAC + _WILL + _ECHO
-                + b"line1\r\nline2\r\nline3\r\n"
+                _IAC + _WILL + _SGA + _IAC + _WILL + _ECHO + b"line1\r\nline2\r\nline3\r\n"
             )
             asyncio.get_event_loop().call_later(0.5, transport.close)
 
@@ -780,5 +812,5 @@ async def test_cooked_to_raw_transition_preserves_crlf(
             for line in ("line1", "line2", "line3"):
                 idx = text.find(line)
                 assert idx != -1
-                after = text[idx + len(line):]
+                after = text[idx + len(line) :]
                 assert after.startswith("\r\n")

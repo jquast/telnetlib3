@@ -205,9 +205,7 @@ def test_transform_args_history_file():
     )
     assert result_custom["history_file"] == "/tmp/my-history"
 
-    result_disabled = cl._transform_args(
-        parser.parse_args(["myhost", "--history-file", ""])
-    )
+    result_disabled = cl._transform_args(parser.parse_args(["myhost", "--history-file", ""]))
     assert result_disabled["history_file"] is None
 
 

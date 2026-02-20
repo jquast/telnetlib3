@@ -144,7 +144,10 @@ async def test_terminal_determine_mode(monkeypatch):
     mode = cs.Terminal.ModeDef(0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 38400, 38400, [0] * 32)
     assert term.determine_mode(mode) is mode
 
+    from telnetlib3.telopt import SGA
+
     tw.will_echo = True
+    tw.remote_option = types.SimpleNamespace(enabled=lambda key: key == SGA)
     t = cs.termios
     cc = [0] * 32
     cc[t.VMIN] = 0

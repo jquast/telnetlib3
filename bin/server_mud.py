@@ -101,7 +101,7 @@ ROOMS: dict[str, dict[str, Any]] = {
 }
 
 
-class Weapon:  # pylint: disable=too-few-public-methods
+class Weapon:
     """A weapon that can be held or placed in a room."""
 
     def __init__(self, name: str, damage: tuple[int, int], start_room: str) -> None:
@@ -117,7 +117,7 @@ class Weapon:  # pylint: disable=too-few-public-methods
         return f"{self.damage[0]}-{self.damage[1]}"
 
 
-class Player:  # pylint: disable=too-few-public-methods
+class Player:
     """A connected player."""
 
     def __init__(self, name: str = "Adventurer") -> None:
@@ -272,7 +272,7 @@ def on_gmcp(writer: Any, package: str, data: Any) -> None:
     writer.write(f"[DEBUG GMCP] {package}: {json.dumps(data)}\r\n")
 
 
-def get_msdp_var(  # pylint: disable=too-many-return-statements
+def get_msdp_var(
     player: Player, var: str
 ) -> dict[str, Any] | None:
     """Return MSDP value dict for *var*, or ``None`` if unknown."""
