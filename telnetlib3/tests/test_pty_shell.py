@@ -6,6 +6,7 @@ import sys
 import time
 import struct
 import asyncio
+import logging
 from unittest.mock import MagicMock, patch
 
 # 3rd party
@@ -21,7 +22,9 @@ from telnetlib3.server_pty_shell import (
     PTYSpawnError,
     _platform_check,
     _wait_for_terminal_info,
+    pty_shell,
 )
+from telnetlib3.telopt import ECHO, WONT
 from telnetlib3.tests.accessories import (
     bind_host,
     create_server,
@@ -873,3 +876,161 @@ async def test_pty_session_ga_timer_cancelled_on_cleanup(mock_session):
     assert session._ga_timer is None
     await asyncio.sleep(0.1)
     session.writer.send_ga.assert_not_called()
+
+
+def test_handle_exec_error_non_decodable():
+    """_handle_exec_error handles data that causes unexpected exceptions."""
+    reader = MagicMock()
+    writer = MagicMock()
+    writer.get_extra_info = MagicMock(return_value=None)
+    session = PTYSession(reader, writer, "/nonexistent", [])
+
+    class BadBytes(bytes):
+        def decode(self, *args, **kwargs):
+            raise TypeError("mocked decode failure")
+
+    with pytest.raises(PTYSpawnError, match="Exec failed"):
+        session._handle_exec_error(BadBytes(b"test"))
+
+
+def test_build_environment_no_rows_cols(mock_session):
+    """_build_environment skips LINES/COLUMNS when rows/cols are falsy."""
+    session, _ = mock_session({"TERM": "vt100", "rows": 0, "cols": 0})
+    env = session._build_environment()
+    assert "LINES" not in env
+    assert "COLUMNS" not in env
+
+
+def test_build_environment_no_lang_no_charset(mock_session):
+    """_build_environment handles missing LANG and charset."""
+    session, _ = mock_session({"TERM": "vt100"})
+    env = session._build_environment()
+    assert "LC_ALL" not in env
+
+
+def test_build_environment_optional_keys(mock_session):
+    """_build_environment copies optional env keys when present."""
+    session, _ = mock_session({
+        "TERM": "xterm",
+        "USER": "testuser",
+        "DISPLAY": ":0",
+        "COLORTERM": "truecolor",
+        "HOME": "/home/test",
+        "SHELL": "/bin/bash",
+        "LOGNAME": "testuser",
+    })
+    env = session._build_environment()
+    assert env["USER"] == "testuser"
+    assert env["DISPLAY"] == ":0"
+    assert env["COLORTERM"] == "truecolor"
+    assert env["HOME"] == "/home/test"
+    assert env["SHELL"] == "/bin/bash"
+    assert env["LOGNAME"] == "testuser"
+
+
+async def test_run_remove_reader_error(mock_session):
+    """run() handles ValueError from remove_reader gracefully."""
+    session, _ = mock_session({"charset": "utf-8"})
+    session.master_fd = 99
+    session.child_pid = 1234
+    session._closing = True
+
+    mock_loop = MagicMock()
+    mock_loop.add_reader = MagicMock()
+    mock_loop.remove_reader = MagicMock(side_effect=ValueError("fd not found"))
+
+    async def noop_bridge(*a):
+        pass
+
+    with (
+        patch("os.waitpid", return_value=(0, 0)),
+        patch("asyncio.get_event_loop", return_value=mock_loop),
+        patch.object(session, "_bridge_loop", side_effect=noop_bridge),
+    ):
+        await session.run()
+
+    mock_loop.remove_reader.assert_called_once_with(99)
+
+
+async def test_bridge_loop_exception(mock_session):
+    """_bridge_loop handles unexpected exceptions by setting _closing."""
+    session, _ = mock_session({"charset": "utf-8"})
+    session._closing = False
+    session.writer.is_closing = MagicMock(return_value=False)
+
+    async def bad_read(size):
+        raise RuntimeError("unexpected")
+
+    session.reader.read = bad_read
+
+    pty_read_event = asyncio.Event()
+    pty_data_queue: asyncio.Queue = asyncio.Queue()
+
+    await session._bridge_loop(pty_read_event, pty_data_queue)
+    assert session._closing is True
+
+
+async def test_fire_ga_writer_closing(mock_session):
+    """_fire_ga does not send GA when writer is closing."""
+    session, _ = mock_session({"charset": "utf-8"})
+    session.writer.is_closing = MagicMock(return_value=True)
+    ga_calls = []
+    session.writer.send_ga = lambda: ga_calls.append(True)
+
+    session._fire_ga()
+    assert len(ga_calls) == 0
+
+
+async def test_flush_output_decoder_returns_empty(mock_session):
+    """_flush_output handles decoder returning empty text."""
+    session, written = mock_session({"charset": "utf-8"}, capture_writes=True)
+    session._flush_output(b"\xc3")
+    assert len(written) == 0
+
+
+async def test_pty_shell_skips_wont_echo_when_not_echoing():
+    """pty_shell skips WONT ECHO when will_echo is False."""
+    reader = MagicMock()
+    writer = MagicMock()
+    writer.will_echo = False
+    writer.get_extra_info = MagicMock(
+        side_effect=lambda k, d=None: {"TERM": "xterm", "rows": 25}.get(k, d)
+    )
+    writer.is_closing = MagicMock(return_value=False)
+
+    iac_calls = []
+    writer.iac = lambda *args: iac_calls.append(args)
+
+    with patch.object(
+        PTYSession, "start", side_effect=PTYSpawnError("mocked")
+    ):
+        with pytest.raises(PTYSpawnError):
+            await pty_shell(reader, writer, "/nonexistent", raw_mode=False)
+
+    assert (WONT, ECHO) not in iac_calls
+
+
+async def test_pty_shell_wont_echo_in_normal_mode():
+    """pty_shell sends WONT ECHO in normal mode when will_echo is True."""
+    reader = MagicMock()
+    writer = MagicMock()
+    writer.will_echo = True
+    writer.get_extra_info = MagicMock(
+        side_effect=lambda k, d=None: {"TERM": "xterm", "rows": 25}.get(k, d)
+    )
+    writer.is_closing = MagicMock(return_value=False)
+    async def noop_drain():
+        pass
+
+    writer.drain = MagicMock(side_effect=noop_drain)
+
+    iac_calls = []
+    writer.iac = lambda *args: iac_calls.append(args)
+
+    with patch.object(
+        PTYSession, "start", side_effect=PTYSpawnError("mocked")
+    ):
+        with pytest.raises(PTYSpawnError):
+            await pty_shell(reader, writer, "/nonexistent", raw_mode=False)
+
+    assert (WONT, ECHO) in iac_calls
