@@ -11,7 +11,7 @@ import logging
 import pytest
 
 # local
-from telnetlib3.macros import Macro, bind_macros, load_macros
+from telnetlib3.macros import Macro, bind_macros, load_macros, save_macros
 
 try:
     import prompt_toolkit.key_binding
@@ -19,11 +19,6 @@ try:
     HAS_PROMPT_TOOLKIT = True
 except ImportError:
     HAS_PROMPT_TOOLKIT = False
-
-
-# ---------------------------------------------------------------------------
-# load_macros
-# ---------------------------------------------------------------------------
 
 
 class TestLoadMacros:
@@ -72,9 +67,34 @@ class TestLoadMacros:
         assert macros[0].keys == ("c-x", "c-s")
 
 
-# ---------------------------------------------------------------------------
-# bind_macros
-# ---------------------------------------------------------------------------
+class TestSaveMacros:
+
+    def test_save_macros_roundtrip(self, tmp_path):
+        fp = tmp_path / "macros.json"
+        original = [
+            Macro(keys=("f5",), text="look<CR>"),
+            Macro(keys=("escape", "n"), text="north<CR>"),
+            Macro(keys=("c-x", "c-s"), text="save<CR>"),
+        ]
+        save_macros(str(fp), original)
+        loaded = load_macros(str(fp))
+        assert len(loaded) == len(original)
+        for orig, restored in zip(original, loaded):
+            assert orig.keys == restored.keys
+            assert orig.text == restored.text
+
+    def test_save_empty(self, tmp_path):
+        fp = tmp_path / "macros.json"
+        save_macros(str(fp), [])
+        loaded = load_macros(str(fp))
+        assert loaded == []
+
+    def test_save_unicode(self, tmp_path):
+        fp = tmp_path / "macros.json"
+        macros = [Macro(keys=("f1",), text="say héllo<CR>")]
+        save_macros(str(fp), macros)
+        loaded = load_macros(str(fp))
+        assert loaded[0].text == "say héllo<CR>"
 
 
 def _mock_writer():
@@ -126,5 +146,36 @@ class TestBindMacros:
         writer, written = _mock_writer()
         log = logging.getLogger("test")
         macros = [Macro(keys=("INVALID_KEY_NAME_XYZ",), text="x<CR>")]
-        # Should not raise.
         bind_macros(kb, macros, writer, log)
+
+    def test_handler_sends_cr_parts(self):
+        kb = prompt_toolkit.key_binding.KeyBindings()
+        writer, written = _mock_writer()
+        log = logging.getLogger("test")
+        macros = [Macro(keys=("f5",), text="look<CR>")]
+        bind_macros(kb, macros, writer, log)
+        handler = kb.bindings[-1].handler
+        event = types.SimpleNamespace(
+            app=types.SimpleNamespace(
+                current_buffer=types.SimpleNamespace(insert_text=lambda t: None)
+            )
+        )
+        handler(event)
+        assert "look\r\n" in written
+
+    def test_handler_inserts_trailing_text(self):
+        kb = prompt_toolkit.key_binding.KeyBindings()
+        writer, written = _mock_writer()
+        log = logging.getLogger("test")
+        macros = [Macro(keys=("f6",), text="cmd<CR>trailing")]
+        bind_macros(kb, macros, writer, log)
+        handler = kb.bindings[-1].handler
+        inserted: list[str] = []
+        event = types.SimpleNamespace(
+            app=types.SimpleNamespace(
+                current_buffer=types.SimpleNamespace(insert_text=inserted.append)
+            )
+        )
+        handler(event)
+        assert "cmd\r\n" in written
+        assert "trailing" in inserted

@@ -305,3 +305,40 @@ def test_aardwolf_decode_long_payload() -> None:
     result = aardwolf_decode(bytes([100, 3, 4, 5]))
     assert result["channel"] == "status"
     assert result["data_bytes"] == bytes([3, 4, 5])
+
+
+def test_gmcp_decode_empty_json_text():
+    pkg, data = gmcp_decode(b"Char.Vitals ")
+    assert pkg == "Char.Vitals"
+    assert data is None
+
+
+def test_msdp_decode_skips_garbage_bytes():
+    buf = b"\x42" + MSDP_VAR + b"KEY" + MSDP_VAL + b"val"
+    result = msdp_decode(buf)
+    assert result == {"KEY": "val"}
+
+
+def test_mssp_decode_duplicate_var_to_list():
+    buf = (
+        MSSP_VAR + b"PORT" + MSSP_VAL + b"6023"
+        + MSSP_VAR + b"PORT" + MSSP_VAL + b"6024"
+    )
+    result = mssp_decode(buf)
+    assert result["PORT"] == ["6023", "6024"]
+
+
+def test_mssp_decode_triple_value_appends():
+    buf = (
+        MSSP_VAR + b"PORT" + MSSP_VAL + b"6023"
+        + MSSP_VAR + b"PORT" + MSSP_VAL + b"6024"
+        + MSSP_VAR + b"PORT" + MSSP_VAL + b"6025"
+    )
+    result = mssp_decode(buf)
+    assert result["PORT"] == ["6023", "6024", "6025"]
+
+
+def test_mssp_decode_skips_garbage_bytes():
+    buf = b"\x42" + MSSP_VAR + b"NAME" + MSSP_VAL + b"TestMUD"
+    result = mssp_decode(buf)
+    assert result == {"NAME": "TestMUD"}

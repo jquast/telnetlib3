@@ -322,6 +322,7 @@ def test_filter_without_eol_xlat(data: bytes, expected: bytes) -> None:
 import os  # noqa: E402
 import time as _time  # noqa: E402
 import select  # noqa: E402
+import signal  # noqa: E402
 import tempfile  # noqa: E402
 import contextlib  # noqa: E402
 import subprocess  # noqa: E402
@@ -678,6 +679,115 @@ async def test_setup_winch_registers_handler() -> None:
     assert term._remove_winch is True
     term.cleanup_winch()
     assert term._remove_winch is False
+
+
+async def test_winch_handler_calls_on_resize() -> None:
+    """SIGWINCH handler triggers on_resize callback."""
+    from telnetlib3.telopt import NAWS
+
+    writer = _make_writer()
+    writer.local_option = _MockOption({NAWS: True})
+    writer.is_closing = lambda: False
+    writer._send_naws = mock.Mock()
+
+    term = _make_term(writer)
+    term._istty = True
+    term._winch_handle = None
+
+    resize_calls: list[tuple[int, int]] = []
+    term.on_resize = lambda rows, cols: resize_calls.append((rows, cols))
+
+    term.setup_winch()
+    assert term._remove_winch is True
+
+    os.kill(os.getpid(), signal.SIGWINCH)
+    await asyncio.sleep(0.15)
+
+    assert len(resize_calls) >= 1
+    assert len(resize_calls[0]) == 2
+    writer._send_naws.assert_called()
+    term.cleanup_winch()
+
+
+@pytest.mark.asyncio
+async def test_raw_event_loop_reactivates_repl() -> None:
+    """_raw_event_loop breaks when want_repl() returns True."""
+    from telnetlib3.client_shell import _raw_event_loop
+
+    class _StrReader:
+        def __init__(self) -> None:
+            self._data = ["server data"]
+            self._eof = False
+
+        async def read(self, n: int) -> str:
+            if self._data:
+                return self._data.pop(0)
+            self._eof = True
+            return ""
+
+        def at_eof(self) -> bool:
+            return self._eof
+
+    reader = _StrReader()
+    stdin = asyncio.StreamReader()
+
+    writer = _make_writer()
+    writer.log = types.SimpleNamespace(debug=lambda *a, **kw: None, log=lambda *a, **kw: None)
+    writer._raw_mode = None
+    writer.is_closing = lambda: False
+
+    term = _make_term(writer)
+    term.check_auto_mode = lambda switched, last_echo: None
+
+    stdout = mock.Mock()
+    stdout.write = mock.Mock()
+
+    close_calls: list[str] = []
+
+    result = await _raw_event_loop(
+        telnet_reader=reader,
+        telnet_writer=writer,
+        term=term,
+        stdin=stdin,
+        stdout=stdout,
+        keyboard_escape="\x1d",
+        local_echo=False,
+        switched_to_raw=True,
+        last_will_echo=False,
+        linesep="\r\n",
+        handle_close=lambda msg: close_calls.append(msg),
+        want_repl=lambda: True,
+    )
+    reactivate_repl, switched, last_echo, local_echo, linesep = result
+    assert reactivate_repl is True
+    assert switched is False
+
+
+@pytest.mark.asyncio
+async def test_winch_on_resize_exception_caught() -> None:
+    """SIGWINCH handler catches exceptions from on_resize callback."""
+    from telnetlib3.telopt import NAWS
+
+    writer = _make_writer()
+    writer.local_option = _MockOption({NAWS: True})
+    writer.is_closing = lambda: False
+    writer._send_naws = mock.Mock()
+
+    term = _make_term(writer)
+    term._istty = True
+    term._winch_handle = None
+
+    def _bad_resize(rows: int, cols: int) -> None:
+        raise RuntimeError("resize failed")
+
+    term.on_resize = _bad_resize
+
+    term.setup_winch()
+    os.kill(os.getpid(), signal.SIGWINCH)
+    await asyncio.sleep(0.15)
+
+    writer._send_naws.assert_called()
+    term.cleanup_winch()
 
 
 async def test_send_stdin_with_input_filter() -> None:

@@ -236,7 +236,7 @@ def _format_encoding(
 
 
 def _build_terminal_rows(  # pylint: disable=too-complex,too-many-locals,too-many-branches
-    term: Any, data: Dict[str, Any],
+    term: Any, data: Dict[str, Any]
 ) -> List[Tuple[str, str]]:
     """Build (key, value) tuples for terminal capabilities table."""
     pairs: List[Tuple[str, str]] = []
@@ -520,9 +520,7 @@ def _apply_unicode_borders(tbl: Any) -> None:
     tbl.bottom_right_junction_char = "\u255d"
 
 
-def _display_compact_summary(
-    data: Dict[str, Any], term: Any = None
-) -> bool:
+def _display_compact_summary(data: Dict[str, Any], term: Any = None) -> bool:
     """Display compact fingerprint summary using prettytable."""
     try:
         from ucs_detect import (  # pylint: disable=import-outside-toplevel
@@ -629,9 +627,7 @@ def _fingerprint_similarity(a: Dict[str, Any], b: Dict[str, Any]) -> float:
     return sum(scores) / len(scores) if scores else 1.0
 
 
-def _load_known_fingerprints(
-    probe_type: str,
-) -> Dict[str, Dict[str, Any]]:
+def _load_known_fingerprints(probe_type: str) -> Dict[str, Dict[str, Any]]:
     """
     Load one fingerprint-data dict per unique hash from the data directory.
 

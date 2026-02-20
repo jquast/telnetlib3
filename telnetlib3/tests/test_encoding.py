@@ -250,3 +250,80 @@ async def test_telnet_client_and_server_escape_iac_binary(bind_host, unused_tcp_
             await srv_instance.writer.wait_closed()
             eof = await asyncio.wait_for(client_reader.read(), 0.5)
             assert eof == b""
+
+
+# -- Atari ST codec tests --
+
+from telnetlib3.encodings.atarist import (
+    Codec as AtariCodec,
+    IncrementalEncoder as AtariIncrementalEncoder,
+    IncrementalDecoder as AtariIncrementalDecoder,
+    StreamWriter as AtariStreamWriter,
+    StreamReader as AtariStreamReader,
+    getregentry as atari_getregentry,
+    getaliases as atari_getaliases,
+)
+
+
+def test_atarist_roundtrip():
+    codec = AtariCodec()
+    text = "Hello, World! 0123456789"
+    encoded, length = codec.encode(text)
+    assert length == len(text)
+    decoded, dec_length = codec.decode(encoded)
+    assert decoded == text
+    assert dec_length == len(encoded)
+
+
+def test_atarist_high_chars_roundtrip():
+    codec = AtariCodec()
+    # Byte 0x80 = U+00C7 (C-cedilla), 0x81 = U+00FC (u-umlaut)
+    text = "\u00c7\u00fc"
+    encoded, _ = codec.encode(text)
+    assert encoded == bytes([0x80, 0x81])
+    decoded, _ = codec.decode(encoded)
+    assert decoded == text
+
+
+def test_atarist_incremental_encoder():
+    enc = AtariIncrementalEncoder()
+    result = enc.encode("AB")
+    assert result == b"AB"
+    result2 = enc.encode("\u00c7", final=True)
+    assert result2 == bytes([0x80])
+
+
+def test_atarist_incremental_decoder():
+    dec = AtariIncrementalDecoder()
+    result = dec.decode(b"AB")
+    assert result == "AB"
+    result2 = dec.decode(bytes([0x80]), final=True)
+    assert result2 == "\u00c7"
+
+
+def test_atarist_stream_writer():
+    import io
+    stream = io.BytesIO()
+    writer = AtariStreamWriter(stream)
+    writer.write("Hello")
+    assert stream.getvalue() == b"Hello"
+
+
+def test_atarist_stream_reader():
+    import io
+    stream = io.BytesIO(b"Hello")
+    reader = AtariStreamReader(stream)
+    result = reader.read()
+    assert result == "Hello"
+
+
+def test_atarist_getregentry():
+    import codecs
+    info = atari_getregentry()
+    assert isinstance(info, codecs.CodecInfo)
+    assert info.name == "atarist"
+
+
+def test_atarist_getaliases():
+    aliases = atari_getaliases()
+    assert aliases == ("atari",)

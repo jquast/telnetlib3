@@ -17,7 +17,7 @@ from dataclasses import dataclass
 # local
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
-__all__ = ("Macro", "load_macros", "bind_macros")
+__all__ = ("Macro", "load_macros", "save_macros", "bind_macros")
 
 _CR_TOKEN = "<CR>"
 
@@ -59,6 +59,19 @@ def load_macros(path: str) -> list[Macro]:
     return macros
 
 
+def save_macros(path: str, macros: list[Macro]) -> None:
+    """
+    Save macro definitions to a JSON file.
+
+    :param path: Path to the macros JSON file.
+    :param macros: List of :class:`Macro` instances to save.
+    """
+    data = {"macros": [{"key": " ".join(m.keys), "text": m.text} for m in macros]}
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
+
+
 def bind_macros(
     kb: Any,
     macros: list[Macro],
@@ -96,12 +109,17 @@ def _bind_one(
     keys = macro.keys
     text = macro.text
 
-    @kb.add(*keys)  # type: ignore[untyped-decorator]
-    def _handler(event: Any, _text: str = text) -> None:
-        parts = _text.split(_CR_TOKEN)
-        for i, part in enumerate(parts):
-            if i < len(parts) - 1:
-                log.info("macro: sending %r", part)
-                writer.write(part + "\r\n")  # type: ignore[arg-type]
-            elif part:
-                event.app.current_buffer.insert_text(part)
+    try:
+
+        @kb.add(*keys)  # type: ignore[untyped-decorator]
+        def _handler(event: Any, _text: str = text) -> None:
+            parts = _text.split(_CR_TOKEN)
+            for i, part in enumerate(parts):
+                if i < len(parts) - 1:
+                    log.info("macro: sending %r", part)
+                    writer.write(part + "\r\n")  # type: ignore[arg-type]
+                elif part:
+                    event.app.current_buffer.insert_text(part)
+
+    except (ValueError, KeyError) as exc:
+        log.warning("macro: could not bind %s: %s", keys, exc)

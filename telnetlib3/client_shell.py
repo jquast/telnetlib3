@@ -633,8 +633,7 @@ else:
                             _ar_rules, telnet_writer, telnet_writer.log, stdout=stdout
                         )
                         # pylint: disable-next=protected-access
-                        telnet_writer._autoreply_engine = (  # type: ignore[union-attr]
-                            _ar_engine)
+                        telnet_writer._autoreply_engine = _ar_engine  # type: ignore[union-attr]
                 if _ar_engine is not None:
                     _ar_engine.feed(out)
                 if raw_mode is None:

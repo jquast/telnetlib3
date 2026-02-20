@@ -64,6 +64,7 @@ class CONFIG(NamedTuple):
     pty_fork_limit: int = 0
     status_interval: int = 20
     never_send_ga: bool = False
+    line_mode: bool = False
 
 
 # Default config instance - use this to access default values
@@ -94,6 +95,7 @@ class TelnetServer(server_base.BaseServer):
         encoding_errors: str = "strict",
         force_binary: bool = False,
         never_send_ga: bool = False,
+        line_mode: bool = False,
         connect_maxwait: float = 4.0,
         limit: Optional[int] = None,
         reader_factory: type = TelnetReader,
@@ -109,6 +111,7 @@ class TelnetServer(server_base.BaseServer):
             encoding_errors=encoding_errors,
             force_binary=force_binary,
             never_send_ga=never_send_ga,
+            line_mode=line_mode,
             connect_maxwait=connect_maxwait,
             limit=limit,
             reader_factory=reader_factory,
@@ -202,7 +205,8 @@ class TelnetServer(server_base.BaseServer):
         )
 
         super().begin_advanced_negotiation()
-        self.writer.iac(WILL, SGA)
+        if not self.line_mode:
+            self.writer.iac(WILL, SGA)
         # WILL ECHO is deferred -- see _negotiate_echo()
         self.writer.iac(WILL, BINARY)
         # DO NEW_ENVIRON is deferred -- see _negotiate_environ()
@@ -606,11 +610,14 @@ class TelnetServer(server_base.BaseServer):
 
     def _negotiate_echo(self) -> None:
         """
-        Send ``WILL ECHO`` unless the client is a MUD client.
+        Send ``WILL ECHO`` unless the client is a MUD client or line mode.
 
         MUD clients (Mudlet, TinTin++, etc.) interpret ``WILL ECHO`` as
         "password mode" and mask the input bar.  We defer ECHO negotiation
         until TTYPE arrives so MUD clients are detected first.
+
+        When :attr:`line_mode` is ``True``, ECHO is never sent so the
+        client stays in NVT local (line) mode.
 
         Called from :meth:`on_ttype` on each TTYPE response, and from
         :meth:`check_negotiation` when TTYPE stalls or is refused.
@@ -618,6 +625,9 @@ class TelnetServer(server_base.BaseServer):
         if self._echo_negotiated:
             return
         self._echo_negotiated = True
+
+        if self.line_mode:
+            return
 
         from .telopt import ECHO, WILL  # pylint: disable=import-outside-toplevel
         from .fingerprinting import _is_maybe_mud  # pylint: disable=import-outside-toplevel
@@ -900,6 +910,7 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
     encoding_errors: str = "strict",
     force_binary: bool = False,
     never_send_ga: bool = False,
+    line_mode: bool = False,
     connect_maxwait: float = 4.0,
     limit: Optional[int] = None,
     term: str = "unknown",
@@ -949,6 +960,10 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
         may be no problem at all. If an encoding is assumed, as in many MUD and
         BBS systems, the combination of ``force_binary`` with a default
         ``encoding`` is often preferred.
+    :param line_mode: When ``True``, the server does not send ``WILL SGA``
+        or ``WILL ECHO`` during negotiation.  This keeps the client in NVT
+        local (line) mode, where the client performs its own line editing
+        and sends complete lines.  Default is ``False`` (kludge mode).
     :param term: Value returned for ``writer.get_extra_info('term')``
         until negotiated by TTYPE :rfc:`930`, or NAWS :rfc:`1572`.  Default value
         is ``'unknown'``.
@@ -995,6 +1010,7 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
                 encoding_errors=encoding_errors,
                 force_binary=force_binary,
                 never_send_ga=never_send_ga,
+                line_mode=line_mode,
                 connect_maxwait=connect_maxwait,
                 limit=limit,
                 term=term,
@@ -1009,6 +1025,7 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
                 encoding_errors=encoding_errors,
                 force_binary=force_binary,
                 never_send_ga=never_send_ga,
+                line_mode=line_mode,
                 connect_maxwait=connect_maxwait,
                 limit=limit,
             )
@@ -1097,18 +1114,18 @@ def parse_server_args() -> Dict[str, Any]:
             default=_config.pty_fork_limit,
             help="limit concurrent PTY connections (0 disables)",
         )
-        parser.add_argument(
-            "--line-mode",
-            action="store_true",
-            default=False,
-            help="use cooked PTY mode with echo for --pty-exec instead of raw "
-            "mode.  By default PTY echo is disabled (raw mode), which is "
-            "correct for programs that handle their own terminal I/O "
-            "(curses, blessed, ucs-detect).",
-        )
         # Hidden backwards-compat: --pty-raw was the default since 2.5,
         # keep it as a silent no-op so existing scripts don't break.
         parser.add_argument("--pty-raw", action="store_true", default=False, help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--line-mode",
+        action="store_true",
+        default=_config.line_mode,
+        help="keep clients in NVT line mode by not sending WILL SGA or "
+        "WILL ECHO during negotiation.  Clients perform their own line "
+        "editing and send complete lines.  Also sets cooked PTY mode "
+        "when combined with --pty-exec.",
+    )
     parser.add_argument(
         "--robot-check",
         action="store_true",
@@ -1151,9 +1168,9 @@ def parse_server_args() -> Dict[str, Any]:
     result = vars(parser.parse_args(argv))
     result["pty_args"] = pty_args if PTY_SUPPORT else None
     # --pty-raw is a hidden no-op (raw is now the default);
-    # --line-mode opts out of raw mode.
+    # --line-mode opts out of raw mode and suppresses WILL SGA/ECHO.
     result.pop("pty_raw", None)
-    result["pty_raw"] = not result.pop("line_mode", False)
+    result["pty_raw"] = not result.get("line_mode", False)
     if not PTY_SUPPORT:
         result["pty_exec"] = None
         result["pty_fork_limit"] = 0
@@ -1197,6 +1214,7 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
     pty_fork_limit: int = _config.pty_fork_limit,
     status_interval: int = _config.status_interval,
     never_send_ga: bool = _config.never_send_ga,
+    line_mode: bool = _config.line_mode,
     protocol_factory: Optional[Type[asyncio.Protocol]] = None,
     ssl: Optional[ssl_module.SSLContext] = None,
     tls_auto: bool = False,
@@ -1281,6 +1299,7 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
         encoding=encoding,
         force_binary=force_binary,
         never_send_ga=never_send_ga,
+        line_mode=line_mode,
         timeout=timeout,
         connect_maxwait=connect_maxwait,
         ssl=ssl,

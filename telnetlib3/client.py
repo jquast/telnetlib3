@@ -676,8 +676,7 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
         ) -> None:
             # pylint: disable=protected-access
             writer_arg._repl_enabled = True  # type: ignore[union-attr]
-            writer_arg._history_file = (  # type: ignore[union-attr]
-                args.get("history_file"))
+            writer_arg._history_file = args.get("history_file")  # type: ignore[union-attr]
             await _inner_repl(reader, writer_arg)
 
         shell_callback = _repl_shell
@@ -694,8 +693,8 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
             # pylint: disable=protected-access
-            writer_arg._autoreply_rules = (  # type: ignore[union-attr]
-                _autoreply_rules)
+            writer_arg._autoreply_rules = _autoreply_rules  # type: ignore[union-attr]
+            writer_arg._autoreplies_file = args["autoreplies"]  # type: ignore[union-attr]
             await _inner_ar(reader, writer_arg)
 
         shell_callback = _autoreply_shell
@@ -712,8 +711,8 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
             # pylint: disable=protected-access
-            writer_arg._macro_defs = (  # type: ignore[union-attr]
-                _macro_defs)
+            writer_arg._macro_defs = _macro_defs  # type: ignore[union-attr]
+            writer_arg._macros_file = args["macros"]  # type: ignore[union-attr]
             await _inner_macro(reader, writer_arg)
 
         shell_callback = _macro_shell
@@ -1023,7 +1022,8 @@ def main() -> None:
     installed, launches the TUI session manager instead.
     """
     has_host = any(not arg.startswith("-") for arg in sys.argv[1:])
-    if not has_host:
+    wants_help = "-h" in sys.argv[1:] or "--help" in sys.argv[1:]
+    if not has_host and not wants_help:
         try:
             import importlib  # pylint: disable=import-outside-toplevel
 

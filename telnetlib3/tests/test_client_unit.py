@@ -1,11 +1,14 @@
 # std imports
+import asyncio
 import sys
+import types
 
 # 3rd party
 import pytest
 
 # local
-from telnetlib3 import client as cl
+from telnetlib3 import accessories, client as cl
+from telnetlib3.client_base import BaseClient
 from telnetlib3.tests.accessories import bind_host, create_server  # noqa: F401
 
 _CLIENT_DEFAULTS = {
@@ -241,3 +244,227 @@ async def test_open_connection_tty_factory(bind_host, unused_tcp_port, monkeypat
         )
         assert isinstance(writer.protocol, cl.TelnetTerminalClient)
         writer.close()
+
+
+def test_detect_syncterm_font_sets_force_binary():
+    client = BaseClient.__new__(BaseClient)
+    client.log = types.SimpleNamespace(debug=lambda *a, **kw: None, isEnabledFor=lambda _: False)
+    client.force_binary = False
+    client.writer = types.SimpleNamespace(environ_encoding="utf-8")
+    client._detect_syncterm_font(b"\x1b[0;0 D")
+    assert client.force_binary is True
+
+
+def test_transform_args_colormatch_default():
+    parser = cl._get_argument_parser()
+    result = cl._transform_args(parser.parse_args(["myhost"]))
+    assert result["colormatch"] == "vga"
+
+
+def test_transform_args_colormatch_explicit():
+    parser = cl._get_argument_parser()
+    result = cl._transform_args(parser.parse_args(["myhost", "--colormatch", "xterm"]))
+    assert result["colormatch"] == "xterm"
+
+
+def test_guard_shells_connection_counter():
+    from telnetlib3.guard_shells import ConnectionCounter
+
+    counter = ConnectionCounter(2)
+    assert counter.try_acquire() is True
+    assert counter.try_acquire() is True
+    assert counter.try_acquire() is False
+    assert counter.count == 2
+    counter.release()
+    assert counter.count == 1
+    assert counter.try_acquire() is True
+    counter.release()
+    counter.release()
+    counter.release()
+    assert counter.count == 0
+
+
+@pytest.mark.asyncio
+async def test_guard_shells_busy_shell():
+    from telnetlib3.guard_shells import busy_shell
+
+    class MockWriter:
+        def __init__(self):
+            self.output = []
+            self._extra = {"peername": ("127.0.0.1", 12345)}
+
+        def write(self, data):
+            self.output.append(data)
+
+        async def drain(self):
+            pass
+
+        def get_extra_info(self, key, default=None):
+            return self._extra.get(key, default)
+
+    class MockReader:
+        async def read(self, n):
+            return ""
+
+    reader = MockReader()
+    writer = MockWriter()
+    await busy_shell(reader, writer)
+
+    output = "".join(writer.output)
+    assert "Machine is busy" in output
+
+
+@pytest.mark.asyncio
+async def test_guard_shells_robot_check_timeout():
+    from telnetlib3.guard_shells import robot_check
+
+    class MockWriter:
+        def __init__(self):
+            self.output = []
+            self._extra = {"peername": ("127.0.0.1", 12345)}
+
+        def write(self, data):
+            self.output.append(data)
+
+        async def drain(self):
+            pass
+
+        def get_extra_info(self, key, default=None):
+            return self._extra.get(key, default)
+
+    class MockReader:
+        fn_encoding = lambda **kw: "utf-8"
+        _decoder = None
+
+        async def read(self, n):
+            return ""
+
+    reader = MockReader()
+    writer = MockWriter()
+    result = await robot_check(reader, writer, timeout=0.1)
+    assert result is False
+
+
+async def _noop_shell(reader, writer):
+    pass
+
+
+def _fake_open_connection_factory(loop):
+    """Build a mock open_connection that captures the shell callback."""
+    captured_kwargs: dict = {}
+    writer_obj = types.SimpleNamespace(
+        _color_filter=None,
+        _raw_mode=None,
+        _ascii_eol=False,
+        _input_filter=None,
+        _repl_enabled=False,
+        _history_file=None,
+        _autoreply_rules=None,
+        _autoreplies_file=None,
+        _macro_defs=None,
+        _macros_file=None,
+        protocol=types.SimpleNamespace(waiter_closed=loop.create_future()),
+    )
+    writer_obj.protocol.waiter_closed.set_result(None)
+    reader_obj = types.SimpleNamespace()
+
+    async def _fake_open_connection(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        shell = kwargs["shell"]
+        await shell(reader_obj, writer_obj)
+        return reader_obj, writer_obj
+
+    return _fake_open_connection, captured_kwargs, writer_obj
+
+
+@pytest.mark.asyncio
+async def test_run_client_unknown_palette(monkeypatch):
+    """run_client exits with error on unknown palette."""
+    monkeypatch.setattr(sys, "argv", ["telnetlib3-client", "localhost", "--colormatch", "bogus"])
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+
+    with pytest.raises(SystemExit) as exc_info:
+        await cl.run_client()
+    assert exc_info.value.code == 1
+
+
+@pytest.mark.asyncio
+async def test_run_client_petscii_selects_c64(monkeypatch):
+    """Petscii encoding auto-selects c64 palette."""
+    monkeypatch.setattr(
+        sys, "argv",
+        ["telnetlib3-client", "localhost", "--encoding", "petscii",
+         "--colormatch", "vga", "--no-repl"],
+    )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(accessories, "function_lookup", lambda _: _noop_shell)
+
+    loop = asyncio.get_event_loop()
+    fake_oc, captured, writer_obj = _fake_open_connection_factory(loop)
+    monkeypatch.setattr(cl, "open_connection", fake_oc)
+    await cl.run_client()
+
+    from telnetlib3.color_filter import PetsciiColorFilter
+
+    assert isinstance(writer_obj._color_filter, PetsciiColorFilter)
+
+
+@pytest.mark.asyncio
+async def test_run_client_atascii_filter(monkeypatch):
+    """Atascii encoding selects AtasciiControlFilter."""
+    monkeypatch.setattr(
+        sys, "argv",
+        ["telnetlib3-client", "localhost", "--encoding", "atascii",
+         "--colormatch", "vga", "--no-repl"],
+    )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(accessories, "function_lookup", lambda _: _noop_shell)
+
+    loop = asyncio.get_event_loop()
+    fake_oc, captured, writer_obj = _fake_open_connection_factory(loop)
+    monkeypatch.setattr(cl, "open_connection", fake_oc)
+    await cl.run_client()
+
+    from telnetlib3.color_filter import AtasciiControlFilter
+
+    assert isinstance(writer_obj._color_filter, AtasciiControlFilter)
+
+
+@pytest.mark.asyncio
+async def test_run_client_colormatch_vga(monkeypatch):
+    """Standard colormatch creates a ColorFilter."""
+    monkeypatch.setattr(
+        sys, "argv",
+        ["telnetlib3-client", "localhost", "--colormatch", "vga", "--no-repl"],
+    )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(accessories, "function_lookup", lambda _: _noop_shell)
+
+    loop = asyncio.get_event_loop()
+    fake_oc, captured, writer_obj = _fake_open_connection_factory(loop)
+    monkeypatch.setattr(cl, "open_connection", fake_oc)
+    await cl.run_client()
+
+    from telnetlib3.color_filter import ColorFilter
+
+    assert isinstance(writer_obj._color_filter, ColorFilter)
+
+
+@pytest.mark.asyncio
+async def test_run_client_colormatch_petscii_alias(monkeypatch):
+    """colormatch='petscii' is remapped to c64."""
+    monkeypatch.setattr(
+        sys, "argv",
+        ["telnetlib3-client", "localhost", "--colormatch", "petscii", "--no-repl"],
+    )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(accessories, "function_lookup", lambda _: _noop_shell)
+
+    loop = asyncio.get_event_loop()
+    fake_oc, captured, writer_obj = _fake_open_connection_factory(loop)
+    monkeypatch.setattr(cl, "open_connection", fake_oc)
+    await cl.run_client()
+
+    from telnetlib3.color_filter import PetsciiColorFilter
+
+    assert isinstance(writer_obj._color_filter, PetsciiColorFilter)

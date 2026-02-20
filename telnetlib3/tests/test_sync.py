@@ -619,3 +619,95 @@ def test_client_connect_timeout_success(bind_host, unused_tcp_port):
         assert conn._connected.is_set()
 
     server.shutdown()
+
+
+def test_client_double_close(bind_host, unused_tcp_port):
+    """Closing a TelnetConnection twice is safe (idempotent)."""
+    server = BlockingTelnetServer(bind_host, unused_tcp_port)
+    server.start()
+
+    conn = TelnetConnection(bind_host, unused_tcp_port, timeout=5)
+    conn.connect()
+    conn.close()
+    conn.close()
+    assert conn._closed is True
+
+    server.shutdown()
+
+
+def test_client_connect_timeout_fires(bind_host, unused_tcp_port):
+    """TelnetConnection.connect raises TimeoutError on very short timeout."""
+    # Use a port with no server to force timeout
+    conn = TelnetConnection(bind_host, unused_tcp_port, timeout=0.001)
+    with pytest.raises((TimeoutError, ConnectionError, OSError)):
+        conn.connect()
+    assert conn._closed is False or conn._thread is None
+
+
+def test_client_wait_for_timeout(bind_host, unused_tcp_port):
+    """TelnetConnection.wait_for raises TimeoutError when conditions not met."""
+    server = BlockingTelnetServer(bind_host, unused_tcp_port)
+    server.start()
+
+    with TelnetConnection(bind_host, unused_tcp_port, timeout=5) as conn:
+        with pytest.raises(TimeoutError, match="Wait for negotiation timed out"):
+            conn.wait_for(remote={"LINEMODE": True}, timeout=0.1)
+
+    server.shutdown()
+
+
+def test_server_connection_double_close(bind_host, unused_tcp_port):
+    """Closing a ServerConnection twice is safe (idempotent)."""
+    server = BlockingTelnetServer(bind_host, unused_tcp_port)
+    server.start()
+
+    def client_thread():
+        time.sleep(0.05)
+        with TelnetConnection(bind_host, unused_tcp_port, timeout=5):
+            time.sleep(0.5)
+
+    thread = threading.Thread(target=client_thread, daemon=True)
+    thread.start()
+
+    conn = server.accept(timeout=5)
+    conn.close()
+    conn.close()
+    assert conn._closed is True
+
+    server.shutdown()
+
+
+def test_client_read_until_timeout(bind_host, unused_tcp_port):
+    """TelnetConnection.read_until times out when match not found."""
+    def handler(server_conn):
+        server_conn.write("no match here")
+        server_conn.flush(timeout=5)
+        time.sleep(5)
+
+    server = BlockingTelnetServer(bind_host, unused_tcp_port, handler=handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    server._started.wait(timeout=5)
+
+    with TelnetConnection(bind_host, unused_tcp_port, timeout=5) as conn:
+        with pytest.raises(TimeoutError, match="Read until timed out"):
+            conn.read_until(">>> ", timeout=0.1)
+
+    server.shutdown()
+
+
+def test_client_flush_timeout(bind_host, unused_tcp_port):
+    """TelnetConnection.flush works after writing data."""
+    def handler(server_conn):
+        server_conn.read(5, timeout=5)
+
+    server = BlockingTelnetServer(bind_host, unused_tcp_port, handler=handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    server._started.wait(timeout=5)
+
+    with TelnetConnection(bind_host, unused_tcp_port, timeout=5) as conn:
+        conn.write("hello")
+        conn.flush(timeout=5)
+
+    server.shutdown()

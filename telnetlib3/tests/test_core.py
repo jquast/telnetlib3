@@ -14,7 +14,7 @@ import pexpect
 
 # local
 import telnetlib3
-from telnetlib3.telopt import DO, SB, IAC, SGA, NAWS, WILL, WONT, TTYPE, BINARY, CHARSET
+from telnetlib3.telopt import DO, SB, IAC, SGA, ECHO, NAWS, WILL, WONT, TTYPE, BINARY, CHARSET
 from telnetlib3.tests.accessories import (
     bind_host,
     create_server,
@@ -137,6 +137,76 @@ async def test_telnet_server_advanced_negotiation(bind_host, unused_tcp_port):
                 WILL + SGA: True,
                 WILL + BINARY: True,
             }
+
+
+async def test_line_mode_skips_will_sga(bind_host, unused_tcp_port):
+    """Server with line_mode=True does not send WILL SGA."""
+    _waiter = asyncio.Future()
+
+    class ServerTestLineMode(telnetlib3.TelnetServer):
+        def begin_advanced_negotiation(self):
+            super().begin_advanced_negotiation()
+            _waiter.set_result(self)
+
+    async with create_server(
+        protocol_factory=ServerTestLineMode,
+        host=bind_host,
+        port=unused_tcp_port,
+        line_mode=True,
+    ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
+            writer.write(IAC + WILL + TTYPE)
+            srv_instance = await asyncio.wait_for(_waiter, 0.5)
+
+            pending = srv_instance.writer.pending_option
+            assert WILL + SGA not in pending
+
+
+async def test_line_mode_skips_will_echo(bind_host, unused_tcp_port):
+    """Server with line_mode=True never sends WILL ECHO."""
+    _waiter = asyncio.Future()
+
+    class ServerTestLineModeEcho(telnetlib3.TelnetServer):
+        def begin_advanced_negotiation(self):
+            super().begin_advanced_negotiation()
+            _waiter.set_result(self)
+
+    async with create_server(
+        protocol_factory=ServerTestLineModeEcho,
+        host=bind_host,
+        port=unused_tcp_port,
+        line_mode=True,
+    ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
+            writer.write(IAC + WILL + TTYPE)
+            srv_instance = await asyncio.wait_for(_waiter, 0.5)
+
+            # Manually trigger _negotiate_echo (normally called from on_ttype)
+            srv_instance._negotiate_echo()
+
+            pending = srv_instance.writer.pending_option
+            assert WILL + ECHO not in pending
+
+
+async def test_default_sends_will_sga(bind_host, unused_tcp_port):
+    """Default server (line_mode=False) sends WILL SGA."""
+    _waiter = asyncio.Future()
+
+    class ServerTestDefault(telnetlib3.TelnetServer):
+        def begin_advanced_negotiation(self):
+            super().begin_advanced_negotiation()
+            _waiter.set_result(self)
+
+    async with create_server(
+        protocol_factory=ServerTestDefault, host=bind_host, port=unused_tcp_port
+    ):
+        async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
+            writer.write(IAC + WILL + TTYPE)
+            srv_instance = await asyncio.wait_for(_waiter, 0.5)
+
+            pending = srv_instance.writer.pending_option
+            assert WILL + SGA in pending
+            assert pending[WILL + SGA] is True
 
 
 async def test_telnet_server_closed_by_client(bind_host, unused_tcp_port):

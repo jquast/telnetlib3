@@ -22,7 +22,13 @@ from wcwidth import strip_sequences
 # local
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
-__all__ = ("AutoreplyRule", "SearchBuffer", "AutoreplyEngine", "load_autoreplies")
+__all__ = (
+    "AutoreplyRule",
+    "SearchBuffer",
+    "AutoreplyEngine",
+    "load_autoreplies",
+    "save_autoreplies",
+)
 
 _DELAY_RE = re.compile(r"::(\d+(?:\.\d+)?)(ms|s)::")
 _CR_TOKEN = "<CR>"
@@ -71,6 +77,19 @@ def load_autoreplies(path: str) -> list[AutoreplyRule]:
             raise ValueError(f"Invalid autoreply pattern {pattern_str!r}: {exc}") from exc
         rules.append(AutoreplyRule(pattern=compiled, reply=reply))
     return rules
+
+
+def save_autoreplies(path: str, rules: list[AutoreplyRule]) -> None:
+    """
+    Save autoreply rules to a JSON file.
+
+    :param path: Path to the autoreplies JSON file.
+    :param rules: List of :class:`AutoreplyRule` instances to save.
+    """
+    data = {"autoreplies": [{"pattern": r.pattern.pattern, "reply": r.reply} for r in rules]}
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
 
 
 def _substitute_groups(template: str, match: re.Match[str]) -> str:
@@ -348,7 +367,7 @@ class AutoreplyEngine:
 
         :param cmd: Command text (without line ending).
         """
-        if not cmd and not cmd.strip():
+        if not cmd or not cmd.strip():
             return
         self._log.info("autoreply: sending %r", cmd)
         self._writer.write(cmd + "\r\n")  # type: ignore[arg-type]

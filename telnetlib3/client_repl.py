@@ -4,6 +4,7 @@
 
 # std imports
 import sys
+import json
 import asyncio
 import logging
 from typing import Any, Tuple, Union, Callable, Optional
@@ -104,6 +105,16 @@ if HAS_PROMPT_TOOLKIT:
 
                 bind_macros(kb, _macro_defs, telnet_writer, log)
 
+            @kb.add("f8")
+            def _edit_macros(event: Any) -> None:
+                """F8 opens macro editor TUI in subprocess."""
+                _launch_tui_editor(event, "macros", telnet_writer)
+
+            @kb.add("f9")
+            def _edit_autoreplies(event: Any) -> None:
+                """F9 opens autoreply editor TUI in subprocess."""
+                _launch_tui_editor(event, "autoreplies", telnet_writer)
+
             self._session: "prompt_toolkit.PromptSession[str]" = prompt_toolkit.PromptSession(
                 history=self._history,
                 auto_suggest=prompt_toolkit.auto_suggest.AutoSuggestFromHistory(),
@@ -135,6 +146,89 @@ if HAS_PROMPT_TOOLKIT:
                 return None
             except KeyboardInterrupt:
                 return None
+
+
+def _launch_tui_editor(
+    event: Any, editor_type: str, writer: Union[TelnetWriter, TelnetWriterUnicode]
+) -> None:
+    """
+    Launch a TUI editor for macros or autoreplies in a subprocess.
+
+    Suspends the prompt_toolkit app, runs the editor, then reloads
+    definitions on return.
+
+    :param event: prompt_toolkit key event.
+    :param editor_type: ``"macros"`` or ``"autoreplies"``.
+    :param writer: Telnet writer with file path and definition attributes.
+    """
+    import os  # pylint: disable=import-outside-toplevel
+    import subprocess  # pylint: disable=import-outside-toplevel
+
+    _xdg = os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config"))
+    _config_dir = os.path.join(_xdg, "telnetlib3")
+
+    if editor_type == "macros":
+        path = getattr(writer, "_macros_file", None) or os.path.join(_config_dir, "macros.json")
+        entry = "edit_macros_main"
+    else:
+        path = getattr(writer, "_autoreplies_file", None) or os.path.join(
+            _config_dir, "autoreplies.json"
+        )
+        entry = "edit_autoreplies_main"
+
+    cmd = [sys.executable, "-c", f"from telnetlib3.client_tui import {entry}; {entry}({path!r})"]
+
+    log = logging.getLogger(__name__)
+
+    def _run_editor() -> None:
+        try:
+            subprocess.run(cmd, check=False)
+        except FileNotFoundError:
+            log.warning("could not launch TUI editor subprocess")
+            return
+
+        if editor_type == "macros":
+            _reload_macros(writer, path, log)
+        else:
+            _reload_autoreplies(writer, path, log)
+
+    event.app.run_in_terminal(_run_editor)
+
+
+def _reload_macros(
+    writer: Union[TelnetWriter, TelnetWriterUnicode], path: str, log: logging.Logger
+) -> None:
+    """Reload macro definitions from disk after editing."""
+    import os  # pylint: disable=import-outside-toplevel
+
+    if not os.path.exists(path):
+        return
+    from .macros import load_macros  # pylint: disable=import-outside-toplevel
+
+    try:
+        writer._macro_defs = load_macros(path)  # type: ignore[union-attr]
+        writer._macros_file = path  # type: ignore[union-attr]
+        log.info("reloaded %d macros from %s", len(writer._macro_defs), path)  # type: ignore[union-attr]
+    except (ValueError, json.JSONDecodeError) as exc:
+        log.warning("failed to reload macros: %s", exc)
+
+
+def _reload_autoreplies(
+    writer: Union[TelnetWriter, TelnetWriterUnicode], path: str, log: logging.Logger
+) -> None:
+    """Reload autoreply rules from disk after editing."""
+    import os  # pylint: disable=import-outside-toplevel
+
+    if not os.path.exists(path):
+        return
+    from .autoreply import load_autoreplies  # pylint: disable=import-outside-toplevel
+
+    try:
+        writer._autoreply_rules = load_autoreplies(path)  # type: ignore[union-attr]
+        writer._autoreplies_file = path  # type: ignore[union-attr]
+        log.info("reloaded %d autoreplies from %s", len(writer._autoreply_rules), path)  # type: ignore[union-attr]
+    except (ValueError, json.JSONDecodeError) as exc:
+        log.warning("failed to reload autoreplies: %s", exc)
 
 
 class BasicLineRepl:
@@ -398,7 +492,8 @@ if sys.platform != "win32":
             stdout.write(f"\x1b[{scroll.input_row};1H\x1b[2K".encode())
 
             repl = PromptToolkitRepl(  # pylint: disable=possibly-used-before-assignment
-                telnet_writer, telnet_writer.log, history_file=history_file)
+                telnet_writer, telnet_writer.log, history_file=history_file
+            )
 
             _ar_rules = getattr(telnet_writer, "_autoreply_rules", None)
             autoreply_engine = None

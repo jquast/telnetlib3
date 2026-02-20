@@ -629,6 +629,7 @@ async def test_pty_spawn_error():
     [
         (b"FileNotFoundError:2:No such file", ["FileNotFoundError", "No such file"]),
         (b"just some error text", ["Exec failed"]),
+        (b"\xff\xfe", ["Exec failed"]),
     ],
 )
 async def test_pty_session_exec_error_parsing(error_data, expected_substrings):
@@ -644,6 +645,73 @@ async def test_pty_session_exec_error_parsing(error_data, expected_substrings):
 
     for substring in expected_substrings:
         assert substring in str(exc_info.value)
+
+
+async def test_write_exec_error_to_pipe():
+    """Test _write_exec_error writes exception info to pipe and closes it."""
+    reader = MagicMock()
+    writer = MagicMock()
+    writer.get_extra_info = MagicMock(return_value=None)
+
+    session = PTYSession(reader, writer, "/nonexistent.program", [])
+    r_fd, w_fd = os.pipe()
+    try:
+        exc = OSError(2, "No such file")
+        session._write_exec_error(w_fd, exc)
+        data = os.read(r_fd, 4096)
+        assert b"Error" in data
+        assert b"No such file" in data
+    finally:
+        os.close(r_fd)
+
+
+async def test_fire_naws_update_noop_when_no_pending():
+    """Test _fire_naws_update does nothing when no update is pending."""
+    reader = MagicMock()
+    writer = MagicMock()
+    writer.get_extra_info = MagicMock(return_value=None)
+
+    session = PTYSession(reader, writer, "/nonexistent.program", [])
+    session._naws_pending = None
+    session._fire_naws_update()
+
+
+async def test_set_window_size_with_real_pty(mock_session):
+    """Test _set_window_size calls ioctl on a real PTY fd."""
+    import fcntl
+    import signal
+    import termios
+
+    session, _ = mock_session()
+    master_fd, slave_fd = os.openpty()
+    try:
+        session.master_fd = master_fd
+        session.child_pid = os.getpid()
+
+        ioctl_calls = []
+        orig_ioctl = fcntl.ioctl
+
+        def _track_ioctl(fd, req, data=None):
+            if req == termios.TIOCSWINSZ:
+                ioctl_calls.append((fd, req))
+            return orig_ioctl(fd, req, data)
+
+        kill_calls = []
+
+        def _fake_killpg(pgid, sig):
+            kill_calls.append((pgid, sig))
+
+        with patch.object(fcntl, "ioctl", side_effect=_track_ioctl):
+            with patch.object(os, "killpg", side_effect=_fake_killpg):
+                session._set_window_size(30, 120)
+
+        assert len(ioctl_calls) == 1
+        assert ioctl_calls[0][0] == master_fd
+        assert len(kill_calls) == 1
+        assert kill_calls[0][1] == signal.SIGWINCH
+    finally:
+        os.close(master_fd)
+        os.close(slave_fd)
 
 
 @pytest.mark.parametrize(

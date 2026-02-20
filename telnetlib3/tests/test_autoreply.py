@@ -21,6 +21,7 @@ from telnetlib3.autoreply import (
     AutoreplyEngine,
     _parse_delay,
     load_autoreplies,
+    save_autoreplies,
     _substitute_groups,
 )
 
@@ -174,6 +175,38 @@ class TestLoadAutoreplies:
         assert rules == []
 
 
+class TestSaveAutoreplies:
+
+    def test_save_autoreplies_roundtrip(self, tmp_path):
+        fp = tmp_path / "autoreplies.json"
+        original = [
+            AutoreplyRule(pattern=re.compile(r"\d+ gold"), reply="get gold<CR>"),
+            AutoreplyRule(
+                pattern=re.compile(r"(\w+) attacks", re.MULTILINE | re.DOTALL), reply="kill \\1<CR>"
+            ),
+        ]
+        save_autoreplies(str(fp), original)
+        loaded = load_autoreplies(str(fp))
+        assert len(loaded) == len(original)
+        for orig, restored in zip(original, loaded):
+            assert orig.pattern.pattern == restored.pattern.pattern
+            assert orig.reply == restored.reply
+
+    def test_save_empty(self, tmp_path):
+        fp = tmp_path / "autoreplies.json"
+        save_autoreplies(str(fp), [])
+        loaded = load_autoreplies(str(fp))
+        assert loaded == []
+
+    def test_save_unicode(self, tmp_path):
+        fp = tmp_path / "autoreplies.json"
+        rules = [AutoreplyRule(pattern=re.compile("héllo"), reply="bonjour<CR>")]
+        save_autoreplies(str(fp), rules)
+        loaded = load_autoreplies(str(fp))
+        assert loaded[0].pattern.pattern == "héllo"
+        assert loaded[0].reply == "bonjour<CR>"
+
+
 # ---------------------------------------------------------------------------
 # _substitute_groups
 # ---------------------------------------------------------------------------
@@ -213,7 +246,14 @@ class TestSubstituteGroups:
 
 @pytest.mark.parametrize(
     "token,expected",
-    [("::100ms::", 0.1), ("::1s::", 1.0), ("::2.5s::", 2.5), ("::500ms::", 0.5), ("::0.5s::", 0.5)],
+    [
+        ("::100ms::", 0.1),
+        ("::1s::", 1.0),
+        ("::2.5s::", 2.5),
+        ("::500ms::", 0.5),
+        ("::0.5s::", 0.5),
+        ("invalid", 0.0),
+    ],
 )
 def test_parse_delay(token, expected):
     assert _parse_delay(token) == pytest.approx(expected)
@@ -345,3 +385,24 @@ class TestAutoreplyEngine:
         await asyncio.sleep(0.05)
         assert any("cmd1\r\n" in w for w in written)
         assert any("cmd2\r\n" in w for w in written)
+
+
+class TestSendCommand:
+
+    def test_send_command_empty_string(self):
+        writer, written = _mock_writer()
+        engine = AutoreplyEngine([], writer, writer.log)
+        engine._send_command("")
+        assert not written
+
+    def test_send_command_whitespace_only(self):
+        writer, written = _mock_writer()
+        engine = AutoreplyEngine([], writer, writer.log)
+        engine._send_command("   ")
+        assert not written
+
+    def test_send_command_valid(self):
+        writer, written = _mock_writer()
+        engine = AutoreplyEngine([], writer, writer.log)
+        engine._send_command("look")
+        assert "look\r\n" in written

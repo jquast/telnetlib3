@@ -324,6 +324,8 @@ class SessionListScreen(Screen[None]):
         Binding("q", "quit_app", "Quit"),
         Binding("n", "new_session", "New"),
         Binding("e", "edit_session", "Edit"),
+        Binding("m", "edit_macros", "Macros"),
+        Binding("a", "edit_autoreplies", "Autoreplies"),
         Binding("d", "delete_session", "Delete"),
         Binding("enter", "connect", "Connect"),
         Binding("s", "edit_defaults", "Defaults"),
@@ -375,6 +377,8 @@ class SessionListScreen(Screen[None]):
                     yield Button("Connect", variant="primary", id="connect-btn")
                     yield Button("New", variant="success", id="add-btn")
                     yield Button("Edit", variant="warning", id="edit-btn")
+                    yield Button("Macros", id="macros-btn")
+                    yield Button("Autoreplies", id="autoreplies-btn")
                     yield Button("Delete", variant="error", id="delete-btn")
                     yield Button("Defaults", id="defaults-btn")
                     yield Button("Quit", id="quit-btn")
@@ -425,6 +429,8 @@ class SessionListScreen(Screen[None]):
             "connect-btn": self.action_connect,
             "add-btn": self.action_new_session,
             "edit-btn": self.action_edit_session,
+            "macros-btn": self.action_edit_macros,
+            "autoreplies-btn": self.action_edit_autoreplies,
             "delete-btn": self.action_delete_session,
             "defaults-btn": self.action_edit_defaults,
             "quit-btn": self.action_quit_app,
@@ -480,6 +486,45 @@ class SessionListScreen(Screen[None]):
         self.app.push_screen(
             SessionEditScreen(config=defaults, is_defaults=True), callback=self._on_defaults_result
         )
+
+    def action_edit_macros(self) -> None:
+        """Open macro editor for the selected session."""
+        key = self._selected_key()
+        if key is None:
+            self.notify("No session selected", severity="warning")
+            return
+        cfg = self._sessions[key]
+        path = cfg.macros_file or os.path.join(CONFIG_DIR, "macros.json")
+        self.app.push_screen(
+            MacroEditScreen(path=path), callback=lambda saved: self._on_macro_save(key, saved, path)
+        )
+
+    def _on_macro_save(self, key: str, saved: bool | None, path: str) -> None:
+        if saved and key in self._sessions:
+            cfg = self._sessions[key]
+            if not cfg.macros_file:
+                cfg.macros_file = path
+                self._save()
+
+    def action_edit_autoreplies(self) -> None:
+        """Open autoreply editor for the selected session."""
+        key = self._selected_key()
+        if key is None:
+            self.notify("No session selected", severity="warning")
+            return
+        cfg = self._sessions[key]
+        path = cfg.autoreplies_file or os.path.join(CONFIG_DIR, "autoreplies.json")
+        self.app.push_screen(
+            AutoreplyEditScreen(path=path),
+            callback=lambda saved: self._on_autoreply_save(key, saved, path),
+        )
+
+    def _on_autoreply_save(self, key: str, saved: bool | None, path: str) -> None:
+        if saved and key in self._sessions:
+            cfg = self._sessions[key]
+            if not cfg.autoreplies_file:
+                cfg.autoreplies_file = path
+                self._save()
 
     def action_connect(self) -> None:
         """Launch a telnet connection to the selected session."""
@@ -1001,6 +1046,366 @@ def _float_val(text: str, default: float) -> float:
         return float(text.strip())
     except (ValueError, TypeError):
         return default
+
+
+class MacroEditScreen(Screen["bool | None"]):
+    """Editor screen for macro key bindings."""
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "cancel_or_close", "Cancel", priority=True)
+    ]
+
+    CSS = """
+    MacroEditScreen { align: center middle; }
+    #macro-panel {
+        width: 70; height: 100%; max-height: 22;
+        border: round $surface-lighten-2; background: $surface; padding: 1 1;
+    }
+    #macro-table { height: 1fr; min-height: 4; }
+    #macro-form { height: auto; margin-top: 1; }
+    #macro-form Input { width: 1fr; }
+    #macro-form-buttons { height: 3; }
+    #macro-bottom { height: 3; margin-top: 1; }
+    #macro-bottom Button { margin-right: 1; }
+    .form-label { width: 8; padding-top: 1; }
+    """
+
+    def __init__(self, path: str) -> None:
+        """Initialize macro editor with file path."""
+        super().__init__()
+        self._path = path
+        self._macros: list[tuple[str, str]] = []
+        self._editing_idx: int | None = None
+
+    @property
+    def _form_visible(self) -> bool:
+        return self.query_one("#macro-form").display
+
+    def compose(self) -> ComposeResult:
+        """Build the macro editor layout."""
+        with Vertical(id="macro-panel"):
+            yield Static("Macro Editor")
+            yield DataTable(id="macro-table")
+            with Vertical(id="macro-form"):
+                with Horizontal(classes="field-row"):
+                    yield Label("Key", classes="form-label")
+                    yield Input(placeholder="e.g. f5 or escape n", id="macro-key")
+                with Horizontal(classes="field-row"):
+                    yield Label("Text", classes="form-label")
+                    yield Input(placeholder="text with <CR> markers", id="macro-text")
+                with Horizontal(id="macro-form-buttons"):
+                    yield Button("OK", variant="success", id="macro-ok")
+                    yield Button("Cancel", variant="default", id="macro-cancel-form")
+            with Horizontal(id="macro-bottom"):
+                yield Button("Add", variant="success", id="macro-add")
+                yield Button("Edit", variant="warning", id="macro-edit")
+                yield Button("Delete", variant="error", id="macro-delete")
+                yield Button("Save", variant="primary", id="macro-save")
+                yield Button("Cancel", id="macro-close")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        """Load macros from file and populate table."""
+        table = self.query_one("#macro-table", DataTable)
+        table.cursor_type = "row"
+        table.add_columns("Key", "Text")
+        self._load_from_file()
+        self._refresh_table()
+        self.query_one("#macro-form").display = False
+
+    def _load_from_file(self) -> None:
+        if not os.path.exists(self._path):
+            return
+        from .macros import load_macros  # pylint: disable=import-outside-toplevel
+
+        try:
+            macros = load_macros(self._path)
+            self._macros = [(" ".join(m.keys), m.text) for m in macros]
+        except (ValueError, json.JSONDecodeError, FileNotFoundError):
+            pass
+
+    def _refresh_table(self) -> None:
+        table = self.query_one("#macro-table", DataTable)
+        table.clear()
+        for i, (key, text) in enumerate(self._macros):
+            table.add_row(key, text, key=str(i))
+
+    def _show_form(self, key_val: str = "", text_val: str = "") -> None:
+        self.query_one("#macro-key", Input).value = key_val
+        self.query_one("#macro-text", Input).value = text_val
+        self.query_one("#macro-form").display = True
+        self.query_one("#macro-key", Input).focus()
+
+    def _hide_form(self) -> None:
+        self.query_one("#macro-form").display = False
+        self._editing_idx = None
+        self.query_one("#macro-table", DataTable).focus()
+
+    def _submit_form(self) -> None:
+        """Accept the current inline form values."""
+        key_val = self.query_one("#macro-key", Input).value.strip()
+        text_val = self.query_one("#macro-text", Input).value
+        if key_val:
+            if self._editing_idx is not None:
+                self._macros[self._editing_idx] = (key_val, text_val)
+            else:
+                self._macros.append((key_val, text_val))
+            self._refresh_table()
+        self._hide_form()
+
+    def _selected_idx(self) -> int | None:
+        table = self.query_one("#macro-table", DataTable)
+        if table.row_count == 0:
+            return None
+        row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
+        return int(str(row_key.value))
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Enter in an inline form input submits the form."""
+        if self._form_visible:
+            event.stop()
+            self._submit_form()
+
+    def action_cancel_or_close(self) -> None:
+        """Escape closes the inline form, or dismisses the screen."""
+        if self._form_visible:
+            self._hide_form()
+        else:
+            self.dismiss(None)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle macro editor button presses."""
+        btn = event.button.id or ""
+        if btn == "macro-add":
+            self._editing_idx = None
+            self._show_form()
+        elif btn == "macro-edit":
+            idx = self._selected_idx()
+            if idx is not None and idx < len(self._macros):
+                self._editing_idx = idx
+                k, t = self._macros[idx]
+                self._show_form(k, t)
+        elif btn == "macro-delete":
+            idx = self._selected_idx()
+            if idx is not None and idx < len(self._macros):
+                self._macros.pop(idx)
+                self._refresh_table()
+        elif btn == "macro-ok":
+            self._submit_form()
+        elif btn == "macro-cancel-form":
+            self._hide_form()
+        elif btn == "macro-save":
+            self._save_to_file()
+            self.dismiss(True)
+        elif btn == "macro-close":
+            self.dismiss(None)
+
+    def _save_to_file(self) -> None:
+        from .macros import Macro, save_macros  # pylint: disable=import-outside-toplevel
+
+        os.makedirs(os.path.dirname(self._path), exist_ok=True)
+        macros = [Macro(keys=tuple(k.split()), text=t) for k, t in self._macros]
+        save_macros(self._path, macros)
+
+
+class AutoreplyEditScreen(Screen["bool | None"]):
+    """Editor screen for autoreply rules."""
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "cancel_or_close", "Cancel", priority=True)
+    ]
+
+    CSS = """
+    AutoreplyEditScreen { align: center middle; }
+    #autoreply-panel {
+        width: 70; height: 100%; max-height: 22;
+        border: round $surface-lighten-2; background: $surface; padding: 1 1;
+    }
+    #autoreply-table { height: 1fr; min-height: 4; }
+    #autoreply-form { height: auto; margin-top: 1; }
+    #autoreply-form Input { width: 1fr; }
+    #autoreply-form-buttons { height: 3; }
+    #autoreply-bottom { height: 3; margin-top: 1; }
+    #autoreply-bottom Button { margin-right: 1; }
+    .form-label { width: 8; padding-top: 1; }
+    """
+
+    def __init__(self, path: str) -> None:
+        """Initialize autoreply editor with file path."""
+        super().__init__()
+        self._path = path
+        self._rules: list[tuple[str, str]] = []
+        self._editing_idx: int | None = None
+
+    @property
+    def _form_visible(self) -> bool:
+        return self.query_one("#autoreply-form").display
+
+    def compose(self) -> ComposeResult:
+        """Build the autoreply editor layout."""
+        with Vertical(id="autoreply-panel"):
+            yield Static("Autoreply Editor")
+            yield DataTable(id="autoreply-table")
+            with Vertical(id="autoreply-form"):
+                with Horizontal(classes="field-row"):
+                    yield Label("Pattern", classes="form-label")
+                    yield Input(placeholder="regex pattern", id="autoreply-pattern")
+                with Horizontal(classes="field-row"):
+                    yield Label("Reply", classes="form-label")
+                    yield Input(placeholder=r"reply with \1 refs and <CR>", id="autoreply-reply")
+                with Horizontal(id="autoreply-form-buttons"):
+                    yield Button("OK", variant="success", id="autoreply-ok")
+                    yield Button("Cancel", variant="default", id="autoreply-cancel-form")
+            with Horizontal(id="autoreply-bottom"):
+                yield Button("Add", variant="success", id="autoreply-add")
+                yield Button("Edit", variant="warning", id="autoreply-edit")
+                yield Button("Delete", variant="error", id="autoreply-delete")
+                yield Button("Save", variant="primary", id="autoreply-save")
+                yield Button("Cancel", id="autoreply-close")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        """Load autoreplies from file and populate table."""
+        table = self.query_one("#autoreply-table", DataTable)
+        table.cursor_type = "row"
+        table.add_columns("Pattern", "Reply")
+        self._load_from_file()
+        self._refresh_table()
+        self.query_one("#autoreply-form").display = False
+
+    def _load_from_file(self) -> None:
+        if not os.path.exists(self._path):
+            return
+        from .autoreply import load_autoreplies  # pylint: disable=import-outside-toplevel
+
+        try:
+            rules = load_autoreplies(self._path)
+            self._rules = [(r.pattern.pattern, r.reply) for r in rules]
+        except (ValueError, json.JSONDecodeError, FileNotFoundError):
+            pass
+
+    def _refresh_table(self) -> None:
+        table = self.query_one("#autoreply-table", DataTable)
+        table.clear()
+        for i, (pattern, reply) in enumerate(self._rules):
+            table.add_row(pattern, reply, key=str(i))
+
+    def _show_form(self, pattern_val: str = "", reply_val: str = "") -> None:
+        self.query_one("#autoreply-pattern", Input).value = pattern_val
+        self.query_one("#autoreply-reply", Input).value = reply_val
+        self.query_one("#autoreply-form").display = True
+        self.query_one("#autoreply-pattern", Input).focus()
+
+    def _hide_form(self) -> None:
+        self.query_one("#autoreply-form").display = False
+        self._editing_idx = None
+        self.query_one("#autoreply-table", DataTable).focus()
+
+    def _submit_form(self) -> None:
+        """Accept the current inline form values."""
+        pattern_val = self.query_one("#autoreply-pattern", Input).value.strip()
+        reply_val = self.query_one("#autoreply-reply", Input).value
+        if pattern_val:
+            import re  # pylint: disable=import-outside-toplevel
+
+            try:
+                re.compile(pattern_val)
+            except re.error as exc:
+                self.notify(f"Invalid regex: {exc}", severity="error")
+                return
+            if self._editing_idx is not None:
+                self._rules[self._editing_idx] = (pattern_val, reply_val)
+            else:
+                self._rules.append((pattern_val, reply_val))
+            self._refresh_table()
+        self._hide_form()
+
+    def _selected_idx(self) -> int | None:
+        table = self.query_one("#autoreply-table", DataTable)
+        if table.row_count == 0:
+            return None
+        row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
+        return int(str(row_key.value))
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Enter in an inline form input submits the form."""
+        if self._form_visible:
+            event.stop()
+            self._submit_form()
+
+    def action_cancel_or_close(self) -> None:
+        """Escape closes the inline form, or dismisses the screen."""
+        if self._form_visible:
+            self._hide_form()
+        else:
+            self.dismiss(None)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle autoreply editor button presses."""
+        btn = event.button.id or ""
+        if btn == "autoreply-add":
+            self._editing_idx = None
+            self._show_form()
+        elif btn == "autoreply-edit":
+            idx = self._selected_idx()
+            if idx is not None and idx < len(self._rules):
+                self._editing_idx = idx
+                p, r = self._rules[idx]
+                self._show_form(p, r)
+        elif btn == "autoreply-delete":
+            idx = self._selected_idx()
+            if idx is not None and idx < len(self._rules):
+                self._rules.pop(idx)
+                self._refresh_table()
+        elif btn == "autoreply-ok":
+            self._submit_form()
+        elif btn == "autoreply-cancel-form":
+            self._hide_form()
+        elif btn == "autoreply-save":
+            self._save_to_file()
+            self.dismiss(True)
+        elif btn == "autoreply-close":
+            self.dismiss(None)
+
+    def _save_to_file(self) -> None:
+        import re  # pylint: disable=import-outside-toplevel
+
+        from .autoreply import (  # pylint: disable=import-outside-toplevel
+            AutoreplyRule,
+            save_autoreplies,
+        )
+
+        os.makedirs(os.path.dirname(self._path), exist_ok=True)
+        rules = [
+            AutoreplyRule(pattern=re.compile(p, re.MULTILINE | re.DOTALL), reply=r)
+            for p, r in self._rules
+        ]
+        save_autoreplies(self._path, rules)
+
+
+class _EditorApp(App[None]):
+    """Minimal Textual app for standalone macro/autoreply editing."""
+
+    def __init__(self, screen: Screen["bool | None"]) -> None:
+        """Initialize with the editor screen to push."""
+        super().__init__()
+        self._editor_screen = screen
+
+    def on_mount(self) -> None:
+        """Push the editor screen."""
+        self.push_screen(self._editor_screen, callback=lambda _: self.exit())
+
+
+def edit_macros_main(path: str) -> None:
+    """Launch standalone macro editor TUI."""
+    app = _EditorApp(MacroEditScreen(path=path))
+    app.run()
+
+
+def edit_autoreplies_main(path: str) -> None:
+    """Launch standalone autoreply editor TUI."""
+    app = _EditorApp(AutoreplyEditScreen(path=path))
+    app.run()
 
 
 class TelnetSessionApp(App[None]):

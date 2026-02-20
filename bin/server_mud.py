@@ -3,8 +3,12 @@
 
 Usage::
 
-    $ python bin/server_mud.py
-    $ telnet localhost 6023
+    $ telnetlib3-server --line-mode --shell bin.server_mud.shell
+    $ telnetlib3-client localhost 6023
+
+The default Telnet server negotiates WILL SGA + WILL ECHO, which puts telnetlib3-client into kludge
+(raw) mode.  MUD clients would prefer that you start the server with ``--line-mode``, to keep
+clients in their (default) NVT line mode.
 """
 
 from __future__ import annotations
@@ -272,9 +276,7 @@ def on_gmcp(writer: Any, package: str, data: Any) -> None:
     writer.write(f"[DEBUG GMCP] {package}: {json.dumps(data)}\r\n")
 
 
-def get_msdp_var(
-    player: Player, var: str
-) -> dict[str, Any] | None:
+def get_msdp_var(player: Player, var: str) -> dict[str, Any] | None:
     """Return MSDP value dict for *var*, or ``None`` if unknown."""
     if var == "CHARACTER_NAME":
         return {"CHARACTER_NAME": player.name}
@@ -835,34 +837,3 @@ async def shell(reader: Any, writer: Any) -> None:
         update_room_all(player.room)
         writer.close()
 
-
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """Parse command-line arguments."""
-    ap = argparse.ArgumentParser(description="Mini-MUD demo server with telnetlib3")
-    ap.add_argument("--host", default="127.0.0.1", help="bind address (default: 127.0.0.1)")
-    ap.add_argument("--port", type=int, default=6023, help="bind port (default: 6023)")
-    ap.add_argument("--log-level", default="INFO", help="log level (default: INFO)")
-    return ap.parse_args(argv)
-
-
-async def main(argv: list[str] | None = None) -> None:
-    """Start the MUD server."""
-    args = parse_args(argv)
-    logging.basicConfig(
-        level=getattr(logging, args.log_level.upper()),
-        format="%(asctime)s %(message)s",
-        datefmt="%H:%M:%S",
-    )
-    server = await telnetlib3.create_server(host=args.host, port=args.port, shell=shell)
-    log.info("%s running on %s:%d", SERVER_NAME, args.host, args.port)
-    print(
-        f"{SERVER_NAME} running on"
-        f" {args.host}:{args.port}\n"
-        f"Connect with: telnet {args.host} {args.port}\n"
-        "Press Ctrl+C to stop"
-    )
-    await server.wait_closed()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

@@ -82,3 +82,16 @@ def test_parse_server_args_never_send_ga():
     with mock.patch.object(sys, "argv", ["server", "--never-send-ga"]):
         result = server.parse_server_args()
         assert result["never_send_ga"] is True
+
+
+def test_parse_server_args_line_mode():
+    """--line-mode flag sets both line_mode and pty_raw."""
+    with mock.patch.object(sys, "argv", ["server"]):
+        result = server.parse_server_args()
+        assert result["line_mode"] is False
+        assert result["pty_raw"] is True
+
+    with mock.patch.object(sys, "argv", ["server", "--line-mode"]):
+        result = server.parse_server_args()
+        assert result["line_mode"] is True
+        assert result["pty_raw"] is False

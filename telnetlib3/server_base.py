@@ -47,6 +47,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         encoding_errors: str = "strict",
         force_binary: bool = False,
         never_send_ga: bool = False,
+        line_mode: bool = False,
         connect_maxwait: float = 4.0,
         limit: Optional[int] = None,
         reader_factory: type = TelnetReader,
@@ -60,6 +61,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._encoding_errors = encoding_errors
         self.force_binary = force_binary
         self.never_send_ga = never_send_ga
+        self.line_mode = line_mode
         self._extra: dict[str, Any] = {}
 
         self._reader_factory = reader_factory
