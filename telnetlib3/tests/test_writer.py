@@ -506,9 +506,10 @@ async def test_wait_for_combined_conditions():
         writer.local_option[NAWS] = True
 
     task = asyncio.create_task(set_options_later())
-    assert await asyncio.wait_for(
-        writer.wait_for(remote={"ECHO": True}, local={"NAWS": True}), 0.5
-    ) is True
+    assert (
+        await asyncio.wait_for(writer.wait_for(remote={"ECHO": True}, local={"NAWS": True}), 0.5)
+        is True
+    )
     await task
 
 
@@ -550,9 +551,12 @@ async def test_wait_for_condition_waits():
         writer.remote_option[ECHO] = True
 
     task = asyncio.create_task(set_option_later())
-    assert await asyncio.wait_for(
-        writer.wait_for_condition(lambda w: w.remote_option.enabled(ECHO)), 0.5
-    ) is True
+    assert (
+        await asyncio.wait_for(
+            writer.wait_for_condition(lambda w: w.remote_option.enabled(ECHO)), 0.5
+        )
+        is True
+    )
     await task
 
 

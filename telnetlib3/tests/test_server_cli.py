@@ -74,11 +74,7 @@ def test_telnetlib3_pty_shell_exports_conditional():
 
 
 @pytest.mark.parametrize(
-    "argv,expected",
-    [
-        (["server"], False),
-        (["server", "--never-send-ga"], True),
-    ],
+    "argv,expected", [(["server"], False), (["server", "--never-send-ga"], True)]
 )
 def test_parse_server_args_never_send_ga(argv, expected):
     """--never-send-ga flag is parsed correctly."""
@@ -89,7 +85,7 @@ def test_parse_server_args_never_send_ga(argv, expected):
 @pytest.mark.parametrize(
     "argv,expected_line_mode,expected_pty_raw",
     [
-        (["server"], False, True),
+        (["server"], False, server.PTY_SUPPORT),
         (["server", "--line-mode"], True, False),
     ],
 )

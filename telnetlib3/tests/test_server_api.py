@@ -110,9 +110,7 @@ async def test_create_server_line_mode_param(bind_host, unused_tcp_port):
 
 async def test_create_server_line_mode_default_false(bind_host, unused_tcp_port):
     """create_server() defaults to line_mode=False."""
-    async with create_server(
-        host=bind_host, port=unused_tcp_port, connect_maxwait=0.05
-    ) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
             client = await asyncio.wait_for(server.wait_for_client(), 0.5)

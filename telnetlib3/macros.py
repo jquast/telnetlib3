@@ -86,9 +86,7 @@ def save_macros(path: str, macros: list[Macro], session_key: str) -> None:
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
 
-    data[session_key] = {
-        "macros": [{"key": " ".join(m.keys), "text": m.text} for m in macros]
-    }
+    data[session_key] = {"macros": [{"key": " ".join(m.keys), "text": m.text} for m in macros]}
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, ensure_ascii=False)
         fh.write("\n")

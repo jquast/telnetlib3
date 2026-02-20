@@ -630,7 +630,7 @@ class TelnetWriter:
 
     # proprietary write helper
 
-    # pylint: disable=too-many-branches,too-many-statements,too-complex
+    # pylint: disable=too-many-branches,too-complex
     def feed_byte(self, byte: bytes) -> bool:
         """
         Feed a single byte into Telnet option state machine.

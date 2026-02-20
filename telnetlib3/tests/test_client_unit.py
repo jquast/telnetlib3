@@ -1,13 +1,14 @@
 # std imports
-import asyncio
 import sys
 import types
+import asyncio
 
 # 3rd party
 import pytest
 
 # local
-from telnetlib3 import accessories, client as cl
+from telnetlib3 import client as cl
+from telnetlib3 import accessories
 from telnetlib3.client_base import BaseClient
 from telnetlib3.tests.accessories import bind_host, create_server  # noqa: F401
 
@@ -255,18 +256,10 @@ def test_detect_syncterm_font_sets_force_binary():
     assert client.force_binary is True
 
 
-@pytest.mark.parametrize(
-    "extra_args,expected",
-    [
-        ([], "vga"),
-        (["--colormatch", "xterm"], "xterm"),
-    ],
-)
+@pytest.mark.parametrize("extra_args,expected", [([], "vga"), (["--colormatch", "xterm"], "xterm")])
 def test_transform_args_colormatch(extra_args, expected):
     parser = cl._get_argument_parser()
-    assert cl._transform_args(
-        parser.parse_args(["myhost"] + extra_args)
-    )["colormatch"] == expected
+    assert cl._transform_args(parser.parse_args(["myhost"] + extra_args))["colormatch"] == expected
 
 
 def test_guard_shells_connection_counter():
@@ -335,7 +328,8 @@ async def test_guard_shells_robot_check_timeout():
             return self._extra.get(key, default)
 
     class MockReader:
-        fn_encoding = lambda **kw: "utf-8"
+        def fn_encoding(**kw):
+            return "utf-8"
         _decoder = None
 
         async def read(self, n):
@@ -401,23 +395,16 @@ async def test_run_client_unknown_palette(monkeypatch):
             "AtasciiControlFilter",
             id="atascii_filter",
         ),
+        pytest.param(["--colormatch", "vga"], "ColorFilter", id="colormatch_vga"),
         pytest.param(
-            ["--colormatch", "vga"],
-            "ColorFilter",
-            id="colormatch_vga",
-        ),
-        pytest.param(
-            ["--colormatch", "petscii"],
-            "PetsciiColorFilter",
-            id="colormatch_petscii_alias",
+            ["--colormatch", "petscii"], "PetsciiColorFilter", id="colormatch_petscii_alias"
         ),
     ],
 )
 @pytest.mark.asyncio
 async def test_run_client_color_filter(monkeypatch, argv_extra, filter_cls_name):
     monkeypatch.setattr(
-        sys, "argv",
-        ["telnetlib3-client", "localhost"] + argv_extra + ["--no-repl"],
+        sys, "argv", ["telnetlib3-client", "localhost"] + argv_extra + ["--no-repl"]
     )
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     monkeypatch.setattr(accessories, "function_lookup", lambda _: _noop_shell)

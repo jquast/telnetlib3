@@ -132,10 +132,7 @@ def test_close_idempotent_and_cleanup():
 
 @pytest.mark.parametrize(
     "setup",
-    [
-        lambda w, t: setattr(t, "_closing", True),
-        lambda w, t: w.close(),
-    ],
+    [lambda w, t: setattr(t, "_closing", True), lambda w, t: w.close()],
     ids=["closing", "closed"],
 )
 def test_send_iac_skipped_when_closing_or_closed(setup):
@@ -328,9 +325,7 @@ def test_handle_wont_tm_and_logout_paths():
 def test_handle_subnegotiation_comport_and_gmcp_and_errors():
     w, *_ = new_writer(server=True)
     w.handle_subnegotiation(collections.deque([GMCP, b"a", b"b"]))
-    w.handle_subnegotiation(
-        collections.deque([COM_PORT_OPTION, b"\x64", b"T", b"e", b"s", b"t"])
-    )
+    w.handle_subnegotiation(collections.deque([COM_PORT_OPTION, b"\x64", b"T", b"e", b"s", b"t"]))
     assert w.comport_data is not None
     assert w.comport_data["signature"] == "Test"
 
@@ -1068,9 +1063,7 @@ def test_linemode_mode_without_negotiation_ignored():
         ("name_command", SGA, "SGA"),
     ],
 )
-def test_name_option_distinguishes_commands_from_options(
-    func_name, byte_val, expected
-):
+def test_name_option_distinguishes_commands_from_options(func_name, byte_val, expected):
     from telnetlib3.telopt import name_option, name_command
 
     fn = name_option if func_name == "name_option" else name_command
@@ -1113,9 +1106,7 @@ def test_send_iac_trace_log(caplog):
     ],
     ids=["msdp", "mssp"],
 )
-def test_send_mud_protocol_returns_early_without_negotiation(
-    caplog, method, data, log_substr
-):
+def test_send_mud_protocol_returns_early_without_negotiation(caplog, method, data, log_substr):
     w, t, _ = new_writer(server=True)
     with caplog.at_level(logging.DEBUG):
         getattr(w, method)(data)

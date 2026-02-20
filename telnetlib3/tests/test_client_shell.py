@@ -872,12 +872,7 @@ def test_transform_output_empty_string() -> None:
 
 
 @pytest.mark.parametrize(
-    "kwargs,expected",
-    [
-        ({}, False),
-        ({"_raw_mode": None}, None),
-        ({"_raw_mode": True}, True),
-    ],
+    "kwargs,expected", [({}, False), ({"_raw_mode": None}, None), ({"_raw_mode": True}, True)]
 )
 def test_get_raw_mode(kwargs: dict, expected: "bool | None") -> None:
     from telnetlib3.client_shell import _get_raw_mode

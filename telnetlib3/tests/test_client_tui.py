@@ -45,6 +45,14 @@ from telnetlib3.client_tui import (  # noqa: E402
 )
 
 
+@pytest.fixture
+def tui_tmp_paths(tmp_path, monkeypatch):
+    monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
+    monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
+    return tmp_path
+
+
 def test_session_config_defaults() -> None:
     cfg = SessionConfig()
     assert cfg.port == 23
@@ -76,12 +84,7 @@ def test_session_config_unknown_fields_ignored() -> None:
     assert cfg.name == "x"
 
 
-def test_persistence_save_load_roundtrip(tmp_path, monkeypatch) -> None:
-    sessions_file = tmp_path / "sessions.json"
-    monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", sessions_file)
-    monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", tmp_path)
-    monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", tmp_path)
-
+def test_persistence_save_load_roundtrip(tui_tmp_paths) -> None:
     sessions = {
         "myserver": SessionConfig(name="myserver", host="example.com", port=23),
         DEFAULTS_KEY: SessionConfig(encoding="cp437", colormatch="cga"),
@@ -94,10 +97,10 @@ def test_persistence_save_load_roundtrip(tmp_path, monkeypatch) -> None:
     assert loaded[DEFAULTS_KEY].colormatch == "cga"
 
 
-def test_persistence_load_empty(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "nope.json")
-    monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", tmp_path)
-    monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", tmp_path)
+def test_persistence_load_empty(tui_tmp_paths, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "telnetlib3.client_tui.SESSIONS_FILE", tui_tmp_paths / "nope.json"
+    )
     assert load_sessions() == {}
 
 
@@ -216,12 +219,10 @@ def test_defaults_inheritance_new_from_defaults() -> None:
     assert new_cfg.host == "example.com"
 
 
-def test_persistence_corrupted_json(tmp_path, monkeypatch) -> None:
-    sessions_file = tmp_path / "sessions.json"
+def test_persistence_corrupted_json(tui_tmp_paths, monkeypatch) -> None:
+    sessions_file = tui_tmp_paths / "sessions.json"
     sessions_file.write_text("{invalid json", encoding="utf-8")
     monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", sessions_file)
-    monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", tmp_path)
-    monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", tmp_path)
     with pytest.raises(Exception):
         load_sessions()
 
@@ -322,19 +323,14 @@ def test_helper_relative_time_invalid() -> None:
     assert result == "not-a-date"[:10]
 
 
-def test_helper_relative_time_days_ago() -> None:
-    past = datetime.datetime.now() - datetime.timedelta(days=5)
-    assert "5d ago" in _relative_time(past.isoformat())
-
-
-def test_helper_relative_time_minutes_ago() -> None:
-    past = datetime.datetime.now() - datetime.timedelta(minutes=10)
-    assert "10m ago" in _relative_time(past.isoformat())
-
-
-def test_helper_relative_time_hours_ago() -> None:
-    past = datetime.datetime.now() - datetime.timedelta(hours=3)
-    assert "3h ago" in _relative_time(past.isoformat())
+@pytest.mark.parametrize("timedelta_kwargs,expected_substr", [
+    ({"days": 5}, "5d ago"),
+    ({"minutes": 10}, "10m ago"),
+    ({"hours": 3}, "3h ago"),
+])
+def test_helper_relative_time(timedelta_kwargs, expected_substr) -> None:
+    past = datetime.datetime.now() - datetime.timedelta(**timedelta_kwargs)
+    assert expected_substr in _relative_time(past.isoformat())
 
 
 def test_helper_relative_time_seconds_ago() -> None:
@@ -343,20 +339,14 @@ def test_helper_relative_time_seconds_ago() -> None:
     assert "30s ago" in result or "29s ago" in result
 
 
-def test_helper_int_val_valid() -> None:
-    assert _int_val("42", 0) == 42
-
-
-def test_helper_int_val_fallback() -> None:
-    assert _int_val("abc", 42) == 42
-
-
-def test_helper_float_val_valid() -> None:
-    assert _float_val("1.5", 0.0) == 1.5
-
-
-def test_helper_float_val_fallback() -> None:
-    assert _float_val("abc", 1.5) == 1.5
+@pytest.mark.parametrize("func,input_val,fallback,expected", [
+    (_int_val, "42", 0, 42),
+    (_int_val, "abc", 42, 42),
+    (_float_val, "1.5", 0.0, 1.5),
+    (_float_val, "abc", 1.5, 1.5),
+])
+def test_helper_val_conversion(func, input_val, fallback, expected) -> None:
+    assert func(input_val, fallback) == expected
 
 
 def test_helper_build_tooltips() -> None:
@@ -401,10 +391,7 @@ class _EditApp(textual.app.App[None]):
 @pytest.mark.asyncio
 class TestSessionListScreenTextual:
 
-    async def test_compose_and_mount(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
-        monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
-        monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
+    async def test_compose_and_mount(self, tui_tmp_paths) -> None:
         sessions = {
             "srv1": SessionConfig(name="srv1", host="host1", port=23),
             "srv2": SessionConfig(name="srv2", host="host2", port=2323),
@@ -420,10 +407,7 @@ class TestSessionListScreenTextual:
             assert screen.query_one("#connect-btn") is not None
             assert screen.query_one("#add-btn") is not None
 
-    async def test_selected_key_returns_key(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
-        monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
-        monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
+    async def test_selected_key_returns_key(self, tui_tmp_paths) -> None:
         sessions = {"srv1": SessionConfig(name="srv1", host="host1", port=23)}
         save_sessions(sessions)
 
@@ -433,10 +417,7 @@ class TestSessionListScreenTextual:
             screen = app.screen
             assert screen._selected_key() == "srv1"
 
-    async def test_session_keys(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
-        monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
-        monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
+    async def test_session_keys(self, tui_tmp_paths) -> None:
         sessions = {
             "srv1": SessionConfig(name="srv1", host="host1"),
             DEFAULTS_KEY: SessionConfig(name=DEFAULTS_KEY),
@@ -451,10 +432,7 @@ class TestSessionListScreenTextual:
             assert "srv1" in keys
             assert DEFAULTS_KEY not in keys
 
-    async def test_action_delete_session(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
-        monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
-        monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
+    async def test_action_delete_session(self, tui_tmp_paths) -> None:
         sessions = {"srv1": SessionConfig(name="srv1", host="host1", port=23)}
         save_sessions(sessions)
 
@@ -467,11 +445,7 @@ class TestSessionListScreenTextual:
             table = screen.query_one("#session-table", DataTable)
             assert table.row_count == 0
 
-    async def test_action_edit_session_no_selection(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
-        monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
-        monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
-
+    async def test_action_edit_session_no_selection(self, tui_tmp_paths) -> None:
         app = _SessionListApp()
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
@@ -479,10 +453,7 @@ class TestSessionListScreenTextual:
             screen.action_edit_session()
             await pilot.pause()
 
-    async def test_action_connect_no_host(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
-        monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
-        monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
+    async def test_action_connect_no_host(self, tui_tmp_paths) -> None:
         sessions = {"srv1": SessionConfig(name="srv1", host="", port=23)}
         save_sessions(sessions)
 
@@ -493,11 +464,7 @@ class TestSessionListScreenTextual:
             screen.action_connect()
             await pilot.pause()
 
-    async def test_on_edit_result_saves(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
-        monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
-        monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
-
+    async def test_on_edit_result_saves(self, tui_tmp_paths) -> None:
         app = _SessionListApp()
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
@@ -509,11 +476,7 @@ class TestSessionListScreenTextual:
             table = screen.query_one("#session-table", DataTable)
             assert table.row_count == 1
 
-    async def test_on_edit_result_none(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
-        monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
-        monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
-
+    async def test_on_edit_result_none(self, tui_tmp_paths) -> None:
         app = _SessionListApp()
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
@@ -521,11 +484,7 @@ class TestSessionListScreenTextual:
             screen._on_edit_result(None)
             await pilot.pause()
 
-    async def test_on_defaults_result(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
-        monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
-        monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
-
+    async def test_on_defaults_result(self, tui_tmp_paths) -> None:
         app = _SessionListApp()
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
@@ -535,11 +494,7 @@ class TestSessionListScreenTextual:
             await pilot.pause()
             assert screen._sessions[DEFAULTS_KEY].encoding == "cp437"
 
-    async def test_on_defaults_result_none(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
-        monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
-        monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
-
+    async def test_on_defaults_result_none(self, tui_tmp_paths) -> None:
         app = _SessionListApp()
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
@@ -660,60 +615,55 @@ class TestSessionEditScreenTextual:
 
 
 @pytest.mark.asyncio
-class TestSessionListActionConnect:
+async def test_action_connect_runs_subprocess(tui_tmp_paths, monkeypatch) -> None:
+    import os
+    import subprocess as _subprocess
 
-    async def test_action_connect_runs_subprocess(self, tmp_path, monkeypatch) -> None:
-        import os
-        import subprocess as _subprocess
+    sessions = {"srv1": SessionConfig(name="srv1", host="localhost", port=12345)}
+    save_sessions(sessions)
 
-        monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
-        monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
-        monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
-        sessions = {"srv1": SessionConfig(name="srv1", host="localhost", port=12345)}
-        save_sessions(sessions)
+    popen_calls: list = []
 
-        popen_calls: list = []
+    class _FakeProc:
+        returncode = 0
+        stderr = None
 
-        class _FakeProc:
-            returncode = 0
-            stderr = None
+        def wait(self, timeout=None):
+            pass
 
-            def wait(self, timeout=None):
-                pass
+        def terminate(self):
+            pass
 
-            def terminate(self):
-                pass
+    def _fake_popen(cmd, **kwargs):
+        popen_calls.append(cmd)
+        return _FakeProc()
 
-        def _fake_popen(cmd, **kwargs):
-            popen_calls.append(cmd)
-            return _FakeProc()
+    monkeypatch.setattr(_subprocess, "Popen", _fake_popen)
 
-        monkeypatch.setattr(_subprocess, "Popen", _fake_popen)
+    _real_get_terminal_size = os.get_terminal_size
 
-        _real_get_terminal_size = os.get_terminal_size
+    def _fake_get_terminal_size(*args):
+        if args:
+            return _real_get_terminal_size(*args)
+        return os.terminal_size((80, 24))
 
-        def _fake_get_terminal_size(*args):
-            if args:
-                return _real_get_terminal_size(*args)
-            return os.terminal_size((80, 24))
+    import contextlib
 
-        import contextlib
+    @contextlib.contextmanager
+    def _fake_suspend():
+        yield
 
-        @contextlib.contextmanager
-        def _fake_suspend():
-            yield
-
-        app = _SessionListApp()
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            screen = app.screen
-            monkeypatch.setattr(os, "set_blocking", lambda fd, blocking: None)
-            monkeypatch.setattr(os, "get_terminal_size", _fake_get_terminal_size)
-            monkeypatch.setattr(app, "suspend", _fake_suspend)
-            screen.action_connect()
-            await pilot.pause()
-            assert len(popen_calls) == 1
-            assert "localhost" in " ".join(popen_calls[0])
+    app = _SessionListApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        monkeypatch.setattr(os, "set_blocking", lambda fd, blocking: None)
+        monkeypatch.setattr(os, "get_terminal_size", _fake_get_terminal_size)
+        monkeypatch.setattr(app, "suspend", _fake_suspend)
+        screen.action_connect()
+        await pilot.pause()
+        assert len(popen_calls) == 1
+        assert "localhost" in " ".join(popen_calls[0])
 
 
 _TEST_SK = "test.host:23"
@@ -878,7 +828,9 @@ class TestAutoreplyEditScreenTextual:
 
         fp = tmp_path / "autoreplies.json"
         fp.write_text(
-            json.dumps({_TEST_SK: {"autoreplies": [{"pattern": r"\d+ gold", "reply": "get gold<CR>"}]}})
+            json.dumps(
+                {_TEST_SK: {"autoreplies": [{"pattern": r"\d+ gold", "reply": "get gold<CR>"}]}}
+            )
         )
         app = _AutoreplyEditApp(str(fp))
         async with app.run_test(size=(80, 24)) as pilot:
@@ -909,7 +861,9 @@ class TestAutoreplyEditScreenTextual:
         import json
 
         fp = tmp_path / "autoreplies.json"
-        fp.write_text(json.dumps({_TEST_SK: {"autoreplies": [{"pattern": "hello", "reply": "world<CR>"}]}}))
+        fp.write_text(
+            json.dumps({_TEST_SK: {"autoreplies": [{"pattern": "hello", "reply": "world<CR>"}]}})
+        )
         app = _AutoreplyEditApp(str(fp))
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
@@ -923,7 +877,9 @@ class TestAutoreplyEditScreenTextual:
         import json
 
         fp = tmp_path / "autoreplies.json"
-        fp.write_text(json.dumps({_TEST_SK: {"autoreplies": [{"pattern": "hello", "reply": "world<CR>"}]}}))
+        fp.write_text(
+            json.dumps({_TEST_SK: {"autoreplies": [{"pattern": "hello", "reply": "world<CR>"}]}})
+        )
         app = _AutoreplyEditApp(str(fp))
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
@@ -998,65 +954,59 @@ class _EditorAppTest(textual.app.App[None]):
 
 
 @pytest.mark.asyncio
-class TestEditorApp:
+async def test_editor_app_macro(tmp_path) -> None:
+    fp = tmp_path / "macros.json"
+    fp.write_text('{"' + _TEST_SK + '": {"macros": []}}')
+    from telnetlib3.client_tui import _EditorApp
 
-    async def test_editor_app_macro(self, tmp_path) -> None:
-        fp = tmp_path / "macros.json"
-        fp.write_text('{"' + _TEST_SK + '": {"macros": []}}')
-        from telnetlib3.client_tui import _EditorApp
-
-        app = _EditorApp(MacroEditScreen(path=str(fp)))
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            assert app.screen.query_one("#macro-table", DataTable) is not None
-
-    async def test_editor_app_autoreply(self, tmp_path) -> None:
-        fp = tmp_path / "autoreplies.json"
-        fp.write_text('{"' + _TEST_SK + '": {"autoreplies": []}}')
-        from telnetlib3.client_tui import _EditorApp
-
-        app = _EditorApp(AutoreplyEditScreen(path=str(fp)))
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            assert app.screen.query_one("#autoreply-table", DataTable) is not None
+    app = _EditorApp(MacroEditScreen(path=str(fp)))
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        assert app.screen.query_one("#macro-table", DataTable) is not None
 
 
 @pytest.mark.asyncio
-class TestEditorMainFunctions:
+async def test_editor_app_autoreply(tmp_path) -> None:
+    fp = tmp_path / "autoreplies.json"
+    fp.write_text('{"' + _TEST_SK + '": {"autoreplies": []}}')
+    from telnetlib3.client_tui import _EditorApp
 
-    async def test_edit_macros_main(self, tmp_path, monkeypatch) -> None:
-        fp = tmp_path / "macros.json"
-        fp.write_text('{"' + _TEST_SK + '": {"macros": []}}')
-        from telnetlib3.client_tui import _EditorApp
-
-        calls: list = []
-        monkeypatch.setattr(_EditorApp, "run", lambda self: calls.append(True))
-        edit_macros_main(str(fp), _TEST_SK)
-        assert calls
-
-    async def test_edit_autoreplies_main(self, tmp_path, monkeypatch) -> None:
-        fp = tmp_path / "autoreplies.json"
-        fp.write_text('{"' + _TEST_SK + '": {"autoreplies": []}}')
-        from telnetlib3.client_tui import _EditorApp
-
-        calls: list = []
-        monkeypatch.setattr(_EditorApp, "run", lambda self: calls.append(True))
-        edit_autoreplies_main(str(fp), _TEST_SK)
-        assert calls
+    app = _EditorApp(AutoreplyEditScreen(path=str(fp)))
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        assert app.screen.query_one("#autoreply-table", DataTable) is not None
 
 
 @pytest.mark.asyncio
-class TestTelnetSessionAppTextual:
+async def test_edit_macros_main(tmp_path, monkeypatch) -> None:
+    fp = tmp_path / "macros.json"
+    fp.write_text('{"' + _TEST_SK + '": {"macros": []}}')
+    from telnetlib3.client_tui import _EditorApp
 
-    async def test_app_mounts_session_list(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
-        monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
-        monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
+    calls: list = []
+    monkeypatch.setattr(_EditorApp, "run", lambda self: calls.append(True))
+    edit_macros_main(str(fp), _TEST_SK)
+    assert calls
 
-        app = TelnetSessionApp()
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            assert isinstance(app.screen, SessionListScreen)
+
+@pytest.mark.asyncio
+async def test_edit_autoreplies_main(tmp_path, monkeypatch) -> None:
+    fp = tmp_path / "autoreplies.json"
+    fp.write_text('{"' + _TEST_SK + '": {"autoreplies": []}}')
+    from telnetlib3.client_tui import _EditorApp
+
+    calls: list = []
+    monkeypatch.setattr(_EditorApp, "run", lambda self: calls.append(True))
+    edit_autoreplies_main(str(fp), _TEST_SK)
+    assert calls
+
+
+@pytest.mark.asyncio
+async def test_app_mounts_session_list(tui_tmp_paths) -> None:
+    app = TelnetSessionApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        assert isinstance(app.screen, SessionListScreen)
 
 
 @pytest.mark.asyncio
@@ -1116,7 +1066,9 @@ class TestMacroEditScreenButtonDispatch:
 
     async def test_edit_submit_form(self, tmp_path) -> None:
         fp = tmp_path / "macros.json"
-        fp.write_text('{"' + _TEST_SK + '": {"macros": [{"key": "f5", "text": "old<CR>"}]}}')
+        fp.write_text(
+            '{"' + _TEST_SK + '": {"macros": [{"key": "f5", "text": "old<CR>"}]}}'
+        )
         app = _MacroEditApp(str(fp))
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
@@ -1237,7 +1189,9 @@ class TestAutoreplyEditScreenButtonDispatch:
         import json
 
         fp = tmp_path / "autoreplies.json"
-        fp.write_text(json.dumps({_TEST_SK: {"autoreplies": [{"pattern": "old", "reply": "old<CR>"}]}}))
+        fp.write_text(
+            json.dumps({_TEST_SK: {"autoreplies": [{"pattern": "old", "reply": "old<CR>"}]}})
+        )
         app = _AutoreplyEditApp(str(fp))
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
@@ -1321,111 +1275,96 @@ class TestAutoreplyEditScreenButtonDispatch:
 
 
 @pytest.mark.asyncio
-class TestSessionListCallbacks:
+async def test_action_edit_autoreplies(tui_tmp_paths) -> None:
+    sessions = {"srv1": SessionConfig(name="srv1", host="host1")}
+    save_sessions(sessions)
 
-    async def test_action_edit_autoreplies(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
-        monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
-        monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
-        sessions = {"srv1": SessionConfig(name="srv1", host="host1")}
-        save_sessions(sessions)
-
-        app = _SessionListApp()
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            screen = app.screen
-            screen.action_edit_autoreplies()
-            await pilot.pause()
-            assert isinstance(app.screen, AutoreplyEditScreen)
-
-    async def test_action_edit_autoreplies_no_selection(self, tmp_path, monkeypatch) -> None:
-        monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
-        monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
-        monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
-
-        app = _SessionListApp()
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            screen = app.screen
-            screen.action_edit_autoreplies()
-            await pilot.pause()
+    app = _SessionListApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.action_edit_autoreplies()
+        await pilot.pause()
+        assert isinstance(app.screen, AutoreplyEditScreen)
 
 
 @pytest.mark.asyncio
-class TestSessionEditSwitchHandlers:
-
-    async def test_ice_colors_switch_updates_palette(self) -> None:
-        cfg = SessionConfig(name="test", host="h", colormatch="vga")
-        app = _EditApp(cfg)
-        async with app.run_test(size=(80, 30)) as pilot:
-            await pilot.pause()
-            screen = app.screen
-            ice_switch = screen.query_one("#ice-colors", Switch)
-            ice_switch.value = not ice_switch.value
-            await pilot.pause()
+async def test_action_edit_autoreplies_no_selection(tui_tmp_paths) -> None:
+    app = _SessionListApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        screen.action_edit_autoreplies()
+        await pilot.pause()
 
 
 @pytest.mark.asyncio
-class TestSessionListActionConnectInterrupt:
-
-    async def test_action_connect_keyboard_interrupt(self, tmp_path, monkeypatch) -> None:
-        import os
-        import subprocess as _subprocess
-
-        monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
-        monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
-        monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
-        sessions = {"srv1": SessionConfig(name="srv1", host="localhost", port=12345)}
-        save_sessions(sessions)
-
-        terminated: list = []
-
-        class _FakeProc:
-            returncode = 0
-            stderr = None
-
-            def wait(self, timeout=None):
-                if not terminated:
-                    raise KeyboardInterrupt
-
-            def terminate(self):
-                terminated.append(True)
-
-        def _fake_popen(cmd, **kwargs):
-            return _FakeProc()
-
-        monkeypatch.setattr(_subprocess, "Popen", _fake_popen)
-
-        _real_get_terminal_size = os.get_terminal_size
-
-        def _fake_get_terminal_size(*args):
-            if args:
-                return _real_get_terminal_size(*args)
-            return os.terminal_size((80, 24))
-
-        import contextlib
-
-        @contextlib.contextmanager
-        def _fake_suspend():
-            yield
-
-        app = _SessionListApp()
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            screen = app.screen
-            monkeypatch.setattr(os, "set_blocking", lambda fd, blocking: None)
-            monkeypatch.setattr(os, "get_terminal_size", _fake_get_terminal_size)
-            monkeypatch.setattr(app, "suspend", _fake_suspend)
-            screen.action_connect()
-            await pilot.pause()
-        assert terminated
+async def test_ice_colors_switch_updates_palette() -> None:
+    cfg = SessionConfig(name="test", host="h", colormatch="vga")
+    app = _EditApp(cfg)
+    async with app.run_test(size=(80, 30)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        ice_switch = screen.query_one("#ice-colors", Switch)
+        ice_switch.value = not ice_switch.value
+        await pilot.pause()
 
 
 @pytest.mark.asyncio
-async def test_arrow_nav_session_list_buttons(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
-    monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
-    monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
+async def test_action_connect_keyboard_interrupt(
+    tui_tmp_paths, monkeypatch
+) -> None:
+    import os
+    import subprocess as _subprocess
+
+    sessions = {"srv1": SessionConfig(name="srv1", host="localhost", port=12345)}
+    save_sessions(sessions)
+
+    terminated: list = []
+
+    class _FakeProc:
+        returncode = 0
+        stderr = None
+
+        def wait(self, timeout=None):
+            if not terminated:
+                raise KeyboardInterrupt
+
+        def terminate(self):
+            terminated.append(True)
+
+    def _fake_popen(cmd, **kwargs):
+        return _FakeProc()
+
+    monkeypatch.setattr(_subprocess, "Popen", _fake_popen)
+
+    _real_get_terminal_size = os.get_terminal_size
+
+    def _fake_get_terminal_size(*args):
+        if args:
+            return _real_get_terminal_size(*args)
+        return os.terminal_size((80, 24))
+
+    import contextlib
+
+    @contextlib.contextmanager
+    def _fake_suspend():
+        yield
+
+    app = _SessionListApp()
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        screen = app.screen
+        monkeypatch.setattr(os, "set_blocking", lambda fd, blocking: None)
+        monkeypatch.setattr(os, "get_terminal_size", _fake_get_terminal_size)
+        monkeypatch.setattr(app, "suspend", _fake_suspend)
+        screen.action_connect()
+        await pilot.pause()
+    assert terminated
+
+
+@pytest.mark.asyncio
+async def test_arrow_nav_session_list_buttons(tui_tmp_paths) -> None:
     sessions = {"srv1": SessionConfig(name="srv1", host="host1", port=23)}
     save_sessions(sessions)
     app = _SessionListApp()
@@ -1443,10 +1382,7 @@ async def test_arrow_nav_session_list_buttons(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_arrow_nav_session_list_right_to_table(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
-    monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
-    monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
+async def test_arrow_nav_session_list_right_to_table(tui_tmp_paths) -> None:
     sessions = {"srv1": SessionConfig(name="srv1", host="host1", port=23)}
     save_sessions(sessions)
     app = _SessionListApp()
@@ -1462,10 +1398,7 @@ async def test_arrow_nav_session_list_right_to_table(tmp_path, monkeypatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_arrow_nav_session_list_left_from_table(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tmp_path / "s.json")
-    monkeypatch.setattr("telnetlib3.client_tui.CONFIG_DIR", str(tmp_path))
-    monkeypatch.setattr("telnetlib3.client_tui.DATA_DIR", str(tmp_path))
+async def test_arrow_nav_session_list_left_from_table(tui_tmp_paths) -> None:
     sessions = {"srv1": SessionConfig(name="srv1", host="host1", port=23)}
     save_sessions(sessions)
     app = _SessionListApp()

@@ -19,12 +19,10 @@ import time
 import random
 import asyncio
 import logging
-import argparse
 import unicodedata
 from typing import Any
 
 # local
-import telnetlib3
 from telnetlib3.telopt import GMCP, MSDP, MSSP, WILL
 from telnetlib3.server_shell import readline2
 
@@ -836,4 +834,3 @@ async def shell(reader: Any, writer: Any) -> None:
         broadcast_room(None, player.room, f"{player.name} has left.")
         update_room_all(player.room)
         writer.close()
-

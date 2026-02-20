@@ -4,7 +4,6 @@
 
 # std imports
 import sys
-import json
 import asyncio
 import logging
 from typing import Any, Tuple, Union, Callable, Optional
@@ -31,7 +30,7 @@ PASSWORD_CHAR = "\u25cf"
 # sessions; writing that data to the terminal fills the PTY buffer and
 # deadlocks the editor's Textual WriterThread.  Data is queued here and
 # replayed when the editor exits.
-_editor_active = False
+_editor_active = False  # pylint: disable=invalid-name
 _editor_buffer: list[bytes] = []
 
 __all__ = (
@@ -157,7 +156,7 @@ if HAS_PROMPT_TOOLKIT:
 
 
 def _launch_tui_editor(
-    event: Any, editor_type: str, writer: Union[TelnetWriter, TelnetWriterUnicode]
+    _event: Any, editor_type: str, writer: Union[TelnetWriter, TelnetWriterUnicode]
 ) -> None:
     """
     Launch a TUI editor for macros or autoreplies in a subprocess.
@@ -165,11 +164,11 @@ def _launch_tui_editor(
     Suspends the prompt_toolkit app, runs the editor, then reloads
     definitions on return.
 
-    :param event: prompt_toolkit key event.
+    :param _event: prompt_toolkit key event (unused).
     :param editor_type: ``"macros"`` or ``"autoreplies"``.
     :param writer: Telnet writer with file path and definition attributes.
     """
-    import os  # pylint: disable=import-outside-toplevel
+    import os  # pylint: disable=import-outside-toplevel,redefined-outer-name
     import subprocess  # pylint: disable=import-outside-toplevel
 
     _xdg = os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config"))
@@ -187,15 +186,15 @@ def _launch_tui_editor(
         entry = "edit_autoreplies_main"
 
     cmd = [
-        sys.executable, "-c",
-        f"from telnetlib3.client_tui import {entry}; "
-        f"{entry}({path!r}, {_session_key!r})",
+        sys.executable,
+        "-c",
+        f"from telnetlib3.client_tui import {entry}; " f"{entry}({path!r}, {_session_key!r})",
     ]
 
     log = logging.getLogger(__name__)
 
     def _run_editor() -> None:
-        global _editor_active  # noqa: PLW0603
+        global _editor_active  # noqa: PLW0603  # pylint: disable=global-statement
         # Reset DECSTBM scroll region before launching TUI subprocess —
         # the Textual app uses the alternate screen buffer, but some
         # terminals share scroll region state across buffers, causing a
@@ -232,7 +231,9 @@ def _launch_tui_editor(
         else:
             _reload_autoreplies(writer, path, _session_key, log)
 
-    from prompt_toolkit.application import run_in_terminal  # pylint: disable=import-outside-toplevel
+    from prompt_toolkit.application import (  # pylint: disable=import-error,import-outside-toplevel
+        run_in_terminal,
+    )
 
     run_in_terminal(_run_editor)
 
@@ -244,17 +245,20 @@ def _reload_macros(
     log: logging.Logger,
 ) -> None:
     """Reload macro definitions from disk after editing."""
-    import os  # pylint: disable=import-outside-toplevel
+    import os  # pylint: disable=import-outside-toplevel,redefined-outer-name
 
     if not os.path.exists(path):
         return
     from .macros import load_macros  # pylint: disable=import-outside-toplevel
 
     try:
+        # pylint: disable=protected-access
         writer._macro_defs = load_macros(path, session_key)  # type: ignore[union-attr]
         writer._macros_file = path  # type: ignore[union-attr]
-        log.info("reloaded %d macros from %s", len(writer._macro_defs), path)  # type: ignore[union-attr]
-    except (ValueError, json.JSONDecodeError) as exc:
+        n_macros = len(writer._macro_defs)  # type: ignore[union-attr]
+        # pylint: enable=protected-access
+        log.info("reloaded %d macros from %s", n_macros, path)
+    except ValueError as exc:
         log.warning("failed to reload macros: %s", exc)
 
 
@@ -265,17 +269,20 @@ def _reload_autoreplies(
     log: logging.Logger,
 ) -> None:
     """Reload autoreply rules from disk after editing."""
-    import os  # pylint: disable=import-outside-toplevel
+    import os  # pylint: disable=import-outside-toplevel,redefined-outer-name
 
     if not os.path.exists(path):
         return
     from .autoreply import load_autoreplies  # pylint: disable=import-outside-toplevel
 
     try:
+        # pylint: disable=protected-access
         writer._autoreply_rules = load_autoreplies(path, session_key)  # type: ignore[union-attr]
         writer._autoreplies_file = path  # type: ignore[union-attr]
-        log.info("reloaded %d autoreplies from %s", len(writer._autoreply_rules), path)  # type: ignore[union-attr]
-    except (ValueError, json.JSONDecodeError) as exc:
+        n_rules = len(writer._autoreply_rules)  # type: ignore[union-attr]
+        # pylint: enable=protected-access
+        log.info("reloaded %d autoreplies from %s", n_rules, path)
+    except ValueError as exc:
         log.warning("failed to reload autoreplies: %s", exc)
 
 
@@ -554,8 +561,7 @@ if sys.platform != "win32":
                         app.current_buffer.insert_text(text)
 
                 autoreply_engine = AutoreplyEngine(
-                    _ar_rules, telnet_writer, telnet_writer.log,
-                    insert_fn=_insert_into_prompt,
+                    _ar_rules, telnet_writer, telnet_writer.log, insert_fn=_insert_into_prompt
                 )
 
             server_done = False
@@ -644,9 +650,7 @@ if sys.platform != "win32":
             if _ar_rules_b:
                 from .autoreply import AutoreplyEngine  # pylint: disable=import-outside-toplevel
 
-                autoreply_engine_b = AutoreplyEngine(
-                    _ar_rules_b, telnet_writer, telnet_writer.log
-                )
+                autoreply_engine_b = AutoreplyEngine(_ar_rules_b, telnet_writer, telnet_writer.log)
 
             server_done = False
 

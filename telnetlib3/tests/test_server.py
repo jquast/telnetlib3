@@ -81,6 +81,7 @@ async def test_connection_lost_remove_done_callback_raises():
 @pytest.mark.asyncio
 async def test_data_received_trace_log():
     import logging
+
     from telnetlib3.accessories import TRACE
 
     server = BaseServer(encoding=False)

@@ -16,9 +16,7 @@ def _fn_encoding(incoming):
 
 
 def test_reader_instantiation_safety():
-    assert repr(telnetlib3.TelnetReader(limit=1999)) == (
-        "<TelnetReader limit=1999 encoding=False>"
-    )
+    assert repr(telnetlib3.TelnetReader(limit=1999)) == ("<TelnetReader limit=1999 encoding=False>")
 
 
 def test_reader_with_encoding_instantiation_safety():
@@ -122,14 +120,10 @@ async def test_telnet_reader_read_exactly_unicode(bind_host, unused_tcp_port):
             client_reader,
             client_writer,
         ):
-            assert await asyncio.wait_for(
-                client_reader.readexactly(len(given)), 0.5
-            ) == given
+            assert await asyncio.wait_for(client_reader.readexactly(len(given)), 0.5) == given
 
             with pytest.raises(asyncio.IncompleteReadError) as exc_info:
-                await asyncio.wait_for(
-                    client_reader.readexactly(len(given_partial) + 1), 0.5
-                )
+                await asyncio.wait_for(client_reader.readexactly(len(given_partial) + 1), 0.5)
 
             assert exc_info.value.partial == given_partial
             assert exc_info.value.expected == len(given_partial) + 1
@@ -149,14 +143,10 @@ async def test_telnet_reader_read_exactly_bytes(bind_host, unused_tcp_port):
         async with open_connection(
             host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False
         ) as (client_reader, client_writer):
-            assert await asyncio.wait_for(
-                client_reader.readexactly(len(given)), 0.5
-            ) == given
+            assert await asyncio.wait_for(client_reader.readexactly(len(given)), 0.5) == given
 
             with pytest.raises(asyncio.IncompleteReadError) as exc_info:
-                await asyncio.wait_for(
-                    client_reader.readexactly(len(given_partial) + 1), 0.5
-                )
+                await asyncio.wait_for(client_reader.readexactly(len(given_partial) + 1), 0.5)
 
             assert exc_info.value.partial == given_partial
             assert exc_info.value.expected == len(given_partial) + 1

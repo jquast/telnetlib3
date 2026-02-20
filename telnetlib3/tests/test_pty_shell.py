@@ -833,10 +833,7 @@ async def test_pty_session_ga_timer_cancelled_by_new_output(mock_session):
     assert len(ga_calls) == 0
 
 
-@pytest.mark.parametrize(
-    "never_send_ga,raw_mode",
-    [(True, False), (False, True)],
-)
+@pytest.mark.parametrize("never_send_ga,raw_mode", [(True, False), (False, True)])
 async def test_pty_session_ga_timer_suppressed(mock_session, never_send_ga, raw_mode):
     """GA timer is not scheduled when never_send_ga is set or in raw_mode."""
     session, _ = mock_session({"charset": "utf-8"}, capture_writes=True)

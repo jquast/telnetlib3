@@ -666,6 +666,7 @@ def test_server_connection_double_close(bind_host, unused_tcp_port):
 
 def test_client_read_until_timeout(bind_host, unused_tcp_port):
     """TelnetConnection.read_until times out when match not found."""
+
     def handler(server_conn):
         server_conn.write("no match here")
         server_conn.flush(timeout=5)
@@ -685,6 +686,7 @@ def test_client_read_until_timeout(bind_host, unused_tcp_port):
 
 def test_client_flush_timeout(bind_host, unused_tcp_port):
     """TelnetConnection.flush works after writing data."""
+
     def handler(server_conn):
         server_conn.read(5, timeout=5)
 

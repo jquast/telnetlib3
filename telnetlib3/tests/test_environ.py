@@ -203,10 +203,7 @@ async def test_on_request_environ_user_excluded_for_ms_telnet(ttype1, ttype2, ex
     assert "LOGNAME" in result
 
 
-@pytest.mark.parametrize(
-    "ttype_refused,final",
-    [(True, False), (False, True)],
-)
+@pytest.mark.parametrize("ttype_refused,final", [(True, False), (False, True)])
 async def test_check_negotiation_triggers_environ(ttype_refused, final):
     """check_negotiation sends DO NEW_ENVIRON on TTYPE refusal or final."""
     server = _make_server()
@@ -227,10 +224,7 @@ async def test_check_negotiation_no_advanced_skips_environ():
     assert not server.writer.pending_option.get(DO + NEW_ENVIRON)
 
 
-@pytest.mark.parametrize(
-    "ttype,expect_requested",
-    [("xterm", True), ("ANSI", False)],
-)
+@pytest.mark.parametrize("ttype,expect_requested", [("xterm", True), ("ANSI", False)])
 async def test_on_ttype_environ_behavior(ttype, expect_requested):
     """on_ttype sends DO NEW_ENVIRON for non-ANSI, defers for ANSI."""
     server = _make_server()

@@ -50,33 +50,15 @@ def test_color_config_defaults() -> None:
 class TestSgrCodeToPaletteIndex:
     @pytest.mark.parametrize(
         "code,expected",
-        [(30, 0), (31, 1), (32, 2), (33, 3), (34, 4), (35, 5), (36, 6), (37, 7)],
-    )
-    def test_normal_foreground(self, code: int, expected: int) -> None:
-        assert _sgr_code_to_palette_index(code) == expected
-
-    @pytest.mark.parametrize(
-        "code,expected",
-        [(40, 0), (41, 1), (42, 2), (43, 3), (44, 4), (45, 5), (46, 6), (47, 7)],
-    )
-    def test_normal_background(self, code: int, expected: int) -> None:
-        assert _sgr_code_to_palette_index(code) == expected
-
-    @pytest.mark.parametrize(
-        "code,expected",
-        [(90, 8), (91, 9), (92, 10), (93, 11), (94, 12), (95, 13), (96, 14), (97, 15)],
-    )
-    def test_bright_foreground(self, code: int, expected: int) -> None:
-        assert _sgr_code_to_palette_index(code) == expected
-
-    @pytest.mark.parametrize(
-        "code,expected",
         [
-            (100, 8), (101, 9), (102, 10), (103, 11),
-            (104, 12), (105, 13), (106, 14), (107, 15),
+            (30, 0), (31, 1), (32, 2), (33, 3), (34, 4), (35, 5), (36, 6), (37, 7),
+            (40, 0), (41, 1), (42, 2), (43, 3), (44, 4), (45, 5), (46, 6), (47, 7),
+            (90, 8), (91, 9), (92, 10), (93, 11), (94, 12), (95, 13), (96, 14), (97, 15),
+            (100, 8), (101, 9), (102, 10), (103, 11), (104, 12), (105, 13), (106, 14),
+            (107, 15),
         ],
     )
-    def test_bright_background(self, code: int, expected: int) -> None:
+    def test_color_code_maps_to_palette_index(self, code: int, expected: int) -> None:
         assert _sgr_code_to_palette_index(code) == expected
 
     @pytest.mark.parametrize("code", [0, 1, 4, 7, 22, 38, 39, 48, 49, 128])
@@ -104,9 +86,7 @@ def test_is_foreground_code_false(code: int) -> None:
     ],
 )
 def test_adjust_color_values(
-    r: int, g: int, b: int,
-    brightness: float, contrast: float,
-    expected: tuple[int, int, int],
+    r: int, g: int, b: int, brightness: float, contrast: float, expected: tuple[int, int, int]
 ) -> None:
     assert _adjust_color(r, g, b, brightness, contrast) == expected
 
@@ -130,16 +110,9 @@ def test_adjust_color_in_range() -> None:
 
 @pytest.mark.parametrize(
     "sgr,palette_idx,prefix",
-    [
-        ("31", 1, "38;2"),
-        ("41", 1, "48;2"),
-        ("91", 9, "38;2"),
-        ("101", 9, "48;2"),
-    ],
+    [("31", 1, "38;2"), ("41", 1, "48;2"), ("91", 9, "38;2"), ("101", 9, "48;2")],
 )
-def test_color_filter_basic_translation(
-    sgr: str, palette_idx: int, prefix: str,
-) -> None:
+def test_color_filter_basic_translation(sgr: str, palette_idx: int, prefix: str) -> None:
     f = _make_filter()
     result = f.filter(f"\x1b[{sgr}m")
     rgb = PALETTES["ega"][palette_idx]
@@ -147,8 +120,7 @@ def test_color_filter_basic_translation(
 
 
 @pytest.mark.parametrize(
-    "code,idx",
-    [(30, 0), (31, 1), (32, 2), (33, 3), (34, 4), (35, 5), (36, 6), (37, 7)],
+    "code,idx", [(30, 0), (31, 1), (32, 2), (33, 3), (34, 4), (35, 5), (36, 6), (37, 7)]
 )
 def test_all_normal_foreground_colors(code: int, idx: int) -> None:
     f = _make_filter()
@@ -158,8 +130,7 @@ def test_all_normal_foreground_colors(code: int, idx: int) -> None:
 
 
 @pytest.mark.parametrize(
-    "code,idx",
-    [(40, 0), (41, 1), (42, 2), (43, 3), (44, 4), (45, 5), (46, 6), (47, 7)],
+    "code,idx", [(40, 0), (41, 1), (42, 2), (43, 3), (44, 4), (45, 5), (46, 6), (47, 7)]
 )
 def test_all_normal_background_colors(code: int, idx: int) -> None:
     f = _make_filter()
@@ -184,8 +155,7 @@ class TestColorFilterReset:
 
     def test_reset_in_compound_sequence(self) -> None:
         f = _make_filter(background_color=(0, 0, 0))
-        result = f.filter("\x1b[0;31m")
-        assert "48;2;0;0;0" in result
+        assert "48;2;0;0;0" in f.filter("\x1b[0;31m")
 
     def test_reset_with_bg_preserves_explicit_bg(self) -> None:
         """SGR 0;30;42 must not override green bg with configured black bg."""
@@ -206,23 +176,20 @@ class TestColorFilterReset:
         """ESC[0m ESC[1m should produce bright white (palette 15)."""
         f = _make_filter(background_color=(0, 0, 0))
         f.filter("\x1b[0m")
-        result = f.filter("\x1b[1m")
-        assert "38;2;255;255;255" in result
+        assert "38;2;255;255;255" in f.filter("\x1b[1m")
 
     def test_bold_after_explicit_fg_emits_bright_color(self) -> None:
         """ESC[31m ESC[1m should produce bright red (palette 9)."""
         f = _make_filter(background_color=(0, 0, 0))
         f.filter("\x1b[31m")
-        result = f.filter("\x1b[1m")
-        assert "38;2;255;85;85" in result
+        assert "38;2;255;85;85" in f.filter("\x1b[1m")
 
     def test_unbold_restores_normal_fg(self) -> None:
         """ESC[31m ESC[1m ESC[22m should restore normal red (palette 1)."""
         f = _make_filter(background_color=(0, 0, 0))
         f.filter("\x1b[31m")
         f.filter("\x1b[1m")
-        result = f.filter("\x1b[22m")
-        assert "38;2;170;0;0" in result
+        assert "38;2;170;0;0" in f.filter("\x1b[22m")
 
     def test_bold_with_explicit_fg_in_same_seq_no_double_inject(self) -> None:
         """ESC[1;31m should not inject default bright fg."""
@@ -232,24 +199,18 @@ class TestColorFilterReset:
         assert "255;255;255" not in result
 
 
-def test_256_color_foreground_pass_through() -> None:
+@pytest.mark.parametrize(
+    "seq,needle",
+    [
+        ("\x1b[38;5;196m", "38;5;196"),
+        ("\x1b[38;2;100;200;50m", "38;2;100;200;50"),
+        ("\x1b[48;5;42m", "48;5;42"),
+        ("\x1b[48;2;10;20;30m", "48;2;10;20;30"),
+    ],
+)
+def test_extended_color_pass_through(seq: str, needle: str) -> None:
     f = _make_filter()
-    assert "38;5;196" in f.filter("\x1b[38;5;196m")
-
-
-def test_24bit_color_foreground_pass_through() -> None:
-    f = _make_filter()
-    assert "38;2;100;200;50" in f.filter("\x1b[38;2;100;200;50m")
-
-
-def test_256_color_background_pass_through() -> None:
-    f = _make_filter()
-    assert "48;5;42" in f.filter("\x1b[48;5;42m")
-
-
-def test_24bit_color_background_pass_through() -> None:
-    f = _make_filter()
-    assert "48;2;10;20;30" in f.filter("\x1b[48;2;10;20;30m")
+    assert needle in f.filter(seq)
 
 
 def test_bold_emits_bright_default_fg() -> None:
@@ -259,34 +220,30 @@ def test_bold_emits_bright_default_fg() -> None:
     assert "38;2;255;255;255" in result
 
 
-def test_underline_pass_through() -> None:
+@pytest.mark.parametrize(
+    "seq,needle",
+    [
+        ("\x1b[4m", "\x1b[4m"),
+        ("\x1b[2J", "\x1b[2J"),
+        ("\x1b[H", "\x1b[H"),
+        ("\x1b[38:2::255:0:0m", "\x1b[38:2::255:0:0m"),
+    ],
+)
+def test_non_sgr_pass_through(seq: str, needle: str) -> None:
     f = _make_filter()
-    assert "\x1b[4m" in f.filter("\x1b[4m")
+    assert needle in f.filter(seq)
 
 
-def test_default_fg_translated() -> None:
+@pytest.mark.parametrize(
+    "sgr_code,expected_prefix",
+    [
+        ("39", "38;2;170;170;170"),
+        ("49", "48;2;0;0;0"),
+    ],
+)
+def test_default_color_translated(sgr_code: str, expected_prefix: str) -> None:
     f = _make_filter()
-    assert "38;2;170;170;170" in f.filter("\x1b[39m")
-
-
-def test_default_bg_translated() -> None:
-    f = _make_filter()
-    assert "48;2;0;0;0" in f.filter("\x1b[49m")
-
-
-def test_non_sgr_escape_pass_through() -> None:
-    f = _make_filter()
-    assert "\x1b[2J" in f.filter("\x1b[2J")
-
-
-def test_cursor_home_pass_through() -> None:
-    f = _make_filter()
-    assert "\x1b[H" in f.filter("\x1b[H")
-
-
-def test_colon_extended_color_pass_through() -> None:
-    f = _make_filter()
-    assert "\x1b[38:2::255:0:0m" in f.filter("\x1b[38:2::255:0:0m")
+    assert expected_prefix in f.filter(f"\x1b[{sgr_code}m")
 
 
 def test_bold_plus_red_uses_bright() -> None:
@@ -360,8 +317,7 @@ def test_bold_does_not_affect_background() -> None:
 
 
 @pytest.mark.parametrize(
-    "code,normal_idx",
-    [(30, 0), (31, 1), (32, 2), (33, 3), (34, 4), (35, 5), (36, 6), (37, 7)],
+    "code,normal_idx", [(30, 0), (31, 1), (32, 2), (33, 3), (34, 4), (35, 5), (36, 6), (37, 7)]
 )
 def test_all_bold_fg_use_bright_palette(code: int, normal_idx: int) -> None:
     f = _make_filter()
@@ -379,9 +335,7 @@ def test_reset_bold_color_in_same_seq() -> None:
 
 class TestColorFilterIceColors:
     def _make_ice_filter(self, ice_colors: bool = True) -> ColorFilter:
-        return ColorFilter(
-            ColorConfig(brightness=1.0, contrast=1.0, ice_colors=ice_colors)
-        )
+        return ColorFilter(ColorConfig(brightness=1.0, contrast=1.0, ice_colors=ice_colors))
 
     def test_blink_bg_uses_bright_bg(self) -> None:
         f = self._make_ice_filter()
@@ -431,12 +385,9 @@ class TestColorFilterIceColors:
         assert f"48;2;{bright_black[0]};{bright_black[1]};{bright_black[2]}" in result
 
     @pytest.mark.parametrize(
-        "code,normal_idx",
-        [(40, 0), (41, 1), (42, 2), (43, 3), (44, 4), (45, 5), (46, 6), (47, 7)],
+        "code,normal_idx", [(40, 0), (41, 1), (42, 2), (43, 3), (44, 4), (45, 5), (46, 6), (47, 7)]
     )
-    def test_all_blink_bg_use_bright_palette(
-        self, code: int, normal_idx: int,
-    ) -> None:
+    def test_all_blink_bg_use_bright_palette(self, code: int, normal_idx: int) -> None:
         f = self._make_ice_filter()
         result = f.filter(f"\x1b[5;{code}m")
         bright_rgb = PALETTES["ega"][normal_idx + 8]
@@ -490,18 +441,14 @@ class TestColorFilterChunkedInput:
 
 
 def test_color_filter_initial_background_first_output() -> None:
-    f = ColorFilter(
-        ColorConfig(brightness=1.0, contrast=1.0, background_color=(0, 0, 0))
-    )
+    f = ColorFilter(ColorConfig(brightness=1.0, contrast=1.0, background_color=(0, 0, 0)))
     result = f.filter("hello")
     assert result.startswith("\x1b[48;2;0;0;0m")
     assert result.endswith("hello")
 
 
 def test_color_filter_initial_background_second_output() -> None:
-    f = ColorFilter(
-        ColorConfig(brightness=1.0, contrast=1.0, background_color=(0, 0, 0))
-    )
+    f = ColorFilter(ColorConfig(brightness=1.0, contrast=1.0, background_color=(0, 0, 0)))
     f.filter("hello")
     result2 = f.filter("world")
     assert not result2.startswith("\x1b[48;2;")
@@ -535,24 +482,18 @@ def test_color_filter_reduced_contrast() -> None:
 
 
 def test_color_filter_custom_background_in_reset() -> None:
-    f = ColorFilter(
-        ColorConfig(brightness=1.0, contrast=1.0, background_color=(32, 32, 48))
-    )
+    f = ColorFilter(ColorConfig(brightness=1.0, contrast=1.0, background_color=(32, 32, 48)))
     assert "\x1b[48;2;32;32;48m" in f.filter("\x1b[0m")
 
 
 def test_color_filter_custom_background_on_initial() -> None:
-    f = ColorFilter(
-        ColorConfig(brightness=1.0, contrast=1.0, background_color=(32, 32, 48))
-    )
+    f = ColorFilter(ColorConfig(brightness=1.0, contrast=1.0, background_color=(32, 32, 48)))
     assert f.filter("hello").startswith("\x1b[48;2;32;32;48m")
 
 
 @pytest.mark.parametrize("name", [n for n in PALETTES if n != "c64"])
 def test_color_filter_palette_red_foreground(name: str) -> None:
-    f = ColorFilter(
-        ColorConfig(palette_name=name, brightness=1.0, contrast=1.0)
-    )
+    f = ColorFilter(ColorConfig(palette_name=name, brightness=1.0, contrast=1.0))
     result = f.filter("\x1b[31m")
     rgb = PALETTES[name][1]
     assert f"38;2;{rgb[0]};{rgb[1]};{rgb[2]}" in result
@@ -668,9 +609,7 @@ class TestAtasciiControlFilter:
 
     def test_backspace_erases(self) -> None:
         f = AtasciiControlFilter()
-        assert f.filter("DINGO\u25c0\u25c0\u25c0\u25c0\u25c0") == (
-            "DINGO" + "\x08\x1b[P" * 5
-        )
+        assert f.filter("DINGO\u25c0\u25c0\u25c0\u25c0\u25c0") == ("DINGO" + "\x08\x1b[P" * 5)
 
     def test_plain_text_unchanged(self) -> None:
         f = AtasciiControlFilter()

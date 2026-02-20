@@ -71,9 +71,7 @@ async def test_telnet_server_on_ttype_beyond_max(bind_host, unused_tcp_port):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WILL + TTYPE)
             for send_ttype in given_ttypes:
-                writer.write(
-                    IAC + SB + TTYPE + IS + send_ttype.encode("ascii") + IAC + SE
-                )
+                writer.write(IAC + SB + TTYPE + IS + send_ttype.encode("ascii") + IAC + SE)
 
             srv_instance = await asyncio.wait_for(_waiter, 0.5)
             for idx in range(telnetlib3.TelnetServer.TTYPE_LOOPMAX):
@@ -110,22 +108,12 @@ async def test_telnet_server_on_ttype_beyond_max(bind_host, unused_tcp_port):
         ),
         (
             ("ALPHA", "BETA", "MTTS 137"),
-            {
-                "ttype1": "ALPHA",
-                "ttype2": "BETA",
-                "ttype3": "MTTS 137",
-                "TERM": "BETA",
-            },
+            {"ttype1": "ALPHA", "ttype2": "BETA", "ttype3": "MTTS 137", "TERM": "BETA"},
         ),
-        (
-            ("ALPHA", "", "BETA"),
-            {"ttype1": "ALPHA", "ttype2": "BETA", "TERM": "BETA"},
-        ),
+        (("ALPHA", "", "BETA"), {"ttype1": "ALPHA", "ttype2": "BETA", "TERM": "BETA"}),
     ],
 )
-async def test_telnet_server_on_ttype_variants(
-    bind_host, unused_tcp_port, given_ttypes, expected
-):
+async def test_telnet_server_on_ttype_variants(bind_host, unused_tcp_port, given_ttypes, expected):
     """Test Server's callback method on_ttype() with various sequences."""
     _waiter = asyncio.Future()
 
@@ -144,9 +132,7 @@ async def test_telnet_server_on_ttype_variants(
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WILL + TTYPE)
             for send_ttype in given_ttypes:
-                writer.write(
-                    IAC + SB + TTYPE + IS + send_ttype.encode("ascii") + IAC + SE
-                )
+                writer.write(IAC + SB + TTYPE + IS + send_ttype.encode("ascii") + IAC + SE)
 
             srv_instance = await asyncio.wait_for(_waiter, 0.5)
             for key, value in expected.items():

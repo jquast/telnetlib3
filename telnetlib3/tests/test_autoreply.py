@@ -219,8 +219,7 @@ def test_save_autoreplies_roundtrip(tmp_path):
     original = [
         AutoreplyRule(pattern=re.compile(r"\d+ gold"), reply="get gold<CR>"),
         AutoreplyRule(
-            pattern=re.compile(r"(\w+) attacks", re.MULTILINE | re.DOTALL),
-            reply="kill \\1<CR>",
+            pattern=re.compile(r"(\w+) attacks", re.MULTILINE | re.DOTALL), reply="kill \\1<CR>"
         ),
     ]
     save_autoreplies(str(fp), original, _SK)
@@ -327,12 +326,7 @@ async def test_autoreply_engine_feed_matches_partial_line():
 @pytest.mark.asyncio
 async def test_autoreply_engine_mud_prompt_without_newline():
     writer, written = _mock_writer()
-    rules = [
-        AutoreplyRule(
-            pattern=re.compile(r"What is your name\?"),
-            reply="dingo<CR>",
-        )
-    ]
+    rules = [AutoreplyRule(pattern=re.compile(r"What is your name\?"), reply="dingo<CR>")]
     engine = AutoreplyEngine(rules, writer, writer.log)
     engine.feed("Welcome to the Mini-MUD!\n")
     await asyncio.sleep(0.05)
@@ -358,11 +352,7 @@ async def test_autoreply_engine_no_double_trigger():
 @pytest.mark.asyncio
 async def test_autoreply_engine_group_substitution():
     writer, written = _mock_writer()
-    rules = [
-        AutoreplyRule(
-            pattern=re.compile(r"a (\w+) (pheasant|duck)"), reply="kill \\2<CR>"
-        )
-    ]
+    rules = [AutoreplyRule(pattern=re.compile(r"a (\w+) (pheasant|duck)"), reply="kill \\2<CR>")]
     engine = AutoreplyEngine(rules, writer, writer.log)
     engine.feed("a black pheasant\n")
     await asyncio.sleep(0.05)
@@ -412,9 +402,7 @@ async def test_autoreply_engine_cancel():
 @pytest.mark.asyncio
 async def test_autoreply_engine_multiline_match():
     writer, written = _mock_writer()
-    rules = [
-        AutoreplyRule(pattern=re.compile(r"start.*end", re.DOTALL), reply="matched<CR>")
-    ]
+    rules = [AutoreplyRule(pattern=re.compile(r"start.*end", re.DOTALL), reply="matched<CR>")]
     engine = AutoreplyEngine(rules, writer, writer.log)
     engine.feed("start\nmiddle\nend\n")
     await asyncio.sleep(0.05)

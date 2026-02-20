@@ -186,11 +186,7 @@ async def test_feed_data_empty_returns_early():
     [
         (lambda: TelnetReader(), "readuntil", (b"\n",)),
         (lambda: TelnetReader(), "readexactly", (5,)),
-        (
-            lambda: TelnetReaderUnicode(fn_encoding=lambda incoming=True: "ascii"),
-            "readline",
-            (),
-        ),
+        (lambda: TelnetReaderUnicode(fn_encoding=lambda incoming=True: "ascii"), "readline", ()),
         (
             lambda: TelnetReaderUnicode(fn_encoding=lambda incoming=True: "ascii"),
             "readexactly",

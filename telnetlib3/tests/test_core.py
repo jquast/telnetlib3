@@ -131,9 +131,7 @@ async def test_telnet_server_advanced_negotiation(bind_host, unused_tcp_port):
 
 
 @pytest.mark.parametrize("option,trigger_echo", [(SGA, False), (ECHO, True)])
-async def test_line_mode_skips_will_option(
-    bind_host, unused_tcp_port, option, trigger_echo
-):
+async def test_line_mode_skips_will_option(bind_host, unused_tcp_port, option, trigger_echo):
     """Server with line_mode=True does not send WILL SGA or WILL ECHO."""
     _waiter = asyncio.Future()
 
@@ -143,10 +141,7 @@ async def test_line_mode_skips_will_option(
             _waiter.set_result(self)
 
     async with create_server(
-        protocol_factory=ServerTestLineMode,
-        host=bind_host,
-        port=unused_tcp_port,
-        line_mode=True,
+        protocol_factory=ServerTestLineMode, host=bind_host, port=unused_tcp_port, line_mode=True
     ):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WILL + TTYPE)
@@ -181,9 +176,7 @@ async def test_default_sends_will_sga(bind_host, unused_tcp_port):
 
 
 @pytest.mark.parametrize("use_eof", [False, True])
-async def test_telnet_server_disconnect_by_client(
-    bind_host, unused_tcp_port, use_eof
-):
+async def test_telnet_server_disconnect_by_client(bind_host, unused_tcp_port, use_eof):
     """Exercise TelnetServer.connection_lost and eof_received."""
     async with create_server(host=bind_host, port=unused_tcp_port) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
@@ -192,9 +185,7 @@ async def test_telnet_server_disconnect_by_client(
             assert hello == expect_hello
             writer.write(IAC + WONT + TTYPE)
 
-            srv_instance = await asyncio.wait_for(
-                server.wait_for_client(), 0.5
-            )
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
 
             assert srv_instance.writer.remote_option[TTYPE] is False
             assert srv_instance.writer.pending_option.get(TTYPE) is not True

@@ -629,9 +629,7 @@ else:
                             AutoreplyEngine,
                         )
 
-                        _ar_engine = AutoreplyEngine(
-                            _ar_rules, telnet_writer, telnet_writer.log
-                        )
+                        _ar_engine = AutoreplyEngine(_ar_rules, telnet_writer, telnet_writer.log)
                         # pylint: disable-next=protected-access
                         telnet_writer._autoreply_engine = _ar_engine  # type: ignore[union-attr]
                 if _ar_engine is not None:
@@ -692,14 +690,10 @@ else:
             _n_autoreplies = len(getattr(telnet_writer, "_autoreply_rules", []) or [])
             if _n_macros:
                 _mf = getattr(telnet_writer, "_macros_file", "")
-                stdout.write(
-                    f"{_n_macros} macros loaded from {_mf}.{linesep}".encode()
-                )
+                stdout.write(f"{_n_macros} macros loaded from {_mf}.{linesep}".encode())
             if _n_autoreplies:
                 _af = getattr(telnet_writer, "_autoreplies_file", "")
-                stdout.write(
-                    f"{_n_autoreplies} autoreplies loaded from {_af}.{linesep}".encode()
-                )
+                stdout.write(f"{_n_autoreplies} autoreplies loaded from {_af}.{linesep}".encode())
             escape_name = accessories.name_unicode(keyboard_escape)
             stdout.write(f"Escape character is '{escape_name}'.{linesep}".encode())
             term.setup_winch()

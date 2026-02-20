@@ -167,10 +167,7 @@ async def test_relay_shell_client_eof_during_passcode(monkeypatch):
 @pytest.mark.asyncio
 async def test_relay_shell_client_eof_during_relay(monkeypatch):
     """Client sends EOF during active relay; server writer should close."""
-    client_reader = PayloadReader(
-        list("867-5309\r")
-        + [""]  # EOF from client during relay
-    )
+    client_reader = PayloadReader(list("867-5309\r") + [""])  # EOF from client during relay
     client_writer = FakeWriter()
 
     async def _no_sleep(_):
@@ -242,10 +239,7 @@ async def test_relay_shell_server_eof_closes_client(monkeypatch):
 @pytest.mark.asyncio
 async def test_relay_shell_client_data_forwarded_to_server(monkeypatch):
     """Client input during relay is forwarded to server writer."""
-    client_reader = PayloadReader(
-        list("867-5309\r")
-        + ["client typing", ""]
-    )
+    client_reader = PayloadReader(list("867-5309\r") + ["client typing", ""])
     client_writer = FakeWriter()
 
     async def _no_sleep(_):

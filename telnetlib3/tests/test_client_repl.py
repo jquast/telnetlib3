@@ -448,9 +448,7 @@ async def test_pt_autoreply_integration() -> None:
     writer.mode = "local"
     writer.write = lambda text: written.append(text)
     writer.log = logging.getLogger("test.pt_autoreply")
-    writer._autoreply_rules = [
-        AutoreplyRule(pattern=re.compile(r"trigger"), reply="reply<CR>")
-    ]
+    writer._autoreply_rules = [AutoreplyRule(pattern=re.compile(r"trigger"), reply="reply<CR>")]
 
     stdout, _ = _mock_stdout()
     term = types.SimpleNamespace(on_resize=None)
@@ -486,9 +484,7 @@ def test_reload_macros_after_edit(tmp_path, monkeypatch) -> None:
 
     sk = "test.host:23"
     macro_file = tmp_path / "macros.json"
-    macro_file.write_text(
-        json.dumps({sk: {"macros": [{"key": "f5", "text": "hello<CR>"}]}})
-    )
+    macro_file.write_text(json.dumps({sk: {"macros": [{"key": "f5", "text": "hello<CR>"}]}}))
 
     import logging
 
@@ -508,9 +504,7 @@ def test_reload_autoreplies_after_edit(tmp_path) -> None:
 
     sk = "test.host:23"
     ar_file = tmp_path / "autoreplies.json"
-    ar_file.write_text(
-        json.dumps({sk: {"autoreplies": [{"pattern": "hello", "reply": "world"}]}})
-    )
+    ar_file.write_text(json.dumps({sk: {"autoreplies": [{"pattern": "hello", "reply": "world"}]}}))
 
     import logging
 
@@ -580,10 +574,7 @@ async def test_basic_event_loop_server_eof() -> None:
     stdin_reader = asyncio.StreamReader()
     stdin_reader.feed_eof()
 
-    term = types.SimpleNamespace(
-        on_resize=None,
-        connect_stdin=lambda: _async_return(stdin_reader),
-    )
+    term = types.SimpleNamespace(on_resize=None, connect_stdin=lambda: _async_return(stdin_reader))
 
     stdout, transport = _mock_stdout()
     result = await _repl_event_loop_basic(reader, writer, term, stdout)
@@ -635,10 +626,7 @@ async def test_basic_event_loop_kludge_mode_switch() -> None:
     stdin_reader = asyncio.StreamReader()
     stdin_reader.feed_eof()
 
-    term = types.SimpleNamespace(
-        on_resize=None,
-        connect_stdin=lambda: _async_return(stdin_reader),
-    )
+    term = types.SimpleNamespace(on_resize=None, connect_stdin=lambda: _async_return(stdin_reader))
 
     stdout, _ = _mock_stdout()
     result = await _repl_event_loop_basic(reader, writer, term, stdout)
@@ -677,10 +665,7 @@ async def test_basic_event_loop_user_input_echo() -> None:
         stdin_reader.feed_eof()
         reader.feed_eof()
 
-    term = types.SimpleNamespace(
-        on_resize=None,
-        connect_stdin=lambda: _async_return(stdin_reader),
-    )
+    term = types.SimpleNamespace(on_resize=None, connect_stdin=lambda: _async_return(stdin_reader))
 
     stdout, transport = _mock_stdout()
     eof_task = asyncio.ensure_future(_delayed_eof())
@@ -724,10 +709,7 @@ async def test_basic_event_loop_password_masking() -> None:
         stdin_reader.feed_eof()
         reader.feed_eof()
 
-    term = types.SimpleNamespace(
-        on_resize=None,
-        connect_stdin=lambda: _async_return(stdin_reader),
-    )
+    term = types.SimpleNamespace(on_resize=None, connect_stdin=lambda: _async_return(stdin_reader))
 
     stdout, transport = _mock_stdout()
     eof_task = asyncio.ensure_future(_delayed_eof())

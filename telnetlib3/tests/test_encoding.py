@@ -109,23 +109,12 @@ async def test_telnet_client_and_server_encoding_bidirectional(bind_host, unused
 
 @pytest.mark.parametrize(
     "lang,expected_encoding",
-    [
-        ("uk_UA.KOI8-U", "KOI8-U"),
-        ("en_IL", "utf8"),
-        ("en_US.BOGUS-ENCODING", "utf8"),
-    ],
+    [("uk_UA.KOI8-U", "KOI8-U"), ("en_IL", "utf8"), ("en_US.BOGUS-ENCODING", "utf8")],
 )
-async def test_telnet_server_encoding_by_LANG(
-    bind_host, unused_tcp_port, lang, expected_encoding
-):
+async def test_telnet_server_encoding_by_LANG(bind_host, unused_tcp_port, lang, expected_encoding):
     """Server's encoding negotiated by LANG value."""
-    async with create_server(
-        host=bind_host, port=unused_tcp_port, connect_maxwait=0.5
-    ) as server:
-        async with asyncio_connection(bind_host, unused_tcp_port) as (
-            reader,
-            writer,
-        ):
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5) as server:
+        async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + DO + BINARY)
             writer.write(IAC + WILL + BINARY)
             writer.write(IAC + WILL + NEW_ENVIRON)
@@ -140,9 +129,7 @@ async def test_telnet_server_encoding_by_LANG(
             )
             writer.write(IAC + WONT + TTYPE)
 
-            srv_instance = await asyncio.wait_for(
-                server.wait_for_client(), 2.0
-            )
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 2.0)
             assert srv_instance.encoding(incoming=True) == expected_encoding
             assert srv_instance.get_extra_info("LANG") == lang
 
@@ -221,15 +208,14 @@ async def test_telnet_client_and_server_escape_iac_binary(bind_host, unused_tcp_
             assert eof == b""
 
 
-from telnetlib3.encodings.atarist import (
-    Codec as AtariCodec,
-    IncrementalEncoder as AtariIncrementalEncoder,
-    IncrementalDecoder as AtariIncrementalDecoder,
-    StreamWriter as AtariStreamWriter,
-    StreamReader as AtariStreamReader,
-    getregentry as atari_getregentry,
-    getaliases as atari_getaliases,
-)
+# local
+from telnetlib3.encodings.atarist import Codec as AtariCodec
+from telnetlib3.encodings.atarist import StreamReader as AtariStreamReader
+from telnetlib3.encodings.atarist import StreamWriter as AtariStreamWriter
+from telnetlib3.encodings.atarist import IncrementalDecoder as AtariIncrementalDecoder
+from telnetlib3.encodings.atarist import IncrementalEncoder as AtariIncrementalEncoder
+from telnetlib3.encodings.atarist import getaliases as atari_getaliases
+from telnetlib3.encodings.atarist import getregentry as atari_getregentry
 
 
 def test_atarist_roundtrip():
@@ -270,6 +256,7 @@ def test_atarist_incremental_decoder():
 
 def test_atarist_stream_writer():
     import io
+
     stream = io.BytesIO()
     writer = AtariStreamWriter(stream)
     writer.write("Hello")
@@ -278,6 +265,7 @@ def test_atarist_stream_writer():
 
 def test_atarist_stream_reader():
     import io
+
     stream = io.BytesIO(b"Hello")
     reader = AtariStreamReader(stream)
     result = reader.read()
@@ -286,6 +274,7 @@ def test_atarist_stream_reader():
 
 def test_atarist_getregentry():
     import codecs
+
     info = atari_getregentry()
     assert isinstance(info, codecs.CodecInfo)
     assert info.name == "atarist"

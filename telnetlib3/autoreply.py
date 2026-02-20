@@ -13,7 +13,7 @@ import re
 import json
 import asyncio
 import logging
-from typing import Any, Callable, Union, Optional
+from typing import Any, Union, Callable, Optional
 from dataclasses import dataclass
 
 # 3rd party
@@ -33,7 +33,6 @@ __all__ = (
 _DELAY_RE = re.compile(r"::(\d+(?:\.\d+)?)(ms|s)::")
 _CR_TOKEN = "<CR>"
 _GROUP_RE = re.compile(r"\\(\d+)")
-
 
 
 @dataclass
@@ -304,9 +303,8 @@ class AutoreplyEngine:
         """
         Feed server output text and check for matches.
 
-        Called from the server output handler in both REPL and raw
-        modes.  Searches after every chunk, including partial lines,
-        so that MUD prompts without trailing newlines are matched.
+        Called from the server output handler in both REPL and raw modes.  Searches after every
+        chunk, including partial lines, so that MUD prompts without trailing newlines are matched.
 
         :param text: Server output text.
         """

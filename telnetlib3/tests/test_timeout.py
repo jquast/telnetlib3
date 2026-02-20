@@ -51,10 +51,7 @@ async def test_telnet_server_set_timeout(bind_host, unused_tcp_port):
 
 @pytest.mark.parametrize(
     "timeout,encoding,elapsed_min,elapsed_max",
-    [
-        (0.050, "utf-8", 0.035, 0.150),
-        (0.150, False, 0.050, 0.200),
-    ],
+    [(0.050, "utf-8", 0.035, 0.150), (0.150, False, 0.050, 0.200)],
 )
 async def test_telnet_server_waitfor_timeout(
     bind_host, unused_tcp_port, timeout, encoding, elapsed_min, elapsed_max

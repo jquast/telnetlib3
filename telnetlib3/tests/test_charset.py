@@ -85,7 +85,6 @@ class CustomTelnetClient(telnetlib3.TelnetClient):
         return super().send_charset(offered)
 
 
-
 async def test_telnet_server_on_charset(bind_host, unused_tcp_port):
     """Test Server's callback method on_charset()."""
     _waiter = asyncio.Future()
@@ -186,7 +185,6 @@ async def test_telnet_client_no_charset(bind_host, unused_tcp_port):
             if server_instance["protocol"]:
                 server_instance["protocol"].writer.close()
                 await server_instance["protocol"].writer.wait_closed()
-
 
 
 def test_server_sends_do_and_will_charset():
@@ -317,7 +315,6 @@ def test_server_does_not_send_duplicate_will_charset():
     assert ws.remote_option.enabled(CHARSET)
 
 
-
 def test_client_responds_with_do_to_will_charset():
     """Test client responds with DO CHARSET when receiving WILL CHARSET from server."""
     # Create client writer instance
@@ -373,7 +370,6 @@ def test_unit_charset_negotiation_sequence():
     assert server_writer.local_option.enabled(CHARSET)
     assert client_writer.remote_option.enabled(CHARSET)
     assert client_writer.local_option.enabled(CHARSET)
-
 
 
 @pytest.mark.parametrize(

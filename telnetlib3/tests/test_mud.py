@@ -320,19 +320,25 @@ def test_msdp_decode_skips_garbage_bytes():
 
 
 def test_mssp_decode_duplicate_var_to_list():
-    buf = (
-        MSSP_VAR + b"PORT" + MSSP_VAL + b"6023"
-        + MSSP_VAR + b"PORT" + MSSP_VAL + b"6024"
-    )
+    buf = MSSP_VAR + b"PORT" + MSSP_VAL + b"6023" + MSSP_VAR + b"PORT" + MSSP_VAL + b"6024"
     result = mssp_decode(buf)
     assert result["PORT"] == ["6023", "6024"]
 
 
 def test_mssp_decode_triple_value_appends():
     buf = (
-        MSSP_VAR + b"PORT" + MSSP_VAL + b"6023"
-        + MSSP_VAR + b"PORT" + MSSP_VAL + b"6024"
-        + MSSP_VAR + b"PORT" + MSSP_VAL + b"6025"
+        MSSP_VAR
+        + b"PORT"
+        + MSSP_VAL
+        + b"6023"
+        + MSSP_VAR
+        + b"PORT"
+        + MSSP_VAL
+        + b"6024"
+        + MSSP_VAR
+        + b"PORT"
+        + MSSP_VAL
+        + b"6025"
     )
     result = mssp_decode(buf)
     assert result["PORT"] == ["6023", "6024", "6025"]

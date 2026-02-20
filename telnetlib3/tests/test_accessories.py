@@ -30,9 +30,7 @@ def test_name_unicode(given, expected):
 
 @pytest.mark.parametrize(
     "given,expected",
-    sorted(
-        {0: "0b00000000", 127: "0b01111111", 128: "0b10000000", 255: "0b11111111"}.items()
-    ),
+    sorted({0: "0b00000000", 127: "0b01111111", 128: "0b10000000", 255: "0b11111111"}.items()),
 )
 def test_eightbits(given, expected):
     """Test mapping of bit values to binary appearance string."""
@@ -57,9 +55,7 @@ def test_encoding_from_lang(given, expected):
 
 @pytest.mark.parametrize(
     "given,expected",
-    sorted(
-        {"en_IL": None, "en_US": None, "C": None, "POSIX": None, "UTF-8": None}.items()
-    ),
+    sorted({"en_IL": None, "en_US": None, "C": None, "POSIX": None, "UTF-8": None}.items()),
 )
 def test_encoding_from_lang_no_encoding(given, expected):
     """Test LANG values without encoding suffix return None."""

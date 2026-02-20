@@ -18,7 +18,7 @@ import sys
 import json
 import datetime
 import subprocess
-from typing import ClassVar
+from typing import Any, ClassVar
 from dataclasses import asdict, fields, dataclass
 
 # 3rd party
@@ -103,7 +103,8 @@ def _handle_arrow_navigation(
     button_col_selector: str,
     table_selector: str,
 ) -> None:
-    """Arrow key navigation between a button column and a data table.
+    """
+    Arrow key navigation between a button column and a data table.
 
     :param screen: The screen handling the key event.
     :param event: The key event.
@@ -551,8 +552,7 @@ class SessionListScreen(Screen[None]):
         path = os.path.join(CONFIG_DIR, "macros.json")
         sk = self._session_key_for(cfg)
         self.app.push_screen(
-            MacroEditScreen(path=path, session_key=sk),
-            callback=lambda saved: None,
+            MacroEditScreen(path=path, session_key=sk), callback=lambda saved: None
         )
 
     def action_edit_autoreplies(self) -> None:
@@ -565,8 +565,7 @@ class SessionListScreen(Screen[None]):
         path = os.path.join(CONFIG_DIR, "autoreplies.json")
         sk = self._session_key_for(cfg)
         self.app.push_screen(
-            AutoreplyEditScreen(path=path, session_key=sk),
-            callback=lambda saved: None,
+            AutoreplyEditScreen(path=path, session_key=sk), callback=lambda saved: None
         )
 
     def action_connect(self) -> None:
@@ -1130,7 +1129,9 @@ class MacroEditScreen(Screen["bool | None"]):
     def compose(self) -> ComposeResult:
         """Build the macro editor layout."""
         with Vertical(id="macro-panel"):
-            yield Static(f"Macro Editor — {self._session_key}" if self._session_key else "Macro Editor")
+            yield Static(
+                f"Macro Editor — {self._session_key}" if self._session_key else "Macro Editor"
+            )
             with Horizontal(id="macro-body"):
                 with Vertical(id="macro-button-col"):
                     yield Button("Add", variant="success", id="macro-add")
@@ -1146,14 +1147,10 @@ class MacroEditScreen(Screen["bool | None"]):
                             yield Input(placeholder="e.g. f5 or escape n", id="macro-key")
                         with Horizontal(classes="field-row"):
                             yield Label("Text", classes="form-label")
-                            yield Input(
-                                placeholder="text with <CR> markers", id="macro-text"
-                            )
+                            yield Input(placeholder="text with <CR> markers", id="macro-text")
                         with Horizontal(id="macro-form-buttons"):
                             yield Button("OK", variant="success", id="macro-ok")
-                            yield Button(
-                                "Cancel", variant="default", id="macro-cancel-form"
-                            )
+                            yield Button("Cancel", variant="default", id="macro-cancel-form")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -1173,7 +1170,7 @@ class MacroEditScreen(Screen["bool | None"]):
         try:
             macros = load_macros(self._path, self._session_key)
             self._macros = [(" ".join(m.keys), m.text) for m in macros]
-        except (ValueError, json.JSONDecodeError, FileNotFoundError):
+        except (ValueError, FileNotFoundError):
             pass
 
     def _refresh_table(self) -> None:
@@ -1235,9 +1232,7 @@ class MacroEditScreen(Screen["bool | None"]):
     def on_key(self, event: events.Key) -> None:
         """Arrow keys navigate between buttons and the macro table."""
         if event.key in ("up", "down", "left", "right"):
-            _handle_arrow_navigation(
-                self, event, "#macro-button-col", "#macro-table"
-            )
+            _handle_arrow_navigation(self, event, "#macro-button-col", "#macro-table")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Enter in an inline form input submits the form."""
@@ -1333,7 +1328,11 @@ class AutoreplyEditScreen(Screen["bool | None"]):
     def compose(self) -> ComposeResult:
         """Build the autoreply editor layout."""
         with Vertical(id="autoreply-panel"):
-            yield Static(f"Autoreply Editor — {self._session_key}" if self._session_key else "Autoreply Editor")
+            yield Static(
+                f"Autoreply Editor — {self._session_key}"
+                if self._session_key
+                else "Autoreply Editor"
+            )
             with Horizontal(id="autoreply-body"):
                 with Vertical(id="autoreply-button-col"):
                     yield Button("Add", variant="success", id="autoreply-add")
@@ -1346,22 +1345,15 @@ class AutoreplyEditScreen(Screen["bool | None"]):
                     with Vertical(id="autoreply-form"):
                         with Horizontal(classes="field-row"):
                             yield Label("Pattern", classes="form-label")
-                            yield Input(
-                                placeholder="regex pattern", id="autoreply-pattern"
-                            )
+                            yield Input(placeholder="regex pattern", id="autoreply-pattern")
                         with Horizontal(classes="field-row"):
                             yield Label("Reply", classes="form-label")
                             yield Input(
-                                placeholder=r"reply with \1 refs and <CR>",
-                                id="autoreply-reply",
+                                placeholder=r"reply with \1 refs and <CR>", id="autoreply-reply"
                             )
                         with Horizontal(id="autoreply-form-buttons"):
                             yield Button("OK", variant="success", id="autoreply-ok")
-                            yield Button(
-                                "Cancel",
-                                variant="default",
-                                id="autoreply-cancel-form",
-                            )
+                            yield Button("Cancel", variant="default", id="autoreply-cancel-form")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -1381,7 +1373,7 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         try:
             rules = load_autoreplies(self._path, self._session_key)
             self._rules = [(r.pattern.pattern, r.reply) for r in rules]
-        except (ValueError, json.JSONDecodeError, FileNotFoundError):
+        except (ValueError, FileNotFoundError):
             pass
 
     def _refresh_table(self) -> None:
@@ -1450,9 +1442,7 @@ class AutoreplyEditScreen(Screen["bool | None"]):
     def on_key(self, event: events.Key) -> None:
         """Arrow keys navigate between buttons and the autoreply table."""
         if event.key in ("up", "down", "left", "right"):
-            _handle_arrow_navigation(
-                self, event, "#autoreply-button-col", "#autoreply-table"
-            )
+            _handle_arrow_navigation(self, event, "#autoreply-button-col", "#autoreply-table")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Enter in an inline form input submits the form."""
@@ -1519,7 +1509,8 @@ class _EditorApp(App[None]):
         self._editor_screen = screen
 
     def _set_pointer_shape(self, shape: str) -> None:
-        """Disable pointer shape changes to prevent WriterThread deadlock.
+        """
+        Disable pointer shape changes to prevent WriterThread deadlock.
 
         Textual writes escape sequences to set cursor shape on mouse move.
         When the PTY output buffer is full, ``WriterThread.write()`` blocks,
@@ -1532,25 +1523,26 @@ class _EditorApp(App[None]):
         self.push_screen(self._editor_screen, callback=lambda _: self.exit())
 
 
-_faulthandler_file: Any = None
+_faulthandler_file: Any = None  # pylint: disable=invalid-name
 
 
 def _enable_faulthandler() -> None:
     """Enable faulthandler with SIGUSR1 for non-fatal traceback dumps."""
-    global _faulthandler_file  # noqa: PLW0603
+    global _faulthandler_file  # noqa: PLW0603  # pylint: disable=global-statement
     import signal  # pylint: disable=import-outside-toplevel
     import faulthandler  # pylint: disable=import-outside-toplevel
 
     if _faulthandler_file is None:
-        _faulthandler_file = open(  # noqa: SIM115
-            "/tmp/textual-faulthandler.log", "a"
+        _faulthandler_file = open(  # noqa: SIM115  # pylint: disable=consider-using-with
+            "/tmp/textual-faulthandler.log", "a", encoding="utf-8"
         )
     faulthandler.enable(file=_faulthandler_file)
     faulthandler.register(signal.SIGUSR1, file=_faulthandler_file, all_threads=True)
 
 
 def _patch_writer_thread_queue() -> None:
-    """Make Textual's WriterThread queue unbounded.
+    """
+    Make Textual's WriterThread queue unbounded.
 
     Textual's ``WriterThread`` uses a bounded queue (``maxsize=30``).
     When terminal output processing lags behind rapid re-renders
@@ -1568,7 +1560,8 @@ def _patch_writer_thread_queue() -> None:
 
 
 def _restore_blocking_fds() -> None:
-    """Restore blocking mode on stdin/stdout/stderr.
+    """
+    Restore blocking mode on stdin/stdout/stderr.
 
     The parent process may set ``O_NONBLOCK`` on the shared PTY file
     description (via asyncio ``connect_read_pipe`` or prompt_toolkit).
@@ -1578,7 +1571,7 @@ def _restore_blocking_fds() -> None:
     so a non-blocking stderr causes the thread to die silently,
     freezing the app.
     """
-    import os  # pylint: disable=import-outside-toplevel
+    import os  # pylint: disable=import-outside-toplevel,redefined-outer-name,reimported
 
     for fd in (0, 1, 2):
         try:

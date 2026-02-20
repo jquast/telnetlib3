@@ -9,7 +9,6 @@ import ssl as ssl_module
 import sys
 import codecs
 import struct
-import json
 import asyncio
 import argparse
 import functools
@@ -683,9 +682,7 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
         shell_callback = _repl_shell
 
     # Auto-load autoreplies and macros from default config path
-    _xdg_cfg = os.environ.get(
-        "XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config")
-    )
+    _xdg_cfg = os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config"))
     _cfg_dir = os.path.join(_xdg_cfg, "telnetlib3")
     _session_key = f"{args['host']}:{args['port']}"
 
@@ -696,7 +693,7 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
 
         try:
             _autoreply_rules = load_autoreplies(_ar_path, _session_key)
-        except (ValueError, json.JSONDecodeError):
+        except ValueError:
             _autoreply_rules = []
 
     _macro_path = os.path.join(_cfg_dir, "macros.json")
@@ -706,7 +703,7 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
 
         try:
             _macro_defs = load_macros(_macro_path, _session_key)
-        except (ValueError, json.JSONDecodeError):
+        except ValueError:
             _macro_defs = []
 
     _inner_session = shell_callback
