@@ -688,6 +688,18 @@ else:
                 if telnet_writer.will_echo or raw_mode is True:
                     linesep = "\r\n"
             stdout = await term.make_stdout()
+            _n_macros = len(getattr(telnet_writer, "_macro_defs", []) or [])
+            _n_autoreplies = len(getattr(telnet_writer, "_autoreply_rules", []) or [])
+            if _n_macros:
+                _mf = getattr(telnet_writer, "_macros_file", "")
+                stdout.write(
+                    f"{_n_macros} macros loaded from {_mf}.{linesep}".encode()
+                )
+            if _n_autoreplies:
+                _af = getattr(telnet_writer, "_autoreplies_file", "")
+                stdout.write(
+                    f"{_n_autoreplies} autoreplies loaded from {_af}.{linesep}".encode()
+                )
             escape_name = accessories.name_unicode(keyboard_escape)
             stdout.write(f"Escape character is '{escape_name}'.{linesep}".encode())
             term.setup_winch()

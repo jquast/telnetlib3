@@ -867,35 +867,22 @@ def test_transform_output_bare_cr_preserved_raw() -> None:
 
 
 def test_transform_output_empty_string() -> None:
-    """Empty server output must write b"", not a debug fallback."""
     writer = _make_transform_writer()
-    result = _transform_output("", writer, True)
-    assert result == ""
-    assert result.encode() == b""
+    assert _transform_output("", writer, True) == ""
 
 
-def test_get_raw_mode_missing() -> None:
-    """_get_raw_mode returns False when _raw_mode attribute is absent."""
+@pytest.mark.parametrize(
+    "kwargs,expected",
+    [
+        ({}, False),
+        ({"_raw_mode": None}, None),
+        ({"_raw_mode": True}, True),
+    ],
+)
+def test_get_raw_mode(kwargs: dict, expected: "bool | None") -> None:
     from telnetlib3.client_shell import _get_raw_mode
 
-    writer = _make_transform_writer()
-    assert _get_raw_mode(writer) is False
-
-
-def test_get_raw_mode_none() -> None:
-    """_get_raw_mode returns None when _raw_mode is None (auto mode)."""
-    from telnetlib3.client_shell import _get_raw_mode
-
-    writer = _make_transform_writer(_raw_mode=None)
-    assert _get_raw_mode(writer) is None
-
-
-def test_get_raw_mode_true() -> None:
-    """_get_raw_mode returns True when _raw_mode is True."""
-    from telnetlib3.client_shell import _get_raw_mode
-
-    writer = _make_transform_writer(_raw_mode=True)
-    assert _get_raw_mode(writer) is True
+    assert _get_raw_mode(_make_transform_writer(**kwargs)) is expected
 
 
 async def test_cooked_to_raw_transition_preserves_crlf(

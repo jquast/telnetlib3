@@ -463,14 +463,8 @@ async def test_telnet_server_shell_dump_closing():
     assert "1 OK" not in "".join(w2.written)
 
 
-# -- readline2 is alias for readline_async --
-
-
 def test_readline2_is_readline_async():
     assert ss.readline2 is ss.readline_async
-
-
-# -- _LineEditor tests --
 
 
 @pytest.mark.parametrize(
@@ -523,9 +517,6 @@ def test_line_editor_maxvis_ascii():
     assert cmd == "abc"
 
 
-# -- _backspace_grapheme tests --
-
-
 @pytest.mark.parametrize(
     "command,expected_cmd,expected_echo",
     [
@@ -558,9 +549,6 @@ def test_backspace_grapheme_wcwidth(command, expected_cmd, expected_echo):
     assert echo == expected_echo
 
 
-# -- _visible_width tests --
-
-
 @pytest.mark.parametrize(
     "text,expected", [pytest.param("hello", 5, id="ascii"), pytest.param("", 0, id="empty")]
 )
@@ -578,9 +566,6 @@ def test_visible_width_ascii(text, expected):
 )
 def test_visible_width_wcwidth(text, expected):
     assert ss._visible_width(text) == expected
-
-
-# -- readline (blocking) grapheme + maxvis tests --
 
 
 def test_readline_backspace_wide():
@@ -607,9 +592,6 @@ def test_readline_maxvis_ascii():
 def test_readline_maxvis_wide():
     cmds, _ = _run_readline("a\u30b3x\r", max_visible_width=3)
     assert cmds == ["a\u30b3"]
-
-
-# -- readline_async grapheme + maxvis tests --
 
 
 @pytest.mark.asyncio
@@ -659,9 +641,6 @@ async def test_readline_async_ss3_filtered():
     assert result == "hello"
 
 
-# -- filter_ansi enhanced tests --
-
-
 @pytest.mark.parametrize(
     "input_chars,expected",
     [
@@ -676,9 +655,6 @@ async def test_readline_async_ss3_filtered():
 async def test_filter_ansi_wcwidth_sequences(input_chars, expected):
     result = await ss.filter_ansi(MockReader(input_chars), MockWriter())
     assert result == expected
-
-
-# -- telnet_server_shell with LF-terminated input --
 
 
 @pytest.mark.asyncio

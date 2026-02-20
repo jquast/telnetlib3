@@ -255,16 +255,18 @@ def test_detect_syncterm_font_sets_force_binary():
     assert client.force_binary is True
 
 
-def test_transform_args_colormatch_default():
+@pytest.mark.parametrize(
+    "extra_args,expected",
+    [
+        ([], "vga"),
+        (["--colormatch", "xterm"], "xterm"),
+    ],
+)
+def test_transform_args_colormatch(extra_args, expected):
     parser = cl._get_argument_parser()
-    result = cl._transform_args(parser.parse_args(["myhost"]))
-    assert result["colormatch"] == "vga"
-
-
-def test_transform_args_colormatch_explicit():
-    parser = cl._get_argument_parser()
-    result = cl._transform_args(parser.parse_args(["myhost", "--colormatch", "xterm"]))
-    assert result["colormatch"] == "xterm"
+    assert cl._transform_args(
+        parser.parse_args(["myhost"] + extra_args)
+    )["colormatch"] == expected
 
 
 def test_guard_shells_connection_counter():
@@ -339,10 +341,7 @@ async def test_guard_shells_robot_check_timeout():
         async def read(self, n):
             return ""
 
-    reader = MockReader()
-    writer = MockWriter()
-    result = await robot_check(reader, writer, timeout=0.1)
-    assert result is False
+    assert await robot_check(MockReader(), MockWriter(), timeout=0.1) is False
 
 
 async def _noop_shell(reader, writer):
@@ -359,6 +358,7 @@ def _fake_open_connection_factory(loop):
         _input_filter=None,
         _repl_enabled=False,
         _history_file=None,
+        _session_key="",
         _autoreply_rules=None,
         _autoreplies_file=None,
         _macro_defs=None,
@@ -388,13 +388,36 @@ async def test_run_client_unknown_palette(monkeypatch):
     assert exc_info.value.code == 1
 
 
+@pytest.mark.parametrize(
+    "argv_extra,filter_cls_name",
+    [
+        pytest.param(
+            ["--encoding", "petscii", "--colormatch", "vga"],
+            "PetsciiColorFilter",
+            id="petscii_selects_c64",
+        ),
+        pytest.param(
+            ["--encoding", "atascii", "--colormatch", "vga"],
+            "AtasciiControlFilter",
+            id="atascii_filter",
+        ),
+        pytest.param(
+            ["--colormatch", "vga"],
+            "ColorFilter",
+            id="colormatch_vga",
+        ),
+        pytest.param(
+            ["--colormatch", "petscii"],
+            "PetsciiColorFilter",
+            id="colormatch_petscii_alias",
+        ),
+    ],
+)
 @pytest.mark.asyncio
-async def test_run_client_petscii_selects_c64(monkeypatch):
-    """Petscii encoding auto-selects c64 palette."""
+async def test_run_client_color_filter(monkeypatch, argv_extra, filter_cls_name):
     monkeypatch.setattr(
         sys, "argv",
-        ["telnetlib3-client", "localhost", "--encoding", "petscii",
-         "--colormatch", "vga", "--no-repl"],
+        ["telnetlib3-client", "localhost"] + argv_extra + ["--no-repl"],
     )
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     monkeypatch.setattr(accessories, "function_lookup", lambda _: _noop_shell)
@@ -404,70 +427,7 @@ async def test_run_client_petscii_selects_c64(monkeypatch):
     monkeypatch.setattr(cl, "open_connection", fake_oc)
     await cl.run_client()
 
-    from telnetlib3.color_filter import PetsciiColorFilter
-
-    assert isinstance(writer_obj._color_filter, PetsciiColorFilter)
-
-
-@pytest.mark.asyncio
-async def test_run_client_atascii_filter(monkeypatch):
-    """Atascii encoding selects AtasciiControlFilter."""
-    monkeypatch.setattr(
-        sys, "argv",
-        ["telnetlib3-client", "localhost", "--encoding", "atascii",
-         "--colormatch", "vga", "--no-repl"],
-    )
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
-    monkeypatch.setattr(accessories, "function_lookup", lambda _: _noop_shell)
-
-    loop = asyncio.get_event_loop()
-    fake_oc, captured, writer_obj = _fake_open_connection_factory(loop)
-    monkeypatch.setattr(cl, "open_connection", fake_oc)
-    await cl.run_client()
-
-    from telnetlib3.color_filter import AtasciiControlFilter
-
-    assert isinstance(writer_obj._color_filter, AtasciiControlFilter)
-
-
-@pytest.mark.asyncio
-async def test_run_client_colormatch_vga(monkeypatch):
-    """Standard colormatch creates a ColorFilter."""
-    monkeypatch.setattr(
-        sys, "argv",
-        ["telnetlib3-client", "localhost", "--colormatch", "vga", "--no-repl"],
-    )
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
-    monkeypatch.setattr(accessories, "function_lookup", lambda _: _noop_shell)
-
-    loop = asyncio.get_event_loop()
-    fake_oc, captured, writer_obj = _fake_open_connection_factory(loop)
-    monkeypatch.setattr(cl, "open_connection", fake_oc)
-    await cl.run_client()
-
-    from telnetlib3.color_filter import ColorFilter
-
-    assert isinstance(writer_obj._color_filter, ColorFilter)
-
-
-@pytest.mark.asyncio
-async def test_run_client_colormatch_petscii_alias(monkeypatch):
-    """colormatch='petscii' is remapped to c64."""
-    monkeypatch.setattr(
-        sys, "argv",
-        ["telnetlib3-client", "localhost", "--colormatch", "petscii", "--no-repl"],
-    )
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
-    monkeypatch.setattr(accessories, "function_lookup", lambda _: _noop_shell)
-
-    loop = asyncio.get_event_loop()
-    fake_oc, captured, writer_obj = _fake_open_connection_factory(loop)
-    monkeypatch.setattr(cl, "open_connection", fake_oc)
-    await cl.run_client()
-
-    from telnetlib3.color_filter import PetsciiColorFilter
-
-    assert isinstance(writer_obj._color_filter, PetsciiColorFilter)
+    assert type(writer_obj._color_filter).__name__ == filter_cls_name
 
 
 @pytest.mark.asyncio

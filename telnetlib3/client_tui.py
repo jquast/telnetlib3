@@ -22,6 +22,7 @@ from typing import ClassVar
 from dataclasses import asdict, fields, dataclass
 
 # 3rd party
+from textual import events
 from textual.app import App, ComposeResult
 from textual.screen import Screen
 from textual.binding import Binding
@@ -175,8 +176,6 @@ class SessionConfig:
     loglevel: str = "warn"
     logfile: str = ""
     no_repl: bool = False
-    macros_file: str = ""
-    autoreplies_file: str = ""
 
 
 def _ensure_dirs() -> None:
@@ -285,10 +284,6 @@ def build_command(  # pylint: disable=too-many-branches,too-complex
         cmd.append("--ssl-no-verify")
     if config.no_repl:
         cmd.append("--no-repl")
-    if config.macros_file:
-        cmd.extend(["--macros", config.macros_file])
-    if config.autoreplies_file:
-        cmd.extend(["--autoreplies", config.autoreplies_file])
 
     return cmd
 
@@ -333,15 +328,14 @@ class SessionListScreen(Screen[None]):
 
     CSS = """
     SessionListScreen {
-        align: center middle;
+        align: center top;
     }
     #session-panel {
-        width: 74;
+        width: 80;
         height: 100%;
-        max-height: 24;
         border: round $surface-lighten-2;
         background: $surface;
-        padding: 1 1;
+        padding: 0 1;
     }
     #session-body {
         height: 1fr;
@@ -353,7 +347,7 @@ class SessionListScreen(Screen[None]):
         overflow-x: hidden;
     }
     #button-col {
-        width: 13;
+        width: 14;
         height: auto;
         padding-right: 1;
     }
@@ -362,6 +356,20 @@ class SessionListScreen(Screen[None]):
         min-width: 0;
         margin-bottom: 0;
     }
+    #connect-btn { background: #5b9bf5; color: #0a0a18; }
+    #connect-btn:hover { background: #82b4f8; }
+    #add-btn { background: #6cc644; color: #0a0a18; }
+    #add-btn:hover { background: #8fd86a; }
+    #delete-btn { background: #f45070; color: #0a0a18; }
+    #delete-btn:hover { background: #f77a95; }
+    #edit-btn { background: #e8a030; color: #0a0a18; }
+    #edit-btn:hover { background: #f0ba60; }
+    #macros-btn { background: #2ec4a8; color: #0a0a18; }
+    #macros-btn:hover { background: #5cd8c0; }
+    #autoreplies-btn { background: #a06ce4; color: #f0f0f0; }
+    #autoreplies-btn:hover { background: #b88eee; }
+    #defaults-btn { background: #6670a0; color: #e8ecf8; }
+    #defaults-btn:hover { background: #8088b8; }
     """
 
     def __init__(self) -> None:
@@ -374,14 +382,13 @@ class SessionListScreen(Screen[None]):
         with Vertical(id="session-panel"):
             with Horizontal(id="session-body"):
                 with Vertical(id="button-col"):
-                    yield Button("Connect", variant="primary", id="connect-btn")
-                    yield Button("New", variant="success", id="add-btn")
-                    yield Button("Edit", variant="warning", id="edit-btn")
+                    yield Button("Connect", id="connect-btn")
+                    yield Button("New", id="add-btn")
+                    yield Button("Delete", id="delete-btn")
+                    yield Button("Edit", id="edit-btn")
                     yield Button("Macros", id="macros-btn")
                     yield Button("Autoreplies", id="autoreplies-btn")
-                    yield Button("Delete", variant="error", id="delete-btn")
                     yield Button("Defaults", id="defaults-btn")
-                    yield Button("Quit", id="quit-btn")
                 yield DataTable(id="session-table")
         yield Footer()
 
@@ -420,6 +427,27 @@ class SessionListScreen(Screen[None]):
             return None
         row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
         return str(row_key.value)
+
+    # -- Arrow key navigation between buttons --------------------------------
+
+    def on_key(self, event: events.Key) -> None:
+        """Allow arrow keys to move focus between buttons."""
+        if event.key not in ("up", "down"):
+            return
+        focused = self.focused
+        if not isinstance(focused, Button):
+            return
+        buttons = list(self.query("#button-col Button"))
+        try:
+            idx = buttons.index(focused)
+        except ValueError:
+            return
+        if event.key == "up" and idx > 0:
+            buttons[idx - 1].focus()
+            event.prevent_default()
+        elif event.key == "down" and idx < len(buttons) - 1:
+            buttons[idx + 1].focus()
+            event.prevent_default()
 
     # -- Button handlers ----------------------------------------------------
 
@@ -487,6 +515,10 @@ class SessionListScreen(Screen[None]):
             SessionEditScreen(config=defaults, is_defaults=True), callback=self._on_defaults_result
         )
 
+    def _session_key_for(self, cfg: SessionConfig) -> str:
+        """Return ``host:port`` session key for config file lookups."""
+        return f"{cfg.host}:{cfg.port}"
+
     def action_edit_macros(self) -> None:
         """Open macro editor for the selected session."""
         key = self._selected_key()
@@ -494,17 +526,12 @@ class SessionListScreen(Screen[None]):
             self.notify("No session selected", severity="warning")
             return
         cfg = self._sessions[key]
-        path = cfg.macros_file or os.path.join(CONFIG_DIR, "macros.json")
+        path = os.path.join(CONFIG_DIR, "macros.json")
+        sk = self._session_key_for(cfg)
         self.app.push_screen(
-            MacroEditScreen(path=path), callback=lambda saved: self._on_macro_save(key, saved, path)
+            MacroEditScreen(path=path, session_key=sk),
+            callback=lambda saved: None,
         )
-
-    def _on_macro_save(self, key: str, saved: bool | None, path: str) -> None:
-        if saved and key in self._sessions:
-            cfg = self._sessions[key]
-            if not cfg.macros_file:
-                cfg.macros_file = path
-                self._save()
 
     def action_edit_autoreplies(self) -> None:
         """Open autoreply editor for the selected session."""
@@ -513,18 +540,12 @@ class SessionListScreen(Screen[None]):
             self.notify("No session selected", severity="warning")
             return
         cfg = self._sessions[key]
-        path = cfg.autoreplies_file or os.path.join(CONFIG_DIR, "autoreplies.json")
+        path = os.path.join(CONFIG_DIR, "autoreplies.json")
+        sk = self._session_key_for(cfg)
         self.app.push_screen(
-            AutoreplyEditScreen(path=path),
-            callback=lambda saved: self._on_autoreply_save(key, saved, path),
+            AutoreplyEditScreen(path=path, session_key=sk),
+            callback=lambda saved: None,
         )
-
-    def _on_autoreply_save(self, key: str, saved: bool | None, path: str) -> None:
-        if saved and key in self._sessions:
-            cfg = self._sessions[key]
-            if not cfg.autoreplies_file:
-                cfg.autoreplies_file = path
-                self._save()
 
     def action_connect(self) -> None:
         """Launch a telnet connection to the selected session."""
@@ -1076,10 +1097,11 @@ class MacroEditScreen(Screen["bool | None"]):
     .form-label { width: 8; padding-top: 1; }
     """
 
-    def __init__(self, path: str) -> None:
-        """Initialize macro editor with file path."""
+    def __init__(self, path: str, session_key: str = "") -> None:
+        """Initialize macro editor with file path and session key."""
         super().__init__()
         self._path = path
+        self._session_key = session_key
         self._macros: list[tuple[str, str]] = []
         self._editing_idx: int | None = None
 
@@ -1090,7 +1112,7 @@ class MacroEditScreen(Screen["bool | None"]):
     def compose(self) -> ComposeResult:
         """Build the macro editor layout."""
         with Vertical(id="macro-panel"):
-            yield Static("Macro Editor")
+            yield Static(f"Macro Editor — {self._session_key}" if self._session_key else "Macro Editor")
             with Horizontal(id="macro-body"):
                 with Vertical(id="macro-button-col"):
                     yield Button("Add", variant="success", id="macro-add")
@@ -1131,7 +1153,7 @@ class MacroEditScreen(Screen["bool | None"]):
         from .macros import load_macros  # pylint: disable=import-outside-toplevel
 
         try:
-            macros = load_macros(self._path)
+            macros = load_macros(self._path, self._session_key)
             self._macros = [(" ".join(m.keys), m.text) for m in macros]
         except (ValueError, json.JSONDecodeError, FileNotFoundError):
             pass
@@ -1146,11 +1168,15 @@ class MacroEditScreen(Screen["bool | None"]):
         self.query_one("#macro-key", Input).value = key_val
         self.query_one("#macro-text", Input).value = text_val
         self.query_one("#macro-form").display = True
+        self.query_one("#macro-add", Button).disabled = True
+        self.query_one("#macro-edit", Button).disabled = True
         self.query_one("#macro-key", Input).focus()
 
     def _hide_form(self) -> None:
         self.query_one("#macro-form").display = False
         self._editing_idx = None
+        self.query_one("#macro-add", Button).disabled = False
+        self.query_one("#macro-edit", Button).disabled = False
         self.query_one("#macro-table", DataTable).focus()
 
     def _submit_form(self) -> None:
@@ -1172,6 +1198,22 @@ class MacroEditScreen(Screen["bool | None"]):
         row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
         return int(str(row_key.value))
 
+    def _edit_selected(self) -> None:
+        """Open the selected row for editing."""
+        idx = self._selected_idx()
+        if idx is not None and idx < len(self._macros):
+            self._editing_idx = idx
+            k, t = self._macros[idx]
+            self._show_form(k, t)
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Double-click or Enter on a table row opens it for editing."""
+        idx = int(str(event.row_key.value))
+        if idx < len(self._macros):
+            self._editing_idx = idx
+            k, t = self._macros[idx]
+            self._show_form(k, t)
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Enter in an inline form input submits the form."""
         if self._form_visible:
@@ -1192,12 +1234,10 @@ class MacroEditScreen(Screen["bool | None"]):
             self._editing_idx = None
             self._show_form()
         elif btn == "macro-edit":
-            idx = self._selected_idx()
-            if idx is not None and idx < len(self._macros):
-                self._editing_idx = idx
-                k, t = self._macros[idx]
-                self._show_form(k, t)
+            self._edit_selected()
         elif btn == "macro-delete":
+            if self._form_visible:
+                self._hide_form()
             idx = self._selected_idx()
             if idx is not None and idx < len(self._macros):
                 self._macros.pop(idx)
@@ -1207,6 +1247,8 @@ class MacroEditScreen(Screen["bool | None"]):
         elif btn == "macro-cancel-form":
             self._hide_form()
         elif btn == "macro-save":
+            if self._form_visible:
+                self._submit_form()
             self._save_to_file()
             self.dismiss(True)
         elif btn == "macro-close":
@@ -1217,7 +1259,7 @@ class MacroEditScreen(Screen["bool | None"]):
 
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
         macros = [Macro(keys=tuple(k.split()), text=t) for k, t in self._macros]
-        save_macros(self._path, macros)
+        save_macros(self._path, macros, self._session_key)
 
 
 class AutoreplyEditScreen(Screen["bool | None"]):
@@ -1248,10 +1290,11 @@ class AutoreplyEditScreen(Screen["bool | None"]):
     .form-label { width: 8; padding-top: 1; }
     """
 
-    def __init__(self, path: str) -> None:
-        """Initialize autoreply editor with file path."""
+    def __init__(self, path: str, session_key: str = "") -> None:
+        """Initialize autoreply editor with file path and session key."""
         super().__init__()
         self._path = path
+        self._session_key = session_key
         self._rules: list[tuple[str, str]] = []
         self._editing_idx: int | None = None
 
@@ -1262,7 +1305,7 @@ class AutoreplyEditScreen(Screen["bool | None"]):
     def compose(self) -> ComposeResult:
         """Build the autoreply editor layout."""
         with Vertical(id="autoreply-panel"):
-            yield Static("Autoreply Editor")
+            yield Static(f"Autoreply Editor — {self._session_key}" if self._session_key else "Autoreply Editor")
             with Horizontal(id="autoreply-body"):
                 with Vertical(id="autoreply-button-col"):
                     yield Button("Add", variant="success", id="autoreply-add")
@@ -1308,7 +1351,7 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         from .autoreply import load_autoreplies  # pylint: disable=import-outside-toplevel
 
         try:
-            rules = load_autoreplies(self._path)
+            rules = load_autoreplies(self._path, self._session_key)
             self._rules = [(r.pattern.pattern, r.reply) for r in rules]
         except (ValueError, json.JSONDecodeError, FileNotFoundError):
             pass
@@ -1323,11 +1366,15 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         self.query_one("#autoreply-pattern", Input).value = pattern_val
         self.query_one("#autoreply-reply", Input).value = reply_val
         self.query_one("#autoreply-form").display = True
+        self.query_one("#autoreply-add", Button).disabled = True
+        self.query_one("#autoreply-edit", Button).disabled = True
         self.query_one("#autoreply-pattern", Input).focus()
 
     def _hide_form(self) -> None:
         self.query_one("#autoreply-form").display = False
         self._editing_idx = None
+        self.query_one("#autoreply-add", Button).disabled = False
+        self.query_one("#autoreply-edit", Button).disabled = False
         self.query_one("#autoreply-table", DataTable).focus()
 
     def _submit_form(self) -> None:
@@ -1356,6 +1403,22 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
         return int(str(row_key.value))
 
+    def _edit_selected(self) -> None:
+        """Open the selected row for editing."""
+        idx = self._selected_idx()
+        if idx is not None and idx < len(self._rules):
+            self._editing_idx = idx
+            p, r = self._rules[idx]
+            self._show_form(p, r)
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Double-click or Enter on a table row opens it for editing."""
+        idx = int(str(event.row_key.value))
+        if idx < len(self._rules):
+            self._editing_idx = idx
+            p, r = self._rules[idx]
+            self._show_form(p, r)
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Enter in an inline form input submits the form."""
         if self._form_visible:
@@ -1376,12 +1439,10 @@ class AutoreplyEditScreen(Screen["bool | None"]):
             self._editing_idx = None
             self._show_form()
         elif btn == "autoreply-edit":
-            idx = self._selected_idx()
-            if idx is not None and idx < len(self._rules):
-                self._editing_idx = idx
-                p, r = self._rules[idx]
-                self._show_form(p, r)
+            self._edit_selected()
         elif btn == "autoreply-delete":
+            if self._form_visible:
+                self._hide_form()
             idx = self._selected_idx()
             if idx is not None and idx < len(self._rules):
                 self._rules.pop(idx)
@@ -1391,6 +1452,8 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         elif btn == "autoreply-cancel-form":
             self._hide_form()
         elif btn == "autoreply-save":
+            if self._form_visible:
+                self._submit_form()
             self._save_to_file()
             self.dismiss(True)
         elif btn == "autoreply-close":
@@ -1409,7 +1472,7 @@ class AutoreplyEditScreen(Screen["bool | None"]):
             AutoreplyRule(pattern=re.compile(p, re.MULTILINE | re.DOTALL), reply=r)
             for p, r in self._rules
         ]
-        save_autoreplies(self._path, rules)
+        save_autoreplies(self._path, rules, self._session_key)
 
 
 class _EditorApp(App[None]):
@@ -1425,15 +1488,15 @@ class _EditorApp(App[None]):
         self.push_screen(self._editor_screen, callback=lambda _: self.exit())
 
 
-def edit_macros_main(path: str) -> None:
+def edit_macros_main(path: str, session_key: str = "") -> None:
     """Launch standalone macro editor TUI."""
-    app = _EditorApp(MacroEditScreen(path=path))
+    app = _EditorApp(MacroEditScreen(path=path, session_key=session_key))
     app.run()
 
 
-def edit_autoreplies_main(path: str) -> None:
+def edit_autoreplies_main(path: str, session_key: str = "") -> None:
     """Launch standalone autoreply editor TUI."""
-    app = _EditorApp(AutoreplyEditScreen(path=path))
+    app = _EditorApp(AutoreplyEditScreen(path=path, session_key=session_key))
     app.run()
 
 

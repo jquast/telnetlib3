@@ -58,8 +58,6 @@ def test_client_read_write(bind_host, unused_tcp_port):
 
 
 def test_client_readline(bind_host, unused_tcp_port):
-    """TelnetConnection readline works correctly."""
-
     def handler(server_conn):
         server_conn.write("Hello, World!\r\n")
         server_conn.flush(timeout=5)
@@ -70,15 +68,12 @@ def test_client_readline(bind_host, unused_tcp_port):
     server._started.wait(timeout=5)
 
     with TelnetConnection(bind_host, unused_tcp_port, timeout=5) as conn:
-        line = conn.readline(timeout=5)
-        assert "Hello, World!" in line
+        assert "Hello, World!" in conn.readline(timeout=5)
 
     server.shutdown()
 
 
 def test_client_read_until(bind_host, unused_tcp_port):
-    """TelnetConnection read_until works correctly."""
-
     def handler(server_conn):
         server_conn.write(">>> ")
         server_conn.flush(timeout=5)
@@ -89,8 +84,7 @@ def test_client_read_until(bind_host, unused_tcp_port):
     server._started.wait(timeout=5)
 
     with TelnetConnection(bind_host, unused_tcp_port, timeout=5) as conn:
-        data = conn.read_until(">>> ", timeout=5)
-        assert data.endswith(b">>> ")
+        assert conn.read_until(">>> ", timeout=5).endswith(b">>> ")
 
     server.shutdown()
 
@@ -223,8 +217,7 @@ def test_server_connection_read_write(bind_host, unused_tcp_port):
     thread.start()
 
     conn = server.accept(timeout=5)
-    data = conn.read(5, timeout=5)
-    conn.write(data.upper())
+    conn.write(conn.read(5, timeout=5).upper())
     conn.flush(timeout=5)
     conn.close()
 
@@ -356,23 +349,24 @@ def test_server_connection_send_newline_conversion(
     assert "\r\r\n" not in received[0]
 
 
+def _assert_writer_attrs(writer):
+    assert writer is not None
+    assert hasattr(writer, "mode")
+    assert hasattr(writer, "remote_option")
+    assert hasattr(writer, "local_option")
+
+
 def test_client_writer_property(bind_host, unused_tcp_port):
-    """TelnetConnection.writer exposes underlying TelnetWriter."""
     server = BlockingTelnetServer(bind_host, unused_tcp_port)
     server.start()
 
     with TelnetConnection(bind_host, unused_tcp_port, timeout=5) as conn:
-        writer = conn.writer
-        assert writer is not None
-        assert hasattr(writer, "mode")
-        assert hasattr(writer, "remote_option")
-        assert hasattr(writer, "local_option")
+        _assert_writer_attrs(conn.writer)
 
     server.shutdown()
 
 
 def test_server_connection_writer_property(bind_host, unused_tcp_port):
-    """ServerConnection.writer exposes underlying TelnetWriter."""
     server = BlockingTelnetServer(bind_host, unused_tcp_port)
     server.start()
 
@@ -385,18 +379,13 @@ def test_server_connection_writer_property(bind_host, unused_tcp_port):
     thread.start()
 
     conn = server.accept(timeout=5)
-    writer = conn.writer
-    assert writer is not None
-    assert hasattr(writer, "mode")
-    assert hasattr(writer, "remote_option")
-    assert hasattr(writer, "local_option")
+    _assert_writer_attrs(conn.writer)
 
     conn.close()
     server.shutdown()
 
 
 def test_client_get_extra_info(bind_host, unused_tcp_port):
-    """TelnetConnection.get_extra_info returns connection metadata."""
     server = BlockingTelnetServer(bind_host, unused_tcp_port)
     server.start()
 
@@ -405,8 +394,6 @@ def test_client_get_extra_info(bind_host, unused_tcp_port):
         assert peername is not None
         assert len(peername) == 2
         assert isinstance(peername[1], int)
-
-        # Non-existent key returns default
         assert conn.get_extra_info("nonexistent") is None
         assert conn.get_extra_info("nonexistent", "default") == "default"
 

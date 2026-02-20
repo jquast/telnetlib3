@@ -21,19 +21,24 @@ except ImportError:
     HAS_PROMPT_TOOLKIT = False
 
 
+_SK = "test.host:23"
+
+
 def test_load_macros_valid(tmp_path):
     fp = tmp_path / "macros.json"
     fp.write_text(
         json.dumps(
             {
-                "macros": [
-                    {"key": "f5", "text": "look<CR>"},
-                    {"key": "escape n", "text": "north<CR>"},
-                ]
+                _SK: {
+                    "macros": [
+                        {"key": "f5", "text": "look<CR>"},
+                        {"key": "escape n", "text": "north<CR>"},
+                    ]
+                }
             }
         )
     )
-    macros = load_macros(str(fp))
+    macros = load_macros(str(fp), _SK)
     assert len(macros) == 2
     assert macros[0].keys == ("f5",)
     assert macros[0].text == "look<CR>"
@@ -42,29 +47,37 @@ def test_load_macros_valid(tmp_path):
 
 def test_load_macros_missing_file():
     with pytest.raises(FileNotFoundError):
-        load_macros("/nonexistent/path.json")
+        load_macros("/nonexistent/path.json", _SK)
 
 
 def test_load_macros_empty_key_skipped(tmp_path):
     fp = tmp_path / "macros.json"
     fp.write_text(
-        json.dumps({"macros": [{"key": "", "text": "skip"}, {"key": "f6", "text": "keep<CR>"}]})
+        json.dumps(
+            {_SK: {"macros": [{"key": "", "text": "skip"}, {"key": "f6", "text": "keep<CR>"}]}}
+        )
     )
-    macros = load_macros(str(fp))
+    macros = load_macros(str(fp), _SK)
     assert len(macros) == 1
     assert macros[0].keys == ("f6",)
 
 
 def test_load_macros_empty_list(tmp_path):
     fp = tmp_path / "macros.json"
-    fp.write_text(json.dumps({"macros": []}))
-    assert load_macros(str(fp)) == []
+    fp.write_text(json.dumps({_SK: {"macros": []}}))
+    assert load_macros(str(fp), _SK) == []
+
+
+def test_load_macros_no_session(tmp_path):
+    fp = tmp_path / "macros.json"
+    fp.write_text(json.dumps({"other.host:23": {"macros": [{"key": "f5", "text": "x"}]}}))
+    assert load_macros(str(fp), _SK) == []
 
 
 def test_load_macros_multi_key(tmp_path):
     fp = tmp_path / "macros.json"
-    fp.write_text(json.dumps({"macros": [{"key": "c-x c-s", "text": "save<CR>"}]}))
-    macros = load_macros(str(fp))
+    fp.write_text(json.dumps({_SK: {"macros": [{"key": "c-x c-s", "text": "save<CR>"}]}}))
+    macros = load_macros(str(fp), _SK)
     assert macros[0].keys == ("c-x", "c-s")
 
 
@@ -75,25 +88,33 @@ def test_save_macros_roundtrip(tmp_path):
         Macro(keys=("escape", "n"), text="north<CR>"),
         Macro(keys=("c-x", "c-s"), text="save<CR>"),
     ]
-    save_macros(str(fp), original)
-    loaded = load_macros(str(fp))
+    save_macros(str(fp), original, _SK)
+    loaded = load_macros(str(fp), _SK)
     assert len(loaded) == len(original)
     for orig, restored in zip(original, loaded):
         assert orig.keys == restored.keys
         assert orig.text == restored.text
 
 
+def test_save_macros_preserves_other_sessions(tmp_path):
+    fp = tmp_path / "macros.json"
+    save_macros(str(fp), [Macro(keys=("f1",), text="a<CR>")], "host1:23")
+    save_macros(str(fp), [Macro(keys=("f2",), text="b<CR>")], "host2:23")
+    assert len(load_macros(str(fp), "host1:23")) == 1
+    assert len(load_macros(str(fp), "host2:23")) == 1
+
+
 def test_save_macros_empty(tmp_path):
     fp = tmp_path / "macros.json"
-    save_macros(str(fp), [])
-    assert load_macros(str(fp)) == []
+    save_macros(str(fp), [], _SK)
+    assert load_macros(str(fp), _SK) == []
 
 
 def test_save_macros_unicode(tmp_path):
     fp = tmp_path / "macros.json"
     macros = [Macro(keys=("f1",), text="say héllo<CR>")]
-    save_macros(str(fp), macros)
-    loaded = load_macros(str(fp))
+    save_macros(str(fp), macros, _SK)
+    loaded = load_macros(str(fp), _SK)
     assert loaded[0].text == "say héllo<CR>"
 
 

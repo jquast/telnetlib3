@@ -833,25 +833,17 @@ async def test_pty_session_ga_timer_cancelled_by_new_output(mock_session):
     assert len(ga_calls) == 0
 
 
-async def test_pty_session_ga_timer_suppressed_by_never_send_ga(mock_session):
-    """GA timer is not scheduled when never_send_ga is set."""
-    session, written = mock_session({"charset": "utf-8"}, capture_writes=True)
-    protocol = MagicMock()
-    protocol.never_send_ga = True
-    session.writer.protocol = protocol
-
-    session._output_buffer = b"prompt> "
-    session._flush_remaining()
-    assert session._ga_timer is None
-
-
-async def test_pty_session_ga_timer_suppressed_in_raw_mode(mock_session):
-    """GA timer is not scheduled in raw_mode (e.g. fingerprinting display)."""
+@pytest.mark.parametrize(
+    "never_send_ga,raw_mode",
+    [(True, False), (False, True)],
+)
+async def test_pty_session_ga_timer_suppressed(mock_session, never_send_ga, raw_mode):
+    """GA timer is not scheduled when never_send_ga is set or in raw_mode."""
     session, _ = mock_session({"charset": "utf-8"}, capture_writes=True)
     protocol = MagicMock()
-    protocol.never_send_ga = False
+    protocol.never_send_ga = never_send_ga
     session.writer.protocol = protocol
-    session.raw_mode = True
+    session.raw_mode = raw_mode
 
     session._output_buffer = b"prompt> "
     session._flush_remaining()

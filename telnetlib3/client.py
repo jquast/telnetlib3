@@ -9,6 +9,7 @@ import ssl as ssl_module
 import sys
 import codecs
 import struct
+import json
 import asyncio
 import argparse
 import functools
@@ -681,41 +682,48 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
 
         shell_callback = _repl_shell
 
-    # Wrap shell to inject autoreply rules
-    if args.get("autoreplies"):
+    # Auto-load autoreplies and macros from default config path
+    _xdg_cfg = os.environ.get(
+        "XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config")
+    )
+    _cfg_dir = os.path.join(_xdg_cfg, "telnetlib3")
+    _session_key = f"{args['host']}:{args['port']}"
+
+    _ar_path = os.path.join(_cfg_dir, "autoreplies.json")
+    _autoreply_rules: list[Any] = []
+    if os.path.exists(_ar_path):
         from .autoreply import load_autoreplies  # pylint: disable=import-outside-toplevel
 
-        _autoreply_rules = load_autoreplies(args["autoreplies"])
-        _inner_ar = shell_callback
+        try:
+            _autoreply_rules = load_autoreplies(_ar_path, _session_key)
+        except (ValueError, json.JSONDecodeError):
+            _autoreply_rules = []
 
-        async def _autoreply_shell(
-            reader: Union[TelnetReader, TelnetReaderUnicode],
-            writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
-        ) -> None:
-            # pylint: disable=protected-access
-            writer_arg._autoreply_rules = _autoreply_rules  # type: ignore[union-attr]
-            writer_arg._autoreplies_file = args["autoreplies"]  # type: ignore[union-attr]
-            await _inner_ar(reader, writer_arg)
-
-        shell_callback = _autoreply_shell
-
-    # Wrap shell to inject macro definitions
-    if args.get("macros"):
+    _macro_path = os.path.join(_cfg_dir, "macros.json")
+    _macro_defs: list[Any] = []
+    if os.path.exists(_macro_path):
         from .macros import load_macros  # pylint: disable=import-outside-toplevel
 
-        _macro_defs = load_macros(args["macros"])
-        _inner_macro = shell_callback
+        try:
+            _macro_defs = load_macros(_macro_path, _session_key)
+        except (ValueError, json.JSONDecodeError):
+            _macro_defs = []
 
-        async def _macro_shell(
-            reader: Union[TelnetReader, TelnetReaderUnicode],
-            writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
-        ) -> None:
-            # pylint: disable=protected-access
-            writer_arg._macro_defs = _macro_defs  # type: ignore[union-attr]
-            writer_arg._macros_file = args["macros"]  # type: ignore[union-attr]
-            await _inner_macro(reader, writer_arg)
+    _inner_session = shell_callback
 
-        shell_callback = _macro_shell
+    async def _session_shell(
+        reader: Union[TelnetReader, TelnetReaderUnicode],
+        writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
+    ) -> None:
+        # pylint: disable=protected-access
+        writer_arg._session_key = _session_key  # type: ignore[union-attr]
+        writer_arg._autoreply_rules = _autoreply_rules  # type: ignore[union-attr]
+        writer_arg._autoreplies_file = _ar_path  # type: ignore[union-attr]
+        writer_arg._macro_defs = _macro_defs  # type: ignore[union-attr]
+        writer_arg._macros_file = _macro_path  # type: ignore[union-attr]
+        await _inner_session(reader, writer_arg)
+
+    shell_callback = _session_shell
 
     # Build connection kwargs explicitly to avoid pylint false positive
     connection_kwargs: Dict[str, Any] = {
@@ -883,18 +891,6 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         "WARNING: this is insecure -- connections are encrypted but "
         "the server identity is not verified, allowing "
         "man-in-the-middle attacks",
-    )
-    parser.add_argument(
-        "--macros",
-        default=None,
-        metavar="FILE",
-        help="JSON file with macro key bindings for REPL mode",
-    )
-    parser.add_argument(
-        "--autoreplies",
-        default=None,
-        metavar="FILE",
-        help="JSON file with autoreply patterns for server output",
     )
     parser.add_argument(
         "--no-repl",

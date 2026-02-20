@@ -52,19 +52,8 @@ class AutoreplyRule:
     reply: str
 
 
-def load_autoreplies(path: str) -> list[AutoreplyRule]:
-    """
-    Load autoreply rules from a JSON file.
-
-    :param path: Path to the autoreplies JSON file.
-    :returns: List of :class:`AutoreplyRule` instances.
-    :raises FileNotFoundError: When *path* does not exist.
-    :raises ValueError: When JSON structure is invalid or regex fails.
-    """
-    with open(path, "r", encoding="utf-8") as fh:
-        data: dict[str, Any] = json.load(fh)
-
-    entries: list[dict[str, str]] = data.get("autoreplies", [])
+def _parse_entries(entries: list[dict[str, str]]) -> list[AutoreplyRule]:
+    """Parse a list of autoreply entry dicts into :class:`AutoreplyRule` instances."""
     rules: list[AutoreplyRule] = []
     for entry in entries:
         pattern_str = entry.get("pattern", "")
@@ -79,14 +68,47 @@ def load_autoreplies(path: str) -> list[AutoreplyRule]:
     return rules
 
 
-def save_autoreplies(path: str, rules: list[AutoreplyRule]) -> None:
+def load_autoreplies(path: str, session_key: str) -> list[AutoreplyRule]:
     """
-    Save autoreply rules to a JSON file.
+    Load autoreply rules for a session from a JSON file.
+
+    The file is keyed by session (``"host:port"``).  Each value is
+    an object with an ``"autoreplies"`` list.
+
+    :param path: Path to the autoreplies JSON file.
+    :param session_key: Session identifier (``"host:port"``).
+    :returns: List of :class:`AutoreplyRule` instances.
+    :raises FileNotFoundError: When *path* does not exist.
+    :raises ValueError: When JSON structure is invalid or regex fails.
+    """
+    with open(path, "r", encoding="utf-8") as fh:
+        data: dict[str, Any] = json.load(fh)
+
+    session_data: dict[str, Any] = data.get(session_key, {})
+    entries: list[dict[str, str]] = session_data.get("autoreplies", [])
+    return _parse_entries(entries)
+
+
+def save_autoreplies(path: str, rules: list[AutoreplyRule], session_key: str) -> None:
+    """
+    Save autoreply rules for a session to a JSON file.
+
+    Other sessions' data in the file is preserved.
 
     :param path: Path to the autoreplies JSON file.
     :param rules: List of :class:`AutoreplyRule` instances to save.
+    :param session_key: Session identifier (``"host:port"``).
     """
-    data = {"autoreplies": [{"pattern": r.pattern.pattern, "reply": r.reply} for r in rules]}
+    import os  # pylint: disable=import-outside-toplevel
+
+    data: dict[str, Any] = {}
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+
+    data[session_key] = {
+        "autoreplies": [{"pattern": r.pattern.pattern, "reply": r.reply} for r in rules]
+    }
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, ensure_ascii=False)
         fh.write("\n")

@@ -148,19 +148,24 @@ def test_search_buffer_advance_match():
     assert "world" not in remaining
 
 
+_SK = "test.host:23"
+
+
 def test_load_autoreplies_valid(tmp_path):
     fp = tmp_path / "autoreplies.json"
     fp.write_text(
         json.dumps(
             {
-                "autoreplies": [
-                    {"pattern": r"\d+ gold", "reply": "get gold<CR>"},
-                    {"pattern": r"(\w+) attacks", "reply": "kill \\1<CR>"},
-                ]
+                _SK: {
+                    "autoreplies": [
+                        {"pattern": r"\d+ gold", "reply": "get gold<CR>"},
+                        {"pattern": r"(\w+) attacks", "reply": "kill \\1<CR>"},
+                    ]
+                }
             }
         )
     )
-    rules = load_autoreplies(str(fp))
+    rules = load_autoreplies(str(fp), _SK)
     assert len(rules) == 2
     assert rules[0].pattern.pattern == r"\d+ gold"
     assert rules[0].reply == "get gold<CR>"
@@ -169,31 +174,44 @@ def test_load_autoreplies_valid(tmp_path):
 
 def test_load_autoreplies_missing_file():
     with pytest.raises(FileNotFoundError):
-        load_autoreplies("/nonexistent/path.json")
+        load_autoreplies("/nonexistent/path.json", _SK)
 
 
 def test_load_autoreplies_invalid_regex(tmp_path):
     fp = tmp_path / "bad.json"
-    fp.write_text(json.dumps({"autoreplies": [{"pattern": "[invalid", "reply": "x"}]}))
+    fp.write_text(json.dumps({_SK: {"autoreplies": [{"pattern": "[invalid", "reply": "x"}]}}))
     with pytest.raises(ValueError, match="Invalid autoreply pattern"):
-        load_autoreplies(str(fp))
+        load_autoreplies(str(fp), _SK)
 
 
 def test_load_autoreplies_empty_pattern_skipped(tmp_path):
     fp = tmp_path / "empty.json"
     fp.write_text(
         json.dumps(
-            {"autoreplies": [{"pattern": "", "reply": "x"}, {"pattern": "valid", "reply": "y"}]}
+            {
+                _SK: {
+                    "autoreplies": [
+                        {"pattern": "", "reply": "x"},
+                        {"pattern": "valid", "reply": "y"},
+                    ]
+                }
+            }
         )
     )
-    rules = load_autoreplies(str(fp))
+    rules = load_autoreplies(str(fp), _SK)
     assert len(rules) == 1
 
 
 def test_load_autoreplies_empty_list(tmp_path):
     fp = tmp_path / "empty.json"
-    fp.write_text(json.dumps({"autoreplies": []}))
-    assert load_autoreplies(str(fp)) == []
+    fp.write_text(json.dumps({_SK: {"autoreplies": []}}))
+    assert load_autoreplies(str(fp), _SK) == []
+
+
+def test_load_autoreplies_no_session(tmp_path):
+    fp = tmp_path / "autoreplies.json"
+    fp.write_text(json.dumps({"other:23": {"autoreplies": [{"pattern": "x", "reply": "y"}]}}))
+    assert load_autoreplies(str(fp), _SK) == []
 
 
 def test_save_autoreplies_roundtrip(tmp_path):
@@ -205,25 +223,35 @@ def test_save_autoreplies_roundtrip(tmp_path):
             reply="kill \\1<CR>",
         ),
     ]
-    save_autoreplies(str(fp), original)
-    loaded = load_autoreplies(str(fp))
+    save_autoreplies(str(fp), original, _SK)
+    loaded = load_autoreplies(str(fp), _SK)
     assert len(loaded) == len(original)
     for orig, restored in zip(original, loaded):
         assert orig.pattern.pattern == restored.pattern.pattern
         assert orig.reply == restored.reply
 
 
+def test_save_autoreplies_preserves_other_sessions(tmp_path):
+    fp = tmp_path / "autoreplies.json"
+    r1 = [AutoreplyRule(pattern=re.compile("a"), reply="b")]
+    r2 = [AutoreplyRule(pattern=re.compile("c"), reply="d")]
+    save_autoreplies(str(fp), r1, "host1:23")
+    save_autoreplies(str(fp), r2, "host2:23")
+    assert len(load_autoreplies(str(fp), "host1:23")) == 1
+    assert len(load_autoreplies(str(fp), "host2:23")) == 1
+
+
 def test_save_autoreplies_empty(tmp_path):
     fp = tmp_path / "autoreplies.json"
-    save_autoreplies(str(fp), [])
-    assert load_autoreplies(str(fp)) == []
+    save_autoreplies(str(fp), [], _SK)
+    assert load_autoreplies(str(fp), _SK) == []
 
 
 def test_save_autoreplies_unicode(tmp_path):
     fp = tmp_path / "autoreplies.json"
     rules = [AutoreplyRule(pattern=re.compile("héllo"), reply="bonjour<CR>")]
-    save_autoreplies(str(fp), rules)
-    loaded = load_autoreplies(str(fp))
+    save_autoreplies(str(fp), rules, _SK)
+    loaded = load_autoreplies(str(fp), _SK)
     assert loaded[0].pattern.pattern == "héllo"
     assert loaded[0].reply == "bonjour<CR>"
 

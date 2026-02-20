@@ -196,7 +196,6 @@ async def test_drain_raises_reader_exception():
 @pytest.mark.asyncio
 async def test_drain_waits_on_transport_closing_and_calls_drain_helper():
     w, t, p = new_writer(server=True)
-    # simulate closing transport
     t._closing = True
     await w.drain()
     assert p.drain_called is True
@@ -843,9 +842,8 @@ def test_mode_client_kludge_and_server_kludge_and_remote_local():
     wc.remote_option[ECHO] = True
     wc.remote_option[SGA] = True
     assert wc.mode == "kludge"
-    # remote mode when remote LINEMODE enabled and not local
     wc.remote_option[LINEMODE] = True
-    wc._linemode = slc.Linemode(bytes([0]))  # remote
+    wc._linemode = slc.Linemode(bytes([0]))
     assert wc.mode == "remote"
 
 
@@ -879,12 +877,10 @@ def test_charset_request_accepted_updates_environ_encoding():
 
 def test_iac_wont_and_dont_suppressed_when_remote_false():
     w, t, p = new_writer(server=True)
-    # WONT sets local option False and writes frame
     w.local_option[ECHO] = True
     assert w.iac(WONT, ECHO) is True
     assert w.local_option[ECHO] is False
     assert t.writes[-1] == IAC + WONT + ECHO
-    # DONT suppressed when remote has key and is False
     w.remote_option[ECHO] = False
     assert w.iac(DONT, ECHO) is False
 
@@ -897,9 +893,8 @@ def test_send_status_clears_pending_will_status():
 
 
 def test_handle_sb_linemode_forwardmask_wrong_sb_opt_raises():
-    w, t, p = new_writer(server=True)
+    w, _, _ = new_writer(server=True)
     with pytest.raises(ValueError, match="expected LMODE_FORWARDMASK"):
-        # DO followed by wrong sb_opt value -> ValueError
         w._handle_sb_linemode(collections.deque([LINEMODE, DO, b"\x99"]))
 
 
@@ -907,10 +902,8 @@ def test_handle_sb_environ_info_warning_path():
     seen = []
     ws, ts, ps = new_writer(server=True)
     ws.set_ext_callback(NEW_ENVIRON, seen.append)
-    # First IS sets pending_option[SB + NEW_ENVIRON] = False
     is_payload = _encode_env_buf({"USER": "root"})
     ws._handle_sb_environ(collections.deque([NEW_ENVIRON, IS, is_payload]))
-    # Then INFO path with pending False triggers warning path and callback
     info_payload = _encode_env_buf({"LANG": "C"})
     ws._handle_sb_environ(collections.deque([NEW_ENVIRON, INFO, info_payload]))
     assert any("USER" in d for d in seen)
@@ -927,7 +920,6 @@ def test_handle_will_tm_success_sets_remote_option_and_calls_cb():
     called = {}
     wtm, tt, pp = new_writer(server=True)
     wtm.set_iac_callback(TM, lambda cmd: called.setdefault("cmd", cmd))
-    # mark DO+TM pending so WILL TM is accepted
     wtm.pending_option[DO + TM] = True
     wtm.handle_will(TM)
     assert wtm.remote_option[TM] is True
@@ -943,9 +935,7 @@ def test_handle_send_helpers_return_values():
 
 
 def test_miscellaneous_handle_logs_cover_remaining_handlers():
-    # server writer for server-side handlers
     ws, ts, ps = new_writer(server=True)
-    # simple extension/info handlers
     ws.handle_xdisploc("host:0")
     ws.handle_sndloc("Room 1")
     ws.handle_ttype("xterm")
@@ -953,7 +943,6 @@ def test_miscellaneous_handle_logs_cover_remaining_handlers():
     ws.handle_environ({"USER": "root"})
     ws.handle_tspeed(9600, 9600)
     ws.handle_charset("UTF-8")
-    # SLC related debug handlers
     ws.handle_lnext(b"\x00")
     ws.handle_rp(b"\x00")
     ws.handle_ew(b"\x00")
@@ -964,19 +953,16 @@ def test_miscellaneous_handle_logs_cover_remaining_handlers():
 def test_sb_interrupted_logs_warning_with_context(caplog):
     """SB interruption logs WARNING (not ERROR) with option name and byte count."""
     w, t, _ = new_writer(server=True)
-    # Enter SB mode: IAC SB CHARSET <payload bytes>
     w.feed_byte(IAC)
     w.feed_byte(SB)
     w.feed_byte(CHARSET)
     w.feed_byte(b"\x01")
     w.feed_byte(b"\x02")
-    # Interrupt with IAC WONT (instead of IAC SE)
     with caplog.at_level(logging.WARNING):
         w.feed_byte(IAC)
         w.feed_byte(WONT)
     assert any("SB CHARSET (3 bytes) interrupted by IAC WONT" in r.message for r in caplog.records)
     assert all(r.levelno != logging.ERROR for r in caplog.records)
-    # The WONT command is still parsed: next byte is its option
     w.feed_byte(ECHO)
 
 
@@ -997,7 +983,6 @@ def test_handle_will_comport_accepted_and_signature_requested():
     assert t.writes[-2] == IAC + DO + COM_PORT_OPTION
     assert w.remote_option.enabled(COM_PORT_OPTION)
     assert COM_PORT_OPTION not in w.rejected_will
-    # SIGNATURE request: IAC SB COM_PORT_OPTION \x00 IAC SE
     assert t.writes[-1] == IAC + SB + COM_PORT_OPTION + b"\x00" + IAC + SE
 
 
@@ -1014,7 +999,6 @@ def test_comport_sb_signature_response():
 def test_comport_sb_baudrate_response():
     """COM-PORT-OPTION SET-BAUDRATE response is parsed."""
     w, *_ = new_writer(server=False, client=True)
-    # subcmd 101 = SET-BAUDRATE response, 4-byte big-endian 9600
     w.handle_subnegotiation(
         collections.deque(
             [COM_PORT_OPTION, bytes([101]), *[bytes([b]) for b in (0, 0, 0x25, 0x80)]]
@@ -1026,13 +1010,10 @@ def test_comport_sb_baudrate_response():
 def test_comport_sb_datasize_parity_stopsize():
     """COM-PORT-OPTION datasize, parity, stopsize responses are parsed."""
     w, *_ = new_writer(server=False, client=True)
-    # datasize=8
     w.handle_subnegotiation(collections.deque([COM_PORT_OPTION, bytes([102]), bytes([8])]))
     assert w.comport_data["datasize"] == 8
-    # parity=NONE (1)
     w.handle_subnegotiation(collections.deque([COM_PORT_OPTION, bytes([103]), bytes([1])]))
     assert w.comport_data["parity"] == "NONE"
-    # stopsize=1 (1)
     w.handle_subnegotiation(collections.deque([COM_PORT_OPTION, bytes([104]), bytes([1])]))
     assert w.comport_data["stopsize"] == "1"
 
@@ -1040,7 +1021,6 @@ def test_comport_sb_datasize_parity_stopsize():
 def test_comport_sb_empty_subcmd_payload():
     """COM-PORT-OPTION SIGNATURE with no payload does not store a signature."""
     w, *_ = new_writer(server=False, client=True)
-    # subcmd 0 = SIGNATURE with no payload (server requesting our signature)
     w.handle_subnegotiation(collections.deque([COM_PORT_OPTION, b"\x00"]))
     assert "signature" not in (w.comport_data or {})
 

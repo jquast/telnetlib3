@@ -976,11 +976,24 @@ def test_detect_yn_prompt_encoding(banner, expected_encoding):
     assert sfp._detect_yn_prompt(banner).encoding == expected_encoding
 
 
+@pytest.mark.parametrize(
+    "banner,expected_write",
+    [
+        pytest.param(b"Do you accept? (y/n) ", b"y\r\n", id="yn_prompt"),
+        pytest.param(b"Continue? (yes/no) ", b"yes\r\n", id="yes_no_prompt"),
+        pytest.param(
+            b"Press [.ESC.] twice within 15 seconds to CONTINUE...",
+            b"\x1b\x1b",
+            id="esc_twice_prompt",
+        ),
+    ],
+)
 @pytest.mark.asyncio
-async def test_fingerprinting_shell_yn_prompt(tmp_path):
-    """Banner with y/n prompt causes 'y\\r\\n' instead of bare '\\r\\n'."""
+async def test_fingerprinting_shell_prompt_response(
+    tmp_path, banner, expected_write
+):
     save_path = str(tmp_path / "result.json")
-    reader = MockReader([b"Do you accept? (y/n) "])
+    reader = MockReader([banner])
     writer = MockWriter(will_options=[fps.SGA])
 
     await sfp.fingerprinting_client_shell(
@@ -995,51 +1008,7 @@ async def test_fingerprinting_shell_yn_prompt(tmp_path):
         mssp_wait=0.01,
     )
 
-    assert b"y\r\n" in writer._writes
-
-
-@pytest.mark.asyncio
-async def test_fingerprinting_shell_yes_no_prompt(tmp_path):
-    """Banner with yes/no prompt causes 'yes\\r\\n' instead of bare '\\r\\n'."""
-    save_path = str(tmp_path / "result.json")
-    reader = MockReader([b"Continue? (yes/no) "])
-    writer = MockWriter(will_options=[fps.SGA])
-
-    await sfp.fingerprinting_client_shell(
-        reader,
-        writer,
-        host="localhost",
-        port=23,
-        save_path=save_path,
-        silent=True,
-        banner_quiet_time=0.01,
-        banner_max_wait=0.01,
-        mssp_wait=0.01,
-    )
-
-    assert b"yes\r\n" in writer._writes
-
-
-@pytest.mark.asyncio
-async def test_fingerprinting_shell_esc_twice_prompt(tmp_path):
-    """Banner with ESC-twice botcheck sends two raw ESC bytes."""
-    save_path = str(tmp_path / "result.json")
-    reader = MockReader([b"Press [.ESC.] twice within 15 seconds to CONTINUE..."])
-    writer = MockWriter(will_options=[fps.SGA])
-
-    await sfp.fingerprinting_client_shell(
-        reader,
-        writer,
-        host="localhost",
-        port=23,
-        save_path=save_path,
-        silent=True,
-        banner_quiet_time=0.01,
-        banner_max_wait=0.01,
-        mssp_wait=0.01,
-    )
-
-    assert b"\x1b\x1b" in writer._writes
+    assert expected_write in writer._writes
 
 
 @pytest.mark.asyncio
@@ -1142,28 +1111,28 @@ async def test_fingerprinting_shell_multi_prompt_max_replies(tmp_path):
     assert len(y_writes) == sfp._MAX_PROMPT_REPLIES
 
 
-class TestCullDisplay:
-    """Tests for _cull_display bytes conversion."""
+def test_cull_display_bytes_utf8():
+    assert sfp._cull_display(b"hello") == "hello"
 
-    def test_bytes_utf8(self):
-        assert sfp._cull_display(b"hello") == "hello"
 
-    def test_bytes_binary(self):
-        assert sfp._cull_display(b"\x80\xff") == "80ff"
+def test_cull_display_bytes_binary():
+    assert sfp._cull_display(b"\x80\xff") == "80ff"
 
-    def test_bytes_in_dict(self):
-        result = sfp._cull_display({"data_bytes": b"\x01"})
-        assert result == {"data_bytes": "\x01"}
-        json.dumps(result)
 
-    def test_bytes_in_nested_list(self):
-        result = sfp._cull_display({"items": [{"val": b"\xfe\xed"}]})
-        assert result == {"items": [{"val": "feed"}]}
-        json.dumps(result)
+def test_cull_display_bytes_in_dict():
+    result = sfp._cull_display({"data_bytes": b"\x01"})
+    assert result == {"data_bytes": "\x01"}
+    json.dumps(result)
 
-    def test_empty_bytes_culled(self):
-        result = sfp._cull_display({"data_bytes": b""})
-        assert result == {}
+
+def test_cull_display_bytes_in_nested_list():
+    result = sfp._cull_display({"items": [{"val": b"\xfe\xed"}]})
+    assert result == {"items": [{"val": "feed"}]}
+    json.dumps(result)
+
+
+def test_cull_display_empty_bytes_culled():
+    assert sfp._cull_display({"data_bytes": b""}) == {}
 
 
 @pytest.mark.asyncio

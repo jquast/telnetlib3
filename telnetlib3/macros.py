@@ -35,19 +35,8 @@ class Macro:
     text: str
 
 
-def load_macros(path: str) -> list[Macro]:
-    """
-    Load macro definitions from a JSON file.
-
-    :param path: Path to the macros JSON file.
-    :returns: List of :class:`Macro` instances.
-    :raises FileNotFoundError: When *path* does not exist.
-    :raises ValueError: When JSON structure is invalid.
-    """
-    with open(path, "r", encoding="utf-8") as fh:
-        data: dict[str, Any] = json.load(fh)
-
-    entries: list[dict[str, str]] = data.get("macros", [])
+def _parse_entries(entries: list[dict[str, str]]) -> list[Macro]:
+    """Parse a list of macro entry dicts into :class:`Macro` instances."""
     macros: list[Macro] = []
     for entry in entries:
         key_str = entry.get("key", "").strip()
@@ -59,14 +48,47 @@ def load_macros(path: str) -> list[Macro]:
     return macros
 
 
-def save_macros(path: str, macros: list[Macro]) -> None:
+def load_macros(path: str, session_key: str) -> list[Macro]:
     """
-    Save macro definitions to a JSON file.
+    Load macro definitions for a session from a JSON file.
+
+    The file is keyed by session (``"host:port"``).  Each value is
+    an object with a ``"macros"`` list.
+
+    :param path: Path to the macros JSON file.
+    :param session_key: Session identifier (``"host:port"``).
+    :returns: List of :class:`Macro` instances.
+    :raises FileNotFoundError: When *path* does not exist.
+    :raises ValueError: When JSON structure is invalid.
+    """
+    with open(path, "r", encoding="utf-8") as fh:
+        data: dict[str, Any] = json.load(fh)
+
+    session_data: dict[str, Any] = data.get(session_key, {})
+    entries: list[dict[str, str]] = session_data.get("macros", [])
+    return _parse_entries(entries)
+
+
+def save_macros(path: str, macros: list[Macro], session_key: str) -> None:
+    """
+    Save macro definitions for a session to a JSON file.
+
+    Other sessions' data in the file is preserved.
 
     :param path: Path to the macros JSON file.
     :param macros: List of :class:`Macro` instances to save.
+    :param session_key: Session identifier (``"host:port"``).
     """
-    data = {"macros": [{"key": " ".join(m.keys), "text": m.text} for m in macros]}
+    import os  # pylint: disable=import-outside-toplevel
+
+    data: dict[str, Any] = {}
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+
+    data[session_key] = {
+        "macros": [{"key": " ".join(m.keys), "text": m.text} for m in macros]
+    }
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, ensure_ascii=False)
         fh.write("\n")

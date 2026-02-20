@@ -167,6 +167,8 @@ def _launch_tui_editor(
     _xdg = os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config"))
     _config_dir = os.path.join(_xdg, "telnetlib3")
 
+    _session_key = getattr(writer, "_session_key", "")
+
     if editor_type == "macros":
         path = getattr(writer, "_macros_file", None) or os.path.join(_config_dir, "macros.json")
         entry = "edit_macros_main"
@@ -176,7 +178,11 @@ def _launch_tui_editor(
         )
         entry = "edit_autoreplies_main"
 
-    cmd = [sys.executable, "-c", f"from telnetlib3.client_tui import {entry}; {entry}({path!r})"]
+    cmd = [
+        sys.executable, "-c",
+        f"from telnetlib3.client_tui import {entry}; "
+        f"{entry}({path!r}, {_session_key!r})",
+    ]
 
     log = logging.getLogger(__name__)
 
@@ -206,9 +212,9 @@ def _launch_tui_editor(
                 pass
 
         if editor_type == "macros":
-            _reload_macros(writer, path, log)
+            _reload_macros(writer, path, _session_key, log)
         else:
-            _reload_autoreplies(writer, path, log)
+            _reload_autoreplies(writer, path, _session_key, log)
 
     from prompt_toolkit.application import run_in_terminal  # pylint: disable=import-outside-toplevel
 
@@ -216,7 +222,10 @@ def _launch_tui_editor(
 
 
 def _reload_macros(
-    writer: Union[TelnetWriter, TelnetWriterUnicode], path: str, log: logging.Logger
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    path: str,
+    session_key: str,
+    log: logging.Logger,
 ) -> None:
     """Reload macro definitions from disk after editing."""
     import os  # pylint: disable=import-outside-toplevel
@@ -226,7 +235,7 @@ def _reload_macros(
     from .macros import load_macros  # pylint: disable=import-outside-toplevel
 
     try:
-        writer._macro_defs = load_macros(path)  # type: ignore[union-attr]
+        writer._macro_defs = load_macros(path, session_key)  # type: ignore[union-attr]
         writer._macros_file = path  # type: ignore[union-attr]
         log.info("reloaded %d macros from %s", len(writer._macro_defs), path)  # type: ignore[union-attr]
     except (ValueError, json.JSONDecodeError) as exc:
@@ -234,7 +243,10 @@ def _reload_macros(
 
 
 def _reload_autoreplies(
-    writer: Union[TelnetWriter, TelnetWriterUnicode], path: str, log: logging.Logger
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    path: str,
+    session_key: str,
+    log: logging.Logger,
 ) -> None:
     """Reload autoreply rules from disk after editing."""
     import os  # pylint: disable=import-outside-toplevel
@@ -244,7 +256,7 @@ def _reload_autoreplies(
     from .autoreply import load_autoreplies  # pylint: disable=import-outside-toplevel
 
     try:
-        writer._autoreply_rules = load_autoreplies(path)  # type: ignore[union-attr]
+        writer._autoreply_rules = load_autoreplies(path, session_key)  # type: ignore[union-attr]
         writer._autoreplies_file = path  # type: ignore[union-attr]
         log.info("reloaded %d autoreplies from %s", len(writer._autoreply_rules), path)  # type: ignore[union-attr]
     except (ValueError, json.JSONDecodeError) as exc:

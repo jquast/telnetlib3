@@ -631,8 +631,8 @@ def test_collect_rejected_options_with_data():
     writer = MockWriter()
     writer.rejected_will = {fps.BINARY, fps.SGA}
     writer.rejected_do = {fps.ECHO}
-    result = fps._collect_rejected_options(writer)
-    assert len(result["will"]) == 2 and len(result["do"]) == 1
+    rejected = fps._collect_rejected_options(writer)
+    assert len(rejected["will"]) == 2 and len(rejected["do"]) == 1
 
 
 def test_collect_extra_info_tuples_and_bytes():
@@ -640,9 +640,9 @@ def test_collect_extra_info_tuples_and_bytes():
     writer._protocol = MockProtocol(
         {"tspeed": (38400, 38400), "raw_data": b"\x01\x02\x03", "name": "test"}
     )
-    result = fps._collect_extra_info(writer)
-    assert result["tspeed"] == [38400, 38400]
-    assert result["raw_data"] == "010203" and result["name"] == "test"
+    info = fps._collect_extra_info(writer)
+    assert info["tspeed"] == [38400, 38400]
+    assert info["raw_data"] == "010203" and info["name"] == "test"
 
 
 def test_collect_extra_info_removes_duplicate_keys():
@@ -658,10 +658,10 @@ def test_collect_extra_info_removes_duplicate_keys():
             "ttype1": "xterm",
         }
     )
-    result = fps._collect_extra_info(writer)
+    info = fps._collect_extra_info(writer)
     for key in ("term", "cols", "rows", "ttype1"):
-        assert key not in result
-    assert result["TERM"] == "xterm"
+        assert key not in info
+    assert info["TERM"] == "xterm"
 
 
 def test_collect_ttype_cycle():
@@ -699,8 +699,8 @@ def test_collect_slc_tab_with_data():
     tab[slc.SLC_EC] = slc.SLC(mask=slc.SLC_DEFAULT, value=slc.theNULL)
     tab[slc.SLC_IP] = slc.SLC(mask=slc.SLC_DEFAULT, value=b"\x04")
     writer.slctab = tab
-    result = fps._collect_slc_tab(writer)
-    assert "nosupport" in result and "unset" in result and "set" in result
+    slc_tab = fps._collect_slc_tab(writer)
+    assert "nosupport" in slc_tab and "unset" in slc_tab and "set" in slc_tab
 
 
 def test_collect_slc_tab_empty():
@@ -972,10 +972,10 @@ def test_atomic_json_write_bytes_values(tmp_path):
         filepath, {"text": b"hello", "binary": b"\x80\xff", "nested": {"val": b"\x01"}}
     )
     with open(filepath, encoding="utf-8") as f:
-        result = json.load(f)
-    assert result["text"] == "hello"
-    assert result["binary"] == "80ff"
-    assert result["nested"]["val"] == "\x01"
+        data = json.load(f)
+    assert data["text"] == "hello"
+    assert data["binary"] == "80ff"
+    assert data["nested"]["val"] == "\x01"
 
 
 def test_fingerprinting_main(monkeypatch, tmp_path):
@@ -1116,8 +1116,8 @@ def test_build_session_fingerprint_comport():
     writer.rejected_will = set()
     writer.rejected_do = set()
     probe_results = {"BINARY": fps.ProbeResult(status="WILL", opt=fps.BINARY)}
-    result = fps._build_session_fingerprint(writer, probe_results, 0.5)
-    assert result["comport"] == {"signature": "COM1"}
+    session = fps._build_session_fingerprint(writer, probe_results, 0.5)
+    assert session["comport"] == {"signature": "COM1"}
 
 
 def test_save_fingerprint_data_existing_non_unknown_subdir(tmp_path, monkeypatch):
@@ -1136,6 +1136,6 @@ def test_save_fingerprint_data_existing_non_unknown_subdir(tmp_path, monkeypatch
     known_dir = telnet_dir / "known-terminal"
     known_dir.mkdir(parents=True)
 
-    result = fps._save_fingerprint_data(writer, probe_results, 0.5)
-    assert result is not None
-    assert "known-terminal" in result
+    filepath = fps._save_fingerprint_data(writer, probe_results, 0.5)
+    assert filepath is not None
+    assert "known-terminal" in filepath
