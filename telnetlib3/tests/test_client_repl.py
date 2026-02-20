@@ -477,69 +477,63 @@ def test_launch_tui_editor_calls_run_in_terminal(monkeypatch) -> None:
 
 
 @pytest.mark.skipif(not HAS_PROMPT_TOOLKIT, reason="prompt_toolkit not installed")
-def test_reload_macros_after_edit(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "reload_func,file_key,data_key,attr,file_attr",
+    [
+        ("_reload_macros", "macros", "macros", "_macro_defs", "_macros_file"),
+        (
+            "_reload_autoreplies",
+            "autoreplies",
+            "autoreplies",
+            "_autoreply_rules",
+            "_autoreplies_file",
+        ),
+    ],
+)
+def test_reload_after_edit(
+    tmp_path, reload_func, file_key, data_key, attr, file_attr
+) -> None:
     import json
+    import logging
 
-    from telnetlib3.client_repl import _reload_macros
+    import telnetlib3.client_repl as cr
 
+    fn = getattr(cr, reload_func)
     sk = "test.host:23"
-    macro_file = tmp_path / "macros.json"
-    macro_file.write_text(json.dumps({sk: {"macros": [{"key": "f5", "text": "hello<CR>"}]}}))
+    if data_key == "macros":
+        payload = {sk: {data_key: [{"key": "f5", "text": "hello<CR>"}]}}
+    else:
+        payload = {sk: {data_key: [{"pattern": "hello", "reply": "world"}]}}
+    data_file = tmp_path / f"{file_key}.json"
+    data_file.write_text(json.dumps(payload))
 
-    import logging
+    writer = types.SimpleNamespace(**{attr: [], file_attr: ""})
+    log = logging.getLogger(f"test.reload_{file_key}")
 
-    writer = types.SimpleNamespace(_macro_defs=[], _macros_file="")
-    log = logging.getLogger("test.reload_macros")
-
-    _reload_macros(writer, str(macro_file), sk, log)
-    assert len(writer._macro_defs) == 1
-    assert writer._macros_file == str(macro_file)
-
-
-@pytest.mark.skipif(not HAS_PROMPT_TOOLKIT, reason="prompt_toolkit not installed")
-def test_reload_autoreplies_after_edit(tmp_path) -> None:
-    import json
-
-    from telnetlib3.client_repl import _reload_autoreplies
-
-    sk = "test.host:23"
-    ar_file = tmp_path / "autoreplies.json"
-    ar_file.write_text(json.dumps({sk: {"autoreplies": [{"pattern": "hello", "reply": "world"}]}}))
-
-    import logging
-
-    writer = types.SimpleNamespace(_autoreply_rules=[], _autoreplies_file="")
-    log = logging.getLogger("test.reload_autoreplies")
-
-    _reload_autoreplies(writer, str(ar_file), sk, log)
-    assert len(writer._autoreply_rules) == 1
-    assert writer._autoreplies_file == str(ar_file)
+    fn(writer, str(data_file), sk, log)
+    assert len(getattr(writer, attr)) == 1
+    assert getattr(writer, file_attr) == str(data_file)
 
 
 @pytest.mark.skipif(not HAS_PROMPT_TOOLKIT, reason="prompt_toolkit not installed")
-def test_reload_macros_missing_file(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "reload_func,attr",
+    [
+        ("_reload_macros", "_macro_defs"),
+        ("_reload_autoreplies", "_autoreply_rules"),
+    ],
+)
+def test_reload_missing_file(tmp_path, reload_func, attr) -> None:
     import logging
 
-    from telnetlib3.client_repl import _reload_macros
+    import telnetlib3.client_repl as cr
 
-    writer = types.SimpleNamespace(_macro_defs=["original"])
-    log = logging.getLogger("test.reload_macros_missing")
+    fn = getattr(cr, reload_func)
+    writer = types.SimpleNamespace(**{attr: ["original"]})
+    log = logging.getLogger(f"test.{reload_func}_missing")
 
-    _reload_macros(writer, str(tmp_path / "nonexistent.json"), "test:23", log)
-    assert writer._macro_defs == ["original"]
-
-
-@pytest.mark.skipif(not HAS_PROMPT_TOOLKIT, reason="prompt_toolkit not installed")
-def test_reload_autoreplies_missing_file(tmp_path) -> None:
-    import logging
-
-    from telnetlib3.client_repl import _reload_autoreplies
-
-    writer = types.SimpleNamespace(_autoreply_rules=["original"])
-    log = logging.getLogger("test.reload_autoreplies_missing")
-
-    _reload_autoreplies(writer, str(tmp_path / "nonexistent.json"), "test:23", log)
-    assert writer._autoreply_rules == ["original"]
+    fn(writer, str(tmp_path / "nonexistent.json"), "test:23", log)
+    assert getattr(writer, attr) == ["original"]
 
 
 async def _async_return(value: object) -> object:
@@ -635,16 +629,25 @@ async def test_basic_event_loop_kludge_mode_switch() -> None:
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
-async def test_basic_event_loop_user_input_echo() -> None:
-    """User input is echoed and sent to writer."""
+@pytest.mark.parametrize(
+    "will_echo,input_data,server_data,check_written,check_output,check_absent",
+    [
+        (False, b"hello\n", b"welcome prompt", "hello\r\n", "hello", None),
+        (True, b"secret\n", b"login: ", None, "******", "secret"),
+    ],
+)
+async def test_basic_event_loop_user_input(
+    will_echo, input_data, server_data,
+    check_written, check_output, check_absent,
+) -> None:
     from telnetlib3.client_repl import _repl_event_loop_basic
 
     reader = asyncio.StreamReader()
-    reader.feed_data(b"welcome prompt")
+    reader.feed_data(server_data)
 
     written: list[str] = []
     closed = False
-    writer = _mock_writer(will_echo=False)
+    writer = _mock_writer(will_echo=will_echo)
     writer.mode = "local"
     writer.handle_send_naws = lambda: (24, 80)
     writer.local_option = types.SimpleNamespace(enabled=lambda _: False)
@@ -658,58 +661,16 @@ async def test_basic_event_loop_user_input_echo() -> None:
     writer.write = lambda data: written.append(data)
 
     stdin_reader = asyncio.StreamReader()
-    stdin_reader.feed_data(b"hello\n")
+    stdin_reader.feed_data(input_data)
 
     async def _delayed_eof() -> None:
         await asyncio.sleep(0.05)
         stdin_reader.feed_eof()
         reader.feed_eof()
 
-    term = types.SimpleNamespace(on_resize=None, connect_stdin=lambda: _async_return(stdin_reader))
-
-    stdout, transport = _mock_stdout()
-    eof_task = asyncio.ensure_future(_delayed_eof())
-    await _repl_event_loop_basic(reader, writer, term, stdout)
-    await eof_task
-
-    assert any("hello\r\n" in w for w in written)
-    output = bytes(transport.data).decode("utf-8", errors="replace")
-    assert "hello" in output
-
-
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
-@pytest.mark.asyncio
-async def test_basic_event_loop_password_masking() -> None:
-    """Password input is masked with asterisks when will_echo=True."""
-    from telnetlib3.client_repl import _repl_event_loop_basic
-
-    reader = asyncio.StreamReader()
-    reader.feed_data(b"login: ")
-
-    written: list[str] = []
-    closed = False
-    writer = _mock_writer(will_echo=True)
-    writer.mode = "local"
-    writer.handle_send_naws = lambda: (24, 80)
-    writer.local_option = types.SimpleNamespace(enabled=lambda _: False)
-    writer.is_closing = lambda: False
-
-    def _close() -> None:
-        nonlocal closed
-        closed = True
-
-    writer.close = _close
-    writer.write = lambda data: written.append(data)
-
-    stdin_reader = asyncio.StreamReader()
-    stdin_reader.feed_data(b"secret\n")
-
-    async def _delayed_eof() -> None:
-        await asyncio.sleep(0.05)
-        stdin_reader.feed_eof()
-        reader.feed_eof()
-
-    term = types.SimpleNamespace(on_resize=None, connect_stdin=lambda: _async_return(stdin_reader))
+    term = types.SimpleNamespace(
+        on_resize=None, connect_stdin=lambda: _async_return(stdin_reader)
+    )
 
     stdout, transport = _mock_stdout()
     eof_task = asyncio.ensure_future(_delayed_eof())
@@ -717,5 +678,8 @@ async def test_basic_event_loop_password_masking() -> None:
     await eof_task
 
     output = bytes(transport.data).decode("utf-8", errors="replace")
-    assert "******" in output
-    assert "secret" not in output
+    if check_written is not None:
+        assert any(check_written in w for w in written)
+    assert check_output in output
+    if check_absent is not None:
+        assert check_absent not in output

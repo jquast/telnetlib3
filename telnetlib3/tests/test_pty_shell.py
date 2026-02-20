@@ -447,15 +447,9 @@ async def test_pty_session_write_to_pty_behavior(mock_session):
         assert len(write_calls) == 0
 
 
-async def test_pty_session_cleanup_flushes_remaining_buffer():
+async def test_pty_session_cleanup_flushes_remaining_buffer(mock_session):
     """Test that cleanup flushes remaining buffer with final=True."""
-    reader = MagicMock()
-    writer = MagicMock()
-    written = []
-    writer.write = written.append
-    writer.get_extra_info = MagicMock(return_value="utf-8")
-
-    session = PTYSession(reader, writer, "/nonexistent.program", [])
+    session, written = mock_session({"charset": "utf-8"}, capture_writes=True)
     session._output_buffer = b"remaining data"
     session.master_fd = 99
     session.child_pid = 12345
@@ -540,14 +534,10 @@ async def test_pty_session_set_window_size_behavior(mock_session):
     ],
 )
 async def test_pty_session_cleanup_error_recovery(
-    close_effect, kill_effect, waitpid_effect, check_attr
+    mock_session, close_effect, kill_effect, waitpid_effect, check_attr
 ):
     """Test cleanup handles various error conditions gracefully."""
-    reader = MagicMock()
-    writer = MagicMock()
-    writer.get_extra_info = MagicMock(return_value="utf-8")
-
-    session = PTYSession(reader, writer, "/nonexistent.program", [])
+    session, _ = mock_session({"charset": "utf-8"})
     session.master_fd = 99
     session.child_pid = 12345
 
@@ -567,16 +557,10 @@ async def test_pty_session_cleanup_error_recovery(
     "in_sync_update,expected_writes,expected_buffer", [(False, 1, b""), (True, 0, b"partial line")]
 )
 async def test_pty_session_flush_remaining_scenarios(
-    in_sync_update, expected_writes, expected_buffer
+    mock_session, in_sync_update, expected_writes, expected_buffer
 ):
     """Test _flush_remaining behavior based on sync update state."""
-    reader = MagicMock()
-    writer = MagicMock()
-    written = []
-    writer.write = written.append
-    writer.get_extra_info = MagicMock(return_value="utf-8")
-
-    session = PTYSession(reader, writer, "/nonexistent.program", [])
+    session, written = mock_session({"charset": "utf-8"}, capture_writes=True)
     session._output_buffer = b"partial line"
     session._in_sync_update = in_sync_update
 
@@ -588,15 +572,9 @@ async def test_pty_session_flush_remaining_scenarios(
     assert session._output_buffer == expected_buffer
 
 
-async def test_pty_session_flush_output_empty_data():
+async def test_pty_session_flush_output_empty_data(mock_session):
     """Test _flush_output does nothing with empty data."""
-    reader = MagicMock()
-    writer = MagicMock()
-    written = []
-    writer.write = written.append
-    writer.get_extra_info = MagicMock(return_value="utf-8")
-
-    session = PTYSession(reader, writer, "/nonexistent.program", [])
+    session, written = mock_session({"charset": "utf-8"}, capture_writes=True)
 
     session._flush_output(b"")
     session._flush_output(b"", final=True)
@@ -604,15 +582,9 @@ async def test_pty_session_flush_output_empty_data():
     assert len(written) == 0
 
 
-async def test_pty_session_write_to_telnet_pre_bsu_content():
+async def test_pty_session_write_to_telnet_pre_bsu_content(mock_session):
     """Test content before BSU is flushed."""
-    reader = MagicMock()
-    writer = MagicMock()
-    written = []
-    writer.write = written.append
-    writer.get_extra_info = MagicMock(return_value="utf-8")
-
-    session = PTYSession(reader, writer, "/nonexistent.program", [])
+    session, written = mock_session({"charset": "utf-8"}, capture_writes=True)
 
     session._write_to_telnet(b"before\n" + _BSU + b"during" + _ESU)
     assert len(written) == 2
@@ -635,13 +607,9 @@ async def test_pty_spawn_error():
         (b"\xff\xfe", ["Exec failed"]),
     ],
 )
-async def test_pty_session_exec_error_parsing(error_data, expected_substrings):
+async def test_pty_session_exec_error_parsing(mock_session, error_data, expected_substrings):
     """Test _handle_exec_error parses various error formats."""
-    reader = MagicMock()
-    writer = MagicMock()
-    writer.get_extra_info = MagicMock(return_value=None)
-
-    session = PTYSession(reader, writer, "/nonexistent.program", [])
+    session, _ = mock_session()
 
     with pytest.raises(PTYSpawnError) as exc_info:
         session._handle_exec_error(error_data)
@@ -650,13 +618,9 @@ async def test_pty_session_exec_error_parsing(error_data, expected_substrings):
         assert substring in str(exc_info.value)
 
 
-async def test_write_exec_error_to_pipe():
+async def test_write_exec_error_to_pipe(mock_session):
     """Test _write_exec_error writes exception info to pipe and closes it."""
-    reader = MagicMock()
-    writer = MagicMock()
-    writer.get_extra_info = MagicMock(return_value=None)
-
-    session = PTYSession(reader, writer, "/nonexistent.program", [])
+    session, _ = mock_session()
     r_fd, w_fd = os.pipe()
     try:
         exc = OSError(2, "No such file")
@@ -668,13 +632,9 @@ async def test_write_exec_error_to_pipe():
         os.close(r_fd)
 
 
-async def test_fire_naws_update_noop_when_no_pending():
+async def test_fire_naws_update_noop_when_no_pending(mock_session):
     """Test _fire_naws_update does nothing when no update is pending."""
-    reader = MagicMock()
-    writer = MagicMock()
-    writer.get_extra_info = MagicMock(return_value=None)
-
-    session = PTYSession(reader, writer, "/nonexistent.program", [])
+    session, _ = mock_session()
     session._naws_pending = None
     session._fire_naws_update()
 
@@ -721,13 +681,9 @@ async def test_set_window_size_with_real_pty(mock_session):
     "child_pid,waitpid_behavior,expected",
     [(None, None, False), (99999, ChildProcessError, False), (12345, (0, 0), True)],
 )
-async def test_pty_session_isalive_scenarios(child_pid, waitpid_behavior, expected):
+async def test_pty_session_isalive_scenarios(mock_session, child_pid, waitpid_behavior, expected):
     """Test _isalive returns correct values for various child states."""
-    reader = MagicMock()
-    writer = MagicMock()
-    writer.get_extra_info = MagicMock(return_value=None)
-
-    session = PTYSession(reader, writer, "/nonexistent.program", [])
+    session, _ = mock_session()
     session.child_pid = child_pid
 
     if waitpid_behavior is None:
@@ -740,21 +696,17 @@ async def test_pty_session_isalive_scenarios(child_pid, waitpid_behavior, expect
             assert session._isalive() is expected
 
 
-async def test_pty_session_terminate_scenarios():
+async def test_pty_session_terminate_scenarios(mock_session):
     """Test _terminate handles various termination scenarios."""
     import signal
 
-    reader = MagicMock()
-    writer = MagicMock()
-    writer.get_extra_info = MagicMock(return_value=None)
-
     # Scenario 1: No child pid - returns True immediately
-    session = PTYSession(reader, writer, "/nonexistent.program", [])
+    session, _ = mock_session()
     session.child_pid = None
     assert session._terminate() is True
 
     # Scenario 2: Child alive, sends signals, child dies
-    session = PTYSession(reader, writer, "/nonexistent.program", [])
+    session, _ = mock_session()
     session.child_pid = 12345
     kill_calls = []
     isalive_calls = [True, True, False]
@@ -770,14 +722,12 @@ async def test_pty_session_terminate_scenarios():
         patch.object(session, "_isalive", side_effect=mock_isalive),
         patch("time.sleep"),
     ):
-        result = session._terminate()
-
-    assert result is True
+        assert session._terminate() is True
     assert len(kill_calls) >= 1
     assert kill_calls[0][1] == signal.SIGHUP
 
     # Scenario 3: ProcessLookupError - child already gone
-    session = PTYSession(reader, writer, "/nonexistent.program", [])
+    session, _ = mock_session()
     session.child_pid = 12345
     isalive_returns = [True]
 
@@ -788,9 +738,7 @@ async def test_pty_session_terminate_scenarios():
         patch.object(os, "kill", side_effect=ProcessLookupError),
         patch.object(session, "_isalive", side_effect=mock_isalive_2),
     ):
-        result = session._terminate()
-
-    assert result is True
+        assert session._terminate() is True
 
 
 async def test_pty_session_ga_timer_fires_after_idle(mock_session):
@@ -878,12 +826,9 @@ async def test_pty_session_ga_timer_cancelled_on_cleanup(mock_session):
     session.writer.send_ga.assert_not_called()
 
 
-def test_handle_exec_error_non_decodable():
+def test_handle_exec_error_non_decodable(mock_session):
     """_handle_exec_error handles data that causes unexpected exceptions."""
-    reader = MagicMock()
-    writer = MagicMock()
-    writer.get_extra_info = MagicMock(return_value=None)
-    session = PTYSession(reader, writer, "/nonexistent", [])
+    session, _ = mock_session()
 
     class BadBytes(bytes):
         def decode(self, *args, **kwargs):
@@ -988,37 +933,20 @@ async def test_flush_output_decoder_returns_empty(mock_session):
     assert len(written) == 0
 
 
-async def test_pty_shell_skips_wont_echo_when_not_echoing():
-    """pty_shell skips WONT ECHO when will_echo is False."""
+@pytest.mark.parametrize(
+    "will_echo,expect_wont_echo",
+    [(False, False), (True, True)],
+)
+async def test_pty_shell_wont_echo_behavior(will_echo, expect_wont_echo):
+    """pty_shell sends WONT ECHO only when will_echo is True."""
     reader = MagicMock()
     writer = MagicMock()
-    writer.will_echo = False
+    writer.will_echo = will_echo
     writer.get_extra_info = MagicMock(
         side_effect=lambda k, d=None: {"TERM": "xterm", "rows": 25}.get(k, d)
     )
     writer.is_closing = MagicMock(return_value=False)
 
-    iac_calls = []
-    writer.iac = lambda *args: iac_calls.append(args)
-
-    with patch.object(
-        PTYSession, "start", side_effect=PTYSpawnError("mocked")
-    ):
-        with pytest.raises(PTYSpawnError):
-            await pty_shell(reader, writer, "/nonexistent", raw_mode=False)
-
-    assert (WONT, ECHO) not in iac_calls
-
-
-async def test_pty_shell_wont_echo_in_normal_mode():
-    """pty_shell sends WONT ECHO in normal mode when will_echo is True."""
-    reader = MagicMock()
-    writer = MagicMock()
-    writer.will_echo = True
-    writer.get_extra_info = MagicMock(
-        side_effect=lambda k, d=None: {"TERM": "xterm", "rows": 25}.get(k, d)
-    )
-    writer.is_closing = MagicMock(return_value=False)
     async def noop_drain():
         pass
 
@@ -1033,4 +961,4 @@ async def test_pty_shell_wont_echo_in_normal_mode():
         with pytest.raises(PTYSpawnError):
             await pty_shell(reader, writer, "/nonexistent", raw_mode=False)
 
-    assert (WONT, ECHO) in iac_calls
+    assert ((WONT, ECHO) in iac_calls) is expect_wont_echo

@@ -214,37 +214,41 @@ def test_send_linemode_asserts_when_not_negotiated():
         w.send_linemode()
 
 
-def test_handle_logout_paths():
-    ws, ts, _ = new_writer(server=True)
-    ws.handle_logout(DO)
-    assert ts._closing is True
-
-    ws2, ts2, _ = new_writer(server=True)
-    ws2.handle_logout(DONT)
-    assert not ts2.writes
-
-    wc, tc, _ = new_writer(server=False, client=True)
-    wc.handle_logout(WILL)
-    assert tc.writes[-1] == IAC + DONT + LOGOUT
-
-    wc2, tc2, _ = new_writer(server=False, client=True)
-    wc2.handle_logout(WONT)
-    assert not tc2.writes
+@pytest.mark.parametrize(
+    "server, client, cmd, check",
+    [
+        (True, False, DO, lambda t: t._closing is True),
+        (True, False, DONT, lambda t: not t.writes),
+        (False, True, WILL, lambda t: t.writes[-1] == IAC + DONT + LOGOUT),
+        (False, True, WONT, lambda t: not t.writes),
+    ],
+    ids=["server_do_closes", "server_dont_noop", "client_will_dont", "client_wont_noop"],
+)
+def test_handle_logout(server, client, cmd, check):
+    w, t, _ = new_writer(server=server, client=client)
+    w.handle_logout(cmd)
+    assert check(t)
 
 
-def test_handle_do_variants_and_tm_and_logout():
+def test_handle_do_server_linemode_refused():
     ws, ts, _ = new_writer(server=True)
     ws.handle_do(LINEMODE)
     assert ts.writes[-1] == IAC + WONT + LINEMODE
 
+
+def test_handle_do_client_logout_raises():
     wc, *_ = new_writer(server=False, client=True)
     with pytest.raises(ValueError, match="cannot recv DO LOGOUT"):
         wc.handle_do(LOGOUT)
 
-    wc2, tc2, _ = new_writer(server=False, client=True)
-    wc2.handle_do(ECHO)
-    assert tc2.writes[-1] == IAC + WONT + ECHO
 
+def test_handle_do_client_echo_refused():
+    wc, tc, _ = new_writer(server=False, client=True)
+    wc.handle_do(ECHO)
+    assert tc.writes[-1] == IAC + WONT + ECHO
+
+
+def test_handle_do_tm_callback():
     called = {}
     wtm, ttm, _ = new_writer(server=True)
     wtm.set_iac_callback(TM, lambda cmd: called.setdefault("cmd", cmd))
@@ -252,10 +256,12 @@ def test_handle_do_variants_and_tm_and_logout():
     assert ttm.writes[-1] == IAC + WILL + TM
     assert called["cmd"] == DO
 
+
+def test_handle_do_server_logout_callback():
     seen = {}
-    ws2, *_ = new_writer(server=True)
-    ws2.set_ext_callback(LOGOUT, lambda cmd: seen.setdefault("v", cmd))
-    ws2.handle_do(LOGOUT)
+    ws, *_ = new_writer(server=True)
+    ws.set_ext_callback(LOGOUT, lambda cmd: seen.setdefault("v", cmd))
+    ws.handle_do(LOGOUT)
     assert seen["v"] == DO
 
 
@@ -267,31 +273,39 @@ def test_handle_dont_logout_calls_callback_on_server():
     assert seen["v"] == DONT
 
 
-def test_handle_will_invalid_cases_and_else_unhandled():
+def test_handle_will_server_echo_raises():
     ws, *_ = new_writer(server=True)
     with pytest.raises(ValueError, match="cannot recv WILL ECHO"):
         ws.handle_will(ECHO)
 
+
+def test_handle_will_client_naws_refused():
     wc, tc, _ = new_writer(server=False, client=True)
     wc.handle_will(NAWS)
     assert tc.writes[-1] == IAC + DONT + NAWS
 
+
+def test_handle_will_server_tm_raises():
     wtm, *_ = new_writer(server=True)
     with pytest.raises(ValueError, match="cannot recv WILL TM"):
         wtm.handle_will(TM)
 
+
+def test_handle_will_server_logout_callback():
     seen = {}
-    w3, *_ = new_writer(server=True)
-    w3.set_ext_callback(LOGOUT, lambda cmd: seen.setdefault("v", cmd))
-    w3.handle_will(LOGOUT)
+    w, *_ = new_writer(server=True)
+    w.set_ext_callback(LOGOUT, lambda cmd: seen.setdefault("v", cmd))
+    w.handle_will(LOGOUT)
     assert seen["v"] == WILL
 
-    w4, t4, _ = new_writer(server=True)
-    w4.pending_option[DO + AUTHENTICATION] = True
-    w4.handle_will(AUTHENTICATION)
-    assert t4.writes[-1] == IAC + DONT + AUTHENTICATION
-    assert not w4.pending_option.get(DO + AUTHENTICATION, False)
-    assert AUTHENTICATION in w4.rejected_will
+
+def test_handle_will_pending_authentication_rejected():
+    w, t, _ = new_writer(server=True)
+    w.pending_option[DO + AUTHENTICATION] = True
+    w.handle_will(AUTHENTICATION)
+    assert t.writes[-1] == IAC + DONT + AUTHENTICATION
+    assert not w.pending_option.get(DO + AUTHENTICATION, False)
+    assert AUTHENTICATION in w.rejected_will
 
 
 def test_handle_will_then_do_unsupported_sends_both_dont_and_wont():
@@ -305,16 +319,20 @@ def test_handle_will_then_do_unsupported_sends_both_dont_and_wont():
     assert AUTHENTICATION in w.rejected_do
 
 
-def test_handle_wont_tm_and_logout_paths():
+def test_handle_wont_tm_unsolicited_raises():
     w, *_ = new_writer(server=True)
     with pytest.raises(ValueError, match="WONT TM"):
         w.handle_wont(TM)
 
-    w2, *_ = new_writer(server=True)
-    w2.pending_option[DO + TM] = True
-    w2.handle_wont(TM)
-    assert w2.remote_option[TM] is False
 
+def test_handle_wont_tm_pending_clears():
+    w, *_ = new_writer(server=True)
+    w.pending_option[DO + TM] = True
+    w.handle_wont(TM)
+    assert w.remote_option[TM] is False
+
+
+def test_handle_wont_client_logout_callback():
     seen = {}
     wc, *_ = new_writer(server=False, client=True)
     wc.set_ext_callback(LOGOUT, lambda cmd: seen.setdefault("v", cmd))
@@ -339,32 +357,46 @@ def test_handle_subnegotiation_comport_and_gmcp_and_errors():
         w.handle_subnegotiation(collections.deque([bytes([0x7F]), b"x"]))
 
 
-def test_handle_sb_charset_paths_and_notimpl_and_illegal():
+def test_handle_sb_charset_request_rejected():
     w, t, _ = new_writer(server=True)
     w.set_ext_send_callback(CHARSET, lambda offers=None: None)
-    sep = b" "
-    offers = b"UTF-8 ASCII"
-    w._handle_sb_charset(collections.deque([CHARSET, REQUEST, sep, offers]))
+    w._handle_sb_charset(
+        collections.deque([CHARSET, REQUEST, b" ", b"UTF-8 ASCII"])
+    )
     assert t.writes[-1] == IAC + SB + CHARSET + REJECTED + IAC + SE
 
-    w2, t2, _ = new_writer(server=True)
-    w2.set_ext_send_callback(CHARSET, lambda offers=None: "UTF-8")
-    w2._handle_sb_charset(collections.deque([CHARSET, REQUEST, sep, offers]))
-    assert t2.writes[-1] == IAC + SB + CHARSET + ACCEPTED + b"UTF-8" + IAC + SE
 
+def test_handle_sb_charset_request_accepted():
+    w, t, _ = new_writer(server=True)
+    w.set_ext_send_callback(CHARSET, lambda offers=None: "UTF-8")
+    w._handle_sb_charset(
+        collections.deque([CHARSET, REQUEST, b" ", b"UTF-8 ASCII"])
+    )
+    assert t.writes[-1] == (
+        IAC + SB + CHARSET + ACCEPTED + b"UTF-8" + IAC + SE
+    )
+
+
+def test_handle_sb_charset_accepted_callback():
     seen = {}
-    w3, *_ = new_writer(server=True)
-    w3.set_ext_callback(CHARSET, lambda cs: seen.setdefault("cs", cs))
-    w3._handle_sb_charset(collections.deque([CHARSET, ACCEPTED, b"UTF-8"]))
+    w, *_ = new_writer(server=True)
+    w.set_ext_callback(CHARSET, lambda cs: seen.setdefault("cs", cs))
+    w._handle_sb_charset(
+        collections.deque([CHARSET, ACCEPTED, b"UTF-8"])
+    )
     assert seen["cs"] == "UTF-8"
 
-    w4, *_ = new_writer(server=True)
-    with pytest.raises(NotImplementedError):
-        w4._handle_sb_charset(collections.deque([CHARSET, TTABLE_IS]))
 
-    w5, *_ = new_writer(server=True)
+def test_handle_sb_charset_ttable_not_implemented():
+    w, *_ = new_writer(server=True)
+    with pytest.raises(NotImplementedError):
+        w._handle_sb_charset(collections.deque([CHARSET, TTABLE_IS]))
+
+
+def test_handle_sb_charset_illegal_raises():
+    w, *_ = new_writer(server=True)
     with pytest.raises(ValueError):
-        w5._handle_sb_charset(collections.deque([CHARSET, b"\x99"]))
+        w._handle_sb_charset(collections.deque([CHARSET, b"\x99"]))
 
 
 def test_handle_sb_xdisploc_wrong_side_asserts_and_send_and_is():
@@ -1002,15 +1034,21 @@ def test_comport_sb_baudrate_response():
     assert w.comport_data["baudrate"] == 9600
 
 
-def test_comport_sb_datasize_parity_stopsize():
-    """COM-PORT-OPTION datasize, parity, stopsize responses are parsed."""
+@pytest.mark.parametrize(
+    "subcmd, payload_byte, key, expected",
+    [
+        (102, 8, "datasize", 8),
+        (103, 1, "parity", "NONE"),
+        (104, 1, "stopsize", "1"),
+    ],
+    ids=["datasize", "parity", "stopsize"],
+)
+def test_comport_sb_datasize_parity_stopsize(subcmd, payload_byte, key, expected):
     w, *_ = new_writer(server=False, client=True)
-    w.handle_subnegotiation(collections.deque([COM_PORT_OPTION, bytes([102]), bytes([8])]))
-    assert w.comport_data["datasize"] == 8
-    w.handle_subnegotiation(collections.deque([COM_PORT_OPTION, bytes([103]), bytes([1])]))
-    assert w.comport_data["parity"] == "NONE"
-    w.handle_subnegotiation(collections.deque([COM_PORT_OPTION, bytes([104]), bytes([1])]))
-    assert w.comport_data["stopsize"] == "1"
+    w.handle_subnegotiation(
+        collections.deque([COM_PORT_OPTION, bytes([subcmd]), bytes([payload_byte])])
+    )
+    assert w.comport_data[key] == expected
 
 
 def test_comport_sb_empty_subcmd_payload():

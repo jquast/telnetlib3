@@ -1139,3 +1139,24 @@ def test_save_fingerprint_data_existing_non_unknown_subdir(tmp_path, monkeypatch
     filepath = fps._save_fingerprint_data(writer, probe_results, 0.5)
     assert filepath is not None
     assert "known-terminal" in filepath
+
+
+@pytest.mark.asyncio
+async def test_probe_client_capabilities_timeout_status():
+    """Probed option that never responds gets 'timeout' status."""
+    from telnetlib3.telopt import LOGOUT
+
+    writer = _probe_writer()
+    options = [(LOGOUT, "LOGOUT", "Logout")]
+
+    results = await fps.probe_client_capabilities(writer, options=options, timeout=0.01)
+    assert results["LOGOUT"]["status"] == "timeout"
+
+
+def test_fingerprinting_post_script_delegates():
+    """fingerprinting_post_script delegates to fingerprinting_display."""
+    from unittest.mock import patch
+
+    with patch("telnetlib3.fingerprinting_display.fingerprinting_post_script") as mock_fps:
+        fps.fingerprinting_post_script("/tmp/test.json")
+        mock_fps.assert_called_once_with("/tmp/test.json")

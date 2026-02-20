@@ -94,23 +94,22 @@ class MockWriter:
         return True
 
 
-def test_readline_basic_and_crlf_and_backspace():
-    cmds, echos = _run_readline("foo\r")
-    assert cmds == ["foo"]
-    assert "".join(echos).endswith("foo")
-
-    cmds, _ = _run_readline("bar\r\n")
-    assert cmds == ["bar"]
-
-    cmds, _ = _run_readline("baz\n")
-    assert cmds == ["baz"]
-
-    cmds, _ = _run_readline("zip\r\x00zap\r\n")
-    assert cmds == ["zip", "zap"]
-
-    cmds, echos = _run_readline("\bhel\blp\r")
-    assert cmds == ["help"]
-    assert "\b \b" in "".join(echos)
+@pytest.mark.parametrize(
+    "input_data, expected_cmds, check_echos",
+    [
+        ("foo\r", ["foo"], lambda e: "".join(e).endswith("foo")),
+        ("bar\r\n", ["bar"], None),
+        ("baz\n", ["baz"], None),
+        ("zip\r\x00zap\r\n", ["zip", "zap"], None),
+        ("\bhel\blp\r", ["help"], lambda e: "\b \b" in "".join(e)),
+    ],
+    ids=["cr", "crlf", "lf", "crnul_multi", "backspace"],
+)
+def test_readline_basic(input_data, expected_cmds, check_echos):
+    cmds, echos = _run_readline(input_data)
+    assert cmds == expected_cmds
+    if check_echos is not None:
+        assert check_echos(echos)
 
 
 def test_character_dump_yields_patterns_and_summary():
@@ -319,12 +318,17 @@ async def test_get_cursor_position_success():
 
 
 @pytest.mark.asyncio
-async def test_get_cursor_position_failure():
-    assert await gs._get_cursor_position(SlowReader(), MockWriter(), timeout=0.01) == (None, None)
-    assert await gs._get_cursor_position(MockReader([b""]), MockWriter(), timeout=1.0) == (
-        None,
-        None,
-    )
+async def test_get_cursor_position_timeout():
+    assert await gs._get_cursor_position(
+        SlowReader(), MockWriter(), timeout=0.01
+    ) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_get_cursor_position_eof():
+    assert await gs._get_cursor_position(
+        MockReader([b""]), MockWriter(), timeout=1.0
+    ) == (None, None)
 
 
 @pytest.mark.parametrize(
@@ -667,8 +671,7 @@ async def test_telnet_server_shell_lf_input():
 
 
 @pytest.mark.asyncio
-async def test_telnet_server_shell_tls_banner():
-    """Plain connection shows 'Ready.', TLS shows 'Ready (secure: ...)'."""
+async def test_telnet_server_shell_plain_banner():
     reader = MockReader(list("quit\r"))
     writer = MockWriter()
     await ss.telnet_server_shell(reader, writer)
@@ -676,16 +679,19 @@ async def test_telnet_server_shell_tls_banner():
     assert "Ready.\r\n" in written
     assert "secure" not in written
 
+
+@pytest.mark.asyncio
+async def test_telnet_server_shell_tls_banner():
     class _FakeSSL:
         def version(self):
             return "TLSv1.3"
 
-    reader2 = MockReader(list("quit\r"))
-    writer2 = MockWriter()
-    writer2._extra["ssl_object"] = _FakeSSL()
-    await ss.telnet_server_shell(reader2, writer2)
-    written2 = "".join(writer2.written)
-    assert "Ready (secure: TLSv1.3)." in written2
+    reader = MockReader(list("quit\r"))
+    writer = MockWriter()
+    writer._extra["ssl_object"] = _FakeSSL()
+    await ss.telnet_server_shell(reader, writer)
+    written = "".join(writer.written)
+    assert "Ready (secure: TLSv1.3)." in written
 
 
 @pytest.mark.asyncio

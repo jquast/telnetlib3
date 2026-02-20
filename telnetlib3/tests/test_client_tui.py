@@ -614,8 +614,7 @@ class TestSessionEditScreenTextual:
             assert None in dismissed
 
 
-@pytest.mark.asyncio
-async def test_action_connect_runs_subprocess(tui_tmp_paths, monkeypatch) -> None:
+async def _run_connect(tui_tmp_paths, monkeypatch, wait_side_effect=None):
     import os
     import subprocess as _subprocess
 
@@ -623,16 +622,19 @@ async def test_action_connect_runs_subprocess(tui_tmp_paths, monkeypatch) -> Non
     save_sessions(sessions)
 
     popen_calls: list = []
+    terminated: list = []
 
     class _FakeProc:
         returncode = 0
         stderr = None
 
         def wait(self, timeout=None):
-            pass
+            if wait_side_effect is not None:
+                if not terminated:
+                    raise wait_side_effect
 
         def terminate(self):
-            pass
+            terminated.append(True)
 
     def _fake_popen(cmd, **kwargs):
         popen_calls.append(cmd)
@@ -662,8 +664,14 @@ async def test_action_connect_runs_subprocess(tui_tmp_paths, monkeypatch) -> Non
         monkeypatch.setattr(app, "suspend", _fake_suspend)
         screen.action_connect()
         await pilot.pause()
-        assert len(popen_calls) == 1
-        assert "localhost" in " ".join(popen_calls[0])
+    return popen_calls, terminated
+
+
+@pytest.mark.asyncio
+async def test_action_connect_runs_subprocess(tui_tmp_paths, monkeypatch) -> None:
+    popen_calls, _ = await _run_connect(tui_tmp_paths, monkeypatch)
+    assert len(popen_calls) == 1
+    assert "localhost" in " ".join(popen_calls[0])
 
 
 _TEST_SK = "test.host:23"
@@ -695,19 +703,153 @@ class _AutoreplyEditApp(textual.app.App[None]):
         )
 
 
-@pytest.mark.asyncio
-class TestMacroEditScreenTextual:
+_MACRO_PARAMS = (
+    _MacroEditApp,
+    "macros.json",
+    "macros",
+    "macro",
+    [{"key": "f5", "text": "look<CR>"}],
+    ("f5", "look<CR>"),
+    ("#macro-key", "#macro-text"),
+)
+_AUTOREPLY_PARAMS = (
+    _AutoreplyEditApp,
+    "autoreplies.json",
+    "autoreplies",
+    "autoreply",
+    [{"pattern": r"\d+ gold", "reply": "get gold<CR>"}],
+    (r"\d+ gold", "get gold<CR>"),
+    ("#autoreply-pattern", "#autoreply-reply"),
+)
 
-    async def test_compose_and_mount(self, tmp_path) -> None:
+_EDITOR_SCREEN_PARAMS = [
+    pytest.param(*_MACRO_PARAMS, id="macro"),
+    pytest.param(*_AUTOREPLY_PARAMS, id="autoreply"),
+]
+
+
+@pytest.mark.asyncio
+class TestEditorScreenTextual:
+
+    @pytest.mark.parametrize(
+        "app_cls,filename,data_key,prefix,items,item_tuple,field_ids",
+        _EDITOR_SCREEN_PARAMS,
+    )
+    async def test_compose_and_mount(
+        self, tmp_path, app_cls, filename, data_key, prefix,
+        items, item_tuple, field_ids,
+    ) -> None:
         import json
 
-        fp = tmp_path / "macros.json"
-        fp.write_text(json.dumps({_TEST_SK: {"macros": [{"key": "f5", "text": "look<CR>"}]}}))
-        app = _MacroEditApp(str(fp))
+        fp = tmp_path / filename
+        fp.write_text(json.dumps({_TEST_SK: {data_key: items}}))
+        app = app_cls(str(fp))
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
-            table = app.screen.query_one("#macro-table", DataTable)
+            table = app.screen.query_one(f"#{prefix}-table", DataTable)
             assert table.row_count == 1
+
+    @pytest.mark.parametrize(
+        "app_cls,filename,data_key,prefix,items,item_tuple,field_ids",
+        _EDITOR_SCREEN_PARAMS,
+    )
+    async def test_edit(
+        self, tmp_path, app_cls, filename, data_key, prefix,
+        items, item_tuple, field_ids,
+    ) -> None:
+        import json
+
+        fp = tmp_path / filename
+        fp.write_text(json.dumps({_TEST_SK: {data_key: items}}))
+        app = app_cls(str(fp))
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            edit_btn = screen.query_one(f"#{prefix}-edit")
+            await pilot.click(edit_btn)
+            await pilot.pause()
+            assert screen.query_one(f"#{prefix}-form").display is True
+
+    @pytest.mark.parametrize(
+        "app_cls,filename,data_key,prefix,items,item_tuple,field_ids",
+        _EDITOR_SCREEN_PARAMS,
+    )
+    async def test_delete(
+        self, tmp_path, app_cls, filename, data_key, prefix,
+        items, item_tuple, field_ids,
+    ) -> None:
+        import json
+
+        fp = tmp_path / filename
+        fp.write_text(json.dumps({_TEST_SK: {data_key: items}}))
+        app = app_cls(str(fp))
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            del_btn = screen.query_one(f"#{prefix}-delete")
+            await pilot.click(del_btn)
+            await pilot.pause()
+            table = screen.query_one(f"#{prefix}-table", DataTable)
+            assert table.row_count == 0
+
+    @pytest.mark.parametrize(
+        "app_cls,filename,data_key,prefix,items,item_tuple,field_ids",
+        _EDITOR_SCREEN_PARAMS,
+    )
+    async def test_save(
+        self, tmp_path, app_cls, filename, data_key, prefix,
+        items, item_tuple, field_ids,
+    ) -> None:
+        fp = tmp_path / filename
+        fp.write_text('{"' + _TEST_SK + '": {"' + data_key + '": []}}')
+        app = app_cls(str(fp))
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            data_attr = "_macros" if prefix == "macro" else "_rules"
+            setattr(screen, data_attr, [item_tuple])
+            screen._refresh_table()
+            save_btn = screen.query_one(f"#{prefix}-save")
+            await pilot.click(save_btn)
+            await pilot.pause()
+
+    @pytest.mark.parametrize(
+        "app_cls,filename,data_key,prefix,items,item_tuple,field_ids",
+        _EDITOR_SCREEN_PARAMS,
+    )
+    async def test_close(
+        self, tmp_path, app_cls, filename, data_key, prefix,
+        items, item_tuple, field_ids,
+    ) -> None:
+        fp = tmp_path / filename
+        fp.write_text('{"' + _TEST_SK + '": {"' + data_key + '": []}}')
+        app = app_cls(str(fp))
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            close_btn = screen.query_one(f"#{prefix}-close")
+            await pilot.click(close_btn)
+            await pilot.pause()
+
+    @pytest.mark.parametrize(
+        "app_cls,filename,data_key,prefix,items,item_tuple,field_ids",
+        _EDITOR_SCREEN_PARAMS,
+    )
+    async def test_cancel_form(
+        self, tmp_path, app_cls, filename, data_key, prefix,
+        items, item_tuple, field_ids,
+    ) -> None:
+        fp = tmp_path / filename
+        fp.write_text('{"' + _TEST_SK + '": {"' + data_key + '": []}}')
+        app = app_cls(str(fp))
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            screen._show_form()
+            await pilot.pause()
+            screen._hide_form()
+            await pilot.pause()
+            assert screen.query_one(f"#{prefix}-form").display is False
 
     async def test_add_macro(self, tmp_path) -> None:
         fp = tmp_path / "macros.json"
@@ -726,71 +868,24 @@ class TestMacroEditScreenTextual:
             table = screen.query_one("#macro-table", DataTable)
             assert table.row_count == 1
 
-    async def test_edit_macro(self, tmp_path) -> None:
-        import json
-
-        fp = tmp_path / "macros.json"
-        fp.write_text(json.dumps({_TEST_SK: {"macros": [{"key": "f5", "text": "look<CR>"}]}}))
-        app = _MacroEditApp(str(fp))
+    async def test_add_autoreply(self, tmp_path) -> None:
+        fp = tmp_path / "autoreplies.json"
+        fp.write_text('{"' + _TEST_SK + '": {"autoreplies": []}}')
+        app = _AutoreplyEditApp(str(fp))
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
             screen = app.screen
-            edit_btn = screen.query_one("#macro-edit")
-            await pilot.click(edit_btn)
+            add_btn = screen.query_one("#autoreply-add")
+            await pilot.click(add_btn)
             await pilot.pause()
-            assert screen.query_one("#macro-form").display is True
-
-    async def test_delete_macro(self, tmp_path) -> None:
-        import json
-
-        fp = tmp_path / "macros.json"
-        fp.write_text(json.dumps({_TEST_SK: {"macros": [{"key": "f5", "text": "look<CR>"}]}}))
-        app = _MacroEditApp(str(fp))
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            screen = app.screen
-            del_btn = screen.query_one("#macro-delete")
-            await pilot.click(del_btn)
-            await pilot.pause()
-            table = screen.query_one("#macro-table", DataTable)
-            assert table.row_count == 0
-
-    async def test_save_macro(self, tmp_path) -> None:
-        fp = tmp_path / "macros.json"
-        fp.write_text('{"' + _TEST_SK + '": {"macros": []}}')
-        app = _MacroEditApp(str(fp))
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            screen = app.screen
-            screen._macros = [("f5", "look<CR>")]
+            screen.query_one("#autoreply-pattern", Input).value = "hello"
+            screen.query_one("#autoreply-reply", Input).value = "world<CR>"
+            screen._rules.append(("hello", "world<CR>"))
             screen._refresh_table()
-            save_btn = screen.query_one("#macro-save")
-            await pilot.click(save_btn)
-            await pilot.pause()
-
-    async def test_close_macro(self, tmp_path) -> None:
-        fp = tmp_path / "macros.json"
-        fp.write_text('{"' + _TEST_SK + '": {"macros": []}}')
-        app = _MacroEditApp(str(fp))
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            screen = app.screen
-            close_btn = screen.query_one("#macro-close")
-            await pilot.click(close_btn)
-            await pilot.pause()
-
-    async def test_cancel_form(self, tmp_path) -> None:
-        fp = tmp_path / "macros.json"
-        fp.write_text('{"' + _TEST_SK + '": {"macros": []}}')
-        app = _MacroEditApp(str(fp))
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            screen = app.screen
-            screen._show_form()
-            await pilot.pause()
             screen._hide_form()
             await pilot.pause()
-            assert screen.query_one("#macro-form").display is False
+            table = screen.query_one("#autoreply-table", DataTable)
+            assert table.row_count == 1
 
     async def test_escape_closes_form(self, tmp_path) -> None:
         fp = tmp_path / "macros.json"
@@ -819,114 +914,6 @@ class TestMacroEditScreenTextual:
             table = screen.query_one("#macro-table", DataTable)
             assert table.row_count == 1
 
-
-@pytest.mark.asyncio
-class TestAutoreplyEditScreenTextual:
-
-    async def test_compose_and_mount(self, tmp_path) -> None:
-        import json
-
-        fp = tmp_path / "autoreplies.json"
-        fp.write_text(
-            json.dumps(
-                {_TEST_SK: {"autoreplies": [{"pattern": r"\d+ gold", "reply": "get gold<CR>"}]}}
-            )
-        )
-        app = _AutoreplyEditApp(str(fp))
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            table = app.screen.query_one("#autoreply-table", DataTable)
-            assert table.row_count == 1
-
-    async def test_add_autoreply(self, tmp_path) -> None:
-        fp = tmp_path / "autoreplies.json"
-        fp.write_text('{"' + _TEST_SK + '": {"autoreplies": []}}')
-        app = _AutoreplyEditApp(str(fp))
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            screen = app.screen
-            add_btn = screen.query_one("#autoreply-add")
-            await pilot.click(add_btn)
-            await pilot.pause()
-            screen.query_one("#autoreply-pattern", Input).value = "hello"
-            screen.query_one("#autoreply-reply", Input).value = "world<CR>"
-            screen._rules.append(("hello", "world<CR>"))
-            screen._refresh_table()
-            screen._hide_form()
-            await pilot.pause()
-            table = screen.query_one("#autoreply-table", DataTable)
-            assert table.row_count == 1
-
-    async def test_edit_autoreply(self, tmp_path) -> None:
-        import json
-
-        fp = tmp_path / "autoreplies.json"
-        fp.write_text(
-            json.dumps({_TEST_SK: {"autoreplies": [{"pattern": "hello", "reply": "world<CR>"}]}})
-        )
-        app = _AutoreplyEditApp(str(fp))
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            screen = app.screen
-            edit_btn = screen.query_one("#autoreply-edit")
-            await pilot.click(edit_btn)
-            await pilot.pause()
-            assert screen.query_one("#autoreply-form").display is True
-
-    async def test_delete_autoreply(self, tmp_path) -> None:
-        import json
-
-        fp = tmp_path / "autoreplies.json"
-        fp.write_text(
-            json.dumps({_TEST_SK: {"autoreplies": [{"pattern": "hello", "reply": "world<CR>"}]}})
-        )
-        app = _AutoreplyEditApp(str(fp))
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            screen = app.screen
-            del_btn = screen.query_one("#autoreply-delete")
-            await pilot.click(del_btn)
-            await pilot.pause()
-            table = screen.query_one("#autoreply-table", DataTable)
-            assert table.row_count == 0
-
-    async def test_save_autoreply(self, tmp_path) -> None:
-        fp = tmp_path / "autoreplies.json"
-        fp.write_text('{"' + _TEST_SK + '": {"autoreplies": []}}')
-        app = _AutoreplyEditApp(str(fp))
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            screen = app.screen
-            screen._rules = [("hello", "world<CR>")]
-            screen._refresh_table()
-            save_btn = screen.query_one("#autoreply-save")
-            await pilot.click(save_btn)
-            await pilot.pause()
-
-    async def test_close_autoreply(self, tmp_path) -> None:
-        fp = tmp_path / "autoreplies.json"
-        fp.write_text('{"' + _TEST_SK + '": {"autoreplies": []}}')
-        app = _AutoreplyEditApp(str(fp))
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            screen = app.screen
-            close_btn = screen.query_one("#autoreply-close")
-            await pilot.click(close_btn)
-            await pilot.pause()
-
-    async def test_cancel_form(self, tmp_path) -> None:
-        fp = tmp_path / "autoreplies.json"
-        fp.write_text('{"' + _TEST_SK + '": {"autoreplies": []}}')
-        app = _AutoreplyEditApp(str(fp))
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            screen = app.screen
-            screen._show_form()
-            await pilot.pause()
-            screen._hide_form()
-            await pilot.pause()
-            assert screen.query_one("#autoreply-form").display is False
-
     async def test_invalid_regex_notifies(self, tmp_path) -> None:
         fp = tmp_path / "autoreplies.json"
         fp.write_text('{"' + _TEST_SK + '": {"autoreplies": []}}')
@@ -953,51 +940,61 @@ class _EditorAppTest(textual.app.App[None]):
         self.push_screen(self._editor_screen, callback=lambda _: self.exit())
 
 
+@pytest.mark.parametrize(
+    "screen_cls,file_content,widget_id",
+    [
+        pytest.param(
+            MacroEditScreen,
+            '{"' + _TEST_SK + '": {"macros": []}}',
+            "#macro-table",
+            id="macro",
+        ),
+        pytest.param(
+            AutoreplyEditScreen,
+            '{"' + _TEST_SK + '": {"autoreplies": []}}',
+            "#autoreply-table",
+            id="autoreply",
+        ),
+    ],
+)
 @pytest.mark.asyncio
-async def test_editor_app_macro(tmp_path) -> None:
-    fp = tmp_path / "macros.json"
-    fp.write_text('{"' + _TEST_SK + '": {"macros": []}}')
+async def test_editor_app(tmp_path, screen_cls, file_content, widget_id) -> None:
+    fp = tmp_path / "data.json"
+    fp.write_text(file_content)
     from telnetlib3.client_tui import _EditorApp
 
-    app = _EditorApp(MacroEditScreen(path=str(fp)))
+    app = _EditorApp(screen_cls(path=str(fp)))
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
-        assert app.screen.query_one("#macro-table", DataTable) is not None
+        assert app.screen.query_one(widget_id, DataTable) is not None
 
 
+@pytest.mark.parametrize(
+    "filename,content,main_fn",
+    [
+        pytest.param(
+            "macros.json",
+            '{"' + _TEST_SK + '": {"macros": []}}',
+            edit_macros_main,
+            id="macros",
+        ),
+        pytest.param(
+            "autoreplies.json",
+            '{"' + _TEST_SK + '": {"autoreplies": []}}',
+            edit_autoreplies_main,
+            id="autoreplies",
+        ),
+    ],
+)
 @pytest.mark.asyncio
-async def test_editor_app_autoreply(tmp_path) -> None:
-    fp = tmp_path / "autoreplies.json"
-    fp.write_text('{"' + _TEST_SK + '": {"autoreplies": []}}')
-    from telnetlib3.client_tui import _EditorApp
-
-    app = _EditorApp(AutoreplyEditScreen(path=str(fp)))
-    async with app.run_test(size=(80, 24)) as pilot:
-        await pilot.pause()
-        assert app.screen.query_one("#autoreply-table", DataTable) is not None
-
-
-@pytest.mark.asyncio
-async def test_edit_macros_main(tmp_path, monkeypatch) -> None:
-    fp = tmp_path / "macros.json"
-    fp.write_text('{"' + _TEST_SK + '": {"macros": []}}')
+async def test_edit_main(tmp_path, monkeypatch, filename, content, main_fn) -> None:
+    fp = tmp_path / filename
+    fp.write_text(content)
     from telnetlib3.client_tui import _EditorApp
 
     calls: list = []
     monkeypatch.setattr(_EditorApp, "run", lambda self: calls.append(True))
-    edit_macros_main(str(fp), _TEST_SK)
-    assert calls
-
-
-@pytest.mark.asyncio
-async def test_edit_autoreplies_main(tmp_path, monkeypatch) -> None:
-    fp = tmp_path / "autoreplies.json"
-    fp.write_text('{"' + _TEST_SK + '": {"autoreplies": []}}')
-    from telnetlib3.client_tui import _EditorApp
-
-    calls: list = []
-    monkeypatch.setattr(_EditorApp, "run", lambda self: calls.append(True))
-    edit_autoreplies_main(str(fp), _TEST_SK)
+    main_fn(str(fp), _TEST_SK)
     assert calls
 
 
@@ -1009,233 +1006,189 @@ async def test_app_mounts_session_list(tui_tmp_paths) -> None:
         assert isinstance(app.screen, SessionListScreen)
 
 
-@pytest.mark.asyncio
-class TestMacroEditScreenButtonDispatch:
+_BTN_DISPATCH_PARAMS = [
+    pytest.param(
+        _MacroEditApp, MacroEditScreen, "macros.json", "macros",
+        "macro", "_macros", ("#macro-key", "#macro-text"),
+        ("f5", "look<CR>"), [{"key": "f5", "text": "old<CR>"}],
+        id="macro",
+    ),
+    pytest.param(
+        _AutoreplyEditApp, AutoreplyEditScreen, "autoreplies.json",
+        "autoreplies", "autoreply", "_rules",
+        ("#autoreply-pattern", "#autoreply-reply"),
+        ("hello", "world<CR>"), [{"pattern": "old", "reply": "old<CR>"}],
+        id="autoreply",
+    ),
+]
 
-    async def test_button_macro_ok_dispatches(self, tmp_path) -> None:
+
+@pytest.mark.asyncio
+class TestEditScreenButtonDispatch:
+
+    @pytest.mark.parametrize(
+        "app_cls,screen_cls,filename,data_key,prefix,data_attr,"
+        "field_ids,form_vals,edit_items",
+        _BTN_DISPATCH_PARAMS,
+    )
+    async def test_button_ok_dispatches(
+        self, tmp_path, app_cls, screen_cls, filename, data_key,
+        prefix, data_attr, field_ids, form_vals, edit_items,
+    ) -> None:
         from textual.widgets import Button
 
-        fp = tmp_path / "macros.json"
-        fp.write_text('{"' + _TEST_SK + '": {"macros": []}}')
-        app = _MacroEditApp(str(fp))
+        fp = tmp_path / filename
+        fp.write_text('{"' + _TEST_SK + '": {"' + data_key + '": []}}')
+        app = app_cls(str(fp))
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
             screen = app.screen
-            screen._show_form("f5", "look<CR>")
+            screen._show_form(*form_vals)
             await pilot.pause()
-            btn = screen.query_one("#macro-ok", Button)
+            btn = screen.query_one(f"#{prefix}-ok", Button)
             screen.on_button_pressed(Button.Pressed(btn))
             await pilot.pause()
-            assert screen.query_one("#macro-table", DataTable).row_count == 1
+            table = screen.query_one(f"#{prefix}-table", DataTable)
+            assert table.row_count == 1
 
-    async def test_button_macro_cancel_form_dispatches(self, tmp_path) -> None:
+    @pytest.mark.parametrize(
+        "app_cls,screen_cls,filename,data_key,prefix,data_attr,"
+        "field_ids,form_vals,edit_items",
+        _BTN_DISPATCH_PARAMS,
+    )
+    async def test_button_cancel_form_dispatches(
+        self, tmp_path, app_cls, screen_cls, filename, data_key,
+        prefix, data_attr, field_ids, form_vals, edit_items,
+    ) -> None:
         from textual.widgets import Button
 
-        fp = tmp_path / "macros.json"
-        fp.write_text('{"' + _TEST_SK + '": {"macros": []}}')
-        app = _MacroEditApp(str(fp))
+        fp = tmp_path / filename
+        fp.write_text('{"' + _TEST_SK + '": {"' + data_key + '": []}}')
+        app = app_cls(str(fp))
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
             screen = app.screen
             screen._show_form()
             await pilot.pause()
-            btn = screen.query_one("#macro-cancel-form", Button)
+            btn = screen.query_one(f"#{prefix}-cancel-form", Button)
             screen.on_button_pressed(Button.Pressed(btn))
             await pilot.pause()
-            assert screen.query_one("#macro-form").display is False
+            assert screen.query_one(f"#{prefix}-form").display is False
 
-    async def test_button_macro_close_dispatches(self, tmp_path) -> None:
+    @pytest.mark.parametrize(
+        "app_cls,screen_cls,filename,data_key,prefix,data_attr,"
+        "field_ids,form_vals,edit_items",
+        _BTN_DISPATCH_PARAMS,
+    )
+    async def test_button_close_dispatches(
+        self, tmp_path, app_cls, screen_cls, filename, data_key,
+        prefix, data_attr, field_ids, form_vals, edit_items,
+    ) -> None:
         from textual.widgets import Button
 
-        fp = tmp_path / "macros.json"
-        fp.write_text('{"' + _TEST_SK + '": {"macros": []}}')
+        fp = tmp_path / filename
+        fp.write_text('{"' + _TEST_SK + '": {"' + data_key + '": []}}')
         dismissed: list = []
 
         class _App(textual.app.App[None]):
             def on_mount(self_app) -> None:
-                scr = MacroEditScreen(path=str(fp))
-                self_app.push_screen(scr, callback=lambda r: dismissed.append(r))
+                scr = screen_cls(path=str(fp))
+                self_app.push_screen(
+                    scr, callback=lambda r: dismissed.append(r)
+                )
 
         app = _App()
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
-            btn = app.screen.query_one("#macro-close", Button)
+            btn = app.screen.query_one(f"#{prefix}-close", Button)
             app.screen.on_button_pressed(Button.Pressed(btn))
             await pilot.pause()
         assert None in dismissed
 
-    async def test_edit_submit_form(self, tmp_path) -> None:
-        fp = tmp_path / "macros.json"
-        fp.write_text(
-            '{"' + _TEST_SK + '": {"macros": [{"key": "f5", "text": "old<CR>"}]}}'
-        )
-        app = _MacroEditApp(str(fp))
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            screen = app.screen
-            screen._editing_idx = 0
-            screen.query_one("#macro-key", Input).value = "f5"
-            screen.query_one("#macro-text", Input).value = "new<CR>"
-            screen.query_one("#macro-form").display = True
-            screen._submit_form()
-            await pilot.pause()
-            assert screen._macros[0] == ("f5", "new<CR>")
-
-    async def test_selected_idx_empty_table(self, tmp_path) -> None:
-        fp = tmp_path / "macros.json"
-        fp.write_text('{"' + _TEST_SK + '": {"macros": []}}')
-        app = _MacroEditApp(str(fp))
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            assert app.screen._selected_idx() is None
-
-    async def test_on_input_submitted_form_visible(self, tmp_path) -> None:
-        fp = tmp_path / "macros.json"
-        fp.write_text('{"' + _TEST_SK + '": {"macros": []}}')
-        app = _MacroEditApp(str(fp))
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            screen = app.screen
-            screen._show_form("f6", "test<CR>")
-            await pilot.pause()
-            key_input = screen.query_one("#macro-key", Input)
-            event = Input.Submitted(key_input, "f6")
-            screen.on_input_submitted(event)
-            await pilot.pause()
-            assert screen.query_one("#macro-table", DataTable).row_count == 1
-
-    async def test_action_cancel_or_close_no_form(self, tmp_path) -> None:
-        fp = tmp_path / "macros.json"
-        fp.write_text('{"' + _TEST_SK + '": {"macros": []}}')
-        dismissed: list = []
-
-        class _App(textual.app.App[None]):
-            def on_mount(self_app) -> None:
-                scr = MacroEditScreen(path=str(fp))
-                self_app.push_screen(scr, callback=lambda r: dismissed.append(r))
-
-        app = _App()
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            app.screen.action_cancel_or_close()
-            await pilot.pause()
-        assert None in dismissed
-
-    async def test_load_from_file_invalid_json(self, tmp_path) -> None:
-        fp = tmp_path / "macros.json"
-        fp.write_text("{invalid json")
-        app = _MacroEditApp(str(fp))
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            assert app.screen.query_one("#macro-table", DataTable).row_count == 0
-
-
-@pytest.mark.asyncio
-class TestAutoreplyEditScreenButtonDispatch:
-
-    async def test_button_autoreply_ok_dispatches(self, tmp_path) -> None:
-        from textual.widgets import Button
-
-        fp = tmp_path / "autoreplies.json"
-        fp.write_text('{"' + _TEST_SK + '": {"autoreplies": []}}')
-        app = _AutoreplyEditApp(str(fp))
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            screen = app.screen
-            screen._show_form("hello", "world<CR>")
-            await pilot.pause()
-            btn = screen.query_one("#autoreply-ok", Button)
-            screen.on_button_pressed(Button.Pressed(btn))
-            await pilot.pause()
-            assert screen.query_one("#autoreply-table", DataTable).row_count == 1
-
-    async def test_button_autoreply_cancel_form_dispatches(self, tmp_path) -> None:
-        from textual.widgets import Button
-
-        fp = tmp_path / "autoreplies.json"
-        fp.write_text('{"' + _TEST_SK + '": {"autoreplies": []}}')
-        app = _AutoreplyEditApp(str(fp))
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            screen = app.screen
-            screen._show_form()
-            await pilot.pause()
-            btn = screen.query_one("#autoreply-cancel-form", Button)
-            screen.on_button_pressed(Button.Pressed(btn))
-            await pilot.pause()
-            assert screen.query_one("#autoreply-form").display is False
-
-    async def test_button_autoreply_close_dispatches(self, tmp_path) -> None:
-        from textual.widgets import Button
-
-        fp = tmp_path / "autoreplies.json"
-        fp.write_text('{"' + _TEST_SK + '": {"autoreplies": []}}')
-        dismissed: list = []
-
-        class _App(textual.app.App[None]):
-            def on_mount(self_app) -> None:
-                scr = AutoreplyEditScreen(path=str(fp))
-                self_app.push_screen(scr, callback=lambda r: dismissed.append(r))
-
-        app = _App()
-        async with app.run_test(size=(80, 24)) as pilot:
-            await pilot.pause()
-            btn = app.screen.query_one("#autoreply-close", Button)
-            app.screen.on_button_pressed(Button.Pressed(btn))
-            await pilot.pause()
-        assert None in dismissed
-
-    async def test_edit_submit_form(self, tmp_path) -> None:
+    @pytest.mark.parametrize(
+        "app_cls,screen_cls,filename,data_key,prefix,data_attr,"
+        "field_ids,form_vals,edit_items",
+        _BTN_DISPATCH_PARAMS,
+    )
+    async def test_edit_submit_form(
+        self, tmp_path, app_cls, screen_cls, filename, data_key,
+        prefix, data_attr, field_ids, form_vals, edit_items,
+    ) -> None:
         import json
 
-        fp = tmp_path / "autoreplies.json"
-        fp.write_text(
-            json.dumps({_TEST_SK: {"autoreplies": [{"pattern": "old", "reply": "old<CR>"}]}})
-        )
-        app = _AutoreplyEditApp(str(fp))
+        fp = tmp_path / filename
+        fp.write_text(json.dumps({_TEST_SK: {data_key: edit_items}}))
+        app = app_cls(str(fp))
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
             screen = app.screen
             screen._editing_idx = 0
-            screen.query_one("#autoreply-pattern", Input).value = "new"
-            screen.query_one("#autoreply-reply", Input).value = "new<CR>"
-            screen.query_one("#autoreply-form").display = True
+            screen.query_one(field_ids[0], Input).value = "new"
+            screen.query_one(field_ids[1], Input).value = "new<CR>"
+            screen.query_one(f"#{prefix}-form").display = True
             screen._submit_form()
             await pilot.pause()
-            assert screen._rules[0] == ("new", "new<CR>")
+            assert getattr(screen, data_attr)[0] == ("new", "new<CR>")
 
-    async def test_selected_idx_empty_table(self, tmp_path) -> None:
-        fp = tmp_path / "autoreplies.json"
-        fp.write_text('{"' + _TEST_SK + '": {"autoreplies": []}}')
-        app = _AutoreplyEditApp(str(fp))
+    @pytest.mark.parametrize(
+        "app_cls,screen_cls,filename,data_key,prefix,data_attr,"
+        "field_ids,form_vals,edit_items",
+        _BTN_DISPATCH_PARAMS,
+    )
+    async def test_selected_idx_empty_table(
+        self, tmp_path, app_cls, screen_cls, filename, data_key,
+        prefix, data_attr, field_ids, form_vals, edit_items,
+    ) -> None:
+        fp = tmp_path / filename
+        fp.write_text('{"' + _TEST_SK + '": {"' + data_key + '": []}}')
+        app = app_cls(str(fp))
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
             assert app.screen._selected_idx() is None
 
-    async def test_on_input_submitted_form_visible(self, tmp_path) -> None:
-        fp = tmp_path / "autoreplies.json"
-        fp.write_text('{"' + _TEST_SK + '": {"autoreplies": []}}')
-        app = _AutoreplyEditApp(str(fp))
+    @pytest.mark.parametrize(
+        "app_cls,screen_cls,filename,data_key,prefix,data_attr,"
+        "field_ids,form_vals,edit_items",
+        _BTN_DISPATCH_PARAMS,
+    )
+    async def test_on_input_submitted_form_visible(
+        self, tmp_path, app_cls, screen_cls, filename, data_key,
+        prefix, data_attr, field_ids, form_vals, edit_items,
+    ) -> None:
+        fp = tmp_path / filename
+        fp.write_text('{"' + _TEST_SK + '": {"' + data_key + '": []}}')
+        app = app_cls(str(fp))
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
             screen = app.screen
-            screen._show_form("ping", "pong<CR>")
+            screen._show_form(*form_vals)
             await pilot.pause()
-            pat_input = screen.query_one("#autoreply-pattern", Input)
-            event = Input.Submitted(pat_input, "ping")
+            inp = screen.query_one(field_ids[0], Input)
+            event = Input.Submitted(inp, form_vals[0])
             screen.on_input_submitted(event)
             await pilot.pause()
-            assert screen.query_one("#autoreply-table", DataTable).row_count == 1
+            table = screen.query_one(f"#{prefix}-table", DataTable)
+            assert table.row_count == 1
 
-    async def test_action_cancel_or_close_no_form(self, tmp_path) -> None:
-        fp = tmp_path / "autoreplies.json"
-        fp.write_text('{"' + _TEST_SK + '": {"autoreplies": []}}')
+    @pytest.mark.parametrize(
+        "app_cls,screen_cls,filename,data_key,prefix,data_attr,"
+        "field_ids,form_vals,edit_items",
+        _BTN_DISPATCH_PARAMS,
+    )
+    async def test_action_cancel_or_close_no_form(
+        self, tmp_path, app_cls, screen_cls, filename, data_key,
+        prefix, data_attr, field_ids, form_vals, edit_items,
+    ) -> None:
+        fp = tmp_path / filename
+        fp.write_text('{"' + _TEST_SK + '": {"' + data_key + '": []}}')
         dismissed: list = []
 
         class _App(textual.app.App[None]):
             def on_mount(self_app) -> None:
-                scr = AutoreplyEditScreen(path=str(fp))
-                self_app.push_screen(scr, callback=lambda r: dismissed.append(r))
+                scr = screen_cls(path=str(fp))
+                self_app.push_screen(
+                    scr, callback=lambda r: dismissed.append(r)
+                )
 
         app = _App()
         async with app.run_test(size=(80, 24)) as pilot:
@@ -1244,20 +1197,30 @@ class TestAutoreplyEditScreenButtonDispatch:
             await pilot.pause()
         assert None in dismissed
 
-    async def test_load_from_file_invalid_json(self, tmp_path) -> None:
-        fp = tmp_path / "autoreplies.json"
+    @pytest.mark.parametrize(
+        "app_cls,screen_cls,filename,data_key,prefix,data_attr,"
+        "field_ids,form_vals,edit_items",
+        _BTN_DISPATCH_PARAMS,
+    )
+    async def test_load_from_file_invalid_json(
+        self, tmp_path, app_cls, screen_cls, filename, data_key,
+        prefix, data_attr, field_ids, form_vals, edit_items,
+    ) -> None:
+        fp = tmp_path / filename
         fp.write_text("{invalid json")
-        app = _AutoreplyEditApp(str(fp))
+        app = app_cls(str(fp))
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
-            assert app.screen.query_one("#autoreply-table", DataTable).row_count == 0
+            table = app.screen.query_one(f"#{prefix}-table", DataTable)
+            assert table.row_count == 0
 
     async def test_load_from_file_nonexistent(self, tmp_path) -> None:
         fp = tmp_path / "nonexistent.json"
         app = _AutoreplyEditApp(str(fp))
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
-            assert app.screen.query_one("#autoreply-table", DataTable).row_count == 0
+            table = app.screen.query_one("#autoreply-table", DataTable)
+            assert table.row_count == 0
 
     async def test_submit_form_invalid_regex(self, tmp_path) -> None:
         fp = tmp_path / "autoreplies.json"
@@ -1270,7 +1233,8 @@ class TestAutoreplyEditScreenButtonDispatch:
             await pilot.pause()
             screen._submit_form()
             await pilot.pause()
-            assert screen.query_one("#autoreply-table", DataTable).row_count == 0
+            table = screen.query_one("#autoreply-table", DataTable)
+            assert table.row_count == 0
             assert screen.query_one("#autoreply-form").display is True
 
 
@@ -1314,52 +1278,9 @@ async def test_ice_colors_switch_updates_palette() -> None:
 async def test_action_connect_keyboard_interrupt(
     tui_tmp_paths, monkeypatch
 ) -> None:
-    import os
-    import subprocess as _subprocess
-
-    sessions = {"srv1": SessionConfig(name="srv1", host="localhost", port=12345)}
-    save_sessions(sessions)
-
-    terminated: list = []
-
-    class _FakeProc:
-        returncode = 0
-        stderr = None
-
-        def wait(self, timeout=None):
-            if not terminated:
-                raise KeyboardInterrupt
-
-        def terminate(self):
-            terminated.append(True)
-
-    def _fake_popen(cmd, **kwargs):
-        return _FakeProc()
-
-    monkeypatch.setattr(_subprocess, "Popen", _fake_popen)
-
-    _real_get_terminal_size = os.get_terminal_size
-
-    def _fake_get_terminal_size(*args):
-        if args:
-            return _real_get_terminal_size(*args)
-        return os.terminal_size((80, 24))
-
-    import contextlib
-
-    @contextlib.contextmanager
-    def _fake_suspend():
-        yield
-
-    app = _SessionListApp()
-    async with app.run_test(size=(80, 24)) as pilot:
-        await pilot.pause()
-        screen = app.screen
-        monkeypatch.setattr(os, "set_blocking", lambda fd, blocking: None)
-        monkeypatch.setattr(os, "get_terminal_size", _fake_get_terminal_size)
-        monkeypatch.setattr(app, "suspend", _fake_suspend)
-        screen.action_connect()
-        await pilot.pause()
+    _, terminated = await _run_connect(
+        tui_tmp_paths, monkeypatch, wait_side_effect=KeyboardInterrupt
+    )
     assert terminated
 
 
@@ -1413,30 +1334,30 @@ async def test_arrow_nav_session_list_left_from_table(tui_tmp_paths) -> None:
         assert screen.focused is buttons[0]
 
 
+@pytest.mark.parametrize(
+    "app_cls,filename,data_key,btn_col_id",
+    [
+        pytest.param(
+            _MacroEditApp, "macros.json", "macros",
+            "#macro-button-col Button", id="macro",
+        ),
+        pytest.param(
+            _AutoreplyEditApp, "autoreplies.json", "autoreplies",
+            "#autoreply-button-col Button", id="autoreply",
+        ),
+    ],
+)
 @pytest.mark.asyncio
-async def test_arrow_nav_macro_buttons(tmp_path) -> None:
-    fp = tmp_path / "macros.json"
-    fp.write_text('{"' + _TEST_SK + '": {"macros": []}}')
-    app = _MacroEditApp(str(fp))
+async def test_arrow_nav_editor_buttons(
+    tmp_path, app_cls, filename, data_key, btn_col_id,
+) -> None:
+    fp = tmp_path / filename
+    fp.write_text('{"' + _TEST_SK + '": {"' + data_key + '": []}}')
+    app = app_cls(str(fp))
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
         screen = app.screen
-        buttons = list(screen.query("#macro-button-col Button"))
-        buttons[0].focus()
-        await pilot.press("down")
-        await pilot.pause()
-        assert screen.focused is buttons[1]
-
-
-@pytest.mark.asyncio
-async def test_arrow_nav_autoreply_buttons(tmp_path) -> None:
-    fp = tmp_path / "autoreplies.json"
-    fp.write_text('{"' + _TEST_SK + '": {"autoreplies": []}}')
-    app = _AutoreplyEditApp(str(fp))
-    async with app.run_test(size=(80, 24)) as pilot:
-        await pilot.pause()
-        screen = app.screen
-        buttons = list(screen.query("#autoreply-button-col Button"))
+        buttons = list(screen.query(btn_col_id))
         buttons[0].focus()
         await pilot.press("down")
         await pilot.pause()
