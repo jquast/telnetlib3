@@ -468,3 +468,130 @@ async def test_run_client_colormatch_petscii_alias(monkeypatch):
     from telnetlib3.color_filter import PetsciiColorFilter
 
     assert isinstance(writer_obj._color_filter, PetsciiColorFilter)
+
+
+@pytest.mark.asyncio
+async def test_connection_made_reader_set_transport_exception():
+    client = _make_client(encoding=False)
+
+    class BadReader:
+        def set_transport(self, t):
+            raise RuntimeError("no transport support")
+
+        def exception(self):
+            return None
+
+    client._reader_factory = lambda **kw: BadReader()
+    transport = types.SimpleNamespace(
+        get_extra_info=lambda name, default=None: default,
+        write=lambda data: None,
+        is_closing=lambda: False,
+        close=lambda: None,
+    )
+    client.connection_made(transport)
+    assert isinstance(client.reader, BadReader)
+
+
+def test_detect_syncterm_font_returns_early_when_writer_none():
+    client = BaseClient.__new__(BaseClient)
+    client.log = types.SimpleNamespace(debug=lambda *a, **kw: None, isEnabledFor=lambda _: False)
+    client.writer = None
+    client._detect_syncterm_font(b"\x1b[0;0 D")
+
+
+@pytest.mark.asyncio
+async def test_begin_shell_cancelled_future():
+    client = BaseClient.__new__(BaseClient)
+    client.log = types.SimpleNamespace(debug=lambda *a, **kw: None, isEnabledFor=lambda _: False)
+    client.shell = lambda r, w: None
+    fut = asyncio.get_event_loop().create_future()
+    fut.cancel()
+    client.begin_shell(fut)
+
+
+@pytest.mark.asyncio
+async def test_data_received_trace_log(caplog):
+    import logging
+
+    client = _make_client(encoding=False)
+    transport = types.SimpleNamespace(
+        get_extra_info=lambda name, default=None: default,
+        write=lambda data: None,
+        is_closing=lambda: False,
+        close=lambda: None,
+        pause_reading=lambda: None,
+    )
+    client.connection_made(transport)
+    with caplog.at_level(5):
+        client.data_received(b"\xff\xfb\x01")
+    await asyncio.sleep(0.05)
+
+
+@pytest.mark.asyncio
+async def test_data_received_pauses_at_high_watermark():
+    client = _make_client(encoding=False)
+    paused = []
+    transport = types.SimpleNamespace(
+        get_extra_info=lambda name, default=None: default,
+        write=lambda data: None,
+        is_closing=lambda: False,
+        close=lambda: None,
+        pause_reading=lambda: paused.append(True),
+        resume_reading=lambda: paused.append(False),
+    )
+    client.connection_made(transport)
+    big_data = b"\x00" * (client._read_high + 100)
+    client.data_received(big_data)
+    assert client._reading_paused is True
+    await asyncio.sleep(0.05)
+
+
+@pytest.mark.asyncio
+async def test_data_received_pause_reading_exception():
+    client = _make_client(encoding=False)
+
+    def bad_pause():
+        raise RuntimeError("pause not supported")
+
+    transport = types.SimpleNamespace(
+        get_extra_info=lambda name, default=None: default,
+        write=lambda data: None,
+        is_closing=lambda: False,
+        close=lambda: None,
+        pause_reading=bad_pause,
+    )
+    client.connection_made(transport)
+    big_data = b"\x00" * (client._read_high + 100)
+    client.data_received(big_data)
+    assert client._reading_paused is False
+    await asyncio.sleep(0.05)
+
+
+@pytest.mark.asyncio
+async def test_process_rx_resumes_reading_on_drain():
+    client = _make_client(encoding=False)
+    resumed = []
+    transport = types.SimpleNamespace(
+        get_extra_info=lambda name, default=None: default,
+        write=lambda data: None,
+        is_closing=lambda: False,
+        close=lambda: None,
+        pause_reading=lambda: None,
+        resume_reading=lambda: resumed.append(True),
+    )
+    client.connection_made(transport)
+    client._reading_paused = True
+    client._rx_queue.append(b"\x00" * 10)
+    client._rx_bytes = 10
+    await client._process_rx()
+    assert len(resumed) >= 1
+
+
+def test_fingerprint_main_oserror(monkeypatch):
+    async def _bad_fp():
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(cl, "run_fingerprint_client", _bad_fp)
+    with pytest.raises(SystemExit) as exc_info:
+        cl.fingerprint_main()
+    assert exc_info.value.code == 1

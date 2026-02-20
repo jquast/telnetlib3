@@ -21,80 +21,80 @@ except ImportError:
     HAS_PROMPT_TOOLKIT = False
 
 
-class TestLoadMacros:
-
-    def test_load_valid(self, tmp_path):
-        fp = tmp_path / "macros.json"
-        fp.write_text(
-            json.dumps(
-                {
-                    "macros": [
-                        {"key": "f5", "text": "look<CR>"},
-                        {"key": "escape n", "text": "north<CR>"},
-                    ]
-                }
-            )
+def test_load_macros_valid(tmp_path):
+    fp = tmp_path / "macros.json"
+    fp.write_text(
+        json.dumps(
+            {
+                "macros": [
+                    {"key": "f5", "text": "look<CR>"},
+                    {"key": "escape n", "text": "north<CR>"},
+                ]
+            }
         )
-        macros = load_macros(str(fp))
-        assert len(macros) == 2
-        assert macros[0].keys == ("f5",)
-        assert macros[0].text == "look<CR>"
-        assert macros[1].keys == ("escape", "n")
-
-    def test_load_missing_file(self):
-        with pytest.raises(FileNotFoundError):
-            load_macros("/nonexistent/path.json")
-
-    def test_load_empty_key_skipped(self, tmp_path):
-        fp = tmp_path / "macros.json"
-        fp.write_text(
-            json.dumps({"macros": [{"key": "", "text": "skip"}, {"key": "f6", "text": "keep<CR>"}]})
-        )
-        macros = load_macros(str(fp))
-        assert len(macros) == 1
-        assert macros[0].keys == ("f6",)
-
-    def test_load_empty_list(self, tmp_path):
-        fp = tmp_path / "macros.json"
-        fp.write_text(json.dumps({"macros": []}))
-        macros = load_macros(str(fp))
-        assert macros == []
-
-    def test_load_multi_key(self, tmp_path):
-        fp = tmp_path / "macros.json"
-        fp.write_text(json.dumps({"macros": [{"key": "c-x c-s", "text": "save<CR>"}]}))
-        macros = load_macros(str(fp))
-        assert macros[0].keys == ("c-x", "c-s")
+    )
+    macros = load_macros(str(fp))
+    assert len(macros) == 2
+    assert macros[0].keys == ("f5",)
+    assert macros[0].text == "look<CR>"
+    assert macros[1].keys == ("escape", "n")
 
 
-class TestSaveMacros:
+def test_load_macros_missing_file():
+    with pytest.raises(FileNotFoundError):
+        load_macros("/nonexistent/path.json")
 
-    def test_save_macros_roundtrip(self, tmp_path):
-        fp = tmp_path / "macros.json"
-        original = [
-            Macro(keys=("f5",), text="look<CR>"),
-            Macro(keys=("escape", "n"), text="north<CR>"),
-            Macro(keys=("c-x", "c-s"), text="save<CR>"),
-        ]
-        save_macros(str(fp), original)
-        loaded = load_macros(str(fp))
-        assert len(loaded) == len(original)
-        for orig, restored in zip(original, loaded):
-            assert orig.keys == restored.keys
-            assert orig.text == restored.text
 
-    def test_save_empty(self, tmp_path):
-        fp = tmp_path / "macros.json"
-        save_macros(str(fp), [])
-        loaded = load_macros(str(fp))
-        assert loaded == []
+def test_load_macros_empty_key_skipped(tmp_path):
+    fp = tmp_path / "macros.json"
+    fp.write_text(
+        json.dumps({"macros": [{"key": "", "text": "skip"}, {"key": "f6", "text": "keep<CR>"}]})
+    )
+    macros = load_macros(str(fp))
+    assert len(macros) == 1
+    assert macros[0].keys == ("f6",)
 
-    def test_save_unicode(self, tmp_path):
-        fp = tmp_path / "macros.json"
-        macros = [Macro(keys=("f1",), text="say héllo<CR>")]
-        save_macros(str(fp), macros)
-        loaded = load_macros(str(fp))
-        assert loaded[0].text == "say héllo<CR>"
+
+def test_load_macros_empty_list(tmp_path):
+    fp = tmp_path / "macros.json"
+    fp.write_text(json.dumps({"macros": []}))
+    assert load_macros(str(fp)) == []
+
+
+def test_load_macros_multi_key(tmp_path):
+    fp = tmp_path / "macros.json"
+    fp.write_text(json.dumps({"macros": [{"key": "c-x c-s", "text": "save<CR>"}]}))
+    macros = load_macros(str(fp))
+    assert macros[0].keys == ("c-x", "c-s")
+
+
+def test_save_macros_roundtrip(tmp_path):
+    fp = tmp_path / "macros.json"
+    original = [
+        Macro(keys=("f5",), text="look<CR>"),
+        Macro(keys=("escape", "n"), text="north<CR>"),
+        Macro(keys=("c-x", "c-s"), text="save<CR>"),
+    ]
+    save_macros(str(fp), original)
+    loaded = load_macros(str(fp))
+    assert len(loaded) == len(original)
+    for orig, restored in zip(original, loaded):
+        assert orig.keys == restored.keys
+        assert orig.text == restored.text
+
+
+def test_save_macros_empty(tmp_path):
+    fp = tmp_path / "macros.json"
+    save_macros(str(fp), [])
+    assert load_macros(str(fp)) == []
+
+
+def test_save_macros_unicode(tmp_path):
+    fp = tmp_path / "macros.json"
+    macros = [Macro(keys=("f1",), text="say héllo<CR>")]
+    save_macros(str(fp), macros)
+    loaded = load_macros(str(fp))
+    assert loaded[0].text == "say héllo<CR>"
 
 
 def _mock_writer():
@@ -117,28 +117,22 @@ class TestBindMacros:
 
     def test_multi_command(self):
         writer, written = _mock_writer()
-        log = logging.getLogger("test")
         macro = Macro(keys=("f6",), text="look<CR>inventory<CR>")
-
-        # Simulate what the handler does.
         parts = macro.text.split("<CR>")
         for i, part in enumerate(parts):
             if i < len(parts) - 1:
                 writer.write(part + "\r\n")
             elif part:
-                pass  # would insert into buffer
+                pass
         assert written == ["look\r\n", "inventory\r\n"]
 
     def test_insert_only_no_cr(self):
         writer, written = _mock_writer()
-        log = logging.getLogger("test")
         macro = Macro(keys=("f7",), text="partial text")
-
         parts = macro.text.split("<CR>")
         for i, part in enumerate(parts):
             if i < len(parts) - 1:
                 writer.write(part + "\r\n")
-        # No <CR> means no write — text would be inserted into buffer.
         assert written == []
 
     def test_invalid_key_logged_not_raised(self):

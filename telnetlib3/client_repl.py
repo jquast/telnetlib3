@@ -181,18 +181,38 @@ def _launch_tui_editor(
     log = logging.getLogger(__name__)
 
     def _run_editor() -> None:
+        # Reset DECSTBM scroll region before launching TUI subprocess —
+        # the Textual app uses the alternate screen buffer, but some
+        # terminals share scroll region state across buffers, causing a
+        # "doubling" effect where widgets render at the wrong row.
+        sys.stdout.write("\x1b[r")
+        sys.stdout.flush()
         try:
             subprocess.run(cmd, check=False)
         except FileNotFoundError:
             log.warning("could not launch TUI editor subprocess")
-            return
+        finally:
+            # Re-establish the scroll region that _repl_event_loop_pt set
+            # via the ScrollRegion context manager (reserve_bottom=1).
+            try:
+                _tsize = os.get_terminal_size()
+                scroll_bottom = max(1, _tsize.lines - 1)
+                sys.stdout.write(f"\x1b[1;{scroll_bottom}r")
+                sys.stdout.write(f"\x1b[{scroll_bottom};1H")
+                sys.stdout.write("\x1b7")
+                sys.stdout.write(f"\x1b[{_tsize.lines};1H\x1b[2K")
+                sys.stdout.flush()
+            except OSError:
+                pass
 
         if editor_type == "macros":
             _reload_macros(writer, path, log)
         else:
             _reload_autoreplies(writer, path, log)
 
-    event.app.run_in_terminal(_run_editor)
+    from prompt_toolkit.application import run_in_terminal  # pylint: disable=import-outside-toplevel
+
+    run_in_terminal(_run_editor)
 
 
 def _reload_macros(

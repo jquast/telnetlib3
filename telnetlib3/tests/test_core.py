@@ -56,7 +56,6 @@ async def test_create_server_on_connect(bind_host, unused_tcp_port):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             await asyncio.sleep(0.01)
             assert call_tracker["called"]
-        # Close server-side transport before server closes
         if call_tracker["transport"]:
             call_tracker["transport"].close()
             await asyncio.sleep(0)
@@ -94,7 +93,6 @@ async def test_telnet_client_open_closed_by_peer(bind_host, unused_tcp_port):
 
     class DisconnecterProtocol(asyncio.Protocol):
         def connection_made(self, transport):
-            # disconnect on connect
             transport.close()
 
     async with asyncio_server(DisconnecterProtocol, bind_host, unused_tcp_port):
@@ -102,9 +100,7 @@ async def test_telnet_client_open_closed_by_peer(bind_host, unused_tcp_port):
             reader,
             writer,
         ):
-            # read until EOF, no data received.
-            data_received = await reader.read()
-            assert not data_received
+            assert not await reader.read()
 
 
 async def test_telnet_server_advanced_negotiation(bind_host, unused_tcp_port):
@@ -125,13 +121,8 @@ async def test_telnet_server_advanced_negotiation(bind_host, unused_tcp_port):
 
             assert srv_instance.writer.remote_option[TTYPE] is True
             assert srv_instance.writer.pending_option == {
-                # server's request to negotiation TTYPE affirmed
                 DO + TTYPE: False,
-                # server's request for TTYPE value unreplied
                 SB + TTYPE: True,
-                # remaining unreplied values from begin_advanced_negotiation()
-                # DO NEW_ENVIRON is deferred until TTYPE cycle completes
-                # WILL ECHO is deferred until TTYPE reveals client identity
                 DO + CHARSET: True,
                 DO + NAWS: True,
                 WILL + SGA: True,
@@ -139,8 +130,11 @@ async def test_telnet_server_advanced_negotiation(bind_host, unused_tcp_port):
             }
 
 
-async def test_line_mode_skips_will_sga(bind_host, unused_tcp_port):
-    """Server with line_mode=True does not send WILL SGA."""
+@pytest.mark.parametrize("option,trigger_echo", [(SGA, False), (ECHO, True)])
+async def test_line_mode_skips_will_option(
+    bind_host, unused_tcp_port, option, trigger_echo
+):
+    """Server with line_mode=True does not send WILL SGA or WILL ECHO."""
     _waiter = asyncio.Future()
 
     class ServerTestLineMode(telnetlib3.TelnetServer):
@@ -158,34 +152,11 @@ async def test_line_mode_skips_will_sga(bind_host, unused_tcp_port):
             writer.write(IAC + WILL + TTYPE)
             srv_instance = await asyncio.wait_for(_waiter, 0.5)
 
-            pending = srv_instance.writer.pending_option
-            assert WILL + SGA not in pending
-
-
-async def test_line_mode_skips_will_echo(bind_host, unused_tcp_port):
-    """Server with line_mode=True never sends WILL ECHO."""
-    _waiter = asyncio.Future()
-
-    class ServerTestLineModeEcho(telnetlib3.TelnetServer):
-        def begin_advanced_negotiation(self):
-            super().begin_advanced_negotiation()
-            _waiter.set_result(self)
-
-    async with create_server(
-        protocol_factory=ServerTestLineModeEcho,
-        host=bind_host,
-        port=unused_tcp_port,
-        line_mode=True,
-    ):
-        async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
-            writer.write(IAC + WILL + TTYPE)
-            srv_instance = await asyncio.wait_for(_waiter, 0.5)
-
-            # Manually trigger _negotiate_echo (normally called from on_ttype)
-            srv_instance._negotiate_echo()
+            if trigger_echo:
+                srv_instance._negotiate_echo()
 
             pending = srv_instance.writer.pending_option
-            assert WILL + ECHO not in pending
+            assert WILL + option not in pending
 
 
 async def test_default_sends_will_sga(bind_host, unused_tcp_port):
@@ -209,49 +180,31 @@ async def test_default_sends_will_sga(bind_host, unused_tcp_port):
             assert pending[WILL + SGA] is True
 
 
-async def test_telnet_server_closed_by_client(bind_host, unused_tcp_port):
-    """Exercise TelnetServer.connection_lost."""
+@pytest.mark.parametrize("use_eof", [False, True])
+async def test_telnet_server_disconnect_by_client(
+    bind_host, unused_tcp_port, use_eof
+):
+    """Exercise TelnetServer.connection_lost and eof_received."""
     async with create_server(host=bind_host, port=unused_tcp_port) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
-            # Read server's negotiation request and send minimal reply
             expect_hello = IAC + DO + TTYPE
             hello = await reader.readexactly(len(expect_hello))
             assert hello == expect_hello
             writer.write(IAC + WONT + TTYPE)
 
-            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
+            srv_instance = await asyncio.wait_for(
+                server.wait_for_client(), 0.5
+            )
 
-            # Verify negotiation state: client refused TTYPE
             assert srv_instance.writer.remote_option[TTYPE] is False
             assert srv_instance.writer.pending_option.get(TTYPE) is not True
 
-            writer.close()
-            await writer.wait_closed()
+            if use_eof:
+                writer.write_eof()
+            else:
+                writer.close()
+                await writer.wait_closed()
 
-            # Wait for server to notice client disconnect
-            await asyncio.sleep(0.05)
-            assert srv_instance._closing
-
-
-async def test_telnet_server_eof_by_client(bind_host, unused_tcp_port):
-    """Exercise TelnetServer.eof_received()."""
-    async with create_server(host=bind_host, port=unused_tcp_port) as server:
-        async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
-            # Read server's negotiation request and send minimal reply
-            expect_hello = IAC + DO + TTYPE
-            hello = await reader.readexactly(len(expect_hello))
-            assert hello == expect_hello
-            writer.write(IAC + WONT + TTYPE)
-
-            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
-
-            # Verify negotiation state: client refused TTYPE
-            assert srv_instance.writer.remote_option[TTYPE] is False
-            assert srv_instance.writer.pending_option.get(TTYPE) is not True
-
-            writer.write_eof()
-
-            # Wait for server to notice EOF
             await asyncio.sleep(0.05)
             assert srv_instance._closing
 
@@ -269,18 +222,15 @@ async def test_telnet_server_closed_by_server(bind_host, unused_tcp_port):
             writer.write(hello_reply)
             srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
 
-            # Verify negotiation state: client refused TTYPE
             assert srv_instance.writer.remote_option[TTYPE] is False
             assert srv_instance.writer.pending_option.get(TTYPE) is not True
 
-            # Verify in-band data was received
             data = await asyncio.wait_for(srv_instance.reader.readline(), 0.5)
             assert data == "quit\r\n"
 
             srv_instance.writer.close()
             await srv_instance.writer.wait_closed()
 
-            # Wait for server to process connection close
             await asyncio.sleep(0.05)
             assert srv_instance._closing
 
@@ -400,7 +350,6 @@ async def test_telnet_server_as_module():
         *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
 
-    # we would expect the script to display help output and exit
     help_output, _ = await proc.communicate()
     assert b"usage:" in help_output and b"server" in help_output
     await proc.wait()
@@ -446,7 +395,6 @@ async def test_telnet_client_as_module():
         *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
 
-    # we would expect the script to display help output and exit
     help_output, _ = await proc.communicate()
     assert b"usage:" in help_output and b"client" in help_output
     await proc.wait()

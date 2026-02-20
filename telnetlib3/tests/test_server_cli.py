@@ -27,9 +27,9 @@ def test_parse_server_args_includes_pty_options_when_supported():
         pytest.skip("PTY not supported on this platform")
 
     with mock.patch.object(sys, "argv", ["server"]):
-        result = server.parse_server_args()
-        assert "pty_exec" in result
-        assert "pty_fork_limit" in result
+        args = server.parse_server_args()
+        assert "pty_exec" in args
+        assert "pty_fork_limit" in args
 
 
 def test_parse_server_args_excludes_pty_options_when_not_supported():
@@ -38,10 +38,10 @@ def test_parse_server_args_excludes_pty_options_when_not_supported():
     try:
         server.PTY_SUPPORT = False
         with mock.patch.object(sys, "argv", ["server"]):
-            result = server.parse_server_args()
-            assert result["pty_exec"] is None
-            assert result["pty_fork_limit"] == 0
-            assert result["pty_args"] is None
+            args = server.parse_server_args()
+            assert args["pty_exec"] is None
+            assert args["pty_fork_limit"] == 0
+            assert args["pty_args"] is None
     finally:
         server.PTY_SUPPORT = original_support
 
@@ -73,25 +73,29 @@ def test_telnetlib3_pty_shell_exports_conditional():
         assert "pty_shell" not in telnetlib3.__all__
 
 
-def test_parse_server_args_never_send_ga():
+@pytest.mark.parametrize(
+    "argv,expected",
+    [
+        (["server"], False),
+        (["server", "--never-send-ga"], True),
+    ],
+)
+def test_parse_server_args_never_send_ga(argv, expected):
     """--never-send-ga flag is parsed correctly."""
-    with mock.patch.object(sys, "argv", ["server"]):
-        result = server.parse_server_args()
-        assert result["never_send_ga"] is False
-
-    with mock.patch.object(sys, "argv", ["server", "--never-send-ga"]):
-        result = server.parse_server_args()
-        assert result["never_send_ga"] is True
+    with mock.patch.object(sys, "argv", argv):
+        assert server.parse_server_args()["never_send_ga"] is expected
 
 
-def test_parse_server_args_line_mode():
+@pytest.mark.parametrize(
+    "argv,expected_line_mode,expected_pty_raw",
+    [
+        (["server"], False, True),
+        (["server", "--line-mode"], True, False),
+    ],
+)
+def test_parse_server_args_line_mode(argv, expected_line_mode, expected_pty_raw):
     """--line-mode flag sets both line_mode and pty_raw."""
-    with mock.patch.object(sys, "argv", ["server"]):
-        result = server.parse_server_args()
-        assert result["line_mode"] is False
-        assert result["pty_raw"] is True
-
-    with mock.patch.object(sys, "argv", ["server", "--line-mode"]):
-        result = server.parse_server_args()
-        assert result["line_mode"] is True
-        assert result["pty_raw"] is False
+    with mock.patch.object(sys, "argv", argv):
+        args = server.parse_server_args()
+        assert args["line_mode"] is expected_line_mode
+        assert args["pty_raw"] is expected_pty_raw

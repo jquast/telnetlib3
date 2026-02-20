@@ -1093,3 +1093,49 @@ def test_fingerprint_server_main_env_fallback(monkeypatch):
         assert fps.DATA_DIR == "/original"
     finally:
         fps.DATA_DIR = old_data_dir
+
+
+def test_bytes_safe_encoder_non_serializable():
+    with pytest.raises(TypeError):
+        json.dumps({"x": object()}, cls=fps._BytesSafeEncoder)
+
+
+def test_fingerprinting_mixin_without_telnet_server():
+    class Standalone(fps.FingerprintingTelnetServer):
+        pass
+
+    obj = Standalone()
+    with pytest.raises(TypeError, match="must be combined with TelnetServer"):
+        obj.on_request_environ()
+
+
+def test_build_session_fingerprint_comport():
+    writer = _probe_writer()
+    writer.comport_data = {"signature": "COM1"}
+    writer.slctab = None
+    writer.rejected_will = set()
+    writer.rejected_do = set()
+    probe_results = {"BINARY": fps.ProbeResult(status="WILL", opt=fps.BINARY)}
+    result = fps._build_session_fingerprint(writer, probe_results, 0.5)
+    assert result["comport"] == {"signature": "COM1"}
+
+
+def test_save_fingerprint_data_existing_non_unknown_subdir(tmp_path, monkeypatch):
+    monkeypatch.setattr(fps, "DATA_DIR", str(tmp_path))
+
+    writer = _probe_writer()
+    writer.slctab = None
+    writer.comport_data = None
+    writer.rejected_will = set()
+    writer.rejected_do = set()
+    probe_results = {"BINARY": fps.ProbeResult(status="WILL", opt=fps.BINARY)}
+
+    protocol_fp = fps._create_protocol_fingerprint(writer, probe_results)
+    telnet_hash = fps._hash_fingerprint(protocol_fp)
+    telnet_dir = tmp_path / "client" / telnet_hash
+    known_dir = telnet_dir / "known-terminal"
+    known_dir.mkdir(parents=True)
+
+    result = fps._save_fingerprint_data(writer, probe_results, 0.5)
+    assert result is not None
+    assert "known-terminal" in result

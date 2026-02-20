@@ -1058,15 +1058,21 @@ class MacroEditScreen(Screen["bool | None"]):
     CSS = """
     MacroEditScreen { align: center middle; }
     #macro-panel {
-        width: 70; height: 100%; max-height: 22;
+        width: 74; height: 100%; max-height: 22;
         border: round $surface-lighten-2; background: $surface; padding: 1 1;
     }
+    #macro-body { height: 1fr; }
+    #macro-button-col {
+        width: 13; height: auto; padding-right: 1;
+    }
+    #macro-button-col Button {
+        width: 100%; min-width: 0; margin-bottom: 0;
+    }
+    #macro-right { width: 1fr; }
     #macro-table { height: 1fr; min-height: 4; }
     #macro-form { height: auto; margin-top: 1; }
     #macro-form Input { width: 1fr; }
     #macro-form-buttons { height: 3; }
-    #macro-bottom { height: 3; margin-top: 1; }
-    #macro-bottom Button { margin-right: 1; }
     .form-label { width: 8; padding-top: 1; }
     """
 
@@ -1085,23 +1091,29 @@ class MacroEditScreen(Screen["bool | None"]):
         """Build the macro editor layout."""
         with Vertical(id="macro-panel"):
             yield Static("Macro Editor")
-            yield DataTable(id="macro-table")
-            with Vertical(id="macro-form"):
-                with Horizontal(classes="field-row"):
-                    yield Label("Key", classes="form-label")
-                    yield Input(placeholder="e.g. f5 or escape n", id="macro-key")
-                with Horizontal(classes="field-row"):
-                    yield Label("Text", classes="form-label")
-                    yield Input(placeholder="text with <CR> markers", id="macro-text")
-                with Horizontal(id="macro-form-buttons"):
-                    yield Button("OK", variant="success", id="macro-ok")
-                    yield Button("Cancel", variant="default", id="macro-cancel-form")
-            with Horizontal(id="macro-bottom"):
-                yield Button("Add", variant="success", id="macro-add")
-                yield Button("Edit", variant="warning", id="macro-edit")
-                yield Button("Delete", variant="error", id="macro-delete")
-                yield Button("Save", variant="primary", id="macro-save")
-                yield Button("Cancel", id="macro-close")
+            with Horizontal(id="macro-body"):
+                with Vertical(id="macro-button-col"):
+                    yield Button("Add", variant="success", id="macro-add")
+                    yield Button("Edit", variant="warning", id="macro-edit")
+                    yield Button("Delete", variant="error", id="macro-delete")
+                    yield Button("Save", variant="primary", id="macro-save")
+                    yield Button("Cancel", id="macro-close")
+                with Vertical(id="macro-right"):
+                    yield DataTable(id="macro-table")
+                    with Vertical(id="macro-form"):
+                        with Horizontal(classes="field-row"):
+                            yield Label("Key", classes="form-label")
+                            yield Input(placeholder="e.g. f5 or escape n", id="macro-key")
+                        with Horizontal(classes="field-row"):
+                            yield Label("Text", classes="form-label")
+                            yield Input(
+                                placeholder="text with <CR> markers", id="macro-text"
+                            )
+                        with Horizontal(id="macro-form-buttons"):
+                            yield Button("OK", variant="success", id="macro-ok")
+                            yield Button(
+                                "Cancel", variant="default", id="macro-cancel-form"
+                            )
         yield Footer()
 
     def on_mount(self) -> None:
@@ -1218,15 +1230,21 @@ class AutoreplyEditScreen(Screen["bool | None"]):
     CSS = """
     AutoreplyEditScreen { align: center middle; }
     #autoreply-panel {
-        width: 70; height: 100%; max-height: 22;
+        width: 74; height: 100%; max-height: 22;
         border: round $surface-lighten-2; background: $surface; padding: 1 1;
     }
+    #autoreply-body { height: 1fr; }
+    #autoreply-button-col {
+        width: 13; height: auto; padding-right: 1;
+    }
+    #autoreply-button-col Button {
+        width: 100%; min-width: 0; margin-bottom: 0;
+    }
+    #autoreply-right { width: 1fr; }
     #autoreply-table { height: 1fr; min-height: 4; }
     #autoreply-form { height: auto; margin-top: 1; }
     #autoreply-form Input { width: 1fr; }
     #autoreply-form-buttons { height: 3; }
-    #autoreply-bottom { height: 3; margin-top: 1; }
-    #autoreply-bottom Button { margin-right: 1; }
     .form-label { width: 8; padding-top: 1; }
     """
 
@@ -1245,23 +1263,34 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         """Build the autoreply editor layout."""
         with Vertical(id="autoreply-panel"):
             yield Static("Autoreply Editor")
-            yield DataTable(id="autoreply-table")
-            with Vertical(id="autoreply-form"):
-                with Horizontal(classes="field-row"):
-                    yield Label("Pattern", classes="form-label")
-                    yield Input(placeholder="regex pattern", id="autoreply-pattern")
-                with Horizontal(classes="field-row"):
-                    yield Label("Reply", classes="form-label")
-                    yield Input(placeholder=r"reply with \1 refs and <CR>", id="autoreply-reply")
-                with Horizontal(id="autoreply-form-buttons"):
-                    yield Button("OK", variant="success", id="autoreply-ok")
-                    yield Button("Cancel", variant="default", id="autoreply-cancel-form")
-            with Horizontal(id="autoreply-bottom"):
-                yield Button("Add", variant="success", id="autoreply-add")
-                yield Button("Edit", variant="warning", id="autoreply-edit")
-                yield Button("Delete", variant="error", id="autoreply-delete")
-                yield Button("Save", variant="primary", id="autoreply-save")
-                yield Button("Cancel", id="autoreply-close")
+            with Horizontal(id="autoreply-body"):
+                with Vertical(id="autoreply-button-col"):
+                    yield Button("Add", variant="success", id="autoreply-add")
+                    yield Button("Edit", variant="warning", id="autoreply-edit")
+                    yield Button("Delete", variant="error", id="autoreply-delete")
+                    yield Button("Save", variant="primary", id="autoreply-save")
+                    yield Button("Cancel", id="autoreply-close")
+                with Vertical(id="autoreply-right"):
+                    yield DataTable(id="autoreply-table")
+                    with Vertical(id="autoreply-form"):
+                        with Horizontal(classes="field-row"):
+                            yield Label("Pattern", classes="form-label")
+                            yield Input(
+                                placeholder="regex pattern", id="autoreply-pattern"
+                            )
+                        with Horizontal(classes="field-row"):
+                            yield Label("Reply", classes="form-label")
+                            yield Input(
+                                placeholder=r"reply with \1 refs and <CR>",
+                                id="autoreply-reply",
+                            )
+                        with Horizontal(id="autoreply-form-buttons"):
+                            yield Button("OK", variant="success", id="autoreply-ok")
+                            yield Button(
+                                "Cancel",
+                                variant="default",
+                                id="autoreply-cancel-form",
+                            )
         yield Footer()
 
     def on_mount(self) -> None:

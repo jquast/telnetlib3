@@ -195,14 +195,20 @@ class SearchBuffer:
         """
         Return text from last match position forward.
 
-        Joins lines from ``_last_match_line`` onward with newlines
-        and skips past ``_last_match_col`` characters.
+        Joins lines from ``_last_match_line`` onward with newlines,
+        including the current partial (incomplete) line so that
+        prompts without trailing newlines can be matched.
 
         :returns: Searchable text substring.
         """
-        if self._last_match_line >= len(self._lines):
+        if self._last_match_line >= len(self._lines) and not self._partial:
             return ""
         text = "\n".join(self._lines[self._last_match_line :])
+        if self._partial:
+            if text:
+                text += "\n" + self._partial
+            else:
+                text = self._partial
         return text[self._last_match_col :]
 
     def advance_match(self, offset_in_searchable: int, length: int) -> None:
@@ -225,9 +231,9 @@ class SearchBuffer:
                 return
             abs_offset -= line_len + (1 if i == self._last_match_line else 0)
 
-        # Past the last line.
+        # Past the last line — offset is within the partial.
         self._last_match_line = len(self._lines)
-        self._last_match_col = 0
+        self._last_match_col = abs_offset
 
     def _cull(self) -> None:
         """Remove oldest lines beyond *max_lines*, adjusting match position."""
@@ -279,14 +285,13 @@ class AutoreplyEngine:
         """
         Feed server output text and check for matches.
 
-        Called from the server output handler in both REPL and raw modes. Only triggers matching
-        when complete lines are added (newline boundary).
+        Called from the server output handler in both REPL and raw
+        modes.  Searches after every chunk, including partial lines,
+        so that MUD prompts without trailing newlines are matched.
 
         :param text: Server output text.
         """
-        has_new_lines = self._buffer.add_text(text)
-        if not has_new_lines:
-            return
+        self._buffer.add_text(text)
 
         searchable = self._buffer.get_searchable_text()
         if not searchable:
@@ -294,9 +299,13 @@ class AutoreplyEngine:
 
         # Search for all matching rules. We re-fetch searchable text
         # after each match since advance_match changes the window.
+        # Cap iterations to len(rules) * 2 as a safety valve — one
+        # chunk of text should never produce more matches than that.
+        max_iterations = len(self._rules) * 2
         found = True
-        while found:
+        while found and max_iterations > 0:
             found = False
+            max_iterations -= 1
             searchable = self._buffer.get_searchable_text()
             if not searchable:
                 break

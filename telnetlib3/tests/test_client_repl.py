@@ -453,13 +453,11 @@ class TestLaunchTuiEditor:
 
         called_with: list[object] = []
 
-        mock_app = types.SimpleNamespace(
-            run_in_terminal=lambda fn: called_with.append(fn),
-            suspend_to_background=lambda *a: (_ for _ in ()).throw(
-                AssertionError("should not call suspend_to_background")
-            ),
-        )
-        event = types.SimpleNamespace(app=mock_app)
+        import prompt_toolkit.application as pta
+
+        monkeypatch.setattr(pta, "run_in_terminal", lambda fn: called_with.append(fn))
+
+        event = types.SimpleNamespace(app=types.SimpleNamespace())
         writer = types.SimpleNamespace()
 
         _launch_tui_editor(event, "macros", writer)

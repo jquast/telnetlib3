@@ -710,3 +710,10 @@ async def test_telnet_server_shell_tls_banner():
     await ss.telnet_server_shell(reader2, writer2)
     written2 = "".join(writer2.written)
     assert "Ready (secure: TLSv1.3)." in written2
+
+
+@pytest.mark.asyncio
+async def test_filter_ansi_esc_then_eof():
+    reader = MockReader(["\x1b", ""])
+    result = await ss.filter_ansi(reader, MockWriter())
+    assert result == ""
