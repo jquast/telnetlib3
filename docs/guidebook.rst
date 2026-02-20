@@ -774,15 +774,14 @@ Running
 
 The repository includes a "mini-MUD" example at `bin/server_mud.py
 <https://github.com/jquast/telnetlib3/blob/master/bin/server_mud.py>`_ with
-rooms, combat, weapons, GMCP/MSDP/MSSP support, and basic persistence.
+rooms, combat, weapons, GMCP/MSDP/MSSP support, and basic persistence.  MUD
+servers usually run in "line mode"::
 
-::
+    telnetlib3-server --line-mode --shell bin.server_mud.shell
 
-    telnetlib3-server --shell bin.server_mud.shell
+Connect with any telnet or MUD client::
 
-Then, connect with any telnet or MUD client::
-
-    telnet localhost 6023
+    telnetlib3-client localhost 6023
 
 Legacy telnetlib Compatibility
 ==============================
