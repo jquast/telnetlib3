@@ -26,6 +26,14 @@ except ImportError:
 
 PASSWORD_CHAR = "\u25cf"
 
+# Buffer for MUD data received while a TUI editor subprocess is running.
+# The asyncio _read_server loop continues receiving MUD data during editor
+# sessions; writing that data to the terminal fills the PTY buffer and
+# deadlocks the editor's Textual WriterThread.  Data is queued here and
+# replayed when the editor exits.
+_editor_active = False
+_editor_buffer: list[bytes] = []
+
 __all__ = (
     "HAS_PROMPT_TOOLKIT",
     "PromptToolkitRepl",
@@ -187,17 +195,25 @@ def _launch_tui_editor(
     log = logging.getLogger(__name__)
 
     def _run_editor() -> None:
+        global _editor_active  # noqa: PLW0603
         # Reset DECSTBM scroll region before launching TUI subprocess —
         # the Textual app uses the alternate screen buffer, but some
         # terminals share scroll region state across buffers, causing a
         # "doubling" effect where widgets render at the wrong row.
         sys.stdout.write("\x1b[r")
         sys.stdout.flush()
+        # Flush and drain stderr — Textual writes all output to
+        # sys.__stderr__, and leftover buffered data can fill the PTY
+        # buffer, blocking the editor's WriterThread.
+        sys.stderr.flush()
+        sys.__stderr__.flush()
+        _editor_active = True
         try:
             subprocess.run(cmd, check=False)
         except FileNotFoundError:
             log.warning("could not launch TUI editor subprocess")
         finally:
+            _editor_active = False
             # Re-establish the scroll region that _repl_event_loop_pt set
             # via the ScrollRegion context manager (reserve_bottom=1).
             try:
@@ -561,7 +577,14 @@ if sys.platform != "win32":
                     out = _transform_output(out, telnet_writer, True)
                     if autoreply_engine is not None:
                         autoreply_engine.feed(out)
+                    if _editor_active:
+                        _editor_buffer.append(out.encode())
+                        continue
                     stdout.write(b"\x1b8")
+                    if _editor_buffer:
+                        for chunk in _editor_buffer:
+                            stdout.write(chunk)
+                        _editor_buffer.clear()
                     stdout.write(out.encode())
                     stdout.write(b"\x1b7")
                     stdout.write(f"\x1b[{scroll.input_row};1H".encode())

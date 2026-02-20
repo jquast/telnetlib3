@@ -1518,25 +1518,89 @@ class _EditorApp(App[None]):
         super().__init__()
         self._editor_screen = screen
 
+    def _set_pointer_shape(self, shape: str) -> None:
+        """Disable pointer shape changes to prevent WriterThread deadlock.
+
+        Textual writes escape sequences to set cursor shape on mouse move.
+        When the PTY output buffer is full, ``WriterThread.write()`` blocks,
+        and the bounded queue causes ``queue.put()`` to block the main
+        asyncio thread, freezing the entire app.
+        """
+
     def on_mount(self) -> None:
         """Push the editor screen."""
         self.push_screen(self._editor_screen, callback=lambda _: self.exit())
 
 
-def edit_macros_main(path: str, session_key: str = "") -> None:
-    """Launch standalone macro editor TUI."""
+_faulthandler_file: Any = None
+
+
+def _enable_faulthandler() -> None:
+    """Enable faulthandler with SIGUSR1 for non-fatal traceback dumps."""
+    global _faulthandler_file  # noqa: PLW0603
+    import signal  # pylint: disable=import-outside-toplevel
     import faulthandler  # pylint: disable=import-outside-toplevel
 
-    faulthandler.enable()
+    if _faulthandler_file is None:
+        _faulthandler_file = open(  # noqa: SIM115
+            "/tmp/textual-faulthandler.log", "a"
+        )
+    faulthandler.enable(file=_faulthandler_file)
+    faulthandler.register(signal.SIGUSR1, file=_faulthandler_file, all_threads=True)
+
+
+def _patch_writer_thread_queue() -> None:
+    """Make Textual's WriterThread queue unbounded.
+
+    Textual's ``WriterThread`` uses a bounded queue (``maxsize=30``).
+    When terminal output processing lags behind rapid re-renders
+    (e.g. clicking between widgets), ``queue.put()`` blocks the main
+    asyncio thread, freezing the entire app.  Setting the constant
+    to 0 (unbounded) before the ``WriterThread`` is instantiated
+    prevents the deadlock.
+    """
+    try:
+        import textual.drivers._writer_thread as _wt  # pylint: disable=import-outside-toplevel
+
+        _wt.MAX_QUEUED_WRITES = 0  # type: ignore[misc]
+    except (ImportError, AttributeError):
+        pass
+
+
+def _restore_blocking_fds() -> None:
+    """Restore blocking mode on stdin/stdout/stderr.
+
+    The parent process may set ``O_NONBLOCK`` on the shared PTY file
+    description (via asyncio ``connect_read_pipe`` or prompt_toolkit).
+    Since stdin, stdout, and stderr all reference the same kernel file
+    description, the child subprocess inherits non-blocking mode.
+    Textual's ``WriterThread`` does not handle ``BlockingIOError``,
+    so a non-blocking stderr causes the thread to die silently,
+    freezing the app.
+    """
+    import os  # pylint: disable=import-outside-toplevel
+
+    for fd in (0, 1, 2):
+        try:
+            os.set_blocking(fd, True)
+        except OSError:
+            pass
+
+
+def edit_macros_main(path: str, session_key: str = "") -> None:
+    """Launch standalone macro editor TUI."""
+    _restore_blocking_fds()
+    _enable_faulthandler()
+    _patch_writer_thread_queue()
     app = _EditorApp(MacroEditScreen(path=path, session_key=session_key))
     app.run()
 
 
 def edit_autoreplies_main(path: str, session_key: str = "") -> None:
     """Launch standalone autoreply editor TUI."""
-    import faulthandler  # pylint: disable=import-outside-toplevel
-
-    faulthandler.enable()
+    _restore_blocking_fds()
+    _enable_faulthandler()
+    _patch_writer_thread_queue()
     app = _EditorApp(AutoreplyEditScreen(path=path, session_key=session_key))
     app.run()
 
@@ -1546,6 +1610,9 @@ class TelnetSessionApp(App[None]):
 
     TITLE = "telnetlib3 Session Manager"
     ENABLE_COMMAND_PALETTE = False
+
+    def _set_pointer_shape(self, shape: str) -> None:
+        """Disable pointer shape changes to prevent WriterThread deadlock."""
 
     def on_mount(self) -> None:
         """Push the session list screen on startup."""
