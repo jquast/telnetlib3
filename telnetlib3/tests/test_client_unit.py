@@ -330,6 +330,7 @@ async def test_guard_shells_robot_check_timeout():
     class MockReader:
         def fn_encoding(**kw):
             return "utf-8"
+
         _decoder = None
 
         async def read(self, n):

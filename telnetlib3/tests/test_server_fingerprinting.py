@@ -118,16 +118,13 @@ class InteractiveMockReader:
 
 _BINARY_PROBE = {"BINARY": {"status": "WILL", "opt": fps.BINARY}}
 
-_FP_KWARGS = dict(
-    silent=True, banner_quiet_time=0.01, banner_max_wait=0.01, mssp_wait=0.01
-)
+_FP_KWARGS = dict(silent=True, banner_quiet_time=0.01, banner_max_wait=0.01, mssp_wait=0.01)
 
 
 async def _run_fp(reader, writer, tmp_path, **extra):
     save_path = str(tmp_path / "result.json")
     await sfp.fingerprinting_client_shell(
-        reader, writer, host="localhost", port=23,
-        save_path=save_path, **_FP_KWARGS, **extra,
+        reader, writer, host="localhost", port=23, save_path=save_path, **_FP_KWARGS, **extra
     )
     return save_path
 
@@ -478,7 +475,7 @@ async def test_fingerprinting_client_shell_no_save(monkeypatch):
 
     writer = MockWriter()
     await sfp.fingerprinting_client_shell(
-        MockReader([]), writer, host="localhost", port=23, **_FP_KWARGS,
+        MockReader([]), writer, host="localhost", port=23, **_FP_KWARGS
     )
     assert writer._closing
 
@@ -600,8 +597,7 @@ async def test_fingerprinting_client_shell_set_name_no_data_dir(monkeypatch):
 
     writer = MockWriter()
     await sfp.fingerprinting_client_shell(
-        MockReader([]), writer, host="localhost", port=23,
-        set_name="should-warn", **_FP_KWARGS,
+        MockReader([]), writer, host="localhost", port=23, set_name="should-warn", **_FP_KWARGS
     )
     assert writer._closing
 
@@ -677,7 +673,7 @@ async def test_fingerprinting_client_shell_connection_error(exc):
 
     writer = MockWriter()
     await sfp.fingerprinting_client_shell(
-        ErrorReader(exc), writer, host="192.0.2.1", port=23, **_FP_KWARGS,
+        ErrorReader(exc), writer, host="192.0.2.1", port=23, **_FP_KWARGS
     )
     assert writer._closing
 
@@ -1009,18 +1005,10 @@ def test_cull_display_empty_bytes_culled():
 @pytest.mark.parametrize(
     "chunks,has_writer,expected_cpr_count",
     [
-        pytest.param(
-            [b"Hello\x1b[6nWorld"], True, 1, id="single_dsr",
-        ),
-        pytest.param(
-            [b"\x1b[6n", b"banner\x1b[6n"], True, 2, id="multiple_dsr",
-        ),
-        pytest.param(
-            [b"Welcome to BBS\r\n"], True, 0, id="no_dsr",
-        ),
-        pytest.param(
-            [b"Hello\x1b[6n"], False, 0, id="no_writer",
-        ),
+        pytest.param([b"Hello\x1b[6nWorld"], True, 1, id="single_dsr"),
+        pytest.param([b"\x1b[6n", b"banner\x1b[6n"], True, 2, id="multiple_dsr"),
+        pytest.param([b"Welcome to BBS\r\n"], True, 0, id="no_dsr"),
+        pytest.param([b"Hello\x1b[6n"], False, 0, id="no_writer"),
     ],
 )
 @pytest.mark.asyncio
@@ -1146,21 +1134,9 @@ async def test_fingerprinting_shell_delayed_prompt(tmp_path):
 @pytest.mark.parametrize(
     "chunks,expected_cprs",
     [
-        pytest.param(
-            [b"\x1b[6n \x1b[6n"],
-            [b"\x1b[1;1R", b"\x1b[1;2R"],
-            id="single_chunk",
-        ),
-        pytest.param(
-            [b"\x1b[6n", b" \x1b[6n"],
-            [b"\x1b[1;1R", b"\x1b[1;2R"],
-            id="separate_chunks",
-        ),
-        pytest.param(
-            [b"\x1b[6n\xe4\xb8\xad\x1b[6n"],
-            [b"\x1b[1;1R", b"\x1b[1;3R"],
-            id="wide_char",
-        ),
+        pytest.param([b"\x1b[6n \x1b[6n"], [b"\x1b[1;1R", b"\x1b[1;2R"], id="single_chunk"),
+        pytest.param([b"\x1b[6n", b" \x1b[6n"], [b"\x1b[1;1R", b"\x1b[1;2R"], id="separate_chunks"),
+        pytest.param([b"\x1b[6n\xe4\xb8\xad\x1b[6n"], [b"\x1b[1;1R", b"\x1b[1;3R"], id="wide_char"),
     ],
 )
 @pytest.mark.asyncio
@@ -1265,10 +1241,7 @@ async def test_banner_loop_repeated_banner(tmp_path):
 async def test_banner_loop_no_prompt_detected(tmp_path):
     """Banner loop exits when no prompt is detected in consecutive banners."""
     writer = MockWriter(will_options=[fps.SGA])
-    reader = InteractiveMockReader(
-        [b"Welcome to server\r\n", b"MOTD line 1\r\n"],
-        writer,
-    )
+    reader = InteractiveMockReader([b"Welcome to server\r\n", b"MOTD line 1\r\n"], writer)
 
     save_path = await _run_fp(reader, writer, tmp_path)
     assert (tmp_path / "result.json").exists()
@@ -1323,8 +1296,7 @@ async def test_save_fingerprint_creates_directory(tmp_path):
     reader = InteractiveMockReader([b"Login: "], writer)
 
     await sfp.fingerprinting_client_shell(
-        reader, writer, host="localhost", port=23,
-        save_path=save_path, **_FP_KWARGS,
+        reader, writer, host="localhost", port=23, save_path=save_path, **_FP_KWARGS
     )
 
     assert (tmp_path / "subdir" / "deep" / "result.json").exists()
@@ -1334,6 +1306,7 @@ async def test_save_fingerprint_creates_directory(tmp_path):
 async def test_await_mssp_timeout():
     """_await_mssp_data waits then returns when data doesn't arrive."""
     import time
+
     writer = MockWriter()
     writer.remote_option[fps.MSSP] = True
     writer.mssp_data = None
@@ -1349,9 +1322,7 @@ async def test_read_banner_syncterm_font_switch():
     font_chunk = b"\x1b[0;40 D" + b"Hello"
     reader = MockReader([font_chunk])
     writer = MockWriter()
-    await sfp._read_banner_until_quiet(
-        reader, quiet_time=0.01, max_wait=0.05, writer=writer
-    )
+    await sfp._read_banner_until_quiet(reader, quiet_time=0.01, max_wait=0.05, writer=writer)
     assert writer.protocol.force_binary is True
 
 
@@ -1363,9 +1334,7 @@ async def test_read_banner_syncterm_font_explicit_encoding():
     writer = MockWriter()
     writer._encoding_explicit = True
     writer.environ_encoding = "cp437"
-    await sfp._read_banner_until_quiet(
-        reader, quiet_time=0.01, max_wait=0.05, writer=writer
-    )
+    await sfp._read_banner_until_quiet(reader, quiet_time=0.01, max_wait=0.05, writer=writer)
     assert writer.environ_encoding == "cp437"
 
 
@@ -1376,7 +1345,5 @@ async def test_read_banner_utf8_menu_explicit_encoding():
     writer = MockWriter()
     writer._encoding_explicit = True
     writer.environ_encoding = "cp437"
-    await sfp._read_banner_until_quiet(
-        reader, quiet_time=0.01, max_wait=0.05, writer=writer
-    )
+    await sfp._read_banner_until_quiet(reader, quiet_time=0.01, max_wait=0.05, writer=writer)
     assert writer.environ_encoding == "cp437"

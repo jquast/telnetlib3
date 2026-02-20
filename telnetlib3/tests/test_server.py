@@ -1,17 +1,16 @@
 # std imports
-import asyncio
-import logging
 import ssl as ssl_module
 import socket
+import asyncio
+import logging
 from unittest.mock import MagicMock, patch
 
 # 3rd party
 import pytest
 
 # local
+from telnetlib3.server import StatusLogger, TelnetServer, parse_server_args, _TLSAutoDetectProtocol
 from telnetlib3.server_base import BaseServer
-from telnetlib3.server import TelnetServer, StatusLogger, parse_server_args
-from telnetlib3.server import _TLSAutoDetectProtocol
 
 
 @pytest.mark.asyncio
@@ -186,7 +185,7 @@ async def test_check_negotiation_deferred_echo_environ():
 @pytest.mark.asyncio
 async def test_check_negotiation_final_subneg_timeout_warning(caplog):
     """check_negotiation warns when critical subneg times out."""
-    from telnetlib3.telopt import NEW_ENVIRON, SB
+    from telnetlib3.telopt import SB, NEW_ENVIRON
 
     server = _make_telnet_server()
     server._advanced = True
@@ -194,19 +193,16 @@ async def test_check_negotiation_final_subneg_timeout_warning(caplog):
     server._environ_requested = True
     server.writer.pending_option[SB + NEW_ENVIRON] = True
 
-    with caplog.at_level(
-        logging.WARNING, logger="telnetlib3.server"
-    ):
+    with caplog.at_level(logging.WARNING, logger="telnetlib3.server"):
         server.check_negotiation(final=True)
 
-    assert "critical subnegotiation" in caplog.text.lower() or \
-        "environ" in caplog.text.lower()
+    assert "critical subnegotiation" in caplog.text.lower() or "environ" in caplog.text.lower()
 
 
 @pytest.mark.asyncio
 async def test_check_encoding_binary_incoming_request():
     """_check_encoding sends DO BINARY when outbinary set but not inbinary."""
-    from telnetlib3.telopt import BINARY, DO
+    from telnetlib3.telopt import DO, BINARY
 
     server = _make_telnet_server()
     server.writer.local_option[BINARY] = True
@@ -229,8 +225,7 @@ async def test_check_encoding_binary_incoming_request():
 async def test_tls_autodetect_empty_peek():
     """TLS auto-detect closes transport on empty peek."""
     proto = _TLSAutoDetectProtocol(
-        ssl_module.SSLContext(ssl_module.PROTOCOL_TLS_SERVER),
-        lambda: MagicMock(),
+        ssl_module.SSLContext(ssl_module.PROTOCOL_TLS_SERVER), lambda: MagicMock()
     )
     transport = MagicMock()
     mock_sock = MagicMock()
@@ -251,18 +246,14 @@ async def test_tls_autodetect_empty_peek():
 async def test_tls_upgrade_handshake_failure():
     """_upgrade_to_tls handles SSLError gracefully."""
     proto = _TLSAutoDetectProtocol(
-        ssl_module.SSLContext(ssl_module.PROTOCOL_TLS_SERVER),
-        lambda: MagicMock(),
+        ssl_module.SSLContext(ssl_module.PROTOCOL_TLS_SERVER), lambda: MagicMock()
     )
     transport = MagicMock()
     transport.is_closing.return_value = False
     proto._transport = transport
 
     loop = asyncio.get_event_loop()
-    with patch.object(
-        loop, "start_tls",
-        side_effect=ssl_module.SSLError("handshake failed"),
-    ):
+    with patch.object(loop, "start_tls", side_effect=ssl_module.SSLError("handshake failed")):
         await proto._upgrade_to_tls()
 
     transport.close.assert_called_once()
@@ -290,18 +281,14 @@ async def test_status_logger_run_loop():
 
 def test_parse_server_args_force_binary_auto():
     """parse_server_args auto-enables force_binary for non-ASCII encoding."""
-    with patch(
-        "sys.argv", ["test", "--encoding", "cp437"]
-    ):
+    with patch("sys.argv", ["test", "--encoding", "cp437"]):
         result = parse_server_args()
     assert result["force_binary"] is True
 
 
 def test_parse_server_args_ascii_no_force_binary():
     """parse_server_args does not auto-enable force_binary for ASCII."""
-    with patch(
-        "sys.argv", ["test", "--encoding", "us-ascii"]
-    ):
+    with patch("sys.argv", ["test", "--encoding", "us-ascii"]):
         result = parse_server_args()
     assert result["force_binary"] is False
 
@@ -312,9 +299,7 @@ async def test_run_server_guarded_shell_wrapping():
     from telnetlib3.server import run_server, create_server
 
     created_server = MagicMock()
-    created_server.wait_closed = MagicMock(
-        side_effect=asyncio.CancelledError
-    )
+    created_server.wait_closed = MagicMock(side_effect=asyncio.CancelledError)
 
     async def mock_create_server(**kwargs):
         created_server.shell = kwargs.get("shell")
@@ -325,9 +310,11 @@ async def test_run_server_guarded_shell_wrapping():
             mock_loop.return_value = asyncio.get_event_loop()
             try:
                 await run_server(
-                    host="127.0.0.1", port=0,
+                    host="127.0.0.1",
+                    port=0,
                     shell=lambda r, w: None,
-                    robot_check=True, pty_fork_limit=2,
+                    robot_check=True,
+                    pty_fork_limit=2,
                 )
             except (asyncio.CancelledError, Exception):
                 pass
@@ -354,9 +341,7 @@ async def test_run_server_status_logger_lifecycle():
         with patch.object(loop, "add_signal_handler"):
             with patch.object(loop, "remove_signal_handler"):
                 await run_server(
-                    host="127.0.0.1", port=0,
-                    shell=lambda r, w: None,
-                    status_interval=1,
+                    host="127.0.0.1", port=0, shell=lambda r, w: None, status_interval=1
                 )
 
 

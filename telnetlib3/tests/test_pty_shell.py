@@ -15,16 +15,16 @@ import pytest
 # local
 import telnetlib3
 from telnetlib3 import server_pty_shell as sps
+from telnetlib3.telopt import ECHO, WONT
 from telnetlib3.server_pty_shell import (
     _BSU,
     _ESU,
     PTYSession,
     PTYSpawnError,
+    pty_shell,
     _platform_check,
     _wait_for_terminal_info,
-    pty_shell,
 )
-from telnetlib3.telopt import ECHO, WONT
 from telnetlib3.tests.accessories import (
     bind_host,
     create_server,
@@ -855,15 +855,17 @@ def test_build_environment_no_lang_no_charset(mock_session):
 
 def test_build_environment_optional_keys(mock_session):
     """_build_environment copies optional env keys when present."""
-    session, _ = mock_session({
-        "TERM": "xterm",
-        "USER": "testuser",
-        "DISPLAY": ":0",
-        "COLORTERM": "truecolor",
-        "HOME": "/home/test",
-        "SHELL": "/bin/bash",
-        "LOGNAME": "testuser",
-    })
+    session, _ = mock_session(
+        {
+            "TERM": "xterm",
+            "USER": "testuser",
+            "DISPLAY": ":0",
+            "COLORTERM": "truecolor",
+            "HOME": "/home/test",
+            "SHELL": "/bin/bash",
+            "LOGNAME": "testuser",
+        }
+    )
     env = session._build_environment()
     assert env["USER"] == "testuser"
     assert env["DISPLAY"] == ":0"
@@ -874,7 +876,7 @@ def test_build_environment_optional_keys(mock_session):
 
 
 async def test_run_remove_reader_error(mock_session):
-    """run() handles ValueError from remove_reader gracefully."""
+    """Run() handles ValueError from remove_reader gracefully."""
     session, _ = mock_session({"charset": "utf-8"})
     session.master_fd = 99
     session.child_pid = 1234
@@ -933,10 +935,7 @@ async def test_flush_output_decoder_returns_empty(mock_session):
     assert len(written) == 0
 
 
-@pytest.mark.parametrize(
-    "will_echo,expect_wont_echo",
-    [(False, False), (True, True)],
-)
+@pytest.mark.parametrize("will_echo,expect_wont_echo", [(False, False), (True, True)])
 async def test_pty_shell_wont_echo_behavior(will_echo, expect_wont_echo):
     """pty_shell sends WONT ECHO only when will_echo is True."""
     reader = MagicMock()
@@ -955,9 +954,7 @@ async def test_pty_shell_wont_echo_behavior(will_echo, expect_wont_echo):
     iac_calls = []
     writer.iac = lambda *args: iac_calls.append(args)
 
-    with patch.object(
-        PTYSession, "start", side_effect=PTYSpawnError("mocked")
-    ):
+    with patch.object(PTYSession, "start", side_effect=PTYSpawnError("mocked")):
         with pytest.raises(PTYSpawnError):
             await pty_shell(reader, writer, "/nonexistent", raw_mode=False)
 

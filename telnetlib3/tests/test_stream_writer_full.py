@@ -360,30 +360,22 @@ def test_handle_subnegotiation_comport_and_gmcp_and_errors():
 def test_handle_sb_charset_request_rejected():
     w, t, _ = new_writer(server=True)
     w.set_ext_send_callback(CHARSET, lambda offers=None: None)
-    w._handle_sb_charset(
-        collections.deque([CHARSET, REQUEST, b" ", b"UTF-8 ASCII"])
-    )
+    w._handle_sb_charset(collections.deque([CHARSET, REQUEST, b" ", b"UTF-8 ASCII"]))
     assert t.writes[-1] == IAC + SB + CHARSET + REJECTED + IAC + SE
 
 
 def test_handle_sb_charset_request_accepted():
     w, t, _ = new_writer(server=True)
     w.set_ext_send_callback(CHARSET, lambda offers=None: "UTF-8")
-    w._handle_sb_charset(
-        collections.deque([CHARSET, REQUEST, b" ", b"UTF-8 ASCII"])
-    )
-    assert t.writes[-1] == (
-        IAC + SB + CHARSET + ACCEPTED + b"UTF-8" + IAC + SE
-    )
+    w._handle_sb_charset(collections.deque([CHARSET, REQUEST, b" ", b"UTF-8 ASCII"]))
+    assert t.writes[-1] == (IAC + SB + CHARSET + ACCEPTED + b"UTF-8" + IAC + SE)
 
 
 def test_handle_sb_charset_accepted_callback():
     seen = {}
     w, *_ = new_writer(server=True)
     w.set_ext_callback(CHARSET, lambda cs: seen.setdefault("cs", cs))
-    w._handle_sb_charset(
-        collections.deque([CHARSET, ACCEPTED, b"UTF-8"])
-    )
+    w._handle_sb_charset(collections.deque([CHARSET, ACCEPTED, b"UTF-8"]))
     assert seen["cs"] == "UTF-8"
 
 
@@ -1036,11 +1028,7 @@ def test_comport_sb_baudrate_response():
 
 @pytest.mark.parametrize(
     "subcmd, payload_byte, key, expected",
-    [
-        (102, 8, "datasize", 8),
-        (103, 1, "parity", "NONE"),
-        (104, 1, "stopsize", "1"),
-    ],
+    [(102, 8, "datasize", 8), (103, 1, "parity", "NONE"), (104, 1, "stopsize", "1")],
     ids=["datasize", "parity", "stopsize"],
 )
 def test_comport_sb_datasize_parity_stopsize(subcmd, payload_byte, key, expected):

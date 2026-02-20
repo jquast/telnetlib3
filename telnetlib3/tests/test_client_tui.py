@@ -98,9 +98,7 @@ def test_persistence_save_load_roundtrip(tui_tmp_paths) -> None:
 
 
 def test_persistence_load_empty(tui_tmp_paths, monkeypatch) -> None:
-    monkeypatch.setattr(
-        "telnetlib3.client_tui.SESSIONS_FILE", tui_tmp_paths / "nope.json"
-    )
+    monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tui_tmp_paths / "nope.json")
     assert load_sessions() == {}
 
 
@@ -323,11 +321,10 @@ def test_helper_relative_time_invalid() -> None:
     assert result == "not-a-date"[:10]
 
 
-@pytest.mark.parametrize("timedelta_kwargs,expected_substr", [
-    ({"days": 5}, "5d ago"),
-    ({"minutes": 10}, "10m ago"),
-    ({"hours": 3}, "3h ago"),
-])
+@pytest.mark.parametrize(
+    "timedelta_kwargs,expected_substr",
+    [({"days": 5}, "5d ago"), ({"minutes": 10}, "10m ago"), ({"hours": 3}, "3h ago")],
+)
 def test_helper_relative_time(timedelta_kwargs, expected_substr) -> None:
     past = datetime.datetime.now() - datetime.timedelta(**timedelta_kwargs)
     assert expected_substr in _relative_time(past.isoformat())
@@ -339,12 +336,15 @@ def test_helper_relative_time_seconds_ago() -> None:
     assert "30s ago" in result or "29s ago" in result
 
 
-@pytest.mark.parametrize("func,input_val,fallback,expected", [
-    (_int_val, "42", 0, 42),
-    (_int_val, "abc", 42, 42),
-    (_float_val, "1.5", 0.0, 1.5),
-    (_float_val, "abc", 1.5, 1.5),
-])
+@pytest.mark.parametrize(
+    "func,input_val,fallback,expected",
+    [
+        (_int_val, "42", 0, 42),
+        (_int_val, "abc", 42, 42),
+        (_float_val, "1.5", 0.0, 1.5),
+        (_float_val, "abc", 1.5, 1.5),
+    ],
+)
 def test_helper_val_conversion(func, input_val, fallback, expected) -> None:
     assert func(input_val, fallback) == expected
 
@@ -685,8 +685,7 @@ class _MacroEditApp(textual.app.App[None]):
 
     def on_mount(self) -> None:
         self.push_screen(
-            MacroEditScreen(path=self._path, session_key=self._session_key),
-            callback=lambda _: None,
+            MacroEditScreen(path=self._path, session_key=self._session_key), callback=lambda _: None
         )
 
 
@@ -732,12 +731,10 @@ _EDITOR_SCREEN_PARAMS = [
 class TestEditorScreenTextual:
 
     @pytest.mark.parametrize(
-        "app_cls,filename,data_key,prefix,items,item_tuple,field_ids",
-        _EDITOR_SCREEN_PARAMS,
+        "app_cls,filename,data_key,prefix,items,item_tuple,field_ids", _EDITOR_SCREEN_PARAMS
     )
     async def test_compose_and_mount(
-        self, tmp_path, app_cls, filename, data_key, prefix,
-        items, item_tuple, field_ids,
+        self, tmp_path, app_cls, filename, data_key, prefix, items, item_tuple, field_ids
     ) -> None:
         import json
 
@@ -750,12 +747,10 @@ class TestEditorScreenTextual:
             assert table.row_count == 1
 
     @pytest.mark.parametrize(
-        "app_cls,filename,data_key,prefix,items,item_tuple,field_ids",
-        _EDITOR_SCREEN_PARAMS,
+        "app_cls,filename,data_key,prefix,items,item_tuple,field_ids", _EDITOR_SCREEN_PARAMS
     )
     async def test_edit(
-        self, tmp_path, app_cls, filename, data_key, prefix,
-        items, item_tuple, field_ids,
+        self, tmp_path, app_cls, filename, data_key, prefix, items, item_tuple, field_ids
     ) -> None:
         import json
 
@@ -771,12 +766,10 @@ class TestEditorScreenTextual:
             assert screen.query_one(f"#{prefix}-form").display is True
 
     @pytest.mark.parametrize(
-        "app_cls,filename,data_key,prefix,items,item_tuple,field_ids",
-        _EDITOR_SCREEN_PARAMS,
+        "app_cls,filename,data_key,prefix,items,item_tuple,field_ids", _EDITOR_SCREEN_PARAMS
     )
     async def test_delete(
-        self, tmp_path, app_cls, filename, data_key, prefix,
-        items, item_tuple, field_ids,
+        self, tmp_path, app_cls, filename, data_key, prefix, items, item_tuple, field_ids
     ) -> None:
         import json
 
@@ -793,12 +786,10 @@ class TestEditorScreenTextual:
             assert table.row_count == 0
 
     @pytest.mark.parametrize(
-        "app_cls,filename,data_key,prefix,items,item_tuple,field_ids",
-        _EDITOR_SCREEN_PARAMS,
+        "app_cls,filename,data_key,prefix,items,item_tuple,field_ids", _EDITOR_SCREEN_PARAMS
     )
     async def test_save(
-        self, tmp_path, app_cls, filename, data_key, prefix,
-        items, item_tuple, field_ids,
+        self, tmp_path, app_cls, filename, data_key, prefix, items, item_tuple, field_ids
     ) -> None:
         fp = tmp_path / filename
         fp.write_text('{"' + _TEST_SK + '": {"' + data_key + '": []}}')
@@ -814,12 +805,10 @@ class TestEditorScreenTextual:
             await pilot.pause()
 
     @pytest.mark.parametrize(
-        "app_cls,filename,data_key,prefix,items,item_tuple,field_ids",
-        _EDITOR_SCREEN_PARAMS,
+        "app_cls,filename,data_key,prefix,items,item_tuple,field_ids", _EDITOR_SCREEN_PARAMS
     )
     async def test_close(
-        self, tmp_path, app_cls, filename, data_key, prefix,
-        items, item_tuple, field_ids,
+        self, tmp_path, app_cls, filename, data_key, prefix, items, item_tuple, field_ids
     ) -> None:
         fp = tmp_path / filename
         fp.write_text('{"' + _TEST_SK + '": {"' + data_key + '": []}}')
@@ -832,12 +821,10 @@ class TestEditorScreenTextual:
             await pilot.pause()
 
     @pytest.mark.parametrize(
-        "app_cls,filename,data_key,prefix,items,item_tuple,field_ids",
-        _EDITOR_SCREEN_PARAMS,
+        "app_cls,filename,data_key,prefix,items,item_tuple,field_ids", _EDITOR_SCREEN_PARAMS
     )
     async def test_cancel_form(
-        self, tmp_path, app_cls, filename, data_key, prefix,
-        items, item_tuple, field_ids,
+        self, tmp_path, app_cls, filename, data_key, prefix, items, item_tuple, field_ids
     ) -> None:
         fp = tmp_path / filename
         fp.write_text('{"' + _TEST_SK + '": {"' + data_key + '": []}}')
@@ -944,10 +931,7 @@ class _EditorAppTest(textual.app.App[None]):
     "screen_cls,file_content,widget_id",
     [
         pytest.param(
-            MacroEditScreen,
-            '{"' + _TEST_SK + '": {"macros": []}}',
-            "#macro-table",
-            id="macro",
+            MacroEditScreen, '{"' + _TEST_SK + '": {"macros": []}}', "#macro-table", id="macro"
         ),
         pytest.param(
             AutoreplyEditScreen,
@@ -973,10 +957,7 @@ async def test_editor_app(tmp_path, screen_cls, file_content, widget_id) -> None
     "filename,content,main_fn",
     [
         pytest.param(
-            "macros.json",
-            '{"' + _TEST_SK + '": {"macros": []}}',
-            edit_macros_main,
-            id="macros",
+            "macros.json", '{"' + _TEST_SK + '": {"macros": []}}', edit_macros_main, id="macros"
         ),
         pytest.param(
             "autoreplies.json",
@@ -1008,16 +989,27 @@ async def test_app_mounts_session_list(tui_tmp_paths) -> None:
 
 _BTN_DISPATCH_PARAMS = [
     pytest.param(
-        _MacroEditApp, MacroEditScreen, "macros.json", "macros",
-        "macro", "_macros", ("#macro-key", "#macro-text"),
-        ("f5", "look<CR>"), [{"key": "f5", "text": "old<CR>"}],
+        _MacroEditApp,
+        MacroEditScreen,
+        "macros.json",
+        "macros",
+        "macro",
+        "_macros",
+        ("#macro-key", "#macro-text"),
+        ("f5", "look<CR>"),
+        [{"key": "f5", "text": "old<CR>"}],
         id="macro",
     ),
     pytest.param(
-        _AutoreplyEditApp, AutoreplyEditScreen, "autoreplies.json",
-        "autoreplies", "autoreply", "_rules",
+        _AutoreplyEditApp,
+        AutoreplyEditScreen,
+        "autoreplies.json",
+        "autoreplies",
+        "autoreply",
+        "_rules",
         ("#autoreply-pattern", "#autoreply-reply"),
-        ("hello", "world<CR>"), [{"pattern": "old", "reply": "old<CR>"}],
+        ("hello", "world<CR>"),
+        [{"pattern": "old", "reply": "old<CR>"}],
         id="autoreply",
     ),
 ]
@@ -1027,13 +1019,21 @@ _BTN_DISPATCH_PARAMS = [
 class TestEditScreenButtonDispatch:
 
     @pytest.mark.parametrize(
-        "app_cls,screen_cls,filename,data_key,prefix,data_attr,"
-        "field_ids,form_vals,edit_items",
+        "app_cls,screen_cls,filename,data_key,prefix,data_attr," "field_ids,form_vals,edit_items",
         _BTN_DISPATCH_PARAMS,
     )
     async def test_button_ok_dispatches(
-        self, tmp_path, app_cls, screen_cls, filename, data_key,
-        prefix, data_attr, field_ids, form_vals, edit_items,
+        self,
+        tmp_path,
+        app_cls,
+        screen_cls,
+        filename,
+        data_key,
+        prefix,
+        data_attr,
+        field_ids,
+        form_vals,
+        edit_items,
     ) -> None:
         from textual.widgets import Button
 
@@ -1052,13 +1052,21 @@ class TestEditScreenButtonDispatch:
             assert table.row_count == 1
 
     @pytest.mark.parametrize(
-        "app_cls,screen_cls,filename,data_key,prefix,data_attr,"
-        "field_ids,form_vals,edit_items",
+        "app_cls,screen_cls,filename,data_key,prefix,data_attr," "field_ids,form_vals,edit_items",
         _BTN_DISPATCH_PARAMS,
     )
     async def test_button_cancel_form_dispatches(
-        self, tmp_path, app_cls, screen_cls, filename, data_key,
-        prefix, data_attr, field_ids, form_vals, edit_items,
+        self,
+        tmp_path,
+        app_cls,
+        screen_cls,
+        filename,
+        data_key,
+        prefix,
+        data_attr,
+        field_ids,
+        form_vals,
+        edit_items,
     ) -> None:
         from textual.widgets import Button
 
@@ -1076,13 +1084,21 @@ class TestEditScreenButtonDispatch:
             assert screen.query_one(f"#{prefix}-form").display is False
 
     @pytest.mark.parametrize(
-        "app_cls,screen_cls,filename,data_key,prefix,data_attr,"
-        "field_ids,form_vals,edit_items",
+        "app_cls,screen_cls,filename,data_key,prefix,data_attr," "field_ids,form_vals,edit_items",
         _BTN_DISPATCH_PARAMS,
     )
     async def test_button_close_dispatches(
-        self, tmp_path, app_cls, screen_cls, filename, data_key,
-        prefix, data_attr, field_ids, form_vals, edit_items,
+        self,
+        tmp_path,
+        app_cls,
+        screen_cls,
+        filename,
+        data_key,
+        prefix,
+        data_attr,
+        field_ids,
+        form_vals,
+        edit_items,
     ) -> None:
         from textual.widgets import Button
 
@@ -1093,9 +1109,7 @@ class TestEditScreenButtonDispatch:
         class _App(textual.app.App[None]):
             def on_mount(self_app) -> None:
                 scr = screen_cls(path=str(fp))
-                self_app.push_screen(
-                    scr, callback=lambda r: dismissed.append(r)
-                )
+                self_app.push_screen(scr, callback=lambda r: dismissed.append(r))
 
         app = _App()
         async with app.run_test(size=(80, 24)) as pilot:
@@ -1106,13 +1120,21 @@ class TestEditScreenButtonDispatch:
         assert None in dismissed
 
     @pytest.mark.parametrize(
-        "app_cls,screen_cls,filename,data_key,prefix,data_attr,"
-        "field_ids,form_vals,edit_items",
+        "app_cls,screen_cls,filename,data_key,prefix,data_attr," "field_ids,form_vals,edit_items",
         _BTN_DISPATCH_PARAMS,
     )
     async def test_edit_submit_form(
-        self, tmp_path, app_cls, screen_cls, filename, data_key,
-        prefix, data_attr, field_ids, form_vals, edit_items,
+        self,
+        tmp_path,
+        app_cls,
+        screen_cls,
+        filename,
+        data_key,
+        prefix,
+        data_attr,
+        field_ids,
+        form_vals,
+        edit_items,
     ) -> None:
         import json
 
@@ -1131,13 +1153,21 @@ class TestEditScreenButtonDispatch:
             assert getattr(screen, data_attr)[0] == ("new", "new<CR>")
 
     @pytest.mark.parametrize(
-        "app_cls,screen_cls,filename,data_key,prefix,data_attr,"
-        "field_ids,form_vals,edit_items",
+        "app_cls,screen_cls,filename,data_key,prefix,data_attr," "field_ids,form_vals,edit_items",
         _BTN_DISPATCH_PARAMS,
     )
     async def test_selected_idx_empty_table(
-        self, tmp_path, app_cls, screen_cls, filename, data_key,
-        prefix, data_attr, field_ids, form_vals, edit_items,
+        self,
+        tmp_path,
+        app_cls,
+        screen_cls,
+        filename,
+        data_key,
+        prefix,
+        data_attr,
+        field_ids,
+        form_vals,
+        edit_items,
     ) -> None:
         fp = tmp_path / filename
         fp.write_text('{"' + _TEST_SK + '": {"' + data_key + '": []}}')
@@ -1147,13 +1177,21 @@ class TestEditScreenButtonDispatch:
             assert app.screen._selected_idx() is None
 
     @pytest.mark.parametrize(
-        "app_cls,screen_cls,filename,data_key,prefix,data_attr,"
-        "field_ids,form_vals,edit_items",
+        "app_cls,screen_cls,filename,data_key,prefix,data_attr," "field_ids,form_vals,edit_items",
         _BTN_DISPATCH_PARAMS,
     )
     async def test_on_input_submitted_form_visible(
-        self, tmp_path, app_cls, screen_cls, filename, data_key,
-        prefix, data_attr, field_ids, form_vals, edit_items,
+        self,
+        tmp_path,
+        app_cls,
+        screen_cls,
+        filename,
+        data_key,
+        prefix,
+        data_attr,
+        field_ids,
+        form_vals,
+        edit_items,
     ) -> None:
         fp = tmp_path / filename
         fp.write_text('{"' + _TEST_SK + '": {"' + data_key + '": []}}')
@@ -1171,13 +1209,21 @@ class TestEditScreenButtonDispatch:
             assert table.row_count == 1
 
     @pytest.mark.parametrize(
-        "app_cls,screen_cls,filename,data_key,prefix,data_attr,"
-        "field_ids,form_vals,edit_items",
+        "app_cls,screen_cls,filename,data_key,prefix,data_attr," "field_ids,form_vals,edit_items",
         _BTN_DISPATCH_PARAMS,
     )
     async def test_action_cancel_or_close_no_form(
-        self, tmp_path, app_cls, screen_cls, filename, data_key,
-        prefix, data_attr, field_ids, form_vals, edit_items,
+        self,
+        tmp_path,
+        app_cls,
+        screen_cls,
+        filename,
+        data_key,
+        prefix,
+        data_attr,
+        field_ids,
+        form_vals,
+        edit_items,
     ) -> None:
         fp = tmp_path / filename
         fp.write_text('{"' + _TEST_SK + '": {"' + data_key + '": []}}')
@@ -1186,9 +1232,7 @@ class TestEditScreenButtonDispatch:
         class _App(textual.app.App[None]):
             def on_mount(self_app) -> None:
                 scr = screen_cls(path=str(fp))
-                self_app.push_screen(
-                    scr, callback=lambda r: dismissed.append(r)
-                )
+                self_app.push_screen(scr, callback=lambda r: dismissed.append(r))
 
         app = _App()
         async with app.run_test(size=(80, 24)) as pilot:
@@ -1198,13 +1242,21 @@ class TestEditScreenButtonDispatch:
         assert None in dismissed
 
     @pytest.mark.parametrize(
-        "app_cls,screen_cls,filename,data_key,prefix,data_attr,"
-        "field_ids,form_vals,edit_items",
+        "app_cls,screen_cls,filename,data_key,prefix,data_attr," "field_ids,form_vals,edit_items",
         _BTN_DISPATCH_PARAMS,
     )
     async def test_load_from_file_invalid_json(
-        self, tmp_path, app_cls, screen_cls, filename, data_key,
-        prefix, data_attr, field_ids, form_vals, edit_items,
+        self,
+        tmp_path,
+        app_cls,
+        screen_cls,
+        filename,
+        data_key,
+        prefix,
+        data_attr,
+        field_ids,
+        form_vals,
+        edit_items,
     ) -> None:
         fp = tmp_path / filename
         fp.write_text("{invalid json")
@@ -1275,9 +1327,7 @@ async def test_ice_colors_switch_updates_palette() -> None:
 
 
 @pytest.mark.asyncio
-async def test_action_connect_keyboard_interrupt(
-    tui_tmp_paths, monkeypatch
-) -> None:
+async def test_action_connect_keyboard_interrupt(tui_tmp_paths, monkeypatch) -> None:
     _, terminated = await _run_connect(
         tui_tmp_paths, monkeypatch, wait_side_effect=KeyboardInterrupt
     )
@@ -1338,19 +1388,19 @@ async def test_arrow_nav_session_list_left_from_table(tui_tmp_paths) -> None:
     "app_cls,filename,data_key,btn_col_id",
     [
         pytest.param(
-            _MacroEditApp, "macros.json", "macros",
-            "#macro-button-col Button", id="macro",
+            _MacroEditApp, "macros.json", "macros", "#macro-button-col Button", id="macro"
         ),
         pytest.param(
-            _AutoreplyEditApp, "autoreplies.json", "autoreplies",
-            "#autoreply-button-col Button", id="autoreply",
+            _AutoreplyEditApp,
+            "autoreplies.json",
+            "autoreplies",
+            "#autoreply-button-col Button",
+            id="autoreply",
         ),
     ],
 )
 @pytest.mark.asyncio
-async def test_arrow_nav_editor_buttons(
-    tmp_path, app_cls, filename, data_key, btn_col_id,
-) -> None:
+async def test_arrow_nav_editor_buttons(tmp_path, app_cls, filename, data_key, btn_col_id) -> None:
     fp = tmp_path / filename
     fp.write_text('{"' + _TEST_SK + '": {"' + data_key + '": []}}')
     app = app_cls(str(fp))

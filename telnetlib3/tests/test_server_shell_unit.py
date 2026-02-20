@@ -319,16 +319,15 @@ async def test_get_cursor_position_success():
 
 @pytest.mark.asyncio
 async def test_get_cursor_position_timeout():
-    assert await gs._get_cursor_position(
-        SlowReader(), MockWriter(), timeout=0.01
-    ) == (None, None)
+    assert await gs._get_cursor_position(SlowReader(), MockWriter(), timeout=0.01) == (None, None)
 
 
 @pytest.mark.asyncio
 async def test_get_cursor_position_eof():
-    assert await gs._get_cursor_position(
-        MockReader([b""]), MockWriter(), timeout=1.0
-    ) == (None, None)
+    assert await gs._get_cursor_position(MockReader([b""]), MockWriter(), timeout=1.0) == (
+        None,
+        None,
+    )
 
 
 @pytest.mark.parametrize(

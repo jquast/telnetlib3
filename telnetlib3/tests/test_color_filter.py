@@ -50,10 +50,37 @@ def test_color_config_defaults() -> None:
 @pytest.mark.parametrize(
     "code,expected",
     [
-        (30, 0), (31, 1), (32, 2), (33, 3), (34, 4), (35, 5), (36, 6), (37, 7),
-        (40, 0), (41, 1), (42, 2), (43, 3), (44, 4), (45, 5), (46, 6), (47, 7),
-        (90, 8), (91, 9), (92, 10), (93, 11), (94, 12), (95, 13), (96, 14), (97, 15),
-        (100, 8), (101, 9), (102, 10), (103, 11), (104, 12), (105, 13), (106, 14),
+        (30, 0),
+        (31, 1),
+        (32, 2),
+        (33, 3),
+        (34, 4),
+        (35, 5),
+        (36, 6),
+        (37, 7),
+        (40, 0),
+        (41, 1),
+        (42, 2),
+        (43, 3),
+        (44, 4),
+        (45, 5),
+        (46, 6),
+        (47, 7),
+        (90, 8),
+        (91, 9),
+        (92, 10),
+        (93, 11),
+        (94, 12),
+        (95, 13),
+        (96, 14),
+        (97, 15),
+        (100, 8),
+        (101, 9),
+        (102, 10),
+        (103, 11),
+        (104, 12),
+        (105, 13),
+        (106, 14),
         (107, 15),
     ],
 )
@@ -86,8 +113,7 @@ def test_is_foreground_code_false(code: int) -> None:
     ],
 )
 def test_adjust_color_values(
-    r: int, g: int, b: int, brightness: float, contrast: float,
-    expected: tuple[int, int, int],
+    r: int, g: int, b: int, brightness: float, contrast: float, expected: tuple[int, int, int]
 ) -> None:
     assert _adjust_color(r, g, b, brightness, contrast) == expected
 
@@ -243,11 +269,7 @@ def test_non_sgr_pass_through(seq: str, needle: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "sgr_code,expected_prefix",
-    [
-        ("39", "38;2;170;170;170"),
-        ("49", "48;2;0;0;0"),
-    ],
+    "sgr_code,expected_prefix", [("39", "38;2;170;170;170"), ("49", "48;2;0;0;0")]
 )
 def test_default_color_translated(sgr_code: str, expected_prefix: str) -> None:
     f = _make_filter()
@@ -325,8 +347,7 @@ def test_bold_does_not_affect_background() -> None:
 
 
 @pytest.mark.parametrize(
-    "code,normal_idx",
-    [(30, 0), (31, 1), (32, 2), (33, 3), (34, 4), (35, 5), (36, 6), (37, 7)],
+    "code,normal_idx", [(30, 0), (31, 1), (32, 2), (33, 3), (34, 4), (35, 5), (36, 6), (37, 7)]
 )
 def test_all_bold_fg_use_bright_palette(code: int, normal_idx: int) -> None:
     f = _make_filter()
@@ -343,9 +364,7 @@ def test_reset_bold_color_in_same_seq() -> None:
 
 
 def _make_ice_filter(ice_colors: bool = True) -> ColorFilter:
-    return ColorFilter(
-        ColorConfig(brightness=1.0, contrast=1.0, ice_colors=ice_colors)
-    )
+    return ColorFilter(ColorConfig(brightness=1.0, contrast=1.0, ice_colors=ice_colors))
 
 
 def test_ice_blink_bg_uses_bright_bg() -> None:
@@ -403,8 +422,7 @@ def test_ice_blink_does_not_affect_bright_bg() -> None:
 
 
 @pytest.mark.parametrize(
-    "code,normal_idx",
-    [(40, 0), (41, 1), (42, 2), (43, 3), (44, 4), (45, 5), (46, 6), (47, 7)],
+    "code,normal_idx", [(40, 0), (41, 1), (42, 2), (43, 3), (44, 4), (45, 5), (46, 6), (47, 7)]
 )
 def test_all_blink_bg_use_bright_palette(code: int, normal_idx: int) -> None:
     f = _make_ice_filter()
@@ -464,18 +482,14 @@ def test_chunked_flush_empty_when_no_buffer() -> None:
 
 
 def test_color_filter_initial_background_first_output() -> None:
-    f = ColorFilter(
-        ColorConfig(brightness=1.0, contrast=1.0, background_color=(0, 0, 0))
-    )
+    f = ColorFilter(ColorConfig(brightness=1.0, contrast=1.0, background_color=(0, 0, 0)))
     result = f.filter("hello")
     assert result.startswith("\x1b[48;2;0;0;0m")
     assert result.endswith("hello")
 
 
 def test_color_filter_initial_background_second_output() -> None:
-    f = ColorFilter(
-        ColorConfig(brightness=1.0, contrast=1.0, background_color=(0, 0, 0))
-    )
+    f = ColorFilter(ColorConfig(brightness=1.0, contrast=1.0, background_color=(0, 0, 0)))
     f.filter("hello")
     result2 = f.filter("world")
     assert not result2.startswith("\x1b[48;2;")
@@ -509,24 +523,18 @@ def test_color_filter_reduced_contrast() -> None:
 
 
 def test_color_filter_custom_background_in_reset() -> None:
-    f = ColorFilter(
-        ColorConfig(brightness=1.0, contrast=1.0, background_color=(32, 32, 48))
-    )
+    f = ColorFilter(ColorConfig(brightness=1.0, contrast=1.0, background_color=(32, 32, 48)))
     assert "\x1b[48;2;32;32;48m" in f.filter("\x1b[0m")
 
 
 def test_color_filter_custom_background_on_initial() -> None:
-    f = ColorFilter(
-        ColorConfig(brightness=1.0, contrast=1.0, background_color=(32, 32, 48))
-    )
+    f = ColorFilter(ColorConfig(brightness=1.0, contrast=1.0, background_color=(32, 32, 48)))
     assert f.filter("hello").startswith("\x1b[48;2;32;32;48m")
 
 
 @pytest.mark.parametrize("name", [n for n in PALETTES if n != "c64"])
 def test_color_filter_palette_red_foreground(name: str) -> None:
-    f = ColorFilter(
-        ColorConfig(palette_name=name, brightness=1.0, contrast=1.0)
-    )
+    f = ColorFilter(ColorConfig(palette_name=name, brightness=1.0, contrast=1.0))
     result = f.filter("\x1b[31m")
     rgb = PALETTES[name][1]
     assert f"38;2;{rgb[0]};{rgb[1]};{rgb[2]}" in result
@@ -587,9 +595,7 @@ class TestPetsciiColorFilter:
         assert f"\x1b[38;2;{red_rgb[0]};{red_rgb[1]};{red_rgb[2]}m" in result
         assert "\x1b[7m" in result
         assert "\x1b[27m" in result
-        assert (
-            f"\x1b[38;2;{white_rgb[0]};{white_rgb[1]};{white_rgb[2]}m" in result
-        )
+        assert f"\x1b[38;2;{white_rgb[0]};{white_rgb[1]};{white_rgb[2]}m" in result
         assert "hello" in result
         assert "world" in result
 
@@ -613,9 +619,7 @@ class TestPetsciiColorFilter:
             ("\x14", "\x08\x1b[P"),
         ],
     )
-    def test_cursor_controls_translated(
-        self, ctrl_char: str, expected: str
-    ) -> None:
+    def test_cursor_controls_translated(self, ctrl_char: str, expected: str) -> None:
         f = self._make_filter()
         assert f.filter(f"A{ctrl_char}B") == f"A{expected}B"
 
@@ -652,9 +656,7 @@ def test_atascii_control_glyph_translated(glyph: str, expected: str) -> None:
 
 def test_atascii_backspace_erases() -> None:
     f = AtasciiControlFilter()
-    assert f.filter("DINGO\u25c0\u25c0\u25c0\u25c0\u25c0") == (
-        "DINGO" + "\x08\x1b[P" * 5
-    )
+    assert f.filter("DINGO\u25c0\u25c0\u25c0\u25c0\u25c0") == ("DINGO" + "\x08\x1b[P" * 5)
 
 
 def test_atascii_plain_text_unchanged() -> None:

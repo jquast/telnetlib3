@@ -84,10 +84,7 @@ def test_parse_server_args_never_send_ga(argv, expected):
 
 @pytest.mark.parametrize(
     "argv,expected_line_mode,expected_pty_raw",
-    [
-        (["server"], False, server.PTY_SUPPORT),
-        (["server", "--line-mode"], True, False),
-    ],
+    [(["server"], False, server.PTY_SUPPORT), (["server", "--line-mode"], True, False)],
 )
 def test_parse_server_args_line_mode(argv, expected_line_mode, expected_pty_raw):
     """--line-mode flag sets both line_mode and pty_raw."""

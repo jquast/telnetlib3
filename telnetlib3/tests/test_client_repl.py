@@ -490,9 +490,7 @@ def test_launch_tui_editor_calls_run_in_terminal(monkeypatch) -> None:
         ),
     ],
 )
-def test_reload_after_edit(
-    tmp_path, reload_func, file_key, data_key, attr, file_attr
-) -> None:
+def test_reload_after_edit(tmp_path, reload_func, file_key, data_key, attr, file_attr) -> None:
     import json
     import logging
 
@@ -518,10 +516,7 @@ def test_reload_after_edit(
 @pytest.mark.skipif(not HAS_PROMPT_TOOLKIT, reason="prompt_toolkit not installed")
 @pytest.mark.parametrize(
     "reload_func,attr",
-    [
-        ("_reload_macros", "_macro_defs"),
-        ("_reload_autoreplies", "_autoreply_rules"),
-    ],
+    [("_reload_macros", "_macro_defs"), ("_reload_autoreplies", "_autoreply_rules")],
 )
 def test_reload_missing_file(tmp_path, reload_func, attr) -> None:
     import logging
@@ -637,8 +632,7 @@ async def test_basic_event_loop_kludge_mode_switch() -> None:
     ],
 )
 async def test_basic_event_loop_user_input(
-    will_echo, input_data, server_data,
-    check_written, check_output, check_absent,
+    will_echo, input_data, server_data, check_written, check_output, check_absent
 ) -> None:
     from telnetlib3.client_repl import _repl_event_loop_basic
 
@@ -668,9 +662,7 @@ async def test_basic_event_loop_user_input(
         stdin_reader.feed_eof()
         reader.feed_eof()
 
-    term = types.SimpleNamespace(
-        on_resize=None, connect_stdin=lambda: _async_return(stdin_reader)
-    )
+    term = types.SimpleNamespace(on_resize=None, connect_stdin=lambda: _async_return(stdin_reader))
 
     stdout, transport = _mock_stdout()
     eof_task = asyncio.ensure_future(_delayed_eof())
