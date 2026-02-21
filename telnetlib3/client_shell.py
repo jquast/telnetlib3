@@ -629,7 +629,13 @@ else:
                             AutoreplyEngine,
                         )
 
-                        _ar_engine = AutoreplyEngine(_ar_rules, telnet_writer, telnet_writer.log)
+                        _ar_wait = getattr(
+                            telnet_writer, "_autoreply_wait_fn", None
+                        )
+                        _ar_engine = AutoreplyEngine(
+                            _ar_rules, telnet_writer, telnet_writer.log,
+                            wait_fn=_ar_wait,
+                        )
                         # pylint: disable-next=protected-access
                         telnet_writer._autoreply_engine = _ar_engine  # type: ignore[union-attr]
                 if _ar_engine is not None:
@@ -686,17 +692,53 @@ else:
                 if telnet_writer.will_echo or raw_mode is True:
                     linesep = "\r\n"
             stdout = await term.make_stdout()
+            _banner_sep = "\r\n" if term._istty else linesep  # pylint: disable=protected-access
             _n_macros = len(getattr(telnet_writer, "_macro_defs", []) or [])
             _n_autoreplies = len(getattr(telnet_writer, "_autoreply_rules", []) or [])
             if _n_macros:
                 _mf = getattr(telnet_writer, "_macros_file", "")
-                stdout.write(f"{_n_macros} macros loaded from {_mf}.{linesep}".encode())
+                stdout.write(f"{_n_macros} macros loaded from {_mf}.{_banner_sep}".encode())
             if _n_autoreplies:
                 _af = getattr(telnet_writer, "_autoreplies_file", "")
-                stdout.write(f"{_n_autoreplies} autoreplies loaded from {_af}.{linesep}".encode())
+                stdout.write(
+                    f"{_n_autoreplies} autoreplies loaded from {_af}.{_banner_sep}".encode()
+                )
             escape_name = accessories.name_unicode(keyboard_escape)
-            stdout.write(f"Escape character is '{escape_name}'.{linesep}".encode())
+            stdout.write(
+                f"Escape character is '{escape_name}'"
+                f" - Press F1 for help!{_banner_sep}".encode()
+            )
             term.setup_winch()
+
+            # EOR/GA-based command pacing for raw-mode autoreplies.
+            _prompt_ready_raw = asyncio.Event()
+            _prompt_ready_raw.set()
+            _ga_detected_raw = False
+
+            def _on_prompt_signal_raw(_cmd: bytes) -> None:
+                nonlocal _ga_detected_raw
+                _ga_detected_raw = True
+                _prompt_ready_raw.set()
+                _ar = getattr(telnet_writer, "_autoreply_engine", None)
+                if _ar is not None:
+                    _ar.on_prompt()
+
+            from .telopt import GA, CMD_EOR  # pylint: disable=import-outside-toplevel
+
+            telnet_writer.set_iac_callback(GA, _on_prompt_signal_raw)
+            telnet_writer.set_iac_callback(CMD_EOR, _on_prompt_signal_raw)
+
+            async def _wait_for_prompt_raw() -> None:
+                if not _ga_detected_raw:
+                    return
+                try:
+                    await asyncio.wait_for(_prompt_ready_raw.wait(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    pass
+                _prompt_ready_raw.clear()
+
+            # Attach wait_fn to writer so _raw_event_loop can pick it up.
+            telnet_writer._autoreply_wait_fn = _wait_for_prompt_raw  # type: ignore[union-attr]
 
             repl_enabled = getattr(telnet_writer, "_repl_enabled", False)
             raw_mode_val = _get_raw_mode(telnet_writer)

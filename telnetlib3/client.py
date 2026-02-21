@@ -189,8 +189,11 @@ class TelnetClient(client_base.BaseClient):
         )
 
     def _on_gmcp(self, package: str, data: Any) -> None:
-        """Store incoming GMCP data and log it."""
-        self._gmcp_data[package] = data
+        """Store incoming GMCP data, merging dict updates incrementally."""
+        if isinstance(data, dict) and isinstance(self._gmcp_data.get(package), dict):
+            self._gmcp_data[package].update(data)
+        else:
+            self._gmcp_data[package] = data
         if self._gmcp_log:
             self.log.info("GMCP: %s %r", package, data)
         else:

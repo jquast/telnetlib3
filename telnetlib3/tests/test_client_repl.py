@@ -39,6 +39,7 @@ def _mock_writer(will_echo: bool = False) -> object:
         will_echo=will_echo,
         log=types.SimpleNamespace(debug=lambda *a, **kw: None),
         get_extra_info=lambda name, default=None: default,
+        set_iac_callback=lambda cmd, func: None,
     )
 
 
@@ -205,9 +206,7 @@ def test_pt_repl_toolbar_contains_connection_info() -> None:
 
     writer = _mock_writer()
     repl = PromptToolkitRepl(writer, writer.log, connection_info="mud.example.com:4000 SSL")
-    assert "mud.example.com:4000 SSL" in repl._toolbar_static
-    assert "F1 Help" in repl._toolbar_static
-    assert "F8 Macros" not in repl._toolbar_static
+    assert repl._rprompt_text == "F1 Help"
 
 
 @pytest.mark.skipif(not HAS_PROMPT_TOOLKIT, reason="prompt_toolkit not installed")
@@ -216,8 +215,7 @@ def test_pt_repl_toolbar_without_connection_info() -> None:
 
     writer = _mock_writer()
     repl = PromptToolkitRepl(writer, writer.log)
-    assert "F1 Help" in repl._toolbar_static
-    assert "F8 Macros" not in repl._toolbar_static
+    assert repl._rprompt_text == "F1 Help"
 
 
 @pytest.mark.skipif(not HAS_PROMPT_TOOLKIT, reason="prompt_toolkit not installed")

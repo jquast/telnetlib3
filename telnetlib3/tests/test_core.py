@@ -419,7 +419,7 @@ async def test_telnet_client_cmdline(bind_host, unused_tcp_port):
         )
 
         line = await asyncio.wait_for(proc.stdout.readline(), 1.5)
-        assert line.strip() == b"Escape character is '^]'."
+        assert line.strip() == b"Escape character is '^]' - Press F1 for help!"
 
         line = await asyncio.wait_for(proc.stdout.readline(), 1.5)
         assert line.strip() == b"hello, space cadet."
@@ -457,7 +457,7 @@ async def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port):
         proc = pexpect.spawn(prog, args)
         await proc.expect(pexpect.EOF, async_=True, timeout=5)
         assert proc.before == (
-            b"Escape character is '^]'.\r\n"
+            b"Escape character is '^]' - Press F1 for help!\r\n"
             b"hello, space cadet.\r\n"
             b"\x1b[m\r\n"
             b"Connection closed by foreign host.\r\n"
@@ -505,7 +505,7 @@ async def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port):
         with open(logfile, encoding="utf-8") as f:
             logfile_output = f.read().splitlines()
         assert stdout == (
-            b"Escape character is '^]'.\n"
+            b"Escape character is '^]' - Press F1 for help!\n"
             b"Press Return to continue:\ngoodbye.\n"
             b"\x1b[m\nConnection closed by foreign host.\n"
         )

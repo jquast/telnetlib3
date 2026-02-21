@@ -247,14 +247,14 @@ def test_macro_screen_loads_file(tmp_path) -> None:
     screen = MacroEditScreen(path=str(fp), session_key=sk)
     screen._load_from_file()
     assert len(screen._macros) == 1
-    assert screen._macros[0] == ("f5", "look<CR>")
+    assert screen._macros[0] == ("f5", "look<CR>", True)
 
 
 def test_macro_screen_save(tmp_path) -> None:
     sk = "test.host:23"
     fp = tmp_path / "macros.json"
     screen = MacroEditScreen(path=str(fp), session_key=sk)
-    screen._macros = [("f5", "look<CR>"), ("escape n", "north<CR>")]
+    screen._macros = [("f5", "look<CR>", True), ("escape n", "north<CR>", True)]
     screen._save_to_file()
 
     from telnetlib3.macros import load_macros
@@ -284,14 +284,14 @@ def test_autoreply_screen_loads_file(tmp_path) -> None:
     screen = AutoreplyEditScreen(path=str(fp), session_key=sk)
     screen._load_from_file()
     assert len(screen._rules) == 1
-    assert screen._rules[0] == (r"\d+ gold", "get gold<CR>")
+    assert screen._rules[0] == (r"\d+ gold", "get gold<CR>", False, "", False, True, 30.0, 1.0)
 
 
 def test_autoreply_screen_save(tmp_path) -> None:
     sk = "test.host:23"
     fp = tmp_path / "autoreplies.json"
     screen = AutoreplyEditScreen(path=str(fp), session_key=sk)
-    screen._rules = [(r"\d+ gold", "get gold<CR>")]
+    screen._rules = [(r"\d+ gold", "get gold<CR>", False, "", False, True, 30.0, 1.0)]
     screen._save_to_file()
 
     from telnetlib3.autoreply import load_autoreplies
@@ -307,7 +307,7 @@ def test_autoreply_screen_rejects_bad_regex(tmp_path) -> None:
 
     fp = tmp_path / "autoreplies.json"
     screen = AutoreplyEditScreen(path=str(fp))
-    screen._rules = [("[invalid", "x")]
+    screen._rules = [("[invalid", "x", False, "", False, True, 30.0, 1.0)]
     with pytest.raises(re.error):
         screen._save_to_file()
 
@@ -708,7 +708,7 @@ _MACRO_PARAMS = (
     "macros",
     "macro",
     [{"key": "f5", "text": "look<CR>"}],
-    ("f5", "look<CR>"),
+    ("f5", "look<CR>", True),
     ("#macro-key", "#macro-text"),
 )
 _AUTOREPLY_PARAMS = (
@@ -717,7 +717,7 @@ _AUTOREPLY_PARAMS = (
     "autoreplies",
     "autoreply",
     [{"pattern": r"\d+ gold", "reply": "get gold<CR>"}],
-    (r"\d+ gold", "get gold<CR>"),
+    (r"\d+ gold", "get gold<CR>", False, "", False, True, 30.0),
     ("#autoreply-pattern", "#autoreply-reply"),
 )
 
@@ -867,7 +867,7 @@ class TestEditorScreenTextual:
             await pilot.pause()
             screen.query_one("#autoreply-pattern", Input).value = "hello"
             screen.query_one("#autoreply-reply", Input).value = "world<CR>"
-            screen._rules.append(("hello", "world<CR>"))
+            screen._rules.append(("hello", "world<CR>", False, "", False, True, 30.0))
             screen._refresh_table()
             screen._hide_form()
             await pilot.pause()
@@ -1150,7 +1150,9 @@ class TestEditScreenButtonDispatch:
             screen.query_one(f"#{prefix}-form").display = True
             screen._submit_form()
             await pilot.pause()
-            assert getattr(screen, data_attr)[0] == ("new", "new<CR>")
+            result = getattr(screen, data_attr)[0]
+            assert result[0] == "new"
+            assert result[1] == "new<CR>"
 
     @pytest.mark.parametrize(
         "app_cls,screen_cls,filename,data_key,prefix,data_attr," "field_ids,form_vals,edit_items",
@@ -1288,6 +1290,28 @@ class TestEditScreenButtonDispatch:
             table = screen.query_one("#autoreply-table", DataTable)
             assert table.row_count == 0
             assert screen.query_one("#autoreply-form").display is True
+
+
+@pytest.mark.asyncio
+async def test_autoreply_table_has_number_column(tmp_path) -> None:
+    fp = tmp_path / "autoreplies.json"
+    fp.write_text(
+        '{"' + _TEST_SK + '": {"autoreplies": ['
+        '{"pattern": "a", "reply": "b<CR>"},'
+        '{"pattern": "c", "reply": "d<CR>"}'
+        "]}}"
+    )
+    app = _AutoreplyEditApp(str(fp))
+    async with app.run_test(size=(80, 24)) as pilot:
+        await pilot.pause()
+        table = app.screen.query_one("#autoreply-table", DataTable)
+        assert table.row_count == 2
+        columns = [col.label.plain for col in table.columns.values()]
+        assert columns[0] == "#"
+        row0 = table.get_row_at(0)
+        row1 = table.get_row_at(1)
+        assert row0[0] == "1"
+        assert row1[0] == "2"
 
 
 @pytest.mark.asyncio

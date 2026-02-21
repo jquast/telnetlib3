@@ -9,6 +9,7 @@ Provides :class:`Macro` for representing key-to-text bindings and
 from __future__ import annotations
 
 # std imports
+import re
 import json
 import logging
 from typing import Any, Union
@@ -20,6 +21,7 @@ from .stream_writer import TelnetWriter, TelnetWriterUnicode
 __all__ = ("Macro", "load_macros", "save_macros", "bind_macros")
 
 _CR_TOKEN = "<CR>"
+_CR_RE = re.compile(r"<CR>", re.IGNORECASE)
 
 
 @dataclass
@@ -33,6 +35,7 @@ class Macro:
 
     keys: tuple[str, ...]
     text: str
+    enabled: bool = True
 
 
 def _parse_entries(entries: list[dict[str, str]]) -> list[Macro]:
@@ -43,8 +46,9 @@ def _parse_entries(entries: list[dict[str, str]]) -> list[Macro]:
         text = entry.get("text", "")
         if not key_str:
             continue
+        enabled = bool(entry.get("enabled", True))
         keys = tuple(key_str.split())
-        macros.append(Macro(keys=keys, text=text))
+        macros.append(Macro(keys=keys, text=text, enabled=enabled))
     return macros
 
 
@@ -86,7 +90,16 @@ def save_macros(path: str, macros: list[Macro], session_key: str) -> None:
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
 
-    data[session_key] = {"macros": [{"key": " ".join(m.keys), "text": m.text} for m in macros]}
+    data[session_key] = {
+        "macros": [
+            {
+                "key": " ".join(m.keys),
+                "text": m.text,
+                **({"enabled": False} if not m.enabled else {}),
+            }
+            for m in macros
+        ]
+    }
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, ensure_ascii=False)
         fh.write("\n")
@@ -112,6 +125,8 @@ def bind_macros(
     :param log: Logger instance.
     """
     for macro in macros:
+        if not macro.enabled:
+            continue
         _bind_one(kb, macro, writer, log)
 
 
@@ -133,7 +148,7 @@ def _bind_one(
 
         @kb.add(*keys)  # type: ignore[untyped-decorator]
         def _handler(event: Any, _text: str = text) -> None:
-            parts = _text.split(_CR_TOKEN)
+            parts = _CR_RE.split(_text)
             for i, part in enumerate(parts):
                 if i < len(parts) - 1:
                     log.info("macro: sending %r", part)

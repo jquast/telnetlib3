@@ -102,20 +102,53 @@ def _handle_arrow_navigation(
     event: events.Key,
     button_col_selector: str,
     table_selector: str,
+    form_selector: str = "",
 ) -> None:
     """
-    Arrow key navigation between a button column and a data table.
+    Arrow key navigation between a button column, data table, and form.
 
     :param screen: The screen handling the key event.
     :param event: The key event.
     :param button_col_selector: CSS selector for the button column container.
     :param table_selector: CSS selector for the DataTable.
+    :param form_selector: CSS selector for the inline form (optional).
     """
     focused = screen.focused
-    if isinstance(focused, Input):
-        return
     buttons = list(screen.query(f"{button_col_selector} Button"))
     table = screen.query_one(table_selector, DataTable)
+
+    # When the form is visible, handle navigation within form fields.
+    if form_selector:
+        try:
+            form = screen.query_one(form_selector)
+        except Exception:  # pylint: disable=broad-except
+            form = None
+        if form is not None and form.display:
+            form_fields: list[Input | Switch | Button] = [
+                w for w in form.query("Input, Switch, Button")
+                if isinstance(w, (Input, Switch, Button))
+            ]
+            if focused in form_fields:
+                idx = form_fields.index(focused)
+                if event.key == "up" and idx > 0:
+                    form_fields[idx - 1].focus()
+                    event.prevent_default()
+                elif event.key == "down" and idx < len(form_fields) - 1:
+                    form_fields[idx + 1].focus()
+                    event.prevent_default()
+                elif event.key == "left" and isinstance(focused, (Switch, Button)):
+                    if buttons:
+                        screen.call_later(buttons[0].focus)
+                    event.prevent_default()
+                return
+            if isinstance(focused, Button) and focused in buttons:
+                if event.key == "right" and form_fields:
+                    screen.call_later(form_fields[0].focus)
+                    event.prevent_default()
+                    return
+
+    if isinstance(focused, Input):
+        return
 
     if isinstance(focused, Button) and focused in buttons:
         idx = buttons.index(focused)
@@ -126,11 +159,11 @@ def _handle_arrow_navigation(
             buttons[idx + 1].focus()
             event.prevent_default()
         elif event.key == "right":
-            table.focus()
+            screen.call_later(table.focus)
             event.prevent_default()
     elif focused is table and event.key == "left":
         if buttons:
-            buttons[0].focus()
+            screen.call_later(buttons[0].focus)
         event.prevent_default()
 
 
@@ -711,6 +744,14 @@ class SessionEditScreen(Screen[SessionConfig | None]):
     #port {
         max-width: 14;
     }
+    #timeout-label {
+        width: 11;
+        padding-top: 1;
+        padding-left: 4;
+    }
+    #connect-timeout {
+        max-width: 13;
+    }
     #mode-repl-row {
         height: auto;
     }
@@ -728,12 +769,15 @@ class SessionEditScreen(Screen[SessionConfig | None]):
     #keys-eol-row {
         height: 3;
     }
+    .dimmed {
+        color: $text-muted;
+    }
     #enc-label {
         width: 10;
         padding-top: 1;
     }
     #enc-errors-label {
-        width: 7;
+        width: 12;
         padding-top: 1;
         padding-left: 4;
     }
@@ -756,6 +800,9 @@ class SessionEditScreen(Screen[SessionConfig | None]):
     #bottom-bar {
         height: 3;
         margin-top: 1;
+    }
+    #save-btn {
+        dock: right;
     }
     #bottom-bar Button {
         margin-right: 1;
@@ -818,18 +865,14 @@ class SessionEditScreen(Screen[SessionConfig | None]):
                             )
                             yield Static(":", id="host-port-sep")
                             yield Input(value=str(cfg.port), placeholder="23", id="port")
-                    with Horizontal(classes="field-row"):
-                        yield Label("Connection Timeout", classes="field-label")
-                        yield Input(
-                            value=str(cfg.connect_timeout),
-                            id="connect-timeout",
-                            classes="field-input",
-                        )
                     with Horizontal(classes="switch-row"):
                         yield Label("SSL/TLS", classes="field-label")
                         yield Switch(value=cfg.ssl, id="ssl")
-                        yield Label("Skip Verify", classes="field-label")
-                        yield Switch(value=cfg.ssl_no_verify, id="ssl-no-verify")
+                        yield Label("Timeout", id="timeout-label")
+                        yield Input(
+                            value=str(cfg.connect_timeout),
+                            id="connect-timeout",
+                        )
 
                 with Vertical(id="tab-terminal", classes="tab-pane"):
                     with Horizontal(classes="field-row"):
@@ -855,7 +898,12 @@ class SessionEditScreen(Screen[SessionConfig | None]):
                                 )
                         with Vertical(id="repl-col"):
                             with Horizontal(classes="switch-row"):
-                                yield Label("Advanced REPL", classes="field-label")
+                                _repl_dim = "" if cfg.mode != "raw" else " dimmed"
+                                yield Label(
+                                    "Advanced REPL",
+                                    id="repl-label",
+                                    classes=f"field-label{_repl_dim}",
+                                )
                                 yield Switch(
                                     value=not cfg.no_repl, id="use-repl", disabled=cfg.mode == "raw"
                                 )
@@ -875,14 +923,23 @@ class SessionEditScreen(Screen[SessionConfig | None]):
                             value=cfg.encoding_errors,
                             id="encoding-errors",
                         )
+                    _dim = "" if _is_retro else " dimmed"
                     with Horizontal(id="keys-eol-row"):
                         with Horizontal(classes="switch-row"):
-                            yield Label("ANSI Keys", classes="field-label")
+                            yield Label(
+                                "ANSI Keys",
+                                id="ansi-keys-label",
+                                classes=f"field-label{_dim}",
+                            )
                             yield Switch(
                                 value=cfg.ansi_keys, id="ansi-keys", disabled=not _is_retro
                             )
                         with Horizontal(classes="switch-row"):
-                            yield Label("ASCII EOL", classes="field-label")
+                            yield Label(
+                                "ASCII EOL",
+                                id="ascii-eol-label",
+                                classes=f"field-label{_dim}",
+                            )
                             yield Switch(
                                 value=cfg.ascii_eol, id="ascii-eol", disabled=not _is_retro
                             )
@@ -896,11 +953,6 @@ class SessionEditScreen(Screen[SessionConfig | None]):
                             id="colormatch",
                         )
                         yield Static("", id="palette-preview")
-                    with Horizontal(classes="field-row"):
-                        yield Label("Background", classes="field-label")
-                        yield Input(
-                            value=cfg.background_color, id="background-color", classes="field-input"
-                        )
                     with Horizontal(classes="switch-row"):
                         yield Label("iCE Colors", classes="field-label")
                         yield Switch(value=cfg.ice_colors, id="ice-colors")
@@ -911,22 +963,7 @@ class SessionEditScreen(Screen[SessionConfig | None]):
                         yield Input(
                             value=cfg.send_environ, id="send-environ", classes="field-input"
                         )
-                    with Horizontal(classes="field-row"):
-                        yield Label("Always WILL", classes="field-label")
-                        yield Input(
-                            value=cfg.always_will,
-                            placeholder="comma-separated option names",
-                            id="always-will",
-                            classes="field-input",
-                        )
-                    with Horizontal(classes="field-row"):
-                        yield Label("Always DO", classes="field-label")
-                        yield Input(
-                            value=cfg.always_do,
-                            placeholder="comma-separated option names",
-                            id="always-do",
-                            classes="field-input",
-                        )
+
                     with Horizontal(classes="field-row"):
                         yield Label("Log Level, File", classes="field-label")
                         yield Select(
@@ -945,8 +982,8 @@ class SessionEditScreen(Screen[SessionConfig | None]):
                         )
 
             with Horizontal(id="bottom-bar"):
-                yield Button("Save", variant="success", id="save-btn")
                 yield Button("Cancel", variant="error", id="cancel-btn")
+                yield Button("Save", variant="success", id="save-btn")
 
     def on_mount(self) -> None:
         """Apply argparse-derived tooltips to form widgets."""
@@ -965,6 +1002,7 @@ class SessionEditScreen(Screen[SessionConfig | None]):
             is_raw = event.pressed.id == "mode-raw"
             repl_switch = self.query_one("#use-repl", Switch)
             repl_switch.disabled = is_raw
+            self.query_one("#repl-label", Label).set_class(is_raw, "dimmed")
 
     def on_select_changed(self, event: Select.Changed) -> None:
         """React to Select widget changes."""
@@ -974,6 +1012,9 @@ class SessionEditScreen(Screen[SessionConfig | None]):
             is_retro = str(event.value).lower() in ("atascii", "petscii")
             self.query_one("#ansi-keys", Switch).disabled = not is_retro
             self.query_one("#ascii-eol", Switch).disabled = not is_retro
+            for label_id in ("#ansi-keys-label", "#ascii-eol-label"):
+                label = self.query_one(label_id, Label)
+                label.set_class(not is_retro, "dimmed")
 
     def on_switch_changed(self, event: Switch.Changed) -> None:
         """Update palette preview when ice_colors changes."""
@@ -997,6 +1038,88 @@ class SessionEditScreen(Screen[SessionConfig | None]):
         bg_blocks = "".join(f"[on rgb({r},{g},{b})] [/]" for r, g, b in palette[:bg_count])
         preview.update(f"FG: {fg_blocks}\nBG: {bg_blocks}")
 
+    def _switch_to_tab(self, tab_id: str) -> None:
+        """Activate the given tab and update button styling."""
+        self.query_one("#tab-content", ContentSwitcher).current = tab_id
+        for btn in self.query("#tab-bar Button"):
+            btn.remove_class("active-tab")
+            if btn.id == f"tabbtn-{tab_id}":
+                btn.add_class("active-tab")
+
+    def _active_tab_focusables(self) -> list[Any]:
+        """Return focusable widgets in the currently visible tab pane."""
+        current = self.query_one("#tab-content", ContentSwitcher).current
+        if not current:
+            return []
+        pane = self.query_one(f"#{current}")
+        return [w for w in pane.query("Input, Select, Switch, RadioButton") if not w.disabled]
+
+    def on_key(self, event: events.Key) -> None:
+        """Arrow key navigation for tabs, fields, and buttons."""
+        focused = self.focused
+        tab_buttons = list(self.query("#tab-bar Button"))
+        bottom_buttons = list(self.query("#bottom-bar Button"))
+
+        if focused in tab_buttons:
+            idx = tab_buttons.index(focused)
+            if event.key == "left" and idx > 0:
+                target = tab_buttons[idx - 1]
+                target.focus()
+                tab_id = (target.id or "").replace("tabbtn-", "")
+                if tab_id:
+                    self._switch_to_tab(tab_id)
+                event.prevent_default()
+            elif event.key == "right" and idx < len(tab_buttons) - 1:
+                target = tab_buttons[idx + 1]
+                target.focus()
+                tab_id = (target.id or "").replace("tabbtn-", "")
+                if tab_id:
+                    self._switch_to_tab(tab_id)
+                event.prevent_default()
+            elif event.key == "down":
+                focusables = self._active_tab_focusables()
+                if focusables:
+                    focusables[0].focus()
+                event.prevent_default()
+            return
+
+        if focused in bottom_buttons:
+            idx = bottom_buttons.index(focused)
+            if event.key == "left" and idx > 0:
+                bottom_buttons[idx - 1].focus()
+                event.prevent_default()
+            elif event.key == "right" and idx < len(bottom_buttons) - 1:
+                bottom_buttons[idx + 1].focus()
+                event.prevent_default()
+            elif event.key == "up":
+                focusables = self._active_tab_focusables()
+                if focusables:
+                    focusables[-1].focus()
+                event.prevent_default()
+            return
+
+        focusables = self._active_tab_focusables()
+        if focused in focusables:
+            idx = focusables.index(focused)
+            if event.key == "up":
+                if idx > 0:
+                    focusables[idx - 1].focus()
+                else:
+                    current = self.query_one(
+                        "#tab-content", ContentSwitcher
+                    ).current
+                    for btn in tab_buttons:
+                        if btn.id == f"tabbtn-{current}":
+                            btn.focus()
+                            break
+                event.prevent_default()
+            elif event.key == "down":
+                if idx < len(focusables) - 1:
+                    focusables[idx + 1].focus()
+                elif bottom_buttons:
+                    bottom_buttons[0].focus()
+                event.prevent_default()
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle save, cancel, and tab switching buttons."""
         btn_id = event.button.id or ""
@@ -1006,10 +1129,7 @@ class SessionEditScreen(Screen[SessionConfig | None]):
             self.dismiss(None)
         elif btn_id.startswith("tabbtn-"):
             tab_id = btn_id[len("tabbtn-") :]
-            self.query_one("#tab-content", ContentSwitcher).current = tab_id
-            for btn in self.query("#tab-bar Button"):
-                btn.remove_class("active-tab")
-            event.button.add_class("active-tab")
+            self._switch_to_tab(tab_id)
 
     # -- Save ---------------------------------------------------------------
 
@@ -1029,7 +1149,7 @@ class SessionEditScreen(Screen[SessionConfig | None]):
             cfg.name = DEFAULTS_KEY
 
         cfg.ssl = self.query_one("#ssl", Switch).value
-        cfg.ssl_no_verify = self.query_one("#ssl-no-verify", Switch).value
+        cfg.ssl_no_verify = False
 
         cfg.last_connected = self._config.last_connected
 
@@ -1050,7 +1170,7 @@ class SessionEditScreen(Screen[SessionConfig | None]):
         cfg.ascii_eol = self.query_one("#ascii-eol", Switch).value
 
         cfg.colormatch = self.query_one("#colormatch", Select).value  # type: ignore[assignment]
-        cfg.background_color = self.query_one("#background-color", Input).value.strip() or "#000000"
+        cfg.background_color = "#000000"
         cfg.ice_colors = self.query_one("#ice-colors", Switch).value
 
         cfg.connect_timeout = _float_val(self.query_one("#connect-timeout", Input).value, 10.0)
@@ -1059,8 +1179,8 @@ class SessionEditScreen(Screen[SessionConfig | None]):
             self.query_one("#send-environ", Input).value.strip()
             or "TERM,LANG,COLUMNS,LINES,COLORTERM"
         )
-        cfg.always_will = self.query_one("#always-will", Input).value.strip()
-        cfg.always_do = self.query_one("#always-do", Input).value.strip()
+        cfg.always_will = self._config.always_will
+        cfg.always_do = self._config.always_do
         cfg.loglevel = self.query_one("#loglevel", Select).value  # type: ignore[assignment]
         cfg.logfile = self.query_one("#logfile", Input).value.strip()
         cfg.no_repl = not self.query_one("#use-repl", Switch).value
@@ -1086,13 +1206,15 @@ class MacroEditScreen(Screen["bool | None"]):
     """Editor screen for macro key bindings."""
 
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding("escape", "cancel_or_close", "Cancel", priority=True)
+        Binding("escape", "cancel_or_close", "Cancel", priority=True),
+        Binding("plus", "reorder_hint", "Change Priority", key_display="+/-", show=True),
+        Binding("enter", "save_hint", "Save", show=True),
     ]
 
     CSS = """
     MacroEditScreen { align: center middle; }
     #macro-panel {
-        width: 74; height: 100%; max-height: 22;
+        width: 91; height: 100%; max-height: 22;
         border: round $surface-lighten-2; background: $surface; padding: 1 1;
     }
     #macro-body { height: 1fr; }
@@ -1102,16 +1224,22 @@ class MacroEditScreen(Screen["bool | None"]):
     #macro-button-col Button {
         width: 100%; min-width: 0; margin-bottom: 0;
     }
+    #macro-copy { background: #6670a0; color: #e8ecf8; }
+    #macro-copy:hover { background: #8088b8; }
     #macro-right { width: 1fr; height: 100%; }
-    #macro-table { height: 1fr; min-height: 4; }
-    #macro-form { height: auto; }
-    #macro-form { height: auto; padding: 0; }
+    #macro-table { height: 1fr; min-height: 4; overflow-x: hidden; }
+    #macro-form { height: 1fr; padding: 0; }
     #macro-form .field-row { height: 3; margin: 0; }
+    #macro-form .switch-row { height: 3; margin: 0; }
     #macro-form Input { width: 1fr; border: tall grey; }
     #macro-form Input:focus { border: tall $accent; }
     #macro-form-buttons { height: 3; align-horizontal: right; }
     #macro-form-buttons Button { width: auto; min-width: 10; margin-left: 1; }
     .form-label { width: 8; padding-top: 1; }
+    .form-label-short { width: 5; padding-top: 1; }
+    .form-label-mid { width: 5; padding-top: 1; }
+    .form-gap { width: 2; }
+    .form-btn-spacer { width: 1; }
     """
 
     def __init__(self, path: str, session_key: str = "") -> None:
@@ -1119,7 +1247,7 @@ class MacroEditScreen(Screen["bool | None"]):
         super().__init__()
         self._path = path
         self._session_key = session_key
-        self._macros: list[tuple[str, str]] = []
+        self._macros: list[tuple[str, str, bool]] = []
         self._editing_idx: int | None = None
 
     @property
@@ -1136,6 +1264,7 @@ class MacroEditScreen(Screen["bool | None"]):
                 with Vertical(id="macro-button-col"):
                     yield Button("Add", variant="success", id="macro-add")
                     yield Button("Edit", variant="warning", id="macro-edit")
+                    yield Button("Copy", id="macro-copy")
                     yield Button("Delete", variant="error", id="macro-delete")
                     yield Button("Save", variant="primary", id="macro-save")
                     yield Button("Cancel", id="macro-close")
@@ -1143,14 +1272,18 @@ class MacroEditScreen(Screen["bool | None"]):
                     yield DataTable(id="macro-table")
                     with Vertical(id="macro-form"):
                         with Horizontal(classes="field-row"):
-                            yield Label("Key", classes="form-label")
+                            yield Label("Enabled", classes="form-label-short")
+                            yield Switch(value=True, id="macro-enabled")
+                            yield Label("", classes="form-gap")
+                            yield Label("Key", classes="form-label-mid")
                             yield Input(placeholder="e.g. f5 or escape n", id="macro-key")
                         with Horizontal(classes="field-row"):
                             yield Label("Text", classes="form-label")
                             yield Input(placeholder="text with <CR> markers", id="macro-text")
                         with Horizontal(id="macro-form-buttons"):
-                            yield Button("OK", variant="success", id="macro-ok")
+                            yield Label(" ", classes="form-btn-spacer")
                             yield Button("Cancel", variant="default", id="macro-cancel-form")
+                            yield Button("OK", variant="success", id="macro-ok")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -1169,40 +1302,47 @@ class MacroEditScreen(Screen["bool | None"]):
 
         try:
             macros = load_macros(self._path, self._session_key)
-            self._macros = [(" ".join(m.keys), m.text) for m in macros]
+            self._macros = [(" ".join(m.keys), m.text, m.enabled) for m in macros]
         except (ValueError, FileNotFoundError):
             pass
 
     def _refresh_table(self) -> None:
         table = self.query_one("#macro-table", DataTable)
         table.clear()
-        for i, (key, text) in enumerate(self._macros):
-            table.add_row(key, text, key=str(i))
+        for i, (key, text, enabled) in enumerate(self._macros):
+            status = "" if enabled else " (off)"
+            table.add_row(key, text + status, key=str(i))
 
-    def _show_form(self, key_val: str = "", text_val: str = "") -> None:
+    def _show_form(self, key_val: str = "", text_val: str = "", enabled: bool = True) -> None:
         self.query_one("#macro-key", Input).value = key_val
         self.query_one("#macro-text", Input).value = text_val
+        self.query_one("#macro-enabled", Switch).value = enabled
+        self.query_one("#macro-table").display = False
         self.query_one("#macro-form").display = True
         self.query_one("#macro-add", Button).disabled = True
         self.query_one("#macro-edit", Button).disabled = True
+        self.query_one("#macro-copy", Button).disabled = True
         self.query_one("#macro-key", Input).focus()
 
     def _hide_form(self) -> None:
         self.query_one("#macro-form").display = False
+        self.query_one("#macro-table").display = True
         self._editing_idx = None
         self.query_one("#macro-add", Button).disabled = False
         self.query_one("#macro-edit", Button).disabled = False
+        self.query_one("#macro-copy", Button).disabled = False
         self.query_one("#macro-table", DataTable).focus()
 
     def _submit_form(self) -> None:
         """Accept the current inline form values."""
         key_val = self.query_one("#macro-key", Input).value.strip()
         text_val = self.query_one("#macro-text", Input).value
+        enabled = self.query_one("#macro-enabled", Switch).value
         if key_val:
             if self._editing_idx is not None:
-                self._macros[self._editing_idx] = (key_val, text_val)
+                self._macros[self._editing_idx] = (key_val, text_val, enabled)
             else:
-                self._macros.append((key_val, text_val))
+                self._macros.append((key_val, text_val, enabled))
             self._refresh_table()
         self._hide_form()
 
@@ -1218,21 +1358,50 @@ class MacroEditScreen(Screen["bool | None"]):
         idx = self._selected_idx()
         if idx is not None and idx < len(self._macros):
             self._editing_idx = idx
-            k, t = self._macros[idx]
-            self._show_form(k, t)
+            k, t, ena = self._macros[idx]
+            self._show_form(k, t, ena)
+
+    def _copy_selected(self) -> None:
+        """Duplicate the selected row."""
+        idx = self._selected_idx()
+        if idx is not None and idx < len(self._macros):
+            k, t, ena = self._macros[idx]
+            self._macros.insert(idx + 1, (k, t, ena))
+            self._refresh_table()
+            table = self.query_one("#macro-table", DataTable)
+            table.move_cursor(row=idx + 1)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Double-click or Enter on a table row opens it for editing."""
         idx = int(str(event.row_key.value))
         if idx < len(self._macros):
             self._editing_idx = idx
-            k, t = self._macros[idx]
-            self._show_form(k, t)
+            k, t, ena = self._macros[idx]
+            self._show_form(k, t, ena)
 
     def on_key(self, event: events.Key) -> None:
-        """Arrow keys navigate between buttons and the macro table."""
+        """Arrow/+/- keys navigate and reorder the macro table."""
         if event.key in ("up", "down", "left", "right"):
-            _handle_arrow_navigation(self, event, "#macro-button-col", "#macro-table")
+            _handle_arrow_navigation(
+                self, event, "#macro-button-col", "#macro-table", "#macro-form"
+            )
+        elif event.key in ("plus", "minus") and not self._form_visible:
+            self._reorder(event.key == "plus")
+
+    def _reorder(self, move_down: bool) -> None:
+        """Swap the selected row with its neighbour."""
+        idx = self._selected_idx()
+        if idx is None:
+            return
+        target = idx + 1 if move_down else idx - 1
+        if target < 0 or target >= len(self._macros):
+            return
+        self._macros[idx], self._macros[target] = (
+            self._macros[target], self._macros[idx]
+        )
+        self._refresh_table()
+        table = self.query_one("#macro-table", DataTable)
+        table.move_cursor(row=target)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Enter in an inline form input submits the form."""
@@ -1247,6 +1416,12 @@ class MacroEditScreen(Screen["bool | None"]):
         else:
             self.dismiss(None)
 
+    def action_reorder_hint(self) -> None:
+        """No-op; +/- handled in on_key, binding exists for footer hint."""
+
+    def action_save_hint(self) -> None:
+        """No-op; enter handled by on_input_submitted, binding exists for footer hint."""
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle macro editor button presses."""
         btn = event.button.id or ""
@@ -1255,6 +1430,8 @@ class MacroEditScreen(Screen["bool | None"]):
             self._show_form()
         elif btn == "macro-edit":
             self._edit_selected()
+        elif btn == "macro-copy":
+            self._copy_selected()
         elif btn == "macro-delete":
             if self._form_visible:
                 self._hide_form()
@@ -1278,7 +1455,7 @@ class MacroEditScreen(Screen["bool | None"]):
         from .macros import Macro, save_macros  # pylint: disable=import-outside-toplevel
 
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
-        macros = [Macro(keys=tuple(k.split()), text=t) for k, t in self._macros]
+        macros = [Macro(keys=tuple(k.split()), text=t, enabled=ena) for k, t, ena in self._macros]
         save_macros(self._path, macros, self._session_key)
 
 
@@ -1286,13 +1463,15 @@ class AutoreplyEditScreen(Screen["bool | None"]):
     """Editor screen for autoreply rules."""
 
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding("escape", "cancel_or_close", "Cancel", priority=True)
+        Binding("escape", "cancel_or_close", "Cancel", priority=True),
+        Binding("plus", "reorder_hint", "Change Priority", key_display="+/-", show=True),
+        Binding("enter", "save_hint", "Save", show=True),
     ]
 
     CSS = """
     AutoreplyEditScreen { align: center middle; }
     #autoreply-panel {
-        width: 74; height: 100%; max-height: 22;
+        width: 91; height: 100%; max-height: 23;
         border: round $surface-lighten-2; background: $surface; padding: 1 1;
     }
     #autoreply-body { height: 1fr; }
@@ -1302,15 +1481,23 @@ class AutoreplyEditScreen(Screen["bool | None"]):
     #autoreply-button-col Button {
         width: 100%; min-width: 0; margin-bottom: 0;
     }
+    #autoreply-copy { background: #6670a0; color: #e8ecf8; }
+    #autoreply-copy:hover { background: #8088b8; }
     #autoreply-right { width: 1fr; height: 100%; }
-    #autoreply-table { height: 1fr; min-height: 4; }
-    #autoreply-form { height: auto; padding: 0; }
+    #autoreply-table { height: 1fr; min-height: 4; overflow-x: hidden; }
+    #autoreply-form { height: 1fr; padding: 0 0 0 4; }
     #autoreply-form .field-row { height: 3; margin: 0; }
     #autoreply-form Input { width: 1fr; border: tall grey; }
     #autoreply-form Input:focus { border: tall $accent; }
     #autoreply-form-buttons { height: 3; align-horizontal: right; }
     #autoreply-form-buttons Button { width: auto; min-width: 10; margin-left: 1; }
-    .form-label { width: 8; padding-top: 1; }
+    #autoreply-form .form-label { width: 12; padding-top: 1; }
+    #autoreply-form .form-label-short { width: 9; padding-top: 1; }
+    #autoreply-form .form-label-mid { width: 9; padding-top: 1; }
+    #autoreply-form .form-gap { width: 2; }
+    #autoreply-form .form-btn-spacer { width: 1; }
+    #autoreply-timeout { width: 9; }
+    #autoreply-cooldown { width: 9; }
     """
 
     def __init__(self, path: str, session_key: str = "") -> None:
@@ -1318,7 +1505,7 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         super().__init__()
         self._path = path
         self._session_key = session_key
-        self._rules: list[tuple[str, str]] = []
+        self._rules: list[tuple[str, str, bool, str, bool, bool, float, float]] = []
         self._editing_idx: int | None = None
 
     @property
@@ -1337,6 +1524,7 @@ class AutoreplyEditScreen(Screen["bool | None"]):
                 with Vertical(id="autoreply-button-col"):
                     yield Button("Add", variant="success", id="autoreply-add")
                     yield Button("Edit", variant="warning", id="autoreply-edit")
+                    yield Button("Copy", id="autoreply-copy")
                     yield Button("Delete", variant="error", id="autoreply-delete")
                     yield Button("Save", variant="primary", id="autoreply-save")
                     yield Button("Cancel", id="autoreply-close")
@@ -1344,23 +1532,57 @@ class AutoreplyEditScreen(Screen["bool | None"]):
                     yield DataTable(id="autoreply-table")
                     with Vertical(id="autoreply-form"):
                         with Horizontal(classes="field-row"):
-                            yield Label("Pattern", classes="form-label")
+                            yield Label("Enabled", classes="form-label-short")
+                            yield Switch(value=True, id="autoreply-enabled")
+                            yield Label("", classes="form-gap")
+                            yield Label("Pattern", classes="form-label-mid")
                             yield Input(placeholder="regex pattern", id="autoreply-pattern")
                         with Horizontal(classes="field-row"):
-                            yield Label("Reply", classes="form-label")
+                            excl = Switch(value=False, id="autoreply-exclusive")
+                            excl.tooltip = "Only this rule matches until cleared by prompt or until pattern"
+                            yield Label("Exclusive", classes="form-label-short")
+                            yield excl
+                            yield Label("", classes="form-gap")
+                            yield Label("Reply", classes="form-label-mid")
                             yield Input(
                                 placeholder=r"reply with \1 refs and <CR>", id="autoreply-reply"
                             )
+                        with Horizontal(classes="field-row"):
+                            alw = Switch(value=False, id="autoreply-always")
+                            alw.tooltip = "Match even while another exclusive rule is active"
+                            yield Label("Always", classes="form-label-short")
+                            yield alw
+                            yield Label("", classes="form-gap")
+                            yield Label("Until", classes="form-label-mid")
+                            yield Input(
+                                placeholder=r"optional: \1 died\.",
+                                id="autoreply-until",
+                            )
+                        with Horizontal(classes="field-row"):
+                            yield Label("Cooldown", classes="form-label")
+                            cd_input = Input(
+                                value="1.0", placeholder="seconds",
+                                id="autoreply-cooldown",
+                            )
+                            cd_input.tooltip = "Min seconds between re-fires (0 to disable)"
+                            yield cd_input
+                            yield Label("", classes="form-gap")
+                            yield Label("Timeout", classes="form-label")
+                            yield Input(
+                                value="30.0", placeholder="seconds",
+                                id="autoreply-timeout",
+                            )
                         with Horizontal(id="autoreply-form-buttons"):
-                            yield Button("OK", variant="success", id="autoreply-ok")
+                            yield Label(" ", classes="form-btn-spacer")
                             yield Button("Cancel", variant="default", id="autoreply-cancel-form")
+                            yield Button("OK", variant="success", id="autoreply-ok")
         yield Footer()
 
     def on_mount(self) -> None:
         """Load autoreplies from file and populate table."""
         table = self.query_one("#autoreply-table", DataTable)
         table.cursor_type = "row"
-        table.add_columns("Pattern", "Reply")
+        table.add_columns("#", "Pattern", "Reply", "Flags")
         self._load_from_file()
         self._refresh_table()
         self.query_one("#autoreply-form").display = False
@@ -1372,35 +1594,84 @@ class AutoreplyEditScreen(Screen["bool | None"]):
 
         try:
             rules = load_autoreplies(self._path, self._session_key)
-            self._rules = [(r.pattern.pattern, r.reply) for r in rules]
+            self._rules = [
+                (r.pattern.pattern, r.reply, r.exclusive, r.until,
+                 r.always, r.enabled, r.exclusive_timeout, r.cooldown)
+                for r in rules
+            ]
         except (ValueError, FileNotFoundError):
             pass
 
     def _refresh_table(self) -> None:
         table = self.query_one("#autoreply-table", DataTable)
         table.clear()
-        for i, (pattern, reply) in enumerate(self._rules):
-            table.add_row(pattern, reply, key=str(i))
+        for i, (pattern, reply, exclusive, until, always, enabled, _timeout, *_rest) in enumerate(
+            self._rules
+        ):
+            flags = ""
+            if not enabled:
+                flags = "X"
+            if exclusive:
+                flags = (flags + " E*") if until else (flags + " E")
+            if always:
+                flags = (flags + " A") if flags else "A"
+            table.add_row(str(i + 1), pattern, reply, flags.strip(), key=str(i))
 
-    def _show_form(self, pattern_val: str = "", reply_val: str = "") -> None:
+    def _show_form(
+        self,
+        pattern_val: str = "",
+        reply_val: str = "",
+        exclusive: bool = False,
+        until: str = "",
+        always: bool = False,
+        enabled: bool = True,
+        exclusive_timeout: float = 30.0,
+        cooldown: float = 1.0,
+    ) -> None:
         self.query_one("#autoreply-pattern", Input).value = pattern_val
         self.query_one("#autoreply-reply", Input).value = reply_val
+        self.query_one("#autoreply-until", Input).value = until
+        self.query_one("#autoreply-exclusive", Switch).value = exclusive
+        self.query_one("#autoreply-always", Switch).value = always
+        self.query_one("#autoreply-enabled", Switch).value = enabled
+        self.query_one("#autoreply-timeout", Input).value = str(exclusive_timeout)
+        self.query_one("#autoreply-cooldown", Input).value = str(cooldown)
+        self.query_one("#autoreply-table").display = False
         self.query_one("#autoreply-form").display = True
         self.query_one("#autoreply-add", Button).disabled = True
         self.query_one("#autoreply-edit", Button).disabled = True
+        self.query_one("#autoreply-copy", Button).disabled = True
         self.query_one("#autoreply-pattern", Input).focus()
 
     def _hide_form(self) -> None:
         self.query_one("#autoreply-form").display = False
+        self.query_one("#autoreply-table").display = True
         self._editing_idx = None
         self.query_one("#autoreply-add", Button).disabled = False
         self.query_one("#autoreply-edit", Button).disabled = False
+        self.query_one("#autoreply-copy", Button).disabled = False
         self.query_one("#autoreply-table", DataTable).focus()
 
     def _submit_form(self) -> None:
         """Accept the current inline form values."""
         pattern_val = self.query_one("#autoreply-pattern", Input).value.strip()
         reply_val = self.query_one("#autoreply-reply", Input).value
+        until_val = self.query_one("#autoreply-until", Input).value.strip()
+        exclusive = self.query_one("#autoreply-exclusive", Switch).value
+        always = self.query_one("#autoreply-always", Switch).value
+        enabled = self.query_one("#autoreply-enabled", Switch).value
+        try:
+            timeout_val = float(
+                self.query_one("#autoreply-timeout", Input).value.strip() or "30"
+            )
+        except ValueError:
+            timeout_val = 30.0
+        try:
+            cooldown_val = float(
+                self.query_one("#autoreply-cooldown", Input).value.strip() or "1"
+            )
+        except ValueError:
+            cooldown_val = 1.0
         if pattern_val:
             import re  # pylint: disable=import-outside-toplevel
 
@@ -1410,9 +1681,15 @@ class AutoreplyEditScreen(Screen["bool | None"]):
                 self.notify(f"Invalid regex: {exc}", severity="error")
                 return
             if self._editing_idx is not None:
-                self._rules[self._editing_idx] = (pattern_val, reply_val)
+                self._rules[self._editing_idx] = (
+                    pattern_val, reply_val, exclusive, until_val, always,
+                    enabled, timeout_val, cooldown_val,
+                )
             else:
-                self._rules.append((pattern_val, reply_val))
+                self._rules.append(
+                    (pattern_val, reply_val, exclusive, until_val, always,
+                     enabled, timeout_val, cooldown_val)
+                )
             self._refresh_table()
         self._hide_form()
 
@@ -1428,21 +1705,54 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         idx = self._selected_idx()
         if idx is not None and idx < len(self._rules):
             self._editing_idx = idx
-            p, r = self._rules[idx]
-            self._show_form(p, r)
+            entry = self._rules[idx]
+            p, r, excl, until, alw, ena, tout = entry[:7]
+            cd = entry[7] if len(entry) > 7 else 1.0
+            self._show_form(p, r, excl, until, alw, ena, tout, cd)
+
+    def _copy_selected(self) -> None:
+        """Duplicate the selected row."""
+        idx = self._selected_idx()
+        if idx is not None and idx < len(self._rules):
+            self._rules.insert(idx + 1, self._rules[idx])
+            self._refresh_table()
+            table = self.query_one("#autoreply-table", DataTable)
+            table.move_cursor(row=idx + 1)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Double-click or Enter on a table row opens it for editing."""
         idx = int(str(event.row_key.value))
         if idx < len(self._rules):
             self._editing_idx = idx
-            p, r = self._rules[idx]
-            self._show_form(p, r)
+            entry = self._rules[idx]
+            p, r, excl, until, alw, ena, tout = entry[:7]
+            cd = entry[7] if len(entry) > 7 else 1.0
+            self._show_form(p, r, excl, until, alw, ena, tout, cd)
 
     def on_key(self, event: events.Key) -> None:
-        """Arrow keys navigate between buttons and the autoreply table."""
+        """Arrow/+/- keys navigate and reorder the autoreply table."""
         if event.key in ("up", "down", "left", "right"):
-            _handle_arrow_navigation(self, event, "#autoreply-button-col", "#autoreply-table")
+            _handle_arrow_navigation(
+                self, event, "#autoreply-button-col", "#autoreply-table",
+                "#autoreply-form",
+            )
+        elif event.key in ("plus", "minus") and not self._form_visible:
+            self._reorder(event.key == "plus")
+
+    def _reorder(self, move_down: bool) -> None:
+        """Swap the selected row with its neighbour."""
+        idx = self._selected_idx()
+        if idx is None:
+            return
+        target = idx + 1 if move_down else idx - 1
+        if target < 0 or target >= len(self._rules):
+            return
+        self._rules[idx], self._rules[target] = (
+            self._rules[target], self._rules[idx]
+        )
+        self._refresh_table()
+        table = self.query_one("#autoreply-table", DataTable)
+        table.move_cursor(row=target)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Enter in an inline form input submits the form."""
@@ -1457,6 +1767,12 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         else:
             self.dismiss(None)
 
+    def action_reorder_hint(self) -> None:
+        """No-op; +/- handled in on_key, binding exists for footer hint."""
+
+    def action_save_hint(self) -> None:
+        """No-op; enter handled by on_input_submitted, binding exists for footer hint."""
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle autoreply editor button presses."""
         btn = event.button.id or ""
@@ -1465,6 +1781,8 @@ class AutoreplyEditScreen(Screen["bool | None"]):
             self._show_form()
         elif btn == "autoreply-edit":
             self._edit_selected()
+        elif btn == "autoreply-copy":
+            self._copy_selected()
         elif btn == "autoreply-delete":
             if self._form_visible:
                 self._hide_form()
@@ -1493,10 +1811,20 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         )
 
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
-        rules = [
-            AutoreplyRule(pattern=re.compile(p, re.MULTILINE | re.DOTALL), reply=r)
-            for p, r in self._rules
-        ]
+        rules = []
+        for entry in self._rules:
+            p, r, excl, until, alw, ena, tout = entry[:7]
+            cd = entry[7] if len(entry) > 7 else 1.0
+            rules.append(AutoreplyRule(
+                pattern=re.compile(p, re.MULTILINE | re.DOTALL),
+                reply=r,
+                exclusive=excl,
+                until=until,
+                always=alw,
+                enabled=ena,
+                exclusive_timeout=tout,
+                cooldown=cd,
+            ))
         save_autoreplies(self._path, rules, self._session_key)
 
 
