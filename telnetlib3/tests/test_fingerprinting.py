@@ -1153,6 +1153,7 @@ async def test_probe_client_capabilities_timeout_status():
     assert results["LOGOUT"]["status"] == "timeout"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="fingerprinting_display requires termios")
 def test_fingerprinting_post_script_delegates():
     """fingerprinting_post_script delegates to fingerprinting_display."""
     from unittest.mock import patch
