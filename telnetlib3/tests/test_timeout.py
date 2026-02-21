@@ -87,7 +87,6 @@ async def test_open_connection_connect_timeout_success(bind_host, unused_tcp_por
             unused_tcp_port,
             connect_timeout=5.0,
             encoding=False,
-            connect_minwait=0.05,
             connect_maxwait=0.5,
         ):
             pass

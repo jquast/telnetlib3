@@ -78,7 +78,7 @@ async def test_telnet_server_open_close(bind_host, unused_tcp_port):
 async def test_telnet_client_open_close_by_write(bind_host, unused_tcp_port):
     """Exercise BaseClient.connection_lost() on writer closed."""
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
-        async with open_connection(host=bind_host, port=unused_tcp_port, connect_minwait=0.05) as (
+        async with open_connection(host=bind_host, port=unused_tcp_port) as (
             reader,
             writer,
         ):
@@ -96,7 +96,7 @@ async def test_telnet_client_open_closed_by_peer(bind_host, unused_tcp_port):
             transport.close()
 
     async with asyncio_server(DisconnecterProtocol, bind_host, unused_tcp_port):
-        async with open_connection(host=bind_host, port=unused_tcp_port, connect_minwait=0.05) as (
+        async with open_connection(host=bind_host, port=unused_tcp_port) as (
             reader,
             writer,
         ):

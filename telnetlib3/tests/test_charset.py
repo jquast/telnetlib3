@@ -138,7 +138,6 @@ async def test_telnet_client_send_charset(bind_host, unused_tcp_port):
             host=bind_host,
             port=unused_tcp_port,
             encoding="latin1",
-            connect_minwait=0.05,
         ) as (reader, writer):
             val = await asyncio.wait_for(_waiter, 1.5)
             assert val == "cp437"

@@ -59,7 +59,7 @@ def _echo_shell(send, reply):
     return shell, waiter
 
 
-_FAST_CLIENT = dict(encoding="ascii", connect_minwait=0.05, connect_maxwait=0.5)
+_FAST_CLIENT = dict(encoding="ascii", connect_maxwait=0.5)
 
 
 async def _ping_pong(bind_host, port, server_kw, client_kw):

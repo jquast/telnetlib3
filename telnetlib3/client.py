@@ -52,7 +52,7 @@ class TelnetClient(client_base.BaseClient):
         encoding: Union[str, bool] = "utf8",
         encoding_errors: str = "strict",
         force_binary: bool = False,
-        connect_minwait: float = 1.0,
+        connect_minwait: float = 0,
         connect_maxwait: float = 4.0,
         limit: Optional[int] = None,
         waiter_closed: Optional[asyncio.Future[None]] = None,

@@ -63,7 +63,7 @@ async def test_telnet_reader_using_readline_unicode(bind_host, unused_tcp_port):
     async with create_server(
         host=bind_host, port=unused_tcp_port, connect_maxwait=0.05, shell=shell
     ):
-        async with open_connection(host=bind_host, port=unused_tcp_port, connect_minwait=0.05) as (
+        async with open_connection(host=bind_host, port=unused_tcp_port) as (
             client_reader,
             client_writer,
         ):
@@ -95,7 +95,7 @@ async def test_telnet_reader_using_readline_bytes(bind_host, unused_tcp_port):
         host=bind_host, port=unused_tcp_port, connect_maxwait=0.05, shell=shell, encoding=False
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False
+            host=bind_host, port=unused_tcp_port, encoding=False
         ) as (client_reader, client_writer):
             for given, expected in sorted(given_expected.items()):
                 assert await asyncio.wait_for(client_reader.readline(), 0.5) == expected
@@ -116,7 +116,7 @@ async def test_telnet_reader_read_exactly_unicode(bind_host, unused_tcp_port):
     async with create_server(
         host=bind_host, port=unused_tcp_port, connect_maxwait=0.05, shell=shell
     ):
-        async with open_connection(host=bind_host, port=unused_tcp_port, connect_minwait=0.05) as (
+        async with open_connection(host=bind_host, port=unused_tcp_port) as (
             client_reader,
             client_writer,
         ):
@@ -141,7 +141,7 @@ async def test_telnet_reader_read_exactly_bytes(bind_host, unused_tcp_port):
         host=bind_host, port=unused_tcp_port, connect_maxwait=0.05, shell=shell, encoding=False
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False
+            host=bind_host, port=unused_tcp_port, encoding=False
         ) as (client_reader, client_writer):
             assert await asyncio.wait_for(client_reader.readexactly(len(given)), 0.5) == given
 
@@ -171,7 +171,7 @@ async def test_telnet_reader_read_beyond_limit_unicode(bind_host, unused_tcp_por
         host=bind_host, port=unused_tcp_port, connect_maxwait=0.05, shell=shell, limit=limit
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, limit=limit
+            host=bind_host, port=unused_tcp_port, limit=limit
         ) as (client_reader, client_writer):
             assert client_reader._limit == limit
             value = await asyncio.wait_for(client_reader.read(), 0.5)
@@ -197,7 +197,7 @@ async def test_telnet_reader_read_beyond_limit_bytes(bind_host, unused_tcp_port)
         limit=limit,
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False, limit=limit
+            host=bind_host, port=unused_tcp_port, encoding=False, limit=limit
         ) as (client_reader, client_writer):
             assert client_reader._limit == limit
             value = await asyncio.wait_for(client_reader.read(), 0.5)
@@ -232,7 +232,7 @@ Router>
         limit=limit,
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False, limit=limit
+            host=bind_host, port=unused_tcp_port, encoding=False, limit=limit
         ) as (client_reader, _):
             # Test successful reads within limit
             result = await client_reader.readuntil_pattern(pattern)
@@ -278,7 +278,7 @@ Router>
         limit=limit,
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False, limit=limit
+            host=bind_host, port=unused_tcp_port, encoding=False, limit=limit
         ) as (client_reader, _):
             # First successful read
             result = await client_reader.readuntil_pattern(pattern)
@@ -326,7 +326,7 @@ async def test_telnet_reader_readuntil_pattern_limit_overrun_buffer_full(
         limit=limit,
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False, limit=limit
+            host=bind_host, port=unused_tcp_port, encoding=False, limit=limit
         ) as (client_reader, _):
             # First read the Router> prompt
             result = await client_reader.readuntil_pattern(pattern)
@@ -362,7 +362,7 @@ async def test_telnet_reader_readuntil_pattern_incomplete_read_eof(bind_host, un
         limit=limit,
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False, limit=limit
+            host=bind_host, port=unused_tcp_port, encoding=False, limit=limit
         ) as (client_reader, _):
             # First successful read
             result = await client_reader.readuntil_pattern(pattern)
@@ -416,7 +416,7 @@ async def test_telnet_reader_readuntil_pattern_cancelled_error(bind_host, unused
         limit=limit,
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False, limit=limit
+            host=bind_host, port=unused_tcp_port, encoding=False, limit=limit
         ) as (client_reader, _):
             # Set exception and test it's properly raised
             client_reader.set_exception(asyncio.CancelledError())
