@@ -631,12 +631,10 @@ async def test_exclusive_cleared_by_on_prompt():
     rules = [
         AutoreplyRule(
             pattern=re.compile(r"A (\w+) pheasant"), reply=r"kill \1<CR>",
-            exclusive=True, cooldown=0,
-        ),
+            exclusive=True,        ),
         AutoreplyRule(
             pattern=re.compile(r"A (\w+) rabbit"), reply=r"kill \1<CR>",
-            exclusive=True, cooldown=0,
-        ),
+            exclusive=True,        ),
     ]
     engine = AutoreplyEngine(rules, writer, writer.log)
     engine.feed("A green pheasant\nA red rabbit\n")
@@ -699,7 +697,7 @@ def test_save_autoreplies_exclusive_roundtrip(tmp_path):
 async def test_exclusive_suppresses_feed_until_on_prompt():
     writer, written = _mock_writer()
     rules = [
-        AutoreplyRule(pattern=re.compile(r"monster"), reply="kill<CR>", exclusive=True, cooldown=0),
+        AutoreplyRule(pattern=re.compile(r"monster"), reply="kill<CR>", exclusive=True),
     ]
     engine = AutoreplyEngine(rules, writer, writer.log)
     engine.feed("monster\n")
@@ -729,7 +727,6 @@ async def test_exclusive_until_clears_on_pattern():
             reply=r"kill \2<CR>",
             exclusive=True,
             until=r"\2 died\.",
-            cooldown=0,
         ),
     ]
     engine = AutoreplyEngine(rules, writer, writer.log)
@@ -759,7 +756,6 @@ async def test_exclusive_until_eor_does_not_clear():
             reply=r"attack \1<CR>",
             exclusive=True,
             until=r"target fell",
-            cooldown=0,
         ),
     ]
     engine = AutoreplyEngine(rules, writer, writer.log)
@@ -787,7 +783,6 @@ async def test_exclusive_until_group_substitution():
             reply=r"attack \1<CR>",
             exclusive=True,
             until=r"\1 fled\.",
-            cooldown=0,
         ),
     ]
     engine = AutoreplyEngine(rules, writer, writer.log)
@@ -849,7 +844,6 @@ async def test_skip_next_prompt_prevents_premature_clear():
             pattern=re.compile(r"A (\w+) pheasant"),
             reply=r"kill \1<CR>",
             exclusive=True,
-            cooldown=0,
         ),
     ]
     engine = AutoreplyEngine(rules, writer, writer.log)
@@ -878,7 +872,6 @@ async def test_until_ignores_on_prompt():
             reply=r"kill \2<CR>",
             exclusive=True,
             until=r"\2 died\.",
-            cooldown=0,
         ),
     ]
     engine = AutoreplyEngine(rules, writer, writer.log)
@@ -978,7 +971,6 @@ async def test_exclusive_timeout_clears_suppression():
             reply="kill<CR>",
             exclusive=True,
             exclusive_timeout=0.1,
-            cooldown=0,
         ),
     ]
     engine = AutoreplyEngine(rules, writer, writer.log)
@@ -1077,157 +1069,6 @@ async def test_disabled_always_rule_skipped():
 
 
 @pytest.mark.asyncio
-async def test_cooldown_prevents_rapid_refire():
-    """Rule with cooldown does not re-fire within the cooldown window."""
-    writer, written = _mock_writer()
-    rules = [
-        AutoreplyRule(
-            pattern=re.compile(r"\d+ solaris"),
-            reply="get all solaris<CR>",
-            cooldown=1.0,
-        ),
-    ]
-    engine = AutoreplyEngine(rules, writer, writer.log)
-    engine.feed("5 solaris\n")
-    await asyncio.sleep(0.05)
-    assert sum(1 for w in written if "get all solaris\r\n" in w) == 1
-
-    engine.feed("5 solaris\n")
-    await asyncio.sleep(0.05)
-    assert sum(1 for w in written if "get all solaris\r\n" in w) == 1
-
-
-@pytest.mark.asyncio
-async def test_cooldown_allows_refire_after_expiry():
-    """Rule fires again after cooldown elapses."""
-    writer, written = _mock_writer()
-    rules = [
-        AutoreplyRule(
-            pattern=re.compile(r"hello"),
-            reply="world<CR>",
-            cooldown=0.1,
-        ),
-    ]
-    engine = AutoreplyEngine(rules, writer, writer.log)
-    engine.feed("hello\n")
-    await asyncio.sleep(0.05)
-    assert sum(1 for w in written if "world\r\n" in w) == 1
-
-    await asyncio.sleep(0.1)
-    engine.feed("hello\n")
-    await asyncio.sleep(0.05)
-    assert sum(1 for w in written if "world\r\n" in w) == 2
-
-
-@pytest.mark.asyncio
-async def test_cooldown_zero_disables_protection():
-    """cooldown=0 allows immediate re-fire."""
-    writer, written = _mock_writer()
-    rules = [
-        AutoreplyRule(
-            pattern=re.compile(r"^trigger$", re.MULTILINE),
-            reply="reply<CR>",
-            cooldown=0,
-        ),
-    ]
-    engine = AutoreplyEngine(rules, writer, writer.log)
-    engine.feed("trigger\ntrigger\n")
-    await asyncio.sleep(0.05)
-    assert sum(1 for w in written if "reply\r\n" in w) == 2
-
-
-@pytest.mark.asyncio
-async def test_cooldown_independent_per_rule():
-    """Each rule tracks its own cooldown independently."""
-    writer, written = _mock_writer()
-    rules = [
-        AutoreplyRule(
-            pattern=re.compile(r"alpha"),
-            reply="a<CR>",
-            cooldown=1.0,
-        ),
-        AutoreplyRule(
-            pattern=re.compile(r"beta"),
-            reply="b<CR>",
-            cooldown=1.0,
-        ),
-    ]
-    engine = AutoreplyEngine(rules, writer, writer.log)
-    engine.feed("alpha\n")
-    await asyncio.sleep(0.05)
-    assert sum(1 for w in written if "a\r\n" in w) == 1
-
-    engine.feed("beta\n")
-    await asyncio.sleep(0.05)
-    assert sum(1 for w in written if "b\r\n" in w) == 1
-
-    engine.feed("alpha\nbeta\n")
-    await asyncio.sleep(0.05)
-    assert sum(1 for w in written if "a\r\n" in w) == 1
-    assert sum(1 for w in written if "b\r\n" in w) == 1
-
-
-def test_parse_entries_cooldown():
-    from telnetlib3.autoreply import _parse_entries
-
-    entries = [
-        {"pattern": "a", "reply": "b<CR>", "cooldown": 5.0},
-        {"pattern": "c", "reply": "d<CR>"},
-    ]
-    rules = _parse_entries(entries)
-    assert rules[0].cooldown == 5.0
-    assert rules[1].cooldown == 1.0
-
-
-def test_save_autoreplies_cooldown_roundtrip(tmp_path):
-    fp = tmp_path / "autoreplies.json"
-    original = [
-        AutoreplyRule(pattern=re.compile(r"hello"), reply="world<CR>", cooldown=2.5),
-        AutoreplyRule(pattern=re.compile(r"foo"), reply="bar<CR>"),
-    ]
-    save_autoreplies(str(fp), original, _SK)
-    loaded = load_autoreplies(str(fp), _SK)
-    assert loaded[0].cooldown == 2.5
-    assert loaded[1].cooldown == 1.0
-
-    with open(str(fp), "r") as fh:
-        data = json.load(fh)
-    entries = data[_SK]["autoreplies"]
-    assert entries[0]["cooldown"] == 2.5
-    assert "cooldown" not in entries[1]
-
-
-@pytest.mark.asyncio
-async def test_cooldown_always_rule_prevents_rapid_refire():
-    """Cooldown applies to always=True rules during exclusive mode."""
-    writer, written = _mock_writer()
-    rules = [
-        AutoreplyRule(
-            pattern=re.compile(r"monster"),
-            reply="kill<CR>",
-            exclusive=True,
-        ),
-        AutoreplyRule(
-            pattern=re.compile(r"loot"),
-            reply="get all<CR>",
-            always=True,
-            cooldown=1.0,
-        ),
-    ]
-    engine = AutoreplyEngine(rules, writer, writer.log)
-    engine.feed("monster\n")
-    await asyncio.sleep(0.05)
-
-    engine.feed("loot\n")
-    await asyncio.sleep(0.05)
-    assert sum(1 for w in written if "get all\r\n" in w) == 1
-
-    engine.feed("loot again\n")
-    await asyncio.sleep(0.05)
-    assert sum(1 for w in written if "get all\r\n" in w) == 1
-
-
-@pytest.mark.asyncio
 async def test_prompt_cycle_dedup_blocks_same_rule():
     """Once on_prompt activates cycle tracking, a rule fires at most once per cycle."""
     writer, written = _mock_writer()
@@ -1235,7 +1076,6 @@ async def test_prompt_cycle_dedup_blocks_same_rule():
         AutoreplyRule(
             pattern=re.compile(r"(^Corpse of|^\w+ times 'Corpse)", re.MULTILINE),
             reply="look in corpse<CR>",
-            cooldown=0,
         ),
     ]
     engine = AutoreplyEngine(rules, writer, writer.log)
@@ -1260,8 +1100,8 @@ async def test_prompt_cycle_dedup_different_rules_both_fire():
     """Different rules can still fire in the same prompt cycle."""
     writer, written = _mock_writer()
     rules = [
-        AutoreplyRule(pattern=re.compile(r"gold"), reply="get gold<CR>", cooldown=0),
-        AutoreplyRule(pattern=re.compile(r"corpse"), reply="look corpse<CR>", cooldown=0),
+        AutoreplyRule(pattern=re.compile(r"gold"), reply="get gold<CR>"),
+        AutoreplyRule(pattern=re.compile(r"corpse"), reply="look corpse<CR>"),
     ]
     engine = AutoreplyEngine(rules, writer, writer.log)
     engine.on_prompt()
@@ -1280,7 +1120,6 @@ async def test_prompt_cycle_dedup_inactive_without_on_prompt():
         AutoreplyRule(
             pattern=re.compile(r"^trigger$", re.MULTILINE),
             reply="reply<CR>",
-            cooldown=0,
         ),
     ]
     engine = AutoreplyEngine(rules, writer, writer.log)
@@ -1301,13 +1140,11 @@ async def test_prompt_cycle_dedup_always_rule():
             pattern=re.compile(r"monster"),
             reply="kill<CR>",
             exclusive=True,
-            cooldown=0,
         ),
         AutoreplyRule(
             pattern=re.compile(r"corpse", re.MULTILINE),
             reply="loot<CR>",
             always=True,
-            cooldown=0,
         ),
     ]
     engine = AutoreplyEngine(rules, writer, writer.log)
@@ -1358,7 +1195,6 @@ async def test_on_prompt_clears_buffer_prevents_stale_rematch():
         AutoreplyRule(
             pattern=re.compile(r"^Corpse of", re.MULTILINE),
             reply="look in corpse<CR>",
-            cooldown=0,
         ),
     ]
     engine = AutoreplyEngine(rules, writer, writer.log)
@@ -1381,7 +1217,6 @@ async def test_on_prompt_clears_buffer_dotall_no_cross_record():
         AutoreplyRule(
             pattern=re.compile(r"Corpse contains:.*?(\d+ solaris)", re.DOTALL),
             reply=r"get all solaris<CR>",
-            cooldown=0,
         ),
     ]
     engine = AutoreplyEngine(rules, writer, writer.log)
@@ -1395,3 +1230,224 @@ async def test_on_prompt_clears_buffer_dotall_no_cross_record():
     engine.feed("19 solaris on the ground\n")
     await asyncio.sleep(0.05)
     assert not any("get all solaris" in w for w in written)
+
+
+@pytest.mark.asyncio
+async def test_suppress_exclusive_skips_exclusive_rules():
+    writer, written = _mock_writer()
+    rules = [
+        AutoreplyRule(pattern=re.compile(r"monster"), reply="kill<CR>", exclusive=True),
+        AutoreplyRule(pattern=re.compile(r"coin"), reply="get coin<CR>"),
+    ]
+    engine = AutoreplyEngine(rules, writer, writer.log)
+    engine.suppress_exclusive = True
+
+    engine.feed("A monster appears\n")
+    await asyncio.sleep(0.05)
+    assert not any("kill" in w for w in written)
+    assert engine.exclusive_active is False
+
+    engine.on_prompt()
+    engine.feed("A coin glitters\n")
+    await asyncio.sleep(0.05)
+    assert any("get coin\r\n" in w for w in written)
+
+
+@pytest.mark.asyncio
+async def test_suppress_exclusive_default_false():
+    writer, _ = _mock_writer()
+    rules = [AutoreplyRule(pattern=re.compile(r"x"), reply="y<CR>")]
+    engine = AutoreplyEngine(rules, writer, writer.log)
+    assert engine.suppress_exclusive is False
+
+
+@pytest.mark.asyncio
+async def test_cancel_clears_exclusive_and_until():
+    writer, written = _mock_writer()
+    rules = [
+        AutoreplyRule(
+            pattern=re.compile(r"A (\w+) is here"),
+            reply=r"kill \1<CR>",
+            exclusive=True,
+            until=r"\1 died\.",
+            post_command="look<CR>",
+        ),
+    ]
+    engine = AutoreplyEngine(rules, writer, writer.log)
+    engine.feed("A shark is here\n")
+    await asyncio.sleep(0.05)
+    assert engine.exclusive_active is True
+
+    engine.cancel()
+    assert engine.exclusive_active is False
+    assert engine.reply_pending is False
+
+    engine.feed("shark died.\n")
+    await asyncio.sleep(0.05)
+    assert not any("look" in w for w in written)
+
+
+@pytest.mark.asyncio
+async def test_reply_pending_tracks_chain():
+    writer, _ = _mock_writer()
+    rules = [AutoreplyRule(pattern=re.compile(r"hello"), reply="world<CR>")]
+    engine = AutoreplyEngine(rules, writer, writer.log)
+    assert engine.reply_pending is False
+
+    engine.feed("hello\n")
+    await asyncio.sleep(0.05)
+    assert engine.reply_pending is False
+
+
+@pytest.mark.asyncio
+async def test_cycle_matched_tracks_matches():
+    writer, _ = _mock_writer()
+    rules = [AutoreplyRule(pattern=re.compile(r"hello"), reply="world<CR>")]
+    engine = AutoreplyEngine(rules, writer, writer.log)
+    assert engine.cycle_matched is False
+
+    engine.feed("hello\n")
+    await asyncio.sleep(0.05)
+    assert engine.cycle_matched is True
+
+    engine.on_prompt()
+    assert engine.cycle_matched is False
+
+
+@pytest.mark.asyncio
+async def test_post_command_queued_on_until_clear():
+    writer, written = _mock_writer()
+    rules = [
+        AutoreplyRule(
+            pattern=re.compile(r"A (\w+) is here"),
+            reply=r"kill \1<CR>",
+            exclusive=True,
+            until=r"\1 died\.",
+            post_command="look<CR>",
+        ),
+    ]
+    engine = AutoreplyEngine(rules, writer, writer.log)
+    engine.feed("A shark is here\n")
+    await asyncio.sleep(0.05)
+    assert any("kill shark\r\n" in w for w in written)
+
+    engine.feed("shark died.\n")
+    await asyncio.sleep(0.05)
+    assert any("look\r\n" in w for w in written)
+
+
+@pytest.mark.asyncio
+async def test_post_command_not_queued_on_timeout():
+    writer, written = _mock_writer()
+    rules = [
+        AutoreplyRule(
+            pattern=re.compile(r"A (\w+) is here"),
+            reply=r"kill \1<CR>",
+            exclusive=True,
+            until=r"\1 died\.",
+            post_command="look<CR>",
+            exclusive_timeout=0.01,
+        ),
+    ]
+    engine = AutoreplyEngine(rules, writer, writer.log)
+    engine.feed("A shark is here\n")
+    await asyncio.sleep(0.05)
+    assert any("kill shark\r\n" in w for w in written)
+
+    await asyncio.sleep(0.02)
+    engine.feed("combat continues\n")
+    await asyncio.sleep(0.05)
+    assert not any("look" in w for w in written)
+
+
+@pytest.mark.asyncio
+async def test_post_command_enables_multi_kill():
+    writer, written = _mock_writer()
+    rules = [
+        AutoreplyRule(
+            pattern=re.compile(r"A (\w+) is here"),
+            reply=r"kill \1<CR>",
+            exclusive=True,
+            until=r"\1 died\.",
+            post_command="look<CR>",
+        ),
+    ]
+    engine = AutoreplyEngine(rules, writer, writer.log)
+    engine.feed("A shark is here\nAn octopus is here\n")
+    await asyncio.sleep(0.05)
+    assert sum(1 for w in written if "kill shark\r\n" in w) == 1
+    assert not any("kill octopus" in w for w in written)
+
+    engine.on_prompt()
+    engine.on_prompt()
+    engine.feed("shark died.\n")
+    await asyncio.sleep(0.05)
+    assert any("look\r\n" in w for w in written)
+
+    engine.on_prompt()
+    engine.on_prompt()
+    engine.feed("A octopus is here\n")
+    await asyncio.sleep(0.05)
+    assert sum(1 for w in written if "kill octopus\r\n" in w) == 1
+
+
+def test_parse_entries_post_command():
+    from telnetlib3.autoreply import _parse_entries
+
+    entries = [
+        {
+            "pattern": "monster",
+            "reply": "kill<CR>",
+            "exclusive": True,
+            "until": "died",
+            "post_command": "look<CR>",
+        },
+        {"pattern": "foo", "reply": "bar<CR>"},
+    ]
+    rules = _parse_entries(entries)
+    assert rules[0].post_command == "look<CR>"
+    assert rules[1].post_command == ""
+
+
+def test_save_autoreplies_post_command_roundtrip(tmp_path):
+    fp = tmp_path / "autoreplies.json"
+    original = [
+        AutoreplyRule(
+            pattern=re.compile(r"(\w+) attacks"),
+            reply=r"kill \1<CR>",
+            exclusive=True,
+            until=r"\1 died",
+            post_command="look<CR>",
+        ),
+        AutoreplyRule(pattern=re.compile(r"foo"), reply="bar<CR>"),
+    ]
+    save_autoreplies(str(fp), original, _SK)
+    loaded = load_autoreplies(str(fp), _SK)
+    assert loaded[0].post_command == "look<CR>"
+    assert loaded[1].post_command == ""
+
+    with open(str(fp), "r") as fh:
+        data = json.load(fh)
+    entries = data[_SK]["autoreplies"]
+    assert entries[0]["post_command"] == "look<CR>"
+    assert "post_command" not in entries[1]
+
+
+@pytest.mark.asyncio
+async def test_post_command_cleared_by_on_prompt():
+    writer, written = _mock_writer()
+    rules = [
+        AutoreplyRule(
+            pattern=re.compile(r"fight (\w+)"),
+            reply=r"attack \1<CR>",
+            exclusive=True,
+            post_command="look<CR>",
+        ),
+    ]
+    engine = AutoreplyEngine(rules, writer, writer.log)
+    engine.feed("fight goblin\n")
+    await asyncio.sleep(0.05)
+
+    engine.on_prompt()
+    engine.on_prompt()
+    assert not any("look" in w for w in written)

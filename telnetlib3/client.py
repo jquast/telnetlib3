@@ -198,6 +198,27 @@ class TelnetClient(client_base.BaseClient):
             self.log.info("GMCP: %s %r", package, data)
         else:
             self.log.debug("GMCP: %s %r", package, data)
+        if package == "Room.Info" and isinstance(data, dict) and "num" in data:
+            self._update_room_graph(data)
+
+    def _update_room_graph(self, data: Dict[str, Any]) -> None:
+        """Update room graph and persist on Room.Info GMCP message."""
+        room_graph = getattr(self.writer, "_room_graph", None)
+        if room_graph is None:
+            return
+        from .rooms import save_rooms, write_current_room  # pylint: disable=import-outside-toplevel
+
+        room_graph.update_room(data)
+        self.writer._current_room_num = str(data["num"])
+        room_changed = getattr(self.writer, "_room_changed", None)
+        if room_changed is not None:
+            room_changed.set()
+        rooms_file = getattr(self.writer, "_rooms_file", None)
+        if rooms_file:
+            save_rooms(rooms_file, room_graph)
+        current_room_file = getattr(self.writer, "_current_room_file", None)
+        if current_room_file:
+            write_current_room(current_room_file, str(data["num"]))
 
     def send_ttype(self) -> str:
         """Callback for responding to TTYPE requests."""
@@ -693,7 +714,7 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
             # pylint: disable-next=protected-access
-            writer_arg._color_filter = color_filter_obj  # type: ignore[union-attr]
+            writer_arg._color_filter = color_filter_obj
             await original_shell(reader, writer_arg)
 
         shell_callback = _color_shell
@@ -725,13 +746,13 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
             # pylint: disable-next=protected-access
-            writer_arg._raw_mode = raw_mode_val  # type: ignore[union-attr]
+            writer_arg._raw_mode = raw_mode_val
             if ascii_eol:
                 # pylint: disable-next=protected-access
-                writer_arg._ascii_eol = True  # type: ignore[union-attr]
+                writer_arg._ascii_eol = True
             if input_filter is not None:
                 # pylint: disable-next=protected-access
-                writer_arg._input_filter = input_filter  # type: ignore[union-attr]
+                writer_arg._input_filter = input_filter
             await _inner_shell(reader, writer_arg)
 
         shell_callback = _raw_shell
@@ -745,8 +766,8 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
             # pylint: disable=protected-access
-            writer_arg._repl_enabled = True  # type: ignore[union-attr]
-            writer_arg._history_file = args.get("history_file")  # type: ignore[union-attr]
+            writer_arg._repl_enabled = True
+            writer_arg._history_file = args.get("history_file")
             await _inner_repl(reader, writer_arg)
 
         shell_callback = _repl_shell
@@ -776,6 +797,22 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
         except ValueError:
             _macro_defs = []
 
+    # Room graph for GMCP Room.Info automapper
+    from .rooms import (  # pylint: disable=import-outside-toplevel
+        RoomGraph,
+        load_rooms,
+        rooms_path as _rooms_path_fn,
+        current_room_path as _current_room_path_fn,
+    )
+
+    _rooms_path = _rooms_path_fn(_session_key)
+    _current_room_file = _current_room_path_fn(_session_key)
+    _room_graph: RoomGraph
+    if os.path.exists(_rooms_path):
+        _room_graph = load_rooms(_rooms_path)
+    else:
+        _room_graph = RoomGraph()
+
     _inner_session = shell_callback
 
     async def _session_shell(
@@ -783,11 +820,16 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
         writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
     ) -> None:
         # pylint: disable=protected-access
-        writer_arg._session_key = _session_key  # type: ignore[union-attr]
-        writer_arg._autoreply_rules = _autoreply_rules  # type: ignore[union-attr]
-        writer_arg._autoreplies_file = _ar_path  # type: ignore[union-attr]
-        writer_arg._macro_defs = _macro_defs  # type: ignore[union-attr]
-        writer_arg._macros_file = _macro_path  # type: ignore[union-attr]
+        writer_arg._session_key = _session_key
+        writer_arg._autoreply_rules = _autoreply_rules
+        writer_arg._autoreplies_file = _ar_path
+        writer_arg._macro_defs = _macro_defs
+        writer_arg._macros_file = _macro_path
+        writer_arg._room_graph = _room_graph
+        writer_arg._rooms_file = _rooms_path
+        writer_arg._current_room_file = _current_room_file
+        writer_arg._current_room_num = ""
+        writer_arg._room_changed = asyncio.Event()
         await _inner_session(reader, writer_arg)
 
     shell_callback = _session_shell

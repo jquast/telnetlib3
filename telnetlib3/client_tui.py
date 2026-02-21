@@ -501,8 +501,14 @@ class SessionListScreen(Screen[None]):
     # -- Arrow key navigation between buttons and table -----------------------
 
     def on_key(self, event: events.Key) -> None:
-        """Arrow keys navigate between buttons and the session table."""
-        if event.key in ("up", "down", "left", "right"):
+        """Arrow/Home/End keys navigate between buttons and the session table."""
+        if event.key in ("home", "end"):
+            table = self.query_one("#session-table", DataTable)
+            if self.focused is table and table.row_count > 0:
+                row = 0 if event.key == "home" else table.row_count - 1
+                table.move_cursor(row=row)
+                event.prevent_default()
+        elif event.key in ("up", "down", "left", "right"):
             _handle_arrow_navigation(self, event, "#button-col", "#session-table")
 
     # -- Button handlers ----------------------------------------------------
@@ -1380,8 +1386,14 @@ class MacroEditScreen(Screen["bool | None"]):
             self._show_form(k, t, ena)
 
     def on_key(self, event: events.Key) -> None:
-        """Arrow/+/- keys navigate and reorder the macro table."""
-        if event.key in ("up", "down", "left", "right"):
+        """Arrow/Home/End/+/- keys navigate and reorder the macro table."""
+        if event.key in ("home", "end"):
+            table = self.query_one("#macro-table", DataTable)
+            if self.focused is table and table.row_count > 0:
+                row = 0 if event.key == "home" else table.row_count - 1
+                table.move_cursor(row=row)
+                event.prevent_default()
+        elif event.key in ("up", "down", "left", "right"):
             _handle_arrow_navigation(
                 self, event, "#macro-button-col", "#macro-table", "#macro-form"
             )
@@ -1496,16 +1508,16 @@ class AutoreplyEditScreen(Screen["bool | None"]):
     #autoreply-form .form-label-mid { width: 9; padding-top: 1; }
     #autoreply-form .form-gap { width: 2; }
     #autoreply-form .form-btn-spacer { width: 1; }
-    #autoreply-timeout { width: 9; }
-    #autoreply-cooldown { width: 9; }
+    #autoreply-timeout { width: 8; }
     """
 
-    def __init__(self, path: str, session_key: str = "") -> None:
+    def __init__(self, path: str, session_key: str = "", select_pattern: str = "") -> None:
         """Initialize autoreply editor with file path and session key."""
         super().__init__()
         self._path = path
         self._session_key = session_key
-        self._rules: list[tuple[str, str, bool, str, bool, bool, float, float]] = []
+        self._select_pattern = select_pattern
+        self._rules: list[tuple[str, str, bool, str, bool, bool, float, str]] = []
         self._editing_idx: int | None = None
 
     @property
@@ -1559,18 +1571,16 @@ class AutoreplyEditScreen(Screen["bool | None"]):
                                 id="autoreply-until",
                             )
                         with Horizontal(classes="field-row"):
-                            yield Label("Cooldown", classes="form-label")
-                            cd_input = Input(
-                                value="1.0", placeholder="seconds",
-                                id="autoreply-cooldown",
-                            )
-                            cd_input.tooltip = "Min seconds between re-fires (0 to disable)"
-                            yield cd_input
-                            yield Label("", classes="form-gap")
-                            yield Label("Timeout", classes="form-label")
+                            yield Label("Timeout", classes="form-label-short")
                             yield Input(
                                 value="30.0", placeholder="seconds",
                                 id="autoreply-timeout",
+                            )
+                            yield Label("", classes="form-gap")
+                            yield Label("Post Cmd", classes="form-label-mid")
+                            yield Input(
+                                placeholder="optional: look<CR>",
+                                id="autoreply-post-command",
                             )
                         with Horizontal(id="autoreply-form-buttons"):
                             yield Label(" ", classes="form-btn-spacer")
@@ -1586,6 +1596,11 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         self._load_from_file()
         self._refresh_table()
         self.query_one("#autoreply-form").display = False
+        if self._select_pattern:
+            for i, (pattern, *_rest) in enumerate(self._rules):
+                if pattern == self._select_pattern:
+                    table.move_cursor(row=i)
+                    break
 
     def _load_from_file(self) -> None:
         if not os.path.exists(self._path):
@@ -1596,7 +1611,8 @@ class AutoreplyEditScreen(Screen["bool | None"]):
             rules = load_autoreplies(self._path, self._session_key)
             self._rules = [
                 (r.pattern.pattern, r.reply, r.exclusive, r.until,
-                 r.always, r.enabled, r.exclusive_timeout, r.cooldown)
+                 r.always, r.enabled, r.exclusive_timeout,
+                 r.post_command)
                 for r in rules
             ]
         except (ValueError, FileNotFoundError):
@@ -1605,7 +1621,7 @@ class AutoreplyEditScreen(Screen["bool | None"]):
     def _refresh_table(self) -> None:
         table = self.query_one("#autoreply-table", DataTable)
         table.clear()
-        for i, (pattern, reply, exclusive, until, always, enabled, _timeout, *_rest) in enumerate(
+        for i, (pattern, reply, exclusive, until, always, enabled, _tout, _pcmd) in enumerate(
             self._rules
         ):
             flags = ""
@@ -1626,16 +1642,16 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         always: bool = False,
         enabled: bool = True,
         exclusive_timeout: float = 30.0,
-        cooldown: float = 1.0,
+        post_command: str = "",
     ) -> None:
         self.query_one("#autoreply-pattern", Input).value = pattern_val
         self.query_one("#autoreply-reply", Input).value = reply_val
         self.query_one("#autoreply-until", Input).value = until
+        self.query_one("#autoreply-post-command", Input).value = post_command
         self.query_one("#autoreply-exclusive", Switch).value = exclusive
         self.query_one("#autoreply-always", Switch).value = always
         self.query_one("#autoreply-enabled", Switch).value = enabled
         self.query_one("#autoreply-timeout", Input).value = str(exclusive_timeout)
-        self.query_one("#autoreply-cooldown", Input).value = str(cooldown)
         self.query_one("#autoreply-table").display = False
         self.query_one("#autoreply-form").display = True
         self.query_one("#autoreply-add", Button).disabled = True
@@ -1657,6 +1673,7 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         pattern_val = self.query_one("#autoreply-pattern", Input).value.strip()
         reply_val = self.query_one("#autoreply-reply", Input).value
         until_val = self.query_one("#autoreply-until", Input).value.strip()
+        post_cmd = self.query_one("#autoreply-post-command", Input).value.strip()
         exclusive = self.query_one("#autoreply-exclusive", Switch).value
         always = self.query_one("#autoreply-always", Switch).value
         enabled = self.query_one("#autoreply-enabled", Switch).value
@@ -1666,12 +1683,6 @@ class AutoreplyEditScreen(Screen["bool | None"]):
             )
         except ValueError:
             timeout_val = 30.0
-        try:
-            cooldown_val = float(
-                self.query_one("#autoreply-cooldown", Input).value.strip() or "1"
-            )
-        except ValueError:
-            cooldown_val = 1.0
         if pattern_val:
             import re  # pylint: disable=import-outside-toplevel
 
@@ -1683,12 +1694,12 @@ class AutoreplyEditScreen(Screen["bool | None"]):
             if self._editing_idx is not None:
                 self._rules[self._editing_idx] = (
                     pattern_val, reply_val, exclusive, until_val, always,
-                    enabled, timeout_val, cooldown_val,
+                    enabled, timeout_val, post_cmd,
                 )
             else:
                 self._rules.append(
                     (pattern_val, reply_val, exclusive, until_val, always,
-                     enabled, timeout_val, cooldown_val)
+                     enabled, timeout_val, post_cmd)
                 )
             self._refresh_table()
         self._hide_form()
@@ -1705,10 +1716,8 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         idx = self._selected_idx()
         if idx is not None and idx < len(self._rules):
             self._editing_idx = idx
-            entry = self._rules[idx]
-            p, r, excl, until, alw, ena, tout = entry[:7]
-            cd = entry[7] if len(entry) > 7 else 1.0
-            self._show_form(p, r, excl, until, alw, ena, tout, cd)
+            p, r, excl, until, alw, ena, tout, pcmd = self._rules[idx]
+            self._show_form(p, r, excl, until, alw, ena, tout, pcmd)
 
     def _copy_selected(self) -> None:
         """Duplicate the selected row."""
@@ -1724,14 +1733,18 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         idx = int(str(event.row_key.value))
         if idx < len(self._rules):
             self._editing_idx = idx
-            entry = self._rules[idx]
-            p, r, excl, until, alw, ena, tout = entry[:7]
-            cd = entry[7] if len(entry) > 7 else 1.0
-            self._show_form(p, r, excl, until, alw, ena, tout, cd)
+            p, r, excl, until, alw, ena, tout, pcmd = self._rules[idx]
+            self._show_form(p, r, excl, until, alw, ena, tout, pcmd)
 
     def on_key(self, event: events.Key) -> None:
-        """Arrow/+/- keys navigate and reorder the autoreply table."""
-        if event.key in ("up", "down", "left", "right"):
+        """Arrow/Home/End/+/- keys navigate and reorder the autoreply table."""
+        if event.key in ("home", "end"):
+            table = self.query_one("#autoreply-table", DataTable)
+            if self.focused is table and table.row_count > 0:
+                row = 0 if event.key == "home" else table.row_count - 1
+                table.move_cursor(row=row)
+                event.prevent_default()
+        elif event.key in ("up", "down", "left", "right"):
             _handle_arrow_navigation(
                 self, event, "#autoreply-button-col", "#autoreply-table",
                 "#autoreply-form",
@@ -1812,20 +1825,269 @@ class AutoreplyEditScreen(Screen["bool | None"]):
 
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
         rules = []
-        for entry in self._rules:
-            p, r, excl, until, alw, ena, tout = entry[:7]
-            cd = entry[7] if len(entry) > 7 else 1.0
+        for p, r, excl, until, alw, ena, tout, pcmd in self._rules:
             rules.append(AutoreplyRule(
                 pattern=re.compile(p, re.MULTILINE | re.DOTALL),
                 reply=r,
                 exclusive=excl,
                 until=until,
+                post_command=pcmd,
                 always=alw,
                 enabled=ena,
                 exclusive_timeout=tout,
-                cooldown=cd,
             ))
         save_autoreplies(self._path, rules, self._session_key)
+
+
+class RoomBrowserScreen(Screen["bool | None"]):
+    """Browser screen for GMCP room graph with search, bookmarks, fast travel."""
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "close", "Close", priority=True),
+        Binding("enter", "fast_travel", "Travel", show=True),
+        Binding("asterisk", "toggle_bookmark", "Bookmark", key_display="*", show=True,
+                priority=True),
+    ]
+
+    CSS = """
+    RoomBrowserScreen { align: center middle; }
+    #room-panel {
+        width: 91; height: 100%; max-height: 22;
+        border: round $surface-lighten-2; background: $surface; padding: 1 1;
+    }
+    #room-body { height: 1fr; }
+    #room-button-col {
+        width: 13; height: auto; padding-right: 1;
+    }
+    #room-button-col Button {
+        width: 100%; min-width: 0; margin-bottom: 0;
+    }
+    #room-right { width: 1fr; height: 100%; }
+    #room-search { dock: top; margin-bottom: 1; }
+    #room-table { height: 1fr; min-height: 4; overflow-x: hidden; }
+    #room-status { height: 1; margin-top: 0; }
+    """
+
+    def __init__(
+        self,
+        rooms_path: str,
+        session_key: str = "",
+        current_room_file: str = "",
+        fasttravel_file: str = "",
+    ) -> None:
+        """Initialize room browser."""
+        super().__init__()
+        self._rooms_path = rooms_path
+        self._session_key = session_key
+        self._current_room_file = current_room_file
+        self._fasttravel_file = fasttravel_file
+        self._all_rooms: list[tuple[str, str, str, int, bool]] = []
+
+    def compose(self) -> ComposeResult:
+        """Build the room browser layout."""
+        title = f"Room Browser \u2014 {self._session_key}" if self._session_key else "Room Browser"
+        with Vertical(id="room-panel"):
+            yield Static(title)
+            yield Input(placeholder="Search rooms...", id="room-search")
+            with Horizontal(id="room-body"):
+                with Vertical(id="room-button-col"):
+                    travel_btn = Button("Travel", variant="success", id="room-travel")
+                    travel_btn.tooltip = (
+                        "Fast travel: move without stopping, skip exclusive autoreplies"
+                    )
+                    yield travel_btn
+                    slow_btn = Button("Slow", variant="primary", id="room-slow-travel")
+                    slow_btn.tooltip = (
+                        "Slow travel: wait for autoreplies to finish in each room"
+                    )
+                    yield slow_btn
+                    yield Button("Bookmark", variant="warning", id="room-bookmark")
+                    yield Button("Close", id="room-close")
+                with Vertical(id="room-right"):
+                    yield DataTable(id="room-table")
+                    yield Static("", id="room-status")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        """Load rooms from file and populate table."""
+        table = self.query_one("#room-table", DataTable)
+        table.cursor_type = "row"
+        table.add_columns("\u2605", "Area", "Name", "Exits")
+        self._load_rooms()
+        self._refresh_table()
+        self._select_current_room()
+
+    def _select_current_room(self) -> None:
+        """Move cursor to the current room row, if known."""
+        if not self._current_room_file:
+            return
+        from telnetlib3.rooms import read_current_room  # pylint: disable=import-outside-toplevel
+
+        current = read_current_room(self._current_room_file)
+        if not current:
+            return
+        table = self.query_one("#room-table", DataTable)
+        for row_idx, row_key in enumerate(table.rows):
+            if row_key.value == current:
+                table.move_cursor(row=row_idx)
+                break
+
+    def _load_rooms(self) -> None:
+        """Load room data from JSON file."""
+        if not os.path.exists(self._rooms_path):
+            return
+        from telnetlib3.rooms import load_rooms  # pylint: disable=import-outside-toplevel
+
+        graph = load_rooms(self._rooms_path)
+        self._all_rooms = [
+            (r.num, r.name, r.area, len(r.exits), r.bookmarked)
+            for r in graph.rooms.values()
+        ]
+        self._all_rooms.sort(key=lambda r: (not r[4], r[2].lower(), r[1].lower()))
+
+    def _refresh_table(self, query: str = "") -> None:
+        """Refresh table rows, filtering by search query."""
+        table = self.query_one("#room-table", DataTable)
+        table.clear()
+        q = query.lower()
+        for num, name, area, exits, bookmarked in self._all_rooms:
+            if q and q not in name.lower() and q not in area.lower():
+                continue
+            star = "\u2605" if bookmarked else ""
+            table.add_row(star, area, name, str(exits), key=num)
+        status = self.query_one("#room-status", Static)
+        n_shown = table.row_count
+        n_total = len(self._all_rooms)
+        if query:
+            status.update(f"{n_shown}/{n_total} rooms shown")
+        else:
+            status.update(f"{n_total} rooms")
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Filter table when search input changes."""
+        if event.input.id == "room-search":
+            self._refresh_table(event.value)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button presses."""
+        if event.button.id == "room-close":
+            self.dismiss(None)
+        elif event.button.id == "room-travel":
+            self._do_fast_travel(slow=False)
+        elif event.button.id == "room-slow-travel":
+            self._do_fast_travel(slow=True)
+        elif event.button.id == "room-bookmark":
+            self._do_toggle_bookmark()
+
+    def on_key(self, event: events.Key) -> None:
+        """Arrow/Home/End keys navigate between search, buttons, and the room table."""
+        if event.key in ("home", "end"):
+            table = self.query_one("#room-table", DataTable)
+            if self.focused is table and table.row_count > 0:
+                row = 0 if event.key == "home" else table.row_count - 1
+                table.move_cursor(row=row)
+                event.prevent_default()
+            return
+        if event.key not in ("up", "down", "left", "right"):
+            return
+        focused = self.focused
+        search = self.query_one("#room-search", Input)
+        table = self.query_one("#room-table", DataTable)
+        buttons = list(self.query("#room-button-col Button"))
+        if focused is search:
+            if event.key == "down":
+                table.focus()
+                event.prevent_default()
+            elif event.key == "left" and buttons:
+                buttons[0].focus()
+                event.prevent_default()
+            return
+        if focused is table and event.key == "up":
+            if table.cursor_coordinate.row == 0:
+                search.focus()
+                event.prevent_default()
+                return
+        _handle_arrow_navigation(self, event, "#room-button-col", "#room-table")
+
+    def action_close(self) -> None:
+        """Close the room browser."""
+        self.dismiss(None)
+
+    def action_fast_travel(self) -> None:
+        """Initiate fast travel to the selected room."""
+        self._do_fast_travel(slow=False)
+
+    def action_toggle_bookmark(self) -> None:
+        """Toggle bookmark on the selected room."""
+        self._do_toggle_bookmark()
+
+    def _do_toggle_bookmark(self) -> None:
+        """Toggle bookmark flag on the currently selected room."""
+        table = self.query_one("#room-table", DataTable)
+        if table.row_count == 0:
+            return
+        row_key, _ = table.coordinate_to_cell_key(table.cursor_coordinate)
+        num = row_key.value
+        if num is None:
+            return
+
+        from telnetlib3.rooms import (  # pylint: disable=import-outside-toplevel
+            load_rooms, save_rooms,
+        )
+
+        graph = load_rooms(self._rooms_path)
+        graph.toggle_bookmark(num)
+        save_rooms(self._rooms_path, graph)
+
+        for i, (rnum, name, area, exits, bm) in enumerate(self._all_rooms):
+            if rnum == num:
+                self._all_rooms[i] = (rnum, name, area, exits, not bm)
+                break
+        self._all_rooms.sort(key=lambda r: (not r[4], r[2].lower(), r[1].lower()))
+        search_val = self.query_one("#room-search", Input).value
+        self._refresh_table(search_val)
+
+    def _do_fast_travel(self, slow: bool = False) -> None:
+        """Calculate path and write fast travel file."""
+        table = self.query_one("#room-table", DataTable)
+        if table.row_count == 0:
+            return
+        row_key, _ = table.coordinate_to_cell_key(table.cursor_coordinate)
+        dst_num = row_key.value
+        if dst_num is None:
+            return
+
+        from telnetlib3.rooms import (  # pylint: disable=import-outside-toplevel
+            load_rooms,
+            read_current_room,
+            write_fasttravel,
+        )
+
+        current = read_current_room(self._current_room_file)
+        if not current:
+            status = self.query_one("#room-status", Static)
+            status.update("No current room — move first")
+            return
+
+        if current == dst_num:
+            status = self.query_one("#room-status", Static)
+            status.update("Already in this room")
+            return
+
+        graph = load_rooms(self._rooms_path)
+        path = graph.find_path_with_rooms(current, dst_num)
+        if path is None:
+            dst_name = ""
+            for rnum, name, *_ in self._all_rooms:
+                if rnum == dst_num:
+                    dst_name = name
+                    break
+            status = self.query_one("#room-status", Static)
+            status.update(f"No path found to {dst_name or dst_num}")
+            return
+
+        write_fasttravel(self._fasttravel_file, path, slow=slow)
+        self.dismiss(True)
 
 
 class _EditorApp(App[None]):
@@ -1917,12 +2179,35 @@ def edit_macros_main(path: str, session_key: str = "") -> None:
     app.run()
 
 
-def edit_autoreplies_main(path: str, session_key: str = "") -> None:
+def edit_autoreplies_main(
+    path: str, session_key: str = "", select_pattern: str = ""
+) -> None:
     """Launch standalone autoreply editor TUI."""
     _restore_blocking_fds()
     _enable_faulthandler()
     _patch_writer_thread_queue()
-    app = _EditorApp(AutoreplyEditScreen(path=path, session_key=session_key))
+    app = _EditorApp(AutoreplyEditScreen(
+        path=path, session_key=session_key, select_pattern=select_pattern,
+    ))
+    app.run()
+
+
+def edit_rooms_main(
+    rooms_path: str,
+    session_key: str = "",
+    current_room_file: str = "",
+    fasttravel_file: str = "",
+) -> None:
+    """Launch standalone room browser TUI."""
+    _restore_blocking_fds()
+    _enable_faulthandler()
+    _patch_writer_thread_queue()
+    app = _EditorApp(RoomBrowserScreen(
+        rooms_path=rooms_path,
+        session_key=session_key,
+        current_room_file=current_room_file,
+        fasttravel_file=fasttravel_file,
+    ))
     app.run()
 
 

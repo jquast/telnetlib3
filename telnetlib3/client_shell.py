@@ -637,7 +637,7 @@ else:
                             wait_fn=_ar_wait,
                         )
                         # pylint: disable-next=protected-access
-                        telnet_writer._autoreply_engine = _ar_engine  # type: ignore[union-attr]
+                        telnet_writer._autoreply_engine = _ar_engine
                 if _ar_engine is not None:
                     _ar_engine.feed(out)
                 if raw_mode is None:
@@ -738,7 +738,7 @@ else:
                 _prompt_ready_raw.clear()
 
             # Attach wait_fn to writer so _raw_event_loop can pick it up.
-            telnet_writer._autoreply_wait_fn = _wait_for_prompt_raw  # type: ignore[union-attr]
+            telnet_writer._autoreply_wait_fn = _wait_for_prompt_raw
 
             repl_enabled = getattr(telnet_writer, "_repl_enabled", False)
             raw_mode_val = _get_raw_mode(telnet_writer)

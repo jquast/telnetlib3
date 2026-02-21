@@ -15,6 +15,7 @@ textual = pytest.importorskip("textual", reason="textual not installed")
 # 3rd party
 from textual.widgets import (  # noqa: E402
     Input,
+    Button,
     Select,
     Switch,
     DataTable,
@@ -28,6 +29,7 @@ from telnetlib3.client_tui import (  # noqa: E402
     DEFAULTS_KEY,
     SessionConfig,
     MacroEditScreen,
+    RoomBrowserScreen,
     TelnetSessionApp,
     SessionEditScreen,
     SessionListScreen,
@@ -41,6 +43,7 @@ from telnetlib3.client_tui import (  # noqa: E402
     _relative_time,
     _build_tooltips,
     edit_macros_main,
+    edit_rooms_main,
     edit_autoreplies_main,
 )
 
@@ -284,14 +287,14 @@ def test_autoreply_screen_loads_file(tmp_path) -> None:
     screen = AutoreplyEditScreen(path=str(fp), session_key=sk)
     screen._load_from_file()
     assert len(screen._rules) == 1
-    assert screen._rules[0] == (r"\d+ gold", "get gold<CR>", False, "", False, True, 30.0, 1.0)
+    assert screen._rules[0] == (r"\d+ gold", "get gold<CR>", False, "", False, True, 30.0, "")
 
 
 def test_autoreply_screen_save(tmp_path) -> None:
     sk = "test.host:23"
     fp = tmp_path / "autoreplies.json"
     screen = AutoreplyEditScreen(path=str(fp), session_key=sk)
-    screen._rules = [(r"\d+ gold", "get gold<CR>", False, "", False, True, 30.0, 1.0)]
+    screen._rules = [(r"\d+ gold", "get gold<CR>", False, "", False, True, 30.0, "")]
     screen._save_to_file()
 
     from telnetlib3.autoreply import load_autoreplies
@@ -307,7 +310,7 @@ def test_autoreply_screen_rejects_bad_regex(tmp_path) -> None:
 
     fp = tmp_path / "autoreplies.json"
     screen = AutoreplyEditScreen(path=str(fp))
-    screen._rules = [("[invalid", "x", False, "", False, True, 30.0, 1.0)]
+    screen._rules = [("[invalid", "x", False, "", False, True, 30.0, "")]
     with pytest.raises(re.error):
         screen._save_to_file()
 
@@ -717,7 +720,7 @@ _AUTOREPLY_PARAMS = (
     "autoreplies",
     "autoreply",
     [{"pattern": r"\d+ gold", "reply": "get gold<CR>"}],
-    (r"\d+ gold", "get gold<CR>", False, "", False, True, 30.0),
+    (r"\d+ gold", "get gold<CR>", False, "", False, True, 30.0, ""),
     ("#autoreply-pattern", "#autoreply-reply"),
 )
 
@@ -867,7 +870,7 @@ class TestEditorScreenTextual:
             await pilot.pause()
             screen.query_one("#autoreply-pattern", Input).value = "hello"
             screen.query_one("#autoreply-reply", Input).value = "world<CR>"
-            screen._rules.append(("hello", "world<CR>", False, "", False, True, 30.0))
+            screen._rules.append(("hello", "world<CR>", False, "", False, True, 30.0, ""))
             screen._refresh_table()
             screen._hide_form()
             await pilot.pause()
@@ -1436,3 +1439,263 @@ async def test_arrow_nav_editor_buttons(tmp_path, app_cls, filename, data_key, b
         await pilot.press("down")
         await pilot.pause()
         assert screen.focused is buttons[1]
+
+
+# --- Room Browser Tests ---
+
+
+class _RoomBrowserApp(textual.app.App[None]):
+    def __init__(self, rooms_path: str, current_room_file: str = "",
+                 fasttravel_file: str = "") -> None:
+        super().__init__()
+        self._rooms_path = rooms_path
+        self._current_room_file = current_room_file
+        self._fasttravel_file = fasttravel_file
+
+    def on_mount(self) -> None:
+        self.push_screen(
+            RoomBrowserScreen(
+                rooms_path=self._rooms_path,
+                session_key=_TEST_SK,
+                current_room_file=self._current_room_file,
+                fasttravel_file=self._fasttravel_file,
+            ),
+            callback=lambda _: None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_room_browser_mounts_empty(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    app = _RoomBrowserApp(str(fp))
+    async with app.run_test(size=(90, 24)) as pilot:
+        await pilot.pause()
+        table = app.screen.query_one("#room-table", DataTable)
+        assert table.row_count == 0
+
+
+@pytest.mark.asyncio
+async def test_room_browser_shows_rooms(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    from telnetlib3.rooms import RoomGraph, save_rooms
+    g = RoomGraph()
+    g.update_room({"num": "1", "name": "Town Square", "area": "mid", "exits": {"n": "2"}})
+    g.update_room({"num": "2", "name": "Dark Forest", "area": "wild", "exits": {"s": "1"}})
+    save_rooms(str(fp), g)
+
+    app = _RoomBrowserApp(str(fp))
+    async with app.run_test(size=(90, 24)) as pilot:
+        await pilot.pause()
+        table = app.screen.query_one("#room-table", DataTable)
+        assert table.row_count == 2
+
+
+@pytest.mark.asyncio
+async def test_room_browser_search_filters(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    from telnetlib3.rooms import RoomGraph, save_rooms
+    g = RoomGraph()
+    g.update_room({"num": "1", "name": "Town Square", "area": "mid"})
+    g.update_room({"num": "2", "name": "Dark Forest", "area": "wild"})
+    save_rooms(str(fp), g)
+
+    app = _RoomBrowserApp(str(fp))
+    async with app.run_test(size=(90, 24)) as pilot:
+        await pilot.pause()
+        search = app.screen.query_one("#room-search", Input)
+        search.focus()
+        await pilot.press("t", "o", "w", "n")
+        await pilot.pause()
+        table = app.screen.query_one("#room-table", DataTable)
+        assert table.row_count == 1
+
+
+@pytest.mark.asyncio
+async def test_room_browser_bookmark_toggle(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    from telnetlib3.rooms import RoomGraph, save_rooms, load_rooms
+    g = RoomGraph()
+    g.update_room({"num": "1", "name": "Town Square", "area": "mid"})
+    save_rooms(str(fp), g)
+
+    app = _RoomBrowserApp(str(fp))
+    async with app.run_test(size=(90, 24)) as pilot:
+        await pilot.pause()
+        table = app.screen.query_one("#room-table", DataTable)
+        table.focus()
+        await pilot.pause()
+        btn = app.screen.query_one("#room-bookmark", Button)
+        btn.press()
+        await pilot.pause()
+
+    reloaded = load_rooms(str(fp))
+    assert reloaded.rooms["1"].bookmarked is True
+
+
+@pytest.mark.asyncio
+async def test_room_browser_travel_no_current_room(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    cr = tmp_path / ".current-room"
+    ft = tmp_path / ".fasttravel"
+    from telnetlib3.rooms import RoomGraph, save_rooms
+    g = RoomGraph()
+    g.update_room({"num": "1", "name": "Town Square", "area": "mid"})
+    save_rooms(str(fp), g)
+
+    app = _RoomBrowserApp(str(fp), str(cr), str(ft))
+    async with app.run_test(size=(90, 24)) as pilot:
+        await pilot.pause()
+        table = app.screen.query_one("#room-table", DataTable)
+        table.focus()
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert not ft.exists()
+
+
+@pytest.mark.asyncio
+async def test_room_browser_fast_travel_writes_file(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    cr = tmp_path / ".current-room"
+    ft = tmp_path / ".fasttravel"
+    from telnetlib3.rooms import RoomGraph, save_rooms, write_current_room
+    g = RoomGraph()
+    g.update_room({"num": "1", "name": "Start", "exits": {"east": "2"}})
+    g.update_room({"num": "2", "name": "End", "exits": {"west": "1"}})
+    save_rooms(str(fp), g)
+    write_current_room(str(cr), "1")
+
+    app = _RoomBrowserApp(str(fp), str(cr), str(ft))
+    async with app.run_test(size=(90, 24)) as pilot:
+        await pilot.pause()
+        table = app.screen.query_one("#room-table", DataTable)
+        table.focus()
+        await pilot.pause()
+        await pilot.press("down")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_room_browser_arrow_nav_table_to_buttons(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    from telnetlib3.rooms import RoomGraph, save_rooms
+    g = RoomGraph()
+    g.update_room({"num": "1", "name": "Room A", "area": "area"})
+    save_rooms(str(fp), g)
+
+    app = _RoomBrowserApp(str(fp))
+    async with app.run_test(size=(90, 24)) as pilot:
+        await pilot.pause()
+        table = app.screen.query_one("#room-table", DataTable)
+        table.focus()
+        await pilot.press("left")
+        await pilot.pause()
+        buttons = list(app.screen.query("#room-button-col Button"))
+        assert app.screen.focused is buttons[0]
+
+
+@pytest.mark.asyncio
+async def test_room_browser_arrow_nav_buttons_to_table(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    from telnetlib3.rooms import RoomGraph, save_rooms
+    g = RoomGraph()
+    g.update_room({"num": "1", "name": "Room A", "area": "area"})
+    save_rooms(str(fp), g)
+
+    app = _RoomBrowserApp(str(fp))
+    async with app.run_test(size=(90, 24)) as pilot:
+        await pilot.pause()
+        buttons = list(app.screen.query("#room-button-col Button"))
+        buttons[0].focus()
+        await pilot.press("right")
+        await pilot.pause()
+        table = app.screen.query_one("#room-table", DataTable)
+        assert app.screen.focused is table
+
+
+@pytest.mark.asyncio
+async def test_room_browser_arrow_nav_between_buttons(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    app = _RoomBrowserApp(str(fp))
+    async with app.run_test(size=(90, 24)) as pilot:
+        await pilot.pause()
+        buttons = list(app.screen.query("#room-button-col Button"))
+        buttons[0].focus()
+        await pilot.press("down")
+        await pilot.pause()
+        assert app.screen.focused is buttons[1]
+
+
+@pytest.mark.asyncio
+async def test_room_browser_arrow_nav_search_down_to_table(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    from telnetlib3.rooms import RoomGraph, save_rooms
+    g = RoomGraph()
+    g.update_room({"num": "1", "name": "Room A", "area": "area"})
+    save_rooms(str(fp), g)
+
+    app = _RoomBrowserApp(str(fp))
+    async with app.run_test(size=(90, 24)) as pilot:
+        await pilot.pause()
+        search = app.screen.query_one("#room-search", Input)
+        search.focus()
+        await pilot.press("down")
+        await pilot.pause()
+        table = app.screen.query_one("#room-table", DataTable)
+        assert app.screen.focused is table
+
+
+@pytest.mark.asyncio
+async def test_room_browser_arrow_nav_table_up_to_search(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    from telnetlib3.rooms import RoomGraph, save_rooms
+    g = RoomGraph()
+    g.update_room({"num": "1", "name": "Room A", "area": "area"})
+    save_rooms(str(fp), g)
+
+    app = _RoomBrowserApp(str(fp))
+    async with app.run_test(size=(90, 24)) as pilot:
+        await pilot.pause()
+        table = app.screen.query_one("#room-table", DataTable)
+        table.focus()
+        await pilot.pause()
+        await pilot.press("up")
+        await pilot.pause()
+        search = app.screen.query_one("#room-search", Input)
+        assert app.screen.focused is search
+
+
+@pytest.mark.asyncio
+async def test_room_browser_arrow_nav_search_left_to_buttons(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    app = _RoomBrowserApp(str(fp))
+    async with app.run_test(size=(90, 24)) as pilot:
+        await pilot.pause()
+        search = app.screen.query_one("#room-search", Input)
+        search.focus()
+        await pilot.press("left")
+        await pilot.pause()
+        buttons = list(app.screen.query("#room-button-col Button"))
+        assert app.screen.focused is buttons[0]
+
+
+@pytest.mark.asyncio
+async def test_room_browser_selects_current_room(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    cr = tmp_path / ".current-room"
+    from telnetlib3.rooms import RoomGraph, save_rooms, write_current_room
+    g = RoomGraph()
+    g.update_room({"num": "1", "name": "Alpha", "area": "zone"})
+    g.update_room({"num": "2", "name": "Beta", "area": "zone"})
+    g.update_room({"num": "3", "name": "Gamma", "area": "zone"})
+    save_rooms(str(fp), g)
+    write_current_room(str(cr), "2")
+
+    app = _RoomBrowserApp(str(fp), current_room_file=str(cr))
+    async with app.run_test(size=(90, 24)) as pilot:
+        await pilot.pause()
+        table = app.screen.query_one("#room-table", DataTable)
+        row_key, _ = table.coordinate_to_cell_key(table.cursor_coordinate)
+        assert row_key.value == "2"

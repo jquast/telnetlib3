@@ -112,7 +112,12 @@ disable = [
     "too-many-public-methods",
     "too-few-public-methods",
     "too-many-arguments",
-    "duplicate-code",  # intentional re-exports in telnetlib.py and telopt.py
+    # intentional re-exports in telnetlib.py and telopt.py
+    "duplicate-code",
+    # my deepest apologies to downstream developers who are also type-lovers, our 'writer' can be
+    # *either*  TelnetWriter or TelnetUnicodeWriter, depending on the arguments passed, designed
+    # several years before python first provided Typing, the API can't be changed this late!
+    "union-attr",
 ]
 
 [tool.pylint.format]

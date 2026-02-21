@@ -173,8 +173,8 @@ def _vital_bar(
 
     prefix = "HP" if kind == "hp" else "MP"
     return [
-        ("fg:#cccccc", prefix),
-        ("fg:black", ":"),
+        ("fg:#dddddd", prefix),
+        ("fg:#dddddd", ":"),
         (filled_style, filled_text),
         (empty_style, empty_text),
     ]
@@ -286,12 +286,17 @@ if HAS_PROMPT_TOOLKIT:
                 """F8 opens macro editor TUI in subprocess."""
                 _launch_tui_editor(event, "macros", telnet_writer, self._replay_buf)
 
+            @kb.add("f7")
+            def _browse_rooms(event: Any) -> None:
+                """F7 opens room browser TUI in subprocess."""
+                _launch_room_browser(event, telnet_writer, self._replay_buf)
+
             @kb.add("f9")
             def _edit_autoreplies(event: Any) -> None:
                 """F9 opens autoreply editor TUI in subprocess."""
                 _launch_tui_editor(event, "autoreplies", telnet_writer, self._replay_buf)
 
-            self._rprompt_text = "F1 Help"
+            self._rprompt_text = connection_info or ""
             self._autoreply_engine: Any = None
             self._last_hp: Optional[int] = None
             self._last_mp: Optional[int] = None
@@ -302,8 +307,8 @@ if HAS_PROMPT_TOOLKIT:
                 "": "fg:#cccccc bg:#2a0000",
                 "bottom-toolbar": "noreverse",
                 "bottom-toolbar.text": "",
-                "rprompt-info": "fg:black",
-                "rprompt": "fg:black bg:#2a0000",
+                "rprompt-info": "fg:#dddddd",
+                "rprompt": "fg:#dddddd bg:#2a0000",
                 "auto-suggest": "fg:#666666",
             })
             self._style_autoreply = prompt_toolkit.styles.Style.from_dict({
@@ -526,6 +531,7 @@ def _show_help(_event: Any, macro_defs: "Any" = None) -> None:
             "  telnetlib3 \u2014 Keybindings",
             "",
             "  F1          This help screen",
+            "  F7          Browse rooms / fast travel",
             "  F8          Edit macros (TUI editor)",
             "  F9          Edit autoreplies (TUI editor)",
             "  Ctrl+]      Disconnect",
@@ -614,16 +620,20 @@ def _launch_tui_editor(
     if editor_type == "macros":
         path = getattr(writer, "_macros_file", None) or os.path.join(_config_dir, "macros.json")
         entry = "edit_macros_main"
+        cmd_args = f"{path!r}, {_session_key!r}"
     else:
         path = getattr(writer, "_autoreplies_file", None) or os.path.join(
             _config_dir, "autoreplies.json"
         )
         entry = "edit_autoreplies_main"
+        engine = getattr(writer, "_autoreply_engine", None)
+        _select = getattr(engine, "last_matched_pattern", "") if engine else ""
+        cmd_args = f"{path!r}, {_session_key!r}, select_pattern={_select!r}"
 
     cmd = [
         sys.executable,
         "-c",
-        f"from telnetlib3.client_tui import {entry}; " f"{entry}({path!r}, {_session_key!r})",
+        f"from telnetlib3.client_tui import {entry}; {entry}({cmd_args})",
     ]
 
     log = logging.getLogger(__name__)
@@ -717,9 +727,9 @@ def _reload_macros(
 
     try:
         # pylint: disable=protected-access
-        writer._macro_defs = load_macros(path, session_key)  # type: ignore[union-attr]
-        writer._macros_file = path  # type: ignore[union-attr]
-        n_macros = len(writer._macro_defs)  # type: ignore[union-attr]
+        writer._macro_defs = load_macros(path, session_key)
+        writer._macros_file = path
+        n_macros = len(writer._macro_defs)
         # pylint: enable=protected-access
         log.info("reloaded %d macros from %s", n_macros, path)
     except ValueError as exc:
@@ -741,13 +751,270 @@ def _reload_autoreplies(
 
     try:
         # pylint: disable=protected-access
-        writer._autoreply_rules = load_autoreplies(path, session_key)  # type: ignore[union-attr]
-        writer._autoreplies_file = path  # type: ignore[union-attr]
-        n_rules = len(writer._autoreply_rules)  # type: ignore[union-attr]
+        writer._autoreply_rules = load_autoreplies(path, session_key)
+        writer._autoreplies_file = path
+        n_rules = len(writer._autoreply_rules)
         # pylint: enable=protected-access
         log.info("reloaded %d autoreplies from %s", n_rules, path)
     except ValueError as exc:
         log.warning("failed to reload autoreplies: %s", exc)
+
+
+def _launch_room_browser(
+    _event: Any,
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    replay_buf: Optional["OutputRingBuffer"] = None,
+) -> None:
+    """
+    Launch the room browser TUI in a subprocess.
+
+    On return, check for a fast travel file and queue movement commands.
+
+    :param _event: prompt_toolkit key event (unused).
+    :param writer: Telnet writer with session attributes.
+    :param replay_buf: Optional replay buffer for screen repaint on return.
+    """
+    import os  # pylint: disable=import-outside-toplevel,redefined-outer-name
+    import subprocess  # pylint: disable=import-outside-toplevel
+
+    _session_key = getattr(writer, "_session_key", "")
+    if not _session_key:
+        return
+
+    from .rooms import (  # pylint: disable=import-outside-toplevel
+        rooms_path as _rooms_path_fn,
+        current_room_path as _current_room_path_fn,
+        fasttravel_path as _fasttravel_path_fn,
+        read_fasttravel,
+    )
+
+    _rp = getattr(writer, "_rooms_file", None) or _rooms_path_fn(_session_key)
+    _crp = getattr(writer, "_current_room_file", None) or _current_room_path_fn(_session_key)
+    _ftp = _fasttravel_path_fn(_session_key)
+
+    cmd = [
+        sys.executable,
+        "-c",
+        f"from telnetlib3.client_tui import edit_rooms_main; "
+        f"edit_rooms_main({_rp!r}, {_session_key!r}, {_crp!r}, {_ftp!r})",
+    ]
+
+    log = logging.getLogger(__name__)
+
+    def _run_browser() -> None:
+        global _editor_active  # noqa: PLW0603  # pylint: disable=global-statement
+        sys.stdout.write("\x1b[r")
+        sys.stdout.flush()
+        sys.stderr.flush()
+        sys.__stderr__.flush()
+        _editor_active = True
+        try:
+            subprocess.run(cmd, check=False)
+        except FileNotFoundError:
+            log.warning("could not launch room browser subprocess")
+        finally:
+            _editor_active = False
+            try:
+                os.set_blocking(sys.stdin.fileno(), True)
+            except OSError:
+                pass
+            sys.stdout.write(
+                "\x1b[m"
+                "\x1b[?25h"
+                "\x1b[?1049l"
+                "\x1b[?1000l"
+                "\x1b[?1002l"
+                "\x1b[?1003l"
+                "\x1b[?1006l"
+                "\x1b[?2004l"
+            )
+            try:
+                _tsize = os.get_terminal_size()
+            except OSError:
+                _tsize = os.terminal_size((80, 24))
+            scroll_bottom = max(1, _tsize.lines - _PT_RESERVE_BOTTOM)
+            sys.stdout.write("\x1b[2J\x1b[H")
+            sys.stdout.write(f"\x1b[1;{scroll_bottom}r")
+            sys.stdout.write("\x1b[1;1H")
+            if replay_buf is not None:
+                data = replay_buf.replay()
+                if data:
+                    sys.stdout.write(data.decode("utf-8", errors="replace"))
+            sys.stdout.write("\x1b7")
+            _input_row = _tsize.lines - _PT_RESERVE_BOTTOM + 1
+            for _r in range(_input_row, _tsize.lines + 1):
+                sys.stdout.write(f"\x1b[{_r};1H\x1b[2K")
+            sys.stdout.flush()
+
+        # Reload room graph from disk to pick up bookmark changes made in TUI.
+        from .rooms import load_rooms as _load_rooms  # pylint: disable=import-outside-toplevel
+        if os.path.exists(_rp):
+            _reloaded = _load_rooms(_rp)
+            room_graph = getattr(writer, "_room_graph", None)
+            if room_graph is not None:
+                room_graph.rooms = _reloaded.rooms
+
+        steps, slow = read_fasttravel(_ftp)
+        if steps:
+            log.debug("fast travel: scheduling %d steps (slow=%s)", len(steps), slow)
+            loop = asyncio.get_event_loop()
+            loop.call_soon_threadsafe(
+                asyncio.ensure_future,
+                _fast_travel(steps, writer, log, slow=slow),
+            )
+
+    from prompt_toolkit.application import (  # pylint: disable=import-error,import-outside-toplevel
+        get_app,
+        run_in_terminal,
+    )
+
+    run_in_terminal(_run_browser)
+    app = get_app()
+    app.renderer.reset()
+    app.invalidate()
+
+
+async def _fast_travel(
+    steps: list[tuple[str, str]],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    log: logging.Logger,
+    slow: bool = False,
+) -> None:
+    """
+    Execute fast travel by sending movement commands with GA/EOR pacing.
+
+    Uses the same ``_wait_for_prompt`` / ``_echo_command`` functions that
+    the autoreply engine and manual input use, so commands are paced by
+    the server's GA/EOR prompt signal and echoed visibly.
+
+    In fast mode (default), exclusive autoreplies are suppressed.
+    Non-exclusive autoreplies still fire; travel pauses until they
+    complete and then waits for a clean EOR with no match before
+    sending the next direction.
+
+    In slow mode, all autoreplies fire including exclusive ones.
+
+    :param steps: List of (direction, expected_room_num) pairs.
+    :param writer: Telnet writer for sending commands.
+    :param log: Logger.
+    :param slow: If ``True``, allow exclusive autoreplies.
+    """
+    wait_fn = getattr(writer, "_wait_for_prompt", None)
+    echo_fn = getattr(writer, "_echo_command", None)
+
+    from .autoreply import AutoreplyEngine  # pylint: disable=import-outside-toplevel
+
+    def _get_engine() -> Optional["AutoreplyEngine"]:
+        """Find the active autoreply engine, if any."""
+        # Stashed by _refresh_autoreply_engine via repl._autoreply_engine
+        # which is the same object as the one feeding on server output.
+        return getattr(writer, "_autoreply_engine", None)
+
+    engine = _get_engine()
+    if engine is not None and not slow:
+        engine.suppress_exclusive = True
+
+    mode = "slow travel" if slow else "fast travel"
+
+    from .rooms import RoomGraph  # pylint: disable=import-outside-toplevel
+
+    def _room_name(num: str) -> str:
+        """Look up a human-readable room name from the writer's graph."""
+        graph: Optional[RoomGraph] = getattr(writer, "_room_graph", None)
+        if graph is not None:
+            room = graph.rooms.get(num)
+            if room is not None:
+                return f"{room.name} ({num[:8]}...)"
+        return num
+
+    room_changed = getattr(writer, "_room_changed", None)
+    _max_retries = 3
+
+    try:
+        for i, (direction, expected_room) in enumerate(steps):
+            prev_room = getattr(writer, "_current_room_num", "")
+
+            for attempt in range(_max_retries + 1):
+                # Delay between steps (and retries) for server rate limits.
+                if i > 0 or attempt > 0:
+                    await asyncio.sleep(0.15)
+
+                if room_changed is not None:
+                    room_changed.clear()
+
+                tag = f" [{i + 1}/{len(steps)}]"
+                if attempt == 0:
+                    log.info("%s [%d/%d] %s", mode, i + 1, len(steps), direction)
+                    if echo_fn is not None:
+                        echo_fn(direction + tag)
+                else:
+                    log.info("%s [%d/%d] %s (retry %d)",
+                             mode, i + 1, len(steps), direction, attempt)
+                # Clear prompt_ready before sending so wait_fn waits
+                # for a FRESH GA/EOR from this step's response.  The
+                # server sends multiple GA/EORs per response (room
+                # prompt + GMCP vitals updates), and stale signals
+                # from the previous step cause wait_fn to return
+                # before the current room output has been received.
+                _prompt_ready = getattr(writer, "_prompt_ready", None)
+                if _prompt_ready is not None:
+                    _prompt_ready.clear()
+
+                writer.write(direction + "\r\n")
+
+                if wait_fn is not None:
+                    await wait_fn()
+
+                # Yield to let _read_server feed the room output to the
+                # autoreply engine before we check reply_pending.
+                await asyncio.sleep(0)
+
+                engine = _get_engine()
+                if engine is not None:
+                    while engine.reply_pending:
+                        await asyncio.sleep(0.05)
+                    # In slow mode, exclusive rules enter exclusive mode
+                    # (e.g. "kill" sent, waiting for "died\.").  Wait for
+                    # combat to finish before moving to the next room.
+                    if slow and engine.exclusive_active:
+                        while engine.exclusive_active:
+                            await asyncio.sleep(0.05)
+                        # After exclusive clears, drain any new replies
+                        # that the "until" match may have queued.
+                        while engine.reply_pending:
+                            await asyncio.sleep(0.05)
+
+                # GMCP Room.Info may arrive after the EOR.  Wait for it.
+                actual = getattr(writer, "_current_room_num", "")
+                if expected_room and actual != expected_room and room_changed is not None:
+                    try:
+                        await asyncio.wait_for(room_changed.wait(), timeout=2.0)
+                    except asyncio.TimeoutError:
+                        pass
+                    actual = getattr(writer, "_current_room_num", "")
+
+                if actual == expected_room:
+                    break
+                # Room didn't change — server likely rejected move (rate limit).
+                # Retry unless we've exhausted attempts.
+                if actual == prev_room and attempt < _max_retries:
+                    continue
+                # Arrived at wrong room — abort.
+                break
+
+            if expected_room and actual and actual != expected_room:
+                expected_name = _room_name(expected_room)
+                actual_name = _room_name(actual)
+                msg = (f"{mode} stopped: expected {expected_name} after "
+                       f"'{direction}', got {actual_name}")
+                log.warning("%s", msg)
+                if echo_fn is not None:
+                    echo_fn(msg)
+                break
+    finally:
+        engine = _get_engine()
+        if engine is not None:
+            engine.suppress_exclusive = False
 
 
 class BasicLineRepl:
@@ -1061,6 +1328,32 @@ if sys.platform != "win32":
             )
             repl._replay_buf = replay_buf  # pylint: disable=protected-access
 
+            # Patch prompt_toolkit's Application._on_resize so that
+            # SIGWINCH (which pt handles during prompt_async) also
+            # updates our DECSTBM scroll region and replays the buffer.
+            # Without this, pt overrides our SIGWINCH handler but never
+            # updates the scroll region, causing screen corruption.
+            _pt_app = repl._session.app  # pylint: disable=protected-access
+            _orig_pt_on_resize = _pt_app._on_resize
+
+            def _combined_on_resize() -> None:
+                new_rows, new_cols = _get_terminal_size()
+                scroll.update_size(new_rows, new_cols)
+                _on_resize_repaint(new_rows, new_cols)
+                # Send updated window size to server.
+                from .telopt import NAWS  # pylint: disable=import-outside-toplevel
+
+                try:
+                    if (telnet_writer.local_option.enabled(NAWS)
+                            and not telnet_writer.is_closing()):
+                        # pylint: disable-next=protected-access
+                        telnet_writer._send_naws()
+                except Exception:  # pylint: disable=broad-exception-caught
+                    pass
+                _orig_pt_on_resize()
+
+            _pt_app._on_resize = _combined_on_resize
+
             def _insert_into_prompt(text: str) -> None:
                 app = repl._session.app  # pylint: disable=protected-access
                 if app and app.current_buffer:
@@ -1110,6 +1403,11 @@ if sys.platform != "win32":
                     pass
                 prompt_ready.clear()
 
+            # Stash pacing/echo functions for fast travel to use.
+            telnet_writer._wait_for_prompt = _wait_for_prompt  # type: ignore[union-attr]
+            telnet_writer._echo_command = _echo_autoreply  # type: ignore[union-attr]
+            telnet_writer._prompt_ready = prompt_ready  # type: ignore[union-attr]
+
             autoreply_engine = None
             _ar_rules_ref: object = None
 
@@ -1134,6 +1432,7 @@ if sys.platform != "win32":
                         wait_fn=_wait_for_prompt,
                     )
                 repl._autoreply_engine = autoreply_engine
+                telnet_writer._autoreply_engine = autoreply_engine  # type: ignore[union-attr]
 
             _refresh_autoreply_engine()
 
@@ -1205,6 +1504,15 @@ if sys.platform != "win32":
                         server_done = True
                         telnet_writer.close()
                         return
+                    # Re-evaluate terminal size after prompt returns —
+                    # prompt_toolkit handles SIGWINCH during prompt_async
+                    # but our scroll region may not have been updated if
+                    # the combined handler wasn't active yet.
+                    _cur_rows, _cur_cols = _get_terminal_size()
+                    if (_cur_rows != scroll._rows  # pylint: disable=protected-access
+                            or _cur_cols != scroll._cols):  # pylint: disable=protected-access
+                        scroll.update_size(_cur_rows, _cur_cols)
+                        _on_resize_repaint(_cur_rows, _cur_cols)
                     # EOR/GA pacing: wait for server prompt before sending.
                     if _ga_detected:
                         try:
@@ -1221,6 +1529,8 @@ if sys.platform != "win32":
                     replay_buf.append(f"\x1b[33m{echo_text}\x1b[m\r\n".encode())
                     stdout.write(b"\x1b7")
                     stdout.write(f"\x1b[{scroll.input_row};1H".encode())
+                    if autoreply_engine is not None:
+                        autoreply_engine.cancel()
                     telnet_writer.write(line + "\r\n")
                     # Clear so next iteration waits for fresh GA/EOR.
                     if _ga_detected:
@@ -1286,6 +1596,10 @@ if sys.platform != "win32":
                     pass
                 prompt_ready_b.clear()
 
+            telnet_writer._wait_for_prompt = _wait_for_prompt_b  # type: ignore[union-attr]
+            telnet_writer._echo_command = _echo_autoreply_b  # type: ignore[union-attr]
+            telnet_writer._prompt_ready = prompt_ready_b  # type: ignore[union-attr]
+
             _ar_rules_b = getattr(telnet_writer, "_autoreply_rules", None)
             autoreply_engine_b = None
             if _ar_rules_b:
@@ -1296,6 +1610,7 @@ if sys.platform != "win32":
                     echo_fn=_echo_autoreply_b,
                     wait_fn=_wait_for_prompt_b,
                 )
+                telnet_writer._autoreply_engine = autoreply_engine_b  # type: ignore[union-attr]
 
             server_done = False
 
@@ -1343,6 +1658,8 @@ if sys.platform != "win32":
                     scroll.save_and_goto_input()
                     scroll.restore_cursor()
                     stdout.write(f"\x1b[33m{echo_text}\x1b[m\r\n".encode())
+                    if autoreply_engine_b is not None:
+                        autoreply_engine_b.cancel()
                     telnet_writer.write(line + "\r\n")
                     if _ga_detected_b:
                         prompt_ready_b.clear()

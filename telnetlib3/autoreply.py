@@ -51,10 +51,10 @@ class AutoreplyRule:
     reply: str
     exclusive: bool = False
     until: str = ""
+    post_command: str = ""
     always: bool = False
     enabled: bool = True
     exclusive_timeout: float = 30.0
-    cooldown: float = 1.0
 
 
 def _parse_entries(entries: list[dict[str, str]]) -> list[AutoreplyRule]:
@@ -67,18 +67,18 @@ def _parse_entries(entries: list[dict[str, str]]) -> list[AutoreplyRule]:
             continue
         exclusive = bool(entry.get("exclusive", False))
         until = entry.get("until", "")
+        post_command = entry.get("post_command", "")
         always = bool(entry.get("always", False))
         enabled = bool(entry.get("enabled", True))
         exclusive_timeout = float(entry.get("exclusive_timeout", 30.0))
-        cooldown = float(entry.get("cooldown", 1.0))
         try:
             compiled = re.compile(pattern_str, re.MULTILINE | re.DOTALL)
         except re.error as exc:
             raise ValueError(f"Invalid autoreply pattern {pattern_str!r}: {exc}") from exc
         rules.append(AutoreplyRule(
             pattern=compiled, reply=reply, exclusive=exclusive,
-            until=until, always=always, enabled=enabled,
-            exclusive_timeout=exclusive_timeout, cooldown=cooldown,
+            until=until, post_command=post_command, always=always,
+            enabled=enabled, exclusive_timeout=exclusive_timeout,
         ))
     return rules
 
@@ -128,11 +128,11 @@ def save_autoreplies(path: str, rules: list[AutoreplyRule], session_key: str) ->
                 "reply": r.reply,
                 **({"exclusive": True} if r.exclusive else {}),
                 **({"until": r.until} if r.until else {}),
+                **({"post_command": r.post_command} if r.post_command else {}),
                 **({"always": True} if r.always else {}),
                 **({"enabled": False} if not r.enabled else {}),
                 **({"exclusive_timeout": r.exclusive_timeout}
                    if r.exclusive and r.exclusive_timeout != 30.0 else {}),
-                **({"cooldown": r.cooldown} if r.cooldown != 1.0 else {}),
             }
             for r in rules
         ]
@@ -339,9 +339,11 @@ class AutoreplyEngine:
         self._until_pattern: Optional[re.Pattern[str]] = None
         self._skip_next_prompt = False
         self._exclusive_deadline: float = 0.0
-        self._rule_last_fired: dict[int, float] = {}
+        self._post_command: str = ""
         self._prompt_based = False
         self._cycle_matched: set[int] = set()
+        self._suppress_exclusive = False
+        self._last_matched_pattern: str = ""
 
     @property
     def buffer(self) -> SearchBuffer:
@@ -357,6 +359,30 @@ class AutoreplyEngine:
     def exclusive_rule_index(self) -> int:
         """1-based index of the active exclusive rule, or 0 if none."""
         return self._exclusive_rule_index
+
+    @property
+    def suppress_exclusive(self) -> bool:
+        """When ``True``, exclusive rules match but do not enter exclusive mode."""
+        return self._suppress_exclusive
+
+    @suppress_exclusive.setter
+    def suppress_exclusive(self, value: bool) -> None:
+        self._suppress_exclusive = value
+
+    @property
+    def reply_pending(self) -> bool:
+        """``True`` when a reply chain is still executing."""
+        return self._reply_chain is not None and not self._reply_chain.done()
+
+    @property
+    def cycle_matched(self) -> bool:
+        """``True`` if any rule matched in the current prompt cycle."""
+        return len(self._cycle_matched) > 0
+
+    @property
+    def last_matched_pattern(self) -> str:
+        """Pattern string of the most recently matched rule, or ``""``."""
+        return self._last_matched_pattern
 
     def feed(self, text: str) -> None:
         """
@@ -377,6 +403,7 @@ class AutoreplyEngine:
                 self._exclusive_rule_index = 0
                 self._until_pattern = None
                 self._skip_next_prompt = False
+                self._post_command = ""
                 # fall through to normal matching below
             # Check until pattern to see if exclusive should end.
             elif self._until_pattern is not None:
@@ -390,6 +417,13 @@ class AutoreplyEngine:
                     self._exclusive_rule_index = 0
                     self._until_pattern = None
                     self._skip_next_prompt = False
+                    if self._post_command:
+                        self._log.info(
+                            "autoreply: queuing post_command %r",
+                            self._post_command,
+                        )
+                        self._queue_reply(self._post_command)
+                        self._post_command = ""
                     # fall through to normal matching below
                 else:
                     self._match_always_rules()
@@ -414,27 +448,26 @@ class AutoreplyEngine:
             searchable = self._buffer.get_searchable_text()
             if not searchable:
                 break
-            now = time.monotonic()
             for rule_idx, rule in enumerate(self._rules):
                 if not rule.enabled:
                     continue
                 if self._prompt_based and rule_idx in self._cycle_matched:
                     continue
-                if rule.cooldown > 0:
-                    last = self._rule_last_fired.get(rule_idx, 0.0)
-                    if now - last < rule.cooldown:
-                        continue
                 match = rule.pattern.search(searchable)
                 if match:
-                    self._rule_last_fired[rule_idx] = now
+                    self._last_matched_pattern = rule.pattern.pattern
                     self._cycle_matched.add(rule_idx)
                     self._buffer.advance_match(match.start(), len(match.group(0)))
+                    if rule.exclusive and self._suppress_exclusive:
+                        found = True
+                        break
                     reply = _substitute_groups(rule.reply, match)
                     self._queue_reply(reply)
                     if rule.exclusive:
                         self._exclusive_active = True
                         self._exclusive_rule_index = rule_idx + 1
                         self._skip_next_prompt = True
+                        self._post_command = rule.post_command
                         self._exclusive_deadline = (
                             time.monotonic() + rule.exclusive_timeout
                             if rule.exclusive_timeout > 0 else 0.0
@@ -458,19 +491,14 @@ class AutoreplyEngine:
         searchable = self._buffer.get_searchable_text()
         if not searchable:
             return
-        now = time.monotonic()
         for rule_idx, rule in enumerate(self._rules):
             if not rule.enabled or not rule.always:
                 continue
             if self._prompt_based and rule_idx in self._cycle_matched:
                 continue
-            if rule.cooldown > 0:
-                last = self._rule_last_fired.get(rule_idx, 0.0)
-                if now - last < rule.cooldown:
-                    continue
             match = rule.pattern.search(searchable)
             if match:
-                self._rule_last_fired[rule_idx] = now
+                self._last_matched_pattern = rule.pattern.pattern
                 self._cycle_matched.add(rule_idx)
                 self._buffer.advance_match(match.start(), len(match.group(0)))
                 reply = _substitute_groups(rule.reply, match)
@@ -573,9 +601,16 @@ class AutoreplyEngine:
             return
         self._exclusive_active = False
         self._exclusive_rule_index = 0
+        self._post_command = ""
 
     def cancel(self) -> None:
-        """Cancel any pending reply chain."""
+        """Cancel any pending reply chain and clear exclusive state."""
         if self._reply_chain is not None and not self._reply_chain.done():
             self._reply_chain.cancel()
             self._reply_chain = None
+        self._exclusive_active = False
+        self._exclusive_rule_index = 0
+        self._until_pattern = None
+        self._skip_next_prompt = False
+        self._post_command = ""
+        self._exclusive_deadline = 0.0
