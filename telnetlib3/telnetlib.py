@@ -501,7 +501,7 @@ class Telnet:
         """Provide a callback function called after each receipt of a telnet option."""
         self.option_callback = callback
 
-    def process_rawq(self):  # pylint: disable=too-complex,too-many-branches
+    def process_rawq(self):
         """
         Transfer from raw queue to cooked queue.
 

@@ -596,7 +596,7 @@ async def _wait_for_terminal_info(
         await asyncio.sleep(_TERMINAL_INFO_POLL)
 
 
-async def pty_shell(  # pylint: disable=too-many-positional-arguments
+async def pty_shell(
     reader: Union[TelnetReader, TelnetReaderUnicode],
     writer: Union[TelnetWriter, TelnetWriterUnicode],
     program: str,

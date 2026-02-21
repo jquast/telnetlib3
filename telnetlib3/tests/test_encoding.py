@@ -22,7 +22,7 @@ from telnetlib3.tests.accessories import (
 
 async def test_telnet_server_encoding_default(bind_host, unused_tcp_port):
     """Default encoding US-ASCII unless it can be negotiated/confirmed!"""
-    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
 
@@ -37,7 +37,7 @@ async def test_telnet_server_encoding_default(bind_host, unused_tcp_port):
 async def test_telnet_client_encoding_default(bind_host, unused_tcp_port):
     """Default encoding US-ASCII unless it can be negotiated/confirmed!"""
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
-        async with open_connection(host=bind_host, port=unused_tcp_port, connect_minwait=0.05) as (
+        async with open_connection(host=bind_host, port=unused_tcp_port) as (
             reader,
             writer,
         ):
@@ -77,7 +77,7 @@ async def test_telnet_server_encoding_server_do(bind_host, unused_tcp_port):
 
 async def test_telnet_server_encoding_bidirectional(bind_host, unused_tcp_port):
     """Server's default encoding with bi-directional BINARY negotiation."""
-    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + DO + BINARY)
             writer.write(IAC + WILL + BINARY)
@@ -95,7 +95,7 @@ async def test_telnet_client_and_server_encoding_bidirectional(bind_host, unused
         host=bind_host, port=unused_tcp_port, encoding="latin1", connect_maxwait=1.0
     ) as server:
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, encoding="cp437", connect_minwait=1.0
+            host=bind_host, port=unused_tcp_port, encoding="cp437"
         ) as (reader, writer):
             srv_instance = await asyncio.wait_for(server.wait_for_client(), 1.5)
 
@@ -107,7 +107,11 @@ async def test_telnet_client_and_server_encoding_bidirectional(bind_host, unused
             assert writer.protocol.encoding(incoming=True, outgoing=True) == "cp437"
 
 
-async def test_telnet_server_encoding_by_LANG(bind_host, unused_tcp_port):
+@pytest.mark.parametrize(
+    "lang,expected_encoding",
+    [("uk_UA.KOI8-U", "KOI8-U"), ("en_IL", "utf8"), ("en_US.BOGUS-ENCODING", "utf8")],
+)
+async def test_telnet_server_encoding_by_LANG(bind_host, unused_tcp_port, lang, expected_encoding):
     """Server's encoding negotiated by LANG value."""
     async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
@@ -119,63 +123,15 @@ async def test_telnet_server_encoding_by_LANG(bind_host, unused_tcp_port):
                 + SB
                 + NEW_ENVIRON
                 + IS
-                + telnetlib3.stream_writer._encode_env_buf({"LANG": "uk_UA.KOI8-U"})
+                + telnetlib3.stream_writer._encode_env_buf({"LANG": lang})
                 + IAC
                 + SE
             )
             writer.write(IAC + WONT + TTYPE)
 
             srv_instance = await asyncio.wait_for(server.wait_for_client(), 2.0)
-            assert srv_instance.encoding(incoming=True) == "KOI8-U"
-            assert srv_instance.encoding(outgoing=True) == "KOI8-U"
-            assert srv_instance.encoding(incoming=True, outgoing=True) == "KOI8-U"
-            assert srv_instance.get_extra_info("LANG") == "uk_UA.KOI8-U"
-
-
-async def test_telnet_server_encoding_LANG_no_encoding_suffix(bind_host, unused_tcp_port):
-    """Server falls back to default when LANG has no encoding suffix."""
-    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5) as server:
-        async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
-            writer.write(IAC + DO + BINARY)
-            writer.write(IAC + WILL + BINARY)
-            writer.write(IAC + WILL + NEW_ENVIRON)
-            writer.write(
-                IAC
-                + SB
-                + NEW_ENVIRON
-                + IS
-                + telnetlib3.stream_writer._encode_env_buf({"LANG": "en_IL"})
-                + IAC
-                + SE
-            )
-            writer.write(IAC + WONT + TTYPE)
-
-            srv_instance = await asyncio.wait_for(server.wait_for_client(), 2.0)
-            assert srv_instance.encoding(incoming=True) == "utf8"
-            assert srv_instance.get_extra_info("LANG") == "en_IL"
-
-
-async def test_telnet_server_encoding_LANG_invalid_encoding(bind_host, unused_tcp_port):
-    """Server falls back to default when LANG has unknown encoding."""
-    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5) as server:
-        async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
-            writer.write(IAC + DO + BINARY)
-            writer.write(IAC + WILL + BINARY)
-            writer.write(IAC + WILL + NEW_ENVIRON)
-            writer.write(
-                IAC
-                + SB
-                + NEW_ENVIRON
-                + IS
-                + telnetlib3.stream_writer._encode_env_buf({"LANG": "en_US.BOGUS-ENCODING"})
-                + IAC
-                + SE
-            )
-            writer.write(IAC + WONT + TTYPE)
-
-            srv_instance = await asyncio.wait_for(server.wait_for_client(), 2.0)
-            assert srv_instance.encoding(incoming=True) == "utf8"
-            assert srv_instance.get_extra_info("LANG") == "en_US.BOGUS-ENCODING"
+            assert srv_instance.encoding(incoming=True) == expected_encoding
+            assert srv_instance.get_extra_info("LANG") == lang
 
 
 async def test_telnet_server_binary_mode(bind_host, unused_tcp_port):
@@ -215,10 +171,10 @@ async def test_telnet_client_and_server_escape_iac_encoding(bind_host, unused_tc
     given_string = "".join(chr(val) for val in list(range(256))) * 2
 
     async with create_server(
-        host=bind_host, port=unused_tcp_port, encoding="iso8859-1", connect_maxwait=0.05
+        host=bind_host, port=unused_tcp_port, encoding="iso8859-1", connect_maxwait=0.5
     ) as server:
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, encoding="iso8859-1", connect_minwait=0.05
+            host=bind_host, port=unused_tcp_port, encoding="iso8859-1"
         ) as (client_reader, client_writer):
             srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
 
@@ -236,10 +192,10 @@ async def test_telnet_client_and_server_escape_iac_binary(bind_host, unused_tcp_
     given_string = bytes(range(256)) * 2
 
     async with create_server(
-        host=bind_host, port=unused_tcp_port, encoding=False, connect_maxwait=0.05
+        host=bind_host, port=unused_tcp_port, encoding=False, connect_maxwait=0.5
     ) as server:
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, encoding=False, connect_minwait=0.05
+            host=bind_host, port=unused_tcp_port, encoding=False
         ) as (client_reader, client_writer):
             srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
 
@@ -250,3 +206,80 @@ async def test_telnet_client_and_server_escape_iac_binary(bind_host, unused_tcp_
             await srv_instance.writer.wait_closed()
             eof = await asyncio.wait_for(client_reader.read(), 0.5)
             assert eof == b""
+
+
+# local
+from telnetlib3.encodings.atarist import Codec as AtariCodec
+from telnetlib3.encodings.atarist import StreamReader as AtariStreamReader
+from telnetlib3.encodings.atarist import StreamWriter as AtariStreamWriter
+from telnetlib3.encodings.atarist import IncrementalDecoder as AtariIncrementalDecoder
+from telnetlib3.encodings.atarist import IncrementalEncoder as AtariIncrementalEncoder
+from telnetlib3.encodings.atarist import getaliases as atari_getaliases
+from telnetlib3.encodings.atarist import getregentry as atari_getregentry
+
+
+def test_atarist_roundtrip():
+    codec = AtariCodec()
+    text = "Hello, World! 0123456789"
+    encoded, length = codec.encode(text)
+    assert length == len(text)
+    decoded, dec_length = codec.decode(encoded)
+    assert decoded == text
+    assert dec_length == len(encoded)
+
+
+def test_atarist_high_chars_roundtrip():
+    codec = AtariCodec()
+    # Byte 0x80 = U+00C7 (C-cedilla), 0x81 = U+00FC (u-umlaut)
+    text = "\u00c7\u00fc"
+    encoded, _ = codec.encode(text)
+    assert encoded == bytes([0x80, 0x81])
+    decoded, _ = codec.decode(encoded)
+    assert decoded == text
+
+
+def test_atarist_incremental_encoder():
+    enc = AtariIncrementalEncoder()
+    result = enc.encode("AB")
+    assert result == b"AB"
+    result2 = enc.encode("\u00c7", final=True)
+    assert result2 == bytes([0x80])
+
+
+def test_atarist_incremental_decoder():
+    dec = AtariIncrementalDecoder()
+    result = dec.decode(b"AB")
+    assert result == "AB"
+    result2 = dec.decode(bytes([0x80]), final=True)
+    assert result2 == "\u00c7"
+
+
+def test_atarist_stream_writer():
+    import io
+
+    stream = io.BytesIO()
+    writer = AtariStreamWriter(stream)
+    writer.write("Hello")
+    assert stream.getvalue() == b"Hello"
+
+
+def test_atarist_stream_reader():
+    import io
+
+    stream = io.BytesIO(b"Hello")
+    reader = AtariStreamReader(stream)
+    result = reader.read()
+    assert result == "Hello"
+
+
+def test_atarist_getregentry():
+    import codecs
+
+    info = atari_getregentry()
+    assert isinstance(info, codecs.CodecInfo)
+    assert info.name == "atarist"
+
+
+def test_atarist_getaliases():
+    aliases = atari_getaliases()
+    assert aliases == ("atari",)

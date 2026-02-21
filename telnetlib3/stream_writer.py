@@ -630,7 +630,7 @@ class TelnetWriter:
 
     # proprietary write helper
 
-    # pylint: disable=too-many-branches,too-many-statements,too-complex
+    # pylint: disable=too-many-branches,too-complex
     def feed_byte(self, byte: bytes) -> bool:
         """
         Feed a single byte into Telnet option state machine.
@@ -788,6 +788,16 @@ class TelnetWriter:
     def protocol(self) -> Any:
         """The (Telnet) protocol attached to this stream."""
         return self._protocol
+
+    def _force_binary_on_protocol(self) -> None:
+        """
+        Enable ``force_binary`` on the attached protocol.
+
+        Called when CHARSET is negotiated or LANG is received via NEW_ENVIRON, implying that the
+        peer can handle non-ASCII bytes regardless of whether BINARY mode was explicitly negotiated.
+        """
+        if self._protocol is not None and hasattr(self._protocol, "force_binary"):
+            self._protocol.force_binary = True
 
     @property
     def server(self) -> bool:
@@ -2111,10 +2121,12 @@ class TelnetWriter:
                 self.log.debug("send IAC SB CHARSET ACCEPTED %s IAC SE", selected)
                 self.send_iac(b"".join(response))
                 self.environ_encoding = selected
+                self._force_binary_on_protocol()
         elif opt == ACCEPTED:
             charset = b"".join(buf).decode("ascii")
             self.log.debug("recv IAC SB CHARSET ACCEPTED %s IAC SE", charset)
             self.environ_encoding = charset
+            self._force_binary_on_protocol()
             self._ext_callback[CHARSET](charset)
         elif opt == REJECTED:
             self.log.warning("recv IAC SB CHARSET REJECTED IAC SE")

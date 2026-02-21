@@ -99,7 +99,7 @@ def _visible_width(text: str) -> int:
     return max(0, result)
 
 
-class _LineEditor:  # pylint: disable=too-few-public-methods
+class _LineEditor:
     """Shared line-editing state machine for readline and readline_async."""
 
     def __init__(self, max_visible_width: int = 0) -> None:
@@ -140,7 +140,7 @@ class _LineEditor:  # pylint: disable=too-few-public-methods
 __all__ = ("telnet_server_shell", "readline_async", "readline")
 
 
-async def telnet_server_shell(  # pylint: disable=too-complex,too-many-branches,too-many-statements
+async def telnet_server_shell(  # pylint: disable=too-complex,too-many-branches
     reader: Union[TelnetReader, TelnetReaderUnicode],
     writer: Union[TelnetWriter, TelnetWriterUnicode],
 ) -> None:

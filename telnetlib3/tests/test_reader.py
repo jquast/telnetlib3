@@ -11,66 +11,33 @@ import telnetlib3
 from telnetlib3.tests.accessories import bind_host, create_server, open_connection, unused_tcp_port
 
 
+def _fn_encoding(incoming):
+    return "def-ENC"
+
+
 def test_reader_instantiation_safety():
-    """On instantiation, one of server or client must be specified."""
-
-    # given,
-    def fn_encoding(incoming):
-        return "def-ENC"
-
-    reader = telnetlib3.TelnetReader(limit=1999)
-
-    # exercise,
-    result = repr(reader)
-
-    # verify.
-    assert result == "<TelnetReader limit=1999 encoding=False>"
+    assert repr(telnetlib3.TelnetReader(limit=1999)) == ("<TelnetReader limit=1999 encoding=False>")
 
 
 def test_reader_with_encoding_instantiation_safety():
-    # given,
-    def fn_encoding(incoming):
-        return "def-ENC"
-
-    expected_result = "<TelnetReaderUnicode encoding='def-ENC' limit=1999 buflen=0 eof=False>"
-
-    reader = telnetlib3.TelnetReaderUnicode(fn_encoding=fn_encoding, limit=1999)
-
-    # exercise,
-    result = repr(reader)
-
-    # verify.
-    assert result == expected_result
+    reader = telnetlib3.TelnetReaderUnicode(fn_encoding=_fn_encoding, limit=1999)
+    assert repr(reader) == (
+        "<TelnetReaderUnicode encoding='def-ENC' limit=1999 buflen=0 eof=False>"
+    )
 
 
 def test_reader_eof_safety():
-    """Check side-effects of feed_eof."""
-    # given,
     reader = telnetlib3.TelnetReader(limit=1999)
     reader.feed_eof()
-
-    # exercise,
-    result = repr(reader)
-
-    # verify.
-    assert result == "<TelnetReader eof limit=1999 encoding=False>"
+    assert repr(reader) == "<TelnetReader eof limit=1999 encoding=False>"
 
 
 def test_reader_unicode_eof_safety():
-    # given,
-    def fn_encoding(incoming):
-        return "def-ENC"
-
-    expected_result = "<TelnetReaderUnicode encoding='def-ENC' limit=65536 buflen=0 eof=True>"
-
-    reader = telnetlib3.TelnetReaderUnicode(fn_encoding=fn_encoding)
+    reader = telnetlib3.TelnetReaderUnicode(fn_encoding=_fn_encoding)
     reader.feed_eof()
-
-    # exercise,
-    result = repr(reader)
-
-    # verify.
-    assert result == expected_result
+    assert repr(reader) == (
+        "<TelnetReaderUnicode encoding='def-ENC' limit=65536 buflen=0 eof=True>"
+    )
 
 
 async def test_telnet_reader_using_readline_unicode(bind_host, unused_tcp_port):
@@ -94,22 +61,19 @@ async def test_telnet_reader_using_readline_unicode(bind_host, unused_tcp_port):
         writer.close()
 
     async with create_server(
-        host=bind_host, port=unused_tcp_port, connect_maxwait=0.05, shell=shell
+        host=bind_host, port=unused_tcp_port, connect_maxwait=0.5, shell=shell
     ):
-        async with open_connection(host=bind_host, port=unused_tcp_port, connect_minwait=0.05) as (
+        async with open_connection(host=bind_host, port=unused_tcp_port) as (
             client_reader,
             client_writer,
         ):
             for given, expected in sorted(given_expected.items()):
-                result = await asyncio.wait_for(client_reader.readline(), 0.5)
-                assert result == expected
+                assert await asyncio.wait_for(client_reader.readline(), 0.5) == expected
 
-            eof = await asyncio.wait_for(client_reader.read(), 0.5)
-            assert not eof
+            assert not await asyncio.wait_for(client_reader.read(), 0.5)
 
 
 async def test_telnet_reader_using_readline_bytes(bind_host, unused_tcp_port):
-    """Ensure strict RFC interpretation of newlines in readline method."""
     given_expected = {
         b"alpha\r\x00": b"alpha\r",
         b"bravo\r\n": b"bravo\r\n",
@@ -128,17 +92,15 @@ async def test_telnet_reader_using_readline_bytes(bind_host, unused_tcp_port):
         writer.close()
 
     async with create_server(
-        host=bind_host, port=unused_tcp_port, connect_maxwait=0.05, shell=shell, encoding=False
+        host=bind_host, port=unused_tcp_port, connect_maxwait=0.5, shell=shell, encoding=False
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False
+            host=bind_host, port=unused_tcp_port, encoding=False
         ) as (client_reader, client_writer):
             for given, expected in sorted(given_expected.items()):
-                result = await asyncio.wait_for(client_reader.readline(), 0.5)
-                assert result == expected
+                assert await asyncio.wait_for(client_reader.readline(), 0.5) == expected
 
-            eof = await asyncio.wait_for(client_reader.read(), 0.5)
-            assert eof == b""
+            assert await asyncio.wait_for(client_reader.read(), 0.5) == b""
 
 
 async def test_telnet_reader_read_exactly_unicode(bind_host, unused_tcp_port):
@@ -152,25 +114,22 @@ async def test_telnet_reader_read_exactly_unicode(bind_host, unused_tcp_port):
         writer.close()
 
     async with create_server(
-        host=bind_host, port=unused_tcp_port, connect_maxwait=0.05, shell=shell
+        host=bind_host, port=unused_tcp_port, connect_maxwait=0.5, shell=shell
     ):
-        async with open_connection(host=bind_host, port=unused_tcp_port, connect_minwait=0.05) as (
+        async with open_connection(host=bind_host, port=unused_tcp_port) as (
             client_reader,
             client_writer,
         ):
-            result = await asyncio.wait_for(client_reader.readexactly(len(given)), 0.5)
-            assert result == given
+            assert await asyncio.wait_for(client_reader.readexactly(len(given)), 0.5) == given
 
-            given_readsize = len(given_partial) + 1
             with pytest.raises(asyncio.IncompleteReadError) as exc_info:
-                await asyncio.wait_for(client_reader.readexactly(given_readsize), 0.5)
+                await asyncio.wait_for(client_reader.readexactly(len(given_partial) + 1), 0.5)
 
             assert exc_info.value.partial == given_partial
-            assert exc_info.value.expected == given_readsize
+            assert exc_info.value.expected == len(given_partial) + 1
 
 
 async def test_telnet_reader_read_exactly_bytes(bind_host, unused_tcp_port):
-    """Ensure TelnetReader.readexactly, especially IncompleteReadError."""
     given = string.ascii_letters.encode("ascii")
     given_partial = b"zzz"
 
@@ -179,36 +138,23 @@ async def test_telnet_reader_read_exactly_bytes(bind_host, unused_tcp_port):
         writer.close()
 
     async with create_server(
-        host=bind_host, port=unused_tcp_port, connect_maxwait=0.05, shell=shell, encoding=False
+        host=bind_host, port=unused_tcp_port, connect_maxwait=0.5, shell=shell, encoding=False
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False
+            host=bind_host, port=unused_tcp_port, encoding=False
         ) as (client_reader, client_writer):
-            result = await asyncio.wait_for(client_reader.readexactly(len(given)), 0.5)
-            assert result == given
+            assert await asyncio.wait_for(client_reader.readexactly(len(given)), 0.5) == given
 
-            given_readsize = len(given_partial) + 1
             with pytest.raises(asyncio.IncompleteReadError) as exc_info:
-                await asyncio.wait_for(client_reader.readexactly(given_readsize), 0.5)
+                await asyncio.wait_for(client_reader.readexactly(len(given_partial) + 1), 0.5)
 
             assert exc_info.value.partial == given_partial
-            assert exc_info.value.expected == given_readsize
+            assert exc_info.value.expected == len(given_partial) + 1
 
 
 async def test_telnet_reader_read_0(bind_host, unused_tcp_port):
-    """Ensure TelnetReader.read(0) returns nothing."""
-
-    # given
-    def fn_encoding(incoming):
-        return "def-ENC"
-
-    reader = telnetlib3.TelnetReaderUnicode(fn_encoding=fn_encoding)
-
-    # exercise
-    value = await reader.read(0)
-
-    # verify
-    assert not value
+    reader = telnetlib3.TelnetReaderUnicode(fn_encoding=_fn_encoding)
+    assert not await reader.read(0)
 
 
 async def test_telnet_reader_read_beyond_limit_unicode(bind_host, unused_tcp_port):
@@ -222,10 +168,10 @@ async def test_telnet_reader_read_beyond_limit_unicode(bind_host, unused_tcp_por
         writer.close()
 
     async with create_server(
-        host=bind_host, port=unused_tcp_port, connect_maxwait=0.05, shell=shell, limit=limit
+        host=bind_host, port=unused_tcp_port, connect_maxwait=0.5, shell=shell, limit=limit
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, limit=limit
+            host=bind_host, port=unused_tcp_port, limit=limit
         ) as (client_reader, client_writer):
             assert client_reader._limit == limit
             value = await asyncio.wait_for(client_reader.read(), 0.5)
@@ -245,13 +191,13 @@ async def test_telnet_reader_read_beyond_limit_bytes(bind_host, unused_tcp_port)
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
         shell=shell,
         encoding=False,
         limit=limit,
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False, limit=limit
+            host=bind_host, port=unused_tcp_port, encoding=False, limit=limit
         ) as (client_reader, client_writer):
             assert client_reader._limit == limit
             value = await asyncio.wait_for(client_reader.read(), 0.5)
@@ -280,13 +226,13 @@ Router>
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
         shell=shell,
         encoding=False,
         limit=limit,
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False, limit=limit
+            host=bind_host, port=unused_tcp_port, encoding=False, limit=limit
         ) as (client_reader, _):
             # Test successful reads within limit
             result = await client_reader.readuntil_pattern(pattern)
@@ -326,13 +272,13 @@ Router>
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
         shell=shell,
         encoding=False,
         limit=limit,
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False, limit=limit
+            host=bind_host, port=unused_tcp_port, encoding=False, limit=limit
         ) as (client_reader, _):
             # First successful read
             result = await client_reader.readuntil_pattern(pattern)
@@ -374,13 +320,13 @@ async def test_telnet_reader_readuntil_pattern_limit_overrun_buffer_full(
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
         shell=shell,
         encoding=False,
         limit=limit,
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False, limit=limit
+            host=bind_host, port=unused_tcp_port, encoding=False, limit=limit
         ) as (client_reader, _):
             # First read the Router> prompt
             result = await client_reader.readuntil_pattern(pattern)
@@ -410,13 +356,13 @@ async def test_telnet_reader_readuntil_pattern_incomplete_read_eof(bind_host, un
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
         shell=shell,
         encoding=False,
         limit=limit,
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False, limit=limit
+            host=bind_host, port=unused_tcp_port, encoding=False, limit=limit
         ) as (client_reader, _):
             # First successful read
             result = await client_reader.readuntil_pattern(pattern)
@@ -464,13 +410,13 @@ async def test_telnet_reader_readuntil_pattern_cancelled_error(bind_host, unused
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
         shell=shell,
         encoding=False,
         limit=limit,
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, encoding=False, limit=limit
+            host=bind_host, port=unused_tcp_port, encoding=False, limit=limit
         ) as (client_reader, _):
             # Set exception and test it's properly raised
             client_reader.set_exception(asyncio.CancelledError())

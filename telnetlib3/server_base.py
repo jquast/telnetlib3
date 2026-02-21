@@ -47,6 +47,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         encoding_errors: str = "strict",
         force_binary: bool = False,
         never_send_ga: bool = False,
+        line_mode: bool = False,
         connect_maxwait: float = 4.0,
         limit: Optional[int] = None,
         reader_factory: type = TelnetReader,
@@ -60,6 +61,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         self._encoding_errors = encoding_errors
         self.force_binary = force_binary
         self.never_send_ga = never_send_ga
+        self.line_mode = line_mode
         self._extra: dict[str, Any] = {}
 
         self._reader_factory = reader_factory
@@ -191,7 +193,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 loop = asyncio.get_event_loop()
                 loop.create_task(coro)
 
-    def data_received(self, data: bytes) -> None:  # pylint: disable=too-complex
+    def data_received(self, data: bytes) -> None:
         """
         Process bytes received by transport.
 
@@ -201,7 +203,6 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         The writer receives a copy of all raw bytes because, as an IAC interpreter, it may likely
         **write** a responding reply.
         """
-        # pylint: disable=too-many-branches
         # This is a "hot path" method, and so it is not broken into "helper functions" to help with
         # performance.  Uses batched processing: scans for IAC (255) and SLC bytes, batching regular
         # data into single feed_data() calls for performance.  This can be done, and previously was,

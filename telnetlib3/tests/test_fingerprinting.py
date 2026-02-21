@@ -428,7 +428,7 @@ async def test_fingerprint_probe_integration(bind_host, unused_tcp_port):
         connect_maxwait=0.5,
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.2, connect_maxwait=0.5
+            host=bind_host, port=unused_tcp_port, connect_maxwait=0.5
         ) as (reader, writer):
             try:
                 await asyncio.wait_for(reader.read(100), timeout=1.0)
@@ -631,8 +631,8 @@ def test_collect_rejected_options_with_data():
     writer = MockWriter()
     writer.rejected_will = {fps.BINARY, fps.SGA}
     writer.rejected_do = {fps.ECHO}
-    result = fps._collect_rejected_options(writer)
-    assert len(result["will"]) == 2 and len(result["do"]) == 1
+    rejected = fps._collect_rejected_options(writer)
+    assert len(rejected["will"]) == 2 and len(rejected["do"]) == 1
 
 
 def test_collect_extra_info_tuples_and_bytes():
@@ -640,9 +640,9 @@ def test_collect_extra_info_tuples_and_bytes():
     writer._protocol = MockProtocol(
         {"tspeed": (38400, 38400), "raw_data": b"\x01\x02\x03", "name": "test"}
     )
-    result = fps._collect_extra_info(writer)
-    assert result["tspeed"] == [38400, 38400]
-    assert result["raw_data"] == "010203" and result["name"] == "test"
+    info = fps._collect_extra_info(writer)
+    assert info["tspeed"] == [38400, 38400]
+    assert info["raw_data"] == "010203" and info["name"] == "test"
 
 
 def test_collect_extra_info_removes_duplicate_keys():
@@ -658,10 +658,10 @@ def test_collect_extra_info_removes_duplicate_keys():
             "ttype1": "xterm",
         }
     )
-    result = fps._collect_extra_info(writer)
+    info = fps._collect_extra_info(writer)
     for key in ("term", "cols", "rows", "ttype1"):
-        assert key not in result
-    assert result["TERM"] == "xterm"
+        assert key not in info
+    assert info["TERM"] == "xterm"
 
 
 def test_collect_ttype_cycle():
@@ -699,8 +699,8 @@ def test_collect_slc_tab_with_data():
     tab[slc.SLC_EC] = slc.SLC(mask=slc.SLC_DEFAULT, value=slc.theNULL)
     tab[slc.SLC_IP] = slc.SLC(mask=slc.SLC_DEFAULT, value=b"\x04")
     writer.slctab = tab
-    result = fps._collect_slc_tab(writer)
-    assert "nosupport" in result and "unset" in result and "set" in result
+    slc_tab = fps._collect_slc_tab(writer)
+    assert "nosupport" in slc_tab and "unset" in slc_tab and "set" in slc_tab
 
 
 def test_collect_slc_tab_empty():
@@ -972,10 +972,10 @@ def test_atomic_json_write_bytes_values(tmp_path):
         filepath, {"text": b"hello", "binary": b"\x80\xff", "nested": {"val": b"\x01"}}
     )
     with open(filepath, encoding="utf-8") as f:
-        result = json.load(f)
-    assert result["text"] == "hello"
-    assert result["binary"] == "80ff"
-    assert result["nested"]["val"] == "\x01"
+        data = json.load(f)
+    assert data["text"] == "hello"
+    assert data["binary"] == "80ff"
+    assert data["nested"]["val"] == "\x01"
 
 
 def test_fingerprinting_main(monkeypatch, tmp_path):
@@ -1031,6 +1031,7 @@ def test_protocol_fingerprint_hash_stability():
 def test_fingerprinting_server_on_request_environ():
     """FingerprintingServer includes HOME and SHELL in environ request."""
     srv = fps.FingerprintingServer.__new__(fps.FingerprintingServer)
+    srv._extra = {}
     env = srv.on_request_environ()
     assert "HOME" in env
     assert "SHELL" in env
@@ -1092,3 +1093,71 @@ def test_fingerprint_server_main_env_fallback(monkeypatch):
         assert fps.DATA_DIR == "/original"
     finally:
         fps.DATA_DIR = old_data_dir
+
+
+def test_bytes_safe_encoder_non_serializable():
+    with pytest.raises(TypeError):
+        json.dumps({"x": object()}, cls=fps._BytesSafeEncoder)
+
+
+def test_fingerprinting_mixin_without_telnet_server():
+    class Standalone(fps.FingerprintingTelnetServer):
+        pass
+
+    obj = Standalone()
+    with pytest.raises(TypeError, match="must be combined with TelnetServer"):
+        obj.on_request_environ()
+
+
+def test_build_session_fingerprint_comport():
+    writer = _probe_writer()
+    writer.comport_data = {"signature": "COM1"}
+    writer.slctab = None
+    writer.rejected_will = set()
+    writer.rejected_do = set()
+    probe_results = {"BINARY": fps.ProbeResult(status="WILL", opt=fps.BINARY)}
+    session = fps._build_session_fingerprint(writer, probe_results, 0.5)
+    assert session["comport"] == {"signature": "COM1"}
+
+
+def test_save_fingerprint_data_existing_non_unknown_subdir(tmp_path, monkeypatch):
+    monkeypatch.setattr(fps, "DATA_DIR", str(tmp_path))
+
+    writer = _probe_writer()
+    writer.slctab = None
+    writer.comport_data = None
+    writer.rejected_will = set()
+    writer.rejected_do = set()
+    probe_results = {"BINARY": fps.ProbeResult(status="WILL", opt=fps.BINARY)}
+
+    protocol_fp = fps._create_protocol_fingerprint(writer, probe_results)
+    telnet_hash = fps._hash_fingerprint(protocol_fp)
+    telnet_dir = tmp_path / "client" / telnet_hash
+    known_dir = telnet_dir / "known-terminal"
+    known_dir.mkdir(parents=True)
+
+    filepath = fps._save_fingerprint_data(writer, probe_results, 0.5)
+    assert filepath is not None
+    assert "known-terminal" in filepath
+
+
+@pytest.mark.asyncio
+async def test_probe_client_capabilities_timeout_status():
+    """Probed option that never responds gets 'timeout' status."""
+    from telnetlib3.telopt import LOGOUT
+
+    writer = _probe_writer()
+    options = [(LOGOUT, "LOGOUT", "Logout")]
+
+    results = await fps.probe_client_capabilities(writer, options=options, timeout=0.01)
+    assert results["LOGOUT"]["status"] == "timeout"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="fingerprinting_display requires termios")
+def test_fingerprinting_post_script_delegates():
+    """fingerprinting_post_script delegates to fingerprinting_display."""
+    from unittest.mock import patch
+
+    with patch("telnetlib3.fingerprinting_display.fingerprinting_post_script") as mock_fps:
+        fps.fingerprinting_post_script("/tmp/test.json")
+        mock_fps.assert_called_once_with("/tmp/test.json")

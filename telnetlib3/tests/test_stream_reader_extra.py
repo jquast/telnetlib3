@@ -38,7 +38,6 @@ async def test_readuntil_success_consumes_and_returns():
     r.feed_data(b"abc\nrest")
     out = await r.readuntil(b"\n")
     assert out == b"abc\n"
-    # buffer consumed up to and including separator
     assert bytes(r._buffer) == b"rest"
 
 
@@ -50,18 +49,15 @@ async def test_readuntil_eof_incomplete_raises_and_clears():
     with pytest.raises(asyncio.IncompleteReadError) as exc:
         await r.readuntil(b"\n")
     assert exc.value.partial == b"partial"
-    # buffer cleared on EOF path
     assert r._buffer == bytearray()
 
 
 @pytest.mark.asyncio
 async def test_readuntil_limit_overrun_leaves_buffer():
     r = TelnetReader(limit=5)
-    # 7 bytes, no separator, should exceed limit
     r.feed_data(b"abcdefg")
     with pytest.raises(asyncio.LimitOverrunError):
         await r.readuntil(b"\n")
-    # buffer left intact on limit overrun
     assert bytes(r._buffer) == b"abcdefg"
 
 
@@ -74,7 +70,6 @@ async def test_readuntil_pattern_success_and_eof_incomplete():
     assert out == b"aaXYZ"
     assert bytes(r._buffer) == b"bb"
 
-    # EOF incomplete for pattern
     r2 = TelnetReader(limit=64)
     r2.feed_data(b"aaaa")
     r2.feed_eof()
@@ -99,11 +94,8 @@ async def test_pause_and_resume_transport_based_on_buffer_limit():
     r = TelnetReader(limit=4)
     t = MockTransport()
     r.set_transport(t)
-    # exceed 2*limit (8) to pause
     r.feed_data(b"123456789")
     assert t.paused is True
-
-    # consume enough to drop buffer length <= limit and trigger resume
     got = await r.read(5)
     assert got == b"12345"
     assert t.resumed is True
@@ -113,12 +105,10 @@ async def test_pause_and_resume_transport_based_on_buffer_limit():
 async def test_anext_iterates_lines_and_stops_on_eof():
     r = TelnetReader()
     r.feed_data(b"Line1\nLine2\n")
-    one = await r.__anext__()  # anext() is 3.10+
+    one = await r.__anext__()
     assert one == b"Line1\n"
-    # second line
     two = await r.__anext__()
     assert two == b"Line2\n"
-    # signal EOF then StopAsyncIteration on next
     r.feed_eof()
     with pytest.raises(StopAsyncIteration):
         await r.__anext__()
@@ -134,10 +124,8 @@ async def test_exception_propagates_to_read_calls():
 
 def test_deprecated_close_and_connection_closed_warns():
     r = TelnetReader()
-    # property warns
     with pytest.warns(DeprecationWarning):
         _ = r.connection_closed
-    # close warns and sets eof
     with pytest.warns(DeprecationWarning):
         r.close()
     assert r._eof is True
@@ -163,14 +151,10 @@ async def test_unicode_reader_read_zero_and_read_consumes():
         return "ascii"
 
     ur = TelnetReaderUnicode(fn_encoding=enc)
-    # read(0) yields empty string
-    out0 = await ur.read(0)
-    assert not out0
-
+    assert await ur.read(0) == ""
     ur.feed_data(b"abc")
     out2 = await ur.read(2)
     assert out2 == "ab"
-    # remaining one char
     out1 = await ur.read(10)
     assert out1 == "c"
 
@@ -181,10 +165,43 @@ async def test_unicode_readexactly_reads_characters_not_bytes():
         return "utf-8"
 
     ur = TelnetReaderUnicode(fn_encoding=enc)
-    s = "☭ab"  # first is multibyte in utf-8
-    ur.feed_data(s.encode("utf-8"))
+    ur.feed_data("☭ab".encode("utf-8"))
     out = await ur.readexactly(2)
     assert out == "☭a"
-    # next call should return remaining 'b'
     out2 = await ur.readexactly(1)
     assert out2 == "b"
+
+
+@pytest.mark.asyncio
+async def test_feed_data_empty_returns_early():
+    r = TelnetReader(limit=64)
+    r.feed_data(b"existing")
+    r.feed_data(b"")
+    assert bytes(r._buffer) == b"existing"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "make_reader, method, args",
+    [
+        (lambda: TelnetReader(), "readuntil", (b"\n",)),
+        (lambda: TelnetReader(), "readexactly", (5,)),
+        (lambda: TelnetReaderUnicode(fn_encoding=lambda incoming=True: "ascii"), "readline", ()),
+        (
+            lambda: TelnetReaderUnicode(fn_encoding=lambda incoming=True: "ascii"),
+            "readexactly",
+            (3,),
+        ),
+    ],
+    ids=["readuntil", "readexactly", "unicode-readline", "unicode-readexactly"],
+)
+async def test_read_method_raises_stored_exception(make_reader, method, args):
+    reader = make_reader()
+    reader.set_exception(RuntimeError("boom"))
+    with pytest.raises(RuntimeError, match="boom"):
+        await getattr(reader, method)(*args)
+
+
+def test_aiter_returns_self():
+    r = TelnetReader()
+    assert r.__aiter__() is r

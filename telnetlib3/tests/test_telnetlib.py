@@ -345,22 +345,21 @@ class nego_collector:
 tl = telnetlib
 
 
-class TestWrite:
-    """The only thing that write does is replace each tl.IAC for tl.IAC+tl.IAC."""
-
-    def test_write(self):
-        data_sample = [
-            b"data sample without IAC",
-            b"data sample with" + tl.IAC + b" one IAC",
-            b"a few" + tl.IAC + tl.IAC + b" iacs" + tl.IAC,
-            tl.IAC,
-            b"",
-        ]
-        for data in data_sample:
-            telnet = make_telnet()
-            telnet.write(data)
-            written = b"".join(telnet.sock.writes)
-            assert data.replace(tl.IAC, tl.IAC + tl.IAC) == written
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"data sample without IAC",
+        b"data sample with" + tl.IAC + b" one IAC",
+        b"a few" + tl.IAC + tl.IAC + b" iacs" + tl.IAC,
+        tl.IAC,
+        b"",
+    ],
+)
+def test_write_doubles_iac(data):
+    telnet = make_telnet()
+    telnet.write(data)
+    written = b"".join(telnet.sock.writes)
+    assert data.replace(tl.IAC, tl.IAC + tl.IAC) == written
 
 
 class TestOption:

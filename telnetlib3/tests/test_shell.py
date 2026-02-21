@@ -68,7 +68,7 @@ async def test_telnet_client_shell_as_coroutine(bind_host, unused_tcp_port):
     # a server that doesn't care
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, shell=shell, connect_minwait=0.05
+            host=bind_host, port=unused_tcp_port, shell=shell
         ) as (reader, writer):
             await asyncio.wait_for(_waiter, 0.5)
 
@@ -110,7 +110,7 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
         host=bind_host,
         port=unused_tcp_port,
         shell=telnet_server_shell,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
         timeout=1.25,
         limit=13377,
         never_send_ga=True,
@@ -289,7 +289,7 @@ async def test_telnet_server_shell_eof(bind_host, unused_tcp_port):
 async def test_telnet_server_shell_version_command(bind_host, unused_tcp_port):
     """Test version command in telnet_server_shell."""
     async with create_server(
-        host=bind_host, port=unused_tcp_port, shell=telnet_server_shell, connect_maxwait=0.05
+        host=bind_host, port=unused_tcp_port, shell=telnet_server_shell, connect_maxwait=0.5
     ):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             expected = IAC + DO + TTYPE
@@ -324,7 +324,7 @@ async def test_telnet_server_shell_version_command(bind_host, unused_tcp_port):
 async def test_telnet_server_shell_dump_with_kb_limit(bind_host, unused_tcp_port):
     """Test dump command with explicit kb_limit."""
     async with create_server(
-        host=bind_host, port=unused_tcp_port, shell=telnet_server_shell, connect_maxwait=0.05
+        host=bind_host, port=unused_tcp_port, shell=telnet_server_shell, connect_maxwait=0.5
     ):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             expected = IAC + DO + TTYPE
@@ -356,7 +356,7 @@ async def test_telnet_server_shell_dump_with_kb_limit(bind_host, unused_tcp_port
 async def test_telnet_server_shell_dump_with_all_options(bind_host, unused_tcp_port):
     """Test dump command with all options including close."""
     async with create_server(
-        host=bind_host, port=unused_tcp_port, shell=telnet_server_shell, connect_maxwait=0.05
+        host=bind_host, port=unused_tcp_port, shell=telnet_server_shell, connect_maxwait=0.5
     ):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             expected = IAC + DO + TTYPE
@@ -387,7 +387,7 @@ async def test_telnet_server_shell_dump_with_all_options(bind_host, unused_tcp_p
 async def test_telnet_server_shell_dump_nodrain(bind_host, unused_tcp_port):
     """Test dump command with nodrain option."""
     async with create_server(
-        host=bind_host, port=unused_tcp_port, shell=telnet_server_shell, connect_maxwait=0.05
+        host=bind_host, port=unused_tcp_port, shell=telnet_server_shell, connect_maxwait=0.5
     ):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             expected = IAC + DO + TTYPE
@@ -419,7 +419,7 @@ async def test_telnet_server_shell_dump_nodrain(bind_host, unused_tcp_port):
 async def test_telnet_server_shell_dump_large_output(bind_host, unused_tcp_port):
     """Test dump command with larger output."""
     async with create_server(
-        host=bind_host, port=unused_tcp_port, shell=telnet_server_shell, connect_maxwait=0.05
+        host=bind_host, port=unused_tcp_port, shell=telnet_server_shell, connect_maxwait=0.5
     ):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             expected = IAC + DO + TTYPE

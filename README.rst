@@ -38,6 +38,104 @@ The python telnetlib.py_ module removed by Python 3.13 is also re-distributed as
 
 See the `Guidebook`_ for examples and the `API documentation`_.
 
+Command-line Utilities
+----------------------
+
+The CLI utility ``telnetlib3-client`` is provided for connecting to servers and
+``telnetlib3-server`` for hosting a server.
+
+Both tools accept the argument ``--shell=my_module.fn_shell`` describing a python module path to a
+function of signature ``async def shell(reader, writer)``.  The server also provides ``--pty-exec``
+argument to host stand-alone programs.
+
+::
+
+    # telnet to utf8 roguelike server
+    telnetlib3-client nethack.alt.org
+
+    # or bbs,
+    telnetlib3-client xibalba.l33t.codes 44510
+
+    # automatic script communicates with a server
+    telnetlib3-client --shell bin.client_wargame.shell 1984.ws 666
+
+    # run a server bound with the default shell bound to 127.0.0.1 6023
+    telnetlib3-server
+
+    # or custom ip, port and shell
+    telnetlib3-server 0.0.0.0 1984 --shell=bin.server_wargame.shell
+
+    # host an external program with a pseudo-terminal (raw mode is default)
+    telnetlib3-server --pty-exec /bin/bash -- --login
+
+    # or host a program in linemode,
+    telnetlib3-server --pty-exec /bin/bc --line-mode
+
+There are also two fingerprinting CLIs, ``telnetlib3-fingerprint`` and
+``telnetlib3-fingerprint-server``::
+
+    # host a server, wait for clients to connect and fingerprint them,
+    telnetlib3-fingerprint-server
+
+    # report fingerprint of the telnet server on 1984.ws
+    telnetlib3-fingerprint 1984.ws
+
+Encoding
+~~~~~~~~
+
+The default encoding is the system locale, usually UTF-8, and, without negotiation of BINARY
+transmission, all Telnet protocol text *should* be limited to ASCII text, by strict compliance of
+Telnet.  Further, the encoding used *should* be negotiated by CHARSET.
+
+When these conditions are true, telnetlib3-server and telnetlib3-client allow connections of any
+encoding supporting by the python language, and additionally specially ``ATASCII`` and ``PETSCII``
+encodings.  Any server capable of negotiating CHARSET or LANG through NEW_ENVIRON is also presumed
+to support BINARY.
+
+From a February 2026 `census of MUDs <https://muds.modem.xyz>`_ and `BBSs servers
+<https://bbs.modem.xyz>`_:
+
+- 2.8% of MUDs support bi-directional CHARSET
+- 0.5% of BBSs support bi-directional CHARSET.
+- 18.4% of BBSs support BINARY.
+- 3.2% of MUDs support BINARY.
+
+For this reason, it is often required to specify the encoding, eg.!
+
+    telnetlib3-client --encoding=cp437 20forbeers.com 1337
+
+
+REPL Input Mode
+~~~~~~~~~~~~~~~
+
+When connecting in line mode, ``telnetlib3-client`` will use an enhanced REPL
+powered by `prompt_toolkit`_ when installed::
+
+    pip install telnetlib3[with_tui]
+
+Features include:
+
+- Persistent command history saved to ``~/.local/share/telnetlib3/history``
+- History-based auto-suggest (grey ghost text, press right arrow to accept)
+- Password masking when the server negotiates ECHO (passwords are never saved)
+- Split-screen display: server output scrolls above, input stays on the bottom line
+
+Line mode is the default telnet protocol behavior -- and the preferred default for MUD servers.
+This input mode is provided automatically. Disable with ``--no-repl``::
+
+    telnetlib3-client --no-repl --ssl dunemud.net 6788
+
+Use ``--history-file`` to set a custom path, or ``--history-file ""`` to disable
+persistence.
+
+Raw Mode
+~~~~~~~~
+
+Some telnet servers, especially BBS systems or those designed for serial transmission but are
+connected to a TCP socket without any telnet negotiation may require "raw" mode argument::
+
+    telnetlib3-client --raw-mode area52.tk 5200
+
 Asyncio Protocol
 ----------------
 
@@ -48,47 +146,6 @@ Blocking API
 
 A Synchronous interface, modeled after telnetlib.py_ (client) and miniboa_ (server), with various
 enhancements in protocol negotiation is also provided.  See `sync API documentation`_ for more.
-
-Command-line Utilities
-----------------------
-
-Two CLI tools are included: ``telnetlib3-client`` for connecting to servers
-and ``telnetlib3-server`` for hosting a server.
-
-Both tools argument ``--shell=my_module.fn_shell`` describing a python
-module path to a function of signature ``async def shell(reader, writer)``.
-The server also provides ``--pty-exec`` argument to host a stand-alone
-program.
-
-::
-
-    # utf8 roguelike server
-    telnetlib3-client nethack.alt.org
-    # utf8 bbs
-    telnetlib3-client xibalba.l33t.codes 44510
-    # automatic communication with telnet server
-    telnetlib3-client --shell bin.client_wargame.shell 1984.ws 666
-    # run a server with default shell
-    telnetlib3-server
-    # or custom port and ip and shell
-    telnetlib3-server 0.0.0.0 1984 --shell=bin.server_wargame.shell
-    # run an external program with a pseudo-terminal (raw mode is default)
-    telnetlib3-server --pty-exec /bin/bash -- --login
-    # or a linemode program, bc (calculator)
-    telnetlib3-server --pty-exec /bin/bc --line-mode
-
-
-There are also fingerprinting CLIs, ``telnetlib3-fingerprint`` and
-``telnetlib3-fingerprint-server``
-
-::
-
-    # host a server, wait for clients to connect and fingerprint them,
-    telnetlib3-fingerprint-server
-
-    # report fingerprint of telnet server on 1984.ws
-    telnetlib3-fingerprint 1984.ws
-
 
 Legacy telnetlib
 ----------------
@@ -106,43 +163,8 @@ To migrate code, change import statements:
     # NEW imports:
     import telnetlib3
 
-``telnetlib3`` did not provide server support, while this library also provides
-both client and server support through a similar Blocking API interface.
-
-See `sync API documentation`_ for details.
-
-Encoding
---------
-
-Often required, ``--encoding`` and ``--force-binary``::
-
-    telnetlib3-client --encoding=cp437 --force-binary 20forbeers.com 1337
-
-The default encoding is the system locale, usually UTF-8, but all Telnet
-protocol text *should* be limited to ASCII until BINARY mode is agreed by
-compliance of their respective RFCs.
-
-However, many clients and servers that are capable of non-ascii encodings like
-UTF-8 or CP437 may not be capable of negotiating about BINARY, NEW_ENVIRON,
-or CHARSET to negotiate about it.
-
-In this case, use ``--force-binary`` and ``--encoding`` when the encoding of
-the remote end is known.
-
-Go-Ahead (GA)
---------------
-
-When a client does not negotiate Suppress Go-Ahead (SGA), the server sends
-``IAC GA`` after output to signal that the client may transmit. This is
-correct behavior for MUD clients like Mudlet that expect prompt detection
-via GA.
-
-If GA causes unwanted output for your use case, disable it::
-
-    telnetlib3-server --never-send-ga
-
-For PTY shells, GA is sent after 500ms of output idle time to avoid
-injecting GA in the middle of streaming output.
+This library *also* provides an additional client (and server) API through a similar interface but
+offering more advanced negotiation features and options.  See `sync API documentation`_ for more.
 
 Quick Example
 =============
@@ -156,7 +178,7 @@ A simple telnet server:
 
     async def shell(reader, writer):
         writer.write('\r\nWould you like to play a game? ')
-        inp = await reader.read(1)
+        inp = await reader.readline()
         if inp:
             writer.echo(inp)
             writer.write('\r\nThey say the only way to win '
@@ -167,6 +189,29 @@ A simple telnet server:
     async def main():
         server = await telnetlib3.create_server(port=6023, shell=shell)
         await server.wait_closed()
+
+    asyncio.run(main())
+
+A client that connects and plays the game:
+
+.. code-block:: python
+
+    import asyncio
+    import telnetlib3
+
+    async def shell(reader, writer):
+        while True:
+            output = await reader.read(1024)
+            if not output:
+                break
+            if '?' in output:
+                writer.write('y\r\n')
+            print(output, end='', flush=True)
+        print()
+
+    async def main():
+        reader, writer = await telnetlib3.open_connection('localhost', 6023)
+        await shell(reader, writer)
 
     asyncio.run(main())
 
@@ -185,7 +230,7 @@ The following RFC specifications are implemented:
 * `rfc-857`_, "Telnet Echo Option", May 1983.
 * `rfc-858`_, "Telnet Suppress Go Ahead Option", May 1983.
 * `rfc-859`_, "Telnet Status Option", May 1983.
-* `rfc-860`_, "Telnet Timing mark Option", May 1983.
+* `rfc-860`_, "Telnet Timing Mark Option", May 1983.
 * `rfc-885`_, "Telnet End of Record Option", Dec 1983.
 * `rfc-930`_, "Telnet Terminal Type Option", Jan 1984.
 * `rfc-1073`_, "Telnet Window Size Option", Oct 1988.
@@ -231,18 +276,7 @@ The following RFC specifications are implemented:
 .. _sync API documentation: https://telnetlib3.readthedocs.io/en/latest/api/sync.html
 .. _miniboa: https://github.com/shmup/miniboa
 .. _asyncio: https://docs.python.org/3/library/asyncio.html
-.. _wait_for(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.TelnetConnection.wait_for
-.. _get_extra_info(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.TelnetConnection.get_extra_info
-.. _readline(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.TelnetConnection.readline
-.. _read_until(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.TelnetConnection.read_until
-.. _active: https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.active
-.. _address: https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.address
-.. _terminal_type: https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.terminal_type
-.. _columns: https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.columns
-.. _rows: https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.rows
-.. _idle(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.idle
-.. _duration(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.duration
-.. _deactivate(): https://telnetlib3.readthedocs.io/en/latest/api/sync.html#telnetlib3.sync.ServerConnection.deactivate
+.. _prompt_toolkit: https://python-prompt-toolkit.readthedocs.io/
 
 Further Reading
 ---------------

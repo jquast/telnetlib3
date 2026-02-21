@@ -64,6 +64,7 @@ class CONFIG(NamedTuple):
     pty_fork_limit: int = 0
     status_interval: int = 20
     never_send_ga: bool = False
+    line_mode: bool = False
 
 
 # Default config instance - use this to access default values
@@ -94,6 +95,7 @@ class TelnetServer(server_base.BaseServer):
         encoding_errors: str = "strict",
         force_binary: bool = False,
         never_send_ga: bool = False,
+        line_mode: bool = False,
         connect_maxwait: float = 4.0,
         limit: Optional[int] = None,
         reader_factory: type = TelnetReader,
@@ -109,6 +111,7 @@ class TelnetServer(server_base.BaseServer):
             encoding_errors=encoding_errors,
             force_binary=force_binary,
             never_send_ga=never_send_ga,
+            line_mode=line_mode,
             connect_maxwait=connect_maxwait,
             limit=limit,
             reader_factory=reader_factory,
@@ -202,7 +205,8 @@ class TelnetServer(server_base.BaseServer):
         )
 
         super().begin_advanced_negotiation()
-        self.writer.iac(WILL, SGA)
+        if not self.line_mode:
+            self.writer.iac(WILL, SGA)
         # WILL ECHO is deferred -- see _negotiate_echo()
         self.writer.iac(WILL, BINARY)
         # DO NEW_ENVIRON is deferred -- see _negotiate_environ()
@@ -420,23 +424,38 @@ class TelnetServer(server_base.BaseServer):
         session setup.  Override this method or see
         :data:`~.fingerprinting.ENVIRON_EXTENDED` for a larger set used
         during client fingerprinting.
+
+        .. note::
+
+            ``USER`` is excluded when the client is Microsoft telnet
+            (ttype1=ANSI, ttype2=VT100) because requesting it crashes
+            ``telnet.exe``.  See GitHub issue #24.
         """
         from .telopt import VAR, USERVAR  # pylint: disable=import-outside-toplevel
 
-        return [
-            "USER",
-            "LOGNAME",
-            "DISPLAY",
-            "LANG",
-            "TERM",
-            "COLUMNS",
-            "LINES",
-            "COLORTERM",
-            "EDITOR",
-            # Request any other VAR/USERVAR the client wants to send
-            VAR,
-            USERVAR,
-        ]
+        ttype1 = self.get_extra_info("ttype1") or ""
+        ttype2 = self.get_extra_info("ttype2") or ""
+        is_ms_telnet = ttype1 == "ANSI" and ttype2 == "VT100"
+
+        result: List[Union[str, bytes]] = []
+        if not is_ms_telnet:
+            result.append("USER")
+        result.extend(
+            [
+                "LOGNAME",
+                "DISPLAY",
+                "LANG",
+                "TERM",
+                "COLUMNS",
+                "LINES",
+                "COLORTERM",
+                "EDITOR",
+                # Request any other VAR/USERVAR the client wants to send
+                VAR,
+                USERVAR,
+            ]
+        )
+        return result
 
     def on_environ(self, mapping: Dict[str, str]) -> None:
         """Callback receives NEW_ENVIRON response, :rfc:`1572`."""
@@ -456,6 +475,14 @@ class TelnetServer(server_base.BaseServer):
         logger.debug("on_environ received: %r", u_mapping)
 
         self._extra.update(u_mapping)
+
+        # When the client provides LANG (with encoding suffix) or CHARSET,
+        # presume BINARY capability even without explicit BINARY negotiation.
+        has_charset = bool(u_mapping.get("CHARSET"))
+        lang_val = u_mapping.get("LANG", "")
+        has_lang_encoding = "." in lang_val and lang_val != "C"
+        if (has_charset or has_lang_encoding) and self.writer is not None:
+            self.writer._force_binary_on_protocol()  # pylint: disable=protected-access
 
     def on_request_charset(self) -> List[str]:
         """
@@ -563,14 +590,14 @@ class TelnetServer(server_base.BaseServer):
 
     def _negotiate_environ(self) -> None:
         """
-        Send ``DO NEW_ENVIRON`` unless the client is Microsoft telnet.
+        Send ``DO NEW_ENVIRON``.
 
         Called from :meth:`on_ttype` as soon as we have enough information:
 
         - After ``ttype1`` when it is not ``"ANSI"``.
-        - After ``ttype2`` when ``ttype1`` *is* ``"ANSI"`` -- if ``ttype2``
-          is ``"VT100"`` the client is Microsoft Windows telnet and
-          ``NEW_ENVIRON`` is skipped entirely (GitHub issue #24).
+        - After ``ttype2`` when ``ttype1`` *is* ``"ANSI"`` -- this gives
+          :meth:`on_request_environ` enough context to detect Microsoft
+          telnet and exclude ``USER`` (GitHub issue #24).
         - From :meth:`check_negotiation` when TTYPE stalls or is refused.
         """
         if self._environ_requested:
@@ -579,24 +606,18 @@ class TelnetServer(server_base.BaseServer):
 
         from .telopt import DO, NEW_ENVIRON  # pylint: disable=import-outside-toplevel
 
-        ttype1 = self.get_extra_info("ttype1") or ""
-        ttype2 = self.get_extra_info("ttype2") or ""
-
-        if ttype1 == "ANSI" and ttype2 == "VT100":
-            logger.info(
-                "skipping NEW_ENVIRON for Microsoft telnet (ttype1=%r, ttype2=%r)", ttype1, ttype2
-            )
-            return
-
         self.writer.iac(DO, NEW_ENVIRON)
 
     def _negotiate_echo(self) -> None:
         """
-        Send ``WILL ECHO`` unless the client is a MUD client.
+        Send ``WILL ECHO`` unless the client is a MUD client or line mode.
 
         MUD clients (Mudlet, TinTin++, etc.) interpret ``WILL ECHO`` as
         "password mode" and mask the input bar.  We defer ECHO negotiation
         until TTYPE arrives so MUD clients are detected first.
+
+        When :attr:`line_mode` is ``True``, ECHO is never sent so the
+        client stays in NVT local (line) mode.
 
         Called from :meth:`on_ttype` on each TTYPE response, and from
         :meth:`check_negotiation` when TTYPE stalls or is refused.
@@ -604,6 +625,9 @@ class TelnetServer(server_base.BaseServer):
         if self._echo_negotiated:
             return
         self._echo_negotiated = True
+
+        if self.line_mode:
+            return
 
         from .telopt import ECHO, WILL  # pylint: disable=import-outside-toplevel
         from .fingerprinting import _is_maybe_mud  # pylint: disable=import-outside-toplevel
@@ -886,6 +910,7 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
     encoding_errors: str = "strict",
     force_binary: bool = False,
     never_send_ga: bool = False,
+    line_mode: bool = False,
     connect_maxwait: float = 4.0,
     limit: Optional[int] = None,
     term: str = "unknown",
@@ -935,6 +960,10 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
         may be no problem at all. If an encoding is assumed, as in many MUD and
         BBS systems, the combination of ``force_binary`` with a default
         ``encoding`` is often preferred.
+    :param line_mode: When ``True``, the server does not send ``WILL SGA``
+        or ``WILL ECHO`` during negotiation.  This keeps the client in NVT
+        local (line) mode, where the client performs its own line editing
+        and sends complete lines.  Default is ``False`` (kludge mode).
     :param term: Value returned for ``writer.get_extra_info('term')``
         until negotiated by TTYPE :rfc:`930`, or NAWS :rfc:`1572`.  Default value
         is ``'unknown'``.
@@ -981,6 +1010,7 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
                 encoding_errors=encoding_errors,
                 force_binary=force_binary,
                 never_send_ga=never_send_ga,
+                line_mode=line_mode,
                 connect_maxwait=connect_maxwait,
                 limit=limit,
                 term=term,
@@ -995,6 +1025,7 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
                 encoding_errors=encoding_errors,
                 force_binary=force_binary,
                 never_send_ga=never_send_ga,
+                line_mode=line_mode,
                 connect_maxwait=connect_maxwait,
                 limit=limit,
             )
@@ -1083,18 +1114,18 @@ def parse_server_args() -> Dict[str, Any]:
             default=_config.pty_fork_limit,
             help="limit concurrent PTY connections (0 disables)",
         )
-        parser.add_argument(
-            "--line-mode",
-            action="store_true",
-            default=False,
-            help="use cooked PTY mode with echo for --pty-exec instead of raw "
-            "mode.  By default PTY echo is disabled (raw mode), which is "
-            "correct for programs that handle their own terminal I/O "
-            "(curses, blessed, ucs-detect).",
-        )
         # Hidden backwards-compat: --pty-raw was the default since 2.5,
         # keep it as a silent no-op so existing scripts don't break.
         parser.add_argument("--pty-raw", action="store_true", default=False, help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--line-mode",
+        action="store_true",
+        default=_config.line_mode,
+        help="keep clients in NVT line mode by not sending WILL SGA or "
+        "WILL ECHO during negotiation.  Clients perform their own line "
+        "editing and send complete lines.  Also sets cooked PTY mode "
+        "when combined with --pty-exec.",
+    )
     parser.add_argument(
         "--robot-check",
         action="store_true",
@@ -1137,18 +1168,17 @@ def parse_server_args() -> Dict[str, Any]:
     result = vars(parser.parse_args(argv))
     result["pty_args"] = pty_args if PTY_SUPPORT else None
     # --pty-raw is a hidden no-op (raw is now the default);
-    # --line-mode opts out of raw mode.
+    # --line-mode opts out of raw mode and suppresses WILL SGA/ECHO.
     result.pop("pty_raw", None)
-    result["pty_raw"] = not result.pop("line_mode", False)
+    result["pty_raw"] = not result.get("line_mode", False)
     if not PTY_SUPPORT:
         result["pty_exec"] = None
         result["pty_fork_limit"] = 0
         result["pty_raw"] = False
 
-    # Auto-enable force_binary for retro BBS encodings that use high-bit bytes.
-    from .encodings import FORCE_BINARY_ENCODINGS  # pylint: disable=import-outside-toplevel
-
-    if result["encoding"].lower().replace("-", "_") in FORCE_BINARY_ENCODINGS:
+    # Auto-enable force_binary for any non-ASCII encoding that uses high-bit bytes.
+    enc_key = result["encoding"].lower().replace("-", "_")
+    if enc_key not in ("us_ascii", "ascii"):
         result["force_binary"] = True
 
     # Build SSLContext from --ssl-certfile / --ssl-keyfile
@@ -1184,6 +1214,7 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
     pty_fork_limit: int = _config.pty_fork_limit,
     status_interval: int = _config.status_interval,
     never_send_ga: bool = _config.never_send_ga,
+    line_mode: bool = _config.line_mode,
     protocol_factory: Optional[Type[asyncio.Protocol]] = None,
     ssl: Optional[ssl_module.SSLContext] = None,
     tls_auto: bool = False,
@@ -1268,6 +1299,7 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
         encoding=encoding,
         force_binary=force_binary,
         never_send_ga=never_send_ga,
+        line_mode=line_mode,
         timeout=timeout,
         connect_maxwait=connect_maxwait,
         ssl=ssl,

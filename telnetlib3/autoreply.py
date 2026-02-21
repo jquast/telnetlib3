@@ -1,0 +1,616 @@
+"""
+Server output pattern matching and automatic reply engine.
+
+Provides :class:`SearchBuffer` for accumulating ANSI-stripped server output
+and :class:`AutoreplyEngine` for matching regex patterns and queuing replies
+with delay/chaining support.
+"""
+
+from __future__ import annotations
+
+# std imports
+import re
+import json
+import time
+import asyncio
+import logging
+from typing import Any, Union, Callable, Optional, Awaitable
+from dataclasses import dataclass
+
+# 3rd party
+from wcwidth import strip_sequences
+
+# local
+from .stream_writer import TelnetWriter, TelnetWriterUnicode
+
+__all__ = (
+    "AutoreplyRule",
+    "SearchBuffer",
+    "AutoreplyEngine",
+    "load_autoreplies",
+    "save_autoreplies",
+)
+
+_DELAY_RE = re.compile(r"::(\d+(?:\.\d+)?)(ms|s)::")
+_CR_TOKEN = "<CR>"
+_CR_RE = re.compile(r"<CR>", re.IGNORECASE)
+_GROUP_RE = re.compile(r"\\(\d+)")
+
+
+@dataclass
+class AutoreplyRule:
+    r"""
+    A single autoreply pattern-action rule.
+
+    :param pattern: Compiled regex pattern.
+    :param reply: Reply template with ``\1``/``\2`` group refs,
+        ``<CR>`` send markers, and ``::Ns::`` delays.
+    """
+
+    pattern: re.Pattern[str]
+    reply: str
+    exclusive: bool = False
+    until: str = ""
+    post_command: str = ""
+    always: bool = False
+    enabled: bool = True
+    exclusive_timeout: float = 30.0
+
+
+def _parse_entries(entries: list[dict[str, str]]) -> list[AutoreplyRule]:
+    """Parse a list of autoreply entry dicts into :class:`AutoreplyRule` instances."""
+    rules: list[AutoreplyRule] = []
+    for entry in entries:
+        pattern_str = entry.get("pattern", "")
+        reply = entry.get("reply", "")
+        if not pattern_str:
+            continue
+        exclusive = bool(entry.get("exclusive", False))
+        until = entry.get("until", "")
+        post_command = entry.get("post_command", "")
+        always = bool(entry.get("always", False))
+        enabled = bool(entry.get("enabled", True))
+        exclusive_timeout = float(entry.get("exclusive_timeout", 30.0))
+        try:
+            compiled = re.compile(pattern_str, re.MULTILINE | re.DOTALL)
+        except re.error as exc:
+            raise ValueError(f"Invalid autoreply pattern {pattern_str!r}: {exc}") from exc
+        rules.append(AutoreplyRule(
+            pattern=compiled, reply=reply, exclusive=exclusive,
+            until=until, post_command=post_command, always=always,
+            enabled=enabled, exclusive_timeout=exclusive_timeout,
+        ))
+    return rules
+
+
+def load_autoreplies(path: str, session_key: str) -> list[AutoreplyRule]:
+    """
+    Load autoreply rules for a session from a JSON file.
+
+    The file is keyed by session (``"host:port"``).  Each value is
+    an object with an ``"autoreplies"`` list.
+
+    :param path: Path to the autoreplies JSON file.
+    :param session_key: Session identifier (``"host:port"``).
+    :returns: List of :class:`AutoreplyRule` instances.
+    :raises FileNotFoundError: When *path* does not exist.
+    :raises ValueError: When JSON structure is invalid or regex fails.
+    """
+    with open(path, "r", encoding="utf-8") as fh:
+        data: dict[str, Any] = json.load(fh)
+
+    session_data: dict[str, Any] = data.get(session_key, {})
+    entries: list[dict[str, str]] = session_data.get("autoreplies", [])
+    return _parse_entries(entries)
+
+
+def save_autoreplies(path: str, rules: list[AutoreplyRule], session_key: str) -> None:
+    """
+    Save autoreply rules for a session to a JSON file.
+
+    Other sessions' data in the file is preserved.
+
+    :param path: Path to the autoreplies JSON file.
+    :param rules: List of :class:`AutoreplyRule` instances to save.
+    :param session_key: Session identifier (``"host:port"``).
+    """
+    import os  # pylint: disable=import-outside-toplevel
+
+    data: dict[str, Any] = {}
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+
+    data[session_key] = {
+        "autoreplies": [
+            {
+                "pattern": r.pattern.pattern,
+                "reply": r.reply,
+                **({"exclusive": True} if r.exclusive else {}),
+                **({"until": r.until} if r.until else {}),
+                **({"post_command": r.post_command} if r.post_command else {}),
+                **({"always": True} if r.always else {}),
+                **({"enabled": False} if not r.enabled else {}),
+                **({"exclusive_timeout": r.exclusive_timeout}
+                   if r.exclusive and r.exclusive_timeout != 30.0 else {}),
+            }
+            for r in rules
+        ]
+    }
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")
+
+
+def _substitute_groups(template: str, match: re.Match[str]) -> str:
+    r"""
+    Replace ``\1``, ``\2``, etc. with match group values.
+
+    :param template: Reply template string.
+    :param match: Regex match object.
+    :returns: Template with groups substituted.
+    """
+
+    def _repl(m: re.Match[str]) -> str:
+        idx = int(m.group(1))
+        try:
+            val = match.group(idx)
+        except IndexError:
+            return m.group(0)
+        return val if val is not None else ""
+
+    return _GROUP_RE.sub(_repl, template)
+
+
+def _parse_delay(token: str) -> float:
+    """
+    Parse a delay value string into seconds.
+
+    :param token: Numeric string portion of a delay token.
+    :returns: Delay in seconds.
+    """
+    m = _DELAY_RE.match(token)
+    if m is None:
+        return 0.0
+    value = float(m.group(1))
+    unit = m.group(2)
+    if unit == "ms":
+        value /= 1000.0
+    return value
+
+
+class SearchBuffer:
+    """
+    Accumulates stripped server output lines for regex matching.
+
+    Maintains a rolling window of recent lines with ANSI sequences stripped.  Tracks the last match
+    position so each new line is only searched from the position after the previous match.
+
+    :param max_lines: Maximum number of lines to retain (default 100).
+    """
+
+    def __init__(self, max_lines: int = 100) -> None:
+        """Initialize SearchBuffer with given line capacity."""
+        self._lines: list[str] = []
+        self._partial: str = ""
+        self._max_lines = max_lines
+        self._last_match_line: int = 0
+        self._last_match_col: int = 0
+
+    @property
+    def lines(self) -> list[str]:
+        """Complete lines accumulated so far."""
+        return self._lines
+
+    @property
+    def partial(self) -> str:
+        """Incomplete trailing line (no newline yet)."""
+        return self._partial
+
+    def add_text(self, text: str) -> bool:
+        """
+        Add server output text, stripping ANSI sequences first.
+
+        Splits on newlines and appends complete lines to the buffer.
+        Incomplete trailing text is held in ``_partial`` until the
+        next newline arrives.
+
+        :param text: Raw server output (may contain ANSI sequences).
+        :returns: ``True`` if new complete lines were added.
+        """
+        stripped = strip_sequences(text)
+        if not stripped:
+            return False
+
+        parts = stripped.split("\n")
+
+        # Prepend partial to first segment.
+        parts[0] = self._partial + parts[0]
+
+        if len(parts) == 1:
+            # No newline in this chunk — accumulate partial.
+            self._partial = parts[0]
+            return False
+
+        # Last element is the new partial (may be empty string).
+        self._partial = parts[-1]
+
+        # Everything except the last element is a complete line.
+        new_lines = parts[:-1]
+        self._lines.extend(new_lines)
+        self._cull()
+        return True
+
+    def get_searchable_text(self) -> str:
+        """
+        Return text from last match position forward.
+
+        Joins lines from ``_last_match_line`` onward with newlines,
+        including the current partial (incomplete) line so that
+        prompts without trailing newlines can be matched.
+
+        :returns: Searchable text substring.
+        """
+        if self._last_match_line >= len(self._lines) and not self._partial:
+            return ""
+        text = "\n".join(self._lines[self._last_match_line :])
+        if self._partial:
+            if text:
+                text += "\n" + self._partial
+            else:
+                text = self._partial
+        return text[self._last_match_col :]
+
+    def advance_match(self, offset_in_searchable: int, length: int) -> None:
+        """
+        Update last match position past the given match.
+
+        :param offset_in_searchable: Start offset of match within
+            the text returned by :meth:`get_searchable_text`.
+        :param length: Length of the match.
+        """
+        # Convert searchable-text offset back to absolute (line, col).
+        abs_offset = self._last_match_col + offset_in_searchable + length
+        for i in range(self._last_match_line, len(self._lines)):
+            line_len = len(self._lines[i])
+            if i > self._last_match_line:
+                line_len += 1  # account for the \n separator
+            if abs_offset <= line_len:
+                self._last_match_line = i
+                self._last_match_col = abs_offset
+                return
+            abs_offset -= line_len + (1 if i == self._last_match_line else 0)
+
+        # Past the last line — offset is within the partial.
+        self._last_match_line = len(self._lines)
+        self._last_match_col = abs_offset
+
+    def clear(self) -> None:
+        """Reset buffer for a new EOR/GA record, preserving partial line."""
+        self._lines.clear()
+        self._last_match_line = 0
+        self._last_match_col = 0
+
+    def _cull(self) -> None:
+        """Remove oldest lines beyond *max_lines*, adjusting match position."""
+        if len(self._lines) <= self._max_lines:
+            return
+        excess = len(self._lines) - self._max_lines
+        self._lines = self._lines[excess:]
+        self._last_match_line = max(0, self._last_match_line - excess)
+        if self._last_match_line == 0 and excess > 0:
+            self._last_match_col = 0
+
+
+class AutoreplyEngine:
+    """
+    Matches server output against autoreply rules and queues replies.
+
+    Replies are chained sequentially: if reply A has a 5s delay, reply B
+    waits for A to complete before starting.
+
+    :param rules: Autoreply rules to match against.
+    :param writer: Telnet writer for sending replies.
+    :param log: Logger instance.
+    :param max_lines: SearchBuffer capacity.
+    """
+
+    def __init__(
+        self,
+        rules: list[AutoreplyRule],
+        writer: Union[TelnetWriter, TelnetWriterUnicode],
+        log: logging.Logger,
+        max_lines: int = 100,
+        insert_fn: Optional[Callable[[str], None]] = None,
+        echo_fn: Optional[Callable[[str], None]] = None,
+        wait_fn: Optional[Callable[[], Awaitable[None]]] = None,
+    ) -> None:
+        """Initialize AutoreplyEngine with rules and I/O handles."""
+        self._rules = rules
+        self._writer = writer
+        self._log = log
+        self._buffer = SearchBuffer(max_lines=max_lines)
+        self._reply_chain: Optional[asyncio.Task[None]] = None
+        self._insert_fn = insert_fn
+        self._echo_fn = echo_fn
+        self._wait_fn = wait_fn
+        self._exclusive_active = False
+        self._exclusive_rule_index: int = 0
+        self._until_pattern: Optional[re.Pattern[str]] = None
+        self._skip_next_prompt = False
+        self._exclusive_deadline: float = 0.0
+        self._post_command: str = ""
+        self._prompt_based = False
+        self._cycle_matched: set[int] = set()
+        self._suppress_exclusive = False
+        self._last_matched_pattern: str = ""
+
+    @property
+    def buffer(self) -> SearchBuffer:
+        """The underlying :class:`SearchBuffer`."""
+        return self._buffer
+
+    @property
+    def exclusive_active(self) -> bool:
+        """``True`` when an exclusive rule is suppressing normal matching."""
+        return self._exclusive_active
+
+    @property
+    def exclusive_rule_index(self) -> int:
+        """1-based index of the active exclusive rule, or 0 if none."""
+        return self._exclusive_rule_index
+
+    @property
+    def suppress_exclusive(self) -> bool:
+        """When ``True``, exclusive rules match but do not enter exclusive mode."""
+        return self._suppress_exclusive
+
+    @suppress_exclusive.setter
+    def suppress_exclusive(self, value: bool) -> None:
+        self._suppress_exclusive = value
+
+    @property
+    def reply_pending(self) -> bool:
+        """``True`` when a reply chain is still executing."""
+        return self._reply_chain is not None and not self._reply_chain.done()
+
+    @property
+    def cycle_matched(self) -> bool:
+        """``True`` if any rule matched in the current prompt cycle."""
+        return len(self._cycle_matched) > 0
+
+    @property
+    def last_matched_pattern(self) -> str:
+        """Pattern string of the most recently matched rule, or ``""``."""
+        return self._last_matched_pattern
+
+    def feed(self, text: str) -> None:
+        """
+        Feed server output text and check for matches.
+
+        Called from the server output handler in both REPL and raw modes.  Searches after every
+        chunk, including partial lines, so that MUD prompts without trailing newlines are matched.
+
+        :param text: Server output text.
+        """
+        self._buffer.add_text(text)
+
+        if self._exclusive_active:
+            # Check timeout.
+            if self._exclusive_deadline and time.monotonic() > self._exclusive_deadline:
+                self._log.info("autoreply: exclusive timed out")
+                self._exclusive_active = False
+                self._exclusive_rule_index = 0
+                self._until_pattern = None
+                self._skip_next_prompt = False
+                self._post_command = ""
+                # fall through to normal matching below
+            # Check until pattern to see if exclusive should end.
+            elif self._until_pattern is not None:
+                searchable = self._buffer.get_searchable_text()
+                if searchable and self._until_pattern.search(searchable):
+                    self._log.info(
+                        "autoreply: exclusive cleared by until pattern %r",
+                        self._until_pattern.pattern,
+                    )
+                    self._exclusive_active = False
+                    self._exclusive_rule_index = 0
+                    self._until_pattern = None
+                    self._skip_next_prompt = False
+                    if self._post_command:
+                        self._log.info(
+                            "autoreply: queuing post_command %r",
+                            self._post_command,
+                        )
+                        self._queue_reply(self._post_command)
+                        self._post_command = ""
+                    # fall through to normal matching below
+                else:
+                    self._match_always_rules()
+                    return
+            else:
+                self._match_always_rules()
+                return
+
+        searchable = self._buffer.get_searchable_text()
+        if not searchable:
+            return
+
+        # Search for all matching rules. We re-fetch searchable text
+        # after each match since advance_match changes the window.
+        # Cap iterations to len(rules) * 2 as a safety valve — one
+        # chunk of text should never produce more matches than that.
+        max_iterations = len(self._rules) * 2
+        found = True
+        while found and max_iterations > 0:
+            found = False
+            max_iterations -= 1
+            searchable = self._buffer.get_searchable_text()
+            if not searchable:
+                break
+            for rule_idx, rule in enumerate(self._rules):
+                if not rule.enabled:
+                    continue
+                if self._prompt_based and rule_idx in self._cycle_matched:
+                    continue
+                match = rule.pattern.search(searchable)
+                if match:
+                    self._last_matched_pattern = rule.pattern.pattern
+                    self._cycle_matched.add(rule_idx)
+                    self._buffer.advance_match(match.start(), len(match.group(0)))
+                    if rule.exclusive and self._suppress_exclusive:
+                        found = True
+                        break
+                    reply = _substitute_groups(rule.reply, match)
+                    self._queue_reply(reply)
+                    if rule.exclusive:
+                        self._exclusive_active = True
+                        self._exclusive_rule_index = rule_idx + 1
+                        self._skip_next_prompt = True
+                        self._post_command = rule.post_command
+                        self._exclusive_deadline = (
+                            time.monotonic() + rule.exclusive_timeout
+                            if rule.exclusive_timeout > 0 else 0.0
+                        )
+                        if rule.until:
+                            until_str = _substitute_groups(rule.until, match)
+                            try:
+                                self._until_pattern = re.compile(
+                                    until_str, re.MULTILINE | re.DOTALL
+                                )
+                            except re.error:
+                                self._until_pattern = None
+                        else:
+                            self._until_pattern = None
+                        return
+                    found = True
+                    break  # re-fetch searchable text and start over
+
+    def _match_always_rules(self) -> None:
+        """Check rules with ``always=True`` even during exclusive suppression."""
+        searchable = self._buffer.get_searchable_text()
+        if not searchable:
+            return
+        for rule_idx, rule in enumerate(self._rules):
+            if not rule.enabled or not rule.always:
+                continue
+            if self._prompt_based and rule_idx in self._cycle_matched:
+                continue
+            match = rule.pattern.search(searchable)
+            if match:
+                self._last_matched_pattern = rule.pattern.pattern
+                self._cycle_matched.add(rule_idx)
+                self._buffer.advance_match(match.start(), len(match.group(0)))
+                reply = _substitute_groups(rule.reply, match)
+                self._queue_reply(reply)
+
+    def _queue_reply(self, reply_text: str) -> None:
+        """
+        Queue a reply, chaining after any pending reply task.
+
+        :param reply_text: Fully substituted reply string.
+        """
+        prev = self._reply_chain
+
+        async def _chained() -> None:
+            if prev is not None and not prev.done():
+                await prev
+            await self._execute_reply(reply_text)
+
+        self._reply_chain = asyncio.ensure_future(_chained())
+
+    async def _execute_reply(self, reply_text: str) -> None:
+        """
+        Execute a single reply: parse delays, split on <CR>, send.
+
+        :param reply_text: Fully substituted reply string.
+        """
+        # Split the reply on delay tokens first.
+        parts = _DELAY_RE.split(reply_text)
+
+        # parts comes in groups: [text, value, unit, text, value, unit, ...]
+        # When there are no delays, parts is just [reply_text].
+        i = 0
+        while i < len(parts):
+            text_segment = parts[i]
+            i += 1
+
+            # Process text segment: split on <CR> and send.
+            if text_segment:
+                cr_parts = _CR_RE.split(text_segment)
+                is_last_segment = i >= len(parts) or i + 1 >= len(parts)
+                for j, cmd in enumerate(cr_parts):
+                    if j < len(cr_parts) - 1:
+                        # This segment ends with <CR> — send it.
+                        if self._wait_fn is not None:
+                            await self._wait_fn()
+                        self._send_command(cmd)
+                    elif cmd and is_last_segment and self._insert_fn is not None:
+                        # Trailing text without <CR> — insert into prompt
+                        # so the user can review before pressing Enter.
+                        self._log.info("autoreply: inserting %r into prompt", cmd)
+                        self._insert_fn(cmd)
+                    elif cmd:
+                        if self._wait_fn is not None:
+                            await self._wait_fn()
+                        self._send_command(cmd)
+
+            # Process delay if present.
+            if i + 1 < len(parts):
+                value = float(parts[i])
+                unit = parts[i + 1]
+                delay = value / 1000.0 if unit == "ms" else value
+                i += 2
+                if delay > 0:
+                    await asyncio.sleep(delay)
+
+    def _send_command(self, cmd: str) -> None:
+        """
+        Send a single command line to the server.
+
+        :param cmd: Command text (without line ending).
+        """
+        if not cmd or not cmd.strip():
+            return
+        self._log.info("autoreply: sending %r", cmd)
+        if self._echo_fn is not None:
+            self._echo_fn(cmd)
+        self._writer.write(cmd + "\r\n")  # type: ignore[arg-type]
+
+    def on_prompt(self) -> None:
+        """Clear per-cycle state and exclusive suppression on EOR/GA.
+
+        The first EOR/GA after an exclusive rule fires is skipped,
+        because it belongs to the same server response that triggered
+        the match (GA/EOR often arrives in a separate TCP chunk).
+
+        When an ``until`` pattern is set, EOR/GA does **not** clear
+        exclusive — only the until pattern match or timeout can.
+
+        Each EOR/GA resets the per-cycle deduplication set so that
+        rules can match again in the next prompt cycle.
+        """
+        self._prompt_based = True
+        self._cycle_matched.clear()
+        self._buffer.clear()
+        if self._skip_next_prompt:
+            self._skip_next_prompt = False
+            return
+        if self._until_pattern is not None:
+            # Until pattern governs when exclusive ends, not EOR/GA.
+            return
+        self._exclusive_active = False
+        self._exclusive_rule_index = 0
+        self._post_command = ""
+
+    def cancel(self) -> None:
+        """Cancel any pending reply chain and clear exclusive state."""
+        if self._reply_chain is not None and not self._reply_chain.done():
+            self._reply_chain.cancel()
+            self._reply_chain = None
+        self._exclusive_active = False
+        self._exclusive_rule_index = 0
+        self._until_pattern = None
+        self._skip_next_prompt = False
+        self._post_command = ""
+        self._exclusive_deadline = 0.0

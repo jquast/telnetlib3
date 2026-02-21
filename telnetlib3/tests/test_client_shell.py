@@ -94,13 +94,7 @@ def test_determine_mode_unchanged(will_echo: bool, raw_mode: "bool | None", will
 
 @pytest.mark.parametrize(
     "will_echo,raw_mode,will_sga",
-    [
-        (True, None, False),
-        (False, None, True),
-        (True, None, True),
-        (False, True, False),
-        (True, True, False),
-    ],
+    [(False, None, True), (True, None, True), (False, True, False), (True, True, False)],
 )
 def test_determine_mode_goes_raw(will_echo: bool, raw_mode: "bool | None", will_sga: bool) -> None:
     term = _make_term(_make_writer(will_echo=will_echo, raw_mode=raw_mode, will_sga=will_sga))
@@ -108,6 +102,16 @@ def test_determine_mode_goes_raw(will_echo: bool, raw_mode: "bool | None", will_
     result = term.determine_mode(mode)
     assert result is not mode
     assert not result.lflag & termios.ICANON
+    assert not result.lflag & termios.ECHO
+
+
+def test_determine_mode_echo_only_stays_linemode() -> None:
+    """WILL ECHO without WILL SGA keeps ICANON (line mode) but suppresses local ECHO."""
+    term = _make_term(_make_writer(will_echo=True, raw_mode=None, will_sga=False))
+    mode = _cooked_mode()
+    result = term.determine_mode(mode)
+    assert result is not mode
+    assert result.lflag & termios.ICANON
     assert not result.lflag & termios.ECHO
 
 
@@ -146,7 +150,7 @@ def test_echo_toggle_password_flow() -> None:
     writer.will_echo = True
     r2 = term.determine_mode(mode)
     assert not r2.lflag & termios.ECHO
-    assert not r2.lflag & termios.ICANON
+    assert r2.lflag & termios.ICANON
 
     writer.will_echo = False
     r3 = term.determine_mode(mode)
@@ -318,6 +322,7 @@ def test_filter_without_eol_xlat(data: bytes, expected: bytes) -> None:
 import os  # noqa: E402
 import time as _time  # noqa: E402
 import select  # noqa: E402
+import signal  # noqa: E402
 import tempfile  # noqa: E402
 import contextlib  # noqa: E402
 import subprocess  # noqa: E402
@@ -352,7 +357,6 @@ def _client_cmd(host: str, port: int, extra: "list[str] | None" = None) -> "list
         prog,
         host,
         str(port),
-        "--connect-minwait=0.05",
         "--connect-maxwait=0.5",
         "--colormatch=none",
     ]
@@ -454,7 +458,7 @@ def _pty_client(cmd: "list[str]"):
         (
             b"hello from server\r\n",
             0.5,
-            None,
+            ["--no-repl"],
             [b"Escape character", b"hello from server", b"Connection closed by foreign host."],
         ),
         (b"raw server\r\n", 0.1, ["--raw-mode"], [b"raw server"]),
@@ -485,8 +489,14 @@ async def test_simple_server_output(
 @pytest.mark.parametrize(
     "prompt,response,extra_args,send,expected",
     [
-        (b"login: ", b"\r\nwelcome!\r\n", None, b"user\r", [b"login:", b"welcome!"]),
-        (b"prompt> ", b"\r\ngot it\r\n", ["--line-mode"], b"hello\r", [b"got it", b"hello"]),
+        (b"login: ", b"\r\nwelcome!\r\n", ["--no-repl"], b"user\r", [b"login:", b"welcome!"]),
+        (
+            b"prompt> ",
+            b"\r\ngot it\r\n",
+            ["--line-mode", "--no-repl"],
+            b"hello\r",
+            [b"got it", b"hello"],
+        ),
     ],
 )
 async def test_echo_sga_interaction(
@@ -551,7 +561,7 @@ async def test_password_hidden_then_echo_restored(bind_host: str, unused_tcp_por
                 asyncio.get_event_loop().call_later(0.2, self._transport.close)
 
     async with asyncio_server(Proto, bind_host, unused_tcp_port):
-        cmd = _client_cmd(bind_host, unused_tcp_port)
+        cmd = _client_cmd(bind_host, unused_tcp_port, ["--no-repl"])
 
         def _interact(master_fd, proc):
             buf = _pty_read(master_fd, marker=b"Name:", timeout=10.0)
@@ -596,7 +606,7 @@ async def test_backspace_visual_erase(bind_host: str, unused_tcp_port: int) -> N
                 asyncio.get_event_loop().call_later(0.2, self._transport.close)
 
     async with asyncio_server(Proto, bind_host, unused_tcp_port):
-        cmd = _client_cmd(bind_host, unused_tcp_port)
+        cmd = _client_cmd(bind_host, unused_tcp_port, ["--no-repl"])
 
         def _interact(master_fd, proc):
             buf = _pty_read(master_fd, marker=b"login:", timeout=10.0)
@@ -621,6 +631,41 @@ def test_check_auto_mode_not_istty() -> None:
     assert term.check_auto_mode(switched_to_raw=False, last_will_echo=False) is None
 
 
+def test_check_auto_mode_echo_only_stays_linemode() -> None:
+    """WILL ECHO without SGA suppresses local echo but does not switch to raw."""
+    writer = _make_writer(will_echo=True, will_sga=False, raw_mode=None)
+    term = _make_term(writer)
+    term._istty = True
+    term._save_mode = _cooked_mode()
+    _set_modes: list[Terminal.ModeDef] = []
+    term.set_mode = lambda m: _set_modes.append(m)  # type: ignore[method-assign]
+    result = term.check_auto_mode(switched_to_raw=False, last_will_echo=False)
+    assert result is not None
+    switched_to_raw, last_will_echo, local_echo = result
+    assert switched_to_raw is False
+    assert last_will_echo is True
+    assert local_echo is False
+    assert len(_set_modes) == 1
+    assert _set_modes[0].lflag & termios.ICANON
+    assert not _set_modes[0].lflag & termios.ECHO
+
+
+def test_check_auto_mode_sga_goes_raw() -> None:
+    """WILL SGA switches to raw mode."""
+    writer = _make_writer(will_echo=False, will_sga=True, raw_mode=None)
+    term = _make_term(writer)
+    term._istty = True
+    term._save_mode = _cooked_mode()
+    _set_modes: list[Terminal.ModeDef] = []
+    term.set_mode = lambda m: _set_modes.append(m)  # type: ignore[method-assign]
+    result = term.check_auto_mode(switched_to_raw=False, last_will_echo=False)
+    assert result is not None
+    switched_to_raw, _, _ = result
+    assert switched_to_raw is True
+    assert len(_set_modes) == 1
+    assert not _set_modes[0].lflag & termios.ICANON
+
+
 async def test_setup_winch_registers_handler() -> None:
     """setup_winch registers SIGWINCH handler when istty is True."""
     writer = _make_writer()
@@ -633,6 +678,115 @@ async def test_setup_winch_registers_handler() -> None:
     assert term._remove_winch is True
     term.cleanup_winch()
     assert term._remove_winch is False
+
+
+async def test_winch_handler_calls_on_resize() -> None:
+    """SIGWINCH handler triggers on_resize callback."""
+    from telnetlib3.telopt import NAWS
+
+    writer = _make_writer()
+    writer.local_option = _MockOption({NAWS: True})
+    writer.is_closing = lambda: False
+    writer._send_naws = mock.Mock()
+
+    term = _make_term(writer)
+    term._istty = True
+    term._winch_handle = None
+
+    resize_calls: list[tuple[int, int]] = []
+    term.on_resize = lambda rows, cols: resize_calls.append((rows, cols))
+
+    term.setup_winch()
+    assert term._remove_winch is True
+
+    os.kill(os.getpid(), signal.SIGWINCH)
+    await asyncio.sleep(0.15)
+
+    assert len(resize_calls) >= 1
+    assert len(resize_calls[0]) == 2
+    writer._send_naws.assert_called()
+    term.cleanup_winch()
+
+
+@pytest.mark.asyncio
+async def test_raw_event_loop_reactivates_repl() -> None:
+    """_raw_event_loop breaks when want_repl() returns True."""
+    from telnetlib3.client_shell import _raw_event_loop
+
+    class _StrReader:
+        def __init__(self) -> None:
+            self._data = ["server data"]
+            self._eof = False
+
+        async def read(self, n: int) -> str:
+            if self._data:
+                return self._data.pop(0)
+            self._eof = True
+            return ""
+
+        def at_eof(self) -> bool:
+            return self._eof
+
+    reader = _StrReader()
+    stdin = asyncio.StreamReader()
+
+    writer = _make_writer()
+    writer.log = types.SimpleNamespace(debug=lambda *a, **kw: None, log=lambda *a, **kw: None)
+    writer._raw_mode = None
+    writer.is_closing = lambda: False
+
+    term = _make_term(writer)
+    term.check_auto_mode = lambda switched, last_echo: None
+
+    stdout = mock.Mock()
+    stdout.write = mock.Mock()
+
+    close_calls: list[str] = []
+
+    result = await _raw_event_loop(
+        telnet_reader=reader,
+        telnet_writer=writer,
+        term=term,
+        stdin=stdin,
+        stdout=stdout,
+        keyboard_escape="\x1d",
+        local_echo=False,
+        switched_to_raw=True,
+        last_will_echo=False,
+        linesep="\r\n",
+        handle_close=lambda msg: close_calls.append(msg),
+        want_repl=lambda: True,
+    )
+    reactivate_repl, switched, last_echo, local_echo, linesep = result
+    assert reactivate_repl is True
+    assert switched is False
+
+
+@pytest.mark.asyncio
+async def test_winch_on_resize_exception_caught() -> None:
+    """SIGWINCH handler catches exceptions from on_resize callback."""
+    from telnetlib3.telopt import NAWS
+
+    writer = _make_writer()
+    writer.local_option = _MockOption({NAWS: True})
+    writer.is_closing = lambda: False
+    writer._send_naws = mock.Mock()
+
+    term = _make_term(writer)
+    term._istty = True
+    term._winch_handle = None
+
+    def _bad_resize(rows: int, cols: int) -> None:
+        raise RuntimeError("resize failed")
+
+    term.on_resize = _bad_resize
+
+    term.setup_winch()
+    os.kill(os.getpid(), signal.SIGWINCH)
+    await asyncio.sleep(0.15)
+
+    writer._send_naws.assert_called()
+    term.cleanup_winch()
 
 
 async def test_send_stdin_with_input_filter() -> None:
@@ -709,3 +863,45 @@ def test_transform_output_bare_cr_preserved_raw() -> None:
     out = _transform_output("\x1b[34;1H\x1b[K\r\x1b[38;2;17;17;17mX\x1b[6n", writer, True)
     assert "\r\n" not in out
     assert "\r" in out
+
+
+def test_transform_output_empty_string() -> None:
+    writer = _make_transform_writer()
+    assert _transform_output("", writer, True) == ""
+
+
+@pytest.mark.parametrize(
+    "kwargs,expected", [({}, False), ({"_raw_mode": None}, None), ({"_raw_mode": True}, True)]
+)
+def test_get_raw_mode(kwargs: dict, expected: "bool | None") -> None:
+    from telnetlib3.client_shell import _get_raw_mode
+
+    assert _get_raw_mode(_make_transform_writer(**kwargs)) is expected
+
+
+async def test_cooked_to_raw_transition_preserves_crlf(
+    bind_host: str, unused_tcp_port: int
+) -> None:
+    """First data chunk during cooked→raw transition must keep \\r\\n line endings."""
+
+    class Proto(asyncio.Protocol):
+        def connection_made(self, transport):
+            super().connection_made(transport)
+            transport.write(
+                _IAC + _WILL + _SGA + _IAC + _WILL + _ECHO + b"line1\r\nline2\r\nline3\r\n"
+            )
+            asyncio.get_event_loop().call_later(0.5, transport.close)
+
+    async with asyncio_server(Proto, bind_host, unused_tcp_port):
+        cmd = _client_cmd(bind_host, unused_tcp_port, ["--no-repl"])
+        with _pty_client(cmd) as (proc, master_fd):
+            output = await asyncio.to_thread(_pty_read, master_fd, proc=proc)
+            assert b"line1" in output
+            assert b"line2" in output
+            assert b"line3" in output
+            text = output.decode("utf-8", errors="replace")
+            for line in ("line1", "line2", "line3"):
+                idx = text.find(line)
+                assert idx != -1
+                after = text[idx + len(line) :]
+                assert after.startswith("\r\n")

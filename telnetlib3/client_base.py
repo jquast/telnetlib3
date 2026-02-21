@@ -254,7 +254,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         if self.writer is None:
             return
         from .server_fingerprinting import (  # pylint: disable=import-outside-toplevel
-            _SYNCTERM_BINARY_ENCODINGS,
             detect_syncterm_font,
         )
 
@@ -267,8 +266,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 )
             else:
                 self.writer.environ_encoding = encoding
-            if encoding in _SYNCTERM_BINARY_ENCODINGS:
-                self.force_binary = True
+            self.force_binary = True
 
     # public properties
 
@@ -373,7 +371,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     # private methods
 
-    def _process_chunk(self, data: bytes) -> bool:  # pylint: disable=too-many-branches,too-complex
+    def _process_chunk(self, data: bytes) -> bool:
         """Process a chunk of received bytes; return True if any IAC/SB cmd observed."""
         # This mirrors the previous optimized logic, but is called from an async task.
         self._last_received = datetime.datetime.now()

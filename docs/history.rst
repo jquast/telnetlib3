@@ -1,5 +1,21 @@
 History
 =======
+2.7.0
+  * new: REPL line editor for ``telnetlib3-client`` with command history,
+    autosuggestion, and password masking.  Powered by ``prompt_toolkit``
+    (``pip install telnetlib3[with_tui]``).  Use ``--no-repl`` to disable.
+  * new: TUI session manager — ``telnetlib3-client`` without a host argument
+    launches a multi-session TUI (requires ``textual``, included in with_tui).
+  * new: ``--ice-colors`` (default on) treats SGR 5 (blink) as bright
+    background for proper 16-color BBS/ANSI art display.
+  * change: ``--connect-timeout`` default changed from no limit to 10 seconds.
+  * change: ``force_binary`` auto-enabled when CHARSET is negotiated
+    (:rfc:`2066`) or ``LANG``/``CHARSET`` received via NEW_ENVIRON
+    (:rfc:`1572`).  SyncTERM font detection also enables it unconditionally.
+  * enhancement: Microsoft Telnet (``telnet.exe``) compatibility refined — server
+    now sends ``DO NEW_ENVIRON`` but excludes ``USER`` variable instead of
+    skipping the option entirely, :ghissue:`24`.
+
 2.6.0
   * new: TLS support (TELNETS).  :func:`~telnetlib3.client.open_connection`
     accepts an ``ssl`` parameter (``True``, or an :class:`ssl.SSLContext`).
@@ -65,7 +81,7 @@ History
 
 2.4.0
   * new: :mod:`telnetlib3.color_filter` module — translates 16-color ANSI SGR
-    codes to 24-bit RGB from hardware palettes (EGA, CGA, VGA, Amiga, xterm).
+    codes to 24-bit RGB from hardware palettes (EGA, CGA, VGA, xterm).
     Enabled by default. New client CLI options: ``--colormatch``,
     ``--color-brightness``, ``--color-contrast``, ``--background-color``,
     ``--reverse-video``.

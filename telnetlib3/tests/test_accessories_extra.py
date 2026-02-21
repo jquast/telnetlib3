@@ -25,17 +25,14 @@ def test_trace_level_registered():
 
 
 def test_hexdump_short():
-    data = b"Hello World\r\n"
-    result = hexdump(data)
+    result = hexdump(b"Hello World\r\n")
     assert "48 65 6c 6c 6f 20 57 6f" in result
     assert "72 6c 64 0d 0a" in result
     assert "|Hello World..|" in result
 
 
 def test_hexdump_two_rows():
-    data = bytes(range(32))
-    result = hexdump(data)
-    lines = result.splitlines()
+    lines = hexdump(bytes(range(32))).splitlines()
     assert len(lines) == 2
     assert lines[0].startswith("00000000")
     assert lines[1].startswith("00000010")
@@ -59,7 +56,6 @@ def test_make_logger_trace_level():
 def test_make_logger_no_file():
     logger = make_logger("acc_no_file", loglevel="info")
     assert logger.name == "acc_no_file"
-    # ensure level applied
     assert logger.level == logging.INFO
     assert logger.isEnabledFor(logging.INFO)
 
@@ -70,15 +66,13 @@ def test_make_logger_with_file(tmp_path):
     assert logger.name == "acc_with_file"
     assert logger.level == logging.WARNING
     assert logger.isEnabledFor(logging.WARNING)
-    # emit (do not assert file contents to avoid coupling with global logging config)
     logger.warning("file logging branch executed")
 
 
 def test_repr_mapping_quotes_roundtrip():
     mapping = OrderedDict([("a", "simple"), ("b", "needs space"), ("c", "quote'"), ("d", 42)])
-    result = repr_mapping(mapping)
     expected = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in mapping.items())
-    assert result == expected
+    assert repr_mapping(mapping) == expected
 
 
 def test_function_lookup_success_and_not_callable():

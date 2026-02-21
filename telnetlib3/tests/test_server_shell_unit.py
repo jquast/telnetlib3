@@ -94,23 +94,22 @@ class MockWriter:
         return True
 
 
-def test_readline_basic_and_crlf_and_backspace():
-    cmds, echos = _run_readline("foo\r")
-    assert cmds == ["foo"]
-    assert "".join(echos).endswith("foo")
-
-    cmds, _ = _run_readline("bar\r\n")
-    assert cmds == ["bar"]
-
-    cmds, _ = _run_readline("baz\n")
-    assert cmds == ["baz"]
-
-    cmds, _ = _run_readline("zip\r\x00zap\r\n")
-    assert cmds == ["zip", "zap"]
-
-    cmds, echos = _run_readline("\bhel\blp\r")
-    assert cmds == ["help"]
-    assert "\b \b" in "".join(echos)
+@pytest.mark.parametrize(
+    "input_data, expected_cmds, check_echos",
+    [
+        ("foo\r", ["foo"], lambda e: "".join(e).endswith("foo")),
+        ("bar\r\n", ["bar"], None),
+        ("baz\n", ["baz"], None),
+        ("zip\r\x00zap\r\n", ["zip", "zap"], None),
+        ("\bhel\blp\r", ["help"], lambda e: "\b \b" in "".join(e)),
+    ],
+    ids=["cr", "crlf", "lf", "crnul_multi", "backspace"],
+)
+def test_readline_basic(input_data, expected_cmds, check_echos):
+    cmds, echos = _run_readline(input_data)
+    assert cmds == expected_cmds
+    if check_echos is not None:
+        assert check_echos(echos)
 
 
 def test_character_dump_yields_patterns_and_summary():
@@ -144,7 +143,10 @@ async def test_terminal_determine_mode(monkeypatch):
     mode = cs.Terminal.ModeDef(0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 38400, 38400, [0] * 32)
     assert term.determine_mode(mode) is mode
 
+    from telnetlib3.telopt import SGA
+
     tw.will_echo = True
+    tw.remote_option = types.SimpleNamespace(enabled=lambda key: key == SGA)
     t = cs.termios
     cc = [0] * 32
     cc[t.VMIN] = 0
@@ -316,8 +318,12 @@ async def test_get_cursor_position_success():
 
 
 @pytest.mark.asyncio
-async def test_get_cursor_position_failure():
+async def test_get_cursor_position_timeout():
     assert await gs._get_cursor_position(SlowReader(), MockWriter(), timeout=0.01) == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_get_cursor_position_eof():
     assert await gs._get_cursor_position(MockReader([b""]), MockWriter(), timeout=1.0) == (
         None,
         None,
@@ -460,14 +466,8 @@ async def test_telnet_server_shell_dump_closing():
     assert "1 OK" not in "".join(w2.written)
 
 
-# -- readline2 is alias for readline_async --
-
-
 def test_readline2_is_readline_async():
     assert ss.readline2 is ss.readline_async
-
-
-# -- _LineEditor tests --
 
 
 @pytest.mark.parametrize(
@@ -520,9 +520,6 @@ def test_line_editor_maxvis_ascii():
     assert cmd == "abc"
 
 
-# -- _backspace_grapheme tests --
-
-
 @pytest.mark.parametrize(
     "command,expected_cmd,expected_echo",
     [
@@ -555,9 +552,6 @@ def test_backspace_grapheme_wcwidth(command, expected_cmd, expected_echo):
     assert echo == expected_echo
 
 
-# -- _visible_width tests --
-
-
 @pytest.mark.parametrize(
     "text,expected", [pytest.param("hello", 5, id="ascii"), pytest.param("", 0, id="empty")]
 )
@@ -575,9 +569,6 @@ def test_visible_width_ascii(text, expected):
 )
 def test_visible_width_wcwidth(text, expected):
     assert ss._visible_width(text) == expected
-
-
-# -- readline (blocking) grapheme + maxvis tests --
 
 
 def test_readline_backspace_wide():
@@ -604,9 +595,6 @@ def test_readline_maxvis_ascii():
 def test_readline_maxvis_wide():
     cmds, _ = _run_readline("a\u30b3x\r", max_visible_width=3)
     assert cmds == ["a\u30b3"]
-
-
-# -- readline_async grapheme + maxvis tests --
 
 
 @pytest.mark.asyncio
@@ -656,9 +644,6 @@ async def test_readline_async_ss3_filtered():
     assert result == "hello"
 
 
-# -- filter_ansi enhanced tests --
-
-
 @pytest.mark.parametrize(
     "input_chars,expected",
     [
@@ -675,9 +660,6 @@ async def test_filter_ansi_wcwidth_sequences(input_chars, expected):
     assert result == expected
 
 
-# -- telnet_server_shell with LF-terminated input --
-
-
 @pytest.mark.asyncio
 async def test_telnet_server_shell_lf_input():
     reader = MockReader(list("quit\n"))
@@ -688,8 +670,7 @@ async def test_telnet_server_shell_lf_input():
 
 
 @pytest.mark.asyncio
-async def test_telnet_server_shell_tls_banner():
-    """Plain connection shows 'Ready.', TLS shows 'Ready (secure: ...)'."""
+async def test_telnet_server_shell_plain_banner():
     reader = MockReader(list("quit\r"))
     writer = MockWriter()
     await ss.telnet_server_shell(reader, writer)
@@ -697,13 +678,23 @@ async def test_telnet_server_shell_tls_banner():
     assert "Ready.\r\n" in written
     assert "secure" not in written
 
+
+@pytest.mark.asyncio
+async def test_telnet_server_shell_tls_banner():
     class _FakeSSL:
         def version(self):
             return "TLSv1.3"
 
-    reader2 = MockReader(list("quit\r"))
-    writer2 = MockWriter()
-    writer2._extra["ssl_object"] = _FakeSSL()
-    await ss.telnet_server_shell(reader2, writer2)
-    written2 = "".join(writer2.written)
-    assert "Ready (secure: TLSv1.3)." in written2
+    reader = MockReader(list("quit\r"))
+    writer = MockWriter()
+    writer._extra["ssl_object"] = _FakeSSL()
+    await ss.telnet_server_shell(reader, writer)
+    written = "".join(writer.written)
+    assert "Ready (secure: TLSv1.3)." in written
+
+
+@pytest.mark.asyncio
+async def test_filter_ansi_esc_then_eof():
+    reader = MockReader(["\x1b", ""])
+    result = await ss.filter_ansi(reader, MockWriter())
+    assert result == ""

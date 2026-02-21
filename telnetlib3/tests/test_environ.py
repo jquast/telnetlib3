@@ -74,16 +74,12 @@ async def test_telnet_client_send_environ(bind_host, unused_tcp_port):
             rows=given_rows,
             encoding=given_encoding,
             term=given_term,
-            connect_minwait=0.05,
         ) as (reader, writer):
             mapping = await asyncio.wait_for(_waiter, 0.5)
-            # Check expected values are present
             assert mapping["COLUMNS"] == str(given_cols)
             assert mapping["LANG"] == "en_US." + given_encoding
             assert mapping["LINES"] == str(given_rows)
             assert mapping["TERM"] == "vt220"
-            # Additional env vars may be present (USER, HOME, SHELL, COLORTERM)
-            # but their values depend on the test environment
 
 
 async def test_telnet_client_send_var_uservar_environ(bind_host, unused_tcp_port):
@@ -112,8 +108,7 @@ async def test_telnet_client_send_var_uservar_environ(bind_host, unused_tcp_port
             rows=given_rows,
             encoding=given_encoding,
             term=given_term,
-            connect_minwait=0.05,
-            connect_maxwait=0.05,
+            connect_maxwait=0.5,
         ) as (reader, writer):
             mapping = await asyncio.wait_for(_waiter, 0.5)
             assert mapping == {}
@@ -168,42 +163,52 @@ def _make_server():
 
 
 @pytest.mark.parametrize(
-    "ttype1,ttype2,expect_skip",
+    "ttype1,ttype2",
     [
-        ("ANSI", "VT100", True),
-        ("ANSI", "ANSI", False),
-        ("ansi", "vt100", False),
-        ("xterm", "xterm", False),
-        ("xterm", "xterm-256color", False),
+        ("ANSI", "VT100"),
+        ("ANSI", "ANSI"),
+        ("ansi", "vt100"),
+        ("xterm", "xterm"),
+        ("xterm", "xterm-256color"),
     ],
 )
-async def test_negotiate_environ_ms_telnet(ttype1, ttype2, expect_skip):
-    """NEW_ENVIRON is skipped for Microsoft telnet (ANSI + VT100)."""
+async def test_negotiate_environ_always_sent(ttype1, ttype2):
+    """DO NEW_ENVIRON is always sent regardless of client identity."""
     server = _make_server()
     server._extra["ttype1"] = ttype1
     server._extra["ttype2"] = ttype2
     server._negotiate_environ()
-    if expect_skip:
-        assert not server.writer.pending_option.get(DO + NEW_ENVIRON)
-    else:
-        assert server.writer.pending_option.get(DO + NEW_ENVIRON)
-
-
-async def test_check_negotiation_ttype_refused_triggers_environ():
-    """check_negotiation sends DO NEW_ENVIRON when TTYPE is refused."""
-    server = _make_server()
-    server._advanced = True
-    server.writer.remote_option[TTYPE] = False
-    server.check_negotiation(final=False)
-    assert server._environ_requested
     assert server.writer.pending_option.get(DO + NEW_ENVIRON)
 
 
-async def test_check_negotiation_final_triggers_environ():
-    """check_negotiation sends DO NEW_ENVIRON on final timeout."""
+@pytest.mark.parametrize(
+    "ttype1,ttype2,expect_user",
+    [
+        ("ANSI", "VT100", False),
+        ("ANSI", "ANSI", True),
+        ("ansi", "vt100", True),
+        ("xterm", "xterm", True),
+        ("xterm", "xterm-256color", True),
+    ],
+)
+async def test_on_request_environ_user_excluded_for_ms_telnet(ttype1, ttype2, expect_user):
+    """USER is excluded from NEW_ENVIRON request for Microsoft telnet."""
+    server = _make_server()
+    server._extra["ttype1"] = ttype1
+    server._extra["ttype2"] = ttype2
+    result = server.on_request_environ()
+    assert ("USER" in result) is expect_user
+    assert "LOGNAME" in result
+
+
+@pytest.mark.parametrize("ttype_refused,final", [(True, False), (False, True)])
+async def test_check_negotiation_triggers_environ(ttype_refused, final):
+    """check_negotiation sends DO NEW_ENVIRON on TTYPE refusal or final."""
     server = _make_server()
     server._advanced = True
-    server.check_negotiation(final=True)
+    if ttype_refused:
+        server.writer.remote_option[TTYPE] = False
+    server.check_negotiation(final=final)
     assert server._environ_requested
     assert server.writer.pending_option.get(DO + NEW_ENVIRON)
 
@@ -217,17 +222,31 @@ async def test_check_negotiation_no_advanced_skips_environ():
     assert not server.writer.pending_option.get(DO + NEW_ENVIRON)
 
 
-async def test_on_ttype_non_ansi_triggers_environ():
-    """on_ttype sends DO NEW_ENVIRON immediately for non-ANSI ttype1."""
+@pytest.mark.parametrize("ttype,expect_requested", [("xterm", True), ("ANSI", False)])
+async def test_on_ttype_environ_behavior(ttype, expect_requested):
+    """on_ttype sends DO NEW_ENVIRON for non-ANSI, defers for ANSI."""
     server = _make_server()
-    server.on_ttype("xterm")
-    assert server._environ_requested
-    assert server.writer.pending_option.get(DO + NEW_ENVIRON)
+    server.on_ttype(ttype)
+    assert server._environ_requested is expect_requested
+    assert bool(server.writer.pending_option.get(DO + NEW_ENVIRON)) is expect_requested
 
 
-async def test_on_ttype_ansi_defers_environ():
-    """on_ttype defers DO NEW_ENVIRON when ttype1 is ANSI."""
+@pytest.mark.parametrize(
+    "env,expect_force",
+    [
+        ({"LANG": "en_US.UTF-8"}, True),
+        ({"LANG": "ja_JP.EUC-JP"}, True),
+        ({"CHARSET": "UTF-8"}, True),
+        ({"CHARSET": "ISO-8859-1", "USER": "test"}, True),
+        ({"LANG": "en_US"}, False),
+        ({"LANG": "C"}, False),
+        ({"USER": "test", "TERM": "xterm"}, False),
+        ({}, False),
+    ],
+)
+async def test_on_environ_force_binary(env, expect_force):
+    """on_environ sets force_binary when LANG has encoding or CHARSET is present."""
     server = _make_server()
-    server.on_ttype("ANSI")
-    assert not server._environ_requested
-    assert not server.writer.pending_option.get(DO + NEW_ENVIRON)
+    assert server.force_binary is False
+    server.on_environ(dict(env))
+    assert server.force_binary is expect_force

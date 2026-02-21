@@ -69,58 +69,29 @@ def new_writer(server=True, client=False, reader=None):
     return w, t, p
 
 
-def test_handle_will_gmcp():
-    w, t, p = new_writer(server=True)
-    w.handle_will(GMCP)
-    assert IAC + DO + GMCP in t.writes
-    assert w.remote_option.get(GMCP) is True
+_MUD_CORE = [GMCP, MSDP, MSSP]
+_MUD_CORE_IDS = ["GMCP", "MSDP", "MSSP"]
 
 
-def test_handle_will_msdp():
-    w, t, p = new_writer(server=True)
-    w.handle_will(MSDP)
-    assert IAC + DO + MSDP in t.writes
-    assert w.remote_option.get(MSDP) is True
+@pytest.mark.parametrize("opt", _MUD_CORE, ids=_MUD_CORE_IDS)
+def test_handle_will_core(opt):
+    w, t, _p = new_writer(server=True)
+    w.handle_will(opt)
+    assert IAC + DO + opt in t.writes
+    assert w.remote_option.get(opt) is True
 
 
-def test_handle_will_mssp():
-    w, t, p = new_writer(server=True)
-    w.handle_will(MSSP)
-    assert IAC + DO + MSSP in t.writes
-    assert w.remote_option.get(MSSP) is True
+@pytest.mark.parametrize("opt", _MUD_CORE, ids=_MUD_CORE_IDS)
+def test_handle_do_core(opt):
+    w, t, _p = new_writer(server=True)
+    w.handle_do(opt)
+    assert IAC + WILL + opt in t.writes
 
 
-def test_handle_do_gmcp():
-    w, t, p = new_writer(server=True)
-    w.handle_do(GMCP)
-    assert IAC + WILL + GMCP in t.writes
-
-
-def test_handle_do_msdp():
-    w, t, p = new_writer(server=True)
-    w.handle_do(MSDP)
-    assert IAC + WILL + MSDP in t.writes
-
-
-def test_handle_do_mssp():
-    w, t, p = new_writer(server=True)
-    w.handle_do(MSSP)
-    assert IAC + WILL + MSSP in t.writes
-
-
-def test_set_ext_callback_gmcp():
-    w, t, p = new_writer(server=True)
-    w.set_ext_callback(GMCP, lambda *a: None)
-
-
-def test_set_ext_callback_msdp():
-    w, t, p = new_writer(server=True)
-    w.set_ext_callback(MSDP, lambda *a: None)
-
-
-def test_set_ext_callback_mssp():
-    w, t, p = new_writer(server=True)
-    w.set_ext_callback(MSSP, lambda *a: None)
+@pytest.mark.parametrize("opt", _MUD_CORE, ids=_MUD_CORE_IDS)
+def test_set_ext_callback_core(opt):
+    w, _t, _p = new_writer(server=True)
+    w.set_ext_callback(opt, lambda *a: None)
 
 
 def test_sb_gmcp_dispatch():
