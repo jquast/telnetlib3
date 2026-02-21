@@ -36,7 +36,9 @@ def _mock_stdout() -> "asyncio.StreamWriter":
 
 def _mock_writer(will_echo: bool = False) -> object:
     return types.SimpleNamespace(
-        will_echo=will_echo, log=types.SimpleNamespace(debug=lambda *a, **kw: None)
+        will_echo=will_echo,
+        log=types.SimpleNamespace(debug=lambda *a, **kw: None),
+        get_extra_info=lambda name, default=None: default,
     )
 
 
@@ -56,6 +58,13 @@ def test_scroll_region_input_row() -> None:
     stdout, _ = _mock_stdout()
     sr = ScrollRegion(stdout, rows=24, cols=80)
     assert sr.input_row == 24
+
+
+def test_scroll_region_input_row_reserve_2() -> None:
+    stdout, _ = _mock_stdout()
+    sr = ScrollRegion(stdout, rows=24, cols=80, reserve_bottom=2)
+    assert sr.scroll_rows == 22
+    assert sr.input_row == 23
 
 
 def test_scroll_region_decstbm_enter_exit() -> None:
@@ -188,6 +197,40 @@ def test_pt_repl_ctrl_bracket_binding_registered() -> None:
     bindings = repl._session.key_bindings.bindings
     bound_keys = [b.keys for b in bindings]
     assert (Keys.ControlSquareClose,) in bound_keys
+
+
+@pytest.mark.skipif(not HAS_PROMPT_TOOLKIT, reason="prompt_toolkit not installed")
+def test_pt_repl_toolbar_contains_connection_info() -> None:
+    from telnetlib3.client_repl import PromptToolkitRepl
+
+    writer = _mock_writer()
+    repl = PromptToolkitRepl(writer, writer.log, connection_info="mud.example.com:4000 SSL")
+    assert "mud.example.com:4000 SSL" in repl._toolbar_static
+    assert "F1 Help" in repl._toolbar_static
+    assert "F8 Macros" not in repl._toolbar_static
+
+
+@pytest.mark.skipif(not HAS_PROMPT_TOOLKIT, reason="prompt_toolkit not installed")
+def test_pt_repl_toolbar_without_connection_info() -> None:
+    from telnetlib3.client_repl import PromptToolkitRepl
+
+    writer = _mock_writer()
+    repl = PromptToolkitRepl(writer, writer.log)
+    assert "F1 Help" in repl._toolbar_static
+    assert "F8 Macros" not in repl._toolbar_static
+
+
+@pytest.mark.skipif(not HAS_PROMPT_TOOLKIT, reason="prompt_toolkit not installed")
+def test_pt_repl_f1_binding_registered() -> None:
+    from prompt_toolkit.keys import Keys
+
+    from telnetlib3.client_repl import PromptToolkitRepl
+
+    writer = _mock_writer()
+    repl = PromptToolkitRepl(writer, writer.log)
+    bindings = repl._session.key_bindings.bindings
+    bound_keys = [b.keys for b in bindings]
+    assert (Keys.F1,) in bound_keys
 
 
 @pytest.mark.skipif(not HAS_PROMPT_TOOLKIT, reason="prompt_toolkit not installed")
@@ -456,6 +499,49 @@ async def test_pt_autoreply_integration() -> None:
     await _repl_event_loop_pt(reader, writer, term, stdout)
     await asyncio.sleep(0.15)
     assert any("reply" in w for w in written)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.skipif(not HAS_PROMPT_TOOLKIT, reason="prompt_toolkit not installed")
+@pytest.mark.asyncio
+async def test_pt_autoreply_hot_reload() -> None:
+    import re
+    import logging
+
+    from telnetlib3.autoreply import AutoreplyRule
+    from telnetlib3.client_repl import _repl_event_loop_pt
+
+    reader = asyncio.StreamReader()
+
+    written: list[str] = []
+    writer = _mock_writer()
+    writer.handle_send_naws = lambda: (24, 80)
+    writer.local_option = types.SimpleNamespace(enabled=lambda _: False)
+    writer.is_closing = lambda: True
+    writer.mode = "local"
+    writer.close = lambda: None
+    writer.write = lambda text: written.append(text)
+    writer.log = logging.getLogger("test.pt_autoreply_reload")
+    writer._autoreply_rules = None
+
+    stdout, _ = _mock_stdout()
+    term = types.SimpleNamespace(on_resize=None)
+
+    new_rules = [
+        AutoreplyRule(pattern=re.compile(r"reload trigger"), reply="reloaded<CR>")
+    ]
+
+    async def _inject_and_eof() -> None:
+        await asyncio.sleep(0)
+        writer._autoreply_rules = new_rules
+        reader.feed_data(b"reload trigger\n")
+        await asyncio.sleep(0.1)
+        reader.feed_eof()
+
+    asyncio.ensure_future(_inject_and_eof())
+    await _repl_event_loop_pt(reader, writer, term, stdout)
+    await asyncio.sleep(0.15)
+    assert any("reloaded" in w for w in written)
 
 
 @pytest.mark.skipif(not HAS_PROMPT_TOOLKIT, reason="prompt_toolkit not installed")

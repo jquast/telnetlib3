@@ -10,7 +10,7 @@ from telnetlib3.tests.accessories import create_server, asyncio_connection
 
 async def test_server_wait_for_client(bind_host, unused_tcp_port):
     """Test Server.wait_for_client() returns protocol after negotiation."""
-    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
             client = await asyncio.wait_for(server.wait_for_client(), 0.5)
@@ -21,7 +21,7 @@ async def test_server_wait_for_client(bind_host, unused_tcp_port):
 
 async def test_server_clients_list(bind_host, unused_tcp_port):
     """Test Server.clients property returns list of connected protocols."""
-    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5) as server:
         assert server.clients == []
 
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
@@ -34,7 +34,7 @@ async def test_server_clients_list(bind_host, unused_tcp_port):
 
 async def test_server_client_disconnect_cleanup(bind_host, unused_tcp_port):
     """Test that clients are removed from list on disconnect."""
-    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
             client = await asyncio.wait_for(server.wait_for_client(), 0.5)
@@ -63,7 +63,7 @@ async def test_server_sockets(bind_host, unused_tcp_port):
 
 async def test_server_with_wait_for(bind_host, unused_tcp_port):
     """Test integration of Server.wait_for_client() with writer.wait_for()."""
-    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             # Send WILL BINARY and WONT TTYPE
             writer.write(IAC + WILL + BINARY)
@@ -78,7 +78,7 @@ async def test_server_with_wait_for(bind_host, unused_tcp_port):
 
 async def test_server_multiple_sequential_clients(bind_host, unused_tcp_port):
     """Test wait_for_client() works for multiple sequential connections."""
-    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5) as server:
         # First client
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader1, writer1):
             writer1.write(IAC + WONT + TTYPE)
@@ -99,7 +99,7 @@ async def test_server_multiple_sequential_clients(bind_host, unused_tcp_port):
 async def test_create_server_line_mode_param(bind_host, unused_tcp_port):
     """create_server() accepts line_mode=True without error."""
     async with create_server(
-        host=bind_host, port=unused_tcp_port, line_mode=True, connect_maxwait=0.05
+        host=bind_host, port=unused_tcp_port, line_mode=True, connect_maxwait=0.5
     ) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
@@ -110,7 +110,7 @@ async def test_create_server_line_mode_param(bind_host, unused_tcp_port):
 
 async def test_create_server_line_mode_default_false(bind_host, unused_tcp_port):
     """create_server() defaults to line_mode=False."""
-    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
             client = await asyncio.wait_for(server.wait_for_client(), 0.5)

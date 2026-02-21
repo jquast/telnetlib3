@@ -191,7 +191,7 @@ async def test_iac_do_twice_replies_once(bind_host, unused_tcp_port):
         host=bind_host,
         shell=shell,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
     ):
         async with asyncio_connection(bind_host, unused_tcp_port) as (client_reader, client_writer):
             client_writer.write(given_from_client)
@@ -210,7 +210,7 @@ async def test_iac_dont_dont(bind_host, unused_tcp_port):
         host=bind_host,
         shell=shell,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
     ):
         async with asyncio_connection(bind_host, unused_tcp_port) as (client_reader, client_writer):
             client_writer.write(IAC + DONT + ECHO + IAC + DONT + ECHO)
@@ -223,10 +223,10 @@ async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
         protocol_factory=telnetlib3.BaseServer,
         host=bind_host,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
     ) as server:
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.05, connect_maxwait=0.05
+            host=bind_host, port=unused_tcp_port, connect_maxwait=0.5
         ) as (_, client_writer):
             assert client_writer.iac(DONT, ECHO)
             assert client_writer.iac(DONT, ECHO) is False
@@ -264,7 +264,7 @@ async def test_slc_simul(bind_host, unused_tcp_port):
         host=bind_host,
         shell=shell,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
         encoding=False,
     )
 
@@ -294,7 +294,7 @@ async def test_unhandled_do_sends_wont(bind_host, unused_tcp_port):
         protocol_factory=telnetlib3.BaseServer,
         host=bind_host,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
         encoding=False,
     ):
         async with asyncio_connection(bind_host, unused_tcp_port) as (client_reader, client_writer):
@@ -322,7 +322,7 @@ async def test_writelines(bind_host, unused_tcp_port, given, encoding):
         host=bind_host,
         shell=shell,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
         encoding=encoding,
     ):
         async with asyncio_connection(bind_host, unused_tcp_port) as (client_reader, client_writer):
@@ -349,7 +349,7 @@ async def test_send_ga(bind_host, unused_tcp_port):
         host=bind_host,
         shell=shell,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
     ):
         async with asyncio_connection(bind_host, unused_tcp_port) as (client_reader, client_writer):
             assert await asyncio.wait_for(client_reader.read(), 0.5) == IAC + GA
@@ -368,7 +368,7 @@ async def test_not_send_ga(bind_host, unused_tcp_port):
         host=bind_host,
         shell=shell,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
     ):
         async with asyncio_connection(bind_host, unused_tcp_port) as (client_reader, client_writer):
             client_writer.write(IAC + DO + SGA)
@@ -388,7 +388,7 @@ async def test_not_send_eor(bind_host, unused_tcp_port):
         host=bind_host,
         shell=shell,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
     ):
         async with asyncio_connection(bind_host, unused_tcp_port) as (client_reader, client_writer):
             assert await asyncio.wait_for(client_reader.read(), 0.5) == b""
@@ -411,7 +411,7 @@ async def test_send_eor(bind_host, unused_tcp_port):
         host=bind_host,
         shell=shell,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
     ):
         async with asyncio_connection(bind_host, unused_tcp_port) as (client_reader, client_writer):
             client_writer.write(IAC + DO + EOR)

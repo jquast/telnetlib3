@@ -12,6 +12,7 @@ import struct
 import asyncio
 import argparse
 import functools
+import logging
 from typing import Any, Dict, List, Tuple, Union, Callable, Optional, Sequence
 
 # local
@@ -21,6 +22,17 @@ from telnetlib3.stream_reader import TelnetReader, TelnetReaderUnicode
 from telnetlib3.stream_writer import TelnetWriter, TelnetWriterUnicode
 
 __all__ = ("TelnetClient", "TelnetTerminalClient", "open_connection")
+
+#: Default GMCP modules requested via ``Core.Supports.Set``.
+_DEFAULT_GMCP_MODULES = [
+    "Char 1",
+    "Char.Vitals 1",
+    "Char.Items 1",
+    "Room 1",
+    "Room.Info 1",
+    "Comm 1",
+    "Comm.Channel 1",
+]
 
 
 class TelnetClient(client_base.BaseClient):
@@ -57,6 +69,8 @@ class TelnetClient(client_base.BaseClient):
         limit: Optional[int] = None,
         waiter_closed: Optional[asyncio.Future[None]] = None,
         _waiter_connected: Optional[asyncio.Future[None]] = None,
+        gmcp_modules: Optional[List[str]] = None,
+        gmcp_log: bool = False,
     ) -> None:
         """Initialize TelnetClient with terminal parameters."""
         super().__init__(
@@ -70,6 +84,10 @@ class TelnetClient(client_base.BaseClient):
             waiter_closed=waiter_closed,
             _waiter_connected=_waiter_connected,
         )
+        self._gmcp_modules = gmcp_modules or list(_DEFAULT_GMCP_MODULES)
+        self._gmcp_log = gmcp_log
+        self._gmcp_data: Dict[str, Any] = {}
+        self._gmcp_hello_sent = False
         self._send_environ = set(send_environ or self.DEFAULT_SEND_ENVIRON)
         self._extra.update(
             {
@@ -134,6 +152,49 @@ class TelnetClient(client_base.BaseClient):
             return result
 
         self.writer.handle_will = enhanced_handle_will  # type: ignore[method-assign]
+
+        self._setup_gmcp()
+
+    def _setup_gmcp(self) -> None:
+        """Wire GMCP callback and WILL-detection for Core.Hello handshake."""
+        from telnetlib3.telopt import GMCP  # pylint: disable=import-outside-toplevel
+
+        self.writer.set_ext_callback(GMCP, self._on_gmcp)
+        self.writer._gmcp_data = self._gmcp_data  # type: ignore[attr-defined]
+
+        original_handle_will_gmcp = self.writer.handle_will
+
+        def _detect_gmcp_will(opt: bytes) -> None:
+            result = original_handle_will_gmcp(opt)
+            if opt == GMCP and self.writer.remote_option.enabled(GMCP):
+                self._send_gmcp_hello()
+            return result
+
+        self.writer.handle_will = _detect_gmcp_will  # type: ignore[method-assign]
+
+    def _send_gmcp_hello(self) -> None:
+        """Send ``Core.Hello`` and ``Core.Supports.Set`` after GMCP negotiation."""
+        if self._gmcp_hello_sent:
+            return
+        self._gmcp_hello_sent = True
+        from telnetlib3.accessories import get_version  # pylint: disable=import-outside-toplevel
+
+        self.writer.send_gmcp(
+            "Core.Hello", {"client": "telnetlib3", "version": get_version()}
+        )
+        self.writer.send_gmcp("Core.Supports.Set", self._gmcp_modules)
+        self.log.info(
+            "GMCP handshake: Core.Hello + Core.Supports.Set %s",
+            self._gmcp_modules,
+        )
+
+    def _on_gmcp(self, package: str, data: Any) -> None:
+        """Store incoming GMCP data and log it."""
+        self._gmcp_data[package] = data
+        if self._gmcp_log:
+            self.log.info("GMCP: %s %r", package, data)
+        else:
+            self.log.debug("GMCP: %s %r", package, data)
 
     def send_ttype(self) -> str:
         """Callback for responding to TTYPE requests."""
@@ -554,9 +615,13 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
     # Wrap client factory to inject always_will/always_do and encoding
     # flags before negotiation starts.
     encoding_explicit = args["encoding"] not in ("utf8", "utf-8", False)
+    gmcp_modules: Optional[List[str]] = args.get("gmcp_modules")
+    gmcp_log: bool = args.get("gmcp_log", False)
 
     def _client_factory(**kwargs: Any) -> client_base.BaseClient:
         client: TelnetClient
+        kwargs["gmcp_modules"] = gmcp_modules
+        kwargs["gmcp_log"] = gmcp_log
         if sys.platform != "win32" and sys.stdin.isatty():
             client = TelnetTerminalClient(**kwargs)
         else:
@@ -567,8 +632,10 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             orig_connection_made(transport)
             if always_will:
                 client.writer.always_will = always_will
-            if always_do:
-                client.writer.always_do = always_do
+            from .telopt import GMCP as _GMCP  # pylint: disable=import-outside-toplevel
+
+            _do = always_do | {_GMCP}
+            client.writer.always_do = _do
             client.writer._encoding_explicit = encoding_explicit  # pylint: disable=protected-access
 
         client.connection_made = _patched_connection_made  # type: ignore[method-assign]
@@ -890,6 +957,21 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         "man-in-the-middle attacks",
     )
     parser.add_argument(
+        "--gmcp-modules",
+        default=None,
+        metavar="MODULES",
+        help="comma-separated GMCP module specs to request "
+        '(e.g. "Char 1,Room 1,IRE.Rift 1"). '
+        "When provided, replaces the built-in defaults.",
+    )
+    parser.add_argument(
+        "--gmcp-log",
+        action="store_true",
+        default=False,
+        help="log all incoming GMCP messages at INFO level "
+        "(default: DEBUG only)",
+    )
+    parser.add_argument(
         "--no-repl",
         action="store_true",
         default=False,
@@ -1004,6 +1086,12 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "ssl": ssl_ctx,
         "no_repl": args.no_repl,
         "history_file": _resolve_history_file(args.history_file),
+        "gmcp_modules": (
+            [m.strip() for m in args.gmcp_modules.split(",") if m.strip()]
+            if args.gmcp_modules
+            else None
+        ),
+        "gmcp_log": args.gmcp_log,
     }
 
 

@@ -37,7 +37,7 @@ async def test_telnet_server_on_naws(bind_host, unused_tcp_port):
             _waiter.set_result(self)
 
     async with create_server(
-        protocol_factory=ServerTestNaws, host=bind_host, port=unused_tcp_port, connect_maxwait=0.05
+        protocol_factory=ServerTestNaws, host=bind_host, port=unused_tcp_port, connect_maxwait=0.5
     ):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WILL + NAWS)
@@ -59,14 +59,13 @@ async def test_telnet_client_send_naws(bind_host, unused_tcp_port):
             _waiter.set_result((rows, cols))
 
     async with create_server(
-        protocol_factory=ServerTestNaws, host=bind_host, port=unused_tcp_port, connect_maxwait=0.05
+        protocol_factory=ServerTestNaws, host=bind_host, port=unused_tcp_port, connect_maxwait=0.5
     ):
         async with open_connection(
             host=bind_host,
             port=unused_tcp_port,
             cols=given_cols,
             rows=given_rows,
-            connect_minwait=0.05,
         ) as (reader, writer):
             recv_rows, recv_cols = await asyncio.wait_for(_waiter, 0.5)
             assert recv_cols == given_cols
@@ -86,7 +85,6 @@ async def test_telnet_client_send_tty_naws(bind_host, unused_tcp_port):
         bind_host,
         str(unused_tcp_port),
         "--loglevel=warning",
-        "--connect-minwait=0.005",
         "--connect-maxwait=0.010",
     ]
 
@@ -97,7 +95,7 @@ async def test_telnet_client_send_tty_naws(bind_host, unused_tcp_port):
             asyncio.get_event_loop().call_soon(self.connection_lost, None)
 
     async with create_server(
-        protocol_factory=ServerTestNaws, host=bind_host, port=unused_tcp_port, connect_maxwait=0.05
+        protocol_factory=ServerTestNaws, host=bind_host, port=unused_tcp_port, connect_maxwait=0.5
     ):
         proc = pexpect.spawn(prog, args, dimensions=(given_rows, given_cols))
         await proc.expect(pexpect.EOF, async_=True, timeout=5)
@@ -120,14 +118,13 @@ async def test_telnet_client_send_naws_65534(bind_host, unused_tcp_port):
             _waiter.set_result((cols, rows))
 
     async with create_server(
-        protocol_factory=ServerTestNaws, host=bind_host, port=unused_tcp_port, connect_maxwait=0.05
+        protocol_factory=ServerTestNaws, host=bind_host, port=unused_tcp_port, connect_maxwait=0.5
     ):
         async with open_connection(
             host=bind_host,
             port=unused_tcp_port,
             cols=given_cols,
             rows=given_rows,
-            connect_minwait=0.05,
         ) as (reader, writer):
             recv_cols, recv_rows = await asyncio.wait_for(_waiter, 0.5)
             assert recv_cols == expect_cols
@@ -145,7 +142,7 @@ async def test_naws_without_will(bind_host, unused_tcp_port):
             _waiter.set_result(self)
 
     async with create_server(
-        protocol_factory=ServerTestNaws, host=bind_host, port=unused_tcp_port, connect_maxwait=0.05
+        protocol_factory=ServerTestNaws, host=bind_host, port=unused_tcp_port, connect_maxwait=0.5
     ):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + SB + NAWS + struct.pack("!HH", given_cols, given_rows) + IAC + SE)

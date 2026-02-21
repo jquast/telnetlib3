@@ -61,7 +61,7 @@ async def test_telnet_reader_using_readline_unicode(bind_host, unused_tcp_port):
         writer.close()
 
     async with create_server(
-        host=bind_host, port=unused_tcp_port, connect_maxwait=0.05, shell=shell
+        host=bind_host, port=unused_tcp_port, connect_maxwait=0.5, shell=shell
     ):
         async with open_connection(host=bind_host, port=unused_tcp_port) as (
             client_reader,
@@ -92,7 +92,7 @@ async def test_telnet_reader_using_readline_bytes(bind_host, unused_tcp_port):
         writer.close()
 
     async with create_server(
-        host=bind_host, port=unused_tcp_port, connect_maxwait=0.05, shell=shell, encoding=False
+        host=bind_host, port=unused_tcp_port, connect_maxwait=0.5, shell=shell, encoding=False
     ):
         async with open_connection(
             host=bind_host, port=unused_tcp_port, encoding=False
@@ -114,7 +114,7 @@ async def test_telnet_reader_read_exactly_unicode(bind_host, unused_tcp_port):
         writer.close()
 
     async with create_server(
-        host=bind_host, port=unused_tcp_port, connect_maxwait=0.05, shell=shell
+        host=bind_host, port=unused_tcp_port, connect_maxwait=0.5, shell=shell
     ):
         async with open_connection(host=bind_host, port=unused_tcp_port) as (
             client_reader,
@@ -138,7 +138,7 @@ async def test_telnet_reader_read_exactly_bytes(bind_host, unused_tcp_port):
         writer.close()
 
     async with create_server(
-        host=bind_host, port=unused_tcp_port, connect_maxwait=0.05, shell=shell, encoding=False
+        host=bind_host, port=unused_tcp_port, connect_maxwait=0.5, shell=shell, encoding=False
     ):
         async with open_connection(
             host=bind_host, port=unused_tcp_port, encoding=False
@@ -168,7 +168,7 @@ async def test_telnet_reader_read_beyond_limit_unicode(bind_host, unused_tcp_por
         writer.close()
 
     async with create_server(
-        host=bind_host, port=unused_tcp_port, connect_maxwait=0.05, shell=shell, limit=limit
+        host=bind_host, port=unused_tcp_port, connect_maxwait=0.5, shell=shell, limit=limit
     ):
         async with open_connection(
             host=bind_host, port=unused_tcp_port, limit=limit
@@ -191,7 +191,7 @@ async def test_telnet_reader_read_beyond_limit_bytes(bind_host, unused_tcp_port)
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
         shell=shell,
         encoding=False,
         limit=limit,
@@ -226,7 +226,7 @@ Router>
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
         shell=shell,
         encoding=False,
         limit=limit,
@@ -272,7 +272,7 @@ Router>
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
         shell=shell,
         encoding=False,
         limit=limit,
@@ -320,7 +320,7 @@ async def test_telnet_reader_readuntil_pattern_limit_overrun_buffer_full(
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
         shell=shell,
         encoding=False,
         limit=limit,
@@ -356,7 +356,7 @@ async def test_telnet_reader_readuntil_pattern_incomplete_read_eof(bind_host, un
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
         shell=shell,
         encoding=False,
         limit=limit,
@@ -410,7 +410,7 @@ async def test_telnet_reader_readuntil_pattern_cancelled_error(bind_host, unused
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
-        connect_maxwait=0.05,
+        connect_maxwait=0.5,
         shell=shell,
         encoding=False,
         limit=limit,

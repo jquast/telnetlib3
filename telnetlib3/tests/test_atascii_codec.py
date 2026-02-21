@@ -18,6 +18,7 @@ def test_codec_lookup():
 
 @pytest.mark.parametrize("alias", ["atari8bit", "atari_8bit"])
 def test_codec_aliases(alias):
+    codecs.lookup("atascii")
     info = codecs.lookup(alias)
     assert info.name == "atascii"
 

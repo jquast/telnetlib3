@@ -357,7 +357,6 @@ def _client_cmd(host: str, port: int, extra: "list[str] | None" = None) -> "list
         prog,
         host,
         str(port),
-        "--connect-minwait=0.05",
         "--connect-maxwait=0.5",
         "--colormatch=none",
     ]

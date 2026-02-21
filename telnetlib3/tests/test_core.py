@@ -281,7 +281,7 @@ async def test_telnet_client_open_close_by_error(bind_host, unused_tcp_port):
         pass
 
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
-        async with open_connection(host=bind_host, port=unused_tcp_port, connect_minwait=0.05) as (
+        async with open_connection(host=bind_host, port=unused_tcp_port) as (
             reader,
             writer,
         ):
@@ -292,7 +292,7 @@ async def test_telnet_client_open_close_by_error(bind_host, unused_tcp_port):
 
 async def test_telnet_server_negotiation_fail(bind_host, unused_tcp_port):
     """Test telnetlib3.TelnetServer() negotiation failure with client."""
-    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             await reader.readexactly(3)  # IAC DO TTYPE, we ignore it!
 
@@ -400,7 +400,6 @@ async def test_telnet_client_cmdline(bind_host, unused_tcp_port):
         bind_host,
         str(unused_tcp_port),
         "--loglevel=info",
-        "--connect-minwait=0.05",
         "--connect-maxwait=0.05",
         "--colormatch=none",
     ]
@@ -443,7 +442,6 @@ async def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port):
         bind_host,
         str(unused_tcp_port),
         "--loglevel=warning",
-        "--connect-minwait=0.05",
         "--connect-maxwait=0.05",
         "--colormatch=none",
         "--no-repl",
@@ -478,7 +476,6 @@ async def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port):
         bind_host,
         str(unused_tcp_port),
         "--loglevel=info",
-        "--connect-minwait=0.15",
         "--connect-maxwait=0.15",
         f"--logfile={logfile}",
         "--colormatch=none",
@@ -494,7 +491,7 @@ async def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port):
         await writer.wait_closed()
 
     async with create_server(
-        host=bind_host, port=unused_tcp_port, shell=shell, connect_maxwait=0.05
+        host=bind_host, port=unused_tcp_port, shell=shell, connect_maxwait=0.5
     ):
         proc = await asyncio.create_subprocess_exec(
             *args,

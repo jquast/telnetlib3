@@ -16,7 +16,6 @@ _CLIENT_DEFAULTS = {
     "encoding": "utf8",
     "encoding_errors": "strict",
     "force_binary": False,
-    "connect_minwait": 0.01,
     "connect_maxwait": 0.02,
 }
 
@@ -217,11 +216,10 @@ def test_transform_args_history_file():
 async def test_open_connection_default_factory(bind_host, unused_tcp_port, monkeypatch):
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
 
-    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05):
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5):
         reader, writer = await cl.open_connection(
             host=bind_host,
             port=unused_tcp_port,
-            connect_minwait=0.05,
             connect_maxwait=0.1,
             encoding=False,
         )
@@ -235,11 +233,10 @@ async def test_open_connection_default_factory(bind_host, unused_tcp_port, monke
 async def test_open_connection_tty_factory(bind_host, unused_tcp_port, monkeypatch):
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
-    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05):
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5):
         reader, writer = await cl.open_connection(
             host=bind_host,
             port=unused_tcp_port,
-            connect_minwait=0.05,
             connect_maxwait=0.1,
             encoding=False,
         )

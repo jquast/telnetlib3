@@ -18,12 +18,16 @@ try:
     import prompt_toolkit.history
     import prompt_toolkit.key_binding
     import prompt_toolkit.auto_suggest
+    import prompt_toolkit.styles
 
     HAS_PROMPT_TOOLKIT = True
 except ImportError:
     HAS_PROMPT_TOOLKIT = False
 
 PASSWORD_CHAR = "\u25cf"
+
+# Number of bottom rows reserved for prompt_toolkit (input + toolbar).
+_PT_RESERVE_BOTTOM = 2
 
 # Buffer for MUD data received while a TUI editor subprocess is running.
 # The asyncio _read_server loop continues receiving MUD data during editor
@@ -94,6 +98,7 @@ if HAS_PROMPT_TOOLKIT:
             telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
             log: logging.Logger,
             history_file: Optional[str] = None,
+            connection_info: str = "",
         ) -> None:
             """Initialize REPL with writer, logger, and optional history file."""
             self._writer = telnet_writer
@@ -106,11 +111,16 @@ if HAS_PROMPT_TOOLKIT:
                 """Ctrl+] closes the connection, matching classic telnet."""
                 event.app.exit(exception=EOFError)
 
-            _macro_defs = getattr(telnet_writer, "_macro_defs", None)
-            if _macro_defs is not None:
+            self._macro_defs = getattr(telnet_writer, "_macro_defs", None)
+            if self._macro_defs is not None:
                 from .macros import bind_macros  # pylint: disable=import-outside-toplevel
 
-                bind_macros(kb, _macro_defs, telnet_writer, log)
+                bind_macros(kb, self._macro_defs, telnet_writer, log)
+
+            @kb.add("f1")
+            def _help_screen(event: Any) -> None:
+                """F1 shows keybinding help on the alternate screen."""
+                _show_help(event, self._macro_defs)
 
             @kb.add("f8")
             def _edit_macros(event: Any) -> None:
@@ -122,12 +132,73 @@ if HAS_PROMPT_TOOLKIT:
                 """F9 opens autoreply editor TUI in subprocess."""
                 _launch_tui_editor(event, "autoreplies", telnet_writer)
 
+            _sep = " \u2502 "
+            _parts = []
+            if connection_info:
+                _parts.append(connection_info)
+            _parts.append("F1 Help")
+            self._toolbar_static = " " + _sep.join(_parts)
+
+            self._style = prompt_toolkit.styles.Style.from_dict({
+                "": "fg:white bg:brown",
+                "bottom-toolbar": "fg:white bg:brown noreverse",
+                "bottom-toolbar.text": "fg:white bg:brown",
+            })
             self._session: "prompt_toolkit.PromptSession[str]" = prompt_toolkit.PromptSession(
                 history=self._history,
                 auto_suggest=prompt_toolkit.auto_suggest.AutoSuggestFromHistory(),
                 enable_history_search=True,
                 key_bindings=kb,
+                style=self._style,
+                bottom_toolbar=self._get_toolbar,
             )
+
+        def _get_toolbar(self) -> str:
+            """Return toolbar text, including GMCP summary when available."""
+            gmcp_data: "Optional[dict[str, Any]]" = getattr(
+                self._writer, "_gmcp_data", None
+            )
+            if not gmcp_data:
+                return self._toolbar_static
+
+            parts: "list[str]" = []
+            vitals = gmcp_data.get("Char.Vitals")
+            if isinstance(vitals, dict):
+                snippets: "list[str]" = []
+                hp = vitals.get("hp", vitals.get("HP"))
+                maxhp = vitals.get("maxhp", vitals.get("maxHP", vitals.get("max_hp")))
+                if hp is not None:
+                    snippets.append(
+                        f"HP:{hp}/{maxhp}" if maxhp is not None else f"HP:{hp}"
+                    )
+                mp = vitals.get("mp", vitals.get("MP", vitals.get("mana")))
+                maxmp = vitals.get("maxmp", vitals.get("maxMP", vitals.get("max_mp")))
+                if mp is not None:
+                    snippets.append(
+                        f"MP:{mp}/{maxmp}" if maxmp is not None else f"MP:{mp}"
+                    )
+                mv = vitals.get("mv", vitals.get("MV", vitals.get("moves")))
+                maxmv = vitals.get("maxmv", vitals.get("maxMV", vitals.get("max_mv")))
+                if mv is not None:
+                    snippets.append(
+                        f"MV:{mv}/{maxmv}" if maxmv is not None else f"MV:{mv}"
+                    )
+                if snippets:
+                    parts.append(" ".join(snippets))
+
+            room_info = gmcp_data.get("Room.Info", gmcp_data.get("Room.Name"))
+            if isinstance(room_info, dict):
+                room_name = room_info.get("name", room_info.get("Name"))
+                if room_name:
+                    parts.append(str(room_name))
+            elif isinstance(room_info, str) and room_info:
+                parts.append(room_info)
+
+            if not parts:
+                return self._toolbar_static
+
+            _sep = " \u2502 "
+            return " " + _sep.join(parts) + _sep + self._toolbar_static.lstrip()
 
         def _is_password_mode(self) -> bool:
             """Return True when server has negotiated WILL ECHO."""
@@ -153,6 +224,77 @@ if HAS_PROMPT_TOOLKIT:
                 return None
             except KeyboardInterrupt:
                 return None
+
+
+def _show_help(_event: Any, macro_defs: "Any" = None) -> None:
+    """
+    Display keybinding help on the alternate screen buffer.
+
+    :param _event: prompt_toolkit key event (unused).
+    :param macro_defs: Optional list of macro definitions to display.
+    """
+    import os  # pylint: disable=import-outside-toplevel,redefined-outer-name
+
+    def _run_help() -> None:
+        sys.stdout.write("\x1b[?1049h")
+        sys.stdout.write("\x1b[H\x1b[2J")
+        lines = [
+            "",
+            "  telnetlib3 \u2014 Keybindings",
+            "",
+            "  F1          This help screen",
+            "  F8          Edit macros (TUI editor)",
+            "  F9          Edit autoreplies (TUI editor)",
+            "  Ctrl+]      Disconnect",
+            "",
+        ]
+        if macro_defs:
+            lines.append("  User macros:")
+            for m in macro_defs:
+                key = m.get("key", "?")
+                text = m.get("text", "")
+                display = text.replace("\r\n", "<CR>").replace("\r", "<CR>")
+                if len(display) > 40:
+                    display = display[:37] + "..."
+                lines.append(f"  {key:<12}{display}")
+            lines.append("")
+        lines.append("  Press any key to return.")
+        lines.append("")
+        sys.stdout.write("\r\n".join(lines))
+        sys.stdout.flush()
+
+        import tty  # pylint: disable=import-outside-toplevel
+        import termios  # pylint: disable=import-outside-toplevel,redefined-outer-name
+
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            os.read(fd, 1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+        sys.stdout.write("\x1b[?1049l")
+        sys.stdout.flush()
+
+        try:
+            _tsize = os.get_terminal_size()
+            scroll_bottom = max(1, _tsize.lines - _PT_RESERVE_BOTTOM)
+            sys.stdout.write(f"\x1b[1;{scroll_bottom}r")
+            sys.stdout.write(f"\x1b[{scroll_bottom};1H")
+            sys.stdout.write("\x1b7")
+            _input_row = _tsize.lines - _PT_RESERVE_BOTTOM + 1
+            for _r in range(_input_row, _tsize.lines + 1):
+                sys.stdout.write(f"\x1b[{_r};1H\x1b[2K")
+            sys.stdout.flush()
+        except OSError:
+            pass
+
+    from prompt_toolkit.application import (  # pylint: disable=import-error,import-outside-toplevel
+        run_in_terminal,
+    )
+
+    run_in_terminal(_run_help)
 
 
 def _launch_tui_editor(
@@ -214,14 +356,16 @@ def _launch_tui_editor(
         finally:
             _editor_active = False
             # Re-establish the scroll region that _repl_event_loop_pt set
-            # via the ScrollRegion context manager (reserve_bottom=1).
+            # via the ScrollRegion context manager.
             try:
                 _tsize = os.get_terminal_size()
-                scroll_bottom = max(1, _tsize.lines - 1)
+                scroll_bottom = max(1, _tsize.lines - _PT_RESERVE_BOTTOM)
                 sys.stdout.write(f"\x1b[1;{scroll_bottom}r")
                 sys.stdout.write(f"\x1b[{scroll_bottom};1H")
                 sys.stdout.write("\x1b7")
-                sys.stdout.write(f"\x1b[{_tsize.lines};1H\x1b[2K")
+                _input_row = _tsize.lines - _PT_RESERVE_BOTTOM + 1
+                for _r in range(_input_row, _tsize.lines + 1):
+                    sys.stdout.write(f"\x1b[{_r};1H\x1b[2K")
                 sys.stdout.flush()
             except OSError:
                 pass
@@ -370,8 +514,8 @@ if sys.platform != "win32":
 
         @property
         def input_row(self) -> int:
-            """1-indexed row number for the input line."""
-            return self._rows
+            """1-indexed row number for the first reserved (input) line."""
+            return self._rows - self._reserve + 1
 
         @property
         def resize_pending(self) -> bool:
@@ -387,10 +531,12 @@ if sys.platform != "win32":
             self._rows = rows
             self._cols = cols
             if self._active:
-                self._stdout.write(f"\x1b[{old_input_row};1H\x1b[2K".encode())
+                for _r in range(old_input_row, old_input_row + self._reserve):
+                    self._stdout.write(f"\x1b[{_r};1H\x1b[2K".encode())
                 self._set_scroll_region()
                 self._stdout.write(b"\x1b7")
-                self._stdout.write(f"\x1b[{self.input_row};1H\x1b[2K".encode())
+                for _r in range(self.input_row, self.input_row + self._reserve):
+                    self._stdout.write(f"\x1b[{_r};1H\x1b[2K".encode())
                 self._dirty = True
 
         def _set_scroll_region(self) -> None:
@@ -431,6 +577,7 @@ if sys.platform != "win32":
         telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
         term: Any,
         stdout: asyncio.StreamWriter,
+        reserve_bottom: int = 1,
     ) -> "Any":
         """
         Set up NAWS patch, scroll region, and resize handler.
@@ -460,7 +607,7 @@ if sys.platform != "win32":
             if telnet_writer.local_option.enabled(NAWS) and not telnet_writer.is_closing():
                 telnet_writer._send_naws()  # pylint: disable=protected-access
 
-            with ScrollRegion(stdout, rows, cols, reserve_bottom=1) as scroll:
+            with ScrollRegion(stdout, rows, cols, reserve_bottom=reserve_bottom) as scroll:
                 scroll_region = scroll
 
                 def _on_resize(new_rows: int, new_cols: int) -> None:
@@ -540,29 +687,53 @@ if sys.platform != "win32":
 
         mode_switched = False
 
-        async with _repl_scaffold(telnet_writer, term, stdout) as (scroll, _):
+        _session_key = getattr(telnet_writer, "_session_key", "")
+        _is_ssl = telnet_writer.get_extra_info("ssl_object") is not None
+        _conn_info = _session_key + (" SSL" if _is_ssl else "")
+
+        async with _repl_scaffold(
+            telnet_writer, term, stdout, reserve_bottom=_PT_RESERVE_BOTTOM
+        ) as (scroll, _):
             # Save initial scroll-region cursor position (DECSC).
             # _read_server restores this before writing, then re-saves.
             stdout.write(b"\x1b7")
             stdout.write(f"\x1b[{scroll.input_row};1H\x1b[2K".encode())
 
             repl = PromptToolkitRepl(  # pylint: disable=possibly-used-before-assignment
-                telnet_writer, telnet_writer.log, history_file=history_file
+                telnet_writer,
+                telnet_writer.log,
+                history_file=history_file,
+                connection_info=_conn_info,
             )
 
-            _ar_rules = getattr(telnet_writer, "_autoreply_rules", None)
+            def _insert_into_prompt(text: str) -> None:
+                app = repl._session.app  # pylint: disable=protected-access
+                if app and app.current_buffer:
+                    app.current_buffer.insert_text(text)
+
             autoreply_engine = None
-            if _ar_rules:
-                from .autoreply import AutoreplyEngine  # pylint: disable=import-outside-toplevel
+            _ar_rules_ref: object = None
 
-                def _insert_into_prompt(text: str) -> None:
-                    app = repl._session.app  # pylint: disable=protected-access
-                    if app and app.current_buffer:
-                        app.current_buffer.insert_text(text)
+            def _refresh_autoreply_engine() -> None:
+                nonlocal autoreply_engine, _ar_rules_ref
+                cur_rules = getattr(telnet_writer, "_autoreply_rules", None)
+                if cur_rules is _ar_rules_ref:
+                    return
+                _ar_rules_ref = cur_rules
+                if autoreply_engine is not None:
+                    autoreply_engine.cancel()
+                    autoreply_engine = None
+                if cur_rules:
+                    from .autoreply import AutoreplyEngine  # pylint: disable=import-outside-toplevel
 
-                autoreply_engine = AutoreplyEngine(
-                    _ar_rules, telnet_writer, telnet_writer.log, insert_fn=_insert_into_prompt
-                )
+                    autoreply_engine = AutoreplyEngine(
+                        cur_rules,
+                        telnet_writer,
+                        telnet_writer.log,
+                        insert_fn=_insert_into_prompt,
+                    )
+
+            _refresh_autoreply_engine()
 
             server_done = False
 
@@ -581,6 +752,7 @@ if sys.platform != "win32":
                     if isinstance(out, bytes):
                         out = out.decode("utf-8", errors="replace")
                     out = _transform_output(out, telnet_writer, True)
+                    _refresh_autoreply_engine()
                     if autoreply_engine is not None:
                         autoreply_engine.feed(out)
                     if _editor_active:

@@ -428,7 +428,7 @@ async def test_fingerprint_probe_integration(bind_host, unused_tcp_port):
         connect_maxwait=0.5,
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_minwait=0.2, connect_maxwait=0.5
+            host=bind_host, port=unused_tcp_port, connect_maxwait=0.5
         ) as (reader, writer):
             try:
                 await asyncio.wait_for(reader.read(100), timeout=1.0)

@@ -235,7 +235,6 @@ async def test_tls_fingerprint_end_to_end(
             ssl=client_ssl_ctx,
             server_hostname="localhost",
             encoding=False,
-            connect_minwait=0.05,
             connect_maxwait=0.5,
         ) as (reader, writer):
             await asyncio.wait_for(waiter, 2.0)
@@ -546,7 +545,6 @@ def _pty_run_client(bind_host, port, extra_argv, server_ssl_ctx=None):
             "telnetlib3-client",
             bind_host,
             str(port),
-            "--connect-minwait=0.05",
             "--connect-maxwait=0.5",
             "--colormatch=none",
         ] + extra_argv

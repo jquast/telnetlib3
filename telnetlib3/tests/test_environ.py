@@ -74,7 +74,6 @@ async def test_telnet_client_send_environ(bind_host, unused_tcp_port):
             rows=given_rows,
             encoding=given_encoding,
             term=given_term,
-            connect_minwait=0.05,
         ) as (reader, writer):
             mapping = await asyncio.wait_for(_waiter, 0.5)
             assert mapping["COLUMNS"] == str(given_cols)
@@ -109,8 +108,7 @@ async def test_telnet_client_send_var_uservar_environ(bind_host, unused_tcp_port
             rows=given_rows,
             encoding=given_encoding,
             term=given_term,
-            connect_minwait=0.05,
-            connect_maxwait=0.05,
+            connect_maxwait=0.5,
         ) as (reader, writer):
             mapping = await asyncio.wait_for(_waiter, 0.5)
             assert mapping == {}

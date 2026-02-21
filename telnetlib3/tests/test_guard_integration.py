@@ -437,7 +437,7 @@ async def test_fingerprint_scanner_defeats_robot_check(unused_tcp_port):
             banner_max_wait=5.0,
         )
         reader, writer = await telnetlib3.open_connection(
-            host="127.0.0.1", port=unused_tcp_port, encoding=False, shell=shell, connect_minwait=0.5
+            host="127.0.0.1", port=unused_tcp_port, encoding=False, shell=shell
         )
         # Shell runs as a background task — wait for it to finish.
         await asyncio.wait_for(writer.protocol.waiter_closed, timeout=10.0)

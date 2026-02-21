@@ -108,7 +108,7 @@ async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capt
         connect_maxwait=0.15,
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, cols=80, rows=25, connect_minwait=0.05
+            host=bind_host, port=unused_tcp_port, cols=80, rows=25
         ) as (reader, writer):
             await asyncio.wait_for(_waiter, 2.0)
             await asyncio.sleep(0.1)
@@ -145,7 +145,6 @@ async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capt
             rows=25,
             term="vt220",
             shell=client_shell,
-            connect_minwait=0.05,
         ) as (reader, writer):
             output = await asyncio.wait_for(_output, 5.0)
             assert "vt220" in output or "xterm" in output
@@ -163,7 +162,7 @@ async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capt
         connect_maxwait=0.15,
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, cols=80, rows=25, connect_minwait=0.05
+            host=bind_host, port=unused_tcp_port, cols=80, rows=25
         ) as (reader, writer):
             await asyncio.wait_for(_waiter, 2.0)
             await asyncio.sleep(0.1)
@@ -196,7 +195,7 @@ async def test_pty_shell_lifecycle(bind_host, unused_tcp_port, require_no_captur
         connect_maxwait=0.15,
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, cols=80, rows=25, connect_minwait=0.05
+            host=bind_host, port=unused_tcp_port, cols=80, rows=25
         ) as (reader, writer):
             await asyncio.wait_for(_waiter, 2.0)
             await asyncio.sleep(0.1)
@@ -232,7 +231,7 @@ async def test_pty_shell_lifecycle(bind_host, unused_tcp_port, require_no_captur
         connect_maxwait=0.15,
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, cols=80, rows=25, connect_minwait=0.05
+            host=bind_host, port=unused_tcp_port, cols=80, rows=25
         ) as (reader, writer):
             await asyncio.wait_for(_waiter, 2.0)
             await asyncio.sleep(0.1)
@@ -838,8 +837,10 @@ def test_handle_exec_error_non_decodable(mock_session):
         session._handle_exec_error(BadBytes(b"test"))
 
 
-def test_build_environment_no_rows_cols(mock_session):
+def test_build_environment_no_rows_cols(mock_session, monkeypatch):
     """_build_environment skips LINES/COLUMNS when rows/cols are falsy."""
+    monkeypatch.delenv("LINES", raising=False)
+    monkeypatch.delenv("COLUMNS", raising=False)
     session, _ = mock_session({"TERM": "vt100", "rows": 0, "cols": 0})
     env = session._build_environment()
     assert "LINES" not in env

@@ -175,7 +175,6 @@ async def test_telnet_client_no_charset(bind_host, unused_tcp_port):
             host=bind_host,
             port=unused_tcp_port,
             encoding="latin1",
-            connect_minwait=0.05,
         ) as (reader, writer):
             val = await asyncio.wait_for(_waiter, 0.5)
             assert not val
@@ -388,7 +387,6 @@ async def test_charset_send_edge_cases(bind_host, unused_tcp_port, charset_behav
             ),
             host=bind_host,
             port=unused_tcp_port,
-            connect_minwait=0.05,
             connect_maxwait=0.25,
         ) as (reader, writer):
             assert writer.protocol.encoding(incoming=True) == "US-ASCII"
