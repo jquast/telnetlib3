@@ -151,7 +151,7 @@ async def test_unicode_reader_read_zero_and_read_consumes():
         return "ascii"
 
     ur = TelnetReaderUnicode(fn_encoding=enc)
-    assert await ur.read(0) == ""
+    assert not await ur.read(0)
     ur.feed_data(b"abc")
     out2 = await ur.read(2)
     assert out2 == "ab"
@@ -184,8 +184,8 @@ async def test_feed_data_empty_returns_early():
 @pytest.mark.parametrize(
     "make_reader, method, args",
     [
-        (lambda: TelnetReader(), "readuntil", (b"\n",)),
-        (lambda: TelnetReader(), "readexactly", (5,)),
+        (TelnetReader, "readuntil", (b"\n",)),
+        (TelnetReader, "readexactly", (5,)),
         (lambda: TelnetReaderUnicode(fn_encoding=lambda incoming=True: "ascii"), "readline", ()),
         (
             lambda: TelnetReaderUnicode(fn_encoding=lambda incoming=True: "ascii"),

@@ -257,13 +257,17 @@ else:
         def __enter__(self) -> "Terminal":
             self._save_mode = self.get_mode()
             if self._istty:
+                assert self._save_mode is not None
                 self.set_mode(self.determine_mode(self._save_mode))
             return self
 
         def __exit__(self, *_: Any) -> None:
             self.cleanup_winch()
             if self._istty:
-                termios.tcsetattr(self._fileno, termios.TCSAFLUSH, list(self._save_mode))
+                assert self._save_mode is not None
+                termios.tcsetattr(
+                    self._fileno, termios.TCSAFLUSH, list(self._save_mode)
+                )
 
         def get_mode(self) -> Optional["Terminal.ModeDef"]:
             """Return current terminal mode if attached to a tty, otherwise None."""
@@ -348,6 +352,7 @@ else:
             _echo_changed = switched_to_raw and _wecho != last_will_echo
             if not (_should_go_raw or _should_suppress_echo or _echo_changed):
                 return None
+            assert self._save_mode is not None
             if _should_suppress_echo:
                 self.set_mode(self._suppress_echo(self._save_mode))
                 self.telnet_writer.log.debug(
@@ -735,6 +740,7 @@ else:
                 _prompt_ready_raw.clear()
 
             # Attach wait_fn to writer so _raw_event_loop can pick it up.
+            # pylint: disable-next=protected-access
             telnet_writer._autoreply_wait_fn = _wait_for_prompt_raw
 
             repl_enabled = getattr(telnet_writer, "_repl_enabled", False)
@@ -770,6 +776,21 @@ else:
                     continue
 
                 # Standard event loop (byte-at-a-time).
+                # After REPL exit, prompt_toolkit restores cooked mode.
+                # Set raw mode so ctrl+] and single-byte input works.
+                if (
+                    not switched_to_raw
+                    and term._istty  # pylint: disable=protected-access
+                    and term._save_mode is not None  # pylint: disable=protected-access
+                ):
+                    term.set_mode(
+                        term._make_raw(  # pylint: disable=protected-access
+                            term._save_mode, suppress_echo=True  # pylint: disable=protected-access
+                        )
+                    )
+                    switched_to_raw = True
+                    local_echo = not telnet_writer.will_echo
+                    linesep = "\r\n"
                 stdin = await term.connect_stdin()
                 _reactivate_repl, switched_to_raw, last_will_echo, local_echo, linesep = (
                     await _raw_event_loop(

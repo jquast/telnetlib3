@@ -97,7 +97,7 @@ _FLAG_TO_WIDGET: dict[str, str] = {
 
 
 def _handle_arrow_navigation(
-    screen: Screen,  # type: ignore[type-arg]
+    screen: Screen,
     event: events.Key,
     button_col_selector: str,
     table_selector: str,
@@ -179,7 +179,7 @@ def _build_tooltips() -> dict[str, str]:
 
     parser = _get_argument_parser()
     tips: dict[str, str] = {}
-    for action in parser._actions:
+    for action in parser._actions:  # pylint: disable=protected-access
         if not action.help:
             continue
         for opt in action.option_strings:
@@ -1199,7 +1199,7 @@ class _EditListScreen(Screen["bool | None"]):
 
     @property
     def _form_visible(self) -> bool:
-        return self.query_one(f"#{self._prefix}-form").display
+        return bool(self.query_one(f"#{self._prefix}-form").display)
 
     def _set_action_buttons_disabled(self, disabled: bool) -> None:
         """Enable or disable the add/edit/copy buttons."""
@@ -1472,6 +1472,9 @@ class MacroEditScreen(_EditListScreen):
                             )
                         with Horizontal(classes="field-row"):
                             yield Button("Autowander", id="macro-autowander", classes="insert-btn")
+                            yield Button(
+                                "Autodiscover", id="macro-autodiscover", classes="insert-btn"
+                            )
                             yield Button("Delay", id="macro-delay", classes="insert-btn")
                         with Horizontal(id="macro-form-buttons"):
                             yield Label(" ", classes="form-btn-spacer")
@@ -1649,6 +1652,8 @@ class MacroEditScreen(_EditListScreen):
             self._insert_command("`return slow`")
         elif suffix == "autowander":
             self._insert_command("`autowander`")
+        elif suffix == "autodiscover":
+            self._insert_command("`autodiscover`")
         elif suffix == "delay":
             self._insert_command("`delay 1s`")
         elif suffix == "capture":
@@ -2565,7 +2570,7 @@ def _patch_writer_thread_queue() -> None:
     try:
         import textual.drivers._writer_thread as _wt  # pylint: disable=import-outside-toplevel
 
-        _wt.MAX_QUEUED_WRITES = 0  # type: ignore[misc]
+        _wt.MAX_QUEUED_WRITES = 0
     except (ImportError, AttributeError):
         pass
 
@@ -2635,6 +2640,129 @@ def edit_rooms_main(
             fasttravel_file=fasttravel_file,
         )
     )
+    app.run()
+
+
+class _ConfirmDialogScreen(Screen[bool]):
+    """Confirmation dialog with optional warning and 'don't ask again' checkbox."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    _ConfirmDialogScreen {
+        align: center middle;
+    }
+    #confirm-dialog {
+        width: 60;
+        height: auto;
+        max-height: 80%;
+        border: round $surface-lighten-2;
+        background: $surface;
+        padding: 1 2;
+    }
+    #confirm-title {
+        text-style: bold;
+        text-align: center;
+        margin-bottom: 1;
+    }
+    #confirm-body {
+        margin-bottom: 1;
+    }
+    #confirm-warning {
+        color: $error;
+        margin-bottom: 1;
+    }
+    #confirm-checkbox-row {
+        height: 3;
+        margin-bottom: 1;
+    }
+    #confirm-checkbox-row Label {
+        padding-top: 1;
+        margin-left: 1;
+    }
+    #confirm-buttons {
+        height: 3;
+        align-horizontal: right;
+    }
+    #confirm-buttons Button {
+        width: auto;
+        min-width: 12;
+        margin-left: 1;
+    }
+    """
+
+    def __init__(
+        self,
+        title: str,
+        body: str,
+        warning: str = "",
+        result_file: str = "",
+    ) -> None:
+        """Initialize confirm dialog with title, body, and optional warning."""
+        super().__init__()
+        self._title = title
+        self._body = body
+        self._warning = warning
+        self._result_file = result_file
+
+    def compose(self) -> ComposeResult:
+        """Build the confirm dialog layout."""
+        with Vertical(id="confirm-dialog"):
+            yield Static(self._title, id="confirm-title")
+            yield Static(self._body, id="confirm-body")
+            if self._warning:
+                yield Static(self._warning, id="confirm-warning")
+            with Horizontal(id="confirm-checkbox-row"):
+                yield Switch(value=False, id="confirm-dont-ask")
+                yield Label("Don't ask me again")
+            with Horizontal(id="confirm-buttons"):
+                yield Button("Cancel", variant="default", id="confirm-cancel")
+                yield Button("OK", variant="success", id="confirm-ok")
+
+    def on_mount(self) -> None:
+        """Focus OK button on mount."""
+        self.query_one("#confirm-ok", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle OK/Cancel button presses."""
+        if event.button.id == "confirm-ok":
+            self._write_result(True)
+            self.dismiss(True)
+        elif event.button.id == "confirm-cancel":
+            self._write_result(False)
+            self.dismiss(False)
+
+    def action_cancel(self) -> None:
+        """Handle Escape key."""
+        self._write_result(False)
+        self.dismiss(False)
+
+    def _write_result(self, confirmed: bool) -> None:
+        """Write result to file for the parent process to read."""
+        if not self._result_file:
+            return
+        dont_ask = self.query_one("#confirm-dont-ask", Switch).value
+        result = json.dumps({"confirmed": confirmed, "dont_ask": dont_ask})
+        with open(self._result_file, "w", encoding="utf-8") as f:
+            f.write(result)
+
+
+def confirm_dialog_main(
+    title: str,
+    body: str,
+    warning: str = "",
+    result_file: str = "",
+) -> None:
+    """Launch standalone confirm dialog TUI."""
+    _restore_blocking_fds()
+    _enable_faulthandler()
+    _patch_writer_thread_queue()
+    screen = _ConfirmDialogScreen(
+        title=title, body=body, warning=warning, result_file=result_file,
+    )
+    app = _EditorApp(screen)
     app.run()
 
 

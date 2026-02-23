@@ -175,6 +175,44 @@ class RoomGraph:
         matches.sort(key=lambda r: r.last_visited)
         return matches[:limit]
 
+    def find_branches(
+        self, src: str, limit: int = 99
+    ) -> list[tuple[str, str, str]]:
+        """
+        Find exits from known rooms leading to unvisited or unknown rooms.
+
+        Uses BFS from *src* to discover frontier exits -- exits that point to
+        rooms with ``visit_count == 0`` or rooms not yet in the graph.
+
+        :param src: Source room number to search from.
+        :param limit: Maximum number of branches to return.
+        :returns: ``[(gateway_room_num, direction, target_num), ...]`` sorted
+            by BFS distance from *src*.
+        """
+        if src not in self.rooms:
+            return []
+
+        # BFS to find all reachable rooms in distance order.
+        visited: set[str] = {src}
+        queue: deque[tuple[str, int]] = deque([(src, 0)])
+        branches: list[tuple[int, str, str, str]] = []
+
+        while queue:
+            current, dist = queue.popleft()
+            room = self.rooms.get(current)
+            if room is None:
+                continue
+            for direction, target in room.exits.items():
+                target_room = self.rooms.get(target)
+                if target_room is None or target_room.visit_count == 0:
+                    branches.append((dist, current, direction, target))
+                elif target not in visited:
+                    visited.add(target)
+                    queue.append((target, dist + 1))
+
+        branches.sort(key=lambda b: b[0])
+        return [(gw, d, t) for _, gw, d, t in branches[:limit]]
+
     def search(self, query: str) -> list[Room]:
         """
         Case-insensitive substring search on room name and area.
@@ -236,6 +274,40 @@ def current_room_path(session_key: str) -> str:
 def fasttravel_path(session_key: str) -> str:
     """Return path to fast travel command file for *session_key*."""
     return _session_file_path(".fasttravel-", session_key)
+
+
+def prefs_path(session_key: str) -> str:
+    """Return path to preferences JSON for *session_key* (``host:port``)."""
+    return _session_file_path("prefs-", session_key, ".json")
+
+
+def load_prefs(session_key: str) -> dict[str, bool]:
+    """
+    Load per-session preferences from disk.
+
+    :param session_key: Session identifier (``host:port``).
+    :returns: Dict of preference flags (missing keys default to ``False``).
+    """
+    path = prefs_path(session_key)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return {str(k): bool(v) for k, v in data.items()}
+    except (OSError, ValueError):
+        pass
+    return {}
+
+
+def save_prefs(session_key: str, prefs: dict[str, bool]) -> None:
+    """
+    Atomically save per-session preferences to disk.
+
+    :param session_key: Session identifier (``host:port``).
+    :param prefs: Dict of preference flags.
+    """
+    path = prefs_path(session_key)
+    _atomic_write(path, json.dumps(prefs, separators=(",", ":")))
 
 
 def load_rooms(path: str) -> RoomGraph:

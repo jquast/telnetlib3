@@ -1543,6 +1543,60 @@ async def test_condition_failed_clears_on_read():
 
 
 @pytest.mark.asyncio
+async def test_condition_blocked_preserves_buffer_for_retry():
+    """Buffer is retained when condition fails so rule can fire after HP heals."""
+    writer, written = _mock_writer_with_vitals(30, 100, 50, 100)
+    rules = [AutoreplyRule(
+        pattern=re.compile(r"bear"), reply="kill bear;", when={"HP%": ">50"},
+    )]
+    engine = AutoreplyEngine(rules, writer, writer.log)
+    engine.on_prompt()
+
+    engine.feed("A bear appears.\n")
+    engine.on_prompt()
+    await asyncio.sleep(0.1)
+    assert not any("kill bear" in w for w in written)
+    assert engine.buffer.lines, "buffer should be retained after condition fail"
+
+    writer._gmcp_data["Char.Vitals"]["hp"] = "80"
+    engine.on_prompt()
+    await asyncio.sleep(0.1)
+    assert any("kill bear" in w for w in written)
+
+
+@pytest.mark.asyncio
+async def test_condition_blocked_clears_buffer_on_repeated_failure():
+    """Buffer is cleared when the same condition fails twice to prevent loops."""
+    writer, written = _mock_writer_with_vitals(30, 100, 50, 100)
+    rules = [
+        AutoreplyRule(
+            pattern=re.compile(r"bear"),
+            reply="kill bear;",
+            when={"HP%": ">50"},
+        ),
+        AutoreplyRule(pattern=re.compile(r"corpse"), reply="loot corpse;"),
+    ]
+    engine = AutoreplyEngine(rules, writer, writer.log)
+    engine.on_prompt()
+
+    engine.feed("A bear appears.\ncorpse of rat\n")
+    engine.on_prompt()
+    await asyncio.sleep(0.1)
+    assert not any("kill bear" in w for w in written)
+    loot_count_1 = sum(1 for w in written if "loot corpse" in w)
+    assert loot_count_1 == 1
+
+    engine.feed("more server text\n")
+    engine.on_prompt()
+    await asyncio.sleep(0.1)
+    loot_count_2 = sum(1 for w in written if "loot corpse" in w)
+    assert loot_count_2 == 1, (
+        f"loot corpse fired {loot_count_2} times, expected 1 "
+        "(buffer should be cleared after repeated condition failure)"
+    )
+
+
+@pytest.mark.asyncio
 async def test_immediate_rule_fires_in_prompt_based_mode():
     writer, written = _mock_writer()
     rules = [

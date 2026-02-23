@@ -416,7 +416,7 @@ def _build_telnet_rows(  # pylint: disable=unused-argument
 
 def _make_terminal(**kwargs: Any) -> Any:
     """Create a blessed Terminal, falling back to ``ansi`` on setupterm failure."""
-    from blessed import Terminal  # pylint: disable=import-outside-toplevel,import-error
+    from blessed import Terminal  # pylint: disable=import-outside-toplevel
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -879,7 +879,7 @@ def _strip_empty_features(d: Dict[str, Any]) -> None:
 
 def _normalize_color_hex(hex_color: str) -> str:
     """Normalize X11 color hex to standard 6-digit format."""
-    from blessed.colorspace import (  # pylint: disable=import-outside-toplevel,import-error
+    from blessed.colorspace import (  # pylint: disable=import-outside-toplevel
         hex_to_rgb,
         rgb_to_hex,
     )

@@ -189,6 +189,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         if future.cancelled() or future.exception() is not None:
             return
         if self.shell is not None:
+            assert self.reader is not None and self.writer is not None
             coro = self.shell(self.reader, self.writer)
             if asyncio.iscoroutine(coro):
                 # When a shell is defined as a coroutine, we must ensure
@@ -273,11 +274,13 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     @property
     def duration(self) -> float:
         """Time elapsed since client connected, in seconds as float."""
+        assert self._when_connected is not None
         return (datetime.datetime.now() - self._when_connected).total_seconds()
 
     @property
     def idle(self) -> float:
         """Time elapsed since data last received, in seconds as float."""
+        assert self._last_received is not None
         return (datetime.datetime.now() - self._last_received).total_seconds()
 
     # public protocol methods

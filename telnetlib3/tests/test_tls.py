@@ -59,7 +59,7 @@ def _echo_shell(send, reply):
     return shell, waiter
 
 
-_FAST_CLIENT = dict(encoding="ascii", connect_maxwait=0.5)
+_FAST_CLIENT = {"encoding": "ascii", "connect_maxwait": 0.5}
 
 
 async def _ping_pong(bind_host, port, server_kw, client_kw):
@@ -156,7 +156,7 @@ async def test_tls_auto_both_clients(bind_host, unused_tcp_port, server_ssl_ctx,
 @pytest.mark.parametrize(
     "client_ssl",
     [
-        pytest.param(lambda: ssl.create_default_context(), id="untrusted-ctx"),
+        pytest.param(ssl.create_default_context, id="untrusted-ctx"),
         pytest.param(lambda: True, id="ssl-true"),
     ],
 )
@@ -191,7 +191,7 @@ async def test_plain_client_rejected_by_tls_server(bind_host, unused_tcp_port, s
             await writer.drain()
             data = await asyncio.wait_for(reader.read(1024), 2.0)
             assert data == b""
-        except (ConnectionResetError, OSError):
+        except OSError:
             pass
         finally:
             writer.close()
@@ -445,7 +445,7 @@ def _run_in_pty(child_func, timeout: float = _MAX_SUBPROC_SECONDS) -> str:
             child_func()
         except SystemExit:
             pass
-        except BaseException:
+        except BaseException:  # pylint: disable=broad-exception-caught
             import traceback  # pylint: disable=import-outside-toplevel
 
             traceback.print_exc()
@@ -606,7 +606,7 @@ def test_cli_run_server_ssl(bind_host, unused_tcp_port, ca, tmp_path, client_ssl
             main()
         except SystemExit:
             pass
-        except BaseException:
+        except BaseException:  # pylint: disable=broad-exception-caught
             import traceback  # pylint: disable=import-outside-toplevel
 
             traceback.print_exc()

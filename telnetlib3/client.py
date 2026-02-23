@@ -137,7 +137,7 @@ class TelnetClient(client_base.BaseClient):
         writer = self.writer
 
         def enhanced_handle_will(opt: bytes) -> None:
-            result = original_handle_will(opt)
+            original_handle_will(opt)
 
             # If this was a WILL CHARSET from the server, and we also have WILL CHARSET enabled,
             # log that both sides support CHARSET. The server should initiate the actual REQUEST.
@@ -148,8 +148,6 @@ class TelnetClient(client_base.BaseClient):
             ):
                 self.log.debug("Both sides support CHARSET, ready for server to initiate REQUEST")
 
-            return result
-
         self.writer.handle_will = enhanced_handle_will  # type: ignore[method-assign]
 
         self._setup_gmcp()
@@ -159,15 +157,15 @@ class TelnetClient(client_base.BaseClient):
         from telnetlib3.telopt import GMCP  # pylint: disable=import-outside-toplevel
 
         self.writer.set_ext_callback(GMCP, self._on_gmcp)
-        self.writer._gmcp_data = self._gmcp_data  # type: ignore[attr-defined]
+        # pylint: disable-next=protected-access
+        self.writer._gmcp_data = self._gmcp_data
 
         original_handle_will_gmcp = self.writer.handle_will
 
         def _detect_gmcp_will(opt: bytes) -> None:
-            result = original_handle_will_gmcp(opt)
+            original_handle_will_gmcp(opt)
             if opt == GMCP and self.writer.remote_option.enabled(GMCP):
                 self._send_gmcp_hello()
-            return result
 
         self.writer.handle_will = _detect_gmcp_will  # type: ignore[method-assign]
 
@@ -203,6 +201,7 @@ class TelnetClient(client_base.BaseClient):
         from .rooms import save_rooms, write_current_room  # pylint: disable=import-outside-toplevel
 
         room_graph.update_room(data)
+        # pylint: disable-next=protected-access
         self.writer._current_room_num = str(data["num"])
         room_changed = getattr(self.writer, "_room_changed", None)
         if room_changed is not None:
@@ -320,7 +319,7 @@ class TelnetClient(client_base.BaseClient):
         """
         # Get client's desired encoding canonical name
         desired_name = None
-        if self.default_encoding:
+        if self.default_encoding and isinstance(self.default_encoding, str):
             try:
                 desired_name = codecs.lookup(self.default_encoding).name
             except LookupError:
@@ -614,6 +613,7 @@ async def open_connection(
 
     await protocol._waiter_connected  # pylint: disable=protected-access
 
+    assert protocol.reader is not None and protocol.writer is not None
     return protocol.reader, protocol.writer
 
 
@@ -792,9 +792,11 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             _macro_defs = []
 
     # Room graph for GMCP Room.Info automapper
+    # pylint: disable=import-outside-toplevel
     from .rooms import RoomGraph, load_rooms
-    from .rooms import rooms_path as _rooms_path_fn  # pylint: disable=import-outside-toplevel
+    from .rooms import rooms_path as _rooms_path_fn
     from .rooms import current_room_path as _current_room_path_fn
+    # pylint: enable=import-outside-toplevel
 
     _rooms_path = _rooms_path_fn(_session_key)
     _current_room_file = _current_room_path_fn(_session_key)
@@ -812,20 +814,20 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
     ) -> None:
         # pylint: disable=protected-access
         # MUD-extension attributes set dynamically on writer
-        writer_arg._session_key = _session_key  # type: ignore[union-attr]
-        writer_arg._autoreply_rules = _autoreply_rules  # type: ignore[union-attr]
-        writer_arg._autoreplies_file = _ar_path  # type: ignore[union-attr]
-        writer_arg._macro_defs = _macro_defs  # type: ignore[union-attr]
-        writer_arg._macros_file = _macro_path  # type: ignore[union-attr]
-        writer_arg._room_graph = _room_graph  # type: ignore[union-attr]
-        writer_arg._rooms_file = _rooms_path  # type: ignore[union-attr]
-        writer_arg._current_room_file = _current_room_file  # type: ignore[union-attr]
-        writer_arg._current_room_num = ""  # type: ignore[union-attr]
-        writer_arg._room_changed = asyncio.Event()  # type: ignore[union-attr]
-        writer_arg._wander_active = False  # type: ignore[union-attr]
-        writer_arg._wander_current = 0  # type: ignore[union-attr]
-        writer_arg._wander_total = 0  # type: ignore[union-attr]
-        writer_arg._wander_task = None  # type: ignore[union-attr]
+        writer_arg._session_key = _session_key
+        writer_arg._autoreply_rules = _autoreply_rules
+        writer_arg._autoreplies_file = _ar_path
+        writer_arg._macro_defs = _macro_defs
+        writer_arg._macros_file = _macro_path
+        writer_arg._room_graph = _room_graph
+        writer_arg._rooms_file = _rooms_path
+        writer_arg._current_room_file = _current_room_file
+        writer_arg._current_room_num = ""
+        writer_arg._room_changed = asyncio.Event()
+        writer_arg._wander_active = False
+        writer_arg._wander_current = 0
+        writer_arg._wander_total = 0
+        writer_arg._wander_task = None
         await _inner_session(reader, writer_arg)
 
     shell_callback = _session_shell

@@ -709,7 +709,7 @@ class TelnetWriter:
 
         elif self.cmd_received:
             # parse 3rd and final byte of IAC DO, DONT, WILL, WONT.
-            cmd, opt = self.cmd_received, byte
+            cmd, opt = self.cmd_received, byte  # type: ignore[assignment]
             self.log.debug("recv IAC %s %s", name_command(cmd), name_option(opt))
             try:
                 if cmd == DO:
@@ -748,7 +748,8 @@ class TelnetWriter:
             finally:
                 # toggle iac_received on any ValueErrors/AssertionErrors raised
                 self.iac_received = False
-                self.cmd_received = (opt, byte)  # pylint: disable=redefined-variable-type
+                # pylint: disable-next=redefined-variable-type
+                self.cmd_received = (opt, byte)
 
         elif self.mode == "remote" or self.mode == "kludge" and self.slc_simulated:
             # 'byte' is tested for SLC characters
@@ -760,7 +761,7 @@ class TelnetWriter:
                 self.log.debug(
                     "slc.snoop(%r): %s, callback is %s.",
                     byte,
-                    slc.name_slc_command(slc_name),
+                    slc.name_slc_command(slc_name),  # type: ignore[arg-type]
                     callback.__name__,
                 )
                 callback(slc_name)

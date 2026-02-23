@@ -299,7 +299,7 @@ async def test_run_server_guarded_shell_wrapping():
     created_server = MagicMock()
     created_server.wait_closed = MagicMock(side_effect=asyncio.CancelledError)
 
-    async def mock_create_server(**kwargs):
+    async def mock_create_server(*args, **kwargs):
         created_server.shell = kwargs.get("shell")
         return created_server
 

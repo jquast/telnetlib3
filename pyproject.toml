@@ -54,6 +54,7 @@ docs = [
     "sphinx-autodoc-typehints",
 ]
 with_tui = [
+    "blessed>=1.20",
     "ucs-detect>=2",
     "prettytable",
     "prompt_toolkit>=3",
@@ -117,6 +118,8 @@ disable = [
     # my deepest apologies to downstream developers who are also type-lovers, our 'writer' can be
     # *either*  TelnetWriter or TelnetUnicodeWriter, depending on the arguments passed, designed
     # several years before python first provided Typing, the API can't be changed this late!
+    # cyclic-import is a graph-level diagnostic that cannot be suppressed inline
+    "cyclic-import",
 ]
 
 [tool.pylint.format]
@@ -149,6 +152,7 @@ python_version = "3.9"
 strict = true
 disallow_subclassing_any = false
 ignore_missing_imports = true
+disable_error_code = ["union-attr"]
 
 [[tool.mypy.overrides]]
 module = ["telnetlib3.tests.*"]

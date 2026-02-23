@@ -161,7 +161,7 @@ async def test_guarded_shell_pattern_busy_shell():
     assert counter.count == 0
 
 
-async def test_guarded_shell_pattern_robot_check():  # pylint: disable=too-complex
+async def test_guarded_shell_pattern_robot_check():
     counter = ConnectionCounter(5)
     shell_calls = []
     robot_shell_calls = []
@@ -240,7 +240,7 @@ async def test_guarded_shell_pattern_robot_check():  # pylint: disable=too-compl
     assert counter.count == 0
 
 
-async def test_full_guarded_shell_flow():  # pylint: disable=too-complex
+async def test_full_guarded_shell_flow():
     counter = ConnectionCounter(2)
     shell_calls = []
     busy_calls = []

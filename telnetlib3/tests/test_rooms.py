@@ -15,6 +15,9 @@ from telnetlib3.rooms import (
     Room,
     RoomGraph,
     load_rooms,
+    load_prefs,
+    save_prefs,
+    prefs_path,
     rooms_path,
     save_rooms,
     fasttravel_path,
@@ -388,3 +391,101 @@ class TestFasttravelFile:
     def test_read_missing_file(self, tmp_path: Any) -> None:
         path = str(tmp_path / "nonexistent")
         assert read_fasttravel(path) == ([], False)
+
+
+class TestFindBranches:
+
+    @staticmethod
+    def _build_graph() -> RoomGraph:
+        g = RoomGraph()
+        g.update_room({"num": "A", "exits": {"east": "B", "north": "X"}})
+        g.update_room({"num": "B", "exits": {"east": "C", "west": "A"}})
+        g.update_room({"num": "C", "exits": {"west": "B"}})
+        return g
+
+    def test_finds_frontier_exit(self) -> None:
+        g = self._build_graph()
+        branches = g.find_branches("A")
+        dirs = [(gw, d) for gw, d, _ in branches]
+        assert ("A", "north") in dirs
+
+    def test_unknown_target_is_frontier(self) -> None:
+        g = RoomGraph()
+        g.update_room({"num": "A", "exits": {"east": "B"}})
+        branches = g.find_branches("A")
+        assert len(branches) == 1
+        assert branches[0] == ("A", "east", "B")
+
+    def test_unvisited_target_is_frontier(self) -> None:
+        g = RoomGraph()
+        g.update_room({"num": "A", "exits": {"east": "B"}})
+        g.rooms["B"] = Room(num="B", name="Empty", visit_count=0)
+        branches = g.find_branches("A")
+        assert len(branches) == 1
+        assert branches[0][2] == "B"
+
+    def test_visited_target_not_frontier(self) -> None:
+        g = RoomGraph()
+        g.update_room({"num": "A", "exits": {"east": "B"}})
+        g.update_room({"num": "B", "exits": {"west": "A"}})
+        branches = g.find_branches("A")
+        assert len(branches) == 0
+
+    def test_sorted_by_distance(self) -> None:
+        g = RoomGraph()
+        g.update_room({"num": "A", "exits": {"east": "B"}})
+        g.update_room({"num": "B", "exits": {"east": "C", "north": "Y"}})
+        g.update_room({"num": "C", "exits": {"north": "Z"}})
+        branches = g.find_branches("A")
+        gateways = [gw for gw, _, _ in branches]
+        assert gateways.index("B") < gateways.index("C")
+
+    def test_empty_graph(self) -> None:
+        g = RoomGraph()
+        assert g.find_branches("A") == []
+
+    def test_unknown_src(self) -> None:
+        g = RoomGraph()
+        g.update_room({"num": "A", "exits": {"east": "B"}})
+        assert g.find_branches("Z") == []
+
+    def test_limit(self) -> None:
+        g = RoomGraph()
+        g.update_room({"num": "A", "exits": {"n": "X1", "s": "X2", "e": "X3"}})
+        branches = g.find_branches("A", limit=2)
+        assert len(branches) == 2
+
+    def test_no_duplicates(self) -> None:
+        g = RoomGraph()
+        g.update_room({"num": "A", "exits": {"east": "B"}})
+        g.update_room({"num": "B", "exits": {"east": "C", "west": "A"}})
+        branches = g.find_branches("A")
+        pairs = [(gw, d) for gw, d, _ in branches]
+        assert len(pairs) == len(set(pairs))
+
+
+class TestPrefs:
+
+    def test_prefs_path_format(self) -> None:
+        p = prefs_path("example.com:4000")
+        assert p.endswith("prefs-example.com_4000.json")
+        assert "telnetlib3" in p
+
+    def test_save_load_roundtrip(self, tmp_path: Any, monkeypatch: Any) -> None:
+        monkeypatch.setattr("telnetlib3.rooms._xdg_data_dir", lambda: str(tmp_path))
+        prefs = {"skip_autowander_confirm": True, "skip_autodiscover_confirm": False}
+        save_prefs("host:1234", prefs)
+        loaded = load_prefs("host:1234")
+        assert loaded["skip_autowander_confirm"] is True
+        assert loaded["skip_autodiscover_confirm"] is False
+
+    def test_load_missing_file(self) -> None:
+        result = load_prefs("nonexistent:9999")
+        assert result == {}
+
+    def test_save_overwrites(self, tmp_path: Any, monkeypatch: Any) -> None:
+        monkeypatch.setattr("telnetlib3.rooms._xdg_data_dir", lambda: str(tmp_path))
+        save_prefs("h:1", {"skip_autowander_confirm": False})
+        save_prefs("h:1", {"skip_autowander_confirm": True})
+        loaded = load_prefs("h:1")
+        assert loaded["skip_autowander_confirm"] is True

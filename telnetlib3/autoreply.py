@@ -404,6 +404,11 @@ class SearchBuffer:
         self._last_match_line = 0
         self._last_match_col = 0
 
+    def reset_match_position(self) -> None:
+        """Reset match position to start so retained text is re-searchable."""
+        self._last_match_line = 0
+        self._last_match_col = 0
+
     def _cull(self) -> None:
         """Remove oldest lines beyond *max_lines*, adjusting match position."""
         if len(self._lines) <= self._max_lines:
@@ -456,7 +461,10 @@ class AutoreplyEngine:
         self._sent_commands: set[str] = set()
         self._prompt_based = False
         self._cycle_matched: set[int] = set()
+        self._condition_blocked: set[int] = set()
+        self._condition_retried: bool = False
         self._suppress_exclusive = False
+        self._enabled = True
         self._last_matched_pattern: str = ""
         self._condition_failed: Optional[tuple[int, str]] = None
         self._exclusive_prompt_count: int = 0
@@ -497,6 +505,15 @@ class AutoreplyEngine:
         self._suppress_exclusive = value
 
     @property
+    def enabled(self) -> bool:
+        """When ``False``, all rule matching is suspended."""
+        return self._enabled
+
+    @enabled.setter
+    def enabled(self, value: bool) -> None:
+        self._enabled = value
+
+    @property
     def reply_pending(self) -> bool:
         """``True`` when a reply chain is still executing."""
         return self._reply_chain is not None and not self._reply_chain.done()
@@ -520,6 +537,8 @@ class AutoreplyEngine:
 
         :param text: Server output text.
         """
+        if not self._enabled:
+            return
         self._buffer.add_text(text, self._sent_commands)
 
         if self._exclusive_active:
@@ -579,6 +598,7 @@ class AutoreplyEngine:
         if not searchable:
             return
 
+        # pylint: disable=too-many-nested-blocks
         # Search for all matching rules. We re-fetch searchable text
         # after each match since advance_match changes the window.
         # Cap iterations to len(rules) * 2 as a safety valve -- one
@@ -596,12 +616,16 @@ class AutoreplyEngine:
                     continue
                 if self._prompt_based and rule_idx in self._cycle_matched:
                     continue
+                if rule_idx in self._condition_blocked:
+                    continue
                 match = rule.pattern.search(searchable)
                 if match:
                     self._last_matched_pattern = rule.pattern.pattern
-                    self._cycle_matched.add(rule_idx)
-                    self._buffer.advance_match(match.start(), len(match.group(0)))
                     if rule.exclusive and self._suppress_exclusive:
+                        self._cycle_matched.add(rule_idx)
+                        self._buffer.advance_match(
+                            match.start(), len(match.group(0))
+                        )
                         found = True
                         break
                     if rule.when:
@@ -613,8 +637,13 @@ class AutoreplyEngine:
                                 desc,
                             )
                             self._condition_failed = (rule_idx + 1, desc)
+                            self._condition_blocked.add(rule_idx)
                             found = True
                             break
+                    self._cycle_matched.add(rule_idx)
+                    self._buffer.advance_match(
+                        match.start(), len(match.group(0))
+                    )
                     reply = _substitute_groups(rule.reply, match)
                     if not reply.rstrip().endswith(";"):
                         reply = reply.rstrip() + ";"
@@ -674,22 +703,28 @@ class AutoreplyEngine:
                     continue
                 if rule_idx in self._cycle_matched:
                     continue
+                if rule_idx in self._condition_blocked:
+                    continue
                 match = rule.pattern.search(searchable)
                 if match:
                     self._last_matched_pattern = rule.pattern.pattern
-                    self._cycle_matched.add(rule_idx)
-                    self._buffer.advance_match(match.start(), len(match.group(0)))
                     if rule.when:
                         ok, desc = check_condition(rule.when, self._writer)
                         if not ok:
                             self._log.info(
-                                "autoreply: immediate rule #%d skipped, condition failed: %s",
+                                "autoreply: immediate rule #%d skipped,"
+                                " condition failed: %s",
                                 rule_idx + 1,
                                 desc,
                             )
                             self._condition_failed = (rule_idx + 1, desc)
+                            self._condition_blocked.add(rule_idx)
                             found = True
                             break
+                    self._cycle_matched.add(rule_idx)
+                    self._buffer.advance_match(
+                        match.start(), len(match.group(0))
+                    )
                     reply = _substitute_groups(rule.reply, match)
                     if not reply.rstrip().endswith(";"):
                         reply = reply.rstrip() + ";"
@@ -803,12 +838,31 @@ class AutoreplyEngine:
         rules can match again in the next prompt cycle.
         """
         self._prompt_based = True
+        if not self._enabled:
+            return
         # Match on accumulated buffer before clearing -- this is where
         # deferred matches from feed() actually fire.
         if not self._exclusive_active:
             self._match_rules()
-        self._cycle_matched.clear()
-        self._buffer.clear()
+        # When rules matched text but their ``when`` condition failed
+        # (e.g. HP too low), preserve the buffer so the text can be
+        # retried on the next prompt cycle when conditions may have
+        # changed (e.g. HP healed).  Only the condition-blocked rules
+        # are re-eligible; rules that already fired keep their
+        # _cycle_matched entry so they don't re-trigger on retained
+        # text.  After one retry, clear normally to prevent loops.
+        if self._condition_blocked and not self._condition_retried:
+            self._condition_retried = True
+            # Keep _cycle_matched for rules that fired; only remove
+            # the blocked rules so they can retry.
+            self._cycle_matched -= self._condition_blocked
+            self._condition_blocked.clear()
+            self._buffer.reset_match_position()
+        else:
+            self._condition_blocked.clear()
+            self._condition_retried = False
+            self._cycle_matched.clear()
+            self._buffer.clear()
         if self._skip_next_prompt:
             self._skip_next_prompt = False
             return
@@ -863,4 +917,6 @@ class AutoreplyEngine:
         self._post_command = ""
         self._exclusive_deadline = 0.0
         self._exclusive_prompt_count = 0
+        self._condition_blocked.clear()
+        self._condition_retried = False
         self._sent_commands.clear()

@@ -697,4 +697,4 @@ async def test_telnet_server_shell_tls_banner():
 async def test_filter_ansi_esc_then_eof():
     reader = MockReader(["\x1b", ""])
     result = await ss.filter_ansi(reader, MockWriter())
-    assert result == ""
+    assert not result
