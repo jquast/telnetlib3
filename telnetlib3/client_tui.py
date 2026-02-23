@@ -1220,7 +1220,7 @@ class MacroEditScreen(Screen["bool | None"]):
     CSS = """
     MacroEditScreen { align: center middle; }
     #macro-panel {
-        width: 91; height: 100%; max-height: 22;
+        width: 91; height: 100%; max-height: 24;
         border: round $surface-lighten-2; background: $surface; padding: 1 1;
     }
     #macro-body { height: 1fr; }
@@ -1230,31 +1230,55 @@ class MacroEditScreen(Screen["bool | None"]):
     #macro-button-col Button {
         width: 100%; min-width: 0; margin-bottom: 0;
     }
+    .insert-btn { width: auto; min-width: 0; margin-left: 1; }
     #macro-copy { background: #6670a0; color: #e8ecf8; }
     #macro-copy:hover { background: #8088b8; }
     #macro-right { width: 1fr; height: 100%; }
     #macro-table { height: 1fr; min-height: 4; overflow-x: hidden; }
     #macro-form { height: 1fr; padding: 0; }
     #macro-form .field-row { height: 3; margin: 0; }
+    #macro-text-row { margin: 1 0; }
     #macro-form .switch-row { height: 3; margin: 0; }
     #macro-form Input { width: 1fr; border: tall grey; }
     #macro-form Input:focus { border: tall $accent; }
     #macro-form-buttons { height: 3; align-horizontal: right; }
     #macro-form-buttons Button { width: auto; min-width: 10; margin-left: 1; }
+    #macro-key-label {
+        width: 16; height: 1; padding: 0 1;
+        margin: 1 0 0 1;
+        background: $surface-darken-1; color: $text;
+    }
+    #macro-key-label.capturing {
+        color: $warning;
+    }
+    #macro-capture { width: auto; min-width: 13; margin-left: 1; }
+    #macro-capture-status { width: 1fr; height: 1; color: $error; padding: 0 1; }
     .form-label { width: 8; padding-top: 1; }
-    .form-label-short { width: 5; padding-top: 1; }
+    .form-label-short { width: 9; padding-top: 1; }
     .form-label-mid { width: 5; padding-top: 1; }
+    #macro-form .form-gap { width: 10; }
     .form-gap { width: 2; }
     .form-btn-spacer { width: 1; }
     """
 
-    def __init__(self, path: str, session_key: str = "") -> None:
+    def __init__(
+        self,
+        path: str,
+        session_key: str = "",
+        rooms_file: str = "",
+        current_room_file: str = "",
+    ) -> None:
         """Initialize macro editor with file path and session key."""
         super().__init__()
         self._path = path
         self._session_key = session_key
+        self._rooms_file = rooms_file
+        self._current_room_file = current_room_file
         self._macros: list[tuple[str, str, bool]] = []
         self._editing_idx: int | None = None
+        self._capturing: bool = False
+        self._capture_escape_pending: bool = False
+        self._captured_key: str = ""
 
     @property
     def _form_visible(self) -> bool:
@@ -1282,10 +1306,26 @@ class MacroEditScreen(Screen["bool | None"]):
                             yield Switch(value=True, id="macro-enabled")
                             yield Label("", classes="form-gap")
                             yield Label("Key", classes="form-label-mid")
-                            yield Input(placeholder="e.g. f5 or escape n", id="macro-key")
-                        with Horizontal(classes="field-row"):
+                            yield Button("Capture", id="macro-capture")
+                            yield Static("(none)", id="macro-key-label")
+                            yield Static("", id="macro-capture-status")
+                        with Horizontal(id="macro-text-row", classes="field-row"):
                             yield Label("Text", classes="form-label")
-                            yield Input(placeholder="text with <CR> markers", id="macro-text")
+                            yield Input(placeholder="text with ; separators", id="macro-text")
+                        with Horizontal(classes="field-row"):
+                            yield Button("Fast Travel", id="macro-fast-travel",
+                                         classes="insert-btn")
+                            yield Button("Slow Travel", id="macro-slow-travel",
+                                         classes="insert-btn")
+                            yield Button("Return Fast", id="macro-return-fast",
+                                         classes="insert-btn")
+                            yield Button("Return Slow", id="macro-return-slow",
+                                         classes="insert-btn")
+                        with Horizontal(classes="field-row"):
+                            yield Button("Autowander", id="macro-autowander",
+                                         classes="insert-btn")
+                            yield Button("Delay", id="macro-delay",
+                                         classes="insert-btn")
                         with Horizontal(id="macro-form-buttons"):
                             yield Label(" ", classes="form-btn-spacer")
                             yield Button("Cancel", variant="default", id="macro-cancel-form")
@@ -1320,7 +1360,13 @@ class MacroEditScreen(Screen["bool | None"]):
             table.add_row(key, text + status, key=str(i))
 
     def _show_form(self, key_val: str = "", text_val: str = "", enabled: bool = True) -> None:
-        self.query_one("#macro-key", Input).value = key_val
+        self._captured_key = key_val
+        self._capturing = False
+        self._capture_escape_pending = False
+        label = self.query_one("#macro-key-label", Static)
+        label.update(key_val if key_val else "(none)")
+        label.remove_class("capturing")
+        self.query_one("#macro-capture-status", Static).update("")
         self.query_one("#macro-text", Input).value = text_val
         self.query_one("#macro-enabled", Switch).value = enabled
         self.query_one("#macro-table").display = False
@@ -1328,9 +1374,11 @@ class MacroEditScreen(Screen["bool | None"]):
         self.query_one("#macro-add", Button).disabled = True
         self.query_one("#macro-edit", Button).disabled = True
         self.query_one("#macro-copy", Button).disabled = True
-        self.query_one("#macro-key", Input).focus()
+        self.query_one("#macro-text", Input).focus()
 
     def _hide_form(self) -> None:
+        self._capturing = False
+        self._capture_escape_pending = False
         self.query_one("#macro-form").display = False
         self.query_one("#macro-table").display = True
         self._editing_idx = None
@@ -1341,15 +1389,19 @@ class MacroEditScreen(Screen["bool | None"]):
 
     def _submit_form(self) -> None:
         """Accept the current inline form values."""
-        key_val = self.query_one("#macro-key", Input).value.strip()
+        key_val = self._captured_key.strip()
         text_val = self.query_one("#macro-text", Input).value
         enabled = self.query_one("#macro-enabled", Switch).value
         if key_val:
             if self._editing_idx is not None:
+                target_row = self._editing_idx
                 self._macros[self._editing_idx] = (key_val, text_val, enabled)
             else:
+                target_row = len(self._macros)
                 self._macros.append((key_val, text_val, enabled))
             self._refresh_table()
+            table = self.query_one("#macro-table", DataTable)
+            table.move_cursor(row=target_row)
         self._hide_form()
 
     def _selected_idx(self) -> int | None:
@@ -1385,8 +1437,96 @@ class MacroEditScreen(Screen["bool | None"]):
             k, t, ena = self._macros[idx]
             self._show_form(k, t, ena)
 
+    _REJECTED_KEYS: ClassVar[frozenset[str]] = frozenset({
+        "up", "down", "left", "right", "home", "end",
+        "pageup", "pagedown", "tab", "enter",
+        "insert", "delete", "backspace",
+    })
+
+    @staticmethod
+    def _textual_to_pt(key: str) -> str:
+        """Convert a Textual key name to prompt_toolkit format."""
+        if key.startswith("ctrl+"):
+            return "c-" + key[5:]
+        return key
+
+    def _finish_capture(self, pt_key: str, display: str) -> None:
+        """Accept a captured key and update the form."""
+        self._capturing = False
+        self._capture_escape_pending = False
+        self._captured_key = pt_key
+        label = self.query_one("#macro-key-label", Static)
+        label.update(display)
+        label.remove_class("capturing")
+        self.query_one("#macro-capture-status", Static).update("")
+
+    def _reject_capture(self, reason: str) -> None:
+        """Show a rejection message and stay in capture mode."""
+        self.query_one("#macro-capture-status", Static).update(reason)
+
     def on_key(self, event: events.Key) -> None:
         """Arrow/Home/End/+/- keys navigate and reorder the macro table."""
+        if self._capturing:
+            event.stop()
+            event.prevent_default()
+            key = event.key
+
+            if self._capture_escape_pending:
+                self._capture_escape_pending = False
+                if key == "escape":
+                    self._finish_capture("escape", "escape")
+                elif len(key) == 1 and key.isalpha():
+                    pt_key = "escape " + key
+                    self._finish_capture(pt_key, f"Alt+{key}")
+                else:
+                    self._reject_capture(
+                        f"Rejected: escape+{key} — use Esc then a letter"
+                    )
+                return
+
+            if key == "escape":
+                self._capture_escape_pending = True
+                self.query_one("#macro-capture-status", Static).update(
+                    "Esc pressed — now press a letter for Alt combo, "
+                    "or Esc again for plain Escape"
+                )
+                return
+
+            if key.startswith("f") and key[1:].isdigit():
+                self._finish_capture(key, key.upper())
+                return
+
+            if key.startswith("ctrl+"):
+                letter = key[5:]
+                if len(letter) == 1 and letter.isalpha():
+                    pt_key = "c-" + letter
+                    self._finish_capture(pt_key, f"Ctrl+{letter}")
+                    return
+
+            if key.startswith("alt+"):
+                letter = key[4:]
+                if len(letter) == 1 and letter.isalpha():
+                    pt_key = "escape " + letter
+                    self._finish_capture(pt_key, f"Alt+{letter}")
+                    return
+
+            if key in self._REJECTED_KEYS:
+                self._reject_capture(
+                    f"Rejected: {key} — use F-keys, Ctrl+key, or Alt+key"
+                )
+                return
+
+            if len(key) == 1:
+                self._reject_capture(
+                    f"Rejected: '{key}' — use F-keys, Ctrl+key, or Alt+key"
+                )
+                return
+
+            self._reject_capture(
+                f"Rejected: {key} — use F-keys, Ctrl+key, or Alt+key"
+            )
+            return
+
         if event.key in ("home", "end"):
             table = self.query_one("#macro-table", DataTable)
             if self.focused is table and table.row_count > 0:
@@ -1423,6 +1563,8 @@ class MacroEditScreen(Screen["bool | None"]):
 
     def action_cancel_or_close(self) -> None:
         """Escape closes the inline form, or dismisses the screen."""
+        if self._capturing:
+            return
         if self._form_visible:
             self._hide_form()
         else:
@@ -1444,6 +1586,18 @@ class MacroEditScreen(Screen["bool | None"]):
             self._edit_selected()
         elif btn == "macro-copy":
             self._copy_selected()
+        elif btn == "macro-fast-travel":
+            self._pick_room_for_travel(slow=False)
+        elif btn == "macro-slow-travel":
+            self._pick_room_for_travel(slow=True)
+        elif btn == "macro-return-fast":
+            self._insert_command("`return fast`")
+        elif btn == "macro-return-slow":
+            self._insert_command("`return slow`")
+        elif btn == "macro-autowander":
+            self._insert_command("`autowander`")
+        elif btn == "macro-delay":
+            self._insert_command("`delay 1s`")
         elif btn == "macro-delete":
             if self._form_visible:
                 self._hide_form()
@@ -1451,6 +1605,13 @@ class MacroEditScreen(Screen["bool | None"]):
             if idx is not None and idx < len(self._macros):
                 self._macros.pop(idx)
                 self._refresh_table()
+        elif btn == "macro-capture":
+            self._capturing = True
+            self._capture_escape_pending = False
+            label = self.query_one("#macro-key-label", Static)
+            label.update("press keystroke to capture ...")
+            label.add_class("capturing")
+            self.query_one("#macro-capture-status", Static).update("")
         elif btn == "macro-ok":
             self._submit_form()
         elif btn == "macro-cancel-form":
@@ -1462,6 +1623,44 @@ class MacroEditScreen(Screen["bool | None"]):
             self.dismiss(True)
         elif btn == "macro-close":
             self.dismiss(None)
+
+    def _insert_command(self, cmd: str) -> None:
+        """Insert a command at the cursor position, adding ``;`` separators."""
+        if self._form_visible:
+            inp = self.query_one("#macro-text", Input)
+            val = inp.value
+            pos = inp.cursor_position
+            before = val[:pos]
+            after = val[pos:]
+            if before and not before.endswith(";"):
+                cmd = ";" + cmd
+            if after and not after.startswith(";"):
+                cmd = cmd + ";"
+            inp.value = before + cmd + after
+            inp.cursor_position = len(before) + len(cmd)
+        else:
+            self._editing_idx = None
+            self._show_form(text_val=cmd)
+
+    def _pick_room_for_travel(self, slow: bool = False) -> None:
+        """Open room picker and insert a travel command into the text field."""
+        if not self._rooms_file or not os.path.exists(self._rooms_file):
+            return
+
+        def _on_pick(room_id: "str | None") -> None:
+            if room_id is None:
+                return
+            cmd = f"`slow travel {room_id}`" if slow else f"`fast travel {room_id}`"
+            self._insert_command(cmd)
+
+        self.app.push_screen(
+            RoomPickerScreen(
+                rooms_path=self._rooms_file,
+                session_key=self._session_key,
+                current_room_file=self._current_room_file,
+            ),
+            callback=_on_pick,
+        )
 
     def _save_to_file(self) -> None:
         from .macros import Macro, save_macros  # pylint: disable=import-outside-toplevel
@@ -1483,7 +1682,7 @@ class AutoreplyEditScreen(Screen["bool | None"]):
     CSS = """
     AutoreplyEditScreen { align: center middle; }
     #autoreply-panel {
-        width: 91; height: 100%; max-height: 23;
+        width: 91; height: 100%; max-height: 26;
         border: round $surface-lighten-2; background: $surface; padding: 1 1;
     }
     #autoreply-body { height: 1fr; }
@@ -1508,7 +1707,13 @@ class AutoreplyEditScreen(Screen["bool | None"]):
     #autoreply-form .form-label-mid { width: 9; padding-top: 1; }
     #autoreply-form .form-gap { width: 2; }
     #autoreply-form .form-btn-spacer { width: 1; }
-    #autoreply-timeout { width: 8; }
+    #autoreply-timeout { width: 5; }
+    .form-gap-wide { width: 5; }
+    #autoreply-cond-vital { width: 14; }
+    #autoreply-cond-op { width: 8; }
+    #autoreply-cond-val { width: 4; border: tall grey; }
+    #autoreply-cond-val:focus { border: tall $accent; }
+    .form-label-pct { width: 12; padding-top: 1; }
     """
 
     def __init__(self, path: str, session_key: str = "", select_pattern: str = "") -> None:
@@ -1517,7 +1722,7 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         self._path = path
         self._session_key = session_key
         self._select_pattern = select_pattern
-        self._rules: list[tuple[str, str, bool, str, bool, bool, float, str]] = []
+        self._rules: list[tuple[str, str, bool, str, bool, bool, float, str, dict[str, str]]] = []
         self._editing_idx: int | None = None
 
     @property
@@ -1557,7 +1762,7 @@ class AutoreplyEditScreen(Screen["bool | None"]):
                             yield Label("", classes="form-gap")
                             yield Label("Reply", classes="form-label-mid")
                             yield Input(
-                                placeholder=r"reply with \1 refs and <CR>", id="autoreply-reply"
+                                placeholder=r"reply with \1 refs, ; separators", id="autoreply-reply"
                             )
                         with Horizontal(classes="field-row"):
                             alw = Switch(value=False, id="autoreply-always")
@@ -1573,15 +1778,35 @@ class AutoreplyEditScreen(Screen["bool | None"]):
                         with Horizontal(classes="field-row"):
                             yield Label("Timeout", classes="form-label-short")
                             yield Input(
-                                value="30.0", placeholder="seconds",
+                                value="10.0", placeholder="seconds",
                                 id="autoreply-timeout",
                             )
-                            yield Label("", classes="form-gap")
+                            yield Label("", classes="form-gap-wide")
                             yield Label("Post Cmd", classes="form-label-mid")
                             yield Input(
-                                placeholder="optional: look<CR>",
+                                placeholder="optional: glance",
                                 id="autoreply-post-command",
                             )
+                        with Horizontal(classes="field-row"):
+                            yield Label("Condition", classes="form-label-short")
+                            yield Select(
+                                [("(none)", ""), ("HP%", "HP%"), ("MP%", "MP%")],
+                                value="",
+                                allow_blank=False,
+                                id="autoreply-cond-vital",
+                            )
+                            yield Select(
+                                [(">", ">"), ("<", "<"), (">=", ">="),
+                                 ("<=", "<="), ("=", "=")],
+                                value=">",
+                                allow_blank=False,
+                                id="autoreply-cond-op",
+                            )
+                            yield Input(
+                                value="50", placeholder="50",
+                                id="autoreply-cond-val",
+                            )
+                            yield Label("(as percent)", classes="form-label-pct")
                         with Horizontal(id="autoreply-form-buttons"):
                             yield Label(" ", classes="form-btn-spacer")
                             yield Button("Cancel", variant="default", id="autoreply-cancel-form")
@@ -1612,7 +1837,7 @@ class AutoreplyEditScreen(Screen["bool | None"]):
             self._rules = [
                 (r.pattern.pattern, r.reply, r.exclusive, r.until,
                  r.always, r.enabled, r.exclusive_timeout,
-                 r.post_command)
+                 r.post_command, dict(r.when))
                 for r in rules
             ]
         except (ValueError, FileNotFoundError):
@@ -1621,7 +1846,7 @@ class AutoreplyEditScreen(Screen["bool | None"]):
     def _refresh_table(self) -> None:
         table = self.query_one("#autoreply-table", DataTable)
         table.clear()
-        for i, (pattern, reply, exclusive, until, always, enabled, _tout, _pcmd) in enumerate(
+        for i, (pattern, reply, exclusive, until, always, enabled, _tout, _pcmd, when) in enumerate(
             self._rules
         ):
             flags = ""
@@ -1631,7 +1856,11 @@ class AutoreplyEditScreen(Screen["bool | None"]):
                 flags = (flags + " E*") if until else (flags + " E")
             if always:
                 flags = (flags + " A") if flags else "A"
-            table.add_row(str(i + 1), pattern, reply, flags.strip(), key=str(i))
+            if when:
+                flags = (flags + " C") if flags else "C"
+            pat_display = pattern if len(pattern) <= 30 else pattern[:29] + "\u2026"
+            reply_display = reply if len(reply) <= 20 else reply[:19] + "\u2026"
+            table.add_row(str(i + 1), pat_display, reply_display, flags.strip(), key=str(i))
 
     def _show_form(
         self,
@@ -1641,8 +1870,9 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         until: str = "",
         always: bool = False,
         enabled: bool = True,
-        exclusive_timeout: float = 30.0,
+        exclusive_timeout: float = 10.0,
         post_command: str = "",
+        when: dict[str, str] | None = None,
     ) -> None:
         self.query_one("#autoreply-pattern", Input).value = pattern_val
         self.query_one("#autoreply-reply", Input).value = reply_val
@@ -1652,6 +1882,26 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         self.query_one("#autoreply-always", Switch).value = always
         self.query_one("#autoreply-enabled", Switch).value = enabled
         self.query_one("#autoreply-timeout", Input).value = str(exclusive_timeout)
+        if when:
+            vital = next(iter(when), "")
+            expr = when.get(vital, ">50")
+            import re as _re  # pylint: disable=import-outside-toplevel
+            m = _re.match(r"^(>=|<=|>|<|=)(\d+)$", expr)
+            if m:
+                self.query_one("#autoreply-cond-vital", Select).value = vital
+                self.query_one("#autoreply-cond-op", Select).value = m.group(1)
+                self.query_one("#autoreply-cond-val", Input).value = m.group(2)
+            else:
+                self.query_one("#autoreply-cond-vital", Select).value = ""
+                self.query_one("#autoreply-cond-op", Select).value = ">"
+                self.query_one("#autoreply-cond-val", Input).value = "50"
+        else:
+            self.query_one("#autoreply-cond-vital", Select).value = ""
+            self.query_one("#autoreply-cond-op", Select).value = ">"
+            self.query_one("#autoreply-cond-val", Input).value = "50"
+        cond_none = not when
+        self.query_one("#autoreply-cond-op", Select).disabled = cond_none
+        self.query_one("#autoreply-cond-val", Input).disabled = cond_none
         self.query_one("#autoreply-table").display = False
         self.query_one("#autoreply-form").display = True
         self.query_one("#autoreply-add", Button).disabled = True
@@ -1679,10 +1929,20 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         enabled = self.query_one("#autoreply-enabled", Switch).value
         try:
             timeout_val = float(
-                self.query_one("#autoreply-timeout", Input).value.strip() or "30"
+                self.query_one("#autoreply-timeout", Input).value.strip() or "10"
             )
         except ValueError:
-            timeout_val = 30.0
+            timeout_val = 10.0
+        cond_vital = self.query_one("#autoreply-cond-vital", Select).value
+        cond_op = self.query_one("#autoreply-cond-op", Select).value
+        cond_val = self.query_one("#autoreply-cond-val", Input).value.strip()
+        when: dict[str, str] = {}
+        if cond_vital and isinstance(cond_vital, str) and cond_vital in ("HP%", "MP%"):
+            try:
+                int(cond_val or "50")
+            except ValueError:
+                cond_val = "50"
+            when = {cond_vital: f"{cond_op}{cond_val or '50'}"}
         if pattern_val:
             import re  # pylint: disable=import-outside-toplevel
 
@@ -1692,16 +1952,20 @@ class AutoreplyEditScreen(Screen["bool | None"]):
                 self.notify(f"Invalid regex: {exc}", severity="error")
                 return
             if self._editing_idx is not None:
+                target_row = self._editing_idx
                 self._rules[self._editing_idx] = (
                     pattern_val, reply_val, exclusive, until_val, always,
-                    enabled, timeout_val, post_cmd,
+                    enabled, timeout_val, post_cmd, when,
                 )
             else:
+                target_row = len(self._rules)
                 self._rules.append(
                     (pattern_val, reply_val, exclusive, until_val, always,
-                     enabled, timeout_val, post_cmd)
+                     enabled, timeout_val, post_cmd, when)
                 )
             self._refresh_table()
+            table = self.query_one("#autoreply-table", DataTable)
+            table.move_cursor(row=target_row)
         self._hide_form()
 
     def _selected_idx(self) -> int | None:
@@ -1716,8 +1980,8 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         idx = self._selected_idx()
         if idx is not None and idx < len(self._rules):
             self._editing_idx = idx
-            p, r, excl, until, alw, ena, tout, pcmd = self._rules[idx]
-            self._show_form(p, r, excl, until, alw, ena, tout, pcmd)
+            p, r, excl, until, alw, ena, tout, pcmd, when = self._rules[idx]
+            self._show_form(p, r, excl, until, alw, ena, tout, pcmd, when)
 
     def _copy_selected(self) -> None:
         """Duplicate the selected row."""
@@ -1733,8 +1997,8 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         idx = int(str(event.row_key.value))
         if idx < len(self._rules):
             self._editing_idx = idx
-            p, r, excl, until, alw, ena, tout, pcmd = self._rules[idx]
-            self._show_form(p, r, excl, until, alw, ena, tout, pcmd)
+            p, r, excl, until, alw, ena, tout, pcmd, when = self._rules[idx]
+            self._show_form(p, r, excl, until, alw, ena, tout, pcmd, when)
 
     def on_key(self, event: events.Key) -> None:
         """Arrow/Home/End/+/- keys navigate and reorder the autoreply table."""
@@ -1772,6 +2036,13 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         if self._form_visible:
             event.stop()
             self._submit_form()
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        """Disable operator/value fields when condition vital is '(none)'."""
+        if event.select.id == "autoreply-cond-vital":
+            disabled = event.value == "" or event.value is Select.BLANK
+            self.query_one("#autoreply-cond-op", Select).disabled = disabled
+            self.query_one("#autoreply-cond-val", Input).disabled = disabled
 
     def action_cancel_or_close(self) -> None:
         """Escape closes the inline form, or dismisses the screen."""
@@ -1825,7 +2096,7 @@ class AutoreplyEditScreen(Screen["bool | None"]):
 
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
         rules = []
-        for p, r, excl, until, alw, ena, tout, pcmd in self._rules:
+        for p, r, excl, until, alw, ena, tout, pcmd, when in self._rules:
             rules.append(AutoreplyRule(
                 pattern=re.compile(p, re.MULTILINE | re.DOTALL),
                 reply=r,
@@ -1835,6 +2106,7 @@ class AutoreplyEditScreen(Screen["bool | None"]):
                 always=alw,
                 enabled=ena,
                 exclusive_timeout=tout,
+                when=when,
             ))
         save_autoreplies(self._path, rules, self._session_key)
 
@@ -1847,25 +2119,37 @@ class RoomBrowserScreen(Screen["bool | None"]):
         Binding("enter", "fast_travel", "Travel", show=True),
         Binding("asterisk", "toggle_bookmark", "Bookmark", key_display="*", show=True,
                 priority=True),
+        Binding("n", "sort_name", "Name sort", show=True),
+        Binding("i", "sort_id", "ID sort", show=True),
+        Binding("d", "sort_distance", "Dist sort", show=True),
     ]
 
     CSS = """
     RoomBrowserScreen { align: center middle; }
     #room-panel {
-        width: 91; height: 100%; max-height: 22;
+        width: 91; height: 100%; max-height: 26;
         border: round $surface-lighten-2; background: $surface; padding: 1 1;
     }
+    #room-search { height: auto; }
     #room-body { height: 1fr; }
     #room-button-col {
-        width: 13; height: auto; padding-right: 1;
+        width: 22; height: auto; padding-right: 1;
     }
     #room-button-col Button {
         width: 100%; min-width: 0; margin-bottom: 0;
     }
+    #room-area-frame {
+        width: 100%; height: auto; margin-top: 0; margin-bottom: 0;
+        border: round $surface-lighten-2; padding: 0 0;
+    }
+    #room-area-frame Static { height: 1; }
+    #room-area-select { width: 100%; }
     #room-right { width: 1fr; height: 100%; }
-    #room-search { dock: top; margin-bottom: 1; }
     #room-table { height: 1fr; min-height: 4; overflow-x: hidden; }
     #room-status { height: 1; margin-top: 0; }
+    #room-count { width: 1fr; }
+    #room-distance { width: auto; text-align: right; }
+    Footer FooterLabel { margin: 0; }
     """
 
     def __init__(
@@ -1882,13 +2166,15 @@ class RoomBrowserScreen(Screen["bool | None"]):
         self._current_room_file = current_room_file
         self._fasttravel_file = fasttravel_file
         self._all_rooms: list[tuple[str, str, str, int, bool]] = []
+        self._current_area: str = ""
+        self._graph: "RoomGraph | None" = None
+        self._mounted = False
+        self._sort_mode: str = "name"
+        self._distances: dict[str, int] = {}
 
     def compose(self) -> ComposeResult:
         """Build the room browser layout."""
-        title = f"Room Browser \u2014 {self._session_key}" if self._session_key else "Room Browser"
         with Vertical(id="room-panel"):
-            yield Static(title)
-            yield Input(placeholder="Search rooms...", id="room-search")
             with Horizontal(id="room-body"):
                 with Vertical(id="room-button-col"):
                     travel_btn = Button("Travel", variant="success", id="room-travel")
@@ -1903,19 +2189,29 @@ class RoomBrowserScreen(Screen["bool | None"]):
                     yield slow_btn
                     yield Button("Bookmark", variant="warning", id="room-bookmark")
                     yield Button("Close", id="room-close")
+                    with Vertical(id="room-area-frame"):
+                        yield Static("Area:")
+                        yield Select[str]([], id="room-area-select", allow_blank=True,
+                                          prompt="All Areas")
                 with Vertical(id="room-right"):
+                    yield Input(placeholder="Search rooms\u2026", id="room-search")
                     yield DataTable(id="room-table")
-                    yield Static("", id="room-status")
+                    with Horizontal(id="room-status"):
+                        yield Static("", id="room-count")
+                        yield Static("", id="room-distance")
         yield Footer()
 
     def on_mount(self) -> None:
         """Load rooms from file and populate table."""
         table = self.query_one("#room-table", DataTable)
         table.cursor_type = "row"
-        table.add_columns("\u2605", "Area", "Name", "Exits")
+        table.add_columns("\u2605", "Room", "ID")
         self._load_rooms()
+        self._compute_distances()
+        self._populate_area_dropdown()
+        self._sort_rooms()
         self._refresh_table()
-        self._select_current_room()
+        self._mounted = True
 
     def _select_current_room(self) -> None:
         """Move cursor to the current room row, if known."""
@@ -1936,37 +2232,134 @@ class RoomBrowserScreen(Screen["bool | None"]):
         """Load room data from JSON file."""
         if not os.path.exists(self._rooms_path):
             return
-        from telnetlib3.rooms import load_rooms  # pylint: disable=import-outside-toplevel
+        from telnetlib3.rooms import (  # pylint: disable=import-outside-toplevel
+            load_rooms, read_current_room,
+        )
 
         graph = load_rooms(self._rooms_path)
+        self._graph = graph
         self._all_rooms = [
             (r.num, r.name, r.area, len(r.exits), r.bookmarked)
             for r in graph.rooms.values()
         ]
-        self._all_rooms.sort(key=lambda r: (not r[4], r[2].lower(), r[1].lower()))
+        if self._current_room_file:
+            current = read_current_room(self._current_room_file)
+            if current and current in graph.rooms:
+                self._current_area = graph.rooms[current].area
+
+    def _populate_area_dropdown(self) -> None:
+        """Populate the area dropdown from loaded rooms."""
+        areas: set[str] = set()
+        for _, _, area, _, _ in self._all_rooms:
+            if area:
+                areas.add(area)
+        sorted_areas = sorted(areas, key=str.lower)
+        options = [(a, a) for a in sorted_areas]
+        select = self.query_one("#room-area-select", Select)
+        select.set_options(options)
+        if self._current_area and self._current_area in areas:
+            select.value = self._current_area
+
+    def _compute_distances(self) -> None:
+        """Compute BFS distances from the current room."""
+        self._distances = {}
+        if not self._current_room_file or self._graph is None:
+            return
+        from telnetlib3.rooms import read_current_room  # pylint: disable=import-outside-toplevel
+
+        current = read_current_room(self._current_room_file)
+        if current:
+            self._distances = self._graph.bfs_distances(current)
+
+    def _sort_rooms(self) -> None:
+        """Sort ``_all_rooms`` according to ``_sort_mode``."""
+        if self._sort_mode == "distance":
+            self._all_rooms.sort(
+                key=lambda r: (
+                    not r[4],
+                    self._distances.get(r[0], float("inf")),
+                    r[2].lower(),
+                    r[1].lower(),
+                ),
+            )
+        elif self._sort_mode == "id":
+            self._all_rooms.sort(
+                key=lambda r: (not r[4], r[0].lower()),
+            )
+        else:
+            self._all_rooms.sort(
+                key=lambda r: (not r[4], r[2].lower(), r[1].lower()),
+            )
+
+    @staticmethod
+    def _short_id(num: str, width: int = 10) -> str:
+        """Truncate room ID to *width* characters with ellipsis."""
+        if len(num) <= width:
+            return num
+        return num[:width - 1] + "\u2026"
 
     def _refresh_table(self, query: str = "") -> None:
-        """Refresh table rows, filtering by search query."""
+        """Refresh table rows, filtering by search query and selected area."""
         table = self.query_one("#room-table", DataTable)
         table.clear()
         q = query.lower()
+        select = self.query_one("#room-area-select", Select)
+        area_filter = select.value if isinstance(select.value, str) else None
         for num, name, area, exits, bookmarked in self._all_rooms:
+            if area_filter and area != area_filter:
+                continue
             if q and q not in name.lower() and q not in area.lower():
                 continue
             star = "\u2605" if bookmarked else ""
-            table.add_row(star, area, name, str(exits), key=num)
-        status = self.query_one("#room-status", Static)
+            short_id = self._short_id(num)
+            table.add_row(star, name, short_id, key=num)
+        count_label = self.query_one("#room-count", Static)
         n_shown = table.row_count
         n_total = len(self._all_rooms)
-        if query:
-            status.update(f"{n_shown}/{n_total} rooms shown")
+        if query or area_filter:
+            count_label.update(f"{n_shown}/{n_total} rooms")
         else:
-            status.update(f"{n_total} rooms")
+            count_label.update(f"{n_total} rooms")
+        self._select_current_room()
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        """Re-filter table when area dropdown changes."""
+        if event.select.id == "room-area-select" and self._mounted:
+            search_val = self.query_one("#room-search", Input).value
+            self._refresh_table(search_val)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         """Filter table when search input changes."""
         if event.input.id == "room-search":
             self._refresh_table(event.value)
+
+    def on_data_table_row_highlighted(
+        self, event: DataTable.RowHighlighted
+    ) -> None:
+        """Update distance label when table cursor moves."""
+        dist_label = self.query_one("#room-distance", Static)
+        if event.row_key is None or event.row_key.value is None:
+            dist_label.update("")
+            return
+        dst_num = event.row_key.value
+        if not self._current_room_file or self._graph is None:
+            dist_label.update("")
+            return
+        from telnetlib3.rooms import read_current_room  # pylint: disable=import-outside-toplevel
+
+        current = read_current_room(self._current_room_file)
+        if not current:
+            dist_label.update("")
+            return
+        if current == dst_num:
+            dist_label.update("Distance: 0 turns")
+            return
+        path = self._graph.find_path(current, dst_num)
+        if path is None:
+            dist_label.update("Distance: \u2014")
+        else:
+            n = len(path)
+            dist_label.update(f"Distance: {n} turn{'s' if n != 1 else ''}")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
@@ -2002,12 +2395,39 @@ class RoomBrowserScreen(Screen["bool | None"]):
                 buttons[0].focus()
                 event.prevent_default()
             return
+        area_select = self.query_one("#room-area-select", Select)
+        if isinstance(focused, Button) and focused in buttons:
+            idx = buttons.index(focused)
+            if event.key == "up" and idx > 0:
+                buttons[idx - 1].focus()
+                event.prevent_default()
+            elif event.key == "down" and idx < len(buttons) - 1:
+                buttons[idx + 1].focus()
+                event.prevent_default()
+            elif event.key == "down" and idx == len(buttons) - 1:
+                area_select.focus()
+                event.prevent_default()
+            elif event.key == "right":
+                search.focus()
+                event.prevent_default()
+            return
+        if focused is area_select:
+            if event.key == "up" and buttons:
+                buttons[-1].focus()
+                event.prevent_default()
+            elif event.key == "right":
+                table.focus()
+                event.prevent_default()
+            return
         if focused is table and event.key == "up":
             if table.cursor_coordinate.row == 0:
                 search.focus()
                 event.prevent_default()
                 return
-        _handle_arrow_navigation(self, event, "#room-button-col", "#room-table")
+        if focused is table and event.key == "left":
+            if buttons:
+                buttons[0].focus()
+            event.prevent_default()
 
     def action_close(self) -> None:
         """Close the room browser."""
@@ -2016,6 +2436,28 @@ class RoomBrowserScreen(Screen["bool | None"]):
     def action_fast_travel(self) -> None:
         """Initiate fast travel to the selected room."""
         self._do_fast_travel(slow=False)
+
+    def action_sort_name(self) -> None:
+        """Sort rooms by name."""
+        self._sort_mode = "name"
+        self._apply_sort()
+
+    def action_sort_id(self) -> None:
+        """Sort rooms by ID."""
+        self._sort_mode = "id"
+        self._apply_sort()
+
+    def action_sort_distance(self) -> None:
+        """Sort rooms by distance from current room."""
+        self._sort_mode = "distance"
+        self._compute_distances()
+        self._apply_sort()
+
+    def _apply_sort(self) -> None:
+        """Re-sort rooms and refresh the table."""
+        self._sort_rooms()
+        search_val = self.query_one("#room-search", Input).value
+        self._refresh_table(search_val)
 
     def action_toggle_bookmark(self) -> None:
         """Toggle bookmark on the selected room."""
@@ -2043,9 +2485,7 @@ class RoomBrowserScreen(Screen["bool | None"]):
             if rnum == num:
                 self._all_rooms[i] = (rnum, name, area, exits, not bm)
                 break
-        self._all_rooms.sort(key=lambda r: (not r[4], r[2].lower(), r[1].lower()))
-        search_val = self.query_one("#room-search", Input).value
-        self._refresh_table(search_val)
+        self._apply_sort()
 
     def _do_fast_travel(self, slow: bool = False) -> None:
         """Calculate path and write fast travel file."""
@@ -2065,13 +2505,13 @@ class RoomBrowserScreen(Screen["bool | None"]):
 
         current = read_current_room(self._current_room_file)
         if not current:
-            status = self.query_one("#room-status", Static)
-            status.update("No current room — move first")
+            count = self.query_one("#room-count", Static)
+            count.update("No current room \u2014 move first")
             return
 
         if current == dst_num:
-            status = self.query_one("#room-status", Static)
-            status.update("Already in this room")
+            count = self.query_one("#room-count", Static)
+            count.update("Already in this room")
             return
 
         graph = load_rooms(self._rooms_path)
@@ -2082,12 +2522,65 @@ class RoomBrowserScreen(Screen["bool | None"]):
                 if rnum == dst_num:
                     dst_name = name
                     break
-            status = self.query_one("#room-status", Static)
-            status.update(f"No path found to {dst_name or dst_num}")
+            count = self.query_one("#room-count", Static)
+            count.update(f"No path found to {dst_name or dst_num}")
             return
 
         write_fasttravel(self._fasttravel_file, path, slow=slow)
         self.dismiss(True)
+
+
+class RoomPickerScreen(RoomBrowserScreen):
+    """Room picker variant with Select/Cancel buttons for embedding in other editors."""
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "close", "Close", priority=True),
+        Binding("enter", "select_room", "Select", show=True),
+        Binding("n", "sort_name", "Name sort", show=True),
+        Binding("i", "sort_id", "ID sort", show=True),
+        Binding("d", "sort_distance", "Dist sort", show=True),
+    ]
+
+    def compose(self) -> ComposeResult:
+        """Build the room picker layout with Select/Cancel buttons only."""
+        with Vertical(id="room-panel"):
+            with Horizontal(id="room-body"):
+                with Vertical(id="room-button-col"):
+                    yield Button("Select", variant="success", id="room-select")
+                    yield Button("Cancel", id="room-close")
+                    with Vertical(id="room-area-frame"):
+                        yield Static("Area:")
+                        yield Select[str]([], id="room-area-select", allow_blank=True,
+                                          prompt="All Areas")
+                with Vertical(id="room-right"):
+                    yield Input(placeholder="Search rooms\u2026", id="room-search")
+                    yield DataTable(id="room-table")
+                    with Horizontal(id="room-status"):
+                        yield Static("", id="room-count")
+                        yield Static("", id="room-distance")
+        yield Footer()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle Select/Cancel button presses."""
+        if event.button.id == "room-close":
+            self.dismiss(None)
+        elif event.button.id == "room-select":
+            self._do_select()
+
+    def action_select_room(self) -> None:
+        """Select the highlighted room."""
+        self._do_select()
+
+    def _do_select(self) -> None:
+        """Dismiss with the selected room ID string."""
+        table = self.query_one("#room-table", DataTable)
+        if table.row_count == 0:
+            return
+        row_key, _ = table.coordinate_to_cell_key(table.cursor_coordinate)
+        num = row_key.value
+        if num is None:
+            return
+        self.dismiss(num)
 
 
 class _EditorApp(App[None]):
@@ -2170,12 +2663,22 @@ def _restore_blocking_fds() -> None:
             pass
 
 
-def edit_macros_main(path: str, session_key: str = "") -> None:
+def edit_macros_main(
+    path: str,
+    session_key: str = "",
+    rooms_file: str = "",
+    current_room_file: str = "",
+) -> None:
     """Launch standalone macro editor TUI."""
     _restore_blocking_fds()
     _enable_faulthandler()
     _patch_writer_thread_queue()
-    app = _EditorApp(MacroEditScreen(path=path, session_key=session_key))
+    app = _EditorApp(MacroEditScreen(
+        path=path,
+        session_key=session_key,
+        rooms_file=rooms_file,
+        current_room_file=current_room_file,
+    ))
     app.run()
 
 

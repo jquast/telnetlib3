@@ -17,6 +17,7 @@ from textual.widgets import (  # noqa: E402
     Input,
     Button,
     Select,
+    Static,
     Switch,
     DataTable,
     RadioButton,
@@ -30,6 +31,7 @@ from telnetlib3.client_tui import (  # noqa: E402
     SessionConfig,
     MacroEditScreen,
     RoomBrowserScreen,
+    RoomPickerScreen,
     TelnetSessionApp,
     SessionEditScreen,
     SessionListScreen,
@@ -246,18 +248,18 @@ def test_macro_screen_loads_file(tmp_path) -> None:
 
     sk = "test.host:23"
     fp = tmp_path / "macros.json"
-    fp.write_text(json.dumps({sk: {"macros": [{"key": "f5", "text": "look<CR>"}]}}))
+    fp.write_text(json.dumps({sk: {"macros": [{"key": "f5", "text": "look;"}]}}))
     screen = MacroEditScreen(path=str(fp), session_key=sk)
     screen._load_from_file()
     assert len(screen._macros) == 1
-    assert screen._macros[0] == ("f5", "look<CR>", True)
+    assert screen._macros[0] == ("f5", "look;", True)
 
 
 def test_macro_screen_save(tmp_path) -> None:
     sk = "test.host:23"
     fp = tmp_path / "macros.json"
     screen = MacroEditScreen(path=str(fp), session_key=sk)
-    screen._macros = [("f5", "look<CR>", True), ("escape n", "north<CR>", True)]
+    screen._macros = [("f5", "look;", True), ("escape n", "north;", True)]
     screen._save_to_file()
 
     from telnetlib3.macros import load_macros
@@ -265,7 +267,7 @@ def test_macro_screen_save(tmp_path) -> None:
     loaded = load_macros(str(fp), sk)
     assert len(loaded) == 2
     assert loaded[0].keys == ("f5",)
-    assert loaded[0].text == "look<CR>"
+    assert loaded[0].text == "look;"
     assert loaded[1].keys == ("escape", "n")
 
 
@@ -282,19 +284,19 @@ def test_autoreply_screen_loads_file(tmp_path) -> None:
     sk = "test.host:23"
     fp = tmp_path / "autoreplies.json"
     fp.write_text(
-        json.dumps({sk: {"autoreplies": [{"pattern": r"\d+ gold", "reply": "get gold<CR>"}]}})
+        json.dumps({sk: {"autoreplies": [{"pattern": r"\d+ gold", "reply": "get gold;"}]}})
     )
     screen = AutoreplyEditScreen(path=str(fp), session_key=sk)
     screen._load_from_file()
     assert len(screen._rules) == 1
-    assert screen._rules[0] == (r"\d+ gold", "get gold<CR>", False, "", False, True, 30.0, "")
+    assert screen._rules[0] == (r"\d+ gold", "get gold;", False, "", False, True, 10.0, "", {})
 
 
 def test_autoreply_screen_save(tmp_path) -> None:
     sk = "test.host:23"
     fp = tmp_path / "autoreplies.json"
     screen = AutoreplyEditScreen(path=str(fp), session_key=sk)
-    screen._rules = [(r"\d+ gold", "get gold<CR>", False, "", False, True, 30.0, "")]
+    screen._rules = [(r"\d+ gold", "get gold;", False, "", False, True, 10.0, "", {})]
     screen._save_to_file()
 
     from telnetlib3.autoreply import load_autoreplies
@@ -302,7 +304,32 @@ def test_autoreply_screen_save(tmp_path) -> None:
     loaded = load_autoreplies(str(fp), sk)
     assert len(loaded) == 1
     assert loaded[0].pattern.pattern == r"\d+ gold"
-    assert loaded[0].reply == "get gold<CR>"
+    assert loaded[0].reply == "get gold;"
+
+
+def test_autoreply_screen_loads_when(tmp_path) -> None:
+    import json
+
+    sk = "test.host:23"
+    fp = tmp_path / "autoreplies.json"
+    fp.write_text(json.dumps({sk: {"autoreplies": [
+        {"pattern": "bear", "reply": "kill bear;", "when": {"HP%": ">50"}}
+    ]}}))
+    screen = AutoreplyEditScreen(path=str(fp), session_key=sk)
+    screen._load_from_file()
+    assert screen._rules[0][8] == {"HP%": ">50"}
+
+
+def test_autoreply_screen_saves_when(tmp_path) -> None:
+    import json
+
+    sk = "test.host:23"
+    fp = tmp_path / "autoreplies.json"
+    screen = AutoreplyEditScreen(path=str(fp), session_key=sk)
+    screen._rules = [("bear", "kill bear;", False, "", False, True, 10.0, "", {"MP%": ">=30"})]
+    screen._save_to_file()
+    raw = json.loads(fp.read_text())
+    assert raw[sk]["autoreplies"][0]["when"] == {"MP%": ">=30"}
 
 
 def test_autoreply_screen_rejects_bad_regex(tmp_path) -> None:
@@ -310,7 +337,7 @@ def test_autoreply_screen_rejects_bad_regex(tmp_path) -> None:
 
     fp = tmp_path / "autoreplies.json"
     screen = AutoreplyEditScreen(path=str(fp))
-    screen._rules = [("[invalid", "x", False, "", False, True, 30.0, "")]
+    screen._rules = [("[invalid", "x", False, "", False, True, 10.0, "", {})]
     with pytest.raises(re.error):
         screen._save_to_file()
 
@@ -681,14 +708,21 @@ _TEST_SK = "test.host:23"
 
 
 class _MacroEditApp(textual.app.App[None]):
-    def __init__(self, path: str, session_key: str = _TEST_SK) -> None:
+    def __init__(self, path: str, session_key: str = _TEST_SK,
+                 rooms_file: str = "", current_room_file: str = "") -> None:
         super().__init__()
         self._path = path
         self._session_key = session_key
+        self._rooms_file = rooms_file
+        self._current_room_file = current_room_file
 
     def on_mount(self) -> None:
         self.push_screen(
-            MacroEditScreen(path=self._path, session_key=self._session_key), callback=lambda _: None
+            MacroEditScreen(
+                path=self._path, session_key=self._session_key,
+                rooms_file=self._rooms_file,
+                current_room_file=self._current_room_file,
+            ), callback=lambda _: None
         )
 
 
@@ -710,8 +744,8 @@ _MACRO_PARAMS = (
     "macros.json",
     "macros",
     "macro",
-    [{"key": "f5", "text": "look<CR>"}],
-    ("f5", "look<CR>", True),
+    [{"key": "f5", "text": "look;"}],
+    ("f5", "look;", True),
     ("#macro-key", "#macro-text"),
 )
 _AUTOREPLY_PARAMS = (
@@ -719,8 +753,8 @@ _AUTOREPLY_PARAMS = (
     "autoreplies.json",
     "autoreplies",
     "autoreply",
-    [{"pattern": r"\d+ gold", "reply": "get gold<CR>"}],
-    (r"\d+ gold", "get gold<CR>", False, "", False, True, 30.0, ""),
+    [{"pattern": r"\d+ gold", "reply": "get gold;"}],
+    (r"\d+ gold", "get gold;", False, "", False, True, 10.0, "", {}),
     ("#autoreply-pattern", "#autoreply-reply"),
 )
 
@@ -851,8 +885,8 @@ class TestEditorScreenTextual:
             add_btn = screen.query_one("#macro-add")
             await pilot.click(add_btn)
             await pilot.pause()
-            screen.query_one("#macro-key", Input).value = "f7"
-            screen.query_one("#macro-text", Input).value = "test<CR>"
+            screen._captured_key = "f7"
+            screen.query_one("#macro-text", Input).value = "test;"
             screen._submit_form()
             await pilot.pause()
             table = screen.query_one("#macro-table", DataTable)
@@ -869,8 +903,8 @@ class TestEditorScreenTextual:
             await pilot.click(add_btn)
             await pilot.pause()
             screen.query_one("#autoreply-pattern", Input).value = "hello"
-            screen.query_one("#autoreply-reply", Input).value = "world<CR>"
-            screen._rules.append(("hello", "world<CR>", False, "", False, True, 30.0, ""))
+            screen.query_one("#autoreply-reply", Input).value = "world;"
+            screen._rules.append(("hello", "world;", False, "", False, True, 10.0, "", {}))
             screen._refresh_table()
             screen._hide_form()
             await pilot.pause()
@@ -897,7 +931,7 @@ class TestEditorScreenTextual:
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
             screen = app.screen
-            screen._show_form("f5", "look<CR>")
+            screen._show_form("f5", "look;")
             await pilot.pause()
             screen._submit_form()
             await pilot.pause()
@@ -999,8 +1033,8 @@ _BTN_DISPATCH_PARAMS = [
         "macro",
         "_macros",
         ("#macro-key", "#macro-text"),
-        ("f5", "look<CR>"),
-        [{"key": "f5", "text": "old<CR>"}],
+        ("f5", "look;"),
+        [{"key": "f5", "text": "old;"}],
         id="macro",
     ),
     pytest.param(
@@ -1011,8 +1045,8 @@ _BTN_DISPATCH_PARAMS = [
         "autoreply",
         "_rules",
         ("#autoreply-pattern", "#autoreply-reply"),
-        ("hello", "world<CR>"),
-        [{"pattern": "old", "reply": "old<CR>"}],
+        ("hello", "world;"),
+        [{"pattern": "old", "reply": "old;"}],
         id="autoreply",
     ),
 ]
@@ -1148,14 +1182,17 @@ class TestEditScreenButtonDispatch:
             await pilot.pause()
             screen = app.screen
             screen._editing_idx = 0
-            screen.query_one(field_ids[0], Input).value = "new"
-            screen.query_one(field_ids[1], Input).value = "new<CR>"
+            if prefix == "macro":
+                screen._captured_key = "new"
+            else:
+                screen.query_one(field_ids[0], Input).value = "new"
+            screen.query_one(field_ids[1], Input).value = "new;"
             screen.query_one(f"#{prefix}-form").display = True
             screen._submit_form()
             await pilot.pause()
             result = getattr(screen, data_attr)[0]
             assert result[0] == "new"
-            assert result[1] == "new<CR>"
+            assert result[1] == "new;"
 
     @pytest.mark.parametrize(
         "app_cls,screen_cls,filename,data_key,prefix,data_attr," "field_ids,form_vals,edit_items",
@@ -1206,8 +1243,8 @@ class TestEditScreenButtonDispatch:
             screen = app.screen
             screen._show_form(*form_vals)
             await pilot.pause()
-            inp = screen.query_one(field_ids[0], Input)
-            event = Input.Submitted(inp, form_vals[0])
+            inp = screen.query_one(field_ids[1], Input)
+            event = Input.Submitted(inp, form_vals[1] if len(form_vals) > 1 else form_vals[0])
             screen.on_input_submitted(event)
             await pilot.pause()
             table = screen.query_one(f"#{prefix}-table", DataTable)
@@ -1286,7 +1323,7 @@ class TestEditScreenButtonDispatch:
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
             screen = app.screen
-            screen._show_form("[invalid", "reply<CR>")
+            screen._show_form("[invalid", "reply;")
             await pilot.pause()
             screen._submit_form()
             await pilot.pause()
@@ -1300,8 +1337,8 @@ async def test_autoreply_table_has_number_column(tmp_path) -> None:
     fp = tmp_path / "autoreplies.json"
     fp.write_text(
         '{"' + _TEST_SK + '": {"autoreplies": ['
-        '{"pattern": "a", "reply": "b<CR>"},'
-        '{"pattern": "c", "reply": "d<CR>"}'
+        '{"pattern": "a", "reply": "b;"},'
+        '{"pattern": "c", "reply": "d;"}'
         "]}}"
     )
     app = _AutoreplyEditApp(str(fp))
@@ -1597,7 +1634,7 @@ async def test_room_browser_arrow_nav_table_to_buttons(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_room_browser_arrow_nav_buttons_to_table(tmp_path) -> None:
+async def test_room_browser_arrow_nav_buttons_to_search(tmp_path) -> None:
     fp = tmp_path / "rooms.json"
     from telnetlib3.rooms import RoomGraph, save_rooms
     g = RoomGraph()
@@ -1611,8 +1648,8 @@ async def test_room_browser_arrow_nav_buttons_to_table(tmp_path) -> None:
         buttons[0].focus()
         await pilot.press("right")
         await pilot.pause()
-        table = app.screen.query_one("#room-table", DataTable)
-        assert app.screen.focused is table
+        search = app.screen.query_one("#room-search", Input)
+        assert app.screen.focused is search
 
 
 @pytest.mark.asyncio
@@ -1626,6 +1663,40 @@ async def test_room_browser_arrow_nav_between_buttons(tmp_path) -> None:
         await pilot.press("down")
         await pilot.pause()
         assert app.screen.focused is buttons[1]
+
+
+@pytest.mark.asyncio
+async def test_room_browser_arrow_nav_close_down_to_area(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    app = _RoomBrowserApp(str(fp))
+    async with app.run_test(size=(90, 24)) as pilot:
+        await pilot.pause()
+        buttons = list(app.screen.query("#room-button-col Button"))
+        buttons[-1].focus()
+        await pilot.press("down")
+        await pilot.pause()
+        focused = app.screen.focused
+        area = app.screen.query_one("#room-area-select", Select)
+        assert focused is area or (focused is not None and area in focused.ancestors_with_self)
+
+
+@pytest.mark.asyncio
+async def test_room_browser_arrow_nav_area_right_to_table(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    from telnetlib3.rooms import RoomGraph, save_rooms
+    g = RoomGraph()
+    g.update_room({"num": "1", "name": "Room A", "area": "area"})
+    save_rooms(str(fp), g)
+
+    app = _RoomBrowserApp(str(fp))
+    async with app.run_test(size=(90, 24)) as pilot:
+        await pilot.pause()
+        area = app.screen.query_one("#room-area-select", Select)
+        area.focus()
+        await pilot.press("right")
+        await pilot.pause()
+        table = app.screen.query_one("#room-table", DataTable)
+        assert app.screen.focused is table
 
 
 @pytest.mark.asyncio
@@ -1694,8 +1765,429 @@ async def test_room_browser_selects_current_room(tmp_path) -> None:
     write_current_room(str(cr), "2")
 
     app = _RoomBrowserApp(str(fp), current_room_file=str(cr))
-    async with app.run_test(size=(90, 24)) as pilot:
+    async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause()
         table = app.screen.query_one("#room-table", DataTable)
         row_key, _ = table.coordinate_to_cell_key(table.cursor_coordinate)
         assert row_key.value == "2"
+
+
+@pytest.mark.asyncio
+async def test_room_browser_area_dropdown_filters(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    from telnetlib3.rooms import RoomGraph, save_rooms
+    g = RoomGraph()
+    g.update_room({"num": "1", "name": "Town Square", "area": "mid"})
+    g.update_room({"num": "2", "name": "Dark Forest", "area": "wild"})
+    g.update_room({"num": "3", "name": "Market", "area": "mid"})
+    save_rooms(str(fp), g)
+
+    app = _RoomBrowserApp(str(fp))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        table = app.screen.query_one("#room-table", DataTable)
+        assert table.row_count == 3
+        select = app.screen.query_one("#room-area-select", Select)
+        select.value = "mid"
+        await pilot.pause()
+        assert table.row_count == 2
+
+
+@pytest.mark.asyncio
+async def test_room_browser_distance_shown(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    cr = tmp_path / ".current-room"
+    from telnetlib3.rooms import RoomGraph, save_rooms, write_current_room
+    g = RoomGraph()
+    g.update_room({"num": "1", "name": "Start", "area": "zone", "exits": {"e": "2"}})
+    g.update_room({"num": "2", "name": "Middle", "area": "zone", "exits": {"e": "3"}})
+    g.update_room({"num": "3", "name": "End", "area": "zone", "exits": {}})
+    save_rooms(str(fp), g)
+    write_current_room(str(cr), "1")
+
+    app = _RoomBrowserApp(str(fp), current_room_file=str(cr))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        table = app.screen.query_one("#room-table", DataTable)
+        table.focus()
+        await pilot.pause()
+        await pilot.press("down")
+        await pilot.pause()
+        dist = app.screen.query_one("#room-distance", Static)
+        assert "Distance:" in str(dist.render())
+
+
+@pytest.mark.asyncio
+async def test_room_browser_short_id() -> None:
+    from telnetlib3.client_tui import RoomBrowserScreen
+    assert RoomBrowserScreen._short_id("12345") == "12345"
+    assert RoomBrowserScreen._short_id("12345678901234") == "123456789\u2026"
+    assert RoomBrowserScreen._short_id("0c94a7d9") == "0c94a7d9"
+
+
+@pytest.mark.asyncio
+async def test_room_browser_sort_by_distance(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    cr = tmp_path / ".current-room"
+    from telnetlib3.rooms import RoomGraph, save_rooms, write_current_room
+    g = RoomGraph()
+    g.update_room({"num": "1", "name": "Start", "area": "a", "exits": {"n": "2"}})
+    g.update_room({"num": "2", "name": "Middle", "area": "a", "exits": {"n": "3", "s": "1"}})
+    g.update_room({"num": "3", "name": "Far", "area": "a", "exits": {"s": "2"}})
+    save_rooms(str(fp), g)
+    write_current_room(str(cr), "1")
+
+    app = _RoomBrowserApp(str(fp), current_room_file=str(cr))
+    async with app.run_test(size=(90, 24)) as pilot:
+        await pilot.pause()
+        table = app.screen.query_one("#room-table", DataTable)
+        table.focus()
+        await pilot.pause()
+        await pilot.press("d")
+        await pilot.pause()
+        keys = [rk.value for rk in table.rows]
+        assert keys == ["1", "2", "3"]
+
+
+@pytest.mark.asyncio
+async def test_room_browser_sort_by_id(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    from telnetlib3.rooms import RoomGraph, save_rooms
+    g = RoomGraph()
+    g.update_room({"num": "zzz", "name": "Alpha", "area": "a"})
+    g.update_room({"num": "aaa", "name": "Zeta", "area": "a"})
+    save_rooms(str(fp), g)
+
+    app = _RoomBrowserApp(str(fp))
+    async with app.run_test(size=(90, 24)) as pilot:
+        await pilot.pause()
+        table = app.screen.query_one("#room-table", DataTable)
+        table.focus()
+        await pilot.pause()
+        await pilot.press("i")
+        await pilot.pause()
+        keys = [rk.value for rk in table.rows]
+        assert keys == ["aaa", "zzz"]
+
+
+@pytest.mark.asyncio
+async def test_room_browser_area_preselects_current(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    cr = tmp_path / ".current-room"
+    from telnetlib3.rooms import RoomGraph, save_rooms, write_current_room
+    g = RoomGraph()
+    g.update_room({"num": "1", "name": "Town Square", "area": "mid"})
+    g.update_room({"num": "2", "name": "Forest", "area": "wild"})
+    save_rooms(str(fp), g)
+    write_current_room(str(cr), "1")
+
+    app = _RoomBrowserApp(str(fp), current_room_file=str(cr))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        select = app.screen.query_one("#room-area-select", Select)
+        assert select.value == "mid"
+
+
+class _RoomPickerApp(textual.app.App[None]):
+    def __init__(self, rooms_path: str, current_room_file: str = "") -> None:
+        super().__init__()
+        self._rooms_path = rooms_path
+        self._current_room_file = current_room_file
+        self.picked_id: str | None = None
+
+    def on_mount(self) -> None:
+        self.push_screen(
+            RoomPickerScreen(
+                rooms_path=self._rooms_path,
+                session_key=_TEST_SK,
+                current_room_file=self._current_room_file,
+            ),
+            callback=self._on_pick,
+        )
+
+    def _on_pick(self, result: "str | None") -> None:
+        self.picked_id = result
+
+
+@pytest.mark.asyncio
+async def test_room_picker_has_select_cancel_buttons(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    from telnetlib3.rooms import RoomGraph, save_rooms
+    g = RoomGraph()
+    g.update_room({"num": "100", "name": "Town Square", "area": "midgaard",
+                    "exits": {"north": "101"}})
+    save_rooms(str(fp), g)
+
+    app = _RoomPickerApp(str(fp))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        buttons = [b.id for b in app.screen.query("#room-button-col Button")]
+        assert "room-select" in buttons
+        assert "room-close" in buttons
+        assert "room-travel" not in buttons
+        assert "room-slow-travel" not in buttons
+        assert "room-bookmark" not in buttons
+
+
+@pytest.mark.asyncio
+async def test_room_picker_select_returns_room_id(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    from telnetlib3.rooms import RoomGraph, save_rooms
+    g = RoomGraph()
+    g.update_room({"num": "100", "name": "Town Square", "area": "midgaard",
+                    "exits": {"north": "101"}})
+    save_rooms(str(fp), g)
+
+    app = _RoomPickerApp(str(fp))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        table = app.screen.query_one("#room-table", DataTable)
+        assert table.row_count > 0
+        await pilot.click("#room-select")
+        await pilot.pause()
+        assert app.picked_id == "100"
+
+
+@pytest.mark.asyncio
+async def test_room_picker_escape_dismisses(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    from telnetlib3.rooms import RoomGraph, save_rooms
+    g = RoomGraph()
+    g.update_room({"num": "100", "name": "Town Square", "area": "midgaard"})
+    save_rooms(str(fp), g)
+
+    app = _RoomPickerApp(str(fp))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        assert app.screen.query("#room-select")
+        assert app.screen.query("#room-close")
+
+
+@pytest.mark.asyncio
+async def test_room_picker_search_filters(tmp_path) -> None:
+    fp = tmp_path / "rooms.json"
+    from telnetlib3.rooms import RoomGraph, save_rooms
+    g = RoomGraph()
+    g.update_room({"num": "200", "name": "Forest", "area": "wild",
+                    "exits": {"south": "201"}})
+    g.update_room({"num": "300", "name": "Town Square", "area": "mid"})
+    save_rooms(str(fp), g)
+
+    app = _RoomPickerApp(str(fp))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        table = app.screen.query_one("#room-table", DataTable)
+        assert table.row_count == 2
+        search = app.screen.query_one("#room-search", Input)
+        search.value = "Forest"
+        await pilot.pause()
+        assert table.row_count == 1
+
+
+@pytest.mark.asyncio
+async def test_macro_editor_has_travel_buttons(tmp_path) -> None:
+    fp = tmp_path / "macros.json"
+    fp.write_text("{}")
+
+    app = _MacroEditApp(str(fp))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.click("#macro-add")
+        await pilot.pause()
+        buttons = [b.id for b in app.screen.query("#macro-form Button")]
+        assert "macro-fast-travel" in buttons
+        assert "macro-slow-travel" in buttons
+        assert "macro-return-fast" in buttons
+        assert "macro-return-slow" in buttons
+        assert "macro-autowander" in buttons
+        assert "macro-delay" in buttons
+
+
+@pytest.mark.asyncio
+async def test_macro_editor_fast_travel_inserts_command(tmp_path) -> None:
+    fp = tmp_path / "macros.json"
+    fp.write_text("{}")
+    rp = tmp_path / "rooms.json"
+    from telnetlib3.rooms import RoomGraph, save_rooms
+    g = RoomGraph()
+    g.update_room({"num": "42", "name": "Nurse", "area": "hospital"})
+    save_rooms(str(rp), g)
+
+    app = _MacroEditApp(str(fp), rooms_file=str(rp))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.click("#macro-add")
+        await pilot.pause()
+        await pilot.click("#macro-fast-travel")
+        await pilot.pause()
+        picker = app.screen
+        assert isinstance(picker, RoomPickerScreen)
+        table = picker.query_one("#room-table", DataTable)
+        assert table.row_count > 0
+        await pilot.click("#room-select")
+        await pilot.pause()
+        text_input = app.screen.query_one("#macro-text", Input)
+        assert text_input.value == "`fast travel 42`"
+
+
+@pytest.mark.asyncio
+async def test_macro_editor_slow_travel_appends_to_existing(tmp_path) -> None:
+    fp = tmp_path / "macros.json"
+    fp.write_text("{}")
+    rp = tmp_path / "rooms.json"
+    from telnetlib3.rooms import RoomGraph, save_rooms
+    g = RoomGraph()
+    g.update_room({"num": "99", "name": "Market", "area": "town"})
+    save_rooms(str(rp), g)
+
+    app = _MacroEditApp(str(fp), rooms_file=str(rp))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.click("#macro-add")
+        await pilot.pause()
+        text_input = app.screen.query_one("#macro-text", Input)
+        text_input.value = "order tonic"
+        await pilot.click("#macro-slow-travel")
+        await pilot.pause()
+        await pilot.click("#room-select")
+        await pilot.pause()
+        text_input = app.screen.query_one("#macro-text", Input)
+        assert text_input.value == "order tonic;`slow travel 99`"
+
+
+@pytest.mark.asyncio
+async def test_macro_editor_wander_inserts_command(tmp_path) -> None:
+    fp = tmp_path / "macros.json"
+    fp.write_text("{}")
+
+    app = _MacroEditApp(str(fp))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.click("#macro-add")
+        await pilot.pause()
+        await pilot.click("#macro-autowander")
+        await pilot.pause()
+        text_input = app.screen.query_one("#macro-text", Input)
+        assert text_input.value == "`autowander`"
+
+
+@pytest.mark.asyncio
+async def test_macro_editor_wander_appends_to_existing(tmp_path) -> None:
+    fp = tmp_path / "macros.json"
+    fp.write_text("{}")
+
+    app = _MacroEditApp(str(fp))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.click("#macro-add")
+        await pilot.pause()
+        text_input = app.screen.query_one("#macro-text", Input)
+        text_input.value = "look"
+        await pilot.click("#macro-autowander")
+        await pilot.pause()
+        text_input = app.screen.query_one("#macro-text", Input)
+        assert text_input.value == "look;`autowander`"
+
+
+@pytest.mark.asyncio
+async def test_macro_editor_return_fast_inserts_command(tmp_path) -> None:
+    fp = tmp_path / "macros.json"
+    fp.write_text("{}")
+
+    app = _MacroEditApp(str(fp))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.click("#macro-add")
+        await pilot.pause()
+        await pilot.click("#macro-return-fast")
+        await pilot.pause()
+        text_input = app.screen.query_one("#macro-text", Input)
+        assert text_input.value == "`return fast`"
+
+
+@pytest.mark.asyncio
+async def test_macro_editor_return_slow_inserts_command(tmp_path) -> None:
+    fp = tmp_path / "macros.json"
+    fp.write_text("{}")
+
+    app = _MacroEditApp(str(fp))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.click("#macro-add")
+        await pilot.pause()
+        await pilot.click("#macro-return-slow")
+        await pilot.pause()
+        text_input = app.screen.query_one("#macro-text", Input)
+        assert text_input.value == "`return slow`"
+
+
+@pytest.mark.asyncio
+async def test_macro_editor_delay_inserts_command(tmp_path) -> None:
+    fp = tmp_path / "macros.json"
+    fp.write_text("{}")
+
+    app = _MacroEditApp(str(fp))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.click("#macro-add")
+        await pilot.pause()
+        await pilot.click("#macro-delay")
+        await pilot.pause()
+        text_input = app.screen.query_one("#macro-text", Input)
+        assert text_input.value == "`delay 1s`"
+
+
+@pytest.mark.asyncio
+async def test_macro_editor_delay_appends_to_existing(tmp_path) -> None:
+    fp = tmp_path / "macros.json"
+    fp.write_text("{}")
+
+    app = _MacroEditApp(str(fp))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.click("#macro-add")
+        await pilot.pause()
+        text_input = app.screen.query_one("#macro-text", Input)
+        text_input.value = "north"
+        await pilot.click("#macro-delay")
+        await pilot.pause()
+        text_input = app.screen.query_one("#macro-text", Input)
+        assert text_input.value == "north;`delay 1s`"
+
+
+@pytest.mark.asyncio
+async def test_macro_editor_insert_at_cursor_start(tmp_path) -> None:
+    fp = tmp_path / "macros.json"
+    fp.write_text("{}")
+
+    app = _MacroEditApp(str(fp))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.click("#macro-add")
+        await pilot.pause()
+        text_input = app.screen.query_one("#macro-text", Input)
+        text_input.value = "north"
+        text_input.cursor_position = 0
+        await pilot.click("#macro-delay")
+        await pilot.pause()
+        text_input = app.screen.query_one("#macro-text", Input)
+        assert text_input.value == "`delay 1s`;north"
+
+
+@pytest.mark.asyncio
+async def test_macro_editor_insert_at_cursor_mid(tmp_path) -> None:
+    fp = tmp_path / "macros.json"
+    fp.write_text("{}")
+
+    app = _MacroEditApp(str(fp))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause()
+        await pilot.click("#macro-add")
+        await pilot.pause()
+        text_input = app.screen.query_one("#macro-text", Input)
+        text_input.value = "look;north"
+        text_input.cursor_position = 4
+        await pilot.click("#macro-autowander")
+        await pilot.pause()
+        text_input = app.screen.query_one("#macro-text", Input)
+        assert text_input.value == "look;`autowander`;north"

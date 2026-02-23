@@ -830,6 +830,10 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
         writer_arg._current_room_file = _current_room_file
         writer_arg._current_room_num = ""
         writer_arg._room_changed = asyncio.Event()
+        writer_arg._wander_active = False
+        writer_arg._wander_current = 0
+        writer_arg._wander_total = 0
+        writer_arg._wander_task = None
         await _inner_session(reader, writer_arg)
 
     shell_callback = _session_shell

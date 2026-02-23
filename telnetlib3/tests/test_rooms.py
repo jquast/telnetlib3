@@ -135,6 +135,84 @@ class TestFindPath:
         g.update_room({"num": "A", "exits": {}})
         assert g.find_path_with_rooms("A", "A") == []
 
+    def test_bfs_distances(self) -> None:
+        g = self._build_linear_graph()
+        d = g.bfs_distances("A")
+        assert d == {"A": 0, "B": 1, "C": 2}
+
+    def test_bfs_distances_unreachable(self) -> None:
+        g = RoomGraph()
+        g.update_room({"num": "A", "exits": {}})
+        g.update_room({"num": "B", "exits": {}})
+        d = g.bfs_distances("A")
+        assert d == {"A": 0}
+
+    def test_bfs_distances_unknown_src(self) -> None:
+        g = RoomGraph()
+        assert g.bfs_distances("X") == {}
+
+
+class TestFindSameName:
+
+    def test_basic_same_name(self) -> None:
+        g = RoomGraph()
+        g.rooms["1"] = Room(num="1", name="A dusty road", last_visited="2024-01-01")
+        g.rooms["2"] = Room(num="2", name="A dusty road", last_visited="2024-01-03")
+        g.rooms["3"] = Room(num="3", name="A dusty road", last_visited="2024-01-02")
+        g.rooms["4"] = Room(num="4", name="Town Square", last_visited="2024-01-01")
+        result = g.find_same_name("1")
+        assert len(result) == 2
+        assert result[0].num == "3"
+        assert result[1].num == "2"
+
+    def test_excludes_self(self) -> None:
+        g = RoomGraph()
+        g.rooms["1"] = Room(num="1", name="Forest", last_visited="2024-01-01")
+        g.rooms["2"] = Room(num="2", name="Forest", last_visited="2024-01-02")
+        result = g.find_same_name("1")
+        assert all(r.num != "1" for r in result)
+
+    def test_missing_room(self) -> None:
+        g = RoomGraph()
+        assert g.find_same_name("999") == []
+
+    def test_empty_name(self) -> None:
+        g = RoomGraph()
+        g.rooms["1"] = Room(num="1", name="")
+        g.rooms["2"] = Room(num="2", name="")
+        assert g.find_same_name("1") == []
+
+    def test_no_matches(self) -> None:
+        g = RoomGraph()
+        g.rooms["1"] = Room(num="1", name="Unique Room")
+        g.rooms["2"] = Room(num="2", name="Different Room")
+        assert g.find_same_name("1") == []
+
+    def test_never_visited_sort_first(self) -> None:
+        g = RoomGraph()
+        g.rooms["1"] = Room(num="1", name="Road", last_visited="2024-01-01")
+        g.rooms["2"] = Room(num="2", name="Road", last_visited="2024-06-01")
+        g.rooms["3"] = Room(num="3", name="Road", last_visited="")
+        result = g.find_same_name("1")
+        assert result[0].num == "3"
+        assert result[1].num == "2"
+
+    def test_limit(self) -> None:
+        g = RoomGraph()
+        g.rooms["0"] = Room(num="0", name="Road", last_visited="2024-01-01")
+        for i in range(1, 30):
+            g.rooms[str(i)] = Room(num=str(i), name="Road", last_visited=f"2024-01-{i:02d}")
+        result = g.find_same_name("0", limit=5)
+        assert len(result) == 5
+
+    def test_default_limit_99(self) -> None:
+        g = RoomGraph()
+        g.rooms["0"] = Room(num="0", name="Road", last_visited="2024-01-01")
+        for i in range(1, 120):
+            g.rooms[str(i)] = Room(num=str(i), name="Road", last_visited=f"2024-01-{i % 28 + 1:02d}")
+        result = g.find_same_name("0")
+        assert len(result) == 99
+
 
 class TestBookmarkAndSearch:
 

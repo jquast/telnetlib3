@@ -15,7 +15,7 @@ import time
 import asyncio
 import logging
 from typing import Any, Union, Callable, Optional, Awaitable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 # 3rd party
 from wcwidth import strip_sequences
@@ -29,12 +29,93 @@ __all__ = (
     "AutoreplyEngine",
     "load_autoreplies",
     "save_autoreplies",
+    "check_condition",
 )
 
-_DELAY_RE = re.compile(r"::(\d+(?:\.\d+)?)(ms|s)::")
-_CR_TOKEN = "<CR>"
-_CR_RE = re.compile(r"<CR>", re.IGNORECASE)
+_DELAY_RE = re.compile(r"^`delay\s+(\d+(?:\.\d+)?)(ms|s)`$")
 _GROUP_RE = re.compile(r"\\(\d+)")
+_COND_RE = re.compile(r"^(>=|<=|>|<|=)(\d+)$")
+
+# Maps condition key to (current_keys, max_keys) for GMCP Char.Vitals lookup.
+_VITAL_KEYS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "HP%": (("hp", "HP"), ("maxhp", "maxHP", "max_hp")),
+    "MP%": (("mp", "MP", "mana", "sp", "SP"), ("maxmp", "maxMP", "max_mp", "maxsp", "maxSP")),
+}
+
+
+def _get_vital_pct(key: str, vitals: dict[str, Any]) -> Optional[int]:
+    """Return the vital percentage (0-100+) for *key*, or ``None`` if unavailable."""
+    spec = _VITAL_KEYS.get(key)
+    if spec is None:
+        return None
+    cur_keys, max_keys = spec
+    cur_raw = None
+    for k in cur_keys:
+        cur_raw = vitals.get(k)
+        if cur_raw is not None:
+            break
+    max_raw = None
+    for k in max_keys:
+        max_raw = vitals.get(k)
+        if max_raw is not None:
+            break
+    if cur_raw is None or max_raw is None:
+        return None
+    try:
+        cur = int(cur_raw)
+        mx = int(max_raw)
+    except (TypeError, ValueError):
+        return None
+    if mx <= 0:
+        return None
+    return int(cur * 100 / mx)
+
+
+def _compare(value: int, op: str, threshold: int) -> bool:
+    """Evaluate ``value op threshold``."""
+    if op == ">":
+        return value > threshold
+    if op == "<":
+        return value < threshold
+    if op == ">=":
+        return value >= threshold
+    if op == "<=":
+        return value <= threshold
+    if op == "=":
+        return value == threshold
+    return True
+
+
+def check_condition(
+    when: dict[str, str],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> tuple[bool, str]:
+    """Check vital conditions against GMCP data on *writer*.
+
+    :param when: Condition dict, e.g. ``{"HP%": ">50", "MP%": ">30"}``.
+    :param writer: Telnet writer with ``_gmcp_data`` attribute.
+    :returns: ``(ok, failure_description)`` — *ok* is ``False`` when a
+        condition is not met; *failure_description* explains which.
+    """
+    if not when:
+        return True, ""
+    gmcp: Optional[dict[str, Any]] = getattr(writer, "_gmcp_data", None)
+    if not gmcp:
+        return True, ""
+    vitals = gmcp.get("Char.Vitals")
+    if not isinstance(vitals, dict):
+        return True, ""
+    for key, expr in when.items():
+        m = _COND_RE.match(expr.strip())
+        if not m:
+            continue
+        op, threshold = m.group(1), int(m.group(2))
+        pct = _get_vital_pct(key, vitals)
+        if pct is None:
+            continue
+        if not _compare(pct, op, threshold):
+            return False, f"{key}{op}{threshold} (actual {pct}%)"
+    return True, ""
 
 
 @dataclass
@@ -44,7 +125,9 @@ class AutoreplyRule:
 
     :param pattern: Compiled regex pattern.
     :param reply: Reply template with ``\1``/``\2`` group refs,
-        ``<CR>`` send markers, and ``::Ns::`` delays.
+        ``;`` command separators, repeat prefixes (``3e``), and delay segments.
+    :param when: Vital conditions that must be met for the rule to fire,
+        e.g. ``{"HP%": ">50", "MP%": ">30"}``.
     """
 
     pattern: re.Pattern[str]
@@ -54,7 +137,8 @@ class AutoreplyRule:
     post_command: str = ""
     always: bool = False
     enabled: bool = True
-    exclusive_timeout: float = 30.0
+    exclusive_timeout: float = 10.0
+    when: dict[str, str] = field(default_factory=dict)
 
 
 def _parse_entries(entries: list[dict[str, str]]) -> list[AutoreplyRule]:
@@ -70,7 +154,9 @@ def _parse_entries(entries: list[dict[str, str]]) -> list[AutoreplyRule]:
         post_command = entry.get("post_command", "")
         always = bool(entry.get("always", False))
         enabled = bool(entry.get("enabled", True))
-        exclusive_timeout = float(entry.get("exclusive_timeout", 30.0))
+        exclusive_timeout = float(entry.get("exclusive_timeout", 10.0))
+        when_raw: Any = entry.get("when", {})
+        when = dict(when_raw) if isinstance(when_raw, dict) else {}
         try:
             compiled = re.compile(pattern_str, re.MULTILINE | re.DOTALL)
         except re.error as exc:
@@ -79,6 +165,7 @@ def _parse_entries(entries: list[dict[str, str]]) -> list[AutoreplyRule]:
             pattern=compiled, reply=reply, exclusive=exclusive,
             until=until, post_command=post_command, always=always,
             enabled=enabled, exclusive_timeout=exclusive_timeout,
+            when=when,
         ))
     return rules
 
@@ -132,7 +219,8 @@ def save_autoreplies(path: str, rules: list[AutoreplyRule], session_key: str) ->
                 **({"always": True} if r.always else {}),
                 **({"enabled": False} if not r.enabled else {}),
                 **({"exclusive_timeout": r.exclusive_timeout}
-                   if r.exclusive and r.exclusive_timeout != 30.0 else {}),
+                   if r.exclusive and r.exclusive_timeout != 10.0 else {}),
+                **({"when": dict(r.when)} if r.when else {}),
             }
             for r in rules
         ]
@@ -207,7 +295,9 @@ class SearchBuffer:
         """Incomplete trailing line (no newline yet)."""
         return self._partial
 
-    def add_text(self, text: str) -> bool:
+    def add_text(
+        self, text: str, echo_filter: Optional["set[str]"] = None,
+    ) -> bool:
         """
         Add server output text, stripping ANSI sequences first.
 
@@ -215,7 +305,12 @@ class SearchBuffer:
         Incomplete trailing text is held in ``_partial`` until the
         next newline arrives.
 
+        Complete lines whose stripped content exactly matches an entry
+        in *echo_filter* are silently dropped (and removed from the
+        set) so that echoed autoreply commands are never matched.
+
         :param text: Raw server output (may contain ANSI sequences).
+        :param echo_filter: Set of sent command strings to suppress.
         :returns: ``True`` if new complete lines were added.
         """
         stripped = strip_sequences(text)
@@ -236,7 +331,13 @@ class SearchBuffer:
         self._partial = parts[-1]
 
         # Everything except the last element is a complete line.
-        new_lines = parts[:-1]
+        # Drop lines that are echoes of commands we sent.
+        new_lines: list[str] = []
+        for line in parts[:-1]:
+            if echo_filter and line.strip() in echo_filter:
+                echo_filter.discard(line.strip())
+            else:
+                new_lines.append(line)
         self._lines.extend(new_lines)
         self._cull()
         return True
@@ -340,10 +441,22 @@ class AutoreplyEngine:
         self._skip_next_prompt = False
         self._exclusive_deadline: float = 0.0
         self._post_command: str = ""
+        self._sent_commands: set[str] = set()
         self._prompt_based = False
         self._cycle_matched: set[int] = set()
         self._suppress_exclusive = False
         self._last_matched_pattern: str = ""
+        self._condition_failed: Optional[tuple[int, str]] = None
+
+    @property
+    def condition_failed(self) -> Optional[tuple[int, str]]:
+        """``(rule_index_1based, description)`` if last match failed a condition.
+
+        Reading this property clears the value.
+        """
+        val = self._condition_failed
+        self._condition_failed = None
+        return val
 
     @property
     def buffer(self) -> SearchBuffer:
@@ -393,17 +506,12 @@ class AutoreplyEngine:
 
         :param text: Server output text.
         """
-        self._buffer.add_text(text)
+        self._buffer.add_text(text, self._sent_commands)
 
         if self._exclusive_active:
             # Check timeout.
-            if self._exclusive_deadline and time.monotonic() > self._exclusive_deadline:
-                self._log.info("autoreply: exclusive timed out")
-                self._exclusive_active = False
-                self._exclusive_rule_index = 0
-                self._until_pattern = None
-                self._skip_next_prompt = False
-                self._post_command = ""
+            if self.check_timeout():
+                self._buffer.add_text(text, self._sent_commands)
                 # fall through to normal matching below
             # Check until pattern to see if exclusive should end.
             elif self._until_pattern is not None:
@@ -417,14 +525,18 @@ class AutoreplyEngine:
                     self._exclusive_rule_index = 0
                     self._until_pattern = None
                     self._skip_next_prompt = False
+                    self._buffer.clear()
                     if self._post_command:
                         self._log.info(
                             "autoreply: queuing post_command %r",
                             self._post_command,
                         )
-                        self._queue_reply(self._post_command)
+                        post = self._post_command
+                        if not post.rstrip().endswith(";"):
+                            post = post.rstrip() + ";"
+                        self._queue_reply(post)
                         self._post_command = ""
-                    # fall through to normal matching below
+                    return
                 else:
                     self._match_always_rules()
                     return
@@ -432,6 +544,25 @@ class AutoreplyEngine:
                 self._match_always_rules()
                 return
 
+        searchable = self._buffer.get_searchable_text()
+        if not searchable:
+            return
+
+        # Once prompt-based mode is active (GA/EOR seen), defer normal
+        # matching until on_prompt() so that replies are never fired
+        # mid-output.  The buffer keeps accumulating and on_prompt()
+        # will run _match_rules() when the server signals it is done.
+        if self._prompt_based:
+            return
+
+        self._match_rules()
+
+    def _match_rules(self) -> None:
+        """Run normal (non-exclusive) rule matching on buffered text.
+
+        Called from :meth:`feed` before prompt-based mode is active,
+        and from :meth:`on_prompt` once prompt-based mode is active.
+        """
         searchable = self._buffer.get_searchable_text()
         if not searchable:
             return
@@ -461,8 +592,25 @@ class AutoreplyEngine:
                     if rule.exclusive and self._suppress_exclusive:
                         found = True
                         break
+                    if rule.when:
+                        ok, desc = check_condition(rule.when, self._writer)
+                        if not ok:
+                            self._log.info(
+                                "autoreply: rule #%d skipped, condition "
+                                "failed: %s", rule_idx + 1, desc,
+                            )
+                            self._condition_failed = (rule_idx + 1, desc)
+                            found = True
+                            break
                     reply = _substitute_groups(rule.reply, match)
+                    if not reply.rstrip().endswith(";"):
+                        reply = reply.rstrip() + ";"
                     self._queue_reply(reply)
+                    if not rule.exclusive and rule.post_command:
+                        post = _substitute_groups(rule.post_command, match)
+                        if not post.rstrip().endswith(";"):
+                            post = post.rstrip() + ";"
+                        self._queue_reply(post)
                     if rule.exclusive:
                         self._exclusive_active = True
                         self._exclusive_rule_index = rule_idx + 1
@@ -521,48 +669,43 @@ class AutoreplyEngine:
 
     async def _execute_reply(self, reply_text: str) -> None:
         """
-        Execute a single reply: parse delays, split on <CR>, send.
+        Execute a single reply: split on ``;``, expand repeats, handle delays, send.
+
+        Delay segments: ```delay Ns``` or ```delay Nms``` (e.g. ```delay 2s```, ```delay 500ms```).
+        Command segments support repeat prefixes (e.g. ``3e`` → ``e;e;e``).
+
+        If the reply ends with ``;``, all commands are sent immediately.
+        Otherwise the final command is inserted into the prompt for review.
 
         :param reply_text: Fully substituted reply string.
         """
-        # Split the reply on delay tokens first.
-        parts = _DELAY_RE.split(reply_text)
+        from .client_repl import expand_commands  # pylint: disable=import-outside-toplevel
 
-        # parts comes in groups: [text, value, unit, text, value, unit, ...]
-        # When there are no delays, parts is just [reply_text].
-        i = 0
-        while i < len(parts):
-            text_segment = parts[i]
-            i += 1
-
-            # Process text segment: split on <CR> and send.
-            if text_segment:
-                cr_parts = _CR_RE.split(text_segment)
-                is_last_segment = i >= len(parts) or i + 1 >= len(parts)
-                for j, cmd in enumerate(cr_parts):
-                    if j < len(cr_parts) - 1:
-                        # This segment ends with <CR> — send it.
-                        if self._wait_fn is not None:
-                            await self._wait_fn()
-                        self._send_command(cmd)
-                    elif cmd and is_last_segment and self._insert_fn is not None:
-                        # Trailing text without <CR> — insert into prompt
-                        # so the user can review before pressing Enter.
-                        self._log.info("autoreply: inserting %r into prompt", cmd)
-                        self._insert_fn(cmd)
-                    elif cmd:
-                        if self._wait_fn is not None:
-                            await self._wait_fn()
-                        self._send_command(cmd)
-
-            # Process delay if present.
-            if i + 1 < len(parts):
-                value = float(parts[i])
-                unit = parts[i + 1]
+        send_all = True
+        cmds = expand_commands(reply_text)
+        sent_count = 0
+        for j, cmd in enumerate(cmds):
+            dm = _DELAY_RE.match(cmd)
+            if dm:
+                value = float(dm.group(1))
+                unit = dm.group(2)
                 delay = value / 1000.0 if unit == "ms" else value
-                i += 2
                 if delay > 0:
                     await asyncio.sleep(delay)
+                continue
+
+            is_last = j == len(cmds) - 1
+            if is_last and not send_all and self._insert_fn is not None:
+                self._log.info("autoreply: inserting %r into prompt", cmd)
+                self._insert_fn(cmd)
+            else:
+                # Skip wait_fn for the first command — the match was
+                # triggered by output that ended with a GA/EOR prompt
+                # signal, so the server is already ready for input.
+                if sent_count > 0 and self._wait_fn is not None:
+                    await self._wait_fn()
+                self._send_command(cmd)
+                sent_count += 1
 
     def _send_command(self, cmd: str) -> None:
         """
@@ -573,12 +716,17 @@ class AutoreplyEngine:
         if not cmd or not cmd.strip():
             return
         self._log.info("autoreply: sending %r", cmd)
+        self._sent_commands.add(cmd.strip())
         if self._echo_fn is not None:
             self._echo_fn(cmd)
         self._writer.write(cmd + "\r\n")  # type: ignore[arg-type]
 
     def on_prompt(self) -> None:
-        """Clear per-cycle state and exclusive suppression on EOR/GA.
+        """Match accumulated text and clear per-cycle state on EOR/GA.
+
+        In prompt-based mode, :meth:`feed` defers normal rule matching
+        to this method so that replies are never fired mid-output.
+        Matching runs on the full buffer before it is cleared.
 
         The first EOR/GA after an exclusive rule fires is skipped,
         because it belongs to the same server response that triggered
@@ -591,6 +739,10 @@ class AutoreplyEngine:
         rules can match again in the next prompt cycle.
         """
         self._prompt_based = True
+        # Match on accumulated buffer before clearing — this is where
+        # deferred matches from feed() actually fire.
+        if not self._exclusive_active:
+            self._match_rules()
         self._cycle_matched.clear()
         self._buffer.clear()
         if self._skip_next_prompt:
@@ -603,6 +755,24 @@ class AutoreplyEngine:
         self._exclusive_rule_index = 0
         self._post_command = ""
 
+    def check_timeout(self) -> bool:
+        """Check and clear exclusive mode if the deadline has passed.
+
+        :returns: ``True`` if exclusive was cleared by timeout.
+        """
+        if (self._exclusive_active
+                and self._exclusive_deadline
+                and time.monotonic() > self._exclusive_deadline):
+            self._log.info("autoreply: exclusive timed out")
+            self._exclusive_active = False
+            self._exclusive_rule_index = 0
+            self._until_pattern = None
+            self._skip_next_prompt = False
+            self._post_command = ""
+            self._buffer.clear()
+            return True
+        return False
+
     def cancel(self) -> None:
         """Cancel any pending reply chain and clear exclusive state."""
         if self._reply_chain is not None and not self._reply_chain.done():
@@ -614,3 +784,4 @@ class AutoreplyEngine:
         self._skip_next_prompt = False
         self._post_command = ""
         self._exclusive_deadline = 0.0
+        self._sent_commands.clear()

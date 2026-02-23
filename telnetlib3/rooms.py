@@ -46,7 +46,7 @@ class RoomGraph:
         num = str(info["num"])
         exits = info.get("exits", {})
         if isinstance(exits, dict):
-            exits = {str(k): str(v) for k, v in exits.items()}
+            exits = {str(k): str(v) for k, v in exits.items() if v}
         else:
             exits = {}
 
@@ -68,6 +68,29 @@ class RoomGraph:
                 visit_count=1,
                 last_visited=datetime.now(timezone.utc).isoformat(),
             )
+
+    def bfs_distances(self, src: str) -> dict[str, int]:
+        """
+        BFS from *src* returning distance to every reachable room.
+
+        :param src: Source room number.
+        :returns: ``{room_num: distance}`` for all reachable rooms (including src=0).
+        """
+        if src not in self.rooms:
+            return {}
+        distances: dict[str, int] = {src: 0}
+        queue: deque[str] = deque([src])
+        while queue:
+            current = queue.popleft()
+            d = distances[current]
+            room = self.rooms.get(current)
+            if room is None:
+                continue
+            for target in room.exits.values():
+                if target not in distances and target in self.rooms:
+                    distances[target] = d + 1
+                    queue.append(target)
+        return distances
 
     def find_path(self, src: str, dst: str) -> list[str] | None:
         """
@@ -133,6 +156,25 @@ class RoomGraph:
         """Toggle the bookmark flag on a room."""
         if num in self.rooms:
             self.rooms[num].bookmarked = not self.rooms[num].bookmarked
+
+    def find_same_name(self, num: str, limit: int = 99) -> list[Room]:
+        """
+        Find rooms with the same name as *num*, sorted by least-recently-visited.
+
+        :param num: Room number to match name against.
+        :param limit: Maximum results to return.
+        :returns: List of matching rooms, excluding *num* itself.
+        """
+        room = self.rooms.get(num)
+        if room is None or not room.name:
+            return []
+        target_name = room.name
+        matches = [
+            r for r in self.rooms.values()
+            if r.num != num and r.name == target_name
+        ]
+        matches.sort(key=lambda r: r.last_visited)
+        return matches[:limit]
 
     def search(self, query: str) -> list[Room]:
         """

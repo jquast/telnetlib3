@@ -5,6 +5,7 @@ from __future__ import annotations
 # std imports
 import json
 import types
+import asyncio
 import logging
 
 # 3rd party
@@ -31,8 +32,8 @@ def test_load_macros_valid(tmp_path):
             {
                 _SK: {
                     "macros": [
-                        {"key": "f5", "text": "look<CR>"},
-                        {"key": "escape n", "text": "north<CR>"},
+                        {"key": "f5", "text": "look;"},
+                        {"key": "escape n", "text": "north;"},
                     ]
                 }
             }
@@ -41,7 +42,7 @@ def test_load_macros_valid(tmp_path):
     macros = load_macros(str(fp), _SK)
     assert len(macros) == 2
     assert macros[0].keys == ("f5",)
-    assert macros[0].text == "look<CR>"
+    assert macros[0].text == "look;"
     assert macros[1].keys == ("escape", "n")
 
 
@@ -54,7 +55,7 @@ def test_load_macros_empty_key_skipped(tmp_path):
     fp = tmp_path / "macros.json"
     fp.write_text(
         json.dumps(
-            {_SK: {"macros": [{"key": "", "text": "skip"}, {"key": "f6", "text": "keep<CR>"}]}}
+            {_SK: {"macros": [{"key": "", "text": "skip"}, {"key": "f6", "text": "keep;"}]}}
         )
     )
     macros = load_macros(str(fp), _SK)
@@ -76,7 +77,7 @@ def test_load_macros_no_session(tmp_path):
 
 def test_load_macros_multi_key(tmp_path):
     fp = tmp_path / "macros.json"
-    fp.write_text(json.dumps({_SK: {"macros": [{"key": "c-x c-s", "text": "save<CR>"}]}}))
+    fp.write_text(json.dumps({_SK: {"macros": [{"key": "c-x c-s", "text": "save;"}]}}))
     macros = load_macros(str(fp), _SK)
     assert macros[0].keys == ("c-x", "c-s")
 
@@ -84,9 +85,9 @@ def test_load_macros_multi_key(tmp_path):
 def test_save_macros_roundtrip(tmp_path):
     fp = tmp_path / "macros.json"
     original = [
-        Macro(keys=("f5",), text="look<CR>"),
-        Macro(keys=("escape", "n"), text="north<CR>"),
-        Macro(keys=("c-x", "c-s"), text="save<CR>"),
+        Macro(keys=("f5",), text="look;"),
+        Macro(keys=("escape", "n"), text="north;"),
+        Macro(keys=("c-x", "c-s"), text="save;"),
     ]
     save_macros(str(fp), original, _SK)
     loaded = load_macros(str(fp), _SK)
@@ -98,8 +99,8 @@ def test_save_macros_roundtrip(tmp_path):
 
 def test_save_macros_preserves_other_sessions(tmp_path):
     fp = tmp_path / "macros.json"
-    save_macros(str(fp), [Macro(keys=("f1",), text="a<CR>")], "host1:23")
-    save_macros(str(fp), [Macro(keys=("f2",), text="b<CR>")], "host2:23")
+    save_macros(str(fp), [Macro(keys=("f1",), text="a;")], "host1:23")
+    save_macros(str(fp), [Macro(keys=("f2",), text="b;")], "host2:23")
     assert len(load_macros(str(fp), "host1:23")) == 1
     assert len(load_macros(str(fp), "host2:23")) == 1
 
@@ -112,16 +113,31 @@ def test_save_macros_empty(tmp_path):
 
 def test_save_macros_unicode(tmp_path):
     fp = tmp_path / "macros.json"
-    macros = [Macro(keys=("f1",), text="say héllo<CR>")]
+    macros = [Macro(keys=("f1",), text="say héllo;")]
     save_macros(str(fp), macros, _SK)
     loaded = load_macros(str(fp), _SK)
-    assert loaded[0].text == "say héllo<CR>"
+    assert loaded[0].text == "say héllo;"
 
 
 def _mock_writer():
     """Create a mock writer that records write() calls."""
     written: list[str] = []
-    writer = types.SimpleNamespace(write=lambda text: written.append(text))
+    prompt_ready = asyncio.Event()
+    prompt_ready.set()
+
+    async def _wait() -> None:
+        await asyncio.sleep(0)
+
+    writer = types.SimpleNamespace(
+        write=lambda text: written.append(text),
+        log=logging.getLogger("test"),
+        _wait_for_prompt=_wait,
+        _echo_command=lambda cmd: None,
+        _prompt_ready=prompt_ready,
+        _current_room_num="",
+        _rooms_file="",
+        _session_key="",
+    )
     return writer, written
 
 
@@ -132,42 +148,25 @@ class TestBindMacros:
         kb = prompt_toolkit.key_binding.KeyBindings()
         writer, written = _mock_writer()
         log = logging.getLogger("test")
-        macros = [Macro(keys=("f5",), text="look<CR>")]
+        macros = [Macro(keys=("f5",), text="look;")]
         bind_macros(kb, macros, writer, log)
         assert len(kb.bindings) >= 1
 
     def test_multi_command(self):
+        from telnetlib3.client_repl import expand_commands
         writer, written = _mock_writer()
-        macro = Macro(keys=("f6",), text="look<CR>inventory<CR>")
-        parts = macro.text.split("<CR>")
-        for i, part in enumerate(parts):
-            if i < len(parts) - 1:
-                writer.write(part + "\r\n")
-            elif part:
-                pass
+        macro = Macro(keys=("f6",), text="look;inventory;")
+        cmds = expand_commands(macro.text)
+        for cmd in cmds:
+            writer.write(cmd + "\r\n")
         assert written == ["look\r\n", "inventory\r\n"]
 
-    def test_insert_only_no_cr(self):
-        writer, written = _mock_writer()
-        macro = Macro(keys=("f7",), text="partial text")
-        parts = macro.text.split("<CR>")
-        for i, part in enumerate(parts):
-            if i < len(parts) - 1:
-                writer.write(part + "\r\n")
-        assert written == []
-
-    def test_invalid_key_logged_not_raised(self):
+    @pytest.mark.asyncio
+    async def test_no_semicolon_still_sends(self):
         kb = prompt_toolkit.key_binding.KeyBindings()
         writer, written = _mock_writer()
         log = logging.getLogger("test")
-        macros = [Macro(keys=("INVALID_KEY_NAME_XYZ",), text="x<CR>")]
-        bind_macros(kb, macros, writer, log)
-
-    def test_handler_sends_cr_parts(self):
-        kb = prompt_toolkit.key_binding.KeyBindings()
-        writer, written = _mock_writer()
-        log = logging.getLogger("test")
-        macros = [Macro(keys=("f5",), text="look<CR>")]
+        macros = [Macro(keys=("f7",), text="partial text")]
         bind_macros(kb, macros, writer, log)
         handler = kb.bindings[-1].handler
         event = types.SimpleNamespace(
@@ -176,21 +175,47 @@ class TestBindMacros:
             )
         )
         handler(event)
-        assert "look\r\n" in written
+        await asyncio.sleep(0.05)
+        assert "partial text\r\n" in written
 
-    def test_handler_inserts_trailing_text(self):
+    def test_invalid_key_logged_not_raised(self):
         kb = prompt_toolkit.key_binding.KeyBindings()
         writer, written = _mock_writer()
         log = logging.getLogger("test")
-        macros = [Macro(keys=("f6",), text="cmd<CR>trailing")]
+        macros = [Macro(keys=("INVALID_KEY_NAME_XYZ",), text="x;")]
+        bind_macros(kb, macros, writer, log)
+
+    @pytest.mark.asyncio
+    async def test_handler_sends_cr_parts(self):
+        kb = prompt_toolkit.key_binding.KeyBindings()
+        writer, written = _mock_writer()
+        log = logging.getLogger("test")
+        macros = [Macro(keys=("f5",), text="look;")]
         bind_macros(kb, macros, writer, log)
         handler = kb.bindings[-1].handler
-        inserted: list[str] = []
         event = types.SimpleNamespace(
             app=types.SimpleNamespace(
-                current_buffer=types.SimpleNamespace(insert_text=inserted.append)
+                current_buffer=types.SimpleNamespace(insert_text=lambda t: None)
             )
         )
         handler(event)
+        await asyncio.sleep(0.05)
+        assert "look\r\n" in written
+
+    @pytest.mark.asyncio
+    async def test_handler_sends_all_commands(self):
+        kb = prompt_toolkit.key_binding.KeyBindings()
+        writer, written = _mock_writer()
+        log = logging.getLogger("test")
+        macros = [Macro(keys=("f6",), text="cmd;trailing")]
+        bind_macros(kb, macros, writer, log)
+        handler = kb.bindings[-1].handler
+        event = types.SimpleNamespace(
+            app=types.SimpleNamespace(
+                current_buffer=types.SimpleNamespace(insert_text=lambda t: None)
+            )
+        )
+        handler(event)
+        await asyncio.sleep(0.05)
         assert "cmd\r\n" in written
-        assert "trailing" in inserted
+        assert "trailing\r\n" in written
