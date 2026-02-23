@@ -9,7 +9,6 @@ fingerprint-based capability detection, and subprocess-based connection
 launching.
 """
 
-# pylint: disable=import-error
 from __future__ import annotations
 
 # std imports
@@ -19,8 +18,11 @@ import json
 import datetime
 import subprocess
 from abc import abstractmethod
-from typing import Any, ClassVar, NamedTuple
+from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
 from dataclasses import asdict, fields, dataclass
+
+if TYPE_CHECKING:
+    from .rooms import RoomGraph
 
 # 3rd party
 from textual import events
@@ -64,7 +66,7 @@ _ENCODINGS = (
 )
 
 # local
-from ._paths import DATA_DIR, CONFIG_DIR, HISTORY_FILE, SESSIONS_FILE
+from ._paths import DATA_DIR, CONFIG_DIR, SESSIONS_FILE  # noqa: E402
 
 DEFAULTS_KEY = "__defaults__"
 
@@ -177,7 +179,7 @@ def _build_tooltips() -> dict[str, str]:
 
     parser = _get_argument_parser()
     tips: dict[str, str] = {}
-    for action in parser._actions:  # pylint: disable=protected-access
+    for action in parser._actions:
         if not action.help:
             continue
         for opt in action.option_strings:
@@ -668,7 +670,7 @@ class SessionListScreen(Screen[None]):
         self._save()
 
 
-class SessionEditScreen(Screen[SessionConfig | None]):
+class SessionEditScreen(Screen[SessionConfig | None]):  # type: ignore[misc]
     """Full-screen form for adding or editing a session."""
 
     CSS = """
@@ -1126,10 +1128,8 @@ class SessionEditScreen(Screen[SessionConfig | None]):
         cfg.last_connected = self._config.last_connected
 
         cfg.term = self.query_one("#term", Input).value.strip()
-        cfg.encoding = self.query_one("#encoding", Select).value  # type: ignore[assignment]
-        cfg.encoding_errors = (  # type: ignore[assignment]
-            self.query_one("#encoding-errors", Select).value
-        )
+        cfg.encoding = self.query_one("#encoding", Select).value
+        cfg.encoding_errors = self.query_one("#encoding-errors", Select).value
 
         if self.query_one("#mode-raw", RadioButton).value:
             cfg.mode = "raw"
@@ -1141,7 +1141,7 @@ class SessionEditScreen(Screen[SessionConfig | None]):
         cfg.ansi_keys = self.query_one("#ansi-keys", Switch).value
         cfg.ascii_eol = self.query_one("#ascii-eol", Switch).value
 
-        cfg.colormatch = self.query_one("#colormatch", Select).value  # type: ignore[assignment]
+        cfg.colormatch = self.query_one("#colormatch", Select).value
         cfg.background_color = "#000000"
         cfg.ice_colors = self.query_one("#ice-colors", Switch).value
 
@@ -1153,7 +1153,7 @@ class SessionEditScreen(Screen[SessionConfig | None]):
         )
         cfg.always_will = self._config.always_will
         cfg.always_do = self._config.always_do
-        cfg.loglevel = self.query_one("#loglevel", Select).value  # type: ignore[assignment]
+        cfg.loglevel = self.query_one("#loglevel", Select).value
         cfg.logfile = self.query_one("#logfile", Input).value.strip()
         cfg.no_repl = not self.query_one("#use-repl", Switch).value
 
@@ -1185,11 +1185,13 @@ class _EditListScreen(Screen["bool | None"]):
 
     @property
     @abstractmethod
-    def _prefix(self) -> str: ...
+    def _prefix(self) -> str:
+        ...
 
     @property
     @abstractmethod
-    def _items(self) -> list[Any]: ...
+    def _items(self) -> list[Any]:
+        ...
 
     def __init__(self) -> None:
         super().__init__()
@@ -1261,21 +1263,23 @@ class _EditListScreen(Screen["bool | None"]):
         table.move_cursor(row=target)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Submit the form when Enter is pressed in an input field."""
         if self._form_visible:
             event.stop()
             self._submit_form()
 
     def action_cancel_or_close(self) -> None:
+        """Cancel form editing or close the screen."""
         if self._form_visible:
             self._hide_form()
         else:
             self.dismiss(None)
 
     def action_reorder_hint(self) -> None:
-        pass
+        """Placeholder for reorder key binding hint."""
 
     def action_save_hint(self) -> None:
-        pass
+        """Placeholder for save key binding hint."""
 
     def on_key(self, event: events.Key) -> None:
         """Arrow/Home/End/+/- keys navigate and reorder the table."""
@@ -1340,16 +1344,20 @@ class _EditListScreen(Screen["bool | None"]):
         """Override to handle subclass-specific buttons."""
 
     @abstractmethod
-    def _show_form(self, *args: Any) -> None: ...
+    def _show_form(self, *args: Any) -> None:
+        ...
 
     @abstractmethod
-    def _submit_form(self) -> None: ...
+    def _submit_form(self) -> None:
+        ...
 
     @abstractmethod
-    def _refresh_table(self) -> None: ...
+    def _refresh_table(self) -> None:
+        ...
 
     @abstractmethod
-    def _save_to_file(self) -> None: ...
+    def _save_to_file(self) -> None:
+        ...
 
 
 class MacroEditScreen(_EditListScreen):
@@ -1498,7 +1506,9 @@ class MacroEditScreen(_EditListScreen):
             status = "" if enabled else " (off)"
             table.add_row(key, text + status, key=str(i))
 
-    def _show_form(self, key_val: str = "", text_val: str = "", enabled: bool = True) -> None:
+    def _show_form(  # pylint: disable=arguments-differ
+        self, key_val: str = "", text_val: str = "", enabled: bool = True,
+    ) -> None:
         self._captured_key = key_val
         self._capturing = False
         self._capture_escape_pending = False
@@ -1622,6 +1632,7 @@ class MacroEditScreen(_EditListScreen):
         super().on_key(event)
 
     def action_cancel_or_close(self) -> None:
+        """Cancel key capture or close the screen."""
         if self._capturing:
             return
         super().action_cancel_or_close()
@@ -1903,7 +1914,7 @@ class AutoreplyEditScreen(_EditListScreen):
             reply_display = rule.reply if len(rule.reply) <= 20 else rule.reply[:19] + "\u2026"
             table.add_row(str(i + 1), pat_display, reply_display, flags.strip(), key=str(i))
 
-    def _show_form(
+    def _show_form(  # pylint: disable=arguments-differ,too-many-positional-arguments
         self,
         pattern_val: str = "",
         reply_val: str = "",
@@ -2000,7 +2011,7 @@ class AutoreplyEditScreen(_EditListScreen):
     def on_select_changed(self, event: Select.Changed) -> None:
         """Disable operator/value fields when condition vital is '(none)'."""
         if event.select.id == "autoreply-cond-vital":
-            disabled = event.value == "" or event.value is Select.BLANK
+            disabled = not event.value or event.value is Select.BLANK
             self.query_one("#autoreply-cond-op", Select).disabled = disabled
             self.query_one("#autoreply-cond-val", Input).disabled = disabled
 
@@ -2222,7 +2233,7 @@ class RoomBrowserScreen(Screen["bool | None"]):
         q = query.lower()
         select = self.query_one("#room-area-select", Select)
         area_filter = select.value if isinstance(select.value, str) else None
-        for num, name, area, exits, bookmarked in self._all_rooms:
+        for num, name, area, _exits, bookmarked in self._all_rooms:
             if area_filter and area != area_filter:
                 continue
             if q and q not in name.lower() and q not in area.lower():

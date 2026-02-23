@@ -1,7 +1,7 @@
-"""
+r"""
 Named constants for ANSI/VT escape sequences.
 
-Replaces raw ``\\x1b[...]`` literals scattered across the codebase with
+Replaces raw ``\x1b[...]`` literals scattered across the codebase with
 readable, self-documenting names.  Only sequences actually used by the
 telnetlib3 client are included.
 """
@@ -49,7 +49,8 @@ TERMINAL_CLEANUP: str = (
 
 
 def cup(row: int, col: int) -> str:
-    """CUP -- cursor position (1-indexed).
+    """
+    CUP -- cursor position (1-indexed).
 
     :param row: 1-indexed row number.
     :param col: 1-indexed column number.
@@ -59,7 +60,8 @@ def cup(row: int, col: int) -> str:
 
 
 def decstbm(top: int, bottom: int) -> str:
-    """DECSTBM -- set top and bottom margins (scroll region).
+    """
+    DECSTBM -- set top and bottom margins (scroll region).
 
     :param top: First row of the scroll region (1-indexed).
     :param bottom: Last row of the scroll region (1-indexed).

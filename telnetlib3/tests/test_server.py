@@ -85,8 +85,6 @@ async def test_connection_lost_remove_done_callback_raises():
 
 @pytest.mark.asyncio
 async def test_data_received_trace_log():
-    import logging
-
     from telnetlib3.accessories import TRACE
 
     server = BaseServer(encoding=False)
@@ -225,7 +223,7 @@ async def test_check_encoding_binary_incoming_request():
 async def test_tls_autodetect_empty_peek():
     """TLS auto-detect closes transport on empty peek."""
     proto = _TLSAutoDetectProtocol(
-        ssl_module.SSLContext(ssl_module.PROTOCOL_TLS_SERVER), lambda: MagicMock()
+        ssl_module.SSLContext(ssl_module.PROTOCOL_TLS_SERVER), MagicMock
     )
     transport = MagicMock()
     mock_sock = MagicMock()
@@ -246,7 +244,7 @@ async def test_tls_autodetect_empty_peek():
 async def test_tls_upgrade_handshake_failure():
     """_upgrade_to_tls handles SSLError gracefully."""
     proto = _TLSAutoDetectProtocol(
-        ssl_module.SSLContext(ssl_module.PROTOCOL_TLS_SERVER), lambda: MagicMock()
+        ssl_module.SSLContext(ssl_module.PROTOCOL_TLS_SERVER), MagicMock
     )
     transport = MagicMock()
     transport.is_closing.return_value = False
@@ -316,7 +314,7 @@ async def test_run_server_guarded_shell_wrapping():
                     robot_check=True,
                     pty_fork_limit=2,
                 )
-            except (asyncio.CancelledError, Exception):
+            except (asyncio.CancelledError, OSError):
                 pass
 
     assert created_server.shell is not None

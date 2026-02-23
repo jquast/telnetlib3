@@ -147,7 +147,7 @@ def _bind_one(
     try:
 
         @kb.add(*keys)  # type: ignore[untyped-decorator]
-        def _handler(event: Any, _text: str = text) -> None:
+        def _handler(_event: Any, _text: str = text) -> None:
             asyncio.ensure_future(execute_macro_commands(_text, writer, log))
 
     except (ValueError, KeyError) as exc:

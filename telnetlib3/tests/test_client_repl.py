@@ -250,7 +250,7 @@ def test_pt_repl_toolbar_without_connection_info() -> None:
 
     writer = _mock_writer()
     repl = PromptToolkitRepl(writer, writer.log)
-    assert repl._rprompt_text == ""
+    assert not repl._rprompt_text
 
 
 @pytest.mark.skipif(not HAS_PROMPT_TOOLKIT, reason="prompt_toolkit not installed")
@@ -460,7 +460,7 @@ async def test_pt_autoreply_integration() -> None:
     writer.local_option = types.SimpleNamespace(enabled=lambda _: False)
     writer.is_closing = lambda: True
     writer.mode = "local"
-    writer.write = lambda text: written.append(text)
+    writer.write = written.append
     writer.log = logging.getLogger("test.pt_autoreply")
     writer._autoreply_rules = [AutoreplyRule(pattern=re.compile(r"trigger"), reply="reply;")]
 
@@ -491,7 +491,7 @@ async def test_pt_autoreply_hot_reload() -> None:
     writer.is_closing = lambda: True
     writer.mode = "local"
     writer.close = lambda: None
-    writer.write = lambda text: written.append(text)
+    writer.write = written.append
     writer.log = logging.getLogger("test.pt_autoreply_reload")
     writer._autoreply_rules = None
 
@@ -521,7 +521,7 @@ def test_launch_tui_editor_calls_run_in_terminal(monkeypatch) -> None:
 
     import prompt_toolkit.application as pta
 
-    monkeypatch.setattr(pta, "run_in_terminal", lambda fn: called_with.append(fn))
+    monkeypatch.setattr(pta, "run_in_terminal", called_with.append)
 
     event = types.SimpleNamespace(app=types.SimpleNamespace())
     writer = types.SimpleNamespace()

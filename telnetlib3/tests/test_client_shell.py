@@ -632,10 +632,10 @@ def test_check_auto_mode_echo_only_stays_linemode() -> None:
     term._istty = True
     term._save_mode = _cooked_mode()
     _set_modes: list[Terminal.ModeDef] = []
-    term.set_mode = lambda m: _set_modes.append(m)  # type: ignore[method-assign]
+    term.set_mode = _set_modes.append  # type: ignore[method-assign]
     result = term.check_auto_mode(switched_to_raw=False, last_will_echo=False)
     assert result is not None
-    switched_to_raw, last_will_echo, local_echo = result
+    switched_to_raw, last_will_echo, local_echo = result  # pylint: disable=unpacking-non-sequence
     assert switched_to_raw is False
     assert last_will_echo is True
     assert local_echo is False
@@ -651,10 +651,10 @@ def test_check_auto_mode_sga_goes_raw() -> None:
     term._istty = True
     term._save_mode = _cooked_mode()
     _set_modes: list[Terminal.ModeDef] = []
-    term.set_mode = lambda m: _set_modes.append(m)  # type: ignore[method-assign]
+    term.set_mode = _set_modes.append  # type: ignore[method-assign]
     result = term.check_auto_mode(switched_to_raw=False, last_will_echo=False)
     assert result is not None
-    switched_to_raw, _, _ = result
+    switched_to_raw, _, _ = result  # pylint: disable=unpacking-non-sequence
     assert switched_to_raw is True
     assert len(_set_modes) == 1
     assert not _set_modes[0].lflag & termios.ICANON
@@ -730,7 +730,7 @@ async def test_raw_event_loop_reactivates_repl() -> None:
     writer.is_closing = lambda: False
 
     term = _make_term(writer)
-    term.check_auto_mode = lambda switched, last_echo: None
+    term.check_auto_mode = lambda switched_to_raw, last_will_echo: None
 
     stdout = mock.Mock()
     stdout.write = mock.Mock()
@@ -748,7 +748,7 @@ async def test_raw_event_loop_reactivates_repl() -> None:
         switched_to_raw=True,
         last_will_echo=False,
         linesep="\r\n",
-        handle_close=lambda msg: close_calls.append(msg),
+        handle_close=close_calls.append,
         want_repl=lambda: True,
     )
     reactivate_repl, switched, last_echo, local_echo, linesep = result
@@ -861,7 +861,7 @@ def test_transform_output_bare_cr_preserved_raw() -> None:
 
 def test_transform_output_empty_string() -> None:
     writer = _make_transform_writer()
-    assert _transform_output("", writer, True) == ""
+    assert not _transform_output("", writer, True)
 
 
 @pytest.mark.parametrize(

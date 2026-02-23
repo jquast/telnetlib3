@@ -64,13 +64,13 @@ def test_load_macros_empty_key_skipped(tmp_path):
 def test_load_macros_empty_list(tmp_path):
     fp = tmp_path / "macros.json"
     fp.write_text(json.dumps({_SK: {"macros": []}}))
-    assert load_macros(str(fp), _SK) == []
+    assert not load_macros(str(fp), _SK)
 
 
 def test_load_macros_no_session(tmp_path):
     fp = tmp_path / "macros.json"
     fp.write_text(json.dumps({"other.host:23": {"macros": [{"key": "f5", "text": "x"}]}}))
-    assert load_macros(str(fp), _SK) == []
+    assert not load_macros(str(fp), _SK)
 
 
 def test_load_macros_multi_key(tmp_path):
@@ -106,7 +106,7 @@ def test_save_macros_preserves_other_sessions(tmp_path):
 def test_save_macros_empty(tmp_path):
     fp = tmp_path / "macros.json"
     save_macros(str(fp), [], _SK)
-    assert load_macros(str(fp), _SK) == []
+    assert not load_macros(str(fp), _SK)
 
 
 def test_save_macros_unicode(tmp_path):
@@ -127,7 +127,7 @@ def _mock_writer():
         await asyncio.sleep(0)
 
     writer = types.SimpleNamespace(
-        write=lambda text: written.append(text),
+        write=written.append,
         log=logging.getLogger("test"),
         _wait_for_prompt=_wait,
         _echo_command=lambda cmd: None,

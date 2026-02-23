@@ -36,6 +36,7 @@ class RoomGraph:
     """Directed graph of rooms built from GMCP Room.Info messages."""
 
     def __init__(self) -> None:
+        """Initialize an empty room graph."""
         self.rooms: dict[str, Room] = {}
 
     def update_room(self, info: dict[str, Any]) -> None:
@@ -331,5 +332,5 @@ def read_fasttravel(path: str) -> tuple[list[tuple[str, str]], bool]:
             return steps, slow
         # Legacy format: bare list
         return [(str(d), str(r)) for d, r in data], False
-    except (OSError, ValueError, json.JSONDecodeError):
+    except (OSError, ValueError):
         return [], False

@@ -52,6 +52,7 @@ class MockWriter:
         self.comport_data: dict[str, object] | None = None
         self.protocol = _MockProtocol()
         self._closing = False
+        self._menu_inline: bool = False
 
     def get_extra_info(self, key, default=None):
         return self._extra.get(key, default)
@@ -118,7 +119,7 @@ class InteractiveMockReader:
 
 _BINARY_PROBE = {"BINARY": {"status": "WILL", "opt": fps.BINARY}}
 
-_FP_KWARGS = dict(silent=True, banner_quiet_time=0.01, banner_max_wait=0.01, mssp_wait=0.01)
+_FP_KWARGS = {"silent": True, "banner_quiet_time": 0.01, "banner_max_wait": 0.01, "mssp_wait": 0.01}
 
 
 async def _run_fp(reader, writer, tmp_path, **extra):
@@ -990,7 +991,7 @@ def test_cull_display_empty_bytes_culled():
 async def test_read_banner_until_quiet_dsr(chunks, has_writer, expected_cpr_count):
     reader = MockReader(chunks)
     writer = MockWriter() if has_writer else None
-    kwargs = dict(quiet_time=0.01, max_wait=0.05)
+    kwargs = {"quiet_time": 0.01, "max_wait": 0.05}
     if writer is not None:
         kwargs["writer"] = writer
     result = await sfp._read_banner_until_quiet(reader, **kwargs)
@@ -1166,7 +1167,7 @@ async def test_read_banner_inline_utf8_menu():
     await sfp._read_banner_until_quiet(reader, quiet_time=0.01, max_wait=0.05, writer=writer)
     assert b"1\r\n" in writer._writes
     assert writer.environ_encoding == "utf-8"
-    assert writer._menu_inline is True  # type: ignore[attr-defined]
+    assert writer._menu_inline is True
 
 
 @pytest.mark.asyncio

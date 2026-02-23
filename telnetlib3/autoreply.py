@@ -548,9 +548,8 @@ class AutoreplyEngine:
                         self._queue_reply(post)
                         self._post_command = ""
                     return
-                else:
-                    self._match_always_rules()
-                    return
+                self._match_always_rules()
+                return
             else:
                 self._match_always_rules()
                 return
@@ -609,7 +608,7 @@ class AutoreplyEngine:
                         ok, desc = check_condition(rule.when, self._writer)
                         if not ok:
                             self._log.info(
-                                "autoreply: rule #%d skipped, condition " "failed: %s",
+                                "autoreply: rule #%d skipped, condition failed: %s",
                                 rule_idx + 1,
                                 desc,
                             )
@@ -684,7 +683,7 @@ class AutoreplyEngine:
                         ok, desc = check_condition(rule.when, self._writer)
                         if not ok:
                             self._log.info(
-                                "autoreply: immediate rule #%d skipped, " "condition failed: %s",
+                                "autoreply: immediate rule #%d skipped, condition failed: %s",
                                 rule_idx + 1,
                                 desc,
                             )
@@ -817,7 +816,7 @@ class AutoreplyEngine:
             self._exclusive_prompt_count += 1
             if self._exclusive_prompt_count >= 2:
                 self._log.info(
-                    "autoreply: exclusive cleared after %d prompts" " without until match",
+                    "autoreply: exclusive cleared after %d prompts without until match",
                     self._exclusive_prompt_count,
                 )
                 self._exclusive_active = False

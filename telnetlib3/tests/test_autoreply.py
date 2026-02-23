@@ -46,7 +46,7 @@ def test_search_buffer_add_text_newline_completes_line():
     result = buf.add_text(" more\n")
     assert result is True
     assert buf.lines == ["partial more"]
-    assert buf.partial == ""
+    assert not buf.partial
 
 
 def test_search_buffer_add_text_multiple_lines():
@@ -183,13 +183,13 @@ def test_load_autoreplies_empty_pattern_skipped(tmp_path):
 def test_load_autoreplies_empty_list(tmp_path):
     fp = tmp_path / "empty.json"
     fp.write_text(json.dumps({_SK: {"autoreplies": []}}))
-    assert load_autoreplies(str(fp), _SK) == []
+    assert not load_autoreplies(str(fp), _SK)
 
 
 def test_load_autoreplies_no_session(tmp_path):
     fp = tmp_path / "autoreplies.json"
     fp.write_text(json.dumps({"other:23": {"autoreplies": [{"pattern": "x", "reply": "y"}]}}))
-    assert load_autoreplies(str(fp), _SK) == []
+    assert not load_autoreplies(str(fp), _SK)
 
 
 def test_save_autoreplies_roundtrip(tmp_path):
@@ -221,7 +221,7 @@ def test_save_autoreplies_preserves_other_sessions(tmp_path):
 def test_save_autoreplies_empty(tmp_path):
     fp = tmp_path / "autoreplies.json"
     save_autoreplies(str(fp), [], _SK)
-    assert load_autoreplies(str(fp), _SK) == []
+    assert not load_autoreplies(str(fp), _SK)
 
 
 def test_save_autoreplies_unicode(tmp_path):
@@ -276,7 +276,7 @@ def _mock_writer():
     """Create a mock writer that records write() calls."""
     written: list[str] = []
     writer = types.SimpleNamespace(
-        write=lambda text: written.append(text), log=logging.getLogger("test")
+        write=written.append, log=logging.getLogger("test")
     )
     return writer, written
 
@@ -752,7 +752,7 @@ def test_save_autoreplies_field_roundtrip(
     assert getattr(loaded[0], field) == exp0
     assert getattr(loaded[1], field) == exp1
 
-    with open(str(fp), "r") as fh:
+    with open(str(fp), "r", encoding="utf-8") as fh:
         data = json.load(fh)
     entries = data[_SK]["autoreplies"]
     assert entries[0][json_key] == json_in_0
@@ -1365,8 +1365,6 @@ async def test_post_command_cleared_by_on_prompt():
 async def test_check_timeout_clears_exclusive():
     import time
 
-    from telnetlib3.autoreply import AutoreplyRule, AutoreplyEngine
-
     writer, written = _mock_writer()
 
     rules = [
@@ -1391,8 +1389,6 @@ async def test_check_timeout_clears_exclusive():
 
 @pytest.mark.asyncio
 async def test_non_exclusive_post_command():
-    from telnetlib3.autoreply import AutoreplyRule, AutoreplyEngine
-
     writer, written = _mock_writer()
 
     rules = [
@@ -1411,7 +1407,7 @@ def _mock_writer_with_vitals(hp: int, maxhp: int, mp: int, maxmp: int):
     """Create a mock writer with GMCP vitals data."""
     written: list[str] = []
     writer = types.SimpleNamespace(
-        write=lambda text: written.append(text),
+        write=written.append,
         log=logging.getLogger("test"),
         _gmcp_data={
             "Char.Vitals": {"hp": str(hp), "maxhp": str(maxhp), "mp": str(mp), "maxmp": str(maxmp)}

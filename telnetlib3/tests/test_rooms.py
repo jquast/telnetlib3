@@ -5,6 +5,7 @@ from __future__ import annotations
 # std imports
 import os
 import json
+from typing import Any
 
 # 3rd party
 import pytest
@@ -45,7 +46,7 @@ class TestRoomGraph:
         assert r.environment == "outdoors"
         assert r.exits == {"north": "101", "south": "102"}
         assert r.visit_count == 1
-        assert r.last_visited != ""
+        assert r.last_visited
 
     def test_update_room_existing(self) -> None:
         g = RoomGraph()
@@ -73,8 +74,8 @@ class TestRoomGraph:
         g = RoomGraph()
         g.update_room({"num": "1"})
         r = g.rooms["1"]
-        assert r.name == ""
-        assert r.area == ""
+        assert not r.name
+        assert not r.area
         assert r.exits == {}
 
     def test_update_room_invalid_exits_ignored(self) -> None:
@@ -166,7 +167,7 @@ class TestFindPath:
 
     def test_bfs_distances_unknown_src(self) -> None:
         g = RoomGraph()
-        assert g.bfs_distances("X") == {}
+        assert not g.bfs_distances("X")
 
 
 class TestFindSameName:
@@ -362,7 +363,7 @@ class TestCurrentRoomFile:
 
     def test_read_missing_file(self, tmp_path: Any) -> None:
         path = str(tmp_path / "nonexistent")
-        assert read_current_room(path) == ""
+        assert not read_current_room(path)
 
 
 class TestFasttravelFile:

@@ -85,7 +85,7 @@ def test_persistence_save_load_roundtrip(tui_tmp_paths) -> None:
 
 def test_persistence_load_empty(tui_tmp_paths, monkeypatch) -> None:
     monkeypatch.setattr("telnetlib3.client_tui.SESSIONS_FILE", tui_tmp_paths / "nope.json")
-    assert load_sessions() == {}
+    assert not load_sessions()
 
 
 def test_build_command_minimal() -> None:
@@ -126,7 +126,9 @@ def test_build_command_auto_mode_no_flag() -> None:
         ({"ansi_keys": True, "ascii_eol": True}, ["--ansi-keys", "--ascii-eol"]),
     ],
 )
-def test_build_command_flags(cfg_kwargs: dict, expected_flags: list[str]) -> None:  # type: ignore[type-arg]
+def test_build_command_flags(
+    cfg_kwargs: dict, expected_flags: list[str]  # type: ignore[type-arg]
+) -> None:
     cfg = SessionConfig(host="h", port=cfg_kwargs.pop("port", 23), **cfg_kwargs)
     cmd = build_command(cfg)
     for flag in expected_flags:
@@ -328,7 +330,7 @@ def test_autoreply_screen_rejects_bad_regex(tmp_path) -> None:
 
 
 def test_helper_relative_time_empty() -> None:
-    assert _relative_time("") == ""
+    assert not _relative_time("")
 
 
 def test_helper_relative_time_invalid() -> None:

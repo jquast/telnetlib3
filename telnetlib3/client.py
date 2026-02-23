@@ -10,7 +10,6 @@ import sys
 import codecs
 import struct
 import asyncio
-import logging
 import argparse
 import functools
 from typing import Any, Dict, List, Tuple, Union, Callable, Optional, Sequence
@@ -812,20 +811,21 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
         writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
     ) -> None:
         # pylint: disable=protected-access
-        writer_arg._session_key = _session_key
-        writer_arg._autoreply_rules = _autoreply_rules
-        writer_arg._autoreplies_file = _ar_path
-        writer_arg._macro_defs = _macro_defs
-        writer_arg._macros_file = _macro_path
-        writer_arg._room_graph = _room_graph
-        writer_arg._rooms_file = _rooms_path
-        writer_arg._current_room_file = _current_room_file
-        writer_arg._current_room_num = ""
-        writer_arg._room_changed = asyncio.Event()
-        writer_arg._wander_active = False
-        writer_arg._wander_current = 0
-        writer_arg._wander_total = 0
-        writer_arg._wander_task = None
+        # MUD-extension attributes set dynamically on writer
+        writer_arg._session_key = _session_key  # type: ignore[union-attr]
+        writer_arg._autoreply_rules = _autoreply_rules  # type: ignore[union-attr]
+        writer_arg._autoreplies_file = _ar_path  # type: ignore[union-attr]
+        writer_arg._macro_defs = _macro_defs  # type: ignore[union-attr]
+        writer_arg._macros_file = _macro_path  # type: ignore[union-attr]
+        writer_arg._room_graph = _room_graph  # type: ignore[union-attr]
+        writer_arg._rooms_file = _rooms_path  # type: ignore[union-attr]
+        writer_arg._current_room_file = _current_room_file  # type: ignore[union-attr]
+        writer_arg._current_room_num = ""  # type: ignore[union-attr]
+        writer_arg._room_changed = asyncio.Event()  # type: ignore[union-attr]
+        writer_arg._wander_active = False  # type: ignore[union-attr]
+        writer_arg._wander_current = 0  # type: ignore[union-attr]
+        writer_arg._wander_total = 0  # type: ignore[union-attr]
+        writer_arg._wander_task = None  # type: ignore[union-attr]
         await _inner_session(reader, writer_arg)
 
     shell_callback = _session_shell
@@ -1337,6 +1337,7 @@ async def run_fingerprint_client() -> None:
 
         def patched_connection_made(transport: asyncio.BaseTransport) -> None:
             orig_connection_made(transport)
+            assert client.writer is not None
             client.writer.environ_encoding = environ_encoding
             # pylint: disable-next=protected-access
             client.writer._encoding_explicit = environ_encoding != "ascii"

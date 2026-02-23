@@ -12,14 +12,15 @@ from typing import Any, List, Tuple, Union, Callable, Optional
 
 # local
 from ._ansi import (
+    HOME,
     SGR_CYAN,
     SGR_RESET,
     CLEAR_HOME,
     CLEAR_LINE,
     SGR_YELLOW,
     SAVE_CURSOR,
-    SHOW_CURSOR,
     SCROLL_RESET,
+    CLEAR_SCREEN,
     CURSOR_DEFAULT,
     RESTORE_CURSOR,
     EXIT_ALT_SCREEN,
@@ -411,8 +412,8 @@ if HAS_PROMPT_TOOLKIT:
                 """Ctrl+L clears screen and replays recent output."""
                 _repaint_screen(event, self._replay_buf, scroll=self._scroll)
 
-            from prompt_toolkit.keys import (
-                Keys as _PTKeys,  # pylint: disable=import-outside-toplevel
+            from prompt_toolkit.keys import (  # pylint: disable=import-outside-toplevel
+                Keys as _PTKeys,
             )
 
             @kb.add(_PTKeys.BracketedPaste)
@@ -456,7 +457,7 @@ if HAS_PROMPT_TOOLKIT:
                 _launch_tui_editor(event, "autoreplies", telnet_writer, self._replay_buf)
 
             @kb.add("f5")
-            def _wander_mode(event: Any) -> None:
+            def _wander_mode(_event: Any) -> None:
                 """F5 toggles autowander through same-named rooms."""
                 if getattr(telnet_writer, "_wander_active", False):
                     task = getattr(telnet_writer, "_wander_task", None)
@@ -517,9 +518,8 @@ if HAS_PROMPT_TOOLKIT:
             self._style = self._style_normal
             _color_depth = None
             if os.environ.get("COLORTERM") in ("truecolor", "24bit"):
-                from prompt_toolkit.output.color_depth import (
-                    ColorDepth,  # pylint: disable=import-outside-toplevel
-                )
+                # pylint: disable-next=import-outside-toplevel
+                from prompt_toolkit.output.color_depth import ColorDepth
 
                 _color_depth = ColorDepth.TRUE_COLOR
             self._session: "prompt_toolkit.PromptSession[str]" = prompt_toolkit.PromptSession(
@@ -751,7 +751,7 @@ def _repaint_screen(
     Re-establishes the DECSTBM scroll region and replays buffered output so recent MUD text
     reappears with colors intact.
     """
-    import os as _os  # pylint: disable=import-outside-toplevel,redefined-outer-name
+    import os as _os  # pylint: disable=import-outside-toplevel
 
     reserve = scroll._reserve if scroll is not None else _PT_RESERVE_WITH_TOOLBAR
 
@@ -783,7 +783,7 @@ def _repaint_screen(
         finally:
             _os.set_blocking(fd, was_blocking)
 
-    from prompt_toolkit.application import (  # pylint: disable=import-error,import-outside-toplevel
+    from prompt_toolkit.application import (  # pylint: disable=import-outside-toplevel
         get_app,
         run_in_terminal,
     )
@@ -801,7 +801,7 @@ def _show_help(_event: Any, macro_defs: "Any" = None) -> None:
     :param _event: prompt_toolkit key event (unused).
     :param macro_defs: Optional list of macro definitions to display.
     """
-    import os  # pylint: disable=import-outside-toplevel,redefined-outer-name
+    import os  # pylint: disable=import-outside-toplevel
 
     def _run_help() -> None:
         sys.stdout.write(ENTER_ALT_SCREEN)
@@ -863,7 +863,7 @@ def _show_help(_event: Any, macro_defs: "Any" = None) -> None:
         except OSError:
             pass
 
-    from prompt_toolkit.application import (  # pylint: disable=import-error,import-outside-toplevel
+    from prompt_toolkit.application import (  # pylint: disable=import-outside-toplevel
         get_app,
         run_in_terminal,
     )
@@ -891,7 +891,7 @@ def _launch_tui_editor(
     :param writer: Telnet writer with file path and definition attributes.
     :param replay_buf: Optional replay buffer for screen repaint on return.
     """
-    import os  # pylint: disable=import-outside-toplevel,redefined-outer-name
+    import os  # pylint: disable=import-outside-toplevel
     import subprocess  # pylint: disable=import-outside-toplevel
 
     from ._paths import CONFIG_DIR as _config_dir  # pylint: disable=import-outside-toplevel
@@ -947,7 +947,7 @@ def _launch_tui_editor(
         else:
             _reload_autoreplies(writer, path, _session_key, log)
 
-    from prompt_toolkit.application import (  # pylint: disable=import-error,import-outside-toplevel
+    from prompt_toolkit.application import (  # pylint: disable=import-outside-toplevel
         get_app,
         run_in_terminal,
     )
@@ -965,7 +965,7 @@ def _reload_macros(
     log: logging.Logger,
 ) -> None:
     """Reload macro definitions from disk and rebind keys."""
-    import os  # pylint: disable=import-outside-toplevel,redefined-outer-name
+    import os  # pylint: disable=import-outside-toplevel
 
     if not os.path.exists(path):
         return
@@ -995,7 +995,7 @@ def _reload_autoreplies(
     log: logging.Logger,
 ) -> None:
     """Reload autoreply rules from disk after editing."""
-    import os  # pylint: disable=import-outside-toplevel,redefined-outer-name
+    import os  # pylint: disable=import-outside-toplevel
 
     if not os.path.exists(path):
         return
@@ -1026,7 +1026,7 @@ def _launch_room_browser(
     :param writer: Telnet writer with session attributes.
     :param replay_buf: Optional replay buffer for screen repaint on return.
     """
-    import os  # pylint: disable=import-outside-toplevel,redefined-outer-name
+    import os  # pylint: disable=import-outside-toplevel
     import subprocess  # pylint: disable=import-outside-toplevel
 
     _session_key = getattr(writer, "_session_key", "")
@@ -1083,7 +1083,7 @@ def _launch_room_browser(
                 asyncio.ensure_future, _fast_travel(steps, writer, log, slow=slow)
             )
 
-    from prompt_toolkit.application import (  # pylint: disable=import-error,import-outside-toplevel
+    from prompt_toolkit.application import (  # pylint: disable=import-outside-toplevel
         get_app,
         run_in_terminal,
     )
@@ -1165,7 +1165,7 @@ async def _fast_travel(
         actual = graph.rooms.get(actual_num)
         if expected is None or actual is None:
             return False
-        return expected.name == actual.name and expected.name != ""
+        return expected.name == actual.name and bool(expected.name)
 
     def _correct_edge(
         prev_num: str,
@@ -1202,7 +1202,6 @@ async def _fast_travel(
     try:
         step_idx = 0
         reroute_count = 0
-        total_steps = len(steps)
         while step_idx < len(steps):
             direction, expected_room = steps[step_idx]
             prev_room = getattr(writer, "_current_room_num", "")
@@ -1478,7 +1477,7 @@ async def _autowander(
 
 
 # std imports
-import re as _re  # pylint: disable=wrong-import-position
+import re as _re  # noqa: E402  # pylint: disable=wrong-import-position
 
 _REPEAT_RE = _re.compile(r"^(\d+)([A-Za-z].*)$")
 _BACKTICK_RE = _re.compile(r"`[^`]*`")
@@ -1532,7 +1531,8 @@ def expand_commands(line: str) -> list[str]:
 
 
 _TRAVEL_RE = _re.compile(
-    r"^`(fast travel|slow travel|return fast" r"|return slow|autowander)\s*(.*?)`$", _re.IGNORECASE
+    r"^`(fast travel|slow travel|return fast|return slow|autowander)\s*(.*?)`$",
+    _re.IGNORECASE,
 )
 
 
@@ -1643,7 +1643,7 @@ async def _send_chained(
 
     is_repeated = len(commands) > 1 and len(set(commands)) == 1
 
-    for idx, cmd in enumerate(commands[1:], 1):
+    for _idx, cmd in enumerate(commands[1:], 1):
         prev_room = getattr(writer, "_current_room_num", "") if is_repeated else ""
 
         if not is_repeated:
@@ -1747,8 +1747,6 @@ async def execute_macro_commands(
         # Delay command.
         dm = _DELAY_RE.match(cmd)
         if dm:
-            import asyncio  # pylint: disable=import-outside-toplevel
-
             value = float(dm.group(1))
             unit = dm.group(2)
             delay = value / 1000.0 if unit == "ms" else value
@@ -2230,8 +2228,8 @@ if sys.platform != "win32":
                     autoreply_engine.cancel()
                     autoreply_engine = None
                 if cur_rules:
-                    from .autoreply import (
-                        AutoreplyEngine,  # pylint: disable=import-outside-toplevel
+                    from .autoreply import (  # pylint: disable=import-outside-toplevel
+                        AutoreplyEngine,
                     )
 
                     autoreply_engine = AutoreplyEngine(
@@ -2345,7 +2343,7 @@ if sys.platform != "win32":
                     if (
                         _cur_rows != scroll._rows  # pylint: disable=protected-access
                         or _cur_cols != scroll._cols
-                    ):  # pylint: disable=protected-access
+                    ):
                         scroll.update_size(_cur_rows, _cur_cols)
                         _on_resize_repaint(_cur_rows, _cur_cols)
                     # EOR/GA pacing: wait for server prompt before sending.

@@ -117,7 +117,6 @@ disable = [
     # my deepest apologies to downstream developers who are also type-lovers, our 'writer' can be
     # *either*  TelnetWriter or TelnetUnicodeWriter, depending on the arguments passed, designed
     # several years before python first provided Typing, the API can't be changed this late!
-    "union-attr",
 ]
 
 [tool.pylint.format]
