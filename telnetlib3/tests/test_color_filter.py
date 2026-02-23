@@ -1,4 +1,4 @@
-"""Tests for telnetlib3.color_filter — ANSI color palette translation."""
+"""Tests for telnetlib3.color_filter -- ANSI color palette translation."""
 
 # 3rd party
 import pytest
@@ -292,44 +292,28 @@ def test_red_fg_green_bg() -> None:
     assert f"48;2;{bg_rgb[0]};{bg_rgb[1]};{bg_rgb[2]}" in result
 
 
-def test_bold_black_uses_bright_black() -> None:
+@pytest.mark.parametrize("seq", ["\x1b[1;30m", "\x1b[30;1m"])
+def test_bold_single_seq_uses_bright(seq: str) -> None:
     f = _make_filter()
-    result = f.filter("\x1b[1;30m")
+    result = f.filter(seq)
     bright_black = PALETTES["ega"][8]
     assert f"38;2;{bright_black[0]};{bright_black[1]};{bright_black[2]}" in result
 
 
-def test_color_before_bold_in_same_seq() -> None:
+@pytest.mark.parametrize("setup_seqs,test_seq,palette_idx", [
+    (["\x1b[1m"], "\x1b[30m", 8),
+    (["\x1b[1m", "\x1b[22m"], "\x1b[30m", 0),
+    (["\x1b[1m", "\x1b[0m"], "\x1b[30m", 0),
+])
+def test_bold_state_across_sequences(
+    setup_seqs: list[str], test_seq: str, palette_idx: int
+) -> None:
     f = _make_filter()
-    result = f.filter("\x1b[30;1m")
-    bright_black = PALETTES["ega"][8]
-    assert f"38;2;{bright_black[0]};{bright_black[1]};{bright_black[2]}" in result
-
-
-def test_bold_persists_across_sequences() -> None:
-    f = _make_filter()
-    f.filter("\x1b[1m")
-    result = f.filter("\x1b[30m")
-    bright_black = PALETTES["ega"][8]
-    assert f"38;2;{bright_black[0]};{bright_black[1]};{bright_black[2]}" in result
-
-
-def test_bold_off_reverts_to_normal() -> None:
-    f = _make_filter()
-    f.filter("\x1b[1m")
-    f.filter("\x1b[22m")
-    result = f.filter("\x1b[30m")
-    normal_black = PALETTES["ega"][0]
-    assert f"38;2;{normal_black[0]};{normal_black[1]};{normal_black[2]}" in result
-
-
-def test_reset_clears_bold() -> None:
-    f = _make_filter()
-    f.filter("\x1b[1m")
-    f.filter("\x1b[0m")
-    result = f.filter("\x1b[30m")
-    normal_black = PALETTES["ega"][0]
-    assert f"38;2;{normal_black[0]};{normal_black[1]};{normal_black[2]}" in result
+    for seq in setup_seqs:
+        f.filter(seq)
+    result = f.filter(test_seq)
+    rgb = PALETTES["ega"][palette_idx]
+    assert f"38;2;{rgb[0]};{rgb[1]};{rgb[2]}" in result
 
 
 def test_bold_does_not_affect_bright_colors() -> None:
@@ -367,44 +351,28 @@ def _make_ice_filter(ice_colors: bool = True) -> ColorFilter:
     return ColorFilter(ColorConfig(brightness=1.0, contrast=1.0, ice_colors=ice_colors))
 
 
-def test_ice_blink_bg_uses_bright_bg() -> None:
+@pytest.mark.parametrize("seq", ["\x1b[5;40m", "\x1b[40;5m"])
+def test_ice_blink_single_seq_uses_bright(seq: str) -> None:
     f = _make_ice_filter()
-    result = f.filter("\x1b[5;40m")
+    result = f.filter(seq)
     bright_black = PALETTES["ega"][8]
     assert f"48;2;{bright_black[0]};{bright_black[1]};{bright_black[2]}" in result
 
 
-def test_ice_bg_before_blink_in_same_seq() -> None:
+@pytest.mark.parametrize("setup_seqs,test_seq,palette_idx", [
+    (["\x1b[5m"], "\x1b[40m", 8),
+    (["\x1b[5m", "\x1b[25m"], "\x1b[40m", 0),
+    (["\x1b[5m", "\x1b[0m"], "\x1b[40m", 0),
+])
+def test_ice_blink_state_across_sequences(
+    setup_seqs: list[str], test_seq: str, palette_idx: int
+) -> None:
     f = _make_ice_filter()
-    result = f.filter("\x1b[40;5m")
-    bright_black = PALETTES["ega"][8]
-    assert f"48;2;{bright_black[0]};{bright_black[1]};{bright_black[2]}" in result
-
-
-def test_ice_blink_persists_across_sequences() -> None:
-    f = _make_ice_filter()
-    f.filter("\x1b[5m")
-    result = f.filter("\x1b[40m")
-    bright_black = PALETTES["ega"][8]
-    assert f"48;2;{bright_black[0]};{bright_black[1]};{bright_black[2]}" in result
-
-
-def test_ice_blink_off_reverts_to_normal() -> None:
-    f = _make_ice_filter()
-    f.filter("\x1b[5m")
-    f.filter("\x1b[25m")
-    result = f.filter("\x1b[40m")
-    normal_black = PALETTES["ega"][0]
-    assert f"48;2;{normal_black[0]};{normal_black[1]};{normal_black[2]}" in result
-
-
-def test_ice_reset_clears_blink() -> None:
-    f = _make_ice_filter()
-    f.filter("\x1b[5m")
-    f.filter("\x1b[0m")
-    result = f.filter("\x1b[40m")
-    normal_black = PALETTES["ega"][0]
-    assert f"48;2;{normal_black[0]};{normal_black[1]};{normal_black[2]}" in result
+    for seq in setup_seqs:
+        f.filter(seq)
+    result = f.filter(test_seq)
+    rgb = PALETTES["ega"][palette_idx]
+    assert f"48;2;{rgb[0]};{rgb[1]};{rgb[2]}" in result
 
 
 def test_ice_blink_does_not_affect_foreground() -> None:

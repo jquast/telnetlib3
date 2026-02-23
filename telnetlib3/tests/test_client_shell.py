@@ -1,4 +1,4 @@
-"""Tests for telnetlib3.client_shell — Terminal mode handling."""
+"""Tests for telnetlib3.client_shell -- Terminal mode handling."""
 
 # std imports
 import sys
@@ -882,7 +882,7 @@ def test_get_raw_mode(kwargs: dict, expected: "bool | None") -> None:
 async def test_cooked_to_raw_transition_preserves_crlf(
     bind_host: str, unused_tcp_port: int
 ) -> None:
-    """First data chunk during cooked→raw transition must keep \\r\\n line endings."""
+    """First data chunk during cooked->raw transition must keep \\r\\n line endings."""
 
     class Proto(asyncio.Protocol):
         def connection_made(self, transport):

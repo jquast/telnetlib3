@@ -95,51 +95,38 @@ async def test_ext_callback_registered_for_gmcp():
 
 
 @pytest.mark.asyncio
-async def test_on_gmcp_stores_data():
+@pytest.mark.parametrize("setup_calls,key,expected", [
+    (
+        [("Char.Vitals", {"hp": 100, "maxhp": 100})],
+        "Char.Vitals", {"hp": 100, "maxhp": 100},
+    ),
+    (
+        [("Room.Info", {"name": "Town Square"}), ("Room.Info", {"name": "Dark Forest"})],
+        "Room.Info", {"name": "Dark Forest"},
+    ),
+    (
+        [("Char.Vitals", {"hp": 100, "maxhp": 100, "sp": 50, "maxsp": 50}),
+         ("Char.Vitals", {"hp": 63})],
+        "Char.Vitals", {"hp": 63, "maxhp": 100, "sp": 50, "maxsp": 50},
+    ),
+    (
+        [("Room.Name", "Old Name"), ("Room.Name", {"name": "New Place"})],
+        "Room.Name", {"name": "New Place"},
+    ),
+    (
+        [("Room.Info", {"name": "Town"}), ("Room.Info", "plain string")],
+        "Room.Info", "plain string",
+    ),
+    (
+        [("Core.Goodbye", None)],
+        "Core.Goodbye", None,
+    ),
+])
+async def test_on_gmcp_data_storage(setup_calls, key, expected):
     client = _make_client()
-    client._on_gmcp("Char.Vitals", {"hp": 100, "maxhp": 100})
-    assert client._gmcp_data["Char.Vitals"] == {"hp": 100, "maxhp": 100}
-
-
-@pytest.mark.asyncio
-async def test_on_gmcp_overwrites_previous():
-    client = _make_client()
-    client._on_gmcp("Room.Info", {"name": "Town Square"})
-    client._on_gmcp("Room.Info", {"name": "Dark Forest"})
-    assert client._gmcp_data["Room.Info"] == {"name": "Dark Forest"}
-
-
-@pytest.mark.asyncio
-async def test_on_gmcp_merges_partial_dict_update():
-    client = _make_client()
-    client._on_gmcp("Char.Vitals", {"hp": 100, "maxhp": 100, "sp": 50, "maxsp": 50})
-    client._on_gmcp("Char.Vitals", {"hp": 63})
-    assert client._gmcp_data["Char.Vitals"] == {
-        "hp": 63, "maxhp": 100, "sp": 50, "maxsp": 50,
-    }
-
-
-@pytest.mark.asyncio
-async def test_on_gmcp_replaces_non_dict_with_dict():
-    client = _make_client()
-    client._on_gmcp("Room.Name", "Old Name")
-    client._on_gmcp("Room.Name", {"name": "New Place"})
-    assert client._gmcp_data["Room.Name"] == {"name": "New Place"}
-
-
-@pytest.mark.asyncio
-async def test_on_gmcp_replaces_dict_with_non_dict():
-    client = _make_client()
-    client._on_gmcp("Room.Info", {"name": "Town"})
-    client._on_gmcp("Room.Info", "plain string")
-    assert client._gmcp_data["Room.Info"] == "plain string"
-
-
-@pytest.mark.asyncio
-async def test_on_gmcp_stores_none():
-    client = _make_client()
-    client._on_gmcp("Core.Goodbye", None)
-    assert client._gmcp_data["Core.Goodbye"] is None
+    for module, data in setup_calls:
+        client._on_gmcp(module, data)
+    assert client._gmcp_data[key] == expected
 
 
 @pytest.mark.asyncio
@@ -268,7 +255,10 @@ if sys.platform != "win32":
 
         def _toolbar_text(repl):
             """Join toolbar formatted text tuples into a single string."""
-            return "".join(t for _, t in repl._get_toolbar())
+            result = repl._get_toolbar()
+            if result is None:
+                return ""
+            return "".join(t for _, t in result)
 
         def test_toolbar_static_when_no_gmcp():
             w = _mock_writer()

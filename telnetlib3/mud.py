@@ -312,7 +312,7 @@ def atcp_decode(buf: bytes, encoding: str = "utf-8") -> tuple[str, str]:
     return (package, value)
 
 
-# Aardwolf channel byte meanings (server → client).
+# Aardwolf channel byte meanings (server -> client).
 _AARDWOLF_CHANNELS: dict[int, str] = {
     100: "status",
     101: "tick",

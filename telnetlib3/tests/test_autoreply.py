@@ -95,47 +95,24 @@ def test_search_buffer_cull_preserves_nonzero_match_line():
     assert buf._last_match_col == 1
 
 
-def test_search_buffer_searchable_text_from_start():
+@pytest.mark.parametrize(
+    "text,match_line,match_col,expected",
+    [
+        ("hello\nworld\n", None, None, "hello\nworld"),
+        ("aaa\nbbb\nccc\n", 1, 0, "bbb\nccc"),
+        ("aaa\nbbb\n", 0, 2, "a\nbbb"),
+        ("one\n", 5, 0, ""),
+        ("line1\npartial prompt", None, None, "line1\npartial prompt"),
+        ("just a prompt", None, None, "just a prompt"),
+    ],
+)
+def test_search_buffer_searchable_text(text, match_line, match_col, expected):
     buf = SearchBuffer(max_lines=100)
-    buf.add_text("hello\nworld\n")
-    assert buf.get_searchable_text() == "hello\nworld"
-
-
-def test_search_buffer_searchable_text_from_position():
-    buf = SearchBuffer(max_lines=100)
-    buf.add_text("aaa\nbbb\nccc\n")
-    buf._last_match_line = 1
-    buf._last_match_col = 0
-    assert buf.get_searchable_text() == "bbb\nccc"
-
-
-def test_search_buffer_searchable_text_with_col_offset():
-    buf = SearchBuffer(max_lines=100)
-    buf.add_text("aaa\nbbb\n")
-    buf._last_match_line = 0
-    buf._last_match_col = 2
-    assert buf.get_searchable_text() == "a\nbbb"
-
-
-def test_search_buffer_searchable_text_past_end():
-    buf = SearchBuffer(max_lines=100)
-    buf.add_text("one\n")
-    buf._last_match_line = 5
-    assert buf.get_searchable_text() == ""
-
-
-def test_search_buffer_searchable_text_includes_partial():
-    buf = SearchBuffer(max_lines=100)
-    buf.add_text("line1\npartial prompt")
-    text = buf.get_searchable_text()
-    assert "partial prompt" in text
-    assert text == "line1\npartial prompt"
-
-
-def test_search_buffer_searchable_text_partial_only():
-    buf = SearchBuffer(max_lines=100)
-    buf.add_text("just a prompt")
-    assert buf.get_searchable_text() == "just a prompt"
+    buf.add_text(text)
+    if match_line is not None:
+        buf._last_match_line = match_line
+        buf._last_match_col = match_col
+    assert buf.get_searchable_text() == expected
 
 
 def test_search_buffer_advance_match():
@@ -305,23 +282,44 @@ def _mock_writer():
 
 
 @pytest.mark.asyncio
-async def test_autoreply_engine_feed_triggers_match():
+@pytest.mark.parametrize(
+    "pattern,flags,reply,feed_text,expected",
+    [
+        (r"hello", 0, "world;", "hello\n", ["world\r\n"]),
+        (r"hello", 0, "world;", "hello", ["world\r\n"]),
+        (
+            r"a (\w+) (pheasant|duck)", 0,
+            "kill \\2;", "a black pheasant\n",
+            ["kill pheasant\r\n"],
+        ),
+        (
+            r"start.*end", re.DOTALL,
+            "matched;", "start\nmiddle\nend\n",
+            ["matched\r\n"],
+        ),
+        (r"multi", 0, "cmd1;cmd2;", "multi\n", ["cmd1\r\n", "cmd2\r\n"]),
+        (
+            r"go", 0, "cmd1;cmd2;cmd3;", "go\n",
+            ["cmd1\r\n", "cmd2\r\n", "cmd3\r\n"],
+        ),
+        (r"trigger", 0, "no-cr-reply", "trigger\n", ["no-cr-reply\r\n"]),
+        (
+            r"trigger", 0,
+            "`delay 0ms`;fast;", "trigger\n",
+            ["fast\r\n"],
+        ),
+    ],
+)
+async def test_autoreply_engine_feed_and_match(
+    pattern, flags, reply, feed_text, expected
+):
     writer, written = _mock_writer()
-    rules = [AutoreplyRule(pattern=re.compile(r"hello"), reply="world;")]
+    rules = [AutoreplyRule(pattern=re.compile(pattern, flags), reply=reply)]
     engine = AutoreplyEngine(rules, writer, writer.log)
-    engine.feed("hello\n")
+    engine.feed(feed_text)
     await asyncio.sleep(0.05)
-    assert any("world\r\n" in w for w in written)
-
-
-@pytest.mark.asyncio
-async def test_autoreply_engine_feed_matches_partial_line():
-    writer, written = _mock_writer()
-    rules = [AutoreplyRule(pattern=re.compile(r"hello"), reply="world;")]
-    engine = AutoreplyEngine(rules, writer, writer.log)
-    engine.feed("hello")
-    await asyncio.sleep(0.05)
-    assert any("world\r\n" in w for w in written)
+    for exp in expected:
+        assert any(exp in w for w in written)
 
 
 @pytest.mark.asyncio
@@ -348,16 +346,6 @@ async def test_autoreply_engine_no_double_trigger():
     engine.feed("more text\n")
     await asyncio.sleep(0.05)
     assert len(written) == count1
-
-
-@pytest.mark.asyncio
-async def test_autoreply_engine_group_substitution():
-    writer, written = _mock_writer()
-    rules = [AutoreplyRule(pattern=re.compile(r"a (\w+) (pheasant|duck)"), reply="kill \\2;")]
-    engine = AutoreplyEngine(rules, writer, writer.log)
-    engine.feed("a black pheasant\n")
-    await asyncio.sleep(0.05)
-    assert any("kill pheasant\r\n" in w for w in written)
 
 
 @pytest.mark.asyncio
@@ -401,49 +389,6 @@ async def test_autoreply_engine_cancel():
 
 
 @pytest.mark.asyncio
-async def test_autoreply_engine_multiline_match():
-    writer, written = _mock_writer()
-    rules = [AutoreplyRule(pattern=re.compile(r"start.*end", re.DOTALL), reply="matched;")]
-    engine = AutoreplyEngine(rules, writer, writer.log)
-    engine.feed("start\nmiddle\nend\n")
-    await asyncio.sleep(0.05)
-    assert any("matched\r\n" in w for w in written)
-
-
-@pytest.mark.asyncio
-async def test_autoreply_engine_multi_command_reply():
-    writer, written = _mock_writer()
-    rules = [AutoreplyRule(pattern=re.compile(r"multi"), reply="cmd1;cmd2;")]
-    engine = AutoreplyEngine(rules, writer, writer.log)
-    engine.feed("multi\n")
-    await asyncio.sleep(0.05)
-    assert any("cmd1\r\n" in w for w in written)
-    assert any("cmd2\r\n" in w for w in written)
-
-
-@pytest.mark.asyncio
-async def test_autoreply_engine_semicolon_multiple_commands():
-    writer, written = _mock_writer()
-    rules = [AutoreplyRule(pattern=re.compile(r"go"), reply="cmd1;cmd2;cmd3;")]
-    engine = AutoreplyEngine(rules, writer, writer.log)
-    engine.feed("go\n")
-    await asyncio.sleep(0.05)
-    assert any("cmd1\r\n" in w for w in written)
-    assert any("cmd2\r\n" in w for w in written)
-    assert any("cmd3\r\n" in w for w in written)
-
-
-@pytest.mark.asyncio
-async def test_autoreply_engine_trailing_text_without_semicolon():
-    writer, written = _mock_writer()
-    rules = [AutoreplyRule(pattern=re.compile(r"trigger"), reply="no-cr-reply")]
-    engine = AutoreplyEngine(rules, writer, writer.log)
-    engine.feed("trigger\n")
-    await asyncio.sleep(0.05)
-    assert any("no-cr-reply\r\n" in w for w in written)
-
-
-@pytest.mark.asyncio
 async def test_autoreply_engine_repeat_expansion():
     writer, written = _mock_writer()
     rules = [AutoreplyRule(pattern=re.compile(r"go"), reply="3e;2n;look;")]
@@ -455,16 +400,6 @@ async def test_autoreply_engine_repeat_expansion():
     assert e_count == 3
     assert n_count == 2
     assert any("look\r\n" in w for w in written)
-
-
-@pytest.mark.asyncio
-async def test_autoreply_engine_zero_delay():
-    writer, written = _mock_writer()
-    rules = [AutoreplyRule(pattern=re.compile(r"trigger"), reply="`delay 0ms`;fast;")]
-    engine = AutoreplyEngine(rules, writer, writer.log)
-    engine.feed("trigger\n")
-    await asyncio.sleep(0.05)
-    assert any("fast\r\n" in w for w in written)
 
 
 def test_autoreply_engine_cancel_when_idle():
@@ -667,6 +602,64 @@ async def test_exclusive_cleared_by_on_prompt():
 
 
 @pytest.mark.asyncio
+async def test_exclusive_until_cleared_after_two_prompts():
+    """Exclusive with until pattern clears after 2 on_prompt() calls."""
+    writer, written = _mock_writer()
+    rules = [
+        AutoreplyRule(
+            pattern=re.compile(r"A (\w+) mouse"),
+            reply=r"kill \1;",
+            exclusive=True,
+            until=r"died\.|Kill what \?",
+        ),
+        AutoreplyRule(
+            pattern=re.compile(r"treasure"), reply="take treasure;",
+        ),
+    ]
+    engine = AutoreplyEngine(rules, writer, writer.log)
+    engine.feed("A brown mouse\n")
+    await asyncio.sleep(0.05)
+    assert engine.exclusive_active is True
+    assert engine._until_pattern is not None
+
+    engine.on_prompt()  # skipped (same-chunk GA/EOR)
+    assert engine.exclusive_active is True
+
+    engine.on_prompt()  # prompt_count=1
+    assert engine.exclusive_active is True
+
+    engine.on_prompt()  # prompt_count=2 -> bail out
+    assert engine.exclusive_active is False
+    assert engine._until_pattern is None
+
+    engine.feed("treasure\n")
+    engine.on_prompt()
+    await asyncio.sleep(0.05)
+    assert any("take treasure\r\n" in w for w in written)
+
+
+@pytest.mark.asyncio
+async def test_exclusive_until_match_clears_before_prompt_limit():
+    """Until pattern match clears exclusive before the 2-prompt bail-out."""
+    writer, _ = _mock_writer()
+    rules = [
+        AutoreplyRule(
+            pattern=re.compile(r"A (\w+) mouse"),
+            reply=r"kill \1;",
+            exclusive=True,
+            until=r"died\.|Kill what \?",
+        ),
+    ]
+    engine = AutoreplyEngine(rules, writer, writer.log)
+    engine.feed("A brown mouse\n")
+    await asyncio.sleep(0.05)
+    assert engine.exclusive_active is True
+
+    engine.feed("Kill what ?\n")
+    assert engine.exclusive_active is False
+
+
+@pytest.mark.asyncio
 async def test_non_exclusive_allows_multiple():
     writer, written = _mock_writer()
     rules = [
@@ -680,34 +673,96 @@ async def test_non_exclusive_allows_multiple():
     assert any("kill red\r\n" in w for w in written)
 
 
-def test_parse_entries_exclusive():
+@pytest.mark.parametrize("entries,checks", [
+    (
+        [{"pattern": "hello", "reply": "world;", "exclusive": True},
+         {"pattern": "foo", "reply": "bar;"}],
+        [(0, "exclusive", True), (1, "exclusive", False)],
+    ),
+    (
+        [{"pattern": "hello", "reply": "world;", "exclusive": True, "until": r"\1 done"},
+         {"pattern": "foo", "reply": "bar;"}],
+        [(0, "until", r"\1 done"), (1, "until", "")],
+    ),
+    (
+        [{"pattern": "died", "reply": "look;", "always": True},
+         {"pattern": "hello", "reply": "world;"}],
+        [(0, "always", True), (1, "always", False)],
+    ),
+    (
+        [{"pattern": "a", "reply": "b;", "exclusive": True, "exclusive_timeout": 10},
+         {"pattern": "c", "reply": "d;"}],
+        [(0, "exclusive_timeout", 10.0), (1, "exclusive_timeout", 10.0)],
+    ),
+    (
+        [{"pattern": "a", "reply": "b;", "enabled": False},
+         {"pattern": "c", "reply": "d;"}],
+        [(0, "enabled", False), (1, "enabled", True)],
+    ),
+    (
+        [{"pattern": "bear", "reply": "kill bear;", "when": {"HP%": ">50"}}],
+        [(0, "when", {"HP%": ">50"})],
+    ),
+    (
+        [{"pattern": "bear", "reply": "kill bear;"}],
+        [(0, "when", {})],
+    ),
+    (
+        [{"pattern": "monster", "reply": "kill;", "exclusive": True,
+          "until": "died", "post_command": "look;"},
+         {"pattern": "foo", "reply": "bar;"}],
+        [(0, "post_command", "look;"), (1, "post_command", "")],
+    ),
+])
+def test_parse_entries_field(entries, checks):
     from telnetlib3.autoreply import _parse_entries
 
-    entries = [
-        {"pattern": "hello", "reply": "world;", "exclusive": True},
-        {"pattern": "foo", "reply": "bar;"},
-    ]
     rules = _parse_entries(entries)
-    assert rules[0].exclusive is True
-    assert rules[1].exclusive is False
+    for idx, field, expected in checks:
+        assert getattr(rules[idx], field) == expected
 
 
-def test_save_autoreplies_exclusive_roundtrip(tmp_path):
+@pytest.mark.parametrize("rule_kwargs,field,exp0,exp1,json_key,json_in_0,json_absent_1", [
+    (
+        {"exclusive": True},
+        "exclusive", True, False, "exclusive", True, True,
+    ),
+    (
+        {"exclusive": True, "until": r"\1 died"},
+        "until", r"\1 died", "", "until", r"\1 died", True,
+    ),
+    (
+        {"always": True},
+        "always", True, False, "always", True, True,
+    ),
+    (
+        {"enabled": False},
+        "enabled", False, True, "enabled", False, True,
+    ),
+    (
+        {"exclusive": True, "until": r"\1 died", "post_command": "look;"},
+        "post_command", "look;", "", "post_command", "look;", True,
+    ),
+])
+def test_save_autoreplies_field_roundtrip(
+    tmp_path, rule_kwargs, field, exp0, exp1, json_key, json_in_0, json_absent_1
+):
     fp = tmp_path / "autoreplies.json"
     original = [
-        AutoreplyRule(pattern=re.compile(r"hello"), reply="world;", exclusive=True),
-        AutoreplyRule(pattern=re.compile(r"foo"), reply="bar;", exclusive=False),
+        AutoreplyRule(pattern=re.compile(r"(\w+) attacks"), reply=r"kill \1;", **rule_kwargs),
+        AutoreplyRule(pattern=re.compile(r"foo"), reply="bar;"),
     ]
     save_autoreplies(str(fp), original, _SK)
     loaded = load_autoreplies(str(fp), _SK)
-    assert loaded[0].exclusive is True
-    assert loaded[1].exclusive is False
+    assert getattr(loaded[0], field) == exp0
+    assert getattr(loaded[1], field) == exp1
 
     with open(str(fp), "r") as fh:
         data = json.load(fh)
     entries = data[_SK]["autoreplies"]
-    assert "exclusive" in entries[0]
-    assert "exclusive" not in entries[1]
+    assert entries[0][json_key] == json_in_0
+    if json_absent_1:
+        assert json_key not in entries[1]
 
 
 @pytest.mark.asyncio
@@ -821,41 +876,6 @@ async def test_exclusive_until_group_substitution():
     assert any("attack goblin\r\n" in w for w in written)
 
 
-def test_parse_entries_until():
-    from telnetlib3.autoreply import _parse_entries
-
-    entries = [
-        {"pattern": "hello", "reply": "world;", "exclusive": True, "until": r"\1 done"},
-        {"pattern": "foo", "reply": "bar;"},
-    ]
-    rules = _parse_entries(entries)
-    assert rules[0].until == r"\1 done"
-    assert rules[1].until == ""
-
-
-def test_save_autoreplies_until_roundtrip(tmp_path):
-    fp = tmp_path / "autoreplies.json"
-    original = [
-        AutoreplyRule(
-            pattern=re.compile(r"(\w+) attacks"),
-            reply=r"kill \1;",
-            exclusive=True,
-            until=r"\1 died",
-        ),
-        AutoreplyRule(pattern=re.compile(r"foo"), reply="bar;"),
-    ]
-    save_autoreplies(str(fp), original, _SK)
-    loaded = load_autoreplies(str(fp), _SK)
-    assert loaded[0].until == r"\1 died"
-    assert loaded[1].until == ""
-
-    with open(str(fp), "r") as fh:
-        data = json.load(fh)
-    entries = data[_SK]["autoreplies"]
-    assert entries[0]["until"] == r"\1 died"
-    assert "until" not in entries[1]
-
-
 @pytest.mark.asyncio
 async def test_skip_next_prompt_prevents_premature_clear():
     """First on_prompt() after exclusive activation is skipped."""
@@ -955,36 +975,6 @@ async def test_always_rule_no_effect_when_not_exclusive():
     assert any("bar\r\n" in w for w in written)
 
 
-def test_parse_entries_always():
-    from telnetlib3.autoreply import _parse_entries
-
-    entries = [
-        {"pattern": "died", "reply": "look;", "always": True},
-        {"pattern": "hello", "reply": "world;"},
-    ]
-    rules = _parse_entries(entries)
-    assert rules[0].always is True
-    assert rules[1].always is False
-
-
-def test_save_autoreplies_always_roundtrip(tmp_path):
-    fp = tmp_path / "autoreplies.json"
-    original = [
-        AutoreplyRule(pattern=re.compile(r"died"), reply="look;", always=True),
-        AutoreplyRule(pattern=re.compile(r"hello"), reply="world;"),
-    ]
-    save_autoreplies(str(fp), original, _SK)
-    loaded = load_autoreplies(str(fp), _SK)
-    assert loaded[0].always is True
-    assert loaded[1].always is False
-
-    with open(str(fp), "r") as fh:
-        data = json.load(fh)
-    entries = data[_SK]["autoreplies"]
-    assert entries[0]["always"] is True
-    assert "always" not in entries[1]
-
-
 @pytest.mark.asyncio
 async def test_exclusive_timeout_clears_suppression():
     writer, written = _mock_writer()
@@ -1009,48 +999,6 @@ async def test_exclusive_timeout_clears_suppression():
     engine.feed("monster returns\n")
     await asyncio.sleep(0.05)
     assert sum(1 for w in written if "kill\r\n" in w) == 2
-
-
-def test_parse_entries_exclusive_timeout():
-    from telnetlib3.autoreply import _parse_entries
-
-    entries = [
-        {"pattern": "a", "reply": "b;", "exclusive": True, "exclusive_timeout": 10},
-        {"pattern": "c", "reply": "d;"},
-    ]
-    rules = _parse_entries(entries)
-    assert rules[0].exclusive_timeout == 10.0
-    assert rules[1].exclusive_timeout == 10.0
-
-
-def test_parse_entries_enabled():
-    from telnetlib3.autoreply import _parse_entries
-
-    entries = [
-        {"pattern": "a", "reply": "b;", "enabled": False},
-        {"pattern": "c", "reply": "d;"},
-    ]
-    rules = _parse_entries(entries)
-    assert rules[0].enabled is False
-    assert rules[1].enabled is True
-
-
-def test_save_autoreplies_enabled_roundtrip(tmp_path):
-    fp = tmp_path / "autoreplies.json"
-    original = [
-        AutoreplyRule(pattern=re.compile(r"hello"), reply="world;", enabled=False),
-        AutoreplyRule(pattern=re.compile(r"foo"), reply="bar;"),
-    ]
-    save_autoreplies(str(fp), original, _SK)
-    loaded = load_autoreplies(str(fp), _SK)
-    assert loaded[0].enabled is False
-    assert loaded[1].enabled is True
-
-    with open(str(fp), "r") as fh:
-        data = json.load(fh)
-    entries = data[_SK]["autoreplies"]
-    assert entries[0]["enabled"] is False
-    assert "enabled" not in entries[1]
 
 
 @pytest.mark.asyncio
@@ -1445,48 +1393,6 @@ async def test_post_command_enables_multi_kill():
     assert sum(1 for w in written if "kill octopus\r\n" in w) == 1
 
 
-def test_parse_entries_post_command():
-    from telnetlib3.autoreply import _parse_entries
-
-    entries = [
-        {
-            "pattern": "monster",
-            "reply": "kill;",
-            "exclusive": True,
-            "until": "died",
-            "post_command": "look;",
-        },
-        {"pattern": "foo", "reply": "bar;"},
-    ]
-    rules = _parse_entries(entries)
-    assert rules[0].post_command == "look;"
-    assert rules[1].post_command == ""
-
-
-def test_save_autoreplies_post_command_roundtrip(tmp_path):
-    fp = tmp_path / "autoreplies.json"
-    original = [
-        AutoreplyRule(
-            pattern=re.compile(r"(\w+) attacks"),
-            reply=r"kill \1;",
-            exclusive=True,
-            until=r"\1 died",
-            post_command="look;",
-        ),
-        AutoreplyRule(pattern=re.compile(r"foo"), reply="bar;"),
-    ]
-    save_autoreplies(str(fp), original, _SK)
-    loaded = load_autoreplies(str(fp), _SK)
-    assert loaded[0].post_command == "look;"
-    assert loaded[1].post_command == ""
-
-    with open(str(fp), "r") as fh:
-        data = json.load(fh)
-    entries = data[_SK]["autoreplies"]
-    assert entries[0]["post_command"] == "look;"
-    assert "post_command" not in entries[1]
-
-
 @pytest.mark.asyncio
 async def test_post_command_cleared_by_on_prompt():
     writer, written = _mock_writer()
@@ -1623,20 +1529,6 @@ def test_check_condition_invalid_expr():
     assert ok is True
 
 
-def test_parse_entries_when():
-    from telnetlib3.autoreply import _parse_entries
-    entries = [{"pattern": "bear", "reply": "kill bear;", "when": {"HP%": ">50"}}]
-    rules = _parse_entries(entries)
-    assert rules[0].when == {"HP%": ">50"}
-
-
-def test_parse_entries_when_missing():
-    from telnetlib3.autoreply import _parse_entries
-    entries = [{"pattern": "bear", "reply": "kill bear;"}]
-    rules = _parse_entries(entries)
-    assert rules[0].when == {}
-
-
 def test_save_autoreplies_when_roundtrip(tmp_path):
     fp = tmp_path / "ar.json"
     rules = [
@@ -1657,6 +1549,28 @@ def test_save_autoreplies_when_empty_not_saved(tmp_path):
     save_autoreplies(str(fp), rules, "test:23")
     raw = json.loads(fp.read_text())
     assert "when" not in raw["test:23"]["autoreplies"][0]
+
+
+def test_save_autoreplies_immediate_roundtrip(tmp_path):
+    fp = tmp_path / "ar.json"
+    rules = [
+        AutoreplyRule(
+            pattern=re.compile(r"ship arrived"),
+            reply="enter ship;",
+            immediate=True,
+        ),
+    ]
+    save_autoreplies(str(fp), rules, "test:23")
+    loaded = load_autoreplies(str(fp), "test:23")
+    assert loaded[0].immediate is True
+
+
+def test_save_autoreplies_immediate_false_not_saved(tmp_path):
+    fp = tmp_path / "ar.json"
+    rules = [AutoreplyRule(pattern=re.compile(r"x"), reply="y;")]
+    save_autoreplies(str(fp), rules, "test:23")
+    raw = json.loads(fp.read_text())
+    assert "immediate" not in raw["test:23"]["autoreplies"][0]
 
 
 @pytest.mark.asyncio
@@ -1711,3 +1625,66 @@ async def test_condition_failed_clears_on_read():
     await asyncio.sleep(0.1)
     assert engine.condition_failed is not None
     assert engine.condition_failed is None
+
+
+@pytest.mark.asyncio
+async def test_immediate_rule_fires_in_prompt_based_mode():
+    writer, written = _mock_writer()
+    rules = [
+        AutoreplyRule(pattern=re.compile(r"normal trigger"), reply="normal;"),
+        AutoreplyRule(
+            pattern=re.compile(r"ship arrived"),
+            reply="enter ship;",
+            immediate=True,
+        ),
+    ]
+    engine = AutoreplyEngine(rules, writer, writer.log)
+    engine.on_prompt()
+    assert engine._prompt_based is True
+
+    engine.feed("ship arrived\n")
+    await asyncio.sleep(0.1)
+    assert any("enter ship" in w for w in written)
+
+
+@pytest.mark.asyncio
+async def test_non_immediate_rule_deferred_in_prompt_based_mode():
+    writer, written = _mock_writer()
+    rules = [
+        AutoreplyRule(pattern=re.compile(r"normal trigger"), reply="normal;"),
+    ]
+    engine = AutoreplyEngine(rules, writer, writer.log)
+    engine.on_prompt()
+    assert engine._prompt_based is True
+
+    engine.feed("normal trigger\n")
+    await asyncio.sleep(0.1)
+    assert not any("normal" in w for w in written)
+
+    engine.on_prompt()
+    await asyncio.sleep(0.1)
+    assert any("normal" in w for w in written)
+
+
+@pytest.mark.asyncio
+async def test_immediate_and_normal_rules_together():
+    writer, written = _mock_writer()
+    rules = [
+        AutoreplyRule(pattern=re.compile(r"normal"), reply="deferred;"),
+        AutoreplyRule(
+            pattern=re.compile(r"urgent"),
+            reply="now;",
+            immediate=True,
+        ),
+    ]
+    engine = AutoreplyEngine(rules, writer, writer.log)
+    engine.on_prompt()
+
+    engine.feed("urgent event\nnormal event\n")
+    await asyncio.sleep(0.1)
+    assert any("now" in w for w in written)
+    assert not any("deferred" in w for w in written)
+
+    engine.on_prompt()
+    await asyncio.sleep(0.1)
+    assert any("deferred" in w for w in written)

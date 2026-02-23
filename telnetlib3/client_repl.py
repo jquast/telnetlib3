@@ -11,6 +11,24 @@ import logging
 from typing import Any, List, Tuple, Union, Callable, Optional
 
 # local
+from ._ansi import (
+    CLEAR_HOME,
+    CLEAR_LINE,
+    CURSOR_BLINKING_BAR,
+    CURSOR_DEFAULT,
+    ENTER_ALT_SCREEN,
+    EXIT_ALT_SCREEN,
+    RESTORE_CURSOR,
+    SAVE_CURSOR,
+    SCROLL_RESET,
+    SGR_CYAN,
+    SGR_RESET,
+    SGR_YELLOW,
+    SHOW_CURSOR,
+    TERMINAL_CLEANUP,
+    cup,
+    decstbm,
+)
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
@@ -64,7 +82,7 @@ def _split_incomplete_esc(data: bytes) -> tuple[bytes, bytes]:
     bytes, OSC (``ESC ]``), DCS (``ESC P``), and plain two-byte ``ESC X``
     sequences.
 
-    :returns: ``(flush_now, hold_back)`` — concatenation equals *data*.
+    :returns: ``(flush_now, hold_back)`` -- concatenation equals *data*.
     """
     n = len(data)
     if n == 0:
@@ -82,7 +100,7 @@ def _split_incomplete_esc(data: bytes) -> tuple[bytes, bytes]:
 
     nxt = data[pos]
 
-    if nxt == 0x5B:  # '[' — CSI
+    if nxt == 0x5B:  # '[' -- CSI
         pos += 1
         # Parameter bytes 0x30-0x3F, intermediate bytes 0x20-0x2F.
         while pos < n and 0x20 <= data[pos] <= 0x3F:
@@ -103,7 +121,7 @@ def _split_incomplete_esc(data: bytes) -> tuple[bytes, bytes]:
         return data[:idx], data[idx:]
 
     if 0x40 <= nxt <= 0x5F:
-        # Two-byte escape — already complete (Fe sequence).
+        # Two-byte escape -- already complete (Fe sequence).
         return data, b""
 
     # Unknown sequence type; assume complete.
@@ -129,6 +147,46 @@ class OutputRingBuffer:
     def replay(self) -> bytes:
         """Return all buffered output concatenated."""
         return b"".join(self._chunks)
+
+
+def _restore_after_subprocess(
+    replay_buf: Optional["OutputRingBuffer"],
+    reserve: int = _PT_RESERVE_WITH_TOOLBAR,
+) -> None:
+    """Restore terminal state after a TUI subprocess exits.
+
+    Restores stdin blocking mode, resets SGR/mouse/alt-screen via
+    :data:`TERMINAL_CLEANUP`, clears the screen, re-establishes the
+    DECSTBM scroll region, replays the output ring buffer, and clears
+    the reserved input rows.
+
+    :param replay_buf: Ring buffer to replay, or ``None`` to skip replay.
+    :param reserve: Number of bottom rows reserved for the input area.
+    """
+    import os as _os  # pylint: disable=import-outside-toplevel
+
+    try:
+        _os.set_blocking(sys.stdin.fileno(), True)
+    except OSError:
+        pass
+    sys.stdout.write(TERMINAL_CLEANUP)
+    try:
+        _tsize = _os.get_terminal_size()
+    except OSError:
+        _tsize = _os.terminal_size((80, 24))
+    scroll_bottom = max(1, _tsize.lines - reserve)
+    sys.stdout.write(CLEAR_HOME)
+    sys.stdout.write(decstbm(1, scroll_bottom))
+    sys.stdout.write(cup(1, 1))
+    if replay_buf is not None:
+        data = replay_buf.replay()
+        if data:
+            sys.stdout.write(data.decode("utf-8", errors="replace"))
+    sys.stdout.write(SAVE_CURSOR)
+    _input_row = _tsize.lines - reserve + 1
+    for _r in range(_input_row, _tsize.lines + 1):
+        sys.stdout.write(cup(_r, 1) + CLEAR_LINE)
+    sys.stdout.flush()
 
 
 def _hsv_to_rgb(h: float, s: float, v: float) -> Tuple[int, int, int]:
@@ -163,16 +221,16 @@ def _vital_color(fraction: float, kind: str) -> str:
     """
     fraction = max(0.0, min(1.0, fraction))
     if kind == "hp":
-        # Stay red below 33%, then red→green over 33%–100%.
+        # Stay red below 33%, then red->green over 33%-100%.
         hue = max(0.0, (fraction - 0.33) / 0.67) * 120.0
     elif kind == "xp":
-        # Purple (270) → cyan (180) as XP fills.
+        # Purple (270) -> cyan (180) as XP fills.
         hue = 270.0 - fraction * 90.0
     elif kind == "wander":
-        # Cyan (180) → yellow (60) as autowander progresses.
+        # Cyan (180) -> yellow (60) as autowander progresses.
         hue = 180.0 - fraction * 120.0
     else:
-        # Stay golden yellow below 33%, then golden-yellow→blue over 33%–100%.
+        # Stay golden yellow below 33%, then golden-yellow->blue over 33%-100%.
         # hue 45=golden yellow, hue 240=blue.
         t = max(0.0, (fraction - 0.33) / 0.67)
         hue = 45.0 + t * 195.0
@@ -284,7 +342,7 @@ if HAS_PROMPT_TOOLKIT:
         """
         FileHistory subclass that skips storing password inputs.
 
-        :attr:`is_password` is a callable checked at store time — when
+        :attr:`is_password` is a callable checked at store time -- when
         it returns ``True`` the entry is silently discarded.
         """
 
@@ -670,7 +728,7 @@ if HAS_PROMPT_TOOLKIT:
             Read one line of input from the user.
 
             ``is_password`` is passed as a callable so prompt_toolkit
-            re-evaluates it on every render — if the server toggles
+            re-evaluates it on every render -- if the server toggles
             ``WILL ECHO`` while the prompt is already waiting, the
             display switches to masked input immediately.
 
@@ -715,18 +773,18 @@ def _repaint_screen(
         _os.set_blocking(fd, True)
         try:
             scroll_bottom = max(1, _tsize.lines - reserve)
-            sys.stdout.write("\x1b[2J\x1b[H")
-            sys.stdout.write(f"\x1b[1;{scroll_bottom}r")
-            sys.stdout.write("\x1b[1;1H")
+            sys.stdout.write(CLEAR_HOME)
+            sys.stdout.write(decstbm(1, scroll_bottom))
+            sys.stdout.write(cup(1, 1))
             if replay_buf is not None:
                 data = replay_buf.replay()
                 if data:
                     sys.stdout.write(data.decode("utf-8", errors="replace"))
-            sys.stdout.write("\x1b7")
+            sys.stdout.write(SAVE_CURSOR)
             _input_row = _tsize.lines - reserve + 1
             for _r in range(_input_row, _tsize.lines + 1):
-                sys.stdout.write(f"\x1b[{_r};1H\x1b[2K")
-            sys.stdout.write(f"\x1b[{_input_row};1H")
+                sys.stdout.write(cup(_r, 1) + CLEAR_LINE)
+            sys.stdout.write(cup(_input_row, 1))
             sys.stdout.flush()
         finally:
             _os.set_blocking(fd, was_blocking)
@@ -752,8 +810,8 @@ def _show_help(_event: Any, macro_defs: "Any" = None) -> None:
     import os  # pylint: disable=import-outside-toplevel,redefined-outer-name
 
     def _run_help() -> None:
-        sys.stdout.write("\x1b[?1049h")
-        sys.stdout.write("\x1b[H\x1b[2J")
+        sys.stdout.write(ENTER_ALT_SCREEN)
+        sys.stdout.write(HOME + CLEAR_SCREEN)
         lines = [
             "",
             "  telnetlib3 \u2014 Keybindings",
@@ -798,15 +856,15 @@ def _show_help(_event: Any, macro_defs: "Any" = None) -> None:
             os.set_blocking(fd, was_blocking)
             termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
-        sys.stdout.write("\x1b[?1049l")
+        sys.stdout.write(EXIT_ALT_SCREEN)
         sys.stdout.flush()
 
         try:
             _tsize = os.get_terminal_size()
             scroll_bottom = max(1, _tsize.lines - _PT_RESERVE_WITH_TOOLBAR)
-            sys.stdout.write(f"\x1b[1;{scroll_bottom}r")
-            sys.stdout.write(f"\x1b[{scroll_bottom};1H")
-            sys.stdout.write("\x1b7")
+            sys.stdout.write(decstbm(1, scroll_bottom))
+            sys.stdout.write(cup(scroll_bottom, 1))
+            sys.stdout.write(SAVE_CURSOR)
             sys.stdout.flush()
         except OSError:
             pass
@@ -841,9 +899,7 @@ def _launch_tui_editor(
     """
     import os  # pylint: disable=import-outside-toplevel,redefined-outer-name
     import subprocess  # pylint: disable=import-outside-toplevel
-
-    _xdg = os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config"))
-    _config_dir = os.path.join(_xdg, "telnetlib3")
+    from ._paths import CONFIG_DIR as _config_dir  # pylint: disable=import-outside-toplevel
 
     _session_key = getattr(writer, "_session_key", "")
 
@@ -878,13 +934,13 @@ def _launch_tui_editor(
 
     def _run_editor() -> None:
         global _editor_active  # noqa: PLW0603  # pylint: disable=global-statement
-        # Reset DECSTBM scroll region before launching TUI subprocess —
+        # Reset DECSTBM scroll region before launching TUI subprocess --
         # the Textual app uses the alternate screen buffer, but some
         # terminals share scroll region state across buffers, causing a
         # "doubling" effect where widgets render at the wrong row.
-        sys.stdout.write("\x1b[r")
+        sys.stdout.write(SCROLL_RESET)
         sys.stdout.flush()
-        # Flush and drain stderr — Textual writes all output to
+        # Flush and drain stderr -- Textual writes all output to
         # sys.__stderr__, and leftover buffered data can fill the PTY
         # buffer, blocking the editor's WriterThread.
         sys.stderr.flush()
@@ -896,43 +952,7 @@ def _launch_tui_editor(
             log.warning("could not launch TUI editor subprocess")
         finally:
             _editor_active = False
-            # Restore stdin blocking mode — the Textual subprocess shares
-            # the kernel file description and may have set O_NONBLOCK.
-            try:
-                os.set_blocking(sys.stdin.fileno(), True)
-            except OSError:
-                pass
-            # Reset terminal state the Textual subprocess may have left
-            # behind (SGR attributes, mouse tracking, alternate screen).
-            sys.stdout.write(
-                "\x1b[m"  # reset SGR attributes
-                "\x1b[?25h"  # show cursor
-                "\x1b[?1049l"  # exit alternate screen
-                "\x1b[?1000l"  # disable mouse tracking (basic)
-                "\x1b[?1002l"  # disable button-event tracking
-                "\x1b[?1003l"  # disable all-motion tracking
-                "\x1b[?1006l"  # disable SGR mouse format
-                "\x1b[?2004l"  # disable bracketed paste
-            )
-            # Full screen clear + scroll region restore + replay, same
-            # as Ctrl+L, so the MUD output and prompt are fully intact.
-            try:
-                _tsize = os.get_terminal_size()
-            except OSError:
-                _tsize = os.terminal_size((80, 24))
-            scroll_bottom = max(1, _tsize.lines - _PT_RESERVE_WITH_TOOLBAR)
-            sys.stdout.write("\x1b[2J\x1b[H")
-            sys.stdout.write(f"\x1b[1;{scroll_bottom}r")
-            sys.stdout.write("\x1b[1;1H")
-            if replay_buf is not None:
-                data = replay_buf.replay()
-                if data:
-                    sys.stdout.write(data.decode("utf-8", errors="replace"))
-            sys.stdout.write("\x1b7")
-            _input_row = _tsize.lines - _PT_RESERVE_WITH_TOOLBAR + 1
-            for _r in range(_input_row, _tsize.lines + 1):
-                sys.stdout.write(f"\x1b[{_r};1H\x1b[2K")
-            sys.stdout.flush()
+            _restore_after_subprocess(replay_buf)
 
         if editor_type == "macros":
             _reload_macros(writer, path, _session_key, log)
@@ -968,7 +988,7 @@ def _reload_macros(
         new_defs = load_macros(path, session_key)
         writer._macro_defs = new_defs
         writer._macros_file = path
-        # Rebind keys — prompt_toolkit uses last-registered-wins,
+        # Rebind keys -- prompt_toolkit uses last-registered-wins,
         # so new bindings for the same keys override old ones.
         kb = getattr(writer, "_pt_kb", None)
         if kb is not None:
@@ -1047,7 +1067,7 @@ def _launch_room_browser(
 
     def _run_browser() -> None:
         global _editor_active  # noqa: PLW0603  # pylint: disable=global-statement
-        sys.stdout.write("\x1b[r")
+        sys.stdout.write(SCROLL_RESET)
         sys.stdout.flush()
         sys.stderr.flush()
         sys.__stderr__.flush()
@@ -1058,37 +1078,7 @@ def _launch_room_browser(
             log.warning("could not launch room browser subprocess")
         finally:
             _editor_active = False
-            try:
-                os.set_blocking(sys.stdin.fileno(), True)
-            except OSError:
-                pass
-            sys.stdout.write(
-                "\x1b[m"
-                "\x1b[?25h"
-                "\x1b[?1049l"
-                "\x1b[?1000l"
-                "\x1b[?1002l"
-                "\x1b[?1003l"
-                "\x1b[?1006l"
-                "\x1b[?2004l"
-            )
-            try:
-                _tsize = os.get_terminal_size()
-            except OSError:
-                _tsize = os.terminal_size((80, 24))
-            scroll_bottom = max(1, _tsize.lines - _PT_RESERVE_WITH_TOOLBAR)
-            sys.stdout.write("\x1b[2J\x1b[H")
-            sys.stdout.write(f"\x1b[1;{scroll_bottom}r")
-            sys.stdout.write("\x1b[1;1H")
-            if replay_buf is not None:
-                data = replay_buf.replay()
-                if data:
-                    sys.stdout.write(data.decode("utf-8", errors="replace"))
-            sys.stdout.write("\x1b7")
-            _input_row = _tsize.lines - _PT_RESERVE_WITH_TOOLBAR + 1
-            for _r in range(_input_row, _tsize.lines + 1):
-                sys.stdout.write(f"\x1b[{_r};1H\x1b[2K")
-            sys.stdout.flush()
+            _restore_after_subprocess(replay_buf)
 
         # Reload room graph from disk to pick up bookmark changes made in TUI.
         from .rooms import load_rooms as _load_rooms  # pylint: disable=import-outside-toplevel
@@ -1282,14 +1272,34 @@ async def _fast_travel(
                     # In slow mode, exclusive rules enter exclusive mode
                     # (e.g. "kill" sent, waiting for "died\.").  Wait for
                     # combat to finish before moving to the next room.
-                    if slow and engine.exclusive_active:
-                        while engine.exclusive_active:
-                            engine.check_timeout()
-                            await asyncio.sleep(0.05)
-                        # After exclusive clears, drain any new replies
-                        # that the "until" match may have queued.
-                        while engine.reply_pending:
-                            await asyncio.sleep(0.05)
+                    # After exclusive/reply_pending clear, wait for a
+                    # fresh prompt so the server response to the last
+                    # autoreply command is processed -- it may trigger
+                    # new matches (cascading always-rules).
+                    if slow and (engine.exclusive_active
+                                 or engine.reply_pending):
+                        _settle_passes = 0
+                        _MAX_SETTLE = 20  # safety cap
+                        while _settle_passes < _MAX_SETTLE:
+                            if engine.exclusive_active:
+                                while engine.exclusive_active:
+                                    engine.check_timeout()
+                                    await asyncio.sleep(0.05)
+                            while engine.reply_pending:
+                                await asyncio.sleep(0.05)
+                            # Wait for server to respond to whatever the
+                            # autoreply just sent.  The prompt signal
+                            # drives on_prompt() which may queue new
+                            # replies.
+                            if wait_fn is not None:
+                                await wait_fn()
+                            await asyncio.sleep(0)
+                            # If neither exclusive nor reply_pending
+                            # after the prompt, we've converged.
+                            if (not engine.exclusive_active
+                                    and not engine.reply_pending):
+                                break
+                            _settle_passes += 1
                 if _cond_cancelled:
                     break
 
@@ -1304,7 +1314,7 @@ async def _fast_travel(
 
                 if actual == expected_room:
                     break
-                # Same-name room with different ID — correct the edge
+                # Same-name room with different ID -- correct the edge
                 # and continue as if we arrived at the expected room.
                 if (expected_room and actual and actual != expected_room
                         and _names_match(expected_room, actual)):
@@ -1318,11 +1328,11 @@ async def _fast_travel(
                     )
                     expected_room = actual
                     break
-                # Room didn't change — server likely rejected move (rate limit).
+                # Room didn't change -- server likely rejected move (rate limit).
                 # Retry unless we've exhausted attempts.
                 if actual == prev_room and attempt < _max_retries:
                     continue
-                # Arrived at wrong room — try to re-route.
+                # Arrived at wrong room -- try to re-route.
                 break
 
             if _cond_cancelled:
@@ -1469,12 +1479,12 @@ def expand_commands(line: str) -> list[str]:
     Split *line* on ``;`` (outside backticks) and expand repeat prefixes.
 
     Backtick-enclosed tokens (e.g. ```fast travel 123```, ```delay 1s```)
-    are preserved verbatim — they are not split on ``;`` and repeat
+    are preserved verbatim -- they are not split on ``;`` and repeat
     expansion is not applied.
 
     A segment like ``5e`` becomes ``['e', 'e', 'e', 'e', 'e']``.
     Only a leading integer followed immediately by an alphabetic
-    character triggers expansion (e.g. ``5east`` → 5 × ``east``).
+    character triggers expansion (e.g. ``5east`` -> 5 × ``east``).
     Segments without a leading digit are passed through unchanged.
 
     :param line: Raw user input line.
@@ -1527,11 +1537,11 @@ async def _handle_travel_commands(
 
     Recognised commands (case-insensitive, enclosed in backticks):
 
-    - ```fast travel <id>``` — fast travel to room *id*
-    - ```slow travel <id>``` — slow travel to room *id*
-    - ```return fast``` — fast travel to the current room (snapshot)
-    - ```return slow``` — slow travel to the current room (snapshot)
-    - ```autowander``` — visit all same-named rooms via slow travel
+    - ```fast travel <id>``` -- fast travel to room *id*
+    - ```slow travel <id>``` -- slow travel to room *id*
+    - ```return fast``` -- fast travel to the current room (snapshot)
+    - ```return slow``` -- slow travel to the current room (snapshot)
+    - ```autowander``` -- visit all same-named rooms via slow travel
 
     Only the **first** travel command in the list is handled; everything
     before it is returned as-is (already sent by the caller), and everything
@@ -1570,7 +1580,7 @@ async def _handle_travel_commands(
 
         current = getattr(writer, "_current_room_num", "")
         if not current:
-            log.warning("no current room — cannot travel")
+            log.warning("no current room -- cannot travel")
             break
 
         rooms_file = getattr(writer, "_rooms_file", None)
@@ -1580,7 +1590,7 @@ async def _handle_travel_commands(
                 from .rooms import rooms_path as _rp_fn  # pylint: disable=import-outside-toplevel
                 rooms_file = _rp_fn(session_key)
         if not rooms_file:
-            log.warning("no rooms file — cannot travel")
+            log.warning("no rooms file -- cannot travel")
             break
 
         graph = load_rooms(rooms_file)
@@ -1644,7 +1654,7 @@ async def _send_chained(
 
         # Repeated commands: delay + room-change pacing with retry.
         for attempt in range(_MOVE_MAX_RETRIES + 1):
-            # Always delay — the first repeated command needs spacing
+            # Always delay -- the first repeated command needs spacing
             # from the caller's initial send, and retries need a longer
             # back-off to respect the server's rate limit.
             if attempt == 0:
@@ -1666,7 +1676,7 @@ async def _send_chained(
             if not prev_room:
                 break
 
-            # Wait briefly for room change — GMCP typically arrives
+            # Wait briefly for room change -- GMCP typically arrives
             # within 100-200ms.  A short timeout keeps movement brisk
             # while still detecting rate-limit rejections.
             actual = getattr(writer, "_current_room_num", "")
@@ -1698,7 +1708,7 @@ async def execute_macro_commands(
     Execute a macro text string, handling travel and delay commands.
 
     Expands the text with :func:`expand_commands`, then processes each
-    part — backtick-enclosed travel commands are routed through
+    part -- backtick-enclosed travel commands are routed through
     :func:`_handle_travel_commands`, delay commands pause execution,
     and plain commands are sent to the server with GA/EOR pacing.
 
@@ -1720,7 +1730,7 @@ async def execute_macro_commands(
     while idx < len(parts):
         cmd = parts[idx]
 
-        # Travel command — hand off the rest to _handle_travel_commands.
+        # Travel command -- hand off the rest to _handle_travel_commands.
         if _TRAVEL_RE.match(cmd):
             remainder = await _handle_travel_commands(
                 parts[idx:], writer, log,
@@ -1742,7 +1752,7 @@ async def execute_macro_commands(
             idx += 1
             continue
 
-        # Plain command — send with pacing.
+        # Plain command -- send with pacing.
         if idx > 0:
             if prompt_ready is not None:
                 prompt_ready.clear()
@@ -1866,52 +1876,73 @@ if sys.platform != "win32":
                 # Push content up: position at bottom of scroll region
                 # and emit newlines so the terminal scrolls.
                 old_bottom = self.scroll_rows
-                self._stdout.write(f"\x1b[{old_bottom};1H".encode())
+                self._stdout.write(cup(old_bottom, 1).encode())
                 self._stdout.write(b"\n" * extra)
             self._reserve = new_reserve
             if self._active:
                 for _r in range(old_input_row, old_input_row + new_reserve):
-                    self._stdout.write(f"\x1b[{_r};1H\x1b[2K".encode())
+                    self._stdout.write(
+                        (cup(_r, 1) + CLEAR_LINE).encode()
+                    )
                 self._set_scroll_region()
-                self._stdout.write(b"\x1b7")
+                # The \n scroll shifted content up by `extra` rows but
+                # the DECSC saved position (from _read_server) stayed
+                # at its old absolute row — which may now be inside the
+                # reserved area.  Restore it, move up to follow the
+                # shifted content, then re-save.
+                self._stdout.write(RESTORE_CURSOR.encode())
+                if extra > 0:
+                    self._stdout.write(f"\x1b[{extra}A".encode())
+                self._stdout.write(SAVE_CURSOR.encode())
                 for _r in range(self.input_row, self.input_row + new_reserve):
-                    self._stdout.write(f"\x1b[{_r};1H\x1b[2K".encode())
+                    self._stdout.write(
+                        (cup(_r, 1) + CLEAR_LINE).encode()
+                    )
                 self._dirty = True
 
         def update_size(self, rows: int, cols: int) -> None:
-            """Update dimensions and reapply scroll region."""
+            """Update dimensions and reapply scroll region.
+
+            No content scrolling occurs here — ``_on_resize_repaint``
+            replays the buffer and saves the cursor at the correct
+            position afterward.
+            """
             old_input_row = self.input_row
             self._rows = rows
             self._cols = cols
             if self._active:
                 for _r in range(old_input_row, old_input_row + self._reserve):
-                    self._stdout.write(f"\x1b[{_r};1H\x1b[2K".encode())
+                    self._stdout.write(
+                        (cup(_r, 1) + CLEAR_LINE).encode()
+                    )
                 self._set_scroll_region()
-                self._stdout.write(b"\x1b7")
+                self._stdout.write(SAVE_CURSOR.encode())
                 for _r in range(self.input_row, self.input_row + self._reserve):
-                    self._stdout.write(f"\x1b[{_r};1H\x1b[2K".encode())
+                    self._stdout.write(
+                        (cup(_r, 1) + CLEAR_LINE).encode()
+                    )
                 self._dirty = True
 
         def _set_scroll_region(self) -> None:
             """Write DECSTBM escape sequence to set scroll region."""
             top = 1
             bottom = self.scroll_rows
-            self._stdout.write(f"\x1b[{top};{bottom}r".encode())
-            self._stdout.write(f"\x1b[{bottom};1H".encode())
+            self._stdout.write(decstbm(top, bottom).encode())
+            self._stdout.write(cup(bottom, 1).encode())
 
         def _reset_scroll_region(self) -> None:
             """Reset scroll region to full terminal height."""
-            self._stdout.write(f"\x1b[1;{self._rows}r".encode())
+            self._stdout.write(decstbm(1, self._rows).encode())
 
         def save_and_goto_input(self) -> None:
             """Save cursor, move to input line, clear it."""
-            self._stdout.write(b"\x1b7")
-            self._stdout.write(f"\x1b[{self.input_row};1H".encode())
-            self._stdout.write(b"\x1b[2K")
+            self._stdout.write(SAVE_CURSOR.encode())
+            self._stdout.write(cup(self.input_row, 1).encode())
+            self._stdout.write(CLEAR_LINE.encode())
 
         def restore_cursor(self) -> None:
             """Restore cursor to saved position in scroll region."""
-            self._stdout.write(b"\x1b8")
+            self._stdout.write(RESTORE_CURSOR.encode())
 
         def __enter__(self) -> "ScrollRegion":
             self._set_scroll_region()
@@ -1921,7 +1952,7 @@ if sys.platform != "win32":
         def __exit__(self, *_: Any) -> None:
             self._active = False
             self._reset_scroll_region()
-            self._stdout.write(f"\x1b[{self._rows};1H".encode())
+            self._stdout.write(cup(self._rows, 1).encode())
 
     import contextlib
 
@@ -2008,7 +2039,7 @@ if sys.platform != "win32":
         Event loop with REPL input at the bottom of the screen.
 
         When ``prompt_toolkit`` is available, :func:`patch_stdout` handles
-        all cursor management — server output is printed above the prompt
+        all cursor management -- server output is printed above the prompt
         automatically.  The fallback ``BasicLineRepl`` path uses a manual
         ``ScrollRegion`` instead.
 
@@ -2062,16 +2093,16 @@ if sys.platform != "win32":
                 if _scroll_ref[0] is not None
                 else _PT_RESERVE_WITH_TOOLBAR
             )
-            stdout.write(b"\x1b[2J\x1b[1;1H")
+            stdout.write(CLEAR_HOME.encode() + cup(1, 1).encode())
             data = replay_buf.replay()
             if data:
                 stdout.write(data)
             # Save cursor at end of replayed content.
-            stdout.write(b"\x1b7")
+            stdout.write(SAVE_CURSOR.encode())
             # Clear reserved input rows.
             _input_row = _rows - _reserve + 1
             for _r in range(_input_row, _rows + 1):
-                stdout.write(f"\x1b[{_r};1H\x1b[2K".encode())
+                stdout.write((cup(_r, 1) + CLEAR_LINE).encode())
             # Reset and redraw prompt_toolkit's input line from scratch.
             try:
                 _app = prompt_toolkit.application.get_app()
@@ -2088,10 +2119,12 @@ if sys.platform != "win32":
             _scroll_ref[0] = scroll
             # Save initial scroll-region cursor position (DECSC).
             # _read_server restores this before writing, then re-saves.
-            stdout.write(b"\x1b7")
-            stdout.write(f"\x1b[{scroll.input_row};1H\x1b[2K".encode())
+            stdout.write(SAVE_CURSOR.encode())
+            stdout.write(
+                (cup(scroll.input_row, 1) + CLEAR_LINE).encode()
+            )
             # Set cursor to blinking bar for text input (DECSCUSR).
-            stdout.write(b"\x1b[5 q")
+            stdout.write(CURSOR_BLINKING_BAR.encode())
 
             repl = PromptToolkitRepl(  # pylint: disable=possibly-used-before-assignment
                 telnet_writer,
@@ -2134,20 +2167,21 @@ if sys.platform != "win32":
                     app.current_buffer.insert_text(text)
 
             def _echo_autoreply(cmd: str) -> None:
-                stdout.write(b"\x1b8")
-                stdout.write(f"\x1b[36m{cmd}\x1b[m\r\n".encode())
-                replay_buf.append(f"\x1b[36m{cmd}\x1b[m\r\n".encode())
-                stdout.write(b"\x1b7")
+                stdout.write(RESTORE_CURSOR.encode())
+                _colored = f"{SGR_CYAN}{cmd}{SGR_RESET}\r\n"
+                stdout.write(_colored.encode())
+                replay_buf.append(_colored.encode())
+                stdout.write(SAVE_CURSOR.encode())
                 try:
                     _app = prompt_toolkit.application.get_app()
                     _cp = _app.renderer._cursor_pos
                     _row = scroll.input_row + _cp.y
                     _col = _cp.x + 1
-                    stdout.write(f"\x1b[{_row};{_col}H".encode())
+                    stdout.write(cup(_row, _col).encode())
                     _app.invalidate()
                 except RuntimeError:
                     stdout.write(
-                        f"\x1b[{scroll.input_row};1H".encode()
+                        cup(scroll.input_row, 1).encode()
                     )
 
             # EOR/GA-based command pacing: wait for server prompt signal
@@ -2155,13 +2189,18 @@ if sys.platform != "win32":
             prompt_ready = asyncio.Event()
             prompt_ready.set()
             _ga_detected = False
+            # Deferred on_prompt: the GA/EOR callback fires from the
+            # IAC handler *before* _read_server calls feed(), so the
+            # autoreply buffer is empty when on_prompt() would run.
+            # Instead, the callback sets this flag and _read_server
+            # calls on_prompt() after feed() so matches see the text.
+            _prompt_pending = False
 
             def _on_prompt_signal(_cmd: bytes) -> None:
-                nonlocal _ga_detected
+                nonlocal _ga_detected, _prompt_pending
                 _ga_detected = True
                 prompt_ready.set()
-                if autoreply_engine is not None:
-                    autoreply_engine.on_prompt()
+                _prompt_pending = True
 
             from .telopt import GA, CMD_EOR  # pylint: disable=import-outside-toplevel
 
@@ -2216,7 +2255,7 @@ if sys.platform != "win32":
             server_done = False
 
             async def _read_server() -> None:
-                nonlocal server_done, mode_switched
+                nonlocal server_done, mode_switched, _prompt_pending
                 _esc_hold = b""
                 while not server_done:
                     out = await telnet_reader.read(2**24)
@@ -2224,14 +2263,19 @@ if sys.platform != "win32":
                         if telnet_reader.at_eof():
                             server_done = True
                             if _esc_hold:
-                                stdout.write(b"\x1b8")
+                                stdout.write(RESTORE_CURSOR.encode())
                                 stdout.write(_esc_hold)
                                 replay_buf.append(_esc_hold)
-                                stdout.write(b"\x1b7")
+                                stdout.write(SAVE_CURSOR.encode())
                             _flush_color_filter(telnet_writer, stdout)
-                            stdout.write(b"\x1b8")
+                            stdout.write(RESTORE_CURSOR.encode())
                             stdout.write(b"\r\nConnection closed by foreign host.\r\n")
                             return
+                        # GA/EOR without visible text (e.g. bare GMCP
+                        # update).  Fire deferred on_prompt if pending.
+                        if _prompt_pending and autoreply_engine is not None:
+                            _prompt_pending = False
+                            autoreply_engine.on_prompt()
                         continue
                     if isinstance(out, bytes):
                         out = out.decode("utf-8", errors="replace")
@@ -2239,10 +2283,20 @@ if sys.platform != "win32":
                     _refresh_autoreply_engine()
                     if autoreply_engine is not None:
                         autoreply_engine.feed(out)
+                        # Fire deferred on_prompt *after* feed() so the
+                        # autoreply buffer contains the text that arrived
+                        # alongside GA/EOR.  Without this, on_prompt()
+                        # fires from the IAC callback before feed() and
+                        # matches an empty buffer — room content like
+                        # "Snake" would not trigger until the *next*
+                        # GA/EOR, by which time autowander has moved on.
+                        if _prompt_pending:
+                            _prompt_pending = False
+                            autoreply_engine.on_prompt()
                     if _editor_active:
                         _editor_buffer.append(out.encode())
                         continue
-                    stdout.write(b"\x1b8")
+                    stdout.write(RESTORE_CURSOR.encode())
                     if _editor_buffer:
                         for chunk in _editor_buffer:
                             stdout.write(chunk)
@@ -2253,7 +2307,7 @@ if sys.platform != "win32":
                     if encoded:
                         stdout.write(encoded)
                         replay_buf.append(encoded)
-                    stdout.write(b"\x1b7")
+                    stdout.write(SAVE_CURSOR.encode())
                     # Reposition cursor where prompt_toolkit expects it,
                     # so delta rendering and user keystrokes land at the
                     # correct column.  Fall back to column 1 if no app.
@@ -2262,11 +2316,11 @@ if sys.platform != "win32":
                         _cp = _app.renderer._cursor_pos
                         _row = scroll.input_row + _cp.y
                         _col = _cp.x + 1
-                        stdout.write(f"\x1b[{_row};{_col}H".encode())
+                        stdout.write(cup(_row, _col).encode())
                         _app.invalidate()
                     except RuntimeError:
                         stdout.write(
-                            f"\x1b[{scroll.input_row};1H".encode()
+                            cup(scroll.input_row, 1).encode()
                         )
                     if telnet_writer.mode == "kludge":
                         mode_switched = True
@@ -2276,7 +2330,9 @@ if sys.platform != "win32":
             async def _read_input() -> None:
                 nonlocal server_done
                 while not server_done:
-                    stdout.write(f"\x1b[{scroll.input_row};1H\x1b[2K".encode())
+                    stdout.write(
+                        (cup(scroll.input_row, 1) + CLEAR_LINE).encode()
+                    )
                     # Reset PT renderer before each new prompt so it does
                     # a full redraw of the input line and toolbar after we
                     # cleared the row above.
@@ -2289,7 +2345,7 @@ if sys.platform != "win32":
                         server_done = True
                         telnet_writer.close()
                         return
-                    # Re-evaluate terminal size after prompt returns —
+                    # Re-evaluate terminal size after prompt returns --
                     # prompt_toolkit handles SIGWINCH during prompt_async
                     # but our scroll region may not have been updated if
                     # the combined handler wasn't active yet.
@@ -2309,11 +2365,12 @@ if sys.platform != "win32":
                     # pylint: disable-next=protected-access
                     is_pw = repl._is_password_mode()
                     echo_text = "*" * len(line) if is_pw else line
-                    stdout.write(b"\x1b8")
-                    stdout.write(f"\x1b[33m{echo_text}\x1b[m\r\n".encode())
-                    replay_buf.append(f"\x1b[33m{echo_text}\x1b[m\r\n".encode())
-                    stdout.write(b"\x1b7")
-                    stdout.write(f"\x1b[{scroll.input_row};1H".encode())
+                    stdout.write(RESTORE_CURSOR.encode())
+                    _colored = f"{SGR_YELLOW}{echo_text}{SGR_RESET}\r\n"
+                    stdout.write(_colored.encode())
+                    replay_buf.append(_colored.encode())
+                    stdout.write(SAVE_CURSOR.encode())
+                    stdout.write(cup(scroll.input_row, 1).encode())
                     if autoreply_engine is not None:
                         autoreply_engine.cancel()
                     _wander_task = getattr(telnet_writer, "_wander_task", None)
@@ -2350,7 +2407,7 @@ if sys.platform != "win32":
                 if autoreply_engine is not None:
                     autoreply_engine.cancel()
                 # Reset cursor shape to terminal default (DECSCUSR).
-                stdout.write(b"\x1b[0 q")
+                stdout.write(CURSOR_DEFAULT.encode())
 
         return mode_switched
 
@@ -2369,7 +2426,9 @@ if sys.platform != "win32":
         mode_switched = False
 
         async with _repl_scaffold(telnet_writer, term, stdout) as (scroll, _):
-            stdout.write(f"\x1b[{scroll.input_row};1H\x1b[2K".encode())
+            stdout.write(
+                (cup(scroll.input_row, 1) + CLEAR_LINE).encode()
+            )
 
             basic_stdin = await term.connect_stdin()
             repl: BasicLineRepl = BasicLineRepl(telnet_writer, basic_stdin, telnet_writer.log)
@@ -2377,18 +2436,20 @@ if sys.platform != "win32":
             def _echo_autoreply_b(cmd: str) -> None:
                 scroll.save_and_goto_input()
                 scroll.restore_cursor()
-                stdout.write(f"\x1b[36m{cmd}\x1b[m\r\n".encode())
+                stdout.write(
+                    f"{SGR_CYAN}{cmd}{SGR_RESET}\r\n".encode()
+                )
 
             prompt_ready_b = asyncio.Event()
             prompt_ready_b.set()
             _ga_detected_b = False
+            _prompt_pending_b = False
 
             def _on_prompt_signal_b(_cmd: bytes) -> None:
-                nonlocal _ga_detected_b
+                nonlocal _ga_detected_b, _prompt_pending_b
                 _ga_detected_b = True
                 prompt_ready_b.set()
-                if autoreply_engine_b is not None:
-                    autoreply_engine_b.on_prompt()
+                _prompt_pending_b = True
 
             from .telopt import GA, CMD_EOR  # pylint: disable=import-outside-toplevel
 
@@ -2423,7 +2484,7 @@ if sys.platform != "win32":
             server_done = False
 
             async def _read_server() -> None:
-                nonlocal server_done, mode_switched
+                nonlocal server_done, mode_switched, _prompt_pending_b
                 _esc_hold = b""
                 while not server_done:
                     out = await telnet_reader.read(2**24)
@@ -2435,12 +2496,18 @@ if sys.platform != "win32":
                             _flush_color_filter(telnet_writer, stdout)
                             stdout.write(b"\r\nConnection closed by foreign host.\r\n")
                             return
+                        if _prompt_pending_b and autoreply_engine_b is not None:
+                            _prompt_pending_b = False
+                            autoreply_engine_b.on_prompt()
                         continue
                     if isinstance(out, bytes):
                         out = out.decode("utf-8", errors="replace")
                     out = _transform_output(out, telnet_writer, False)
                     if autoreply_engine_b is not None:
                         autoreply_engine_b.feed(out)
+                        if _prompt_pending_b:
+                            _prompt_pending_b = False
+                            autoreply_engine_b.on_prompt()
                     scroll.save_and_goto_input()
                     scroll.restore_cursor()
                     encoded = _esc_hold + out.encode()
@@ -2455,7 +2522,9 @@ if sys.platform != "win32":
             async def _read_input() -> None:
                 nonlocal server_done
                 while not server_done:
-                    stdout.write(f"\x1b[{scroll.input_row};1H\x1b[2K".encode())
+                    stdout.write(
+                        (cup(scroll.input_row, 1) + CLEAR_LINE).encode()
+                    )
                     line = await repl.prompt()
                     if line is None:
                         server_done = True
@@ -2471,7 +2540,9 @@ if sys.platform != "win32":
                     echo_text = "*" * len(line) if telnet_writer.will_echo else line
                     scroll.save_and_goto_input()
                     scroll.restore_cursor()
-                    stdout.write(f"\x1b[33m{echo_text}\x1b[m\r\n".encode())
+                    stdout.write(
+                        f"{SGR_YELLOW}{echo_text}{SGR_RESET}\r\n".encode()
+                    )
                     if autoreply_engine_b is not None:
                         autoreply_engine_b.cancel()
                     parts = expand_commands(line)

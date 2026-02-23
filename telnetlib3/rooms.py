@@ -194,28 +194,51 @@ class RoomGraph:
 
 def _xdg_data_dir() -> str:
     """Return XDG data directory for telnetlib3."""
-    xdg = os.environ.get(
-        "XDG_DATA_HOME", os.path.join(os.path.expanduser("~"), ".local", "share")
-    )
-    return os.path.join(xdg, "telnetlib3")
+    from ._paths import DATA_DIR  # pylint: disable=import-outside-toplevel
+    return DATA_DIR
+
+
+def _atomic_write(path: str, content: str) -> None:
+    """
+    Atomically write *content* to *path* using a temp file and :func:`os.replace`.
+
+    :param path: Target file path.
+    :param content: String content to write.
+    """
+    dir_path = os.path.dirname(path)
+    os.makedirs(dir_path, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=dir_path, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _session_file_path(prefix: str, session_key: str, ext: str = "") -> str:
+    """Return a per-session file path under the XDG data directory."""
+    safe = session_key.replace(":", "_")
+    return os.path.join(_xdg_data_dir(), f"{prefix}{safe}{ext}")
 
 
 def rooms_path(session_key: str) -> str:
     """Return path to room graph JSON for *session_key* (``host:port``)."""
-    safe = session_key.replace(":", "_")
-    return os.path.join(_xdg_data_dir(), f"rooms-{safe}.json")
+    return _session_file_path("rooms-", session_key, ".json")
 
 
 def current_room_path(session_key: str) -> str:
     """Return path to current room number file for *session_key*."""
-    safe = session_key.replace(":", "_")
-    return os.path.join(_xdg_data_dir(), f".current-room-{safe}")
+    return _session_file_path(".current-room-", session_key)
 
 
 def fasttravel_path(session_key: str) -> str:
     """Return path to fast travel command file for *session_key*."""
-    safe = session_key.replace(":", "_")
-    return os.path.join(_xdg_data_dir(), f".fasttravel-{safe}")
+    return _session_file_path(".fasttravel-", session_key)
 
 
 def load_rooms(path: str) -> RoomGraph:
@@ -257,19 +280,7 @@ def save_rooms(path: str, graph: RoomGraph) -> None:
         "version": 1,
         "rooms": {num: asdict(room) for num, room in graph.rooms.items()},
     }
-    dir_path = os.path.dirname(path)
-    os.makedirs(dir_path, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=dir_path, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, separators=(",", ":"))
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    _atomic_write(path, json.dumps(data, separators=(",", ":")))
 
 
 def write_current_room(path: str, room_num: str) -> None:
@@ -279,19 +290,7 @@ def write_current_room(path: str, room_num: str) -> None:
     :param path: File path.
     :param room_num: Current room number string.
     """
-    dir_path = os.path.dirname(path)
-    os.makedirs(dir_path, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=dir_path, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(room_num)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    _atomic_write(path, room_num)
 
 
 def read_current_room(path: str) -> str:
@@ -319,19 +318,7 @@ def write_fasttravel(
     :param slow: If ``True``, all autoreplies (including exclusive) fire.
     """
     data = {"steps": steps, "slow": slow}
-    dir_path = os.path.dirname(path)
-    os.makedirs(dir_path, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=dir_path, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    _atomic_write(path, json.dumps(data))
 
 
 def read_fasttravel(path: str) -> tuple[list[tuple[str, str]], bool]:

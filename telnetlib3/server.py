@@ -748,7 +748,7 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
         self._transport.resume_reading()
 
     def data_received(self, data: bytes) -> None:  # pragma: no cover
-        """Not expected — reading is paused during detection."""
+        """Not expected -- reading is paused during detection."""
 
     def connection_lost(self, exc: Optional[Exception]) -> None:
         """Connection dropped before detection completed."""

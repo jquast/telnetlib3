@@ -43,70 +43,13 @@ __all__ = ("AtasciiControlFilter", "ColorConfig", "ColorFilter", "PetsciiColorFi
 # Type alias for a 16-color palette: 16 (R, G, B) tuples indexed 0-15.
 # Index 0-7: normal colors (black, red, green, yellow, blue, magenta, cyan, white)
 # Index 8-15: bright variants of the same order.
-PaletteRGB = Tuple[
-    Tuple[int, int, int],
-    Tuple[int, int, int],
-    Tuple[int, int, int],
-    Tuple[int, int, int],
-    Tuple[int, int, int],
-    Tuple[int, int, int],
-    Tuple[int, int, int],
-    Tuple[int, int, int],
-    Tuple[int, int, int],
-    Tuple[int, int, int],
-    Tuple[int, int, int],
-    Tuple[int, int, int],
-    Tuple[int, int, int],
-    Tuple[int, int, int],
-    Tuple[int, int, int],
-    Tuple[int, int, int],
-]
+PaletteRGB = tuple[tuple[int, int, int], ...]
 
 # Hardware color palettes.  Each defines exact RGB values for ANSI colors 0-15.
 PALETTES: Dict[str, PaletteRGB] = {
     # IBM Enhanced Graphics Adapter -- the classic DOS palette used by most
     # BBS and MUD ANSI artwork.
     "ega": (
-        (0, 0, 0),
-        (170, 0, 0),
-        (0, 170, 0),
-        (170, 85, 0),
-        (0, 0, 170),
-        (170, 0, 170),
-        (0, 170, 170),
-        (170, 170, 170),
-        (85, 85, 85),
-        (255, 85, 85),
-        (85, 255, 85),
-        (255, 255, 85),
-        (85, 85, 255),
-        (255, 85, 255),
-        (85, 255, 255),
-        (255, 255, 255),
-    ),
-    # IBM Color Graphics Adapter -- same DOS ANSI.SYS text mode palette as
-    # EGA/VGA (index 3 is brown via the CGA brown modification circuit).
-    "cga": (
-        (0, 0, 0),
-        (170, 0, 0),
-        (0, 170, 0),
-        (170, 85, 0),
-        (0, 0, 170),
-        (170, 0, 170),
-        (0, 170, 170),
-        (170, 170, 170),
-        (85, 85, 85),
-        (255, 85, 85),
-        (85, 255, 85),
-        (255, 255, 85),
-        (85, 85, 255),
-        (255, 85, 255),
-        (85, 255, 255),
-        (255, 255, 255),
-    ),
-    # VGA / DOS standard palette -- identical to EGA; all three (CGA, EGA,
-    # VGA) share the same DOS ANSI.SYS text mode palette.
-    "vga": (
         (0, 0, 0),
         (170, 0, 0),
         (0, 170, 0),
@@ -143,7 +86,7 @@ PALETTES: Dict[str, PaletteRGB] = {
         (0, 255, 255),
         (255, 255, 255),
     ),
-    # VIC-II C64 palette — Colodore (Pepto) reference from VICE
+    # VIC-II C64 palette -- Colodore (Pepto) reference from VICE
     # (colodore.vpl, https://www.colodore.com).
     # Indexed by VIC-II color register 0-15, NOT ANSI SGR order.
     "c64": (
@@ -165,6 +108,10 @@ PALETTES: Dict[str, PaletteRGB] = {
         (174, 174, 174),  # 15 light grey
     ),
 }
+
+# CGA and VGA text mode share the same palette as EGA.
+PALETTES["cga"] = PALETTES["ega"]
+PALETTES["vga"] = PALETTES["ega"]
 
 # Detect potentially incomplete escape sequence at end of a chunk.
 _TRAILING_ESC = re.compile(r"\x1b(\[[\d;:]*)?$")
@@ -318,14 +265,14 @@ class ColorFilter:
         """
         params_str = match.group(1)
 
-        # Empty params or bare "0" → reset
+        # Empty params or bare "0" -> reset
         if not params_str:
             self._bold = False
             self._blink = False
             self._fg_idx = 7
             return f"\x1b[0m{self._bg_sgr}{self._fg_sgr}"
 
-        # Colon-separated extended colors (ITU T.416) — pass through unchanged
+        # Colon-separated extended colors (ITU T.416) -- pass through unchanged
         if ":" in params_str:
             return match.group()
 
@@ -410,7 +357,7 @@ class ColorFilter:
                 i += 1
                 continue
 
-            # Extended color — pass through 38;5;N or 38;2;R;G;B verbatim
+            # Extended color -- pass through 38;5;N or 38;2;R;G;B verbatim
             if p in (38, 48):
                 if p == 38:
                     self._fg_idx = -1
@@ -429,7 +376,7 @@ class ColorFilter:
                 output_parts.extend(parts[start_i:i])
                 continue
 
-            # Default fg → palette white; default bg → configured bg
+            # Default fg -> palette white; default bg -> configured bg
             if p == 39:
                 self._fg_idx = 7
                 r, g, b = self._adjusted[7]
@@ -482,7 +429,7 @@ class ColorFilter:
         return result
 
 
-# PETSCII decoded control character → VIC-II palette index (0-15).
+# PETSCII decoded control character -> VIC-II palette index (0-15).
 _PETSCII_COLOR_CODES: Dict[str, int] = {
     "\x05": 1,  # WHT (white)
     "\x1c": 2,  # RED
@@ -502,7 +449,7 @@ _PETSCII_COLOR_CODES: Dict[str, int] = {
     "\x9f": 3,  # CYN (cyan)
 }
 
-# PETSCII cursor/screen control codes → ANSI escape sequences.
+# PETSCII cursor/screen control codes -> ANSI escape sequences.
 _PETSCII_CURSOR_CODES: Dict[str, str] = {
     "\x11": "\x1b[B",  # cursor down
     "\x91": "\x1b[A",  # cursor up
@@ -531,14 +478,14 @@ class PetsciiColorFilter:
     color changes, cursor movement, and screen control.  This filter
     translates them to ANSI equivalents:
 
-    - **Colors**: 16 VIC-II palette colors → ``\x1b[38;2;R;G;Bm`` (24-bit RGB)
-    - **Reverse video**: RVS ON/OFF → ``\x1b[7m`` / ``\x1b[27m``
-    - **Cursor**: up/down/left/right → ``\x1b[A/B/C/D``
-    - **Screen**: HOME → ``\x1b[H``, CLR → ``\x1b[2J``
-    - **DEL**: destructive backspace → ``\x08\x1b[P``
+    - **Colors**: 16 VIC-II palette colors -> ``\x1b[38;2;R;G;Bm`` (24-bit RGB)
+    - **Reverse video**: RVS ON/OFF -> ``\x1b[7m`` / ``\x1b[27m``
+    - **Cursor**: up/down/left/right -> ``\x1b[A/B/C/D``
+    - **Screen**: HOME -> ``\x1b[H``, CLR -> ``\x1b[2J``
+    - **DEL**: destructive backspace -> ``\x08\x1b[P``
 
     :param config: Color configuration (uses ``brightness`` and ``contrast``
-        for palette adjustment; ``palette_name`` is ignored — always C64).
+        for palette adjustment; ``palette_name`` is ignored -- always C64).
     """
 
     def __init__(self, config: Optional[ColorConfig] = None) -> None:
@@ -599,7 +546,7 @@ class PetsciiColorFilter:
         return ""
 
 
-# ATASCII decoded control character glyphs → ANSI terminal sequences.
+# ATASCII decoded control character glyphs -> ANSI terminal sequences.
 # The atascii codec decodes control bytes to Unicode glyphs; this map
 # translates those glyphs to the terminal actions they represent.
 _ATASCII_CONTROL_CODES: Dict[str, str] = {
@@ -609,7 +556,7 @@ _ATASCII_CONTROL_CODES: Dict[str, str] = {
     "\u2191": "\x1b[A",  # ↑  cursor up (0x1C / 0x9C)
     "\u2193": "\x1b[B",  # ↓  cursor down (0x1D / 0x9D)
     "\u2190": "\x1b[D",  # ←  cursor left (0x1E / 0x9E)
-    "\u2192": "\x1b[C",  # →  cursor right (0x1F / 0x9F)
+    "\u2192": "\x1b[C",  # ->  cursor right (0x1F / 0x9F)
 }
 
 _ATASCII_CTRL_RE = re.compile("[" + re.escape("".join(sorted(_ATASCII_CONTROL_CODES))) + "]")
@@ -620,13 +567,13 @@ class AtasciiControlFilter:
     Translate decoded ATASCII control character glyphs to ANSI sequences.
 
     The ``atascii`` codec decodes ATASCII control bytes into Unicode glyphs
-    (e.g. byte 0x7E → U+25C0 ◀).  This filter replaces those glyphs with
+    (e.g. byte 0x7E -> U+25C0 ◀).  This filter replaces those glyphs with
     the ANSI terminal sequences that produce the intended effect:
 
-    - **Backspace/delete**: ◀ → ``\x08\x1b[P`` (destructive backspace)
-    - **Tab**: ▶ → ``\t``
-    - **Clear screen**: ↰ → ``\x1b[2J\x1b[H``
-    - **Cursor movement**: ↑↓←→ → ``\x1b[A/B/D/C``
+    - **Backspace/delete**: ◀ -> ``\x08\x1b[P`` (destructive backspace)
+    - **Tab**: ▶ -> ``\t``
+    - **Clear screen**: ↰ -> ``\x1b[2J\x1b[H``
+    - **Cursor movement**: ↑↓←-> -> ``\x1b[A/B/D/C``
     """
 
     def filter(self, text: str) -> str:

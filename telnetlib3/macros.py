@@ -112,7 +112,7 @@ def bind_macros(
     Register macro key bindings on a prompt_toolkit KeyBindings instance.
 
     For each macro, adds a handler that splits ``text`` on ``;`` and expands
-    repeat prefixes (e.g. ``3e`` → 3 × ``e``), sending each command followed
+    repeat prefixes (e.g. ``3e`` -> 3 × ``e``), sending each command followed
     by ``\r\n``.  If the text does not end with ``;``, the final segment is
     inserted into the prompt buffer without sending.
 

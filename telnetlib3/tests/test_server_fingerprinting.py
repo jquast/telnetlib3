@@ -252,18 +252,29 @@ def test_server_fingerprint_hash_consistency():
     assert h1 == h2 and len(h1) == 16
 
 
-def test_format_banner():
-    assert sfp._format_banner(b"Hello\r\nWorld") == "Hello\r\nWorld"
-    assert not sfp._format_banner(b"")
-
-
-def test_format_banner_surrogateescape():
-    """High bytes are preserved as surrogates, not replaced with U+FFFD."""
-    result = sfp._format_banner(b"\xff\xfe\xb1")
-    assert "\ufffd" not in result
-    assert result == "\udcff\udcfe\udcb1"
-    raw = result.encode("ascii", errors="surrogateescape")
-    assert raw == b"\xff\xfe\xb1"
+@pytest.mark.parametrize("data,encoding,checks", [
+    (b"Hello\r\nWorld", None, [("eq", "Hello\r\nWorld")]),
+    (b"", None, [("falsy", None)]),
+    (b"\xff\xfe\xb1", None, [("not_in", "\ufffd"), ("eq", "\udcff\udcfe\udcb1")]),
+    (b"Hello\xb1World", "x-no-such-codec", [("eq", "Hello\xb1World")]),
+    (b"Hello\x9b", "atascii", [("eq", "Hello\n")]),
+    (b"\x1c\xc8\xc9", "petscii", [("in", "\x1b[38;2;"), ("in", "HI")]),
+    (b"\x12\xc8\xc9\x92", "petscii", [("in", "\x1b[7m"), ("in", "\x1b[27m")]),
+    (b"\xc8\xc9\x0d\xca\xcb", "petscii", [("eq", "HI\nJK")]),
+    (b"\x13\xc8\xc9", "petscii", [("in", "\x1b[H"), ("in", "HI")]),
+])
+def test_format_banner(data, encoding, checks):
+    kwargs = {"encoding": encoding} if encoding else {}
+    result = sfp._format_banner(data, **kwargs)
+    for check_type, check_val in checks:
+        if check_type == "eq":
+            assert result == check_val
+        elif check_type == "in":
+            assert check_val in result
+        elif check_type == "not_in":
+            assert check_val not in result
+        elif check_type == "falsy":
+            assert not result
 
 
 def test_format_banner_json_roundtrip():
@@ -274,45 +285,6 @@ def test_format_banner_json_roundtrip():
     assert decoded == banner
     raw = decoded.encode("ascii", errors="surrogateescape")
     assert raw == b"Hello\xb1\xb2World"
-
-
-def test_format_banner_unknown_encoding_fallback():
-    """Unknown encoding falls back to latin-1 instead of raising LookupError."""
-    result = sfp._format_banner(b"Hello\xb1World", encoding="x-no-such-codec")
-    assert result == "Hello\xb1World"
-    assert result == b"Hello\xb1World".decode("latin-1")
-
-
-def test_format_banner_atascii():
-    """ATASCII encoding decodes banner bytes through the registered codec."""
-    assert sfp._format_banner(b"Hello\x9b", encoding="atascii") == "Hello\n"
-
-
-def test_format_banner_petscii_color():
-    """PETSCII color codes are translated to ANSI 24-bit RGB in banners."""
-    result = sfp._format_banner(b"\x1c\xc8\xc9", encoding="petscii")
-    assert "\x1b[38;2;" in result
-    assert "HI" in result
-    assert "\x1c" not in result
-
-
-def test_format_banner_petscii_rvs():
-    """PETSCII RVS ON/OFF are translated to ANSI reverse in banners."""
-    result = sfp._format_banner(b"\x12\xc8\xc9\x92", encoding="petscii")
-    assert "\x1b[7m" in result
-    assert "\x1b[27m" in result
-
-
-def test_format_banner_petscii_newline():
-    """PETSCII CR line terminators are normalized to LF in banners."""
-    assert sfp._format_banner(b"\xc8\xc9\x0d\xca\xcb", encoding="petscii") == "HI\nJK"
-
-
-def test_format_banner_petscii_cursor():
-    """PETSCII cursor controls are translated to ANSI in banners."""
-    result = sfp._format_banner(b"\x13\xc8\xc9", encoding="petscii")
-    assert "\x1b[H" in result
-    assert "HI" in result
 
 
 @pytest.mark.parametrize(

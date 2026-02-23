@@ -274,9 +274,9 @@ class TelnetClient(client_base.BaseClient):
         codec registry does not recognise.  This tries progressively simpler
         variations until one resolves:
 
-        1. Original name (spaces → hyphens)
-        2. Leading zeros stripped from numeric parts (``iso-8859-02`` → ``iso-8859-2``)
-        3. Hyphens removed entirely (``cp-1250`` → ``cp1250``)
+        1. Original name (spaces -> hyphens)
+        2. Leading zeros stripped from numeric parts (``iso-8859-02`` -> ``iso-8859-2``)
+        3. Hyphens removed entirely (``cp-1250`` -> ``cp1250``)
         4. Hyphens removed from all but the first segment (``iso-8859-2`` kept)
 
         :param name: Raw charset name from the server.
@@ -285,9 +285,9 @@ class TelnetClient(client_base.BaseClient):
         import re  # pylint: disable=import-outside-toplevel
 
         base = name.strip().replace(" ", "-")
-        # Strip leading zeros from numeric segments: iso-8859-02 → iso-8859-2
+        # Strip leading zeros from numeric segments: iso-8859-02 -> iso-8859-2
         no_leading_zeros = re.sub(r"-0+(\d)", r"-\1", base)
-        # All hyphens removed: cp-1250 → cp1250
+        # All hyphens removed: cp-1250 -> cp1250
         no_hyphens = base.replace("-", "")
         # Keep first hyphen-segment, collapse the rest: iso-8859-2 stays
         parts = no_leading_zeros.split("-")
@@ -773,8 +773,7 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
         shell_callback = _repl_shell
 
     # Auto-load autoreplies and macros from default config path
-    _xdg_cfg = os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config"))
-    _cfg_dir = os.path.join(_xdg_cfg, "telnetlib3")
+    from ._paths import CONFIG_DIR as _cfg_dir  # pylint: disable=import-outside-toplevel
     _session_key = f"{args['host']}:{args['port']}"
 
     _ar_path = os.path.join(_cfg_dir, "autoreplies.json")
@@ -1071,10 +1070,8 @@ def _resolve_history_file(value: Optional[str]) -> Optional[str]:
     """Resolve ``--history-file`` to an absolute path or ``None``."""
     if value is not None:
         return str(value) if value else None
-    xdg_data = os.environ.get(
-        "XDG_DATA_HOME", os.path.join(os.path.expanduser("~"), ".local", "share")
-    )
-    return os.path.join(xdg_data, "telnetlib3", "history")
+    from ._paths import HISTORY_FILE  # pylint: disable=import-outside-toplevel
+    return HISTORY_FILE
 
 
 def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:

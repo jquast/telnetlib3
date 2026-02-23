@@ -326,7 +326,7 @@ class Codec(codecs.Codec):
 
 
 class IncrementalEncoder(codecs.IncrementalEncoder):
-    """ATASCII incremental encoder with CR/CRLF → LF normalization."""
+    """ATASCII incremental encoder with CR/CRLF -> LF normalization."""
 
     def __init__(self, errors: str = "strict") -> None:
         """Initialize encoder with pending CR state."""

@@ -621,7 +621,7 @@ async def pty_shell(
 
     # Echo handling depends on raw_mode:
     # - Normal mode: Send WONT ECHO so client does local echo, PTY handles
-    #   echo with proper ONLCR translation (\n → \r\n) for input() display.
+    #   echo with proper ONLCR translation (\n -> \r\n) for input() display.
     # - Raw mode: Keep WILL ECHO so client doesn't local-echo, but PTY echo
     #   is disabled. This prevents terminal responses (CPR, etc.) from being
     #   echoed back. The program handles its own output.

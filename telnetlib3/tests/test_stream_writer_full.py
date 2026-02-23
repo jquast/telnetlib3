@@ -230,22 +230,21 @@ def test_handle_logout(server, client, cmd, check):
     assert check(t)
 
 
-def test_handle_do_server_linemode_refused():
-    ws, ts, _ = new_writer(server=True)
-    ws.handle_do(LINEMODE)
-    assert ts.writes[-1] == IAC + WONT + LINEMODE
+@pytest.mark.parametrize("server,client,handler,opt,response", [
+    (True, False, "handle_do", LINEMODE, IAC + WONT + LINEMODE),
+    (False, True, "handle_do", ECHO, IAC + WONT + ECHO),
+    (False, True, "handle_will", NAWS, IAC + DONT + NAWS),
+])
+def test_handle_option_refused(server, client, handler, opt, response):
+    w, t, _ = new_writer(server=server, client=client)
+    getattr(w, handler)(opt)
+    assert t.writes[-1] == response
 
 
 def test_handle_do_client_logout_raises():
     wc, *_ = new_writer(server=False, client=True)
     with pytest.raises(ValueError, match="cannot recv DO LOGOUT"):
         wc.handle_do(LOGOUT)
-
-
-def test_handle_do_client_echo_refused():
-    wc, tc, _ = new_writer(server=False, client=True)
-    wc.handle_do(ECHO)
-    assert tc.writes[-1] == IAC + WONT + ECHO
 
 
 def test_handle_do_tm_callback():
@@ -257,20 +256,18 @@ def test_handle_do_tm_callback():
     assert called["cmd"] == DO
 
 
-def test_handle_do_server_logout_callback():
+@pytest.mark.parametrize("server,client,handler,expected_cmd", [
+    (True, False, "handle_do", DO),
+    (True, False, "handle_dont", DONT),
+    (True, False, "handle_will", WILL),
+    (False, True, "handle_wont", WONT),
+])
+def test_handle_logout_callback(server, client, handler, expected_cmd):
     seen = {}
-    ws, *_ = new_writer(server=True)
-    ws.set_ext_callback(LOGOUT, lambda cmd: seen.setdefault("v", cmd))
-    ws.handle_do(LOGOUT)
-    assert seen["v"] == DO
-
-
-def test_handle_dont_logout_calls_callback_on_server():
-    seen = {}
-    w, *_ = new_writer(server=True)
+    w, *_ = new_writer(server=server, client=client)
     w.set_ext_callback(LOGOUT, lambda cmd: seen.setdefault("v", cmd))
-    w.handle_dont(LOGOUT)
-    assert seen["v"] == DONT
+    getattr(w, handler)(LOGOUT)
+    assert seen["v"] == expected_cmd
 
 
 def test_handle_will_server_echo_raises():
@@ -279,24 +276,10 @@ def test_handle_will_server_echo_raises():
         ws.handle_will(ECHO)
 
 
-def test_handle_will_client_naws_refused():
-    wc, tc, _ = new_writer(server=False, client=True)
-    wc.handle_will(NAWS)
-    assert tc.writes[-1] == IAC + DONT + NAWS
-
-
 def test_handle_will_server_tm_raises():
     wtm, *_ = new_writer(server=True)
     with pytest.raises(ValueError, match="cannot recv WILL TM"):
         wtm.handle_will(TM)
-
-
-def test_handle_will_server_logout_callback():
-    seen = {}
-    w, *_ = new_writer(server=True)
-    w.set_ext_callback(LOGOUT, lambda cmd: seen.setdefault("v", cmd))
-    w.handle_will(LOGOUT)
-    assert seen["v"] == WILL
 
 
 def test_handle_will_pending_authentication_rejected():
@@ -330,14 +313,6 @@ def test_handle_wont_tm_pending_clears():
     w.pending_option[DO + TM] = True
     w.handle_wont(TM)
     assert w.remote_option[TM] is False
-
-
-def test_handle_wont_client_logout_callback():
-    seen = {}
-    wc, *_ = new_writer(server=False, client=True)
-    wc.set_ext_callback(LOGOUT, lambda cmd: seen.setdefault("v", cmd))
-    wc.handle_wont(LOGOUT)
-    assert seen["v"] == WONT
 
 
 def test_handle_subnegotiation_comport_and_gmcp_and_errors():
@@ -1061,7 +1036,7 @@ def test_linemode_slc_no_forwardmask_on_client():
     flag = bytes([slc.SLC_LEVELBITS | ord(slc.SLC_FLUSHIN)])
     value = b"\x03"  # ^C
     w._handle_sb_linemode_slc(collections.deque([func, flag, value]))
-    # no AssertionError raised — forwardmask not requested on client
+    # no AssertionError raised -- forwardmask not requested on client
 
 
 def test_linemode_mode_without_negotiation_ignored():
@@ -1069,7 +1044,7 @@ def test_linemode_mode_without_negotiation_ignored():
     w, t, _ = new_writer(server=False, client=True)
     mode_byte = bytes([0x03])
     w._handle_sb_linemode_mode(collections.deque([mode_byte]))
-    # no AssertionError — the mode is silently ignored
+    # no AssertionError -- the mode is silently ignored
 
 
 @pytest.mark.parametrize(

@@ -17,8 +17,12 @@ import os
 import sys
 import json
 import datetime
+
+# local
+from ._ansi import TERMINAL_CLEANUP, cup
 import subprocess
-from typing import Any, ClassVar
+from abc import abstractmethod
+from typing import Any, ClassVar, NamedTuple
 from dataclasses import asdict, fields, dataclass
 
 # 3rd party
@@ -59,16 +63,8 @@ _ENCODINGS = (
     "petscii",
 )
 
-_XDG_CONFIG = os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config"))
-_XDG_DATA = os.environ.get(
-    "XDG_DATA_HOME", os.path.join(os.path.expanduser("~"), ".local", "share")
-)
+from ._paths import CONFIG_DIR, DATA_DIR, SESSIONS_FILE, HISTORY_FILE
 
-CONFIG_DIR = os.path.join(_XDG_CONFIG, "telnetlib3")
-DATA_DIR = os.path.join(_XDG_DATA, "telnetlib3")
-
-SESSIONS_FILE = os.path.join(CONFIG_DIR, "sessions.json")
-HISTORY_FILE = os.path.join(DATA_DIR, "history")
 DEFAULTS_KEY = "__defaults__"
 
 
@@ -277,9 +273,37 @@ def save_sessions(sessions: dict[str, SessionConfig]) -> None:
         f.write("\n")
 
 
-def build_command(  # pylint: disable=too-many-branches,too-complex
-    config: SessionConfig,
-) -> list[str]:
+_CMD_STR_FLAGS: list[tuple[str, str, object]] = [
+    ("term", "--term", ""),
+    ("encoding", "--encoding", "utf8"),
+    ("speed", "--speed", 38400),
+    ("encoding_errors", "--encoding-errors", "replace"),
+    ("colormatch", "--colormatch", "vga"),
+    ("color_brightness", "--color-brightness", 1.0),
+    ("color_contrast", "--color-contrast", 1.0),
+    ("background_color", "--background-color", "#000000"),
+    ("connect_minwait", "--connect-minwait", 0.0),
+    ("connect_maxwait", "--connect-maxwait", 4.0),
+    ("send_environ", "--send-environ", "TERM,LANG,COLUMNS,LINES,COLORTERM"),
+    ("loglevel", "--loglevel", "warn"),
+    ("logfile", "--logfile", ""),
+    ("ssl_cafile", "--ssl-cafile", ""),
+]
+
+_CMD_BOOL_FLAGS: list[tuple[str, str, bool]] = [
+    ("ssl", "--ssl", False),
+    ("ssl_no_verify", "--ssl-no-verify", False),
+    ("no_repl", "--no-repl", False),
+    ("ansi_keys", "--ansi-keys", False),
+    ("ascii_eol", "--ascii-eol", False),
+]
+
+_CMD_NEG_BOOL_FLAGS: list[tuple[str, str, bool]] = [
+    ("ice_colors", "--no-ice-colors", True),
+]
+
+
+def build_command(config: SessionConfig) -> list[str]:
     """
     Build ``telnetlib3-client`` CLI arguments from *config*.
 
@@ -293,44 +317,26 @@ def build_command(  # pylint: disable=too-many-branches,too-complex
         str(config.port),
     ]
 
-    if config.term:
-        cmd.extend(["--term", config.term])
-    if config.encoding != "utf8":
-        cmd.extend(["--encoding", config.encoding])
-    if config.speed != 38400:
-        cmd.extend(["--speed", str(config.speed)])
-    if config.encoding_errors != "replace":
-        cmd.extend(["--encoding-errors", config.encoding_errors])
+    for attr, flag, default in _CMD_STR_FLAGS:
+        val = getattr(config, attr)
+        if val != default:
+            cmd.extend([flag, str(val)])
 
     if config.mode == "raw":
         cmd.append("--raw-mode")
     elif config.mode == "line":
         cmd.append("--line-mode")
 
-    if config.colormatch != "vga":
-        cmd.extend(["--colormatch", config.colormatch])
-    if config.color_brightness != 1.0:
-        cmd.extend(["--color-brightness", str(config.color_brightness)])
-    if config.color_contrast != 1.0:
-        cmd.extend(["--color-contrast", str(config.color_contrast)])
-    if config.background_color != "#000000":
-        cmd.extend(["--background-color", config.background_color])
-    if not config.ice_colors:
-        cmd.append("--no-ice-colors")
-    if config.ansi_keys:
-        cmd.append("--ansi-keys")
-    if config.ascii_eol:
-        cmd.append("--ascii-eol")
+    for attr, flag, default in _CMD_BOOL_FLAGS:
+        if getattr(config, attr) != default:
+            cmd.append(flag)
 
-    if config.connect_minwait != 0.0:
-        cmd.extend(["--connect-minwait", str(config.connect_minwait)])
-    if config.connect_maxwait != 4.0:
-        cmd.extend(["--connect-maxwait", str(config.connect_maxwait)])
+    for attr, flag, default in _CMD_NEG_BOOL_FLAGS:
+        if getattr(config, attr) != default:
+            cmd.append(flag)
+
     if config.connect_timeout > 0 and config.connect_timeout != 10.0:
         cmd.extend(["--connect-timeout", str(config.connect_timeout)])
-
-    if config.send_environ != "TERM,LANG,COLUMNS,LINES,COLORTERM":
-        cmd.extend(["--send-environ", config.send_environ])
 
     for opt in config.always_will.split(","):
         opt = opt.strip()
@@ -340,20 +346,6 @@ def build_command(  # pylint: disable=too-many-branches,too-complex
         opt = opt.strip()
         if opt:
             cmd.extend(["--always-do", opt])
-
-    if config.loglevel != "warn":
-        cmd.extend(["--loglevel", config.loglevel])
-    if config.logfile:
-        cmd.extend(["--logfile", config.logfile])
-
-    if config.ssl:
-        cmd.append("--ssl")
-    if config.ssl_cafile:
-        cmd.extend(["--ssl-cafile", config.ssl_cafile])
-    if config.ssl_no_verify:
-        cmd.append("--ssl-no-verify")
-    if config.no_repl:
-        cmd.append("--no-repl")
 
     return cmd
 
@@ -498,7 +490,7 @@ class SessionListScreen(Screen[None]):
         row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
         return str(row_key.value)
 
-    # -- Arrow key navigation between buttons and table -----------------------
+
 
     def on_key(self, event: events.Key) -> None:
         """Arrow/Home/End keys navigate between buttons and the session table."""
@@ -511,7 +503,7 @@ class SessionListScreen(Screen[None]):
         elif event.key in ("up", "down", "left", "right"):
             _handle_arrow_navigation(self, event, "#button-col", "#session-table")
 
-    # -- Button handlers ----------------------------------------------------
+
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Dispatch button press to the appropriate action."""
@@ -533,7 +525,7 @@ class SessionListScreen(Screen[None]):
         """Connect on double-click or Enter."""
         self.action_connect()
 
-    # -- Actions ------------------------------------------------------------
+
 
     def action_quit_app(self) -> None:
         """Exit the application."""
@@ -550,20 +542,25 @@ class SessionListScreen(Screen[None]):
             SessionEditScreen(config=new_cfg, is_new=True), callback=self._on_edit_result
         )
 
-    def action_edit_session(self) -> None:
-        """Open editor for the selected session."""
+    def _require_selected(self) -> str | None:
+        """Return selected session key, or notify and return ``None``."""
         key = self._selected_key()
         if key is None:
             self.notify("No session selected", severity="warning")
+        return key
+
+    def action_edit_session(self) -> None:
+        """Open editor for the selected session."""
+        key = self._require_selected()
+        if key is None:
             return
         cfg = self._sessions[key]
         self.app.push_screen(SessionEditScreen(config=cfg), callback=self._on_edit_result)
 
     def action_delete_session(self) -> None:
         """Delete the selected session."""
-        key = self._selected_key()
+        key = self._require_selected()
         if key is None:
-            self.notify("No session selected", severity="warning")
             return
         del self._sessions[key]
         self._save()
@@ -583,9 +580,8 @@ class SessionListScreen(Screen[None]):
 
     def action_edit_macros(self) -> None:
         """Open macro editor for the selected session."""
-        key = self._selected_key()
+        key = self._require_selected()
         if key is None:
-            self.notify("No session selected", severity="warning")
             return
         cfg = self._sessions[key]
         path = os.path.join(CONFIG_DIR, "macros.json")
@@ -596,9 +592,8 @@ class SessionListScreen(Screen[None]):
 
     def action_edit_autoreplies(self) -> None:
         """Open autoreply editor for the selected session."""
-        key = self._selected_key()
+        key = self._require_selected()
         if key is None:
-            self.notify("No session selected", severity="warning")
             return
         cfg = self._sessions[key]
         path = os.path.join(CONFIG_DIR, "autoreplies.json")
@@ -609,9 +604,8 @@ class SessionListScreen(Screen[None]):
 
     def action_connect(self) -> None:
         """Launch a telnet connection to the selected session."""
-        key = self._selected_key()
+        key = self._require_selected()
         if key is None:
-            self.notify("No session selected", severity="warning")
             return
         cfg = self._sessions[key]
         if not cfg.host:
@@ -626,10 +620,10 @@ class SessionListScreen(Screen[None]):
             # Move to bottom-right and print newline so the TUI
             # scrolls cleanly off screen before the client starts.
             _tsize = os.get_terminal_size()
-            sys.stdout.write(f"\x1b[{_tsize.lines};{_tsize.columns}H\r\n")
+            sys.stdout.write(cup(_tsize.lines, _tsize.columns) + "\r\n")
             sys.stdout.flush()
             try:
-                # stderr must NOT be piped — the child may launch
+                # stderr must NOT be piped -- the child may launch
                 # Textual subprocesses (F8/F9 editors) that write all
                 # output to sys.__stderr__.  A piped stderr would send
                 # that output into the pipe instead of the terminal,
@@ -645,25 +639,16 @@ class SessionListScreen(Screen[None]):
                 # for stdin/stdout.  asyncio's connect_read_pipe sets
                 # O_NONBLOCK on the shared description, which persists
                 # after the child exits.  Textual's input loop expects
-                # blocking reads — restore before Textual resumes.
+                # blocking reads -- restore before Textual resumes.
                 os.set_blocking(sys.stdin.fileno(), True)
-                # Reset terminal to known-good state — the child may
+                # Reset terminal to known-good state -- the child may
                 # have left raw mode, SGR attributes, mouse tracking,
                 # or alternate screen active.
-                sys.stdout.write(
-                    "\x1b[m"  # reset SGR attributes
-                    "\x1b[?25h"  # show cursor
-                    "\x1b[?1049l"  # exit alternate screen
-                    "\x1b[?1000l"  # disable mouse tracking (basic)
-                    "\x1b[?1002l"  # disable button-event tracking
-                    "\x1b[?1003l"  # disable all-motion tracking
-                    "\x1b[?1006l"  # disable SGR mouse format
-                    "\x1b[?2004l"  # disable bracketed paste
-                )
+                sys.stdout.write(TERMINAL_CLEANUP)
                 sys.stdout.flush()
         self._refresh_table()
 
-    # -- Callbacks ----------------------------------------------------------
+
 
     def _on_edit_result(self, config: SessionConfig | None) -> None:
         if config is None:
@@ -1137,7 +1122,7 @@ class SessionEditScreen(Screen[SessionConfig | None]):
             tab_id = btn_id[len("tabbtn-") :]
             self._switch_to_tab(tab_id)
 
-    # -- Save ---------------------------------------------------------------
+
 
     def _on_save(self) -> None:
         config = self._collect_config()
@@ -1208,14 +1193,194 @@ def _float_val(text: str, default: float) -> float:
         return default
 
 
-class MacroEditScreen(Screen["bool | None"]):
-    """Editor screen for macro key bindings."""
+class _EditListScreen(Screen["bool | None"]):
+    """Base class for list-editor screens (macros, autoreplies)."""
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("escape", "cancel_or_close", "Cancel", priority=True),
-        Binding("plus", "reorder_hint", "Change Priority", key_display="+/-", show=True),
+        Binding(
+            "plus", "reorder_hint", "Change Priority",
+            key_display="+/-", show=True,
+        ),
         Binding("enter", "save_hint", "Save", show=True),
     ]
+
+    @property
+    @abstractmethod
+    def _prefix(self) -> str: ...
+
+    @property
+    @abstractmethod
+    def _items(self) -> list[Any]: ...
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._editing_idx: int | None = None
+
+    @property
+    def _form_visible(self) -> bool:
+        return self.query_one(f"#{self._prefix}-form").display
+
+    def _set_action_buttons_disabled(self, disabled: bool) -> None:
+        """Enable or disable the add/edit/copy buttons."""
+        pfx = self._prefix
+        for suffix in ("add", "edit", "copy"):
+            self.query_one(f"#{pfx}-{suffix}", Button).disabled = disabled
+
+    def _hide_form(self) -> None:
+        pfx = self._prefix
+        self.query_one(f"#{pfx}-form").display = False
+        self.query_one(f"#{pfx}-table").display = True
+        self._editing_idx = None
+        self._set_action_buttons_disabled(False)
+        self.query_one(f"#{pfx}-table", DataTable).focus()
+
+    def _finalize_edit(self, entry: Any, is_valid: bool) -> None:
+        """Insert or update an item, refresh, and hide the form."""
+        if is_valid:
+            if self._editing_idx is not None:
+                self._items[self._editing_idx] = entry
+                target_row = self._editing_idx
+            else:
+                target_row = len(self._items)
+                self._items.append(entry)
+            self._refresh_table()
+            self.query_one(f"#{self._prefix}-table", DataTable).move_cursor(row=target_row)
+        self._hide_form()
+
+    def _selected_idx(self) -> int | None:
+        table = self.query_one(f"#{self._prefix}-table", DataTable)
+        if table.row_count == 0:
+            return None
+        row_key = table.coordinate_to_cell_key(
+            table.cursor_coordinate
+        ).row_key
+        return int(str(row_key.value))
+
+    def _edit_selected(self) -> None:
+        idx = self._selected_idx()
+        if idx is not None and idx < len(self._items):
+            self._editing_idx = idx
+            self._show_form(*self._items[idx])
+
+    def _copy_selected(self) -> None:
+        idx = self._selected_idx()
+        if idx is not None and idx < len(self._items):
+            self._items.insert(idx + 1, self._items[idx])
+            self._refresh_table()
+            table = self.query_one(
+                f"#{self._prefix}-table", DataTable
+            )
+            table.move_cursor(row=idx + 1)
+
+    def _reorder(self, move_down: bool) -> None:
+        idx = self._selected_idx()
+        if idx is None:
+            return
+        items = self._items
+        target = idx + 1 if move_down else idx - 1
+        if target < 0 or target >= len(items):
+            return
+        items[idx], items[target] = items[target], items[idx]
+        self._refresh_table()
+        table = self.query_one(
+            f"#{self._prefix}-table", DataTable
+        )
+        table.move_cursor(row=target)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if self._form_visible:
+            event.stop()
+            self._submit_form()
+
+    def action_cancel_or_close(self) -> None:
+        if self._form_visible:
+            self._hide_form()
+        else:
+            self.dismiss(None)
+
+    def action_reorder_hint(self) -> None:
+        pass
+
+    def action_save_hint(self) -> None:
+        pass
+
+    def on_key(self, event: events.Key) -> None:
+        """Arrow/Home/End/+/- keys navigate and reorder the table."""
+        if event.key in ("home", "end"):
+            table = self.query_one(f"#{self._prefix}-table", DataTable)
+            if self.focused is table and table.row_count > 0:
+                row = 0 if event.key == "home" else table.row_count - 1
+                table.move_cursor(row=row)
+                event.prevent_default()
+        elif event.key in ("up", "down", "left", "right"):
+            _handle_arrow_navigation(
+                self, event, f"#{self._prefix}-button-col",
+                f"#{self._prefix}-table", f"#{self._prefix}-form",
+            )
+        elif event.key in ("plus", "minus") and not self._form_visible:
+            self._reorder(event.key == "plus")
+
+    def on_data_table_row_selected(
+        self, event: DataTable.RowSelected
+    ) -> None:
+        """Double-click or Enter on a table row opens it for editing."""
+        idx = int(str(event.row_key.value))
+        if idx < len(self._items):
+            self._editing_idx = idx
+            self._show_form(*self._items[idx])
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle common list-editor button presses."""
+        btn = event.button.id or ""
+        pfx = self._prefix
+        suffix = btn.removeprefix(pfx + "-") if btn.startswith(pfx + "-") else ""
+        if suffix == "add":
+            self._editing_idx = None
+            self._show_form()
+        elif suffix == "edit":
+            self._edit_selected()
+        elif suffix == "copy":
+            self._copy_selected()
+        elif suffix == "delete":
+            if self._form_visible:
+                self._hide_form()
+            idx = self._selected_idx()
+            if idx is not None and idx < len(self._items):
+                self._items.pop(idx)
+                self._refresh_table()
+        elif suffix == "ok":
+            self._submit_form()
+        elif suffix == "cancel-form":
+            self._hide_form()
+        elif suffix == "save":
+            if self._form_visible:
+                self._submit_form()
+            self._save_to_file()
+            self.dismiss(True)
+        elif suffix == "close":
+            self.dismiss(None)
+        else:
+            self._on_extra_button(suffix, btn)
+
+    def _on_extra_button(self, suffix: str, btn: str) -> None:
+        """Override to handle subclass-specific buttons."""
+
+    @abstractmethod
+    def _show_form(self, *args: Any) -> None: ...
+
+    @abstractmethod
+    def _submit_form(self) -> None: ...
+
+    @abstractmethod
+    def _refresh_table(self) -> None: ...
+
+    @abstractmethod
+    def _save_to_file(self) -> None: ...
+
+
+class MacroEditScreen(_EditListScreen):
+    """Editor screen for macro key bindings."""
 
     CSS = """
     MacroEditScreen { align: center middle; }
@@ -1275,20 +1440,23 @@ class MacroEditScreen(Screen["bool | None"]):
         self._rooms_file = rooms_file
         self._current_room_file = current_room_file
         self._macros: list[tuple[str, str, bool]] = []
-        self._editing_idx: int | None = None
         self._capturing: bool = False
         self._capture_escape_pending: bool = False
         self._captured_key: str = ""
 
     @property
-    def _form_visible(self) -> bool:
-        return self.query_one("#macro-form").display
+    def _prefix(self) -> str:
+        return "macro"
+
+    @property
+    def _items(self) -> list[Any]:
+        return self._macros
 
     def compose(self) -> ComposeResult:
         """Build the macro editor layout."""
         with Vertical(id="macro-panel"):
             yield Static(
-                f"Macro Editor — {self._session_key}" if self._session_key else "Macro Editor"
+                f"Macro Editor -- {self._session_key}" if self._session_key else "Macro Editor"
             )
             with Horizontal(id="macro-body"):
                 with Vertical(id="macro-button-col"):
@@ -1371,71 +1539,20 @@ class MacroEditScreen(Screen["bool | None"]):
         self.query_one("#macro-enabled", Switch).value = enabled
         self.query_one("#macro-table").display = False
         self.query_one("#macro-form").display = True
-        self.query_one("#macro-add", Button).disabled = True
-        self.query_one("#macro-edit", Button).disabled = True
-        self.query_one("#macro-copy", Button).disabled = True
+        self._set_action_buttons_disabled(True)
         self.query_one("#macro-text", Input).focus()
 
     def _hide_form(self) -> None:
         self._capturing = False
         self._capture_escape_pending = False
-        self.query_one("#macro-form").display = False
-        self.query_one("#macro-table").display = True
-        self._editing_idx = None
-        self.query_one("#macro-add", Button).disabled = False
-        self.query_one("#macro-edit", Button).disabled = False
-        self.query_one("#macro-copy", Button).disabled = False
-        self.query_one("#macro-table", DataTable).focus()
+        super()._hide_form()
 
     def _submit_form(self) -> None:
         """Accept the current inline form values."""
         key_val = self._captured_key.strip()
         text_val = self.query_one("#macro-text", Input).value
         enabled = self.query_one("#macro-enabled", Switch).value
-        if key_val:
-            if self._editing_idx is not None:
-                target_row = self._editing_idx
-                self._macros[self._editing_idx] = (key_val, text_val, enabled)
-            else:
-                target_row = len(self._macros)
-                self._macros.append((key_val, text_val, enabled))
-            self._refresh_table()
-            table = self.query_one("#macro-table", DataTable)
-            table.move_cursor(row=target_row)
-        self._hide_form()
-
-    def _selected_idx(self) -> int | None:
-        table = self.query_one("#macro-table", DataTable)
-        if table.row_count == 0:
-            return None
-        row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
-        return int(str(row_key.value))
-
-    def _edit_selected(self) -> None:
-        """Open the selected row for editing."""
-        idx = self._selected_idx()
-        if idx is not None and idx < len(self._macros):
-            self._editing_idx = idx
-            k, t, ena = self._macros[idx]
-            self._show_form(k, t, ena)
-
-    def _copy_selected(self) -> None:
-        """Duplicate the selected row."""
-        idx = self._selected_idx()
-        if idx is not None and idx < len(self._macros):
-            k, t, ena = self._macros[idx]
-            self._macros.insert(idx + 1, (k, t, ena))
-            self._refresh_table()
-            table = self.query_one("#macro-table", DataTable)
-            table.move_cursor(row=idx + 1)
-
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Double-click or Enter on a table row opens it for editing."""
-        idx = int(str(event.row_key.value))
-        if idx < len(self._macros):
-            self._editing_idx = idx
-            k, t, ena = self._macros[idx]
-            self._show_form(k, t, ena)
+        self._finalize_edit((key_val, text_val, enabled), bool(key_val))
 
     _REJECTED_KEYS: ClassVar[frozenset[str]] = frozenset({
         "up", "down", "left", "right", "home", "end",
@@ -1465,7 +1582,7 @@ class MacroEditScreen(Screen["bool | None"]):
         self.query_one("#macro-capture-status", Static).update(reason)
 
     def on_key(self, event: events.Key) -> None:
-        """Arrow/Home/End/+/- keys navigate and reorder the macro table."""
+        """Handle key capture mode, then delegate to base navigation."""
         if self._capturing:
             event.stop()
             event.prevent_default()
@@ -1480,14 +1597,14 @@ class MacroEditScreen(Screen["bool | None"]):
                     self._finish_capture(pt_key, f"Alt+{key}")
                 else:
                     self._reject_capture(
-                        f"Rejected: escape+{key} — use Esc then a letter"
+                        f"Rejected: escape+{key} -- use Esc then a letter"
                     )
                 return
 
             if key == "escape":
                 self._capture_escape_pending = True
                 self.query_one("#macro-capture-status", Static).update(
-                    "Esc pressed — now press a letter for Alt combo, "
+                    "Esc pressed -- now press a letter for Alt combo, "
                     "or Esc again for plain Escape"
                 )
                 return
@@ -1512,117 +1629,49 @@ class MacroEditScreen(Screen["bool | None"]):
 
             if key in self._REJECTED_KEYS:
                 self._reject_capture(
-                    f"Rejected: {key} — use F-keys, Ctrl+key, or Alt+key"
+                    f"Rejected: {key} -- use F-keys, Ctrl+key, or Alt+key"
                 )
                 return
 
             if len(key) == 1:
                 self._reject_capture(
-                    f"Rejected: '{key}' — use F-keys, Ctrl+key, or Alt+key"
+                    f"Rejected: '{key}' -- use F-keys, Ctrl+key, or Alt+key"
                 )
                 return
 
             self._reject_capture(
-                f"Rejected: {key} — use F-keys, Ctrl+key, or Alt+key"
+                f"Rejected: {key} -- use F-keys, Ctrl+key, or Alt+key"
             )
             return
 
-        if event.key in ("home", "end"):
-            table = self.query_one("#macro-table", DataTable)
-            if self.focused is table and table.row_count > 0:
-                row = 0 if event.key == "home" else table.row_count - 1
-                table.move_cursor(row=row)
-                event.prevent_default()
-        elif event.key in ("up", "down", "left", "right"):
-            _handle_arrow_navigation(
-                self, event, "#macro-button-col", "#macro-table", "#macro-form"
-            )
-        elif event.key in ("plus", "minus") and not self._form_visible:
-            self._reorder(event.key == "plus")
-
-    def _reorder(self, move_down: bool) -> None:
-        """Swap the selected row with its neighbour."""
-        idx = self._selected_idx()
-        if idx is None:
-            return
-        target = idx + 1 if move_down else idx - 1
-        if target < 0 or target >= len(self._macros):
-            return
-        self._macros[idx], self._macros[target] = (
-            self._macros[target], self._macros[idx]
-        )
-        self._refresh_table()
-        table = self.query_one("#macro-table", DataTable)
-        table.move_cursor(row=target)
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Enter in an inline form input submits the form."""
-        if self._form_visible:
-            event.stop()
-            self._submit_form()
+        super().on_key(event)
 
     def action_cancel_or_close(self) -> None:
-        """Escape closes the inline form, or dismisses the screen."""
         if self._capturing:
             return
-        if self._form_visible:
-            self._hide_form()
-        else:
-            self.dismiss(None)
+        super().action_cancel_or_close()
 
-    def action_reorder_hint(self) -> None:
-        """No-op; +/- handled in on_key, binding exists for footer hint."""
-
-    def action_save_hint(self) -> None:
-        """No-op; enter handled by on_input_submitted, binding exists for footer hint."""
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle macro editor button presses."""
-        btn = event.button.id or ""
-        if btn == "macro-add":
-            self._editing_idx = None
-            self._show_form()
-        elif btn == "macro-edit":
-            self._edit_selected()
-        elif btn == "macro-copy":
-            self._copy_selected()
-        elif btn == "macro-fast-travel":
+    def _on_extra_button(self, suffix: str, btn: str) -> None:
+        """Handle macro-specific buttons (travel, capture, etc.)."""
+        if suffix == "fast-travel":
             self._pick_room_for_travel(slow=False)
-        elif btn == "macro-slow-travel":
+        elif suffix == "slow-travel":
             self._pick_room_for_travel(slow=True)
-        elif btn == "macro-return-fast":
+        elif suffix == "return-fast":
             self._insert_command("`return fast`")
-        elif btn == "macro-return-slow":
+        elif suffix == "return-slow":
             self._insert_command("`return slow`")
-        elif btn == "macro-autowander":
+        elif suffix == "autowander":
             self._insert_command("`autowander`")
-        elif btn == "macro-delay":
+        elif suffix == "delay":
             self._insert_command("`delay 1s`")
-        elif btn == "macro-delete":
-            if self._form_visible:
-                self._hide_form()
-            idx = self._selected_idx()
-            if idx is not None and idx < len(self._macros):
-                self._macros.pop(idx)
-                self._refresh_table()
-        elif btn == "macro-capture":
+        elif suffix == "capture":
             self._capturing = True
             self._capture_escape_pending = False
             label = self.query_one("#macro-key-label", Static)
             label.update("press keystroke to capture ...")
             label.add_class("capturing")
             self.query_one("#macro-capture-status", Static).update("")
-        elif btn == "macro-ok":
-            self._submit_form()
-        elif btn == "macro-cancel-form":
-            self._hide_form()
-        elif btn == "macro-save":
-            if self._form_visible:
-                self._submit_form()
-            self._save_to_file()
-            self.dismiss(True)
-        elif btn == "macro-close":
-            self.dismiss(None)
 
     def _insert_command(self, cmd: str) -> None:
         """Insert a command at the cursor position, adding ``;`` separators."""
@@ -1670,14 +1719,23 @@ class MacroEditScreen(Screen["bool | None"]):
         save_macros(self._path, macros, self._session_key)
 
 
-class AutoreplyEditScreen(Screen["bool | None"]):
-    """Editor screen for autoreply rules."""
+class _AutoreplyTuple(NamedTuple):
+    """Lightweight tuple for autoreply rules in the TUI editor."""
 
-    BINDINGS: ClassVar[list[Binding]] = [
-        Binding("escape", "cancel_or_close", "Cancel", priority=True),
-        Binding("plus", "reorder_hint", "Change Priority", key_display="+/-", show=True),
-        Binding("enter", "save_hint", "Save", show=True),
-    ]
+    pattern: str
+    reply: str
+    exclusive: bool = False
+    until: str = ""
+    always: bool = False
+    enabled: bool = True
+    exclusive_timeout: float = 10.0
+    post_command: str = ""
+    when: dict[str, str] = {}
+    immediate: bool = False
+
+
+class AutoreplyEditScreen(_EditListScreen):
+    """Editor screen for autoreply rules."""
 
     CSS = """
     AutoreplyEditScreen { align: center middle; }
@@ -1716,24 +1774,30 @@ class AutoreplyEditScreen(Screen["bool | None"]):
     .form-label-pct { width: 12; padding-top: 1; }
     """
 
-    def __init__(self, path: str, session_key: str = "", select_pattern: str = "") -> None:
+    def __init__(
+        self, path: str, session_key: str = "",
+        select_pattern: str = "",
+    ) -> None:
         """Initialize autoreply editor with file path and session key."""
         super().__init__()
         self._path = path
         self._session_key = session_key
         self._select_pattern = select_pattern
-        self._rules: list[tuple[str, str, bool, str, bool, bool, float, str, dict[str, str]]] = []
-        self._editing_idx: int | None = None
+        self._rules: list[_AutoreplyTuple] = []
 
     @property
-    def _form_visible(self) -> bool:
-        return self.query_one("#autoreply-form").display
+    def _prefix(self) -> str:
+        return "autoreply"
+
+    @property
+    def _items(self) -> list[Any]:
+        return self._rules
 
     def compose(self) -> ComposeResult:
         """Build the autoreply editor layout."""
         with Vertical(id="autoreply-panel"):
             yield Static(
-                f"Autoreply Editor — {self._session_key}"
+                f"Autoreply Editor -- {self._session_key}"
                 if self._session_key
                 else "Autoreply Editor"
             )
@@ -1769,7 +1833,13 @@ class AutoreplyEditScreen(Screen["bool | None"]):
                             alw.tooltip = "Match even while another exclusive rule is active"
                             yield Label("Always", classes="form-label-short")
                             yield alw
-                            yield Label("", classes="form-gap")
+                            imm = Switch(value=False, id="autoreply-immediate")
+                            imm.tooltip = (
+                                "Reply immediately without waiting for prompt/GA/EOR; "
+                                "needed for scripted actions displayed without a final prompt"
+                            )
+                            yield Label("Imm", classes="form-label-short")
+                            yield imm
                             yield Label("Until", classes="form-label-mid")
                             yield Input(
                                 placeholder=r"optional: \1 died\.",
@@ -1835,9 +1905,11 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         try:
             rules = load_autoreplies(self._path, self._session_key)
             self._rules = [
-                (r.pattern.pattern, r.reply, r.exclusive, r.until,
-                 r.always, r.enabled, r.exclusive_timeout,
-                 r.post_command, dict(r.when))
+                _AutoreplyTuple(
+                    r.pattern.pattern, r.reply, r.exclusive, r.until,
+                    r.always, r.enabled, r.exclusive_timeout,
+                    r.post_command, dict(r.when), r.immediate,
+                )
                 for r in rules
             ]
         except (ValueError, FileNotFoundError):
@@ -1846,20 +1918,22 @@ class AutoreplyEditScreen(Screen["bool | None"]):
     def _refresh_table(self) -> None:
         table = self.query_one("#autoreply-table", DataTable)
         table.clear()
-        for i, (pattern, reply, exclusive, until, always, enabled, _tout, _pcmd, when) in enumerate(
-            self._rules
-        ):
+        for i, rule in enumerate(self._rules):
             flags = ""
-            if not enabled:
+            if not rule.enabled:
                 flags = "X"
-            if exclusive:
-                flags = (flags + " E*") if until else (flags + " E")
-            if always:
+            if rule.exclusive:
+                flags = (flags + " E*") if rule.until else (flags + " E")
+            if rule.always:
                 flags = (flags + " A") if flags else "A"
-            if when:
+            if rule.immediate:
+                flags = (flags + " I") if flags else "I"
+            if rule.when:
                 flags = (flags + " C") if flags else "C"
-            pat_display = pattern if len(pattern) <= 30 else pattern[:29] + "\u2026"
-            reply_display = reply if len(reply) <= 20 else reply[:19] + "\u2026"
+            pat_display = (rule.pattern if len(rule.pattern) <= 30
+                           else rule.pattern[:29] + "\u2026")
+            reply_display = (rule.reply if len(rule.reply) <= 20
+                             else rule.reply[:19] + "\u2026")
             table.add_row(str(i + 1), pat_display, reply_display, flags.strip(), key=str(i))
 
     def _show_form(
@@ -1873,6 +1947,7 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         exclusive_timeout: float = 10.0,
         post_command: str = "",
         when: dict[str, str] | None = None,
+        immediate: bool = False,
     ) -> None:
         self.query_one("#autoreply-pattern", Input).value = pattern_val
         self.query_one("#autoreply-reply", Input).value = reply_val
@@ -1881,6 +1956,7 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         self.query_one("#autoreply-exclusive", Switch).value = exclusive
         self.query_one("#autoreply-always", Switch).value = always
         self.query_one("#autoreply-enabled", Switch).value = enabled
+        self.query_one("#autoreply-immediate", Switch).value = immediate
         self.query_one("#autoreply-timeout", Input).value = str(exclusive_timeout)
         if when:
             vital = next(iter(when), "")
@@ -1904,19 +1980,8 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         self.query_one("#autoreply-cond-val", Input).disabled = cond_none
         self.query_one("#autoreply-table").display = False
         self.query_one("#autoreply-form").display = True
-        self.query_one("#autoreply-add", Button).disabled = True
-        self.query_one("#autoreply-edit", Button).disabled = True
-        self.query_one("#autoreply-copy", Button).disabled = True
+        self._set_action_buttons_disabled(True)
         self.query_one("#autoreply-pattern", Input).focus()
-
-    def _hide_form(self) -> None:
-        self.query_one("#autoreply-form").display = False
-        self.query_one("#autoreply-table").display = True
-        self._editing_idx = None
-        self.query_one("#autoreply-add", Button).disabled = False
-        self.query_one("#autoreply-edit", Button).disabled = False
-        self.query_one("#autoreply-copy", Button).disabled = False
-        self.query_one("#autoreply-table", DataTable).focus()
 
     def _submit_form(self) -> None:
         """Accept the current inline form values."""
@@ -1927,6 +1992,7 @@ class AutoreplyEditScreen(Screen["bool | None"]):
         exclusive = self.query_one("#autoreply-exclusive", Switch).value
         always = self.query_one("#autoreply-always", Switch).value
         enabled = self.query_one("#autoreply-enabled", Switch).value
+        immediate = self.query_one("#autoreply-immediate", Switch).value
         try:
             timeout_val = float(
                 self.query_one("#autoreply-timeout", Input).value.strip() or "10"
@@ -1951,91 +2017,11 @@ class AutoreplyEditScreen(Screen["bool | None"]):
             except re.error as exc:
                 self.notify(f"Invalid regex: {exc}", severity="error")
                 return
-            if self._editing_idx is not None:
-                target_row = self._editing_idx
-                self._rules[self._editing_idx] = (
-                    pattern_val, reply_val, exclusive, until_val, always,
-                    enabled, timeout_val, post_cmd, when,
-                )
-            else:
-                target_row = len(self._rules)
-                self._rules.append(
-                    (pattern_val, reply_val, exclusive, until_val, always,
-                     enabled, timeout_val, post_cmd, when)
-                )
-            self._refresh_table()
-            table = self.query_one("#autoreply-table", DataTable)
-            table.move_cursor(row=target_row)
-        self._hide_form()
-
-    def _selected_idx(self) -> int | None:
-        table = self.query_one("#autoreply-table", DataTable)
-        if table.row_count == 0:
-            return None
-        row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
-        return int(str(row_key.value))
-
-    def _edit_selected(self) -> None:
-        """Open the selected row for editing."""
-        idx = self._selected_idx()
-        if idx is not None and idx < len(self._rules):
-            self._editing_idx = idx
-            p, r, excl, until, alw, ena, tout, pcmd, when = self._rules[idx]
-            self._show_form(p, r, excl, until, alw, ena, tout, pcmd, when)
-
-    def _copy_selected(self) -> None:
-        """Duplicate the selected row."""
-        idx = self._selected_idx()
-        if idx is not None and idx < len(self._rules):
-            self._rules.insert(idx + 1, self._rules[idx])
-            self._refresh_table()
-            table = self.query_one("#autoreply-table", DataTable)
-            table.move_cursor(row=idx + 1)
-
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Double-click or Enter on a table row opens it for editing."""
-        idx = int(str(event.row_key.value))
-        if idx < len(self._rules):
-            self._editing_idx = idx
-            p, r, excl, until, alw, ena, tout, pcmd, when = self._rules[idx]
-            self._show_form(p, r, excl, until, alw, ena, tout, pcmd, when)
-
-    def on_key(self, event: events.Key) -> None:
-        """Arrow/Home/End/+/- keys navigate and reorder the autoreply table."""
-        if event.key in ("home", "end"):
-            table = self.query_one("#autoreply-table", DataTable)
-            if self.focused is table and table.row_count > 0:
-                row = 0 if event.key == "home" else table.row_count - 1
-                table.move_cursor(row=row)
-                event.prevent_default()
-        elif event.key in ("up", "down", "left", "right"):
-            _handle_arrow_navigation(
-                self, event, "#autoreply-button-col", "#autoreply-table",
-                "#autoreply-form",
-            )
-        elif event.key in ("plus", "minus") and not self._form_visible:
-            self._reorder(event.key == "plus")
-
-    def _reorder(self, move_down: bool) -> None:
-        """Swap the selected row with its neighbour."""
-        idx = self._selected_idx()
-        if idx is None:
-            return
-        target = idx + 1 if move_down else idx - 1
-        if target < 0 or target >= len(self._rules):
-            return
-        self._rules[idx], self._rules[target] = (
-            self._rules[target], self._rules[idx]
+        entry = _AutoreplyTuple(
+            pattern_val, reply_val, exclusive, until_val, always,
+            enabled, timeout_val, post_cmd, when, immediate,
         )
-        self._refresh_table()
-        table = self.query_one("#autoreply-table", DataTable)
-        table.move_cursor(row=target)
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Enter in an inline form input submits the form."""
-        if self._form_visible:
-            event.stop()
-            self._submit_form()
+        self._finalize_edit(entry, bool(pattern_val))
 
     def on_select_changed(self, event: Select.Changed) -> None:
         """Disable operator/value fields when condition vital is '(none)'."""
@@ -2043,48 +2029,6 @@ class AutoreplyEditScreen(Screen["bool | None"]):
             disabled = event.value == "" or event.value is Select.BLANK
             self.query_one("#autoreply-cond-op", Select).disabled = disabled
             self.query_one("#autoreply-cond-val", Input).disabled = disabled
-
-    def action_cancel_or_close(self) -> None:
-        """Escape closes the inline form, or dismisses the screen."""
-        if self._form_visible:
-            self._hide_form()
-        else:
-            self.dismiss(None)
-
-    def action_reorder_hint(self) -> None:
-        """No-op; +/- handled in on_key, binding exists for footer hint."""
-
-    def action_save_hint(self) -> None:
-        """No-op; enter handled by on_input_submitted, binding exists for footer hint."""
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle autoreply editor button presses."""
-        btn = event.button.id or ""
-        if btn == "autoreply-add":
-            self._editing_idx = None
-            self._show_form()
-        elif btn == "autoreply-edit":
-            self._edit_selected()
-        elif btn == "autoreply-copy":
-            self._copy_selected()
-        elif btn == "autoreply-delete":
-            if self._form_visible:
-                self._hide_form()
-            idx = self._selected_idx()
-            if idx is not None and idx < len(self._rules):
-                self._rules.pop(idx)
-                self._refresh_table()
-        elif btn == "autoreply-ok":
-            self._submit_form()
-        elif btn == "autoreply-cancel-form":
-            self._hide_form()
-        elif btn == "autoreply-save":
-            if self._form_visible:
-                self._submit_form()
-            self._save_to_file()
-            self.dismiss(True)
-        elif btn == "autoreply-close":
-            self.dismiss(None)
 
     def _save_to_file(self) -> None:
         import re  # pylint: disable=import-outside-toplevel
@@ -2096,17 +2040,18 @@ class AutoreplyEditScreen(Screen["bool | None"]):
 
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
         rules = []
-        for p, r, excl, until, alw, ena, tout, pcmd, when in self._rules:
+        for t in self._rules:
             rules.append(AutoreplyRule(
-                pattern=re.compile(p, re.MULTILINE | re.DOTALL),
-                reply=r,
-                exclusive=excl,
-                until=until,
-                post_command=pcmd,
-                always=alw,
-                enabled=ena,
-                exclusive_timeout=tout,
-                when=when,
+                pattern=re.compile(t.pattern, re.MULTILINE | re.DOTALL),
+                reply=t.reply,
+                exclusive=t.exclusive,
+                until=t.until,
+                post_command=t.post_command,
+                always=t.always,
+                enabled=t.enabled,
+                exclusive_timeout=t.exclusive_timeout,
+                when=t.when,
+                immediate=t.immediate,
             ))
         save_autoreplies(self._path, rules, self._session_key)
 

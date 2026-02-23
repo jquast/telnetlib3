@@ -69,7 +69,7 @@ async def filter_ansi(reader: TelnetReaderUnicode, _writer: TelnetWriterUnicode)
                 buf += seq_char
                 match = _ZERO_WIDTH_PATTERN.match(buf)
                 # Skip spurious 2-byte Fe matches on the
-                # ESC+starter prefix — the real sequence is
+                # ESC+starter prefix -- the real sequence is
                 # longer (CSI 3+, charset 3, OSC/DCS/APC/PM 4+)
                 if match and match.end() > 2:
                     if match.end() < len(buf):

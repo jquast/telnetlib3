@@ -29,14 +29,14 @@ _ATASCII_LF_CHAR = "\u25e3"  # BLACK LOWER LEFT TRIANGLE (from byte 0x0A)
 # shares its Unicode codepoint U+25C0 with 0xFE).
 _INPUT_XLAT: Dict[str, Dict[int, int]] = {
     "atascii": {
-        0x7F: 0x7E,  # DEL → ATASCII backspace (byte 0x7E)
-        0x08: 0x7E,  # BS  → ATASCII backspace (byte 0x7E)
-        0x0D: 0x9B,  # CR  → ATASCII EOL (byte 0x9B)
-        0x0A: 0x9B,  # LF  → ATASCII EOL (byte 0x9B)
+        0x7F: 0x7E,  # DEL -> ATASCII backspace (byte 0x7E)
+        0x08: 0x7E,  # BS  -> ATASCII backspace (byte 0x7E)
+        0x0D: 0x9B,  # CR  -> ATASCII EOL (byte 0x9B)
+        0x0A: 0x9B,  # LF  -> ATASCII EOL (byte 0x9B)
     },
     "petscii": {
-        0x7F: 0x14,  # DEL → PETSCII DEL (byte 0x14)
-        0x08: 0x14,  # BS  → PETSCII DEL (byte 0x14)
+        0x7F: 0x14,  # DEL -> PETSCII DEL (byte 0x14)
+        0x08: 0x14,  # BS  -> PETSCII DEL (byte 0x14)
     },
 }
 
@@ -54,8 +54,8 @@ _INPUT_SEQ_XLAT: Dict[str, Dict[bytes, bytes]] = {
         b"\x1bOB": b"\x1d",  # cursor down
         b"\x1bOC": b"\x1f",  # cursor right
         b"\x1bOD": b"\x1e",  # cursor left
-        b"\x1b[3~": b"\x7e",  # delete → ATASCII backspace
-        b"\t": b"\x7f",  # tab → ATASCII tab
+        b"\x1b[3~": b"\x7e",  # delete -> ATASCII backspace
+        b"\t": b"\x7f",  # tab -> ATASCII tab
     },
     "petscii": {
         b"\x1b[A": b"\x91",  # cursor up (CSI)
@@ -66,9 +66,9 @@ _INPUT_SEQ_XLAT: Dict[str, Dict[bytes, bytes]] = {
         b"\x1bOB": b"\x11",  # cursor down
         b"\x1bOC": b"\x1d",  # cursor right
         b"\x1bOD": b"\x9d",  # cursor left
-        b"\x1b[3~": b"\x14",  # delete → PETSCII DEL
-        b"\x1b[H": b"\x13",  # home → PETSCII HOME
-        b"\x1b[2~": b"\x94",  # insert → PETSCII INSERT
+        b"\x1b[3~": b"\x14",  # delete -> PETSCII DEL
+        b"\x1b[H": b"\x13",  # home -> PETSCII HOME
+        b"\x1b[2~": b"\x94",  # insert -> PETSCII INSERT
     },
 }
 
@@ -86,8 +86,8 @@ class InputFilter:
     becomes ``True``.  The caller should start an ``esc_delay`` timer and
     call :meth:`flush` if no further input arrives before the timer fires.
 
-    :param seq_xlat: Multi-byte escape sequence → replacement bytes.
-    :param byte_xlat: Single input byte → replacement byte.
+    :param seq_xlat: Multi-byte escape sequence -> replacement bytes.
+    :param byte_xlat: Single input byte -> replacement byte.
     :param esc_delay: Seconds to wait before flushing a buffered prefix
         (default 0.35, matching blessed's ``DEFAULT_ESCDELAY``).
     """
@@ -153,7 +153,7 @@ class InputFilter:
                     break
             if matched:
                 continue
-            # Check if buffer is a prefix of any known sequence — wait for more
+            # Check if buffer is a prefix of any known sequence -- wait for more
             if self._buf in self._prefixes:
                 break
             # No sequence match, emit single byte with translation
@@ -413,7 +413,7 @@ else:
             """
             Return an asyncio StreamWriter for local terminal output.
 
-            This does **not** connect stdin — call :meth:`connect_stdin`
+            This does **not** connect stdin -- call :meth:`connect_stdin`
             separately when an asyncio stdin reader is needed (the REPL
             manages its own stdin via prompt_toolkit).
             """
@@ -474,8 +474,8 @@ else:
         if in_raw_mode:
             out = out.replace("\r\n", "\n").replace("\n", "\r\n")
         else:
-            # Cooked mode: PTY ONLCR converts \n → \r\n, so strip \r before \n
-            # to avoid doubling (\r\n → \r\r\n).
+            # Cooked mode: PTY ONLCR converts \n -> \r\n, so strip \r before \n
+            # to avoid doubling (\r\n -> \r\r\n).
             out = out.replace("\r\n", "\n")
         return out
 
@@ -571,7 +571,7 @@ else:
 
             telnet_writer.log.log(TRACE, "task=%s, wait_for=%s", task, wait_for)
 
-            # ESC_DELAY timer fired — flush buffered partial sequence
+            # ESC_DELAY timer fired -- flush buffered partial sequence
             if task is esc_timer_task:
                 esc_timer_task = None
                 _inf = getattr(telnet_writer, "_input_filter", None)
@@ -646,8 +646,8 @@ else:
                         if not switched_to_raw:
                             linesep = "\r\n"
                         switched_to_raw, last_will_echo, local_echo = mode_result
-                        # When transitioning cooked → raw, the data was
-                        # processed for ONLCR (\r\n → \n) but the terminal
+                        # When transitioning cooked -> raw, the data was
+                        # processed for ONLCR (\r\n -> \n) but the terminal
                         # now has ONLCR disabled.  Re-normalize so bare \n
                         # becomes \r\n for correct display.
                         if switched_to_raw and not in_raw:

@@ -94,7 +94,7 @@ def check_condition(
 
     :param when: Condition dict, e.g. ``{"HP%": ">50", "MP%": ">30"}``.
     :param writer: Telnet writer with ``_gmcp_data`` attribute.
-    :returns: ``(ok, failure_description)`` — *ok* is ``False`` when a
+    :returns: ``(ok, failure_description)`` -- *ok* is ``False`` when a
         condition is not met; *failure_description* explains which.
     """
     if not when:
@@ -139,6 +139,7 @@ class AutoreplyRule:
     enabled: bool = True
     exclusive_timeout: float = 10.0
     when: dict[str, str] = field(default_factory=dict)
+    immediate: bool = False
 
 
 def _parse_entries(entries: list[dict[str, str]]) -> list[AutoreplyRule]:
@@ -157,6 +158,7 @@ def _parse_entries(entries: list[dict[str, str]]) -> list[AutoreplyRule]:
         exclusive_timeout = float(entry.get("exclusive_timeout", 10.0))
         when_raw: Any = entry.get("when", {})
         when = dict(when_raw) if isinstance(when_raw, dict) else {}
+        immediate = bool(entry.get("immediate", False))
         try:
             compiled = re.compile(pattern_str, re.MULTILINE | re.DOTALL)
         except re.error as exc:
@@ -166,6 +168,7 @@ def _parse_entries(entries: list[dict[str, str]]) -> list[AutoreplyRule]:
             until=until, post_command=post_command, always=always,
             enabled=enabled, exclusive_timeout=exclusive_timeout,
             when=when,
+            immediate=immediate,
         ))
     return rules
 
@@ -221,6 +224,7 @@ def save_autoreplies(path: str, rules: list[AutoreplyRule], session_key: str) ->
                 **({"exclusive_timeout": r.exclusive_timeout}
                    if r.exclusive and r.exclusive_timeout != 10.0 else {}),
                 **({"when": dict(r.when)} if r.when else {}),
+                **({"immediate": True} if r.immediate else {}),
             }
             for r in rules
         ]
@@ -323,7 +327,7 @@ class SearchBuffer:
         parts[0] = self._partial + parts[0]
 
         if len(parts) == 1:
-            # No newline in this chunk — accumulate partial.
+            # No newline in this chunk -- accumulate partial.
             self._partial = parts[0]
             return False
 
@@ -382,7 +386,7 @@ class SearchBuffer:
                 return
             abs_offset -= line_len + (1 if i == self._last_match_line else 0)
 
-        # Past the last line — offset is within the partial.
+        # Past the last line -- offset is within the partial.
         self._last_match_line = len(self._lines)
         self._last_match_col = abs_offset
 
@@ -447,6 +451,7 @@ class AutoreplyEngine:
         self._suppress_exclusive = False
         self._last_matched_pattern: str = ""
         self._condition_failed: Optional[tuple[int, str]] = None
+        self._exclusive_prompt_count: int = 0
 
     @property
     def condition_failed(self) -> Optional[tuple[int, str]]:
@@ -550,9 +555,10 @@ class AutoreplyEngine:
 
         # Once prompt-based mode is active (GA/EOR seen), defer normal
         # matching until on_prompt() so that replies are never fired
-        # mid-output.  The buffer keeps accumulating and on_prompt()
-        # will run _match_rules() when the server signals it is done.
+        # mid-output.  Rules with immediate=True still fire here so
+        # that asynchronous MUD events (no trailing GA/EOR) are caught.
         if self._prompt_based:
+            self._match_immediate_rules()
             return
 
         self._match_rules()
@@ -569,7 +575,7 @@ class AutoreplyEngine:
 
         # Search for all matching rules. We re-fetch searchable text
         # after each match since advance_match changes the window.
-        # Cap iterations to len(rules) * 2 as a safety valve — one
+        # Cap iterations to len(rules) * 2 as a safety valve -- one
         # chunk of text should never produce more matches than that.
         max_iterations = len(self._rules) * 2
         found = True
@@ -615,6 +621,7 @@ class AutoreplyEngine:
                         self._exclusive_active = True
                         self._exclusive_rule_index = rule_idx + 1
                         self._skip_next_prompt = True
+                        self._exclusive_prompt_count = 0
                         self._post_command = rule.post_command
                         self._exclusive_deadline = (
                             time.monotonic() + rule.exclusive_timeout
@@ -633,6 +640,52 @@ class AutoreplyEngine:
                         return
                     found = True
                     break  # re-fetch searchable text and start over
+
+    def _match_immediate_rules(self) -> None:
+        """Match only rules with ``immediate=True`` during prompt-based deferral.
+
+        This is a restricted variant of :meth:`_match_rules` that fires
+        immediately from :meth:`feed` even when ``_prompt_based`` is active,
+        so that asynchronous MUD events without a trailing GA/EOR are caught.
+        """
+        searchable = self._buffer.get_searchable_text()
+        if not searchable:
+            return
+
+        max_iterations = len(self._rules) * 2
+        found = True
+        while found and max_iterations > 0:
+            found = False
+            max_iterations -= 1
+            searchable = self._buffer.get_searchable_text()
+            if not searchable:
+                break
+            for rule_idx, rule in enumerate(self._rules):
+                if not rule.enabled or not rule.immediate:
+                    continue
+                if rule_idx in self._cycle_matched:
+                    continue
+                match = rule.pattern.search(searchable)
+                if match:
+                    self._last_matched_pattern = rule.pattern.pattern
+                    self._cycle_matched.add(rule_idx)
+                    self._buffer.advance_match(match.start(), len(match.group(0)))
+                    if rule.when:
+                        ok, desc = check_condition(rule.when, self._writer)
+                        if not ok:
+                            self._log.info(
+                                "autoreply: immediate rule #%d skipped, "
+                                "condition failed: %s", rule_idx + 1, desc,
+                            )
+                            self._condition_failed = (rule_idx + 1, desc)
+                            found = True
+                            break
+                    reply = _substitute_groups(rule.reply, match)
+                    if not reply.rstrip().endswith(";"):
+                        reply = reply.rstrip() + ";"
+                    self._queue_reply(reply)
+                    found = True
+                    break
 
     def _match_always_rules(self) -> None:
         """Check rules with ``always=True`` even during exclusive suppression."""
@@ -672,7 +725,7 @@ class AutoreplyEngine:
         Execute a single reply: split on ``;``, expand repeats, handle delays, send.
 
         Delay segments: ```delay Ns``` or ```delay Nms``` (e.g. ```delay 2s```, ```delay 500ms```).
-        Command segments support repeat prefixes (e.g. ``3e`` → ``e;e;e``).
+        Command segments support repeat prefixes (e.g. ``3e`` -> ``e;e;e``).
 
         If the reply ends with ``;``, all commands are sent immediately.
         Otherwise the final command is inserted into the prompt for review.
@@ -699,7 +752,7 @@ class AutoreplyEngine:
                 self._log.info("autoreply: inserting %r into prompt", cmd)
                 self._insert_fn(cmd)
             else:
-                # Skip wait_fn for the first command — the match was
+                # Skip wait_fn for the first command -- the match was
                 # triggered by output that ended with a GA/EOR prompt
                 # signal, so the server is already ready for input.
                 if sent_count > 0 and self._wait_fn is not None:
@@ -733,13 +786,13 @@ class AutoreplyEngine:
         the match (GA/EOR often arrives in a separate TCP chunk).
 
         When an ``until`` pattern is set, EOR/GA does **not** clear
-        exclusive — only the until pattern match or timeout can.
+        exclusive -- only the until pattern match or timeout can.
 
         Each EOR/GA resets the per-cycle deduplication set so that
         rules can match again in the next prompt cycle.
         """
         self._prompt_based = True
-        # Match on accumulated buffer before clearing — this is where
+        # Match on accumulated buffer before clearing -- this is where
         # deferred matches from feed() actually fire.
         if not self._exclusive_active:
             self._match_rules()
@@ -749,7 +802,18 @@ class AutoreplyEngine:
             self._skip_next_prompt = False
             return
         if self._until_pattern is not None:
-            # Until pattern governs when exclusive ends, not EOR/GA.
+            self._exclusive_prompt_count += 1
+            if self._exclusive_prompt_count >= 2:
+                self._log.info(
+                    "autoreply: exclusive cleared after %d prompts"
+                    " without until match",
+                    self._exclusive_prompt_count,
+                )
+                self._exclusive_active = False
+                self._exclusive_rule_index = 0
+                self._until_pattern = None
+                self._post_command = ""
+                self._exclusive_prompt_count = 0
             return
         self._exclusive_active = False
         self._exclusive_rule_index = 0
@@ -769,6 +833,7 @@ class AutoreplyEngine:
             self._until_pattern = None
             self._skip_next_prompt = False
             self._post_command = ""
+            self._exclusive_prompt_count = 0
             self._buffer.clear()
             return True
         return False
@@ -784,4 +849,5 @@ class AutoreplyEngine:
         self._skip_next_prompt = False
         self._post_command = ""
         self._exclusive_deadline = 0.0
+        self._exclusive_prompt_count = 0
         self._sent_commands.clear()

@@ -59,7 +59,7 @@ from .fingerprinting import (
 __all__ = ("fingerprinting_client_shell", "probe_server_capabilities")
 
 # Options where only the client sends WILL (in response to a server's DO).
-# A server should never WILL these — they describe client-side properties.
+# A server should never WILL these -- they describe client-side properties.
 # The probe must not send DO for these; their state is already captured
 # in ``server_requested`` (what the server sent DO for).
 _CLIENT_ONLY_WILL = frozenset({TTYPE, TSPEED, NAWS, XDISPLOC, NEW_ENVIRON, LFLOW, LINEMODE, SNDLOC})
@@ -81,7 +81,7 @@ _YN_RE = re.compile(
     rb"|[(\[][yY][nN][)\]]"
 )
 
-# Match "color?" prompts — many MUDs ask if the user wants color.
+# Match "color?" prompts -- many MUDs ask if the user wants color.
 _COLOR_RE = re.compile(rb"(?i)color\s*\?")
 
 # Match numbered menu items offering UTF-8, e.g. "5) UTF-8", "[3] UTF-8",
@@ -114,7 +114,7 @@ _ESC_ONCE_RE = re.compile(rb"(?i)press\s+[\[<]?\.?esc\.?[\]>]?(?!\s+twice)")
 # Common on Worldgroup/MajorBBS and other vintage BBS systems.
 _RETURN_PROMPT_RE = re.compile(rb"(?i)(?:hit|press)\s+(?:return|enter)\s*[:\.]?")
 
-# Match "Press the BACKSPACE key" prompts — standard telnet terminal
+# Match "Press the BACKSPACE key" prompts -- standard telnet terminal
 # detection (e.g. TelnetBible.com).  Respond with ASCII BS (0x08).
 _BACKSPACE_KEY_RE = re.compile(rb"(?i)press\s+the\s+backspace\s+key")
 
@@ -209,7 +209,7 @@ def detect_syncterm_font(data: bytes) -> str | None:
 
 #: Encodings where standard telnet CR+LF must be re-encoded to the
 #: codec's native EOL byte.  The codec's ``encode()`` handles the
-#: actual CR → LF normalization; we just gate the re-encoding step.
+#: actual CR -> LF normalization; we just gate the re-encoding step.
 _RETRO_EOL_ENCODINGS = frozenset({"atascii", "atari8bit", "atari_8bit"})
 
 
@@ -246,7 +246,7 @@ class _VirtualCursor:
     the scanner produces CPR responses that satisfy the width check.
 
     When *encoding* is set to a single-byte encoding like ``cp437``, raw
-    bytes are decoded with that encoding before measuring — this gives
+    bytes are decoded with that encoding before measuring -- this gives
     correct column widths for servers that use SyncTERM font switching
     where the raw bytes are not valid UTF-8.
     """
@@ -339,7 +339,7 @@ def _detect_yn_prompt(banner: bytes) -> _PromptResult:  # pylint: disable=too-ma
     embedded color/cursor codes do not interfere with detection.
 
     Returns a :class:`_PromptResult` whose *response* is ``None`` when
-    no recognizable prompt is found — the caller should fall back to
+    no recognizable prompt is found -- the caller should fall back to
     sending a bare ``\r\n``.  When a UTF-8 charset menu is selected,
     *encoding* is set to ``"utf-8"`` so the caller can update the
     session encoding.
@@ -463,7 +463,7 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
     start_time = time.time()
     cursor = _VirtualCursor(encoding=writer.environ_encoding)
 
-    # 1. Let straggler negotiation settle — read (and respond to DSR)
+    # 1. Let straggler negotiation settle -- read (and respond to DSR)
     #    instead of sleeping blind so early DSR requests get a CPR reply.
     settle_data = await _read_banner_until_quiet(
         reader,
@@ -474,7 +474,7 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
         cursor=cursor,
     )
 
-    # 2. Read banner (pre-return) — wait until output stops
+    # 2. Read banner (pre-return) -- wait until output stops
     banner_before_raw = await _read_banner_until_quiet(
         reader,
         quiet_time=banner_quiet_time,
@@ -485,7 +485,7 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
     )
     banner_before = settle_data + banner_before_raw
 
-    # 3. Respond to prompts — some servers ask multiple questions in
+    # 3. Respond to prompts -- some servers ask multiple questions in
     #    sequence (e.g. "color?" then a UTF-8 charset menu).  Loop up to
     #    _MAX_PROMPT_REPLIES times, stopping early when no prompt is detected
     #    or the connection is lost.
@@ -531,7 +531,7 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
         after_chunks.append(latest_banner)
         if writer.is_closing() or not latest_banner:
             break
-        # Stop when the server repeats the same banner — it is not
+        # Stop when the server repeats the same banner -- it is not
         # advancing through prompts, just re-displaying the login screen.
         if latest_banner == previous_banner:
             break
@@ -855,7 +855,7 @@ def _format_banner(data: bytes, encoding: str = "utf-8") -> str:
     regardless of ``environ_encoding``; callers may override.
 
     Uses ``surrogateescape`` so high bytes (common in CP437 BBS art)
-    are preserved as surrogates (e.g. byte ``0xB1`` → ``U+DCB1``)
+    are preserved as surrogates (e.g. byte ``0xB1`` -> ``U+DCB1``)
     rather than replaced with ``U+FFFD``.  JSON serialization escapes
     them as ``\udcXX``, which round-trips through :func:`json.load`.
 
@@ -962,8 +962,8 @@ async def _read_banner_until_quiet(  # pylint: disable=too-many-nested-blocks
     printable character).  This defeats robot-check guards that verify
     cursor movement after writing a test character.
 
-    Time-sensitive prompts — ``Press [.ESC.] twice`` botcheck countdowns
-    and charset selection menus — are detected inline and responded to
+    Time-sensitive prompts -- ``Press [.ESC.] twice`` botcheck countdowns
+    and charset selection menus -- are detected inline and responded to
     immediately so the reply arrives before the server times out.
 
     :param reader: :class:`~telnetlib3.stream_reader.TelnetReader` instance.
