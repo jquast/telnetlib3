@@ -2,23 +2,26 @@
 
 from __future__ import annotations
 
-import json
+# std imports
 import os
+import json
 
+# 3rd party
 import pytest
 
+# local
 from telnetlib3.rooms import (
     Room,
     RoomGraph,
     load_rooms,
-    save_rooms,
     rooms_path,
-    current_room_path,
+    save_rooms,
     fasttravel_path,
-    write_current_room,
-    read_current_room,
-    write_fasttravel,
     read_fasttravel,
+    write_fasttravel,
+    current_room_path,
+    read_current_room,
+    write_current_room,
 )
 
 
@@ -26,8 +29,15 @@ class TestRoomGraph:
 
     def test_update_room_new(self) -> None:
         g = RoomGraph()
-        g.update_room({"num": "100", "name": "Town Square", "area": "midgaard",
-                        "environment": "outdoors", "exits": {"north": "101", "south": "102"}})
+        g.update_room(
+            {
+                "num": "100",
+                "name": "Town Square",
+                "area": "midgaard",
+                "environment": "outdoors",
+                "exits": {"north": "101", "south": "102"},
+            }
+        )
         assert "100" in g.rooms
         r = g.rooms["100"]
         assert r.name == "Town Square"
@@ -39,10 +49,17 @@ class TestRoomGraph:
 
     def test_update_room_existing(self) -> None:
         g = RoomGraph()
-        g.update_room({"num": "100", "name": "Town Square", "area": "midgaard",
-                        "exits": {"north": "101"}})
-        g.update_room({"num": "100", "name": "Town Square (rebuilt)", "area": "midgaard",
-                        "exits": {"north": "101", "east": "103"}})
+        g.update_room(
+            {"num": "100", "name": "Town Square", "area": "midgaard", "exits": {"north": "101"}}
+        )
+        g.update_room(
+            {
+                "num": "100",
+                "name": "Town Square (rebuilt)",
+                "area": "midgaard",
+                "exits": {"north": "101", "east": "103"},
+            }
+        )
         assert g.rooms["100"].name == "Town Square (rebuilt)"
         assert g.rooms["100"].exits == {"north": "101", "east": "103"}
         assert g.rooms["100"].visit_count == 2
@@ -209,7 +226,9 @@ class TestFindSameName:
         g = RoomGraph()
         g.rooms["0"] = Room(num="0", name="Road", last_visited="2024-01-01")
         for i in range(1, 120):
-            g.rooms[str(i)] = Room(num=str(i), name="Road", last_visited=f"2024-01-{i % 28 + 1:02d}")
+            g.rooms[str(i)] = Room(
+                num=str(i), name="Road", last_visited=f"2024-01-{i % 28 + 1:02d}"
+            )
         result = g.find_same_name("0")
         assert len(result) == 99
 
@@ -272,8 +291,15 @@ class TestPersistence:
 
     def test_save_load_roundtrip(self, tmp_path: Any) -> None:
         g = RoomGraph()
-        g.update_room({"num": "100", "name": "Town", "area": "mid",
-                        "environment": "indoor", "exits": {"n": "101"}})
+        g.update_room(
+            {
+                "num": "100",
+                "name": "Town",
+                "area": "mid",
+                "environment": "indoor",
+                "exits": {"n": "101"},
+            }
+        )
         g.toggle_bookmark("100")
 
         path = str(tmp_path / "rooms.json")

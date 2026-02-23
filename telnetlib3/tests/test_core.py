@@ -78,10 +78,7 @@ async def test_telnet_server_open_close(bind_host, unused_tcp_port):
 async def test_telnet_client_open_close_by_write(bind_host, unused_tcp_port):
     """Exercise BaseClient.connection_lost() on writer closed."""
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
-        async with open_connection(host=bind_host, port=unused_tcp_port) as (
-            reader,
-            writer,
-        ):
+        async with open_connection(host=bind_host, port=unused_tcp_port) as (reader, writer):
             writer.close()
             await writer.wait_closed()
             assert not await reader.read()
@@ -96,10 +93,7 @@ async def test_telnet_client_open_closed_by_peer(bind_host, unused_tcp_port):
             transport.close()
 
     async with asyncio_server(DisconnecterProtocol, bind_host, unused_tcp_port):
-        async with open_connection(host=bind_host, port=unused_tcp_port) as (
-            reader,
-            writer,
-        ):
+        async with open_connection(host=bind_host, port=unused_tcp_port) as (reader, writer):
             assert not await reader.read()
 
 
@@ -281,10 +275,7 @@ async def test_telnet_client_open_close_by_error(bind_host, unused_tcp_port):
         pass
 
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
-        async with open_connection(host=bind_host, port=unused_tcp_port) as (
-            reader,
-            writer,
-        ):
+        async with open_connection(host=bind_host, port=unused_tcp_port) as (reader, writer):
             writer.protocol.connection_lost(GivenException("candy corn 4 everyone"))
             with pytest.raises(GivenException):
                 await reader.read()

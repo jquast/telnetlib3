@@ -252,17 +252,20 @@ def test_server_fingerprint_hash_consistency():
     assert h1 == h2 and len(h1) == 16
 
 
-@pytest.mark.parametrize("data,encoding,checks", [
-    (b"Hello\r\nWorld", None, [("eq", "Hello\r\nWorld")]),
-    (b"", None, [("falsy", None)]),
-    (b"\xff\xfe\xb1", None, [("not_in", "\ufffd"), ("eq", "\udcff\udcfe\udcb1")]),
-    (b"Hello\xb1World", "x-no-such-codec", [("eq", "Hello\xb1World")]),
-    (b"Hello\x9b", "atascii", [("eq", "Hello\n")]),
-    (b"\x1c\xc8\xc9", "petscii", [("in", "\x1b[38;2;"), ("in", "HI")]),
-    (b"\x12\xc8\xc9\x92", "petscii", [("in", "\x1b[7m"), ("in", "\x1b[27m")]),
-    (b"\xc8\xc9\x0d\xca\xcb", "petscii", [("eq", "HI\nJK")]),
-    (b"\x13\xc8\xc9", "petscii", [("in", "\x1b[H"), ("in", "HI")]),
-])
+@pytest.mark.parametrize(
+    "data,encoding,checks",
+    [
+        (b"Hello\r\nWorld", None, [("eq", "Hello\r\nWorld")]),
+        (b"", None, [("falsy", None)]),
+        (b"\xff\xfe\xb1", None, [("not_in", "\ufffd"), ("eq", "\udcff\udcfe\udcb1")]),
+        (b"Hello\xb1World", "x-no-such-codec", [("eq", "Hello\xb1World")]),
+        (b"Hello\x9b", "atascii", [("eq", "Hello\n")]),
+        (b"\x1c\xc8\xc9", "petscii", [("in", "\x1b[38;2;"), ("in", "HI")]),
+        (b"\x12\xc8\xc9\x92", "petscii", [("in", "\x1b[7m"), ("in", "\x1b[27m")]),
+        (b"\xc8\xc9\x0d\xca\xcb", "petscii", [("eq", "HI\nJK")]),
+        (b"\x13\xc8\xc9", "petscii", [("in", "\x1b[H"), ("in", "HI")]),
+    ],
+)
 def test_format_banner(data, encoding, checks):
     kwargs = {"encoding": encoding} if encoding else {}
     result = sfp._format_banner(data, **kwargs)

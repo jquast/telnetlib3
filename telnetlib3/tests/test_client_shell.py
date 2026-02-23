@@ -353,13 +353,7 @@ def _strip_iac(data: bytes) -> bytes:
 def _client_cmd(host: str, port: int, extra: "list[str] | None" = None) -> "list[str]":
     prog = pexpect.which("telnetlib3-client")
     assert prog is not None
-    args = [
-        prog,
-        host,
-        str(port),
-        "--connect-maxwait=0.5",
-        "--colormatch=none",
-    ]
+    args = [prog, host, str(port), "--connect-maxwait=0.5", "--colormatch=none"]
     if extra:
         args.extend(extra)
     return args

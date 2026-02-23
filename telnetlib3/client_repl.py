@@ -6,26 +6,26 @@
 import sys
 import time
 import asyncio
-import collections
 import logging
+import collections
 from typing import Any, List, Tuple, Union, Callable, Optional
 
 # local
 from ._ansi import (
-    CLEAR_HOME,
-    CLEAR_LINE,
-    CURSOR_BLINKING_BAR,
-    CURSOR_DEFAULT,
-    ENTER_ALT_SCREEN,
-    EXIT_ALT_SCREEN,
-    RESTORE_CURSOR,
-    SAVE_CURSOR,
-    SCROLL_RESET,
     SGR_CYAN,
     SGR_RESET,
+    CLEAR_HOME,
+    CLEAR_LINE,
     SGR_YELLOW,
+    SAVE_CURSOR,
     SHOW_CURSOR,
+    SCROLL_RESET,
+    CURSOR_DEFAULT,
+    RESTORE_CURSOR,
+    EXIT_ALT_SCREEN,
+    ENTER_ALT_SCREEN,
     TERMINAL_CLEANUP,
+    CURSOR_BLINKING_BAR,
     cup,
     decstbm,
 )
@@ -34,12 +34,12 @@ from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
 try:
     import prompt_toolkit
-    import prompt_toolkit.application
+    import prompt_toolkit.styles
     import prompt_toolkit.filters
     import prompt_toolkit.history
+    import prompt_toolkit.application
     import prompt_toolkit.key_binding
     import prompt_toolkit.auto_suggest
-    import prompt_toolkit.styles
 
     HAS_PROMPT_TOOLKIT = True
 except ImportError:
@@ -74,7 +74,8 @@ __all__ = (
 
 
 def _split_incomplete_esc(data: bytes) -> tuple[bytes, bytes]:
-    """Split *data* into (complete, holdback) at a trailing incomplete escape.
+    """
+    Split *data* into (complete, holdback) at a trailing incomplete escape.
 
     If *data* ends mid-escape-sequence the incomplete tail is returned as
     *holdback* so the caller can buffer it until more bytes arrive.
@@ -150,10 +151,10 @@ class OutputRingBuffer:
 
 
 def _restore_after_subprocess(
-    replay_buf: Optional["OutputRingBuffer"],
-    reserve: int = _PT_RESERVE_WITH_TOOLBAR,
+    replay_buf: Optional["OutputRingBuffer"], reserve: int = _PT_RESERVE_WITH_TOOLBAR
 ) -> None:
-    """Restore terminal state after a TUI subprocess exits.
+    """
+    Restore terminal state after a TUI subprocess exits.
 
     Restores stdin blocking mode, resets SGR/mouse/alt-screen via
     :data:`TERMINAL_CLEANUP`, clears the screen, re-establishes the
@@ -198,7 +199,8 @@ def _hsv_to_rgb(h: float, s: float, v: float) -> Tuple[int, int, int]:
 
 
 def _fmt_value(n: int) -> str:
-    """Format a numeric value with k/m suffixes for compact display.
+    """
+    Format a numeric value with k/m suffixes for compact display.
 
     :param n: Integer value.
     :returns: Formatted string, e.g. ``1.2k``, ``3.5m``.
@@ -213,7 +215,8 @@ def _fmt_value(n: int) -> str:
 
 
 def _vital_color(fraction: float, kind: str) -> str:
-    """Return an RGB hex color for a vitals bar.
+    """
+    Return an RGB hex color for a vitals bar.
 
     :param fraction: 0.0 (empty) to 1.0 (full).
     :param kind: ``"hp"`` for red-to-green, ``"mp"`` for golden-yellow-to-blue,
@@ -253,7 +256,8 @@ _BAR_WIDTH = 16
 def _vital_bar(
     current: Any, maximum: Any, width: int, kind: str, flash: bool = False
 ) -> "List[Tuple[str, str]]":
-    """Build a labelled progress-bar with overlaid text.
+    """
+    Build a labelled progress-bar with overlaid text.
 
     Returns ``HP:`` or ``MP:`` prefix followed by a colored bar.
     The label (e.g. ``60/65 92%``) is rendered *on top of* the bar.
@@ -407,7 +411,9 @@ if HAS_PROMPT_TOOLKIT:
                 """Ctrl+L clears screen and replays recent output."""
                 _repaint_screen(event, self._replay_buf, scroll=self._scroll)
 
-            from prompt_toolkit.keys import Keys as _PTKeys  # pylint: disable=import-outside-toplevel
+            from prompt_toolkit.keys import (
+                Keys as _PTKeys,  # pylint: disable=import-outside-toplevel
+            )
 
             @kb.add(_PTKeys.BracketedPaste)
             def _paste_lines(event: Any) -> None:
@@ -459,14 +465,10 @@ if HAS_PROMPT_TOOLKIT:
                     return
 
                 async def _start() -> None:
-                    task = asyncio.ensure_future(
-                        _autowander(telnet_writer, log)
-                    )
+                    task = asyncio.ensure_future(_autowander(telnet_writer, log))
                     telnet_writer._wander_task = task  # type: ignore[union-attr]
 
-                asyncio.get_event_loop().call_soon_threadsafe(
-                    asyncio.ensure_future, _start()
-                )
+                asyncio.get_event_loop().call_soon_threadsafe(asyncio.ensure_future, _start())
 
             self._rprompt_text = connection_info or ""
             self._autoreply_engine: Any = None
@@ -481,37 +483,43 @@ if HAS_PROMPT_TOOLKIT:
             self._has_gmcp: bool = False
             self._scroll: Any = None
 
-            self._style_normal = prompt_toolkit.styles.Style.from_dict({
-                "": "fg:#cccccc bg:#2a0000",
-                "bottom-toolbar": "noreverse",
-                "bottom-toolbar.text": "",
-                "rprompt-info": "fg:#dddddd",
-                "rprompt": "fg:#dddddd bg:#2a0000",
-                "xp-label": "fg:#c8a8ff",
-                "xp-delta-pos": "fg:#44ff44 bold",
-                "xp-delta-neg": "fg:#ff4444 bold",
-                "xp-rate": "fg:#888888",
-                "stat-label": "fg:#aaaaaa",
-                "auto-suggest": "fg:#666666",
-            })
-            self._style_autoreply = prompt_toolkit.styles.Style.from_dict({
-                "": "fg:#000000 bg:#b8860b",
-                "bottom-toolbar": "noreverse bg:#b8860b",
-                "bottom-toolbar.text": "fg:#000000 bg:#b8860b",
-                "rprompt-info": "fg:#000000 bg:#b8860b",
-                "rprompt": "fg:#000000 bg:#b8860b",
-                "rprompt-autoreply": "fg:#000000 bg:#b8860b bold",
-                "xp-label": "fg:#000000 bg:#b8860b",
-                "xp-delta-pos": "fg:#000000 bg:#b8860b bold",
-                "xp-delta-neg": "fg:#000000 bg:#b8860b bold",
-                "xp-rate": "fg:#000000 bg:#b8860b",
-                "stat-label": "fg:#000000 bg:#b8860b",
-                "auto-suggest": "fg:#666666",
-            })
+            self._style_normal = prompt_toolkit.styles.Style.from_dict(
+                {
+                    "": "fg:#cccccc bg:#2a0000",
+                    "bottom-toolbar": "noreverse",
+                    "bottom-toolbar.text": "",
+                    "rprompt-info": "fg:#dddddd",
+                    "rprompt": "fg:#dddddd bg:#2a0000",
+                    "xp-label": "fg:#c8a8ff",
+                    "xp-delta-pos": "fg:#44ff44 bold",
+                    "xp-delta-neg": "fg:#ff4444 bold",
+                    "xp-rate": "fg:#888888",
+                    "stat-label": "fg:#aaaaaa",
+                    "auto-suggest": "fg:#666666",
+                }
+            )
+            self._style_autoreply = prompt_toolkit.styles.Style.from_dict(
+                {
+                    "": "fg:#000000 bg:#b8860b",
+                    "bottom-toolbar": "noreverse bg:#b8860b",
+                    "bottom-toolbar.text": "fg:#000000 bg:#b8860b",
+                    "rprompt-info": "fg:#000000 bg:#b8860b",
+                    "rprompt": "fg:#000000 bg:#b8860b",
+                    "rprompt-autoreply": "fg:#000000 bg:#b8860b bold",
+                    "xp-label": "fg:#000000 bg:#b8860b",
+                    "xp-delta-pos": "fg:#000000 bg:#b8860b bold",
+                    "xp-delta-neg": "fg:#000000 bg:#b8860b bold",
+                    "xp-rate": "fg:#000000 bg:#b8860b",
+                    "stat-label": "fg:#000000 bg:#b8860b",
+                    "auto-suggest": "fg:#666666",
+                }
+            )
             self._style = self._style_normal
             _color_depth = None
             if os.environ.get("COLORTERM") in ("truecolor", "24bit"):
-                from prompt_toolkit.output.color_depth import ColorDepth  # pylint: disable=import-outside-toplevel
+                from prompt_toolkit.output.color_depth import (
+                    ColorDepth,  # pylint: disable=import-outside-toplevel
+                )
 
                 _color_depth = ColorDepth.TRUE_COLOR
             self._session: "prompt_toolkit.PromptSession[str]" = prompt_toolkit.PromptSession(
@@ -528,9 +536,7 @@ if HAS_PROMPT_TOOLKIT:
 
         def _get_toolbar(self) -> "Optional[List[Tuple[str, str]]]":
             """Return toolbar as formatted text tuples with GMCP and rprompt."""
-            gmcp_data: "Optional[dict[str, Any]]" = getattr(
-                self._writer, "_gmcp_data", None
-            )
+            gmcp_data: "Optional[dict[str, Any]]" = getattr(self._writer, "_gmcp_data", None)
             if not self._has_gmcp:
                 if not gmcp_data:
                     return None
@@ -539,10 +545,7 @@ if HAS_PROMPT_TOOLKIT:
                     self._scroll.grow_reserve(_PT_RESERVE_WITH_TOOLBAR)
 
             engine = self._autoreply_engine
-            ar_active = (
-                engine is not None
-                and (engine.exclusive_active or engine.reply_pending)
-            )
+            ar_active = engine is not None and (engine.exclusive_active or engine.reply_pending)
             wander_active = getattr(self._writer, "_wander_active", False)
             if wander_active or ar_active:
                 self._session.style = self._style_autoreply
@@ -567,13 +570,17 @@ if HAS_PROMPT_TOOLKIT:
                             self._schedule_invalidate()
                         self._last_hp = hp_int
                         hp_flashing = (now - self._hp_flash) < 0.1
-                        bars.extend(
-                            _vital_bar(hp, maxhp, _BAR_WIDTH, "hp", flash=hp_flashing)
-                        )
-                    mp = vitals.get("mp", vitals.get("MP", vitals.get(
-                        "mana", vitals.get("sp", vitals.get("SP")))))
-                    maxmp = vitals.get("maxmp", vitals.get("maxMP", vitals.get(
-                        "max_mp", vitals.get("maxsp", vitals.get("maxSP")))))
+                        bars.extend(_vital_bar(hp, maxhp, _BAR_WIDTH, "hp", flash=hp_flashing))
+                    mp = vitals.get(
+                        "mp",
+                        vitals.get("MP", vitals.get("mana", vitals.get("sp", vitals.get("SP")))),
+                    )
+                    maxmp = vitals.get(
+                        "maxmp",
+                        vitals.get(
+                            "maxMP", vitals.get("max_mp", vitals.get("maxsp", vitals.get("maxSP")))
+                        ),
+                    )
                     if mp is not None:
                         try:
                             mp_int = int(mp)
@@ -586,15 +593,14 @@ if HAS_PROMPT_TOOLKIT:
                         mp_flashing = (now - self._mp_flash) < 0.1
                         if bars:
                             bars.append(("", "   "))
-                        bars.extend(
-                            _vital_bar(mp, maxmp, _BAR_WIDTH, "mp", flash=mp_flashing)
-                        )
+                        bars.extend(_vital_bar(mp, maxmp, _BAR_WIDTH, "mp", flash=mp_flashing))
 
                 status = gmcp_data.get("Char.Status")
                 if isinstance(status, dict):
                     xp_raw = status.get("xp", status.get("XP", status.get("experience")))
-                    maxxp = status.get("maxxp", status.get("maxXP",
-                            status.get("max_xp", status.get("maxexp"))))
+                    maxxp = status.get(
+                        "maxxp", status.get("maxXP", status.get("max_xp", status.get("maxexp")))
+                    )
                     if xp_raw is not None:
                         try:
                             xp_int = int(xp_raw)
@@ -610,17 +616,13 @@ if HAS_PROMPT_TOOLKIT:
                         self._last_xp = xp_int
 
                         cutoff = now - 300.0
-                        while (self._xp_history
-                               and self._xp_history[0][0] < cutoff):
+                        while self._xp_history and self._xp_history[0][0] < cutoff:
                             self._xp_history.popleft()
 
                         xp_flashing = (now - self._xp_flash) < 2.0
                         if bars:
                             bars.append(("", "   "))
-                        bars.extend(
-                            _vital_bar(xp_raw, maxxp, _BAR_WIDTH, "xp",
-                                       flash=xp_flashing)
-                        )
+                        bars.extend(_vital_bar(xp_raw, maxxp, _BAR_WIDTH, "xp", flash=xp_flashing))
 
                         if len(self._xp_history) >= 2 and maxxp is not None:
                             oldest_t, oldest_xp = self._xp_history[0]
@@ -639,9 +641,7 @@ if HAS_PROMPT_TOOLKIT:
                                     else:
                                         eta_min = int(eta_sec / 60.0)
                                         eta_text = f" ETA {eta_min}m"
-                                    bars.append((
-                                        "class:xp-rate", eta_text,
-                                    ))
+                                    bars.append(("class:xp-rate", eta_text))
 
                 if isinstance(status, dict):
                     level = status.get("level")
@@ -692,9 +692,7 @@ if HAS_PROMPT_TOOLKIT:
 
             cols = prompt_toolkit.application.get_app().output.get_size().columns
 
-            bars_width = sum(
-                _wcswidth(t) if t else 0 for _, t in bars
-            )
+            bars_width = sum(_wcswidth(t) if t else 0 for _, t in bars)
 
             if bars:
                 pad = max(1, cols - bars_width - right_width)
@@ -703,10 +701,7 @@ if HAS_PROMPT_TOOLKIT:
                 result.append((rprompt_class, right_text))
                 return result
             pad = max(1, cols - right_width)
-            return [
-                ("", " " * pad),
-                (rprompt_class, right_text),
-            ]
+            return [("", " " * pad), (rprompt_class, right_text)]
 
         def _schedule_invalidate(self) -> None:
             """Schedule a toolbar redraw after the flash duration expires."""
@@ -748,14 +743,13 @@ if HAS_PROMPT_TOOLKIT:
 
 
 def _repaint_screen(
-    _event: Any, replay_buf: Optional[OutputRingBuffer],
-    scroll: Any = None,
+    _event: Any, replay_buf: Optional[OutputRingBuffer], scroll: Any = None
 ) -> None:
     """
     Clear screen and replay recent output from the ring buffer.
 
-    Re-establishes the DECSTBM scroll region and replays buffered
-    output so recent MUD text reappears with colors intact.
+    Re-establishes the DECSTBM scroll region and replays buffered output so recent MUD text
+    reappears with colors intact.
     """
     import os as _os  # pylint: disable=import-outside-toplevel,redefined-outer-name
 
@@ -899,6 +893,7 @@ def _launch_tui_editor(
     """
     import os  # pylint: disable=import-outside-toplevel,redefined-outer-name
     import subprocess  # pylint: disable=import-outside-toplevel
+
     from ._paths import CONFIG_DIR as _config_dir  # pylint: disable=import-outside-toplevel
 
     _session_key = getattr(writer, "_session_key", "")
@@ -906,15 +901,12 @@ def _launch_tui_editor(
     if editor_type == "macros":
         path = getattr(writer, "_macros_file", None) or os.path.join(_config_dir, "macros.json")
         entry = "edit_macros_main"
-        from .rooms import (  # pylint: disable=import-outside-toplevel
-            rooms_path as _rooms_path_fn,
-            current_room_path as _current_room_path_fn,
-        )
+        from .rooms import rooms_path as _rooms_path_fn  # pylint: disable=import-outside-toplevel
+        from .rooms import current_room_path as _current_room_path_fn
+
         _rp = getattr(writer, "_rooms_file", None) or _rooms_path_fn(_session_key)
-        _crp = (getattr(writer, "_current_room_file", None)
-                or _current_room_path_fn(_session_key))
-        cmd_args = (f"{path!r}, {_session_key!r},"
-                    f" rooms_file={_rp!r}, current_room_file={_crp!r}")
+        _crp = getattr(writer, "_current_room_file", None) or _current_room_path_fn(_session_key)
+        cmd_args = f"{path!r}, {_session_key!r}," f" rooms_file={_rp!r}, current_room_file={_crp!r}"
     else:
         path = getattr(writer, "_autoreplies_file", None) or os.path.join(
             _config_dir, "autoreplies.json"
@@ -924,11 +916,7 @@ def _launch_tui_editor(
         _select = getattr(engine, "last_matched_pattern", "") if engine else ""
         cmd_args = f"{path!r}, {_session_key!r}, select_pattern={_select!r}"
 
-    cmd = [
-        sys.executable,
-        "-c",
-        f"from telnetlib3.client_tui import {entry}; {entry}({cmd_args})",
-    ]
+    cmd = [sys.executable, "-c", f"from telnetlib3.client_tui import {entry}; {entry}({cmd_args})"]
 
     log = logging.getLogger(__name__)
 
@@ -981,7 +969,7 @@ def _reload_macros(
 
     if not os.path.exists(path):
         return
-    from .macros import load_macros, bind_macros  # pylint: disable=import-outside-toplevel
+    from .macros import bind_macros, load_macros  # pylint: disable=import-outside-toplevel
 
     try:
         # pylint: disable=protected-access
@@ -1045,12 +1033,10 @@ def _launch_room_browser(
     if not _session_key:
         return
 
-    from .rooms import (  # pylint: disable=import-outside-toplevel
-        rooms_path as _rooms_path_fn,
-        current_room_path as _current_room_path_fn,
-        fasttravel_path as _fasttravel_path_fn,
-        read_fasttravel,
-    )
+    from .rooms import rooms_path as _rooms_path_fn  # pylint: disable=import-outside-toplevel
+    from .rooms import fasttravel_path as _fasttravel_path_fn
+    from .rooms import read_fasttravel
+    from .rooms import current_room_path as _current_room_path_fn
 
     _rp = getattr(writer, "_rooms_file", None) or _rooms_path_fn(_session_key)
     _crp = getattr(writer, "_current_room_file", None) or _current_room_path_fn(_session_key)
@@ -1082,6 +1068,7 @@ def _launch_room_browser(
 
         # Reload room graph from disk to pick up bookmark changes made in TUI.
         from .rooms import load_rooms as _load_rooms  # pylint: disable=import-outside-toplevel
+
         if os.path.exists(_rp):
             _reloaded = _load_rooms(_rp)
             room_graph = getattr(writer, "_room_graph", None)
@@ -1093,8 +1080,7 @@ def _launch_room_browser(
             log.debug("fast travel: scheduling %d steps (slow=%s)", len(steps), slow)
             loop = asyncio.get_event_loop()
             loop.call_soon_threadsafe(
-                asyncio.ensure_future,
-                _fast_travel(steps, writer, log, slow=slow),
+                asyncio.ensure_future, _fast_travel(steps, writer, log, slow=slow)
             )
 
     from prompt_toolkit.application import (  # pylint: disable=import-error,import-outside-toplevel
@@ -1182,7 +1168,10 @@ async def _fast_travel(
         return expected.name == actual.name and expected.name != ""
 
     def _correct_edge(
-        prev_num: str, direction: str, old_target: str, new_target: str,
+        prev_num: str,
+        direction: str,
+        old_target: str,
+        new_target: str,
         remaining_steps: list[tuple[str, str]],
     ) -> None:
         """Update the graph edge and rewrite remaining steps in-place."""
@@ -1193,7 +1182,11 @@ async def _fast_travel(
                 prev.exits[direction] = new_target
                 log.info(
                     "%s: corrected exit %s of %s: %s -> %s",
-                    mode, direction, prev_num[:8], old_target[:8], new_target[:8],
+                    mode,
+                    direction,
+                    prev_num[:8],
+                    old_target[:8],
+                    new_target[:8],
                 )
         for j, (d, r) in enumerate(remaining_steps):
             if r == old_target:
@@ -1224,14 +1217,18 @@ async def _fast_travel(
 
                 tag = f" [{step_idx + 1}/{len(steps)}]"
                 if attempt == 0:
-                    log.info("%s [%d/%d] %s", mode,
-                             step_idx + 1, len(steps), direction)
+                    log.info("%s [%d/%d] %s", mode, step_idx + 1, len(steps), direction)
                     if echo_fn is not None:
                         echo_fn(direction + tag)
                 else:
-                    log.info("%s [%d/%d] %s (retry %d)",
-                             mode, step_idx + 1, len(steps),
-                             direction, attempt)
+                    log.info(
+                        "%s [%d/%d] %s (retry %d)",
+                        mode,
+                        step_idx + 1,
+                        len(steps),
+                        direction,
+                        attempt,
+                    )
                 # Clear prompt_ready before sending so wait_fn waits
                 # for a FRESH GA/EOR from this step's response.  The
                 # server sends multiple GA/EORs per response (room
@@ -1276,8 +1273,7 @@ async def _fast_travel(
                     # fresh prompt so the server response to the last
                     # autoreply command is processed -- it may trigger
                     # new matches (cascading always-rules).
-                    if slow and (engine.exclusive_active
-                                 or engine.reply_pending):
+                    if slow and (engine.exclusive_active or engine.reply_pending):
                         _settle_passes = 0
                         _MAX_SETTLE = 20  # safety cap
                         while _settle_passes < _MAX_SETTLE:
@@ -1296,8 +1292,7 @@ async def _fast_travel(
                             await asyncio.sleep(0)
                             # If neither exclusive nor reply_pending
                             # after the prompt, we've converged.
-                            if (not engine.exclusive_active
-                                    and not engine.reply_pending):
+                            if not engine.exclusive_active and not engine.reply_pending:
                                 break
                             _settle_passes += 1
                 if _cond_cancelled:
@@ -1316,16 +1311,20 @@ async def _fast_travel(
                     break
                 # Same-name room with different ID -- correct the edge
                 # and continue as if we arrived at the expected room.
-                if (expected_room and actual and actual != expected_room
-                        and _names_match(expected_room, actual)):
+                if (
+                    expected_room
+                    and actual
+                    and actual != expected_room
+                    and _names_match(expected_room, actual)
+                ):
                     log.info(
                         "%s: room ID changed for %s (%s -> %s), correcting",
-                        mode, _room_name(actual), expected_room[:8], actual[:8],
+                        mode,
+                        _room_name(actual),
+                        expected_room[:8],
+                        actual[:8],
                     )
-                    _correct_edge(
-                        prev_room, direction, expected_room, actual,
-                        steps,
-                    )
+                    _correct_edge(prev_room, direction, expected_room, actual, steps)
                     expected_room = actual
                     break
                 # Room didn't change -- server likely rejected move (rate limit).
@@ -1346,12 +1345,20 @@ async def _fast_travel(
                         prev.exits[direction] = actual
                         log.info(
                             "%s: updated edge %s of %s: -> %s",
-                            mode, direction, prev_room[:8], actual[:8],
+                            mode,
+                            direction,
+                            prev_room[:8],
+                            actual[:8],
                         )
 
                 # Try re-pathfinding from actual position.
-                if (destination and actual and actual != destination
-                        and reroute_count < _max_reroutes and graph is not None):
+                if (
+                    destination
+                    and actual
+                    and actual != destination
+                    and reroute_count < _max_reroutes
+                    and graph is not None
+                ):
                     new_steps = graph.find_path_with_rooms(actual, destination)
                     if new_steps is not None:
                         reroute_count += 1
@@ -1369,8 +1376,10 @@ async def _fast_travel(
 
                 expected_name = _room_name(expected_room)
                 actual_name = _room_name(actual)
-                msg = (f"{mode} stopped: expected {expected_name} after "
-                       f"'{direction}', got {actual_name}")
+                msg = (
+                    f"{mode} stopped: expected {expected_name} after "
+                    f"'{direction}', got {actual_name}"
+                )
                 log.warning("%s", msg)
                 if echo_fn is not None:
                     echo_fn(msg)
@@ -1383,15 +1392,14 @@ async def _fast_travel(
 
 
 async def _autowander(
-    writer: Union[TelnetWriter, TelnetWriterUnicode],
-    log: logging.Logger,
+    writer: Union[TelnetWriter, TelnetWriterUnicode], log: logging.Logger
 ) -> None:
     """
     Visit up to 99 same-named rooms using slow travel.
 
-    Computes a list of rooms with the same name as the current room,
-    sorted by least-recently-visited, then walks through them one leg
-    at a time with slow travel (autoreplies fire in each room).
+    Computes a list of rooms with the same name as the current room, sorted by least-recently-
+    visited, then walks through them one leg at a time with slow travel (autoreplies fire in each
+    room).
 
     :param writer: Telnet writer with room graph and session attributes.
     :param log: Logger.
@@ -1441,17 +1449,18 @@ async def _autowander(
                         f"heading to {target_room.name} ({target_room.num[:8]})"
                         f"{tag}"
                     )
-                await _fast_travel(
-                    steps, writer, log, slow=True,
-                    destination=target_room.num,
-                )
+                await _fast_travel(steps, writer, log, slow=True, destination=target_room.num)
                 actual = getattr(writer, "_current_room_num", "")
                 if actual == target_room.num:
                     arrived = True
                     break
                 if leg_attempt < _leg_retries:
-                    log.info("AUTOWANDER: leg to %s failed, retrying (%d/%d)",
-                             target_room.num[:8], leg_attempt + 1, _leg_retries)
+                    log.info(
+                        "AUTOWANDER: leg to %s failed, retrying (%d/%d)",
+                        target_room.num[:8],
+                        leg_attempt + 1,
+                        _leg_retries,
+                    )
                     await asyncio.sleep(1.0)
             actual = getattr(writer, "_current_room_num", "")
             if not arrived and actual != target_room.num:
@@ -1468,6 +1477,7 @@ async def _autowander(
         writer._wander_task = None  # type: ignore[union-attr]
 
 
+# std imports
 import re as _re  # pylint: disable=wrong-import-position
 
 _REPEAT_RE = _re.compile(r"^(\d+)([A-Za-z].*)$")
@@ -1492,6 +1502,7 @@ def expand_commands(line: str) -> list[str]:
     """
     # Replace backtick tokens with placeholders to protect from ; splitting.
     placeholders: list[str] = []
+
     def _replace_bt(m: _re.Match[str]) -> str:
         placeholders.append(m.group(0))
         return f"\x00BT{len(placeholders) - 1}\x00"
@@ -1521,16 +1532,12 @@ def expand_commands(line: str) -> list[str]:
 
 
 _TRAVEL_RE = _re.compile(
-    r"^`(fast travel|slow travel|return fast"
-    r"|return slow|autowander)\s*(.*?)`$",
-    _re.IGNORECASE,
+    r"^`(fast travel|slow travel|return fast" r"|return slow|autowander)\s*(.*?)`$", _re.IGNORECASE
 )
 
 
 async def _handle_travel_commands(
-    parts: list[str],
-    writer: Union[TelnetWriter, TelnetWriterUnicode],
-    log: logging.Logger,
+    parts: list[str], writer: Union[TelnetWriter, TelnetWriterUnicode], log: logging.Logger
 ) -> list[str]:
     """
     Scan *parts* for travel commands, execute them, and return remaining parts.
@@ -1564,7 +1571,7 @@ async def _handle_travel_commands(
 
         if verb == "autowander":
             await _autowander(writer, log)
-            return parts[idx + 1:]
+            return parts[idx + 1 :]
 
         slow = "slow" in verb
         is_return = verb.startswith("return")
@@ -1588,6 +1595,7 @@ async def _handle_travel_commands(
             session_key = getattr(writer, "_session_key", "")
             if session_key:
                 from .rooms import rooms_path as _rp_fn  # pylint: disable=import-outside-toplevel
+
                 rooms_file = _rp_fn(session_key)
         if not rooms_file:
             log.warning("no rooms file -- cannot travel")
@@ -1600,7 +1608,7 @@ async def _handle_travel_commands(
             break
 
         await _fast_travel(path, writer, log, slow=slow, destination=room_id)
-        return parts[idx + 1:]
+        return parts[idx + 1 :]
 
     return parts
 
@@ -1610,9 +1618,7 @@ _MOVE_MAX_RETRIES = 3
 
 
 async def _send_chained(
-    commands: list[str],
-    writer: Union[TelnetWriter, TelnetWriterUnicode],
-    log: logging.Logger,
+    commands: list[str], writer: Union[TelnetWriter, TelnetWriterUnicode], log: logging.Logger
 ) -> None:
     """
     Send multiple commands with GA/EOR pacing between each.
@@ -1691,18 +1697,18 @@ async def _send_chained(
             if actual != prev_room:
                 break
             if attempt < _MOVE_MAX_RETRIES:
-                log.info("room unchanged after %r, retrying (%d/%d)",
-                         cmd, attempt + 1, _MOVE_MAX_RETRIES)
+                log.info(
+                    "room unchanged after %r, retrying (%d/%d)", cmd, attempt + 1, _MOVE_MAX_RETRIES
+                )
             else:
-                log.warning("room unchanged after %r, giving up after %d retries",
-                            cmd, _MOVE_MAX_RETRIES)
+                log.warning(
+                    "room unchanged after %r, giving up after %d retries", cmd, _MOVE_MAX_RETRIES
+                )
                 return
 
 
 async def execute_macro_commands(
-    text: str,
-    writer: Union[TelnetWriter, TelnetWriterUnicode],
-    log: logging.Logger,
+    text: str, writer: Union[TelnetWriter, TelnetWriterUnicode], log: logging.Logger
 ) -> None:
     """
     Execute a macro text string, handling travel and delay commands.
@@ -1732,9 +1738,7 @@ async def execute_macro_commands(
 
         # Travel command -- hand off the rest to _handle_travel_commands.
         if _TRAVEL_RE.match(cmd):
-            remainder = await _handle_travel_commands(
-                parts[idx:], writer, log,
-            )
+            remainder = await _handle_travel_commands(parts[idx:], writer, log)
             # remainder contains post-travel commands; continue processing.
             parts = remainder
             idx = 0
@@ -1744,6 +1748,7 @@ async def execute_macro_commands(
         dm = _DELAY_RE.match(cmd)
         if dm:
             import asyncio  # pylint: disable=import-outside-toplevel
+
             value = float(dm.group(1))
             unit = dm.group(2)
             delay = value / 1000.0 if unit == "ms" else value
@@ -1861,12 +1866,12 @@ if sys.platform != "win32":
             return False
 
         def grow_reserve(self, new_reserve: int) -> None:
-            """Increase the reserved bottom area and reapply scroll region.
+            """
+            Increase the reserved bottom area and reapply scroll region.
 
-            Emits newlines inside the current scroll region first so that
-            any server text on the rows about to be claimed is scrolled
-            up rather than silently overwritten (e.g. a password prompt
-            arriving just as the GMCP status bar appears).
+            Emits newlines inside the current scroll region first so that any server text on the
+            rows about to be claimed is scrolled up rather than silently overwritten (e.g. a
+            password prompt arriving just as the GMCP status bar appears).
             """
             if new_reserve <= self._reserve:
                 return
@@ -1881,9 +1886,7 @@ if sys.platform != "win32":
             self._reserve = new_reserve
             if self._active:
                 for _r in range(old_input_row, old_input_row + new_reserve):
-                    self._stdout.write(
-                        (cup(_r, 1) + CLEAR_LINE).encode()
-                    )
+                    self._stdout.write((cup(_r, 1) + CLEAR_LINE).encode())
                 self._set_scroll_region()
                 # The \n scroll shifted content up by `extra` rows but
                 # the DECSC saved position (from _read_server) stayed
@@ -1895,13 +1898,12 @@ if sys.platform != "win32":
                     self._stdout.write(f"\x1b[{extra}A".encode())
                 self._stdout.write(SAVE_CURSOR.encode())
                 for _r in range(self.input_row, self.input_row + new_reserve):
-                    self._stdout.write(
-                        (cup(_r, 1) + CLEAR_LINE).encode()
-                    )
+                    self._stdout.write((cup(_r, 1) + CLEAR_LINE).encode())
                 self._dirty = True
 
         def update_size(self, rows: int, cols: int) -> None:
-            """Update dimensions and reapply scroll region.
+            """
+            Update dimensions and reapply scroll region.
 
             No content scrolling occurs here — ``_on_resize_repaint``
             replays the buffer and saves the cursor at the correct
@@ -1912,15 +1914,11 @@ if sys.platform != "win32":
             self._cols = cols
             if self._active:
                 for _r in range(old_input_row, old_input_row + self._reserve):
-                    self._stdout.write(
-                        (cup(_r, 1) + CLEAR_LINE).encode()
-                    )
+                    self._stdout.write((cup(_r, 1) + CLEAR_LINE).encode())
                 self._set_scroll_region()
                 self._stdout.write(SAVE_CURSOR.encode())
                 for _r in range(self.input_row, self.input_row + self._reserve):
-                    self._stdout.write(
-                        (cup(_r, 1) + CLEAR_LINE).encode()
-                    )
+                    self._stdout.write((cup(_r, 1) + CLEAR_LINE).encode())
                 self._dirty = True
 
         def _set_scroll_region(self) -> None:
@@ -2089,9 +2087,7 @@ if sys.platform != "win32":
             # re-save cursor so _read_server picks up at the right spot.
             # Erase full screen and reposition to top-left.
             _reserve = (
-                _scroll_ref[0]._reserve
-                if _scroll_ref[0] is not None
-                else _PT_RESERVE_WITH_TOOLBAR
+                _scroll_ref[0]._reserve if _scroll_ref[0] is not None else _PT_RESERVE_WITH_TOOLBAR
             )
             stdout.write(CLEAR_HOME.encode() + cup(1, 1).encode())
             data = replay_buf.replay()
@@ -2112,7 +2108,9 @@ if sys.platform != "win32":
                 pass
 
         async with _repl_scaffold(
-            telnet_writer, term, stdout,
+            telnet_writer,
+            term,
+            stdout,
             reserve_bottom=_PT_RESERVE_INITIAL,
             on_resize=_on_resize_repaint,
         ) as (scroll, _):
@@ -2120,9 +2118,7 @@ if sys.platform != "win32":
             # Save initial scroll-region cursor position (DECSC).
             # _read_server restores this before writing, then re-saves.
             stdout.write(SAVE_CURSOR.encode())
-            stdout.write(
-                (cup(scroll.input_row, 1) + CLEAR_LINE).encode()
-            )
+            stdout.write((cup(scroll.input_row, 1) + CLEAR_LINE).encode())
             # Set cursor to blinking bar for text input (DECSCUSR).
             stdout.write(CURSOR_BLINKING_BAR.encode())
 
@@ -2151,8 +2147,7 @@ if sys.platform != "win32":
                 from .telopt import NAWS  # pylint: disable=import-outside-toplevel
 
                 try:
-                    if (telnet_writer.local_option.enabled(NAWS)
-                            and not telnet_writer.is_closing()):
+                    if telnet_writer.local_option.enabled(NAWS) and not telnet_writer.is_closing():
                         # pylint: disable-next=protected-access
                         telnet_writer._send_naws()
                 except Exception:  # pylint: disable=broad-exception-caught
@@ -2180,9 +2175,7 @@ if sys.platform != "win32":
                     stdout.write(cup(_row, _col).encode())
                     _app.invalidate()
                 except RuntimeError:
-                    stdout.write(
-                        cup(scroll.input_row, 1).encode()
-                    )
+                    stdout.write(cup(scroll.input_row, 1).encode())
 
             # EOR/GA-based command pacing: wait for server prompt signal
             # before sending each autoreply command.
@@ -2230,13 +2223,16 @@ if sys.platform != "win32":
                 if cur_rules is _ar_rules_ref:
                     return
                 _ar_rules_ref = cur_rules
-                prev_suppress = (autoreply_engine.suppress_exclusive
-                                 if autoreply_engine is not None else False)
+                prev_suppress = (
+                    autoreply_engine.suppress_exclusive if autoreply_engine is not None else False
+                )
                 if autoreply_engine is not None:
                     autoreply_engine.cancel()
                     autoreply_engine = None
                 if cur_rules:
-                    from .autoreply import AutoreplyEngine  # pylint: disable=import-outside-toplevel
+                    from .autoreply import (
+                        AutoreplyEngine,  # pylint: disable=import-outside-toplevel
+                    )
 
                     autoreply_engine = AutoreplyEngine(
                         cur_rules,
@@ -2319,9 +2315,7 @@ if sys.platform != "win32":
                         stdout.write(cup(_row, _col).encode())
                         _app.invalidate()
                     except RuntimeError:
-                        stdout.write(
-                            cup(scroll.input_row, 1).encode()
-                        )
+                        stdout.write(cup(scroll.input_row, 1).encode())
                     if telnet_writer.mode == "kludge":
                         mode_switched = True
                         server_done = True
@@ -2330,9 +2324,7 @@ if sys.platform != "win32":
             async def _read_input() -> None:
                 nonlocal server_done
                 while not server_done:
-                    stdout.write(
-                        (cup(scroll.input_row, 1) + CLEAR_LINE).encode()
-                    )
+                    stdout.write((cup(scroll.input_row, 1) + CLEAR_LINE).encode())
                     # Reset PT renderer before each new prompt so it does
                     # a full redraw of the input line and toolbar after we
                     # cleared the row above.
@@ -2350,16 +2342,16 @@ if sys.platform != "win32":
                     # but our scroll region may not have been updated if
                     # the combined handler wasn't active yet.
                     _cur_rows, _cur_cols = _get_terminal_size()
-                    if (_cur_rows != scroll._rows  # pylint: disable=protected-access
-                            or _cur_cols != scroll._cols):  # pylint: disable=protected-access
+                    if (
+                        _cur_rows != scroll._rows  # pylint: disable=protected-access
+                        or _cur_cols != scroll._cols
+                    ):  # pylint: disable=protected-access
                         scroll.update_size(_cur_rows, _cur_cols)
                         _on_resize_repaint(_cur_rows, _cur_cols)
                     # EOR/GA pacing: wait for server prompt before sending.
                     if _ga_detected:
                         try:
-                            await asyncio.wait_for(
-                                prompt_ready.wait(), timeout=2.0
-                            )
+                            await asyncio.wait_for(prompt_ready.wait(), timeout=2.0)
                         except asyncio.TimeoutError:
                             pass
                     # pylint: disable-next=protected-access
@@ -2379,25 +2371,21 @@ if sys.platform != "win32":
                     parts = expand_commands(line)
                     if parts and _TRAVEL_RE.match(parts[0]):
                         remainder = await _handle_travel_commands(
-                            parts, telnet_writer, telnet_writer.log,
+                            parts, telnet_writer, telnet_writer.log
                         )
                         if remainder:
                             telnet_writer.write(remainder[0] + "\r\n")
                             if _ga_detected:
                                 prompt_ready.clear()
                             if len(remainder) > 1:
-                                await _send_chained(
-                                    remainder, telnet_writer, telnet_writer.log,
-                                )
+                                await _send_chained(remainder, telnet_writer, telnet_writer.log)
                     elif parts:
                         telnet_writer.write(parts[0] + "\r\n")
                         # Clear so next iteration waits for fresh GA/EOR.
                         if _ga_detected:
                             prompt_ready.clear()
                         if len(parts) > 1:
-                            await _send_chained(
-                                parts, telnet_writer, telnet_writer.log,
-                            )
+                            await _send_chained(parts, telnet_writer, telnet_writer.log)
                     else:
                         telnet_writer.write("\r\n")
 
@@ -2426,9 +2414,7 @@ if sys.platform != "win32":
         mode_switched = False
 
         async with _repl_scaffold(telnet_writer, term, stdout) as (scroll, _):
-            stdout.write(
-                (cup(scroll.input_row, 1) + CLEAR_LINE).encode()
-            )
+            stdout.write((cup(scroll.input_row, 1) + CLEAR_LINE).encode())
 
             basic_stdin = await term.connect_stdin()
             repl: BasicLineRepl = BasicLineRepl(telnet_writer, basic_stdin, telnet_writer.log)
@@ -2436,9 +2422,7 @@ if sys.platform != "win32":
             def _echo_autoreply_b(cmd: str) -> None:
                 scroll.save_and_goto_input()
                 scroll.restore_cursor()
-                stdout.write(
-                    f"{SGR_CYAN}{cmd}{SGR_RESET}\r\n".encode()
-                )
+                stdout.write(f"{SGR_CYAN}{cmd}{SGR_RESET}\r\n".encode())
 
             prompt_ready_b = asyncio.Event()
             prompt_ready_b.set()
@@ -2475,7 +2459,9 @@ if sys.platform != "win32":
                 from .autoreply import AutoreplyEngine  # pylint: disable=import-outside-toplevel
 
                 autoreply_engine_b = AutoreplyEngine(
-                    _ar_rules_b, telnet_writer, telnet_writer.log,
+                    _ar_rules_b,
+                    telnet_writer,
+                    telnet_writer.log,
                     echo_fn=_echo_autoreply_b,
                     wait_fn=_wait_for_prompt_b,
                 )
@@ -2522,9 +2508,7 @@ if sys.platform != "win32":
             async def _read_input() -> None:
                 nonlocal server_done
                 while not server_done:
-                    stdout.write(
-                        (cup(scroll.input_row, 1) + CLEAR_LINE).encode()
-                    )
+                    stdout.write((cup(scroll.input_row, 1) + CLEAR_LINE).encode())
                     line = await repl.prompt()
                     if line is None:
                         server_done = True
@@ -2532,40 +2516,32 @@ if sys.platform != "win32":
                         return
                     if _ga_detected_b:
                         try:
-                            await asyncio.wait_for(
-                                prompt_ready_b.wait(), timeout=2.0
-                            )
+                            await asyncio.wait_for(prompt_ready_b.wait(), timeout=2.0)
                         except asyncio.TimeoutError:
                             pass
                     echo_text = "*" * len(line) if telnet_writer.will_echo else line
                     scroll.save_and_goto_input()
                     scroll.restore_cursor()
-                    stdout.write(
-                        f"{SGR_YELLOW}{echo_text}{SGR_RESET}\r\n".encode()
-                    )
+                    stdout.write(f"{SGR_YELLOW}{echo_text}{SGR_RESET}\r\n".encode())
                     if autoreply_engine_b is not None:
                         autoreply_engine_b.cancel()
                     parts = expand_commands(line)
                     if parts and _TRAVEL_RE.match(parts[0]):
                         remainder = await _handle_travel_commands(
-                            parts, telnet_writer, telnet_writer.log,
+                            parts, telnet_writer, telnet_writer.log
                         )
                         if remainder:
                             telnet_writer.write(remainder[0] + "\r\n")
                             if _ga_detected_b:
                                 prompt_ready_b.clear()
                             if len(remainder) > 1:
-                                await _send_chained(
-                                    remainder, telnet_writer, telnet_writer.log,
-                                )
+                                await _send_chained(remainder, telnet_writer, telnet_writer.log)
                     elif parts:
                         telnet_writer.write(parts[0] + "\r\n")
                         if _ga_detected_b:
                             prompt_ready_b.clear()
                         if len(parts) > 1:
-                            await _send_chained(
-                                parts, telnet_writer, telnet_writer.log,
-                            )
+                            await _send_chained(parts, telnet_writer, telnet_writer.log)
                     else:
                         telnet_writer.write("\r\n")
 

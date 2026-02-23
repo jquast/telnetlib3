@@ -498,9 +498,7 @@ async def test_pt_autoreply_hot_reload() -> None:
     stdout, _ = _mock_stdout()
     term = types.SimpleNamespace(on_resize=None)
 
-    new_rules = [
-        AutoreplyRule(pattern=re.compile(r"reload trigger"), reply="reloaded;")
-    ]
+    new_rules = [AutoreplyRule(pattern=re.compile(r"reload trigger"), reply="reloaded;")]
 
     async def _inject_and_eof() -> None:
         await asyncio.sleep(0)
@@ -592,6 +590,7 @@ def test_reload_missing_file(tmp_path, reload_func, attr) -> None:
 def test_reload_macros_rebinds_keys(tmp_path) -> None:
     import json
     import logging
+
     import prompt_toolkit.key_binding
 
     import telnetlib3.client_repl as cr
@@ -612,41 +611,49 @@ def test_reload_macros_rebinds_keys(tmp_path) -> None:
     assert len(kb.bindings) > initial_count
 
 
-@pytest.mark.parametrize("line,expected", [
-    ("5e", ["e"] * 5),
-    ("3north", ["north"] * 3),
-    ("5east", ["east"] * 5),
-    ("6e;9n;rocks", ["e"] * 6 + ["n"] * 9 + ["rocks"]),
-    ("look", ["look"]),
-    ("n;e;s;w", ["n", "e", "s", "w"]),
-    ("2n;look;3s", ["n", "n", "look", "s", "s", "s"]),
-    ("42", ["42"]),
-    ("100", ["100"]),
-    ("2 apples", ["2 apples"]),
-    ("", []),
-    ("`fast travel 42`", ["`fast travel 42`"]),
-    ("look;`delay 1s`;north", ["look", "`delay 1s`", "north"]),
-    ("`autowander`", ["`autowander`"]),
-    ("3e;`slow travel 99`", ["e", "e", "e", "`slow travel 99`"]),
-])
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        ("5e", ["e"] * 5),
+        ("3north", ["north"] * 3),
+        ("5east", ["east"] * 5),
+        ("6e;9n;rocks", ["e"] * 6 + ["n"] * 9 + ["rocks"]),
+        ("look", ["look"]),
+        ("n;e;s;w", ["n", "e", "s", "w"]),
+        ("2n;look;3s", ["n", "n", "look", "s", "s", "s"]),
+        ("42", ["42"]),
+        ("100", ["100"]),
+        ("2 apples", ["2 apples"]),
+        ("", []),
+        ("`fast travel 42`", ["`fast travel 42`"]),
+        ("look;`delay 1s`;north", ["look", "`delay 1s`", "north"]),
+        ("`autowander`", ["`autowander`"]),
+        ("3e;`slow travel 99`", ["e", "e", "e", "`slow travel 99`"]),
+    ],
+)
 def test_expand_commands(line: str, expected: list[str]) -> None:
     from telnetlib3.client_repl import expand_commands
+
     assert expand_commands(line) == expected
 
 
-@pytest.mark.parametrize("value,expected", [
-    (0, "0"),
-    (999, "999"),
-    (1000, "1.0k"),
-    (1500, "1.5k"),
-    (12345, "12.3k"),
-    (999900, "999.9k"),
-    (1000000, "1.0m"),
-    (1500000, "1.5m"),
-    (123456789, "123.5m"),
-])
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (0, "0"),
+        (999, "999"),
+        (1000, "1.0k"),
+        (1500, "1.5k"),
+        (12345, "12.3k"),
+        (999900, "999.9k"),
+        (1000000, "1.0m"),
+        (1500000, "1.5m"),
+        (123456789, "123.5m"),
+    ],
+)
 def test_fmt_value(value: int, expected: str) -> None:
     from telnetlib3.client_repl import _fmt_value
+
     assert _fmt_value(value) == expected
 
 
@@ -675,6 +682,7 @@ def test_fmt_value(value: int, expected: str) -> None:
 )
 def test_split_incomplete_esc(data: bytes, flush: bytes, hold: bytes) -> None:
     from telnetlib3.client_repl import _split_incomplete_esc
+
     got_flush, got_hold = _split_incomplete_esc(data)
     assert got_flush == flush
     assert got_hold == hold
@@ -701,4 +709,5 @@ def test_split_incomplete_esc(data: bytes, flush: bytes, hold: bytes) -> None:
 )
 def test_travel_re_matching(cmd: str, match: bool) -> None:
     from telnetlib3.client_repl import _TRAVEL_RE
+
     assert bool(_TRAVEL_RE.match(cmd)) is match

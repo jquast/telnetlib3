@@ -629,12 +629,9 @@ else:
                             AutoreplyEngine,
                         )
 
-                        _ar_wait = getattr(
-                            telnet_writer, "_autoreply_wait_fn", None
-                        )
+                        _ar_wait = getattr(telnet_writer, "_autoreply_wait_fn", None)
                         _ar_engine = AutoreplyEngine(
-                            _ar_rules, telnet_writer, telnet_writer.log,
-                            wait_fn=_ar_wait,
+                            _ar_rules, telnet_writer, telnet_writer.log, wait_fn=_ar_wait
                         )
                         # pylint: disable-next=protected-access
                         telnet_writer._autoreply_engine = _ar_engine

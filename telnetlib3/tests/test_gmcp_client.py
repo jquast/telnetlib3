@@ -10,9 +10,8 @@ from unittest import mock
 import pytest
 
 # local
-from telnetlib3.client import TelnetClient, _DEFAULT_GMCP_MODULES, _get_argument_parser
+from telnetlib3.client import _DEFAULT_GMCP_MODULES, TelnetClient, _get_argument_parser
 from telnetlib3.telopt import GMCP
-
 
 _CLIENT_DEFAULTS = {
     "encoding": "utf8",
@@ -95,33 +94,36 @@ async def test_ext_callback_registered_for_gmcp():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("setup_calls,key,expected", [
-    (
-        [("Char.Vitals", {"hp": 100, "maxhp": 100})],
-        "Char.Vitals", {"hp": 100, "maxhp": 100},
-    ),
-    (
-        [("Room.Info", {"name": "Town Square"}), ("Room.Info", {"name": "Dark Forest"})],
-        "Room.Info", {"name": "Dark Forest"},
-    ),
-    (
-        [("Char.Vitals", {"hp": 100, "maxhp": 100, "sp": 50, "maxsp": 50}),
-         ("Char.Vitals", {"hp": 63})],
-        "Char.Vitals", {"hp": 63, "maxhp": 100, "sp": 50, "maxsp": 50},
-    ),
-    (
-        [("Room.Name", "Old Name"), ("Room.Name", {"name": "New Place"})],
-        "Room.Name", {"name": "New Place"},
-    ),
-    (
-        [("Room.Info", {"name": "Town"}), ("Room.Info", "plain string")],
-        "Room.Info", "plain string",
-    ),
-    (
-        [("Core.Goodbye", None)],
-        "Core.Goodbye", None,
-    ),
-])
+@pytest.mark.parametrize(
+    "setup_calls,key,expected",
+    [
+        ([("Char.Vitals", {"hp": 100, "maxhp": 100})], "Char.Vitals", {"hp": 100, "maxhp": 100}),
+        (
+            [("Room.Info", {"name": "Town Square"}), ("Room.Info", {"name": "Dark Forest"})],
+            "Room.Info",
+            {"name": "Dark Forest"},
+        ),
+        (
+            [
+                ("Char.Vitals", {"hp": 100, "maxhp": 100, "sp": 50, "maxsp": 50}),
+                ("Char.Vitals", {"hp": 63}),
+            ],
+            "Char.Vitals",
+            {"hp": 63, "maxhp": 100, "sp": 50, "maxsp": 50},
+        ),
+        (
+            [("Room.Name", "Old Name"), ("Room.Name", {"name": "New Place"})],
+            "Room.Name",
+            {"name": "New Place"},
+        ),
+        (
+            [("Room.Info", {"name": "Town"}), ("Room.Info", "plain string")],
+            "Room.Info",
+            "plain string",
+        ),
+        ([("Core.Goodbye", None)], "Core.Goodbye", None),
+    ],
+)
 async def test_on_gmcp_data_storage(setup_calls, key, expected):
     client = _make_client()
     for module, data in setup_calls:
@@ -171,6 +173,7 @@ async def test_hello_idempotent():
 @pytest.mark.asyncio
 async def test_hello_includes_version():
     from telnetlib3.accessories import get_version
+
     client, transport = _make_connected_client()
     client.writer.always_do = {GMCP}
     transport.data.clear()
@@ -225,6 +228,7 @@ def test_gmcp_log_cli_default_false():
 
 def test_transform_args_gmcp_modules():
     from telnetlib3.client import _transform_args
+
     parser = _get_argument_parser()
     args = parser.parse_args(["example.com", "--gmcp-modules", "Char 1,IRE.Rift 1"])
     result = _transform_args(args)
@@ -233,6 +237,7 @@ def test_transform_args_gmcp_modules():
 
 def test_transform_args_gmcp_modules_none():
     from telnetlib3.client import _transform_args
+
     parser = _get_argument_parser()
     args = parser.parse_args(["example.com"])
     result = _transform_args(args)

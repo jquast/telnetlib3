@@ -10,9 +10,9 @@ import sys
 import codecs
 import struct
 import asyncio
+import logging
 import argparse
 import functools
-import logging
 from typing import Any, Dict, List, Tuple, Union, Callable, Optional, Sequence
 
 # local
@@ -179,14 +179,9 @@ class TelnetClient(client_base.BaseClient):
         self._gmcp_hello_sent = True
         from telnetlib3.accessories import get_version  # pylint: disable=import-outside-toplevel
 
-        self.writer.send_gmcp(
-            "Core.Hello", {"client": "telnetlib3", "version": get_version()}
-        )
+        self.writer.send_gmcp("Core.Hello", {"client": "telnetlib3", "version": get_version()})
         self.writer.send_gmcp("Core.Supports.Set", self._gmcp_modules)
-        self.log.info(
-            "GMCP handshake: Core.Hello + Core.Supports.Set %s",
-            self._gmcp_modules,
-        )
+        self.log.info("GMCP handshake: Core.Hello + Core.Supports.Set %s", self._gmcp_modules)
 
     def _on_gmcp(self, package: str, data: Any) -> None:
         """Store incoming GMCP data, merging dict updates incrementally."""
@@ -774,6 +769,7 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
 
     # Auto-load autoreplies and macros from default config path
     from ._paths import CONFIG_DIR as _cfg_dir  # pylint: disable=import-outside-toplevel
+
     _session_key = f"{args['host']}:{args['port']}"
 
     _ar_path = os.path.join(_cfg_dir, "autoreplies.json")
@@ -797,12 +793,9 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             _macro_defs = []
 
     # Room graph for GMCP Room.Info automapper
-    from .rooms import (  # pylint: disable=import-outside-toplevel
-        RoomGraph,
-        load_rooms,
-        rooms_path as _rooms_path_fn,
-        current_room_path as _current_room_path_fn,
-    )
+    from .rooms import RoomGraph, load_rooms
+    from .rooms import rooms_path as _rooms_path_fn  # pylint: disable=import-outside-toplevel
+    from .rooms import current_room_path as _current_room_path_fn
 
     _rooms_path = _rooms_path_fn(_session_key)
     _current_room_file = _current_room_path_fn(_session_key)
@@ -1016,8 +1009,7 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         "--gmcp-log",
         action="store_true",
         default=False,
-        help="log all incoming GMCP messages at INFO level "
-        "(default: DEBUG only)",
+        help="log all incoming GMCP messages at INFO level " "(default: DEBUG only)",
     )
     parser.add_argument(
         "--no-repl",
@@ -1071,6 +1063,7 @@ def _resolve_history_file(value: Optional[str]) -> Optional[str]:
     if value is not None:
         return str(value) if value else None
     from ._paths import HISTORY_FILE  # pylint: disable=import-outside-toplevel
+
     return HISTORY_FILE
 
 

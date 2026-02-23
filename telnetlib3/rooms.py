@@ -8,13 +8,14 @@ data to ``~/.local/share/telnetlib3/rooms-{host}_{port}.json``.
 
 from __future__ import annotations
 
+# std imports
 import os
 import json
 import tempfile
-from collections import deque
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
 from typing import Any
+from datetime import datetime, timezone
+from collections import deque
+from dataclasses import field, asdict, dataclass
 
 
 @dataclass
@@ -169,10 +170,7 @@ class RoomGraph:
         if room is None or not room.name:
             return []
         target_name = room.name
-        matches = [
-            r for r in self.rooms.values()
-            if r.num != num and r.name == target_name
-        ]
+        matches = [r for r in self.rooms.values() if r.num != num and r.name == target_name]
         matches.sort(key=lambda r: r.last_visited)
         return matches[:limit]
 
@@ -184,10 +182,7 @@ class RoomGraph:
         :returns: Matching rooms sorted bookmarked-first, then by name.
         """
         q = query.lower()
-        results = [
-            r for r in self.rooms.values()
-            if q in r.name.lower() or q in r.area.lower()
-        ]
+        results = [r for r in self.rooms.values() if q in r.name.lower() or q in r.area.lower()]
         results.sort(key=lambda r: (not r.bookmarked, r.name.lower()))
         return results
 
@@ -195,6 +190,7 @@ class RoomGraph:
 def _xdg_data_dir() -> str:
     """Return XDG data directory for telnetlib3."""
     from ._paths import DATA_DIR  # pylint: disable=import-outside-toplevel
+
     return DATA_DIR
 
 
@@ -276,10 +272,7 @@ def save_rooms(path: str, graph: RoomGraph) -> None:
     :param path: Target path.
     :param graph: Room graph to persist.
     """
-    data = {
-        "version": 1,
-        "rooms": {num: asdict(room) for num, room in graph.rooms.items()},
-    }
+    data = {"version": 1, "rooms": {num: asdict(room) for num, room in graph.rooms.items()}}
     _atomic_write(path, json.dumps(data, separators=(",", ":")))
 
 
@@ -307,9 +300,7 @@ def read_current_room(path: str) -> str:
         return ""
 
 
-def write_fasttravel(
-    path: str, steps: list[tuple[str, str]], slow: bool = False
-) -> None:
+def write_fasttravel(path: str, steps: list[tuple[str, str]], slow: bool = False) -> None:
     """
     Write fast travel steps to disk for the REPL to read.
 

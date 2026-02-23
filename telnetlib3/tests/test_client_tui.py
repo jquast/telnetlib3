@@ -19,7 +19,6 @@ from telnetlib3.client_tui import (  # noqa: E402
     MacroEditScreen,
     TelnetSessionApp,
     AutoreplyEditScreen,
-    _AutoreplyTuple,
     _int_val,
     tui_main,
     _float_val,
@@ -27,6 +26,7 @@ from telnetlib3.client_tui import (  # noqa: E402
     load_sessions,
     save_sessions,
     _relative_time,
+    _AutoreplyTuple,
     _build_tooltips,
 )
 
@@ -113,13 +113,19 @@ def test_build_command_auto_mode_no_flag() -> None:
     assert "--line-mode" not in cmd
 
 
-@pytest.mark.parametrize("cfg_kwargs,expected_flags", [
-    ({"ssl": True, "ssl_no_verify": True, "port": 992}, ["--ssl", "--ssl-no-verify"]),
-    ({"colormatch": "cga", "background_color": "#101010"}, ["--colormatch", "--background-color"]),
-    ({"no_repl": True}, ["--no-repl"]),
-    ({"connect_timeout": 5.0}, ["--connect-timeout"]),
-    ({"ansi_keys": True, "ascii_eol": True}, ["--ansi-keys", "--ascii-eol"]),
-])
+@pytest.mark.parametrize(
+    "cfg_kwargs,expected_flags",
+    [
+        ({"ssl": True, "ssl_no_verify": True, "port": 992}, ["--ssl", "--ssl-no-verify"]),
+        (
+            {"colormatch": "cga", "background_color": "#101010"},
+            ["--colormatch", "--background-color"],
+        ),
+        ({"no_repl": True}, ["--no-repl"]),
+        ({"connect_timeout": 5.0}, ["--connect-timeout"]),
+        ({"ansi_keys": True, "ascii_eol": True}, ["--ansi-keys", "--ascii-eol"]),
+    ],
+)
 def test_build_command_flags(cfg_kwargs: dict, expected_flags: list[str]) -> None:  # type: ignore[type-arg]
     cfg = SessionConfig(host="h", port=cfg_kwargs.pop("port", 23), **cfg_kwargs)
     cmd = build_command(cfg)
@@ -271,10 +277,10 @@ def test_autoreply_screen_save(tmp_path) -> None:
     assert loaded[0].reply == "get gold;"
 
 
-@pytest.mark.parametrize("entry_extra,field_idx,expected", [
-    ({"when": {"HP%": ">50"}}, 8, {"HP%": ">50"}),
-    ({"immediate": True}, 9, True),
-])
+@pytest.mark.parametrize(
+    "entry_extra,field_idx,expected",
+    [({"when": {"HP%": ">50"}}, 8, {"HP%": ">50"}), ({"immediate": True}, 9, True)],
+)
 def test_autoreply_screen_loads_field(tmp_path, entry_extra, field_idx, expected) -> None:
     import json
 
@@ -287,11 +293,14 @@ def test_autoreply_screen_loads_field(tmp_path, entry_extra, field_idx, expected
     assert screen._rules[0][field_idx] == expected
 
 
-@pytest.mark.parametrize("rule_kwargs,json_key,expected,absent", [
-    ({"when": {"MP%": ">=30"}}, "when", {"MP%": ">=30"}, False),
-    ({"immediate": True}, "immediate", True, False),
-    ({}, "immediate", None, True),
-])
+@pytest.mark.parametrize(
+    "rule_kwargs,json_key,expected,absent",
+    [
+        ({"when": {"MP%": ">=30"}}, "when", {"MP%": ">=30"}, False),
+        ({"immediate": True}, "immediate", True, False),
+        ({}, "immediate", None, True),
+    ],
+)
 def test_autoreply_screen_saves_field(tmp_path, rule_kwargs, json_key, expected, absent) -> None:
     import json
 

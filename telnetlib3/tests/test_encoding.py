@@ -37,10 +37,7 @@ async def test_telnet_server_encoding_default(bind_host, unused_tcp_port):
 async def test_telnet_client_encoding_default(bind_host, unused_tcp_port):
     """Default encoding US-ASCII unless it can be negotiated/confirmed!"""
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
-        async with open_connection(host=bind_host, port=unused_tcp_port) as (
-            reader,
-            writer,
-        ):
+        async with open_connection(host=bind_host, port=unused_tcp_port) as (reader, writer):
             assert writer.protocol.encoding(incoming=True) == "US-ASCII"
             assert writer.protocol.encoding(outgoing=True) == "US-ASCII"
             assert writer.protocol.encoding(incoming=True, outgoing=True) == "US-ASCII"
@@ -94,9 +91,10 @@ async def test_telnet_client_and_server_encoding_bidirectional(bind_host, unused
     async with create_server(
         host=bind_host, port=unused_tcp_port, encoding="latin1", connect_maxwait=1.0
     ) as server:
-        async with open_connection(
-            host=bind_host, port=unused_tcp_port, encoding="cp437"
-        ) as (reader, writer):
+        async with open_connection(host=bind_host, port=unused_tcp_port, encoding="cp437") as (
+            reader,
+            writer,
+        ):
             srv_instance = await asyncio.wait_for(server.wait_for_client(), 1.5)
 
             assert srv_instance.encoding(incoming=True) == "cp437"
@@ -173,9 +171,10 @@ async def test_telnet_client_and_server_escape_iac_encoding(bind_host, unused_tc
     async with create_server(
         host=bind_host, port=unused_tcp_port, encoding="iso8859-1", connect_maxwait=0.5
     ) as server:
-        async with open_connection(
-            host=bind_host, port=unused_tcp_port, encoding="iso8859-1"
-        ) as (client_reader, client_writer):
+        async with open_connection(host=bind_host, port=unused_tcp_port, encoding="iso8859-1") as (
+            client_reader,
+            client_writer,
+        ):
             srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
 
             srv_instance.writer.write(given_string)
@@ -194,9 +193,10 @@ async def test_telnet_client_and_server_escape_iac_binary(bind_host, unused_tcp_
     async with create_server(
         host=bind_host, port=unused_tcp_port, encoding=False, connect_maxwait=0.5
     ) as server:
-        async with open_connection(
-            host=bind_host, port=unused_tcp_port, encoding=False
-        ) as (client_reader, client_writer):
+        async with open_connection(host=bind_host, port=unused_tcp_port, encoding=False) as (
+            client_reader,
+            client_writer,
+        ):
             srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
 
             srv_instance.writer.write(given_string)

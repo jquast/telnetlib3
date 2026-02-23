@@ -54,9 +54,7 @@ def test_load_macros_missing_file():
 def test_load_macros_empty_key_skipped(tmp_path):
     fp = tmp_path / "macros.json"
     fp.write_text(
-        json.dumps(
-            {_SK: {"macros": [{"key": "", "text": "skip"}, {"key": "f6", "text": "keep;"}]}}
-        )
+        json.dumps({_SK: {"macros": [{"key": "", "text": "skip"}, {"key": "f6", "text": "keep;"}]}})
     )
     macros = load_macros(str(fp), _SK)
     assert len(macros) == 1
@@ -154,6 +152,7 @@ class TestBindMacros:
 
     def test_multi_command(self):
         from telnetlib3.client_repl import expand_commands
+
         writer, written = _mock_writer()
         macro = Macro(keys=("f6",), text="look;inventory;")
         cmds = expand_commands(macro.text)

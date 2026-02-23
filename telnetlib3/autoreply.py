@@ -15,7 +15,7 @@ import time
 import asyncio
 import logging
 from typing import Any, Union, Callable, Optional, Awaitable
-from dataclasses import dataclass, field
+from dataclasses import field, dataclass
 
 # 3rd party
 from wcwidth import strip_sequences
@@ -87,10 +87,10 @@ def _compare(value: int, op: str, threshold: int) -> bool:
 
 
 def check_condition(
-    when: dict[str, str],
-    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    when: dict[str, str], writer: Union[TelnetWriter, TelnetWriterUnicode]
 ) -> tuple[bool, str]:
-    """Check vital conditions against GMCP data on *writer*.
+    """
+    Check vital conditions against GMCP data on *writer*.
 
     :param when: Condition dict, e.g. ``{"HP%": ">50", "MP%": ">30"}``.
     :param writer: Telnet writer with ``_gmcp_data`` attribute.
@@ -163,13 +163,20 @@ def _parse_entries(entries: list[dict[str, str]]) -> list[AutoreplyRule]:
             compiled = re.compile(pattern_str, re.MULTILINE | re.DOTALL)
         except re.error as exc:
             raise ValueError(f"Invalid autoreply pattern {pattern_str!r}: {exc}") from exc
-        rules.append(AutoreplyRule(
-            pattern=compiled, reply=reply, exclusive=exclusive,
-            until=until, post_command=post_command, always=always,
-            enabled=enabled, exclusive_timeout=exclusive_timeout,
-            when=when,
-            immediate=immediate,
-        ))
+        rules.append(
+            AutoreplyRule(
+                pattern=compiled,
+                reply=reply,
+                exclusive=exclusive,
+                until=until,
+                post_command=post_command,
+                always=always,
+                enabled=enabled,
+                exclusive_timeout=exclusive_timeout,
+                when=when,
+                immediate=immediate,
+            )
+        )
     return rules
 
 
@@ -221,8 +228,11 @@ def save_autoreplies(path: str, rules: list[AutoreplyRule], session_key: str) ->
                 **({"post_command": r.post_command} if r.post_command else {}),
                 **({"always": True} if r.always else {}),
                 **({"enabled": False} if not r.enabled else {}),
-                **({"exclusive_timeout": r.exclusive_timeout}
-                   if r.exclusive and r.exclusive_timeout != 10.0 else {}),
+                **(
+                    {"exclusive_timeout": r.exclusive_timeout}
+                    if r.exclusive and r.exclusive_timeout != 10.0
+                    else {}
+                ),
                 **({"when": dict(r.when)} if r.when else {}),
                 **({"immediate": True} if r.immediate else {}),
             }
@@ -299,9 +309,7 @@ class SearchBuffer:
         """Incomplete trailing line (no newline yet)."""
         return self._partial
 
-    def add_text(
-        self, text: str, echo_filter: Optional["set[str]"] = None,
-    ) -> bool:
+    def add_text(self, text: str, echo_filter: Optional["set[str]"] = None) -> bool:
         """
         Add server output text, stripping ANSI sequences first.
 
@@ -455,7 +463,8 @@ class AutoreplyEngine:
 
     @property
     def condition_failed(self) -> Optional[tuple[int, str]]:
-        """``(rule_index_1based, description)`` if last match failed a condition.
+        """
+        ``(rule_index_1based, description)`` if last match failed a condition.
 
         Reading this property clears the value.
         """
@@ -532,10 +541,7 @@ class AutoreplyEngine:
                     self._skip_next_prompt = False
                     self._buffer.clear()
                     if self._post_command:
-                        self._log.info(
-                            "autoreply: queuing post_command %r",
-                            self._post_command,
-                        )
+                        self._log.info("autoreply: queuing post_command %r", self._post_command)
                         post = self._post_command
                         if not post.rstrip().endswith(";"):
                             post = post.rstrip() + ";"
@@ -564,7 +570,8 @@ class AutoreplyEngine:
         self._match_rules()
 
     def _match_rules(self) -> None:
-        """Run normal (non-exclusive) rule matching on buffered text.
+        """
+        Run normal (non-exclusive) rule matching on buffered text.
 
         Called from :meth:`feed` before prompt-based mode is active,
         and from :meth:`on_prompt` once prompt-based mode is active.
@@ -602,8 +609,9 @@ class AutoreplyEngine:
                         ok, desc = check_condition(rule.when, self._writer)
                         if not ok:
                             self._log.info(
-                                "autoreply: rule #%d skipped, condition "
-                                "failed: %s", rule_idx + 1, desc,
+                                "autoreply: rule #%d skipped, condition " "failed: %s",
+                                rule_idx + 1,
+                                desc,
                             )
                             self._condition_failed = (rule_idx + 1, desc)
                             found = True
@@ -625,7 +633,8 @@ class AutoreplyEngine:
                         self._post_command = rule.post_command
                         self._exclusive_deadline = (
                             time.monotonic() + rule.exclusive_timeout
-                            if rule.exclusive_timeout > 0 else 0.0
+                            if rule.exclusive_timeout > 0
+                            else 0.0
                         )
                         if rule.until:
                             until_str = _substitute_groups(rule.until, match)
@@ -642,7 +651,8 @@ class AutoreplyEngine:
                     break  # re-fetch searchable text and start over
 
     def _match_immediate_rules(self) -> None:
-        """Match only rules with ``immediate=True`` during prompt-based deferral.
+        """
+        Match only rules with ``immediate=True`` during prompt-based deferral.
 
         This is a restricted variant of :meth:`_match_rules` that fires
         immediately from :meth:`feed` even when ``_prompt_based`` is active,
@@ -674,8 +684,9 @@ class AutoreplyEngine:
                         ok, desc = check_condition(rule.when, self._writer)
                         if not ok:
                             self._log.info(
-                                "autoreply: immediate rule #%d skipped, "
-                                "condition failed: %s", rule_idx + 1, desc,
+                                "autoreply: immediate rule #%d skipped, " "condition failed: %s",
+                                rule_idx + 1,
+                                desc,
                             )
                             self._condition_failed = (rule_idx + 1, desc)
                             found = True
@@ -775,7 +786,8 @@ class AutoreplyEngine:
         self._writer.write(cmd + "\r\n")  # type: ignore[arg-type]
 
     def on_prompt(self) -> None:
-        """Match accumulated text and clear per-cycle state on EOR/GA.
+        """
+        Match accumulated text and clear per-cycle state on EOR/GA.
 
         In prompt-based mode, :meth:`feed` defers normal rule matching
         to this method so that replies are never fired mid-output.
@@ -805,8 +817,7 @@ class AutoreplyEngine:
             self._exclusive_prompt_count += 1
             if self._exclusive_prompt_count >= 2:
                 self._log.info(
-                    "autoreply: exclusive cleared after %d prompts"
-                    " without until match",
+                    "autoreply: exclusive cleared after %d prompts" " without until match",
                     self._exclusive_prompt_count,
                 )
                 self._exclusive_active = False
@@ -820,13 +831,16 @@ class AutoreplyEngine:
         self._post_command = ""
 
     def check_timeout(self) -> bool:
-        """Check and clear exclusive mode if the deadline has passed.
+        """
+        Check and clear exclusive mode if the deadline has passed.
 
         :returns: ``True`` if exclusive was cleared by timeout.
         """
-        if (self._exclusive_active
-                and self._exclusive_deadline
-                and time.monotonic() > self._exclusive_deadline):
+        if (
+            self._exclusive_active
+            and self._exclusive_deadline
+            and time.monotonic() > self._exclusive_deadline
+        ):
             self._log.info("autoreply: exclusive timed out")
             self._exclusive_active = False
             self._exclusive_rule_index = 0

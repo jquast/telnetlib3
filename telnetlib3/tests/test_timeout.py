@@ -83,11 +83,7 @@ async def test_open_connection_connect_timeout_success(bind_host, unused_tcp_por
     """Test connect_timeout does not interfere with successful connection."""
     async with create_server(host=bind_host, port=unused_tcp_port):
         async with open_connection(
-            bind_host,
-            unused_tcp_port,
-            connect_timeout=5.0,
-            encoding=False,
-            connect_maxwait=0.5,
+            bind_host, unused_tcp_port, connect_timeout=5.0, encoding=False, connect_maxwait=0.5
         ):
             pass
 

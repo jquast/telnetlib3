@@ -62,10 +62,7 @@ async def test_telnet_client_send_naws(bind_host, unused_tcp_port):
         protocol_factory=ServerTestNaws, host=bind_host, port=unused_tcp_port, connect_maxwait=0.5
     ):
         async with open_connection(
-            host=bind_host,
-            port=unused_tcp_port,
-            cols=given_cols,
-            rows=given_rows,
+            host=bind_host, port=unused_tcp_port, cols=given_cols, rows=given_rows
         ) as (reader, writer):
             recv_rows, recv_cols = await asyncio.wait_for(_waiter, 0.5)
             assert recv_cols == given_cols
@@ -121,10 +118,7 @@ async def test_telnet_client_send_naws_65534(bind_host, unused_tcp_port):
         protocol_factory=ServerTestNaws, host=bind_host, port=unused_tcp_port, connect_maxwait=0.5
     ):
         async with open_connection(
-            host=bind_host,
-            port=unused_tcp_port,
-            cols=given_cols,
-            rows=given_rows,
+            host=bind_host, port=unused_tcp_port, cols=given_cols, rows=given_rows
         ) as (reader, writer):
             recv_cols, recv_rows = await asyncio.wait_for(_waiter, 0.5)
             assert recv_cols == expect_cols

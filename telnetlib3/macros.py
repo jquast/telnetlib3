@@ -20,7 +20,6 @@ from .stream_writer import TelnetWriter, TelnetWriterUnicode
 __all__ = ("Macro", "load_macros", "save_macros", "bind_macros")
 
 
-
 @dataclass
 class Macro:
     """
@@ -139,6 +138,7 @@ def _bind_one(
     :param log: Logger instance.
     """
     import asyncio  # pylint: disable=import-outside-toplevel
+
     from .client_repl import execute_macro_commands  # pylint: disable=import-outside-toplevel
 
     keys = macro.keys

@@ -1,19 +1,17 @@
 """
 Consolidated XDG Base Directory paths for telnetlib3.
 
-Provides config and data directory resolution following the
-`XDG Base Directory Specification
+Provides config and data directory resolution following the `XDG Base Directory Specification
 <https://specifications.freedesktop.org/basedir-spec/latest/>`_.
 """
 
 from __future__ import annotations
 
+# std imports
 import os
 import pathlib
 
-_XDG_CONFIG = os.environ.get(
-    "XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config")
-)
+_XDG_CONFIG = os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config"))
 _XDG_DATA = os.environ.get(
     "XDG_DATA_HOME", os.path.join(os.path.expanduser("~"), ".local", "share")
 )

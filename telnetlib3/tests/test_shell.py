@@ -67,9 +67,10 @@ async def test_telnet_client_shell_as_coroutine(bind_host, unused_tcp_port):
 
     # a server that doesn't care
     async with asyncio_server(asyncio.Protocol, bind_host, unused_tcp_port):
-        async with open_connection(
-            host=bind_host, port=unused_tcp_port, shell=shell
-        ) as (reader, writer):
+        async with open_connection(host=bind_host, port=unused_tcp_port, shell=shell) as (
+            reader,
+            writer,
+        ):
             await asyncio.wait_for(_waiter, 0.5)
 
 

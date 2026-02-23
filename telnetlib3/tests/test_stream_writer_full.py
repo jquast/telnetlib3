@@ -230,11 +230,14 @@ def test_handle_logout(server, client, cmd, check):
     assert check(t)
 
 
-@pytest.mark.parametrize("server,client,handler,opt,response", [
-    (True, False, "handle_do", LINEMODE, IAC + WONT + LINEMODE),
-    (False, True, "handle_do", ECHO, IAC + WONT + ECHO),
-    (False, True, "handle_will", NAWS, IAC + DONT + NAWS),
-])
+@pytest.mark.parametrize(
+    "server,client,handler,opt,response",
+    [
+        (True, False, "handle_do", LINEMODE, IAC + WONT + LINEMODE),
+        (False, True, "handle_do", ECHO, IAC + WONT + ECHO),
+        (False, True, "handle_will", NAWS, IAC + DONT + NAWS),
+    ],
+)
 def test_handle_option_refused(server, client, handler, opt, response):
     w, t, _ = new_writer(server=server, client=client)
     getattr(w, handler)(opt)
@@ -256,12 +259,15 @@ def test_handle_do_tm_callback():
     assert called["cmd"] == DO
 
 
-@pytest.mark.parametrize("server,client,handler,expected_cmd", [
-    (True, False, "handle_do", DO),
-    (True, False, "handle_dont", DONT),
-    (True, False, "handle_will", WILL),
-    (False, True, "handle_wont", WONT),
-])
+@pytest.mark.parametrize(
+    "server,client,handler,expected_cmd",
+    [
+        (True, False, "handle_do", DO),
+        (True, False, "handle_dont", DONT),
+        (True, False, "handle_will", WILL),
+        (False, True, "handle_wont", WONT),
+    ],
+)
 def test_handle_logout_callback(server, client, handler, expected_cmd):
     seen = {}
     w, *_ = new_writer(server=server, client=client)

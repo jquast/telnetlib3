@@ -94,9 +94,10 @@ async def test_telnet_reader_using_readline_bytes(bind_host, unused_tcp_port):
     async with create_server(
         host=bind_host, port=unused_tcp_port, connect_maxwait=0.5, shell=shell, encoding=False
     ):
-        async with open_connection(
-            host=bind_host, port=unused_tcp_port, encoding=False
-        ) as (client_reader, client_writer):
+        async with open_connection(host=bind_host, port=unused_tcp_port, encoding=False) as (
+            client_reader,
+            client_writer,
+        ):
             for given, expected in sorted(given_expected.items()):
                 assert await asyncio.wait_for(client_reader.readline(), 0.5) == expected
 
@@ -140,9 +141,10 @@ async def test_telnet_reader_read_exactly_bytes(bind_host, unused_tcp_port):
     async with create_server(
         host=bind_host, port=unused_tcp_port, connect_maxwait=0.5, shell=shell, encoding=False
     ):
-        async with open_connection(
-            host=bind_host, port=unused_tcp_port, encoding=False
-        ) as (client_reader, client_writer):
+        async with open_connection(host=bind_host, port=unused_tcp_port, encoding=False) as (
+            client_reader,
+            client_writer,
+        ):
             assert await asyncio.wait_for(client_reader.readexactly(len(given)), 0.5) == given
 
             with pytest.raises(asyncio.IncompleteReadError) as exc_info:
@@ -170,9 +172,10 @@ async def test_telnet_reader_read_beyond_limit_unicode(bind_host, unused_tcp_por
     async with create_server(
         host=bind_host, port=unused_tcp_port, connect_maxwait=0.5, shell=shell, limit=limit
     ):
-        async with open_connection(
-            host=bind_host, port=unused_tcp_port, limit=limit
-        ) as (client_reader, client_writer):
+        async with open_connection(host=bind_host, port=unused_tcp_port, limit=limit) as (
+            client_reader,
+            client_writer,
+        ):
             assert client_reader._limit == limit
             value = await asyncio.wait_for(client_reader.read(), 0.5)
             assert value == "x" * (limit + 1)

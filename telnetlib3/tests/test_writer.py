@@ -225,9 +225,10 @@ async def test_send_iac_dont_dont(bind_host, unused_tcp_port):
         port=unused_tcp_port,
         connect_maxwait=0.5,
     ) as server:
-        async with open_connection(
-            host=bind_host, port=unused_tcp_port, connect_maxwait=0.5
-        ) as (_, client_writer):
+        async with open_connection(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5) as (
+            _,
+            client_writer,
+        ):
             assert client_writer.iac(DONT, ECHO)
             assert client_writer.iac(DONT, ECHO) is False
 

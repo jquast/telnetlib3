@@ -1,4 +1,5 @@
-"""Named constants for ANSI/VT escape sequences.
+"""
+Named constants for ANSI/VT escape sequences.
 
 Replaces raw ``\\x1b[...]`` literals scattered across the codebase with
 readable, self-documenting names.  Only sequences actually used by the

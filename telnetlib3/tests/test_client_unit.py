@@ -218,10 +218,7 @@ async def test_open_connection_default_factory(bind_host, unused_tcp_port, monke
 
     async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5):
         reader, writer = await cl.open_connection(
-            host=bind_host,
-            port=unused_tcp_port,
-            connect_maxwait=0.1,
-            encoding=False,
+            host=bind_host, port=unused_tcp_port, connect_maxwait=0.1, encoding=False
         )
         assert isinstance(writer.protocol, cl.TelnetClient)
         assert not isinstance(writer.protocol, cl.TelnetTerminalClient)
@@ -235,10 +232,7 @@ async def test_open_connection_tty_factory(bind_host, unused_tcp_port, monkeypat
 
     async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5):
         reader, writer = await cl.open_connection(
-            host=bind_host,
-            port=unused_tcp_port,
-            connect_maxwait=0.1,
-            encoding=False,
+            host=bind_host, port=unused_tcp_port, connect_maxwait=0.1, encoding=False
         )
         assert isinstance(writer.protocol, cl.TelnetTerminalClient)
         writer.close()

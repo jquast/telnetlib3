@@ -28,9 +28,7 @@ def serve_with_handler(bind_host, unused_tcp_port):
     servers = []
 
     def _start(handler, **kwargs):
-        server = BlockingTelnetServer(
-            bind_host, unused_tcp_port, handler=handler, **kwargs
-        )
+        server = BlockingTelnetServer(bind_host, unused_tcp_port, handler=handler, **kwargs)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         server._started.wait(timeout=5)

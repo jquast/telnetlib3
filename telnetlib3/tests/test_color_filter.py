@@ -300,11 +300,14 @@ def test_bold_single_seq_uses_bright(seq: str) -> None:
     assert f"38;2;{bright_black[0]};{bright_black[1]};{bright_black[2]}" in result
 
 
-@pytest.mark.parametrize("setup_seqs,test_seq,palette_idx", [
-    (["\x1b[1m"], "\x1b[30m", 8),
-    (["\x1b[1m", "\x1b[22m"], "\x1b[30m", 0),
-    (["\x1b[1m", "\x1b[0m"], "\x1b[30m", 0),
-])
+@pytest.mark.parametrize(
+    "setup_seqs,test_seq,palette_idx",
+    [
+        (["\x1b[1m"], "\x1b[30m", 8),
+        (["\x1b[1m", "\x1b[22m"], "\x1b[30m", 0),
+        (["\x1b[1m", "\x1b[0m"], "\x1b[30m", 0),
+    ],
+)
 def test_bold_state_across_sequences(
     setup_seqs: list[str], test_seq: str, palette_idx: int
 ) -> None:
@@ -359,11 +362,14 @@ def test_ice_blink_single_seq_uses_bright(seq: str) -> None:
     assert f"48;2;{bright_black[0]};{bright_black[1]};{bright_black[2]}" in result
 
 
-@pytest.mark.parametrize("setup_seqs,test_seq,palette_idx", [
-    (["\x1b[5m"], "\x1b[40m", 8),
-    (["\x1b[5m", "\x1b[25m"], "\x1b[40m", 0),
-    (["\x1b[5m", "\x1b[0m"], "\x1b[40m", 0),
-])
+@pytest.mark.parametrize(
+    "setup_seqs,test_seq,palette_idx",
+    [
+        (["\x1b[5m"], "\x1b[40m", 8),
+        (["\x1b[5m", "\x1b[25m"], "\x1b[40m", 0),
+        (["\x1b[5m", "\x1b[0m"], "\x1b[40m", 0),
+    ],
+)
 def test_ice_blink_state_across_sequences(
     setup_seqs: list[str], test_seq: str, palette_idx: int
 ) -> None:
