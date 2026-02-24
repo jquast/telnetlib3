@@ -6,10 +6,13 @@
 import os
 import sys
 import time
+import random
 import asyncio
 import logging
 import collections
-from typing import TYPE_CHECKING, Any, List, Tuple, Union, Callable, Optional
+from typing import (
+    TYPE_CHECKING, Any, List, NamedTuple, Tuple, Union, Callable, Optional,
+)
 
 # local
 from .stream_reader import TelnetReader, TelnetReaderUnicode
@@ -103,7 +106,7 @@ def _make_styles() -> None:
     t = _get_term()
     _STYLE_NORMAL = {
         "text_sgr": t.color_rgb(255, 239, 213),
-        "suggestion_sgr": t.color_rgb(0, 0, 0),
+        "suggestion_sgr": t.color_rgb(60, 40, 40),
         "bg_sgr": t.on_color_rgb(26, 0, 0),
         "ellipsis_sgr": t.color_rgb(190, 190, 190),
         "cursor_seq": "\x1b[5 q",  # DECSCUSR -- blinking bar
@@ -265,7 +268,7 @@ def _restore_after_subprocess(
     dmz = scroll_bottom + 1
     _input_row = _tsize.lines - reserve
     if dmz < _input_row:
-        sys.stdout.write(t.move_yx(dmz, 0) + t.clear_eol + "\u2500" * _tsize.columns)
+        sys.stdout.write(t.move_yx(dmz, 0) + t.clear_eol + _dmz_line(_tsize.columns))
     for _r in range(_input_row, _tsize.lines):
         sys.stdout.write(t.move_yx(_r, 0) + t.clear_eol)
     sys.stdout.flush()
@@ -316,6 +319,9 @@ def _vital_color(fraction: float, kind: str) -> str:
     elif kind == "discover":
         # Green (120) -> magenta (300) as autodiscover progresses.
         hue = 120.0 + fraction * 180.0
+    elif kind == "randomwalk":
+        # Orange (30) -> teal (170) as randomwalk progresses.
+        hue = 30.0 + fraction * 140.0
     else:
         # Stay golden yellow below 33%, then golden-yellow->blue over 33%-100%.
         # hue 45=golden yellow, hue 240=blue.
@@ -333,12 +339,19 @@ def _wcswidth(text: str) -> int:
     return w if w >= 0 else len(text)
 
 
-# Width of the inner progress bar (between the brackets).
-_BAR_WIDTH = 16
+# Width of the inner progress bar (between the sextant caps).
+_BAR_WIDTH = 20
 
 
 _BAR_CAP_LEFT = "\U0001FB2B"   # 🬫 Block Sextant-2346
 _BAR_CAP_RIGHT = "\U0001FB1B"  # 🬛 Block Sextant-1345
+_DMZ_CHAR = "\u2581"           # ▁ Lower One Eighth Block
+
+
+def _dmz_line(cols: int) -> str:
+    """Return a styled DMZ divider line of *cols* width."""
+    t = _get_term()
+    return t.color_rgb(50, 10, 10) + (_DMZ_CHAR * cols) + t.normal
 
 
 def _segmented(text: str) -> str:
@@ -402,19 +415,23 @@ def _vital_bar(
         filled_sgr = _sgr_fg("#101010") + _sgr_bg(bar_color)
         empty_sgr = _sgr_fg("#666666") + _sgr_bg("#2a2a2a")
 
-    suffix = {"hp": " HP", "mp": " MP", "xp": " XP", "wander": " AW"}.get(kind, "")
+    suffix = {
+        "hp": " hp", "mp": " mp", "xp": " xp",
+        "wander": " AW", "randomwalk": " rndwlk",
+    }.get(kind, "")
     if mx > 0:
-        label = _segmented(f"{_fmt_value(cur)}/{_fmt_value(mx)} {pct}%{suffix}")
+        left_part = _segmented(f"{_fmt_value(cur)}/{_fmt_value(mx)}")
+        right_part = _segmented(f"{pct}%") + suffix
     else:
-        label = _segmented(f"{_fmt_value(cur)}{suffix}")
+        left_part = _segmented(f"{_fmt_value(cur)}")
+        right_part = suffix.lstrip()
 
-    lpad = max(0, width - len(label) - 1)
-
-    bg = list(" " * width)
-    for i, ch in enumerate(label, start=lpad):
-        if i < width:
-            bg[i] = ch
-    bar_text = "".join(bg[:width])
+    # Left-align values, right-align pct+suffix, gap in the middle
+    # where the filled/empty boundary is most visible.
+    gap = max(1, width - len(left_part) - len(right_part))
+    bar_text = (left_part + " " * gap + right_part)[:width]
+    if len(bar_text) < width:
+        bar_text += " " * (width - len(bar_text))
 
     filled_text = bar_text[:filled]
     empty_text = bar_text[filled:]
@@ -483,7 +500,7 @@ def _repaint_screen(
         dmz = scroll_bottom + 1
         _input_row = _tsize.lines - reserve
         if dmz < _input_row:
-            sys.stdout.write(t.move_yx(dmz, 0) + t.clear_eol + "\u2500" * _tsize.columns)
+            sys.stdout.write(t.move_yx(dmz, 0) + t.clear_eol + _dmz_line(_tsize.columns))
         for _r in range(_input_row, _tsize.lines):
             sys.stdout.write(t.move_yx(_r, 0) + t.clear_eol)
         sys.stdout.write(t.move_yx(_input_row, 0))
@@ -572,6 +589,7 @@ def _show_help(macro_defs: "Any" = None, replay_buf: Optional[OutputRingBuffer] 
         "  telnetlib3 \u2014 Keybindings",
         "",
         "  F1          This help screen",
+        "  F3          Random walk (explore random exits, prefer unvisited)",
         "  F4          Autodiscover (explore unvisited exits)",
         "  F5          Wander mode (visit same-named rooms)",
         "  F7          Browse rooms / fast travel",
@@ -1131,18 +1149,25 @@ async def _fast_travel(
             engine.suppress_exclusive = False
 
 
+_DEFAULT_WALK_LIMIT = 999
+
+
 async def _autowander(
-    writer: Union[TelnetWriter, TelnetWriterUnicode], log: logging.Logger
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    log: logging.Logger,
+    limit: int = _DEFAULT_WALK_LIMIT,
 ) -> None:
     """
-    Visit up to 99 same-named rooms using slow travel.
+    Visit same-named rooms using slow travel.
 
-    Computes a list of rooms with the same name as the current room, sorted by least-recently-
-    visited, then walks through them one leg at a time with slow travel (autoreplies fire in each
-    room).
+    Computes a list of rooms with the same name as the current room,
+    sorted by least-recently-visited, then walks through them one leg
+    at a time with slow travel (autoreplies fire in each room).
+    Stops after *limit* rooms or when all targets are exhausted.
 
     :param writer: Telnet writer with room graph and session attributes.
     :param log: Logger.
+    :param limit: Maximum number of rooms to visit.
     """
     if getattr(writer, "_wander_active", False):
         return
@@ -1178,7 +1203,7 @@ async def _autowander(
         chosen = remaining.pop(best_idx)
         ordered.append(chosen)
         pos = chosen.num
-    targets = ordered
+    targets = ordered[:limit]
 
     _leg_retries = 3
     visited: set[str] = {current}
@@ -1267,7 +1292,9 @@ async def _autowander(
 
 
 async def _autodiscover(
-    writer: Union[TelnetWriter, TelnetWriterUnicode], log: logging.Logger
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    log: logging.Logger,
+    limit: int = _DEFAULT_WALK_LIMIT,
 ) -> None:
     """
     Explore unvisited exits reachable from the current room.
@@ -1275,10 +1302,12 @@ async def _autodiscover(
     BFS-discovers frontier exits (leading to unvisited or unknown rooms),
     travels to each, then returns to the starting room before trying the
     next.  Maintains an in-memory ``tried`` set to avoid retrying exits
-    that failed or led to unexpected rooms.
+    that failed or led to unexpected rooms.  Stops after *limit* exits
+    or when no more branches remain.
 
     :param writer: Telnet writer with room graph and session attributes.
     :param log: Logger.
+    :param limit: Maximum number of exits to explore.
     """
     if getattr(writer, "_discover_active", False):
         return
@@ -1305,8 +1334,10 @@ async def _autodiscover(
     writer._discover_total = len(branches)
     writer._discover_current = 0
     step_count = 0
+    last_stuck_room = ""
+    stuck_retries = 0
     try:
-        while True:
+        while step_count < limit:
             pos = getattr(writer, "_current_room_num", "")
             # Re-discover from current position each iteration — picks up
             # newly revealed exits from rooms we just visited, nearest-first.
@@ -1349,6 +1380,19 @@ async def _autodiscover(
                             f"AUTODISCOVER [{step_count}]: "
                             f"gateway {gw_room[:8]} inaccessible, skipping"
                         )
+                    if actual == last_stuck_room:
+                        stuck_retries += 1
+                    else:
+                        last_stuck_room = actual
+                        stuck_retries = 1
+                    if stuck_retries >= 3:
+                        if echo_fn is not None:
+                            echo_fn(
+                                f"AUTODISCOVER [{step_count}]: "
+                                f"stuck at {actual[:8]}, all routes blocked, "
+                                f"stopping"
+                            )
+                        break
                     continue
 
             # Step through the frontier exit.
@@ -1415,6 +1459,188 @@ async def _autodiscover(
         writer._discover_task = None
 
 
+async def _randomwalk(
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    log: logging.Logger,
+    limit: int = _DEFAULT_WALK_LIMIT,
+) -> None:
+    """
+    Random walk up to *limit* rooms, preferring unvisited exits.
+
+    At each room the walker picks a random exit from those with the
+    lowest walk visit count.  A per-walk ``walk_counts`` dict tracks
+    how many times we have arrived at each room during this walk.  The
+    room the player was in *before* triggering the walk (the
+    "entrance") is seeded with an infinite count so it is never
+    chosen — the walker will never leave through the direction it
+    came from.
+
+    Stops early when every reachable room (excluding the entrance)
+    has been visited at least once.
+
+    :param writer: Telnet writer with room graph and session attributes.
+    :param log: Logger.
+    :param limit: Maximum number of steps.
+    """
+    if getattr(writer, "_randomwalk_active", False):
+        return
+
+    current = getattr(writer, "_current_room_num", "")
+    graph = getattr(writer, "_room_graph", None)
+    echo_fn = getattr(writer, "_echo_command", None)
+    wait_fn = getattr(writer, "_wait_for_prompt", None)
+    if not current or graph is None:
+        if echo_fn is not None:
+            echo_fn("RANDOMWALK: no room data")
+        return
+
+    adj = graph._adj  # pylint: disable=protected-access
+    exits = adj.get(current, {})
+    if not exits:
+        if echo_fn is not None:
+            echo_fn("RANDOMWALK: no exits from current room")
+        return
+
+    # Per-walk visit counter.  The entrance room (the room we were in
+    # before triggering the walk) is seeded at infinity so the walker
+    # never prefers going back through it.
+    entrance_room = getattr(writer, "_previous_room_num", "")
+    walk_counts: dict[str, float] = {current: 1}
+    if entrance_room:
+        walk_counts[entrance_room] = float("inf")
+
+    def _flood_reachable() -> set[str]:
+        """BFS flood from current room, excluding the entrance."""
+        result: set[str] = set()
+        q: collections.deque[str] = collections.deque([current])
+        seen: set[str] = {current}
+        if entrance_room:
+            seen.add(entrance_room)
+        while q:
+            node = q.popleft()
+            for dst in adj.get(node, {}).values():
+                if dst not in seen:
+                    seen.add(dst)
+                    result.add(dst)
+                    q.append(dst)
+        return result
+
+    reachable = _flood_reachable()
+
+    # pylint: disable=protected-access
+    writer._randomwalk_active = True
+    writer._randomwalk_total = min(limit, len(reachable)) if reachable else limit
+    writer._randomwalk_current = 0
+    visited: set[str] = {current}
+
+    try:
+        stuck_count = 0
+        for step in range(limit):
+            writer._randomwalk_current = step + 1
+            current = getattr(writer, "_current_room_num", "")
+            exits = dict(adj.get(current, {}))
+            if not exits:
+                if echo_fn is not None:
+                    echo_fn(
+                        f"RANDOMWALK [{step + 1}/{writer._randomwalk_total}]: "
+                        f"dead end, stopping"
+                    )
+                break
+
+            # Check if all reachable rooms have been visited.
+            if reachable and reachable.issubset(visited):
+                if echo_fn is not None:
+                    echo_fn(
+                        f"RANDOMWALK [{step + 1}/{writer._randomwalk_total}]: "
+                        f"all {len(visited)} reachable rooms visited"
+                    )
+                break
+
+            # Score each exit by walk visit count (lower is better).
+            scored: list[tuple[float, str, str]] = []
+            for d, dst in exits.items():
+                scored.append((walk_counts.get(dst, 0), d, dst))
+
+            min_count = min(s[0] for s in scored)
+            best = [(d, dst) for cnt, d, dst in scored if cnt == min_count]
+            direction, dst_num = random.choice(best)
+
+            room = graph.get_room(dst_num)
+            dst_label = room.name if room else dst_num[:8]
+            if echo_fn is not None:
+                echo_fn(
+                    f"RANDOMWALK [{step + 1}/{writer._randomwalk_total}]: "
+                    f"{direction} -> {dst_label}"
+                )
+
+            if wait_fn is not None:
+                await wait_fn()
+            if isinstance(writer, TelnetWriterUnicode):
+                writer.write(direction + "\r\n")
+            else:
+                writer.write((direction + "\r\n").encode("utf-8"))
+
+            # Wait for room change.
+            for _tick in range(30):
+                await asyncio.sleep(0.3)
+                new_room = getattr(writer, "_current_room_num", "")
+                if new_room != current:
+                    break
+            else:
+                stuck_count += 1
+                if echo_fn is not None:
+                    echo_fn(
+                        f"RANDOMWALK [{step + 1}/{writer._randomwalk_total}]: "
+                        f"no room change after {direction}"
+                    )
+                if stuck_count >= 3:
+                    for dst in exits.values():
+                        walk_counts[dst] = float("inf")
+                    if echo_fn is not None:
+                        echo_fn(
+                            f"RANDOMWALK [{step + 1}/{writer._randomwalk_total}]: "
+                            f"stuck in room, stopping"
+                        )
+                    break
+                continue
+
+            stuck_count = 0
+            actual = getattr(writer, "_current_room_num", "")
+            walk_counts[actual] = walk_counts.get(actual, 0) + 1
+            visited.add(actual)
+
+            # Re-flood: the room graph's adjacency is updated live by
+            # GMCP Room.Info, so newly discovered exits expand the
+            # reachable set dynamically.
+            new_reachable = _flood_reachable()
+            if len(new_reachable) > len(reachable):
+                reachable = new_reachable
+                writer._randomwalk_total = min(limit, len(reachable))
+
+            # Wait for autoreplies to settle.
+            _ar = getattr(writer, "_autoreply_engine", None)
+            if _ar is not None:
+                _settle = 0
+                while _settle < 60:
+                    if _ar.exclusive_active:
+                        while _ar.exclusive_active:
+                            _ar.check_timeout()
+                            await asyncio.sleep(0.1)
+                    while _ar.reply_pending:
+                        await asyncio.sleep(0.05)
+                    await asyncio.sleep(0.1)
+                    if not _ar.exclusive_active and not _ar.reply_pending:
+                        break
+                    _settle += 1
+    except asyncio.CancelledError:
+        pass
+    finally:
+        writer._randomwalk_active = False
+        writer._randomwalk_current = 0
+        writer._randomwalk_total = 0
+        writer._randomwalk_task = None
+
+
 # std imports
 import re as _re  # noqa: E402  # pylint: disable=wrong-import-position
 
@@ -1470,7 +1696,8 @@ def expand_commands(line: str) -> list[str]:
 
 
 _TRAVEL_RE = _re.compile(
-    r"^`(fast travel|slow travel|return fast|return slow|autowander|autodiscover)\s*(.*?)`$",
+    r"^`(fast travel|slow travel|return fast|return slow"
+    r"|autowander|autodiscover|randomwalk)\s*(.*?)`$",
     _re.IGNORECASE,
 )
 
@@ -1489,6 +1716,7 @@ async def _handle_travel_commands(
     - ```return slow``` -- slow travel to the current room (snapshot)
     - ```autowander``` -- visit all same-named rooms via slow travel
     - ```autodiscover``` -- explore unvisited exits from nearby rooms
+    - ```randomwalk``` -- random walk preferring unvisited rooms
 
     Only the **first** travel command in the list is handled; everything
     before it is returned as-is (already sent by the caller), and everything
@@ -1507,12 +1735,19 @@ async def _handle_travel_commands(
         verb = m.group(1).lower()
         arg = m.group(2).strip()
 
-        if verb == "autowander":
-            await _autowander(writer, log)
-            return parts[idx + 1 :]
-
-        if verb == "autodiscover":
-            await _autodiscover(writer, log)
+        if verb in ("autowander", "autodiscover", "randomwalk"):
+            walk_limit = _DEFAULT_WALK_LIMIT
+            if arg:
+                try:
+                    walk_limit = int(arg)
+                except ValueError:
+                    pass
+            if verb == "autowander":
+                await _autowander(writer, log, limit=walk_limit)
+            elif verb == "autodiscover":
+                await _autodiscover(writer, log, limit=walk_limit)
+            else:
+                await _randomwalk(writer, log, limit=walk_limit)
             return parts[idx + 1 :]
 
         slow = "slow" in verb
@@ -1552,8 +1787,101 @@ _MOVE_STEP_DELAY = 0.15
 _MOVE_MAX_RETRIES = 3
 
 
+class _CommandQueue:
+    """Mutable state for a running command queue, enabling display and cancellation."""
+
+    __slots__ = ("commands", "current_idx", "cancelled", "cancel_event", "render")
+
+    def __init__(self, commands: list[str], render: Callable[[], None]) -> None:
+        self.commands = commands
+        self.current_idx = 0
+        self.cancelled = False
+        self.cancel_event = asyncio.Event()
+        self.render = render
+
+
+def _collapse_runs(
+    commands: list[str], start: int = 0
+) -> list[tuple[str, int, int]]:
+    """Collapse consecutive identical commands into display groups.
+
+    :param commands: Full command list.
+    :param start: Index to start collapsing from (earlier entries are skipped).
+    :returns: List of ``(display_text, start_idx, end_idx)`` tuples.
+    """
+    if start >= len(commands):
+        return []
+    runs: list[tuple[str, int, int]] = []
+    i = start
+    while i < len(commands):
+        cmd = commands[i]
+        j = i
+        while j + 1 < len(commands) and commands[j + 1] == cmd:
+            j += 1
+        count = j - i + 1
+        text = f"{count}\u00d7{cmd}" if count > 1 else cmd
+        runs.append((text, i, j))
+        i = j + 1
+    return runs
+
+
+def _render_command_queue(
+    queue: "_CommandQueue",
+    scroll: "ScrollRegion",
+    out: "asyncio.StreamWriter",
+) -> None:
+    """Render the command queue on the input row.
+
+    The active run is highlighted with paper-white background / black
+    foreground.  Pending runs use dim grey.  If the display is too wide
+    it is truncated with an ellipsis.
+    """
+    bt = _get_term()
+    cols = bt.width
+
+    runs = _collapse_runs(queue.commands, queue.current_idx)
+    if not runs:
+        return
+
+    active_sgr = bt.on_color_rgb(255, 255, 255) + bt.color_rgb(0, 0, 0)
+    pending_sgr = bt.color_rgb(120, 120, 120)
+    normal = bt.normal
+
+    # Build fragments: (sgr, text) for each run.
+    frags: list[tuple[str, str]] = []
+    for text, start_idx, _end_idx in runs:
+        is_active = start_idx <= queue.current_idx <= _end_idx
+        sgr = active_sgr if is_active else pending_sgr
+        frags.append((sgr, text))
+
+    sep = " "
+    total_w = 0
+    built: list[tuple[str, str]] = []
+    for idx, (sgr, text) in enumerate(frags):
+        w = _wcswidth(text) + (1 if idx > 0 else 0)
+        if total_w + w > cols - 1 and built:
+            built.append((pending_sgr, _ELLIPSIS))
+            total_w += 1
+            break
+        if idx > 0:
+            built.append(("", sep))
+        built.append((sgr, text))
+        total_w += w
+
+    out.write(bt.move_yx(scroll.input_row, 0).encode())
+    for sgr, text in built:
+        out.write(f"{sgr}{text}{normal}".encode())
+    pad = cols - total_w
+    if pad > 0:
+        out.write((" " * pad).encode())
+    out.write(normal.encode())
+
+
 async def _send_chained(
-    commands: list[str], writer: Union[TelnetWriter, TelnetWriterUnicode], log: logging.Logger
+    commands: list[str],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    log: logging.Logger,
+    queue: Optional["_CommandQueue"] = None,
 ) -> None:
     """
     Send multiple commands with GA/EOR pacing between each.
@@ -1579,9 +1907,14 @@ async def _send_chained(
     is_repeated = len(commands) > 1 and len(set(commands)) == 1
 
     for _idx, cmd in enumerate(commands[1:], 1):
-        prev_room = getattr(writer, "_current_room_num", "") if is_repeated else ""
+        # Detect runs of identical commands (e.g. "9e;6n" expands to
+        # e,e,...,n,n,...) — these need movement pacing even in mixed
+        # lists.  A command is "repeated" if it matches the previous one.
+        prev_cmd = commands[_idx - 1] if _idx > 0 else ""
+        use_move_pacing = is_repeated or cmd == prev_cmd
+        prev_room = getattr(writer, "_current_room_num", "") if use_move_pacing else ""
 
-        if not is_repeated:
+        if not use_move_pacing:
             # Mixed commands: GA/EOR pacing only.
             if prompt_ready is not None:
                 prompt_ready.clear()
@@ -1826,7 +2159,7 @@ if sys.platform != "win32":
             dmz = bottom + 1
             if dmz < self.input_row:
                 self._stdout.write(
-                    (t.move_yx(dmz, 0) + t.clear_eol + "\u2500" * self._cols).encode()
+                    (t.move_yx(dmz, 0) + t.clear_eol + _dmz_line(self._cols)).encode()
                 )
             self._stdout.write(t.move_yx(bottom, 0).encode())
 
@@ -1931,6 +2264,77 @@ if sys.platform != "win32":
             except asyncio.CancelledError:
                 pass
 
+    class _ToolbarSlot(NamedTuple):
+        """A single toolbar item with layout metadata."""
+
+        priority: int
+        display_order: int
+        width: int
+        fragments: List[Tuple[str, str]]
+        side: str
+        min_width: int
+        label: str
+
+    _SEPARATOR_WIDTH = 3
+
+    def _layout_toolbar(
+        slots: List["_ToolbarSlot"], cols: int
+    ) -> Tuple[List[List[Tuple[str, str]]], List[List[Tuple[str, str]]]]:
+        """
+        Fit toolbar slots into *cols* columns by priority.
+
+        :returns: ``(left_items, right_items)`` — each a list of fragment
+            lists, ordered by ``display_order``.
+        """
+        left: List[_ToolbarSlot] = []
+        right: List[_ToolbarSlot] = []
+        left_used = 0
+        right_used = 0
+        has_left = False
+        has_right = False
+
+        for slot in sorted(slots, key=lambda s: s.priority):
+            sep = _SEPARATOR_WIDTH if (
+                (slot.side == "left" and has_left)
+                or (slot.side == "right" and has_right)
+            ) else 0
+            need = slot.width + sep
+            avail = cols - left_used - right_used - 1  # 1 char min pad
+
+            if need <= avail:
+                if slot.side == "left":
+                    left.append(slot)
+                    left_used += need
+                    has_left = True
+                else:
+                    right.append(slot)
+                    right_used += need
+                    has_right = True
+            elif slot.min_width > 0 and slot.min_width < slot.width:
+                fit = avail - sep
+                if fit >= slot.min_width:
+                    trimmed_text = _center_truncate(slot.label, fit)
+                    trimmed_w = _wcswidth(trimmed_text)
+                    trimmed_frags = [(slot.fragments[0][0], trimmed_text)]
+                    trimmed = slot._replace(
+                        width=trimmed_w, fragments=trimmed_frags
+                    )
+                    if slot.side == "left":
+                        left.append(trimmed)
+                        left_used += trimmed_w + sep
+                        has_left = True
+                    else:
+                        right.append(trimmed)
+                        right_used += trimmed_w + sep
+                        has_right = True
+
+        left.sort(key=lambda s: s.display_order)
+        right.sort(key=lambda s: s.display_order)
+        return (
+            [s.fragments for s in left],
+            [s.fragments for s in right],
+        )
+
     def _render_toolbar(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
         writer: Union[TelnetWriter, TelnetWriterUnicode],
         scroll: "ScrollRegion",
@@ -1955,17 +2359,28 @@ if sys.platform != "win32":
         ar_active = engine is not None and (engine.exclusive_active or engine.reply_pending)
         wander_active = getattr(writer, "_wander_active", False)
         discover_active = getattr(writer, "_discover_active", False)
+        randomwalk_active = getattr(writer, "_randomwalk_active", False)
 
-        bars: List[Tuple[str, str]] = []
+        slots: List[_ToolbarSlot] = []
         room_name = ""
         now = time.monotonic()
         needs_reflash = False
+
         if gmcp_data:  # pylint: disable=too-many-nested-blocks
             status = gmcp_data.get("Char.Status")
             if isinstance(status, dict):
                 level = status.get("level")
                 if level is not None:
-                    bars.append((_sgr_fg("#aaaaaa"), _segmented(f"Lv:{level}")))
+                    lv_text = _segmented(f"Lv:{level}")
+                    lv_frags: List[Tuple[str, str]] = [
+                        (_sgr_fg("#aaaaaa"), lv_text),
+                    ]
+                    slots.append(_ToolbarSlot(
+                        priority=7, display_order=0,
+                        width=_wcswidth(lv_text),
+                        fragments=lv_frags, side="left",
+                        min_width=0, label="",
+                    ))
 
                 money = status.get("money")
                 if money is not None:
@@ -1974,9 +2389,15 @@ if sys.platform != "win32":
                         money_str = _segmented(f"${money_int:,}")
                     except (TypeError, ValueError):
                         money_str = _segmented(f"${money}")
-                    if bars:
-                        bars.append(("", "   "))
-                    bars.append((_sgr_fg("#aaaaaa"), money_str))
+                    cash_frags: List[Tuple[str, str]] = [
+                        (_sgr_fg("#aaaaaa"), money_str),
+                    ]
+                    slots.append(_ToolbarSlot(
+                        priority=6, display_order=1,
+                        width=_wcswidth(money_str),
+                        fragments=cash_frags, side="left",
+                        min_width=0, label="",
+                    ))
 
             vitals = gmcp_data.get("Char.Vitals")
             if isinstance(vitals, dict):
@@ -1995,16 +2416,25 @@ if sys.platform != "win32":
                     hp_flashing = (now - hp_flash) < 0.1
                     if hp_flashing:
                         needs_reflash = True
-                    if bars:
-                        bars.append(("", "   "))
-                    bars.extend(_vital_bar(hp, maxhp, _BAR_WIDTH, "hp", flash=hp_flashing))
+                    hp_frags = _vital_bar(hp, maxhp, _BAR_WIDTH, "hp", flash=hp_flashing)
+                    hp_w = sum(_wcswidth(t) for _, t in hp_frags)
+                    slots.append(_ToolbarSlot(
+                        priority=1, display_order=2,
+                        width=hp_w, fragments=hp_frags, side="left",
+                        min_width=0, label="",
+                    ))
+
                 mp = vitals.get(
-                    "mp", vitals.get("MP", vitals.get("mana", vitals.get("sp", vitals.get("SP"))))
+                    "mp",
+                    vitals.get(
+                        "MP", vitals.get("mana", vitals.get("sp", vitals.get("SP")))
+                    ),
                 )
                 maxmp = vitals.get(
                     "maxmp",
                     vitals.get(
-                        "maxMP", vitals.get("max_mp", vitals.get("maxsp", vitals.get("maxSP")))
+                        "maxMP",
+                        vitals.get("max_mp", vitals.get("maxsp", vitals.get("maxSP"))),
                     ),
                 )
                 if mp is not None:
@@ -2020,14 +2450,19 @@ if sys.platform != "win32":
                     mp_flashing = (now - mp_flash) < 0.1
                     if mp_flashing:
                         needs_reflash = True
-                    if bars:
-                        bars.append(("", "   "))
-                    bars.extend(_vital_bar(mp, maxmp, _BAR_WIDTH, "mp", flash=mp_flashing))
+                    mp_frags = _vital_bar(mp, maxmp, _BAR_WIDTH, "mp", flash=mp_flashing)
+                    mp_w = sum(_wcswidth(t) for _, t in mp_frags)
+                    slots.append(_ToolbarSlot(
+                        priority=4, display_order=3,
+                        width=mp_w, fragments=mp_frags, side="left",
+                        min_width=0, label="",
+                    ))
 
             if isinstance(status, dict):
                 xp_raw = status.get("xp", status.get("XP", status.get("experience")))
                 maxxp = status.get(
-                    "maxxp", status.get("maxXP", status.get("max_xp", status.get("maxexp")))
+                    "maxxp",
+                    status.get("maxXP", status.get("max_xp", status.get("maxexp"))),
                 )
                 if xp_raw is not None:
                     try:
@@ -2035,7 +2470,9 @@ if sys.platform != "win32":
                     except (TypeError, ValueError):
                         xp_int = 0
                     last_xp = toolbar_state.get("last_xp")
-                    xp_history = toolbar_state.setdefault("xp_history", collections.deque())
+                    xp_history = toolbar_state.setdefault(
+                        "xp_history", collections.deque()
+                    )
                     if last_xp is not None and xp_int != last_xp:
                         toolbar_state["xp_flash"] = now
                         xp_history.append((now, xp_int))
@@ -2051,9 +2488,15 @@ if sys.platform != "win32":
                     xp_flashing = (now - xp_flash) < 2.0
                     if xp_flashing:
                         needs_reflash = True
-                    if bars:
-                        bars.append(("", "   "))
-                    bars.extend(_vital_bar(xp_raw, maxxp, _BAR_WIDTH, "xp", flash=xp_flashing))
+                    xp_frags = _vital_bar(
+                        xp_raw, maxxp, _BAR_WIDTH, "xp", flash=xp_flashing
+                    )
+                    xp_w = sum(_wcswidth(t) for _, t in xp_frags)
+                    slots.append(_ToolbarSlot(
+                        priority=5, display_order=4,
+                        width=xp_w, fragments=xp_frags, side="left",
+                        min_width=0, label="",
+                    ))
 
                     if len(xp_history) >= 2 and maxxp is not None:
                         oldest_t, oldest_xp = xp_history[0]
@@ -2072,67 +2515,125 @@ if sys.platform != "win32":
                                 else:
                                     eta_min = int(eta_sec / 60.0)
                                     eta_text = _segmented(f"ETA {eta_min}m")
-                                bars.append(("", "   "))
-                                bars.append((_sgr_fg("#888888"), eta_text))
+                                eta_frags: List[Tuple[str, str]] = [
+                                    (_sgr_fg("#888888"), eta_text),
+                                ]
+                                slots.append(_ToolbarSlot(
+                                    priority=8, display_order=5,
+                                    width=_wcswidth(eta_text),
+                                    fragments=eta_frags, side="left",
+                                    min_width=0, label="",
+                                ))
 
             room_info = gmcp_data.get("Room.Info", gmcp_data.get("Room.Name"))
             if isinstance(room_info, dict):
-                room_name = str(room_info.get("name", room_info.get("Name", "")))
+                room_name = str(
+                    room_info.get("name", room_info.get("Name", ""))
+                )
             elif isinstance(room_info, str):
                 room_name = room_info
 
         if room_name:
             toolbar_state["rprompt_text"] = room_name
 
-        right_bar: List[Tuple[str, str]] = []
-        if wander_active:
+        is_autoreply_bg = (
+            wander_active or discover_active or randomwalk_active or ar_active
+        )
+
+        if randomwalk_active:
+            rwcur = getattr(writer, "_randomwalk_current", 0)
+            rwtot = getattr(writer, "_randomwalk_total", 0)
+            mode_frags = _vital_bar(rwcur, rwtot, 16, "randomwalk")
+            mode_w = sum(_wcswidth(t) for _, t in mode_frags)
+            slots.append(_ToolbarSlot(
+                priority=3, display_order=10,
+                width=mode_w, fragments=mode_frags, side="right",
+                min_width=0, label="",
+            ))
+        elif wander_active:
             wcur = getattr(writer, "_wander_current", 0)
             wtot = getattr(writer, "_wander_total", 0)
-            right_bar = _vital_bar(wcur, wtot, 12, "wander")
-            right_text = ""
+            mode_frags = _vital_bar(wcur, wtot, 12, "wander")
+            mode_w = sum(_wcswidth(t) for _, t in mode_frags)
+            slots.append(_ToolbarSlot(
+                priority=3, display_order=10,
+                width=mode_w, fragments=mode_frags, side="right",
+                min_width=0, label="",
+            ))
         elif discover_active:
             dcur = getattr(writer, "_discover_current", 0)
             dtot = getattr(writer, "_discover_total", 0)
-            right_bar = _vital_bar(dcur, dtot, 12, "discover")
-            right_text = ""
+            mode_frags = _vital_bar(dcur, dtot, 12, "discover")
+            mode_w = sum(_wcswidth(t) for _, t in mode_frags)
+            slots.append(_ToolbarSlot(
+                priority=3, display_order=10,
+                width=mode_w, fragments=mode_frags, side="right",
+                min_width=0, label="",
+            ))
         elif ar_active:
             idx = getattr(engine, "exclusive_rule_index", None)
             ar_label = f"Autoreply #{idx}" if idx is not None else "Autoreply"
-            right_text = " " + ar_label
+            ar_text = " " + ar_label
+            slots.append(_ToolbarSlot(
+                priority=3, display_order=10,
+                width=len(ar_text),
+                fragments=[("", ar_text)],
+                side="right", min_width=0, label="",
+            ))
         else:
-            right_text = " " + toolbar_state.get("rprompt_text", "")
-        right_width = len(right_text)
-        right_bar_width = sum(_wcswidth(txt) if txt else 0 for _, txt in right_bar)
+            loc_text = toolbar_state.get("rprompt_text", "")
+            if loc_text:
+                full_text = " " + loc_text
+                full_w = _wcswidth(full_text)
+                loc_sgr = _sgr_fg("#dddddd")
+                slots.append(_ToolbarSlot(
+                    priority=2, display_order=10,
+                    width=full_w,
+                    fragments=[(loc_sgr, full_text)],
+                    side="right", min_width=5,
+                    label=full_text,
+                ))
 
         bt = _get_term()
         cols = bt.width
-
-        bars_width = sum(_wcswidth(txt) if txt else 0 for _, txt in bars)
+        left_items, right_items = _layout_toolbar(slots, cols)
 
         toolbar_row = scroll.input_row + 1
         out.write(bt.move_yx(toolbar_row, 0).encode())
 
-        is_autoreply_bg = wander_active or discover_active or ar_active
         if is_autoreply_bg:
             bg_sgr = bt.on_color_rgb(26, 18, 0) + bt.color_rgb(184, 134, 11)
         else:
             bg_sgr = bt.on_color_rgb(26, 0, 0)
-
         out.write(bg_sgr.encode())
-        for sgr, text in bars:
-            out.write(f"{sgr}{text}".encode())
-            out.write(bg_sgr.encode())
 
-        used = bars_width + right_width + right_bar_width
-        pad = max(1, cols - used)
+        left_total = 0
+        for i, frags in enumerate(left_items):
+            if i > 0:
+                out.write("   ".encode())
+                left_total += _SEPARATOR_WIDTH
+            for sgr, text in frags:
+                out.write(f"{sgr}{text}".encode())
+                out.write(bg_sgr.encode())
+                left_total += _wcswidth(text)
+
+        right_total = 0
+        for i, frags in enumerate(right_items):
+            if i > 0:
+                right_total += _SEPARATOR_WIDTH
+            right_total += sum(_wcswidth(t) for _, t in frags)
+
+        pad = max(1, cols - left_total - right_total)
         out.write((" " * pad).encode())
 
         right_sgr = _sgr_fg("#dddddd") if not is_autoreply_bg else ""
-        out.write(f"{right_sgr}{right_text}".encode())
-
-        for sgr, text in right_bar:
-            out.write(f"{sgr}{text}".encode())
-            out.write(bg_sgr.encode())
+        for i, frags in enumerate(right_items):
+            if i > 0:
+                out.write("   ".encode())
+            for sgr, text in frags:
+                effective_sgr = sgr if sgr else right_sgr
+                out.write(f"{effective_sgr}{text}".encode())
+                out.write(bg_sgr.encode())
 
         out.write(bt.normal.encode())
         return needs_reflash
@@ -2321,7 +2822,7 @@ if sys.platform != "win32":
                 dmz = _sr.scroll_bottom + 1
                 if dmz < _sr.input_row:
                     stdout.write(
-                        (t.move_yx(dmz, 0) + "\u2500" * _cols).encode()
+                        (t.move_yx(dmz, 0) + _dmz_line(_cols)).encode()
                     )
             _cs = getattr(telnet_writer, "_cursor_style", _DEFAULT_CURSOR_STYLE)
             stdout.write(_CURSOR_STYLES.get(_cs, CURSOR_BLINKING_BAR).encode())
@@ -2515,6 +3016,38 @@ if sys.platform != "win32":
 
             dispatch.register("KEY_F5", _wander_mode)
 
+            def _randomwalk_mode() -> None:
+                if getattr(telnet_writer, "_randomwalk_active", False):
+                    task = getattr(telnet_writer, "_randomwalk_task", None)
+                    if task is not None:
+                        task.cancel()
+                    return
+                from .rooms import load_prefs, save_prefs  # pylint: disable=import-outside-toplevel
+
+                skey = getattr(telnet_writer, "_session_key", "")
+                prefs = load_prefs(skey) if skey else {}
+                if not prefs.get("skip_randomwalk_confirm"):
+                    ok, dont_ask = _confirm_dialog(
+                        "Random Walk",
+                        "Random walk explores rooms by picking "
+                        "random exits, preferring unvisited rooms. "
+                        "It never returns through the entrance you "
+                        "came from. Autoreplies fire in each room. "
+                        "Stops when all reachable rooms are visited.",
+                        replay_buf=replay_buf,
+                    )
+                    if not ok:
+                        return
+                    if dont_ask and skey:
+                        prefs["skip_randomwalk_confirm"] = True
+                        save_prefs(skey, prefs)
+                task = asyncio.ensure_future(
+                    _randomwalk(telnet_writer, telnet_writer.log)
+                )
+                telnet_writer._randomwalk_task = task
+
+            dispatch.register("KEY_F3", _randomwalk_mode)
+
             server_done = False
 
             _last_input_style: list[Optional[dict[str, str]]] = [None]
@@ -2524,7 +3057,12 @@ if sys.platform != "win32":
                 ar_active = engine is not None and (engine.exclusive_active or engine.reply_pending)
                 wander = getattr(telnet_writer, "_wander_active", False)
                 disc = getattr(telnet_writer, "_discover_active", False)
-                style = _STYLE_AUTOREPLY if (wander or disc or ar_active) else _STYLE_NORMAL
+                rwalk = getattr(telnet_writer, "_randomwalk_active", False)
+                style = (
+                    _STYLE_AUTOREPLY
+                    if (wander or disc or rwalk or ar_active)
+                    else _STYLE_NORMAL
+                )
                 changed = _last_input_style[0] is not style
                 _last_input_style[0] = style
                 for attr, val in style.items():
@@ -2678,6 +3216,9 @@ if sys.platform != "win32":
                             _disc_task = getattr(telnet_writer, "_discover_task", None)
                             if _disc_task is not None and not _disc_task.done():
                                 _disc_task.cancel()
+                            _rw_task = getattr(telnet_writer, "_randomwalk_task", None)
+                            if _rw_task is not None and not _rw_task.done():
+                                _rw_task.cancel()
 
                             parts = expand_commands(line)
                             if parts and _TRAVEL_RE.match(parts[0]):

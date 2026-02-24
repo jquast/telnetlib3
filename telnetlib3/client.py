@@ -209,8 +209,12 @@ class TelnetClient(client_base.BaseClient):
         from .rooms import write_current_room  # pylint: disable=import-outside-toplevel
 
         room_graph.update_room(data)
-        # pylint: disable-next=protected-access
-        self.writer._current_room_num = str(data["num"])
+        # pylint: disable=protected-access
+        prev = getattr(self.writer, "_current_room_num", "")
+        new_num = str(data["num"])
+        if prev and prev != new_num:
+            self.writer._previous_room_num = prev
+        self.writer._current_room_num = new_num
         room_changed = getattr(self.writer, "_room_changed", None)
         if room_changed is not None:
             room_changed.set()
@@ -824,6 +828,7 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
         writer_arg._rooms_file = _rooms_path
         writer_arg._current_room_file = _current_room_file
         writer_arg._current_room_num = ""
+        writer_arg._previous_room_num = ""
         writer_arg._room_changed = asyncio.Event()
         writer_arg._wander_active = False
         writer_arg._wander_current = 0

@@ -30,6 +30,7 @@ from textual.app import App, ComposeResult
 from textual.screen import Screen
 from textual.binding import Binding
 from textual.widgets import (
+    Tree,
     Input,
     Label,
     Button,
@@ -2175,15 +2176,11 @@ class RoomBrowserScreen(Screen["bool | None"]):
 
         graph = RoomStore(self._rooms_path, read_only=True)
         self._graph = graph
-        all_rooms = graph.rooms
-        self._all_rooms = [
-            (r.num, r.name, r.area, len(r.exits), r.bookmarked)
-            for r in all_rooms.values()
-        ]
+        self._all_rooms = graph.room_summaries()
         if self._current_room_file:
             current = read_current_room(self._current_room_file)
-            if current and current in all_rooms:
-                self._current_area = all_rooms[current].area
+            if current:
+                self._current_area = graph.room_area(current)
 
     def _populate_area_dropdown(self) -> None:
         """Populate the area dropdown from loaded rooms."""
@@ -2239,14 +2236,15 @@ class RoomBrowserScreen(Screen["bool | None"]):
         q = query.lower()
         select = self.query_one("#room-area-select", Select)
         area_filter = select.value if isinstance(select.value, str) else None
-        for num, name, area, _exits, bookmarked in self._all_rooms:
-            if area_filter and area != area_filter:
-                continue
-            if q and q not in name.lower() and q not in area.lower():
-                continue
-            star = "\u2605" if bookmarked else ""
-            short_id = self._short_id(num)
-            table.add_row(star, name, short_id, key=num)
+        short_id = self._short_id
+        with self.app.batch_update():
+            for num, name, area, _exits, bookmarked in self._all_rooms:
+                if area_filter and area != area_filter:
+                    continue
+                if q and q not in name.lower() and q not in area.lower():
+                    continue
+                star = "\u2605" if bookmarked else ""
+                table.add_row(star, name, short_id(num), key=num)
         count_label = self.query_one("#room-count", Static)
         n_shown = table.row_count
         n_total = len(self._all_rooms)

@@ -236,6 +236,7 @@ async def test_naws_restored_on_normal_exit() -> None:
         ("`fast travel 42`", ["`fast travel 42`"]),
         ("look;`delay 1s`;north", ["look", "`delay 1s`", "north"]),
         ("`autowander`", ["`autowander`"]),
+        ("`randomwalk`", ["`randomwalk`"]),
         ("3e;`slow travel 99`", ["e", "e", "e", "`slow travel 99`"]),
     ],
 )
@@ -309,6 +310,8 @@ def test_split_incomplete_esc(data: bytes, flush: bytes, hold: bytes) -> None:
         ("`fast travel`", True),
         ("`autowander`", True),
         ("`AUTOWANDER`", True),
+        ("`randomwalk`", True),
+        ("`RANDOMWALK`", True),
         ("fast travel 123", False),
         ("`fastravel 123`", False),
         ("north", False),
@@ -467,3 +470,195 @@ def test_history_path_no_traversal() -> None:
     result = history_path(malicious)
     assert result.startswith(DATA_DIR)
     assert ".." not in os.path.basename(result)
+
+
+# ---------------------------------------------------------------------------
+# _randomwalk / _autodiscover stuck-loop tests
+# ---------------------------------------------------------------------------
+
+
+class _WalkWriter:
+    """Mock writer for _randomwalk / _autodiscover tests.
+
+    Reads of ``_current_room_num`` consume from *room_sequence* when given,
+    simulating movement (or lack thereof).
+    """
+
+    def __init__(
+        self,
+        room_num: str = "room1",
+        adj: dict[str, dict[str, str]] | None = None,
+        room_sequence: list[str] | None = None,
+    ) -> None:
+        self._room_val = room_num
+        self._seq_iter = iter(room_sequence) if room_sequence else None
+        self._previous_room_num = ""
+        self._randomwalk_active = False
+        self._randomwalk_total = 0
+        self._randomwalk_current = 0
+        self._randomwalk_task = None
+        self._discover_active = False
+        self._discover_total = 0
+        self._discover_current = 0
+        self._discover_task = None
+        self._autoreply_engine = None
+        self._echo_log: list[str] = []
+        self._echo_command = self._echo_log.append
+        self._wait_for_prompt = None
+        self._sent: list[str] = []
+        self._room_graph = types.SimpleNamespace(
+            _adj=adj or {},
+            get_room=lambda num: types.SimpleNamespace(name=num),
+            find_branches=lambda pos: [],
+        )
+
+    @property
+    def _current_room_num(self) -> str:
+        if self._seq_iter is not None:
+            val = next(self._seq_iter, None)
+            if val is not None:
+                self._room_val = val
+        return self._room_val
+
+    @_current_room_num.setter
+    def _current_room_num(self, value: str) -> None:
+        self._room_val = value
+
+    def write(self, data: str) -> None:
+        self._sent.append(data)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.asyncio
+async def test_randomwalk_stuck_room_stops(monkeypatch: pytest.MonkeyPatch) -> None:
+    """After 3 consecutive failed moves, randomwalk marks exits exhausted and stops."""
+    import logging
+    from telnetlib3.client_repl import _randomwalk
+
+    _real_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
+
+    adj: dict[str, dict[str, str]] = {
+        "room1": {"north": "room2"},
+    }
+    writer = _WalkWriter(room_num="room1", adj=adj)
+
+    await _randomwalk(writer, logging.getLogger("test"), limit=10)  # type: ignore[arg-type]
+
+    stuck_msgs = [m for m in writer._echo_log if "stuck in room" in m]
+    assert len(stuck_msgs) == 1
+    assert not writer._randomwalk_active
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.asyncio
+async def test_randomwalk_resets_stuck_on_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful room change resets the stuck counter."""
+    import logging
+    from telnetlib3.client_repl import _randomwalk
+
+    _real_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
+
+    adj: dict[str, dict[str, str]] = {
+        "room1": {"north": "room2"},
+        "room2": {"south": "room1"},
+    }
+    seq = (
+        ["room1"]  # initial read
+        + ["room1"] * 31  # fail tick 1 (30 ticks + re-read)
+        + ["room1"] * 31  # fail tick 2
+        + ["room2"] * 31  # success — moves to room2
+        + ["room2"] * 31  # fail from room2
+        + ["room2"] * 31  # fail from room2
+        + ["room1"] * 31  # success — moves to room1
+        + ["room1"] * 100  # more failures
+    )
+    writer = _WalkWriter(room_num="room1", adj=adj, room_sequence=seq)
+
+    await _randomwalk(writer, logging.getLogger("test"), limit=20)  # type: ignore[arg-type]
+
+    no_change_msgs = [m for m in writer._echo_log if "no room change" in m]
+    assert len(no_change_msgs) >= 2
+    stuck_msgs = [m for m in writer._echo_log if "stuck in room" in m]
+    assert len(stuck_msgs) <= 1
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.asyncio
+async def test_autodiscover_stuck_gateway_stops(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After 3 failures from the same room, autodiscover stops."""
+    import logging
+    from telnetlib3.client_repl import _autodiscover
+
+    _real_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
+
+    adj: dict[str, dict[str, str]] = {
+        "room1": {"north": "gw1"},
+        "gw1": {"east": "target1"},
+        "gw2": {"west": "target2"},
+        "gw3": {"south": "target3"},
+    }
+    writer = _WalkWriter(room_num="room1", adj=adj)
+
+    def fake_find_branches(pos: str) -> list[tuple[str, str, str]]:
+        return [
+            ("gw1", "east", "target1"),
+            ("gw2", "west", "target2"),
+            ("gw3", "south", "target3"),
+        ]
+
+    writer._room_graph.find_branches = fake_find_branches
+    writer._room_graph.find_path_with_rooms = lambda src, dst: [("north", dst)]
+
+    async def fake_fast_travel(*args: object, **kwargs: object) -> None:
+        pass
+
+    monkeypatch.setattr(
+        "telnetlib3.client_repl._fast_travel", fake_fast_travel
+    )
+
+    await _autodiscover(writer, logging.getLogger("test"), limit=20)  # type: ignore[arg-type]
+
+    stuck_msgs = [m for m in writer._echo_log if "all routes blocked" in m]
+    assert len(stuck_msgs) == 1
+    assert not writer._discover_active
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.asyncio
+async def test_send_chained_mixed_uses_move_pacing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Consecutive identical commands in a mixed list get movement delay pacing."""
+    import logging
+    from telnetlib3.client_repl import _send_chained, _MOVE_STEP_DELAY
+
+    sleep_args: list[float] = []
+    _real_sleep = asyncio.sleep
+
+    async def _tracking_sleep(duration: float) -> None:
+        sleep_args.append(duration)
+        await _real_sleep(0)
+
+    monkeypatch.setattr(asyncio, "sleep", _tracking_sleep)
+
+    writer = _WalkWriter(room_num="room1")
+    writer._wait_for_prompt = None
+    writer._prompt_ready = None
+    writer._room_changed = None
+
+    commands = ["e", "e", "e", "n", "n", "rocks"]
+    seq = ["room2", "room3", "room4", "room4a", "room4b", "room4c"]
+    writer._seq_iter = iter(seq)
+
+    await _send_chained(commands, writer, logging.getLogger("test"))  # type: ignore[arg-type]
+
+    assert len(writer._sent) == 5
+    move_delays = [d for d in sleep_args if d == _MOVE_STEP_DELAY]
+    assert len(move_delays) >= 3

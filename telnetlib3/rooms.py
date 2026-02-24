@@ -127,6 +127,27 @@ class RoomStore:
             result[room.num] = room
         return result
 
+    def room_summaries(self) -> list[tuple[str, str, str, int, bool]]:
+        """Return lightweight ``(num, name, area, exit_count, bookmarked)`` tuples.
+
+        Counts exits via SQL aggregation instead of materialising
+        :class:`Room` objects, which avoids copying exit dicts for every
+        room.
+        """
+        rows = self._conn.execute(
+            "SELECT r.num, r.name, r.area, COUNT(e.direction), r.bookmarked"
+            " FROM room r LEFT JOIN exit e ON r.num = e.src_num"
+            " GROUP BY r.num"
+        ).fetchall()
+        return [(r[0], r[1], r[2], r[3], bool(r[4])) for r in rows]
+
+    def room_area(self, num: str) -> str:
+        """Return the area of a single room, or ``""`` if not found."""
+        row = self._conn.execute(
+            "SELECT area FROM room WHERE num = ?", (num,)
+        ).fetchone()
+        return row[0] if row else ""
+
     def get_room(self, num: str) -> Optional[Room]:
         """
         Get a single room by number.
@@ -210,6 +231,12 @@ class RoomStore:
         self._conn.commit()
         return new_state
 
+    def _room_nums(self) -> frozenset[str]:
+        """Return the set of all room numbers in the database."""
+        return frozenset(
+            row[0] for row in self._conn.execute("SELECT num FROM room")
+        )
+
     def bfs_distances(self, src: str) -> dict[str, int]:
         """
         BFS from *src* returning distance to every reachable room.
@@ -217,7 +244,8 @@ class RoomStore:
         :param src: Source room number.
         :returns: ``{room_num: distance}`` for all reachable rooms.
         """
-        if not self._has_room(src):
+        known = self._room_nums()
+        if src not in known:
             return {}
         distances: dict[str, int] = {src: 0}
         queue: deque[str] = deque([src])
@@ -225,7 +253,7 @@ class RoomStore:
             current = queue.popleft()
             d = distances[current]
             for target in self._adj.get(current, {}).values():
-                if target not in distances and self._has_room(target):
+                if target not in distances and target in known:
                     distances[target] = d + 1
                     queue.append(target)
         return distances
