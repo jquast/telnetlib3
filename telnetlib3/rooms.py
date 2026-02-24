@@ -39,8 +39,7 @@ class RoomStore:
     """SQLite-backed room graph with in-memory adjacency cache."""
 
     def __init__(self, db_path: str, read_only: bool = False) -> None:
-        """
-        Open or create an SQLite room database.
+        """Open or create an SQLite room database.
 
         :param db_path: Path to the ``.db`` file.
         :param read_only: Open in read-only mode (no table creation).

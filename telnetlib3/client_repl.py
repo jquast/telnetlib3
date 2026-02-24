@@ -55,7 +55,7 @@ def _save_history_entry(line: str, path: str) -> None:
         f.write(line + "\n")
 
 # Number of bottom rows reserved for the input line + toolbar.
-_RESERVE_INITIAL = 2
+_RESERVE_INITIAL = 1
 _RESERVE_WITH_TOOLBAR = 2
 
 # Lazy blessed Terminal singleton — created on first use.
@@ -103,16 +103,16 @@ def _make_styles() -> None:
     t = _get_term()
     _STYLE_NORMAL = {
         "text_sgr": t.color_rgb(255, 239, 213),
-        "suggestion_sgr": t.color_rgb(190, 190, 190),
+        "suggestion_sgr": t.color_rgb(0, 0, 0),
         "bg_sgr": t.on_color_rgb(26, 0, 0),
         "ellipsis_sgr": t.color_rgb(190, 190, 190),
         "cursor_seq": "\x1b[5 q",  # DECSCUSR -- blinking bar
     }
     _STYLE_AUTOREPLY = {
-        "text_sgr": t.color_rgb(0, 0, 0),
-        "suggestion_sgr": t.color_rgb(80, 80, 80),
-        "bg_sgr": t.on_color_rgb(184, 134, 11),
-        "ellipsis_sgr": t.color_rgb(80, 80, 80),
+        "text_sgr": t.color_rgb(184, 134, 11),
+        "suggestion_sgr": t.color_rgb(80, 60, 0),
+        "bg_sgr": t.on_color_rgb(26, 18, 0),
+        "ellipsis_sgr": t.color_rgb(80, 60, 0),
         "cursor_seq": "\x1b[5 q",  # DECSCUSR -- blinking bar
     }
 
@@ -337,6 +337,17 @@ def _wcswidth(text: str) -> int:
 _BAR_WIDTH = 16
 
 
+_BAR_CAP_LEFT = "\U0001FB2B"   # 🬫 Block Sextant-2346
+_BAR_CAP_RIGHT = "\U0001FB1B"  # 🬛 Block Sextant-1345
+
+
+def _segmented(text: str) -> str:
+    """Replace ASCII digits 0-9 with segmented digit glyphs U+1FBF0..U+1FBF9."""
+    return text.translate(str.maketrans("0123456789", "\U0001FBF0\U0001FBF1"
+                                        "\U0001FBF2\U0001FBF3\U0001FBF4\U0001FBF5"
+                                        "\U0001FBF6\U0001FBF7\U0001FBF8\U0001FBF9"))
+
+
 def _sgr_fg(hexcolor: str) -> str:
     """SGR foreground from ``#rrggbb`` hex via blessed (auto-downconverts)."""
     return _get_term().color_hex(hexcolor)
@@ -351,12 +362,11 @@ def _vital_bar(
     current: Any, maximum: Any, width: int, kind: str, flash: bool = False
 ) -> "List[Tuple[str, str]]":
     """
-    Build a labelled progress-bar with overlaid text.
+    Build a labelled progress-bar with sextant bookends and overlaid text.
 
-    Returns ``HP:`` or ``MP:`` prefix followed by a colored bar.
-    The label (e.g. ``60/65 92%``) is rendered *on top of* the bar.
-    The filled portion uses dark text on the vitals color, the empty
-    portion uses dim text on a dark background.
+    The label (e.g. ``513/514 100% HP``) is rendered *on top of* the bar
+    using segmented digit glyphs.  Sextant block characters bookend the
+    bar for a rounded appearance.
 
     :param flash: When ``True``, render the bar in white for attention.
     """
@@ -382,20 +392,25 @@ def _vital_bar(
 
     bar_color = _vital_color(frac, kind)
     if flash:
+        fill_bg = "#ffffff"
+        empty_bg = "#888888"
         filled_sgr = _sgr_fg("#101010") + _sgr_bg("#ffffff")
         empty_sgr = _sgr_fg("#aaaaaa") + _sgr_bg("#888888")
     else:
+        fill_bg = bar_color
+        empty_bg = "#2a2a2a"
         filled_sgr = _sgr_fg("#101010") + _sgr_bg(bar_color)
         empty_sgr = _sgr_fg("#666666") + _sgr_bg("#2a2a2a")
 
+    suffix = {"hp": " HP", "mp": " MP", "xp": " XP", "wander": " AW"}.get(kind, "")
     if mx > 0:
-        label = f"{_fmt_value(cur)}/{_fmt_value(mx)} {pct}%"
+        label = _segmented(f"{_fmt_value(cur)}/{_fmt_value(mx)} {pct}%{suffix}")
     else:
-        label = _fmt_value(cur)
+        label = _segmented(f"{_fmt_value(cur)}{suffix}")
 
-    lpad = max(0, (width - len(label)) // 2)
+    lpad = max(0, width - len(label) - 1)
 
-    bg = list(" " * filled + " " * (width - filled))
+    bg = list(" " * width)
     for i, ch in enumerate(label, start=lpad):
         if i < width:
             bg[i] = ch
@@ -404,13 +419,14 @@ def _vital_bar(
     filled_text = bar_text[:filled]
     empty_text = bar_text[filled:]
 
-    prefix_sgr = _sgr_fg("#dddddd")
-    prefix = {"hp": "HP", "mp": "MP", "xp": "XP", "wander": "AW"}.get(kind, kind.upper())
+    left_color = fill_bg if filled > 0 else empty_bg
+    right_color = fill_bg if filled >= width else empty_bg
+
     return [
-        (prefix_sgr, prefix),
-        (prefix_sgr, ":"),
+        (_sgr_fg(left_color), _BAR_CAP_LEFT),
         (filled_sgr, filled_text),
         (empty_sgr, empty_text),
+        (_sgr_fg(right_color), _BAR_CAP_RIGHT),
     ]
 
 
@@ -892,6 +908,7 @@ async def _fast_travel(
     if not destination and steps:
         destination = steps[-1][1]
 
+    blocked_exits: list[tuple[str, str, str]] = []
     try:
         step_idx = 0
         reroute_count = 0
@@ -1032,19 +1049,37 @@ async def _fast_travel(
             if _cond_cancelled:
                 break
             if expected_room and actual and actual != expected_room:
-                # Update graph edge to reflect actual connection.
-                graph = _get_graph()
-                if graph is not None:
-                    prev = graph.rooms.get(prev_room)
-                    if prev is not None:
-                        prev.exits[direction] = actual
-                        log.info(
-                            "%s: updated edge %s of %s: -> %s",
-                            mode,
-                            direction,
-                            prev_room[:8],
-                            actual[:8],
-                        )
+                move_blocked = actual == prev_room
+                if move_blocked:
+                    # Exit is impassable (server rejected the move after
+                    # all retries).  Temporarily remove it from the graph
+                    # so re-routing won't try it again.
+                    graph = _get_graph()
+                    if graph is not None:
+                        prev = graph.rooms.get(prev_room)
+                        if prev is not None and direction in prev.exits:
+                            blocked_exits.append((prev_room, direction, prev.exits[direction]))
+                            del prev.exits[direction]
+                            log.info(
+                                "%s: blocked exit %s of %s (impassable)",
+                                mode,
+                                direction,
+                                prev_room[:8],
+                            )
+                else:
+                    # Update graph edge to reflect actual connection.
+                    graph = _get_graph()
+                    if graph is not None:
+                        prev = graph.rooms.get(prev_room)
+                        if prev is not None:
+                            prev.exits[direction] = actual
+                            log.info(
+                                "%s: updated edge %s of %s: -> %s",
+                                mode,
+                                direction,
+                                prev_room[:8],
+                                actual[:8],
+                            )
 
                 # Try re-pathfinding from actual position.
                 if (
@@ -1081,6 +1116,16 @@ async def _fast_travel(
                 break
             step_idx += 1
     finally:
+        # Restore temporarily blocked exits so the graph stays accurate
+        # for future pathfinding (the block may be transient, e.g. a
+        # quest gate that opens later).
+        if blocked_exits:
+            graph = _get_graph()
+            if graph is not None:
+                for room_num, exit_dir, target in blocked_exits:
+                    prev = graph.rooms.get(room_num)
+                    if prev is not None and exit_dir not in prev.exits:
+                        prev.exits[exit_dir] = target
         engine = _get_engine()
         if engine is not None:
             engine.suppress_exclusive = False
@@ -1247,6 +1292,7 @@ async def _autodiscover(
         return
 
     tried: set[tuple[str, str]] = set()
+    inaccessible: set[str] = set()
 
     branches = graph.find_branches(current)
     if not branches:
@@ -1264,7 +1310,11 @@ async def _autodiscover(
             pos = getattr(writer, "_current_room_num", "")
             # Re-discover from current position each iteration — picks up
             # newly revealed exits from rooms we just visited, nearest-first.
-            branches = [(gw, d, t) for gw, d, t in graph.find_branches(pos) if (gw, d) not in tried]
+            branches = [
+                (gw, d, t)
+                for gw, d, t in graph.find_branches(pos)
+                if (gw, d) not in tried and t not in inaccessible
+            ]
             if not branches:
                 break
 
@@ -1278,6 +1328,8 @@ async def _autodiscover(
                 steps = graph.find_path_with_rooms(pos, gw_room)
                 if steps is None:
                     tried.add((gw_room, direction))
+                    if target_num:
+                        inaccessible.add(target_num)
                     if echo_fn is not None:
                         echo_fn(
                             f"AUTODISCOVER [{step_count}]: " f"no path to gateway {gw_room[:8]}"
@@ -1289,7 +1341,14 @@ async def _autodiscover(
                 actual = getattr(writer, "_current_room_num", "")
                 if actual != gw_room:
                     tried.add((gw_room, direction))
+                    if target_num:
+                        inaccessible.add(target_num)
                     log.info("AUTODISCOVER: failed to reach gateway %s", gw_room[:8])
+                    if echo_fn is not None:
+                        echo_fn(
+                            f"AUTODISCOVER [{step_count}]: "
+                            f"gateway {gw_room[:8]} inaccessible, skipping"
+                        )
                     continue
 
             # Step through the frontier exit.
@@ -1312,6 +1371,8 @@ async def _autodiscover(
                     break
             else:
                 tried.add((gw_room, direction))
+                if target_num:
+                    inaccessible.add(target_num)
                 if echo_fn is not None:
                     echo_fn(f"AUTODISCOVER [{step_count}]: " f"no room change after {direction}")
                 continue
@@ -1900,6 +1961,23 @@ if sys.platform != "win32":
         now = time.monotonic()
         needs_reflash = False
         if gmcp_data:  # pylint: disable=too-many-nested-blocks
+            status = gmcp_data.get("Char.Status")
+            if isinstance(status, dict):
+                level = status.get("level")
+                if level is not None:
+                    bars.append((_sgr_fg("#aaaaaa"), _segmented(f"Lv:{level}")))
+
+                money = status.get("money")
+                if money is not None:
+                    try:
+                        money_int = int(money)
+                        money_str = _segmented(f"${money_int:,}")
+                    except (TypeError, ValueError):
+                        money_str = _segmented(f"${money}")
+                    if bars:
+                        bars.append(("", "   "))
+                    bars.append((_sgr_fg("#aaaaaa"), money_str))
+
             vitals = gmcp_data.get("Char.Vitals")
             if isinstance(vitals, dict):
                 hp = vitals.get("hp", vitals.get("HP"))
@@ -1917,6 +1995,8 @@ if sys.platform != "win32":
                     hp_flashing = (now - hp_flash) < 0.1
                     if hp_flashing:
                         needs_reflash = True
+                    if bars:
+                        bars.append(("", "   "))
                     bars.extend(_vital_bar(hp, maxhp, _BAR_WIDTH, "hp", flash=hp_flashing))
                 mp = vitals.get(
                     "mp", vitals.get("MP", vitals.get("mana", vitals.get("sp", vitals.get("SP"))))
@@ -1944,7 +2024,6 @@ if sys.platform != "win32":
                         bars.append(("", "   "))
                     bars.extend(_vital_bar(mp, maxmp, _BAR_WIDTH, "mp", flash=mp_flashing))
 
-            status = gmcp_data.get("Char.Status")
             if isinstance(status, dict):
                 xp_raw = status.get("xp", status.get("XP", status.get("experience")))
                 maxxp = status.get(
@@ -1989,29 +2068,12 @@ if sys.platform != "win32":
                                 eta_sec = remaining / rate_per_sec
                                 eta_hr = eta_sec / 3600.0
                                 if eta_hr >= 1.0:
-                                    eta_text = f" ETA {eta_hr:.1f}h"
+                                    eta_text = _segmented(f"ETA {eta_hr:.1f}h")
                                 else:
                                     eta_min = int(eta_sec / 60.0)
-                                    eta_text = f" ETA {eta_min}m"
+                                    eta_text = _segmented(f"ETA {eta_min}m")
+                                bars.append(("", "   "))
                                 bars.append((_sgr_fg("#888888"), eta_text))
-
-            if isinstance(status, dict):
-                level = status.get("level")
-                if level is not None:
-                    if bars:
-                        bars.append(("", "  "))
-                    bars.append((_sgr_fg("#aaaaaa"), f"Lv:{level}"))
-
-                money = status.get("money")
-                if money is not None:
-                    try:
-                        money_int = int(money)
-                        money_str = f"${money_int:,}"
-                    except (TypeError, ValueError):
-                        money_str = f"${money}"
-                    if bars:
-                        bars.append(("", "  "))
-                    bars.append((_sgr_fg("#aaaaaa"), money_str))
 
             room_info = gmcp_data.get("Room.Info", gmcp_data.get("Room.Name"))
             if isinstance(room_info, dict):
@@ -2022,17 +2084,16 @@ if sys.platform != "win32":
         if room_name:
             toolbar_state["rprompt_text"] = room_name
 
+        right_bar: List[Tuple[str, str]] = []
         if wander_active:
             wcur = getattr(writer, "_wander_current", 0)
             wtot = getattr(writer, "_wander_total", 0)
-            wander_bar = _vital_bar(wcur, wtot, 12, "wander")
-            bars = bars + [(_sgr_fg("#dddddd"), " ")] + wander_bar
+            right_bar = _vital_bar(wcur, wtot, 12, "wander")
             right_text = ""
         elif discover_active:
             dcur = getattr(writer, "_discover_current", 0)
             dtot = getattr(writer, "_discover_total", 0)
-            disc_bar = _vital_bar(dcur, dtot, 12, "discover")
-            bars = bars + [(_sgr_fg("#dddddd"), " ")] + disc_bar
+            right_bar = _vital_bar(dcur, dtot, 12, "discover")
             right_text = ""
         elif ar_active:
             idx = getattr(engine, "exclusive_rule_index", None)
@@ -2041,6 +2102,7 @@ if sys.platform != "win32":
         else:
             right_text = " " + toolbar_state.get("rprompt_text", "")
         right_width = len(right_text)
+        right_bar_width = sum(_wcswidth(txt) if txt else 0 for _, txt in right_bar)
 
         bt = _get_term()
         cols = bt.width
@@ -2052,7 +2114,7 @@ if sys.platform != "win32":
 
         is_autoreply_bg = wander_active or discover_active or ar_active
         if is_autoreply_bg:
-            bg_sgr = bt.on_color_rgb(184, 134, 11) + bt.color_rgb(0, 0, 0)
+            bg_sgr = bt.on_color_rgb(26, 18, 0) + bt.color_rgb(184, 134, 11)
         else:
             bg_sgr = bt.on_color_rgb(26, 0, 0)
 
@@ -2061,14 +2123,17 @@ if sys.platform != "win32":
             out.write(f"{sgr}{text}".encode())
             out.write(bg_sgr.encode())
 
-        if bars:
-            pad = max(1, cols - bars_width - right_width)
-        else:
-            pad = max(1, cols - right_width)
+        used = bars_width + right_width + right_bar_width
+        pad = max(1, cols - used)
         out.write((" " * pad).encode())
 
         right_sgr = _sgr_fg("#dddddd") if not is_autoreply_bg else ""
         out.write(f"{right_sgr}{right_text}".encode())
+
+        for sgr, text in right_bar:
+            out.write(f"{sgr}{text}".encode())
+            out.write(bg_sgr.encode())
+
         out.write(bt.normal.encode())
         return needs_reflash
 
@@ -2089,36 +2154,34 @@ if sys.platform != "win32":
         bt = _get_term()
         cols = bt.width
 
-        ellipsis_char = getattr(display, "_ellipsis", _ELLIPSIS)
-        clipped_left = getattr(display, "clipped_left", False)
-        clipped_right = getattr(display, "clipped_right", False)
-        bg_sgr = getattr(display, "bg_sgr", "")
-        text_sgr = getattr(display, "text_sgr", "")
-        suggestion_sgr = getattr(display, "suggestion_sgr", "")
-        ellipsis_sgr = getattr(display, "ellipsis_sgr", "")
-
         out.write(bt.move_yx(scroll.input_row, 0).encode())
-        out.write(bg_sgr.encode())
+        out.write(display.bg_sgr.encode())
 
-        if clipped_left:
-            out.write(f"{ellipsis_sgr}{ellipsis_char}".encode())
-            out.write(bg_sgr.encode())
+        if display.overflow_left:
+            out.write(f"{display.ellipsis_sgr}{_ELLIPSIS}".encode())
+            out.write(display.bg_sgr.encode())
 
-        if text_sgr:
-            out.write(text_sgr.encode())
+        if display.text_sgr:
+            out.write(display.text_sgr.encode())
         out.write(display.text.encode())
 
         if display.suggestion:
-            out.write(f"{suggestion_sgr}{display.suggestion}".encode())
+            out.write(
+                f"{display.suggestion_sgr}{display.suggestion}".encode()
+            )
 
-        if clipped_right:
-            out.write(f"{ellipsis_sgr}{ellipsis_char}".encode())
+        if display.overflow_right:
+            out.write(f"{display.ellipsis_sgr}{_ELLIPSIS}".encode())
 
         text_w = _wcswidth(display.text) + _wcswidth(display.suggestion)
-        rendered = (1 if clipped_left else 0) + text_w + (1 if clipped_right else 0)
+        rendered = (
+            (1 if display.overflow_left else 0)
+            + text_w
+            + (1 if display.overflow_right else 0)
+        )
         pad = cols - rendered
         if pad > 0:
-            out.write(f"{bg_sgr}{' ' * pad}".encode())
+            out.write(f"{display.bg_sgr}{' ' * pad}".encode())
         out.write(bt.normal.encode())
 
         out.write(bt.move_yx(scroll.input_row, display.cursor).encode())
@@ -2454,14 +2517,20 @@ if sys.platform != "win32":
 
             server_done = False
 
+            _last_input_style: list[Optional[dict[str, str]]] = [None]
+
             def _update_input_style() -> None:
                 engine = autoreply_engine
                 ar_active = engine is not None and (engine.exclusive_active or engine.reply_pending)
                 wander = getattr(telnet_writer, "_wander_active", False)
                 disc = getattr(telnet_writer, "_discover_active", False)
                 style = _STYLE_AUTOREPLY if (wander or disc or ar_active) else _STYLE_NORMAL
+                changed = _last_input_style[0] is not style
+                _last_input_style[0] = style
                 for attr, val in style.items():
                     setattr(editor, attr, val)
+                if changed:
+                    _render_input_line(editor.display, scroll, stdout)
 
             async def _read_server() -> None:
                 nonlocal server_done, mode_switched, _prompt_pending
