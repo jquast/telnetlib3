@@ -4,7 +4,6 @@ Atari ST codec.
 Generated from ftp://ftp.unicode.org/Public/MAPPINGS/VENDORS/MISC/ATARIST.TXT
 """
 
-
 # std imports
 import codecs
 

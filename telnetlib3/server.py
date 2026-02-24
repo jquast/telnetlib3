@@ -137,14 +137,7 @@ class TelnetServer(server_base.BaseServer):
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         """Handle new connection and wire up telnet option callbacks."""
-        from .telopt import (
-            NAWS,
-            TTYPE,
-            TSPEED,
-            CHARSET,
-            XDISPLOC,
-            NEW_ENVIRON,
-        )
+        from .telopt import NAWS, TTYPE, TSPEED, CHARSET, XDISPLOC, NEW_ENVIRON
 
         super().connection_made(transport)
 
@@ -195,14 +188,7 @@ class TelnetServer(server_base.BaseServer):
         MUD clients (Mudlet, TinTin++, etc.) interpret ``WILL ECHO`` as
         "password mode" and mask input.  See ``_negotiate_echo()``.
         """
-        from .telopt import (
-            DO,
-            SGA,
-            NAWS,
-            WILL,
-            BINARY,
-            CHARSET,
-        )
+        from .telopt import DO, SGA, NAWS, WILL, BINARY, CHARSET
 
         super().begin_advanced_negotiation()
         if not self.line_mode:
@@ -216,13 +202,7 @@ class TelnetServer(server_base.BaseServer):
 
     def check_negotiation(self, final: bool = False) -> bool:
         """Check if negotiation is complete including encoding."""
-        from .telopt import (
-            DO,
-            SB,
-            TTYPE,
-            CHARSET,
-            NEW_ENVIRON,
-        )
+        from .telopt import DO, SB, TTYPE, CHARSET, NEW_ENVIRON
 
         # If TTYPE cycle stalled or client refused TTYPE, trigger
         # deferred ECHO and NEW_ENVIRON negotiation now.  Only when
@@ -1239,9 +1219,9 @@ async def run_server(
 
     # Wrap shell with guards if enabled
     if robot_check or pty_fork_limit:
-        from .guard_shells import robot_shell
         from .guard_shells import ConnectionCounter, busy_shell
         from .guard_shells import robot_check as do_robot_check
+        from .guard_shells import robot_shell
 
         counter = ConnectionCounter(pty_fork_limit) if pty_fork_limit else None
         inner_shell = shell

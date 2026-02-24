@@ -1,6 +1,5 @@
 """Telnet client shell implementations for interactive terminal sessions."""
 
-
 # std imports
 import sys
 import asyncio
@@ -570,9 +569,7 @@ else:
             # ESC_DELAY timer fired -- flush buffered partial sequence
             if task is esc_timer_task:
                 esc_timer_task = None
-                from .session_context import (
-                    SessionContext,
-                )
+                from .session_context import SessionContext
 
                 _es_ctx: Optional[SessionContext] = getattr(telnet_writer, "_ctx", None)
                 _inf = _es_ctx.input_filter if _es_ctx is not None else None
@@ -627,9 +624,7 @@ else:
                 if _ar_engine is None and _so_ctx is not None:
                     _ar_rules = _so_ctx.autoreply_rules
                     if _ar_rules:
-                        from .autoreply import (
-                            AutoreplyEngine,
-                        )
+                        from .autoreply import AutoreplyEngine
 
                         _ar_wait = _so_ctx.autoreply_wait_fn
                         _ar_engine = AutoreplyEngine(
@@ -792,15 +787,9 @@ else:
                 # Standard event loop (byte-at-a-time).
                 # After REPL exit, restore cooked mode.
                 # Set raw mode so ctrl+] and single-byte input works.
-                if (
-                    not switched_to_raw
-                    and tty_shell._istty
-                    and tty_shell._save_mode is not None
-                ):
+                if not switched_to_raw and tty_shell._istty and tty_shell._save_mode is not None:
                     tty_shell.set_mode(
-                        tty_shell._make_raw(
-                            tty_shell._save_mode, suppress_echo=True
-                        )
+                        tty_shell._make_raw(tty_shell._save_mode, suppress_echo=True)
                     )
                     switched_to_raw = True
                     local_echo = not telnet_writer.will_echo

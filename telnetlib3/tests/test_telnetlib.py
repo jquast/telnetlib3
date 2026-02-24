@@ -18,7 +18,6 @@ try:
 except OSError:
     pytest.skip("Working socket required", allow_module_level=True)
 
-# pylint:disable=consider-using-from-import
 # local
 import telnetlib3.telnetlib as telnetlib  # noqa: E402
 

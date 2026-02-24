@@ -9,8 +9,6 @@ import logging
 import collections
 from typing import TYPE_CHECKING, Any, Dict, Callable, Optional, Sequence
 
-
-
 if TYPE_CHECKING:  # pragma: no cover
     from .stream_reader import TelnetReader
 
@@ -749,7 +747,6 @@ class TelnetWriter:
             finally:
                 # toggle iac_received on any ValueErrors/AssertionErrors raised
                 self.iac_received = False
-                # pylint: disable-next=redefined-variable-type
                 self.cmd_received = (opt, byte)
 
         elif self.mode == "remote" or self.mode == "kludge" and self.slc_simulated:
@@ -3040,9 +3037,7 @@ class TelnetWriterUnicode(TelnetWriter):
         encoding = self.fn_encoding(outgoing=True)
         return bytes(string, encoding, errors or self.encoding_errors)
 
-    def write(  # type: ignore[override]
-        self, string: str, errors: Optional[str] = None
-    ) -> None:
+    def write(self, string: str, errors: Optional[str] = None) -> None:  # type: ignore[override]
         """
         Write unicode string to transport, using protocol-preferred encoding.
 
@@ -3072,9 +3067,7 @@ class TelnetWriterUnicode(TelnetWriter):
         """
         self.write(string="".join(lines), errors=errors)
 
-    def echo(  # type: ignore[override]
-        self, string: str, errors: Optional[str] = None
-    ) -> None:
+    def echo(self, string: str, errors: Optional[str] = None) -> None:  # type: ignore[override]
         """
         Conditionally write ``string`` to transport when "remote echo" enabled.
 

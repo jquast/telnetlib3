@@ -114,10 +114,7 @@ class RoomStore:
             last_visited=row[6],
         )
 
-    _ROOM_COLS = (
-        "num, name, area, environment, bookmarked,"
-        " visit_count, last_visited"
-    )
+    _ROOM_COLS = "num, name, area, environment, bookmarked," " visit_count, last_visited"
 
     @property
     def rooms(self) -> dict[str, Room]:
@@ -203,8 +200,7 @@ class RoomStore:
         self._conn.execute("DELETE FROM exit WHERE src_num = ?", (num,))
         for direction, dst in exits.items():
             self._conn.execute(
-                ("INSERT INTO exit (src_num, direction, dst_num)"
-                 " VALUES (?, ?, ?)"),
+                ("INSERT INTO exit (src_num, direction, dst_num)" " VALUES (?, ?, ?)"),
                 (num, direction, dst),
             )
         self._conn.commit()

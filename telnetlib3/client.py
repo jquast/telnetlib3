@@ -722,11 +722,7 @@ async def run_client() -> None:
     # Wrap shell to inject raw_mode flag and input translation for retro encodings
     raw_mode_val: Optional[bool] = args.get("raw_mode", False)
     if raw_mode_val is not False:
-        from .client_shell import (
-            _INPUT_XLAT,
-            _INPUT_SEQ_XLAT,
-            InputFilter,
-        )
+        from .client_shell import _INPUT_XLAT, _INPUT_SEQ_XLAT, InputFilter
 
         enc_key = (args.get("encoding", "") or "").lower()
         byte_xlat = dict(_INPUT_XLAT.get(enc_key, {}))
@@ -799,7 +795,6 @@ async def run_client() -> None:
     from .rooms import RoomStore
     from .rooms import rooms_path as _rooms_path_fn
     from .rooms import current_room_path as _current_room_path_fn
-
 
     _rooms_path = _rooms_path_fn(_session_key)
     _current_room_file = _current_room_path_fn(_session_key)

@@ -89,9 +89,7 @@ async def test_gmcp_data_on_writer():
 @pytest.mark.asyncio
 async def test_ext_callback_registered_for_gmcp():
     client, _ = _make_connected_client()
-    assert (
-        client.writer._ext_callback[GMCP] == client._on_gmcp
-    )  # pylint: disable=comparison-with-callable
+    assert client.writer._ext_callback[GMCP] == client._on_gmcp
 
 
 @pytest.mark.asyncio

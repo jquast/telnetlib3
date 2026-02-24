@@ -632,7 +632,7 @@ def test_check_auto_mode_echo_only_stays_linemode() -> None:
     term.set_mode = _set_modes.append  # type: ignore[method-assign]
     result = term.check_auto_mode(switched_to_raw=False, last_will_echo=False)
     assert result is not None
-    switched_to_raw, last_will_echo, local_echo = result  # pylint: disable=unpacking-non-sequence
+    switched_to_raw, last_will_echo, local_echo = result
     assert switched_to_raw is False
     assert last_will_echo is True
     assert local_echo is False
@@ -651,7 +651,7 @@ def test_check_auto_mode_sga_goes_raw() -> None:
     term.set_mode = _set_modes.append  # type: ignore[method-assign]
     result = term.check_auto_mode(switched_to_raw=False, last_will_echo=False)
     assert result is not None
-    switched_to_raw, _, _ = result  # pylint: disable=unpacking-non-sequence
+    switched_to_raw, _, _ = result
     assert switched_to_raw is True
     assert len(_set_modes) == 1
     assert not _set_modes[0].lflag & termios.ICANON

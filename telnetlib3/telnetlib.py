@@ -300,9 +300,7 @@ class Telnet:
         if host is not None:
             self.open(host, port, timeout)
 
-    def open(
-        self, host, port=0, timeout=socket._GLOBAL_DEFAULT_TIMEOUT
-    ):
+    def open(self, host, port=0, timeout=socket._GLOBAL_DEFAULT_TIMEOUT):
         """
         Connect to a host.
 

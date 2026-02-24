@@ -239,9 +239,7 @@ def _format_encoding(
     return None
 
 
-def _build_terminal_rows(
-    term: "blessed.Terminal", data: Dict[str, Any]
-) -> List[Tuple[str, str]]:
+def _build_terminal_rows(term: "blessed.Terminal", data: Dict[str, Any]) -> List[Tuple[str, str]]:
     """Build (key, value) tuples for terminal capabilities table."""
     pairs: List[Tuple[str, str]] = []
     terminal_probe = data.get("terminal-probe", {})
@@ -362,9 +360,7 @@ def _build_terminal_rows(
     return pairs
 
 
-def _build_telnet_rows(
-    term: "blessed.Terminal", data: Dict[str, Any]
-) -> List[Tuple[str, str]]:
+def _build_telnet_rows(term: "blessed.Terminal", data: Dict[str, Any]) -> List[Tuple[str, str]]:
     """Build (key, value) tuples for telnet protocol table."""
     pairs: List[Tuple[str, str]] = []
     telnet_probe = data.get("telnet-probe", {})
@@ -529,9 +525,7 @@ def _display_compact_summary(
 ) -> bool:
     """Display compact fingerprint summary using prettytable."""
     try:
-        from ucs_detect import (
-            _collect_side_by_side_lines,
-        )
+        from ucs_detect import _collect_side_by_side_lines
         from prettytable import PrettyTable
     except ImportError:
         return False
@@ -832,9 +826,7 @@ def _repl_prompt(term: "blessed.Terminal") -> None:
     echo(f"\r{term.clear_eos}{term.normal}{legend}")
 
 
-def _paginate(
-    term: "blessed.Terminal", text: str, **_kw: Any
-) -> None:
+def _paginate(term: "blessed.Terminal", text: str, **_kw: Any) -> None:
     """Display text."""
     for line in text.split("\n"):
         echo(line + "\n")
@@ -895,9 +887,7 @@ def _normalize_color_hex(hex_color: str) -> str:
     return str(rgb_to_hex(r, g, b))
 
 
-def _filter_terminal_detail(
-    detail: Optional[Dict[str, Any]],
-) -> Optional[Dict[str, Any]]:
+def _filter_terminal_detail(detail: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Filter terminal session data for display."""
     if not detail:
         return detail

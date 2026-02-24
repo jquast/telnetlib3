@@ -197,7 +197,6 @@ class FingerprintingTelnetServer:
         """Return base environ keys plus :data:`ENVIRON_EXTENDED`."""
         if not isinstance(self, TelnetServer):
             raise TypeError("FingerprintingTelnetServer must be combined with TelnetServer")
-        # pylint: disable-next=no-member
         base: list[Union[str, bytes]] = super().on_request_environ()  # type: ignore[misc]
         # Insert extended keys before the trailing VAR/USERVAR sentinels
         from .telopt import VAR, USERVAR

@@ -274,7 +274,6 @@ class _VirtualCursor:
         stripped = _ANSI_STRIP_RE.sub(b"", data)
         try:
             text = stripped.decode(self.encoding, errors="replace")
-        # pylint: disable-next=overlapping-except
         except (LookupError, Exception):
             text = stripped.decode("latin-1")
         for ch in text:
@@ -294,7 +293,6 @@ logger = logging.getLogger("telnetlib3.server_fingerprint")
 
 def _is_display_worthy(v: Any) -> bool:
     """Return True if *v* should be kept in culled display output."""
-    # pylint: disable-next=use-implicit-booleaness-not-comparison-to-string
     return v is not False and v != {} and v != [] and v != "" and v != b""
 
 

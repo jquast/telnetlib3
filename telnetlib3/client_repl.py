@@ -1,6 +1,5 @@
 """REPL and TUI components for linemode telnet client sessions."""
 
-
 # std imports
 import os
 import sys
@@ -740,7 +739,6 @@ def _launch_tui_editor(
         from .rooms import rooms_path as _rooms_path_fn
         from .rooms import current_room_path as _current_room_path_fn
 
-
         _rp = ctx.rooms_file or _rooms_path_fn(_session_key)
         _crp = ctx.current_room_file or _current_room_path_fn(_session_key)
         cmd = [
@@ -859,7 +857,6 @@ def _launch_room_browser(
     from .rooms import fasttravel_path as _fasttravel_path_fn
     from .rooms import read_fasttravel
     from .rooms import current_room_path as _current_room_path_fn
-
 
     _rp = ctx.rooms_file or _rooms_path_fn(_session_key)
     _crp = ctx.current_room_file or _current_room_path_fn(_session_key)
@@ -2955,7 +2952,6 @@ if sys.platform != "win32":
         banner_lines: Optional[List[str]] = None,
     ) -> bool:
         """Unified REPL event loop using blessed LineEditor + async_inkey."""
-        # pylint: disable=import-error,no-name-in-module
         import blessed
         import blessed.line_editor
 
@@ -2973,12 +2969,12 @@ if sys.platform != "win32":
 
         replay_buf = OutputRingBuffer()
 
-        history = blessed.line_editor.LineHistory()  # pylint: disable=no-member
+        history = blessed.line_editor.LineHistory()
         if history_file:
             _load_history(history, history_file)
 
         _term_cols = blessed_term.width
-        editor = blessed.line_editor.LineEditor(  # pylint: disable=no-member
+        editor = blessed.line_editor.LineEditor(
             history=history,
             is_password=lambda: bool(telnet_writer.will_echo),
             max_width=_term_cols,
@@ -3097,9 +3093,7 @@ if sys.platform != "win32":
                     autoreply_engine.cancel()
                     autoreply_engine = None
                 if cur_rules:
-                    from .autoreply import (
-                        AutoreplyEngine,
-                    )
+                    from .autoreply import AutoreplyEngine
 
                     autoreply_engine = AutoreplyEngine(
                         cur_rules,

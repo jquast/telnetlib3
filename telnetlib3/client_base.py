@@ -254,9 +254,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         """
         if self.writer is None:
             return
-        from .server_fingerprinting import (
-            detect_syncterm_font,
-        )
+        from .server_fingerprinting import detect_syncterm_font
 
         encoding = detect_syncterm_font(data)
         if encoding is not None:

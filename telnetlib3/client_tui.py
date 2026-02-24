@@ -28,8 +28,8 @@ if TYPE_CHECKING:
 
 # 3rd party
 from textual import events
-from rich.style import Style  # pylint: disable=ungrouped-imports
-from textual.app import App, ComposeResult  # pylint: disable=ungrouped-imports
+from rich.style import Style
+from textual.app import App, ComposeResult
 from textual.screen import Screen
 from textual.binding import Binding
 from textual.widgets import (
@@ -51,8 +51,7 @@ from textual.widgets._tree import TreeNode
 
 # Reset SGR, cursor, alt-screen, mouse, and bracketed paste.
 _TERMINAL_CLEANUP = (
-    "\x1b[m\x1b[?25h\x1b[?1049l"
-    "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l"
+    "\x1b[m\x1b[?25h\x1b[?1049l" "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l"
 )
 
 _ENCODINGS = (
@@ -647,7 +646,6 @@ class SessionListScreen(Screen[None]):
                 # output to sys.__stderr__.  A piped stderr would send
                 # that output into the pipe instead of the terminal,
                 # hanging the editor.
-                # pylint: disable-next=consider-using-with
                 proc = subprocess.Popen(cmd)
                 proc.wait()
             except KeyboardInterrupt:
@@ -1208,8 +1206,7 @@ class _EditListScreen(Screen["bool | None"]):
 
     @property
     @abstractmethod
-    def _prefix(self) -> str:
-        ...
+    def _prefix(self) -> str: ...
 
     @property
     @abstractmethod
@@ -1218,8 +1215,7 @@ class _EditListScreen(Screen["bool | None"]):
 
     @property
     @abstractmethod
-    def _items(self) -> list[Any]:
-        ...
+    def _items(self) -> list[Any]: ...
 
     def _item_label(self, idx: int) -> str:
         """Return a display label for the item at *idx*."""
@@ -1389,20 +1385,16 @@ class _EditListScreen(Screen["bool | None"]):
         """Override to handle subclass-specific buttons."""
 
     @abstractmethod
-    def _show_form(self, *args: Any) -> None:
-        ...
+    def _show_form(self, *args: Any) -> None: ...
 
     @abstractmethod
-    def _submit_form(self) -> None:
-        ...
+    def _submit_form(self) -> None: ...
 
     @abstractmethod
-    def _refresh_table(self) -> None:
-        ...
+    def _refresh_table(self) -> None: ...
 
     @abstractmethod
-    def _save_to_file(self) -> None:
-        ...
+    def _save_to_file(self) -> None: ...
 
 
 class MacroEditScreen(_EditListScreen):
@@ -1558,9 +1550,7 @@ class MacroEditScreen(_EditListScreen):
             status = "" if enabled else " (off)"
             table.add_row(key, text + status, key=str(i))
 
-    def _show_form(
-        self, key_val: str = "", text_val: str = "", enabled: bool = True
-    ) -> None:
+    def _show_form(self, key_val: str = "", text_val: str = "", enabled: bool = True) -> None:
         self._captured_key = key_val
         self._capturing = False
         self._capture_escape_pending = False
@@ -2076,10 +2066,7 @@ class AutoreplyEditScreen(_EditListScreen):
     def _save_to_file(self) -> None:
         import re
 
-        from .autoreply import (
-            AutoreplyRule,
-            save_autoreplies,
-        )
+        from .autoreply import AutoreplyRule, save_autoreplies
 
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
         rules = []
@@ -2118,9 +2105,7 @@ class _RoomTree(Tree[str]):
         super().__init__(*args, **kwargs)
         self._bookmarked: set[str] = set()
 
-    def render_label(
-        self, node: TreeNode[str], base_style: Style, style: Style
-    ) -> "RichText":
+    def render_label(self, node: TreeNode[str], base_style: Style, style: Style) -> "RichText":
         """Render label with fixed star+arrow prefix columns."""
         from rich.text import Text as RichText
 
@@ -2278,10 +2263,7 @@ class RoomBrowserScreen(Screen["bool | None"]):
 
     def _load_rooms(self) -> None:
         """Load room data from SQLite database."""
-        from telnetlib3.rooms import (
-            RoomStore,
-            read_current_room,
-        )
+        from telnetlib3.rooms import RoomStore, read_current_room
 
         graph = RoomStore(self._rooms_path, read_only=True)
         self._graph = graph
@@ -2367,9 +2349,7 @@ class RoomBrowserScreen(Screen["bool | None"]):
 
         # Populate bookmarked set for the _RoomTree prefix renderer.
         if isinstance(tree, _RoomTree):
-            tree._bookmarked = {
-                num for num, _, _, _, bm in self._all_rooms if bm
-            }
+            tree._bookmarked = {num for num, _, _, _, bm in self._all_rooms if bm}
 
         n_shown = 0
         with self.app.batch_update():
@@ -2587,11 +2567,7 @@ class RoomBrowserScreen(Screen["bool | None"]):
         if dst_num is None:
             return
 
-        from telnetlib3.rooms import (
-            RoomStore,
-            write_fasttravel,
-            read_current_room,
-        )
+        from telnetlib3.rooms import RoomStore, write_fasttravel, read_current_room
 
         current = read_current_room(self._current_room_file)
         if not current:
@@ -2694,8 +2670,7 @@ class _EditorApp(App[None]):
         _log = logging.getLogger(__name__)
         driver = self._driver
         _log.debug(
-            "EditorApp mounted: driver._mouse=%s input_tty=%s "
-            "driver._file=%r driver.fileno=%s",
+            "EditorApp mounted: driver._mouse=%s input_tty=%s " "driver._file=%r driver.fileno=%s",
             getattr(driver, "_mouse", "?"),
             getattr(driver, "input_tty", "?"),
             getattr(driver, "_file", "?"),

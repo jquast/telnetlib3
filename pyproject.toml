@@ -145,6 +145,22 @@ disable = [
     # deliberate override renames/changes
     "arguments-renamed",
     "arguments-differ",
+    # blessed uses dynamic attributes (line_editor submodule)
+    "no-member",
+    # optional deps may not be installed
+    "import-error",
+    "no-name-in-module",
+    # false positives on mixed-type comparisons, unpacking, etc.
+    "unpacking-non-sequence",
+    "possibly-used-before-assignment",
+    "comparison-with-callable",
+    "use-implicit-booleaness-not-comparison-to-string",
+    "consider-using-from-import",
+    "ungrouped-imports",
+    "consider-using-with",
+    "overlapping-except",
+    "redefined-variable-type",
+    "unsupported-assignment-operation",
 ]
 
 [tool.pylint.format]

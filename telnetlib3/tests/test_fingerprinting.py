@@ -243,7 +243,6 @@ def test_prompt_stores_suggestions(tmp_path, monkeypatch, capsys):
     filepath.write_text(json.dumps(data))
 
     inputs = iter(["Ghostty", "GNU Telnet"])
-    # pylint: disable=possibly-used-before-assignment
     monkeypatch.setattr(fpd, "_cooked_input", lambda prompt: next(inputs))
     fpd._prompt_fingerprint_identification(MockTerm(), data, str(filepath), {})
     assert data["suggestions"]["terminal-emulator"] == "Ghostty"
