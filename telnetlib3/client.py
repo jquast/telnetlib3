@@ -19,6 +19,7 @@ from telnetlib3 import accessories, client_base
 from telnetlib3._types import ShellCallback
 from telnetlib3.stream_reader import TelnetReader, TelnetReaderUnicode
 from telnetlib3.stream_writer import TelnetWriter, TelnetWriterUnicode
+from telnetlib3.session_context import SessionContext
 
 __all__ = ("TelnetClient", "TelnetTerminalClient", "open_connection")
 
@@ -51,7 +52,7 @@ class TelnetClient(client_base.BaseClient):
     #: Default environment variables to send via NEW_ENVIRON
     DEFAULT_SEND_ENVIRON = ("TERM", "LANG", "COLUMNS", "LINES", "COLORTERM")
 
-    def __init__(  # pylint: disable=too-many-positional-arguments
+    def __init__(
         self,
         term: str = "unknown",
         cols: int = 80,
@@ -115,7 +116,6 @@ class TelnetClient(client_base.BaseClient):
         Wire up telnet option callbacks for terminal type, speed, display, environment, window size,
         and character set negotiation.
         """
-        # pylint: disable=import-outside-toplevel
         from telnetlib3.telopt import NAWS, TTYPE, TSPEED, CHARSET, XDISPLOC, NEW_ENVIRON
 
         super().connection_made(transport)
@@ -134,10 +134,14 @@ class TelnetClient(client_base.BaseClient):
 
         # Override the default handle_will method to detect when both sides support CHARSET
         # Store the original only on first connection to prevent chain growth on reconnect.
-        if not hasattr(self.writer, '_original_handle_will'):
-            self.writer._original_handle_will = self.writer.handle_will  # type: ignore[attr-defined]
+        if not hasattr(self.writer, "_original_handle_will"):
+            self.writer._original_handle_will = (  # type: ignore[attr-defined]
+                self.writer.handle_will
+            )
         else:
-            self.writer.handle_will = self.writer._original_handle_will  # type: ignore[attr-defined]
+            self.writer.handle_will = (  # type: ignore[attr-defined]
+                self.writer._original_handle_will
+            )
         original_handle_will = self.writer.handle_will
         writer = self.writer
 
@@ -159,11 +163,9 @@ class TelnetClient(client_base.BaseClient):
 
     def _setup_gmcp(self) -> None:
         """Wire GMCP callback and WILL-detection for Core.Hello handshake."""
-        from telnetlib3.telopt import GMCP  # pylint: disable=import-outside-toplevel
+        from telnetlib3.telopt import GMCP
 
         self.writer.set_ext_callback(GMCP, self._on_gmcp)
-        # pylint: disable-next=protected-access
-        self.writer._gmcp_data = self._gmcp_data
 
         # Capture current handle_will (already includes CHARSET wrapper).
         # On reconnect, _original_handle_will was already restored in connection_made,
@@ -182,7 +184,7 @@ class TelnetClient(client_base.BaseClient):
         if self._gmcp_hello_sent:
             return
         self._gmcp_hello_sent = True
-        from telnetlib3.accessories import get_version  # pylint: disable=import-outside-toplevel
+        from telnetlib3.accessories import get_version
 
         self.writer.send_gmcp("Core.Hello", {"client": "telnetlib3", "version": get_version()})
         self.writer.send_gmcp("Core.Supports.Set", self._gmcp_modules)
@@ -203,24 +205,19 @@ class TelnetClient(client_base.BaseClient):
 
     def _update_room_graph(self, data: Dict[str, Any]) -> None:
         """Update room graph and persist on Room.Info GMCP message."""
-        room_graph = getattr(self.writer, "_room_graph", None)
-        if room_graph is None:
+        ctx: Optional[SessionContext] = getattr(self.writer, "_ctx", None)
+        if ctx is None or ctx.room_graph is None:
             return
-        from .rooms import write_current_room  # pylint: disable=import-outside-toplevel
+        from .rooms import write_current_room
 
-        room_graph.update_room(data)
-        # pylint: disable=protected-access
-        prev = getattr(self.writer, "_current_room_num", "")
+        ctx.room_graph.update_room(data)
         new_num = str(data["num"])
-        if prev and prev != new_num:
-            self.writer._previous_room_num = prev
-        self.writer._current_room_num = new_num
-        room_changed = getattr(self.writer, "_room_changed", None)
-        if room_changed is not None:
-            room_changed.set()
-        current_room_file = getattr(self.writer, "_current_room_file", None)
-        if current_room_file:
-            write_current_room(current_room_file, str(data["num"]))
+        if ctx.current_room_num and ctx.current_room_num != new_num:
+            ctx.previous_room_num = ctx.current_room_num
+        ctx.current_room_num = new_num
+        ctx.room_changed.set()
+        if ctx.current_room_file:
+            write_current_room(ctx.current_room_file, new_num)
 
     def send_ttype(self) -> str:
         """Callback for responding to TTYPE requests."""
@@ -284,7 +281,7 @@ class TelnetClient(client_base.BaseClient):
         :param name: Raw charset name from the server.
         :returns: Normalized name suitable for :func:`codecs.lookup`.
         """
-        import re  # pylint: disable=import-outside-toplevel
+        import re
 
         base = name.strip().replace(" ", "-")
         # Strip leading zeros from numeric segments: iso-8859-02 -> iso-8859-2
@@ -464,8 +461,8 @@ class TelnetTerminalClient(TelnetClient):
     @staticmethod
     def _winsize() -> Tuple[int, int]:
         try:
-            import fcntl  # pylint: disable=import-outside-toplevel
-            import termios  # pylint: disable=import-outside-toplevel
+            import fcntl
+            import termios
 
             fmt = "hhhh"
             buf = b"\x00" * struct.calcsize(fmt)
@@ -620,13 +617,13 @@ async def open_connection(
             f"TCP connection to {host or 'localhost'}:{port}" f" timed out after {connect_timeout}s"
         ) from exc
 
-    await protocol._waiter_connected  # pylint: disable=protected-access
+    await protocol._waiter_connected
 
     assert protocol.reader is not None and protocol.writer is not None
     return protocol.reader, protocol.writer
 
 
-async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-statements,too-complex
+async def run_client() -> None:
     """Command-line 'telnetlib3-client' entry point, via setuptools."""
     args = _transform_args(_get_argument_parser().parse_args())
     config_msg = f"Client configuration: {accessories.repr_mapping(args)}"
@@ -660,9 +657,10 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             if always_will:
                 client.writer.always_will = always_will
             client.writer.always_do = always_do
-            from .telopt import GMCP as _GMCP  # pylint: disable=import-outside-toplevel
+            from .telopt import GMCP as _GMCP
+
             client.writer.passive_do = {_GMCP}
-            client.writer._encoding_explicit = encoding_explicit  # pylint: disable=protected-access
+            client.writer._encoding_explicit = encoding_explicit
 
         client.connection_made = _patched_connection_made  # type: ignore[method-assign]
         return client
@@ -673,7 +671,7 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
     colormatch: str = args["colormatch"]
     shell_callback = args["shell"]
     if colormatch.lower() != "none":
-        from .color_filter import (  # pylint: disable=import-outside-toplevel
+        from .color_filter import (
             PALETTES,
             ColorConfig,
             ColorFilter,
@@ -715,8 +713,8 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             reader: Union[TelnetReader, TelnetReaderUnicode],
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
-            # pylint: disable-next=protected-access
-            writer_arg._color_filter = color_filter_obj
+            ctx: SessionContext = writer_arg._ctx  # type: ignore[union-attr]
+            ctx.color_filter = color_filter_obj
             await original_shell(reader, writer_arg)
 
         shell_callback = _color_shell
@@ -724,7 +722,7 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
     # Wrap shell to inject raw_mode flag and input translation for retro encodings
     raw_mode_val: Optional[bool] = args.get("raw_mode", False)
     if raw_mode_val is not False:
-        from .client_shell import (  # pylint: disable=import-outside-toplevel
+        from .client_shell import (
             _INPUT_XLAT,
             _INPUT_SEQ_XLAT,
             InputFilter,
@@ -747,14 +745,12 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             reader: Union[TelnetReader, TelnetReaderUnicode],
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
-            # pylint: disable-next=protected-access
-            writer_arg._raw_mode = raw_mode_val
+            ctx: SessionContext = writer_arg._ctx  # type: ignore[union-attr]
+            ctx.raw_mode = raw_mode_val
             if ascii_eol:
-                # pylint: disable-next=protected-access
-                writer_arg._ascii_eol = True
+                ctx.ascii_eol = True
             if input_filter is not None:
-                # pylint: disable-next=protected-access
-                writer_arg._input_filter = input_filter
+                ctx.input_filter = input_filter
             await _inner_shell(reader, writer_arg)
 
         shell_callback = _raw_shell
@@ -767,22 +763,22 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             reader: Union[TelnetReader, TelnetReaderUnicode],
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
-            # pylint: disable=protected-access
-            writer_arg._repl_enabled = True
-            writer_arg._history_file = args.get("history_file")
+            ctx: SessionContext = writer_arg._ctx  # type: ignore[union-attr]
+            ctx.repl_enabled = True
+            ctx.history_file = args.get("history_file")
             await _inner_repl(reader, writer_arg)
 
         shell_callback = _repl_shell
 
     # Auto-load autoreplies and macros from default config path
-    from ._paths import CONFIG_DIR as _cfg_dir  # pylint: disable=import-outside-toplevel
+    from ._paths import CONFIG_DIR as _cfg_dir
 
     _session_key = f"{args['host']}:{args['port']}"
 
     _ar_path = os.path.join(_cfg_dir, "autoreplies.json")
     _autoreply_rules: list[Any] = []
     if os.path.exists(_ar_path):
-        from .autoreply import load_autoreplies  # pylint: disable=import-outside-toplevel
+        from .autoreply import load_autoreplies
 
         try:
             _autoreply_rules = load_autoreplies(_ar_path, _session_key)
@@ -792,7 +788,7 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
     _macro_path = os.path.join(_cfg_dir, "macros.json")
     _macro_defs: list[Any] = []
     if os.path.exists(_macro_path):
-        from .macros import load_macros  # pylint: disable=import-outside-toplevel
+        from .macros import load_macros
 
         try:
             _macro_defs = load_macros(_macro_path, _session_key)
@@ -800,12 +796,10 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             _macro_defs = []
 
     # Room graph for GMCP Room.Info automapper
-    # pylint: disable=import-outside-toplevel
     from .rooms import RoomStore
     from .rooms import rooms_path as _rooms_path_fn
     from .rooms import current_room_path as _current_room_path_fn
 
-    # pylint: enable=import-outside-toplevel
 
     _rooms_path = _rooms_path_fn(_session_key)
     _current_room_file = _current_room_path_fn(_session_key)
@@ -817,23 +811,17 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
         reader: Union[TelnetReader, TelnetReaderUnicode],
         writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
     ) -> None:
-        # pylint: disable=protected-access
-        # MUD-extension attributes set dynamically on writer
-        writer_arg._session_key = _session_key
-        writer_arg._autoreply_rules = _autoreply_rules
-        writer_arg._autoreplies_file = _ar_path
-        writer_arg._macro_defs = _macro_defs
-        writer_arg._macros_file = _macro_path
-        writer_arg._room_graph = _room_graph
-        writer_arg._rooms_file = _rooms_path
-        writer_arg._current_room_file = _current_room_file
-        writer_arg._current_room_num = ""
-        writer_arg._previous_room_num = ""
-        writer_arg._room_changed = asyncio.Event()
-        writer_arg._wander_active = False
-        writer_arg._wander_current = 0
-        writer_arg._wander_total = 0
-        writer_arg._wander_task = None
+        ctx = SessionContext(session_key=_session_key)
+        ctx.writer = writer_arg
+        ctx.autoreply_rules = _autoreply_rules
+        ctx.autoreplies_file = _ar_path
+        ctx.macro_defs = _macro_defs
+        ctx.macros_file = _macro_path
+        ctx.room_graph = _room_graph
+        ctx.rooms_file = _rooms_path
+        ctx.current_room_file = _current_room_file
+        ctx.gmcp_data = writer_arg.protocol._gmcp_data  # type: ignore[union-attr]
+        writer_arg._ctx = ctx  # type: ignore[union-attr]
         await _inner_session(reader, writer_arg)
 
     shell_callback = _session_shell
@@ -870,7 +858,6 @@ def _get_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("port", nargs="?", default=23, type=int, help="port number")
     parser.add_argument("--term", default=os.environ.get("TERM", "unknown"), help="terminal type")
     parser.add_argument("--loglevel", default="warn", help="log level")
-    # pylint: disable=protected-access
     parser.add_argument("--logfmt", default=accessories._DEFAULT_LOGFMT, help="log format")
     parser.add_argument("--logfile", help="filepath")
     parser.add_argument(
@@ -1044,7 +1031,7 @@ def _parse_option_arg(value: str) -> bytes:
     :returns: Single-byte option value.
     :raises ValueError: When *value* is not a known name or valid integer.
     """
-    from .telopt import option_from_name  # pylint: disable=import-outside-toplevel
+    from .telopt import option_from_name
 
     try:
         return option_from_name(value)
@@ -1067,7 +1054,8 @@ def _parse_background_color(value: str) -> Tuple[int, int, int]:
 
 
 def _resolve_history_file(value: Optional[str], session_key: str = "") -> Optional[str]:
-    """Resolve ``--history-file`` to an absolute path or ``None``.
+    """
+    Resolve ``--history-file`` to an absolute path or ``None``.
 
     :param value: Explicit path from CLI args, or ``None`` for auto.
     :param session_key: Session identifier (``host:port``) for per-session default.
@@ -1075,17 +1063,17 @@ def _resolve_history_file(value: Optional[str], session_key: str = "") -> Option
     if value is not None:
         return str(value) if value else None
     if session_key:
-        from ._paths import history_path  # pylint: disable=import-outside-toplevel
+        from ._paths import history_path
 
         return history_path(session_key)
-    from ._paths import HISTORY_FILE  # pylint: disable=import-outside-toplevel
+    from ._paths import HISTORY_FILE
 
     return HISTORY_FILE
 
 
 def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
     # Auto-enable force_binary for any non-ASCII encoding that uses high-bit bytes.
-    from .encodings import FORCE_BINARY_ENCODINGS  # pylint: disable=import-outside-toplevel
+    from .encodings import FORCE_BINARY_ENCODINGS
 
     force_binary = args.force_binary
     # Three-state: True (forced raw), False (forced line), None (auto-detect)
@@ -1140,9 +1128,7 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "ansi_keys": args.ansi_keys,
         "ssl": ssl_ctx,
         "no_repl": args.no_repl,
-        "history_file": _resolve_history_file(
-            args.history_file, f"{args.host}:{args.port}"
-        ),
+        "history_file": _resolve_history_file(args.history_file, f"{args.host}:{args.port}"),
         "gmcp_modules": (
             [m.strip() for m in args.gmcp_modules.split(",") if m.strip()]
             if args.gmcp_modules
@@ -1163,7 +1149,7 @@ def main() -> None:
     wants_help = "-h" in sys.argv[1:] or "--help" in sys.argv[1:]
     if not has_host and not wants_help:
         try:
-            import importlib  # pylint: disable=import-outside-toplevel
+            import importlib
 
             tui = importlib.import_module("telnetlib3.client_tui")
             tui.tui_main()
@@ -1200,7 +1186,6 @@ def _get_fingerprint_argument_parser() -> argparse.ArgumentParser:
         "--connect-timeout", default=10, type=float, help="TCP connection timeout in seconds"
     )
     parser.add_argument("--loglevel", default="warn", help="log level")
-    # pylint: disable=protected-access
     parser.add_argument("--logfmt", default=accessories._DEFAULT_LOGFMT, help="log format")
     parser.add_argument("--logfile", default=None, help="filepath")
     parser.add_argument(
@@ -1296,7 +1281,6 @@ async def run_fingerprint_client() -> None:
     :func:`~telnetlib3.server_fingerprinting.fingerprinting_client_shell`
     via :func:`functools.partial`, and runs the connection.
     """
-    # pylint: disable=import-outside-toplevel
     from . import fingerprinting, server_fingerprinting
 
     args = _get_fingerprint_argument_parser().parse_args()
@@ -1357,7 +1341,6 @@ async def run_fingerprint_client() -> None:
             orig_connection_made(transport)
             assert client.writer is not None
             client.writer.environ_encoding = environ_encoding
-            # pylint: disable-next=protected-access
             client.writer._encoding_explicit = environ_encoding != "ascii"
             mud_opts = {opt for opt, _, _ in fingerprinting.EXTENDED_OPTIONS}
             client.writer.always_will = fp_always_will | mud_opts

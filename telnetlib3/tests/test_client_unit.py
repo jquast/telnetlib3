@@ -338,18 +338,7 @@ def _fake_open_connection_factory(loop):
     """Build a mock open_connection that captures the shell callback."""
     captured_kwargs: dict = {}
     writer_obj = types.SimpleNamespace(
-        _color_filter=None,
-        _raw_mode=None,
-        _ascii_eol=False,
-        _input_filter=None,
-        _repl_enabled=False,
-        _history_file=None,
-        _session_key="",
-        _autoreply_rules=None,
-        _autoreplies_file=None,
-        _macro_defs=None,
-        _macros_file=None,
-        protocol=types.SimpleNamespace(waiter_closed=loop.create_future()),
+        protocol=types.SimpleNamespace(waiter_closed=loop.create_future(), _gmcp_data={})
     )
     writer_obj.protocol.waiter_closed.set_result(None)
     reader_obj = types.SimpleNamespace()
@@ -406,7 +395,7 @@ async def test_run_client_color_filter(monkeypatch, argv_extra, filter_cls_name)
     monkeypatch.setattr(cl, "open_connection", fake_oc)
     await cl.run_client()
 
-    assert type(writer_obj._color_filter).__name__ == filter_cls_name
+    assert type(writer_obj._ctx.color_filter).__name__ == filter_cls_name
 
 
 @pytest.mark.asyncio

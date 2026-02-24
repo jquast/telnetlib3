@@ -133,7 +133,7 @@ class TelnetConnection:
         # is programmatic, not a terminal app, so it should use the cols/rows
         # parameters rather than reading the real terminal size.
         if "client_factory" not in kwargs:
-            from .client import TelnetClient  # pylint: disable=import-outside-toplevel
+            from .client import TelnetClient
 
             kwargs["client_factory"] = TelnetClient
         self._reader, self._writer = await _open_connection(
@@ -295,7 +295,7 @@ class TelnetConnection:
             future = asyncio.run_coroutine_threadsafe(self._async_cleanup(), self._loop)
             try:
                 future.result(timeout=2.0)
-            except Exception:  # pylint: disable=broad-exception-caught
+            except Exception:
                 pass  # Cleanup should not raise
         if self._loop and self._loop.is_running():
             self._loop.call_soon_threadsafe(self._loop.stop)
@@ -311,7 +311,7 @@ class TelnetConnection:
             self._writer.close()
             try:
                 await self._writer.wait_closed()
-            except Exception:  # pylint: disable=broad-exception-caught
+            except Exception:
                 pass  # Cleanup should not raise
 
     def get_extra_info(self, name: str, default: Any = None) -> Any:
@@ -498,7 +498,6 @@ class BlockingTelnetServer:
             conn = ServerConnection(reader, writer, loop)
             self._client_queue.put(conn)
             # Wait until the sync handler closes the connection
-            # pylint: disable=protected-access
             await conn._wait_closed()
 
         self._server = await _create_server(self._host, self._port, shell=shell, **self._kwargs)
@@ -551,7 +550,7 @@ class BlockingTelnetServer:
         try:
             self._handler(conn)
         finally:
-            if not conn._closed:  # pylint: disable=protected-access
+            if not conn._closed:
                 conn.close()
 
     def shutdown(self) -> None:
@@ -566,7 +565,7 @@ class BlockingTelnetServer:
             future = asyncio.run_coroutine_threadsafe(self._async_shutdown(), self._loop)
             try:
                 future.result(timeout=2.0)
-            except Exception:  # pylint: disable=broad-exception-caught
+            except Exception:
                 pass  # Cleanup should not raise
         if self._loop and self._loop.is_running():
             self._loop.call_soon_threadsafe(self._loop.stop)
@@ -582,7 +581,7 @@ class BlockingTelnetServer:
             self._server.close()
             try:
                 await self._server.wait_closed()
-            except Exception:  # pylint: disable=broad-exception-caught
+            except Exception:
                 pass  # Cleanup should not raise
         # Cancel all pending tasks to avoid "Task was destroyed but pending" warnings
         for task in asyncio.all_tasks(self._loop):

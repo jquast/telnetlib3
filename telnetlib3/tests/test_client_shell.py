@@ -41,16 +41,19 @@ def _make_writer(
     will_echo: bool = False, raw_mode: "bool | None" = False, will_sga: bool = False
 ) -> object:
     """Build a minimal mock writer with the attributes Terminal needs."""
-    from telnetlib3.telopt import SGA  # pylint: disable=import-outside-toplevel
+    from telnetlib3.telopt import SGA
 
     writer = types.SimpleNamespace(
         will_echo=will_echo,
         client=True,
         remote_option=_MockOption({SGA: will_sga}),
         log=types.SimpleNamespace(debug=lambda *a, **kw: None),
+        _ctx=types.SimpleNamespace(
+            raw_mode=False, input_filter=None, color_filter=None, ascii_eol=False
+        ),
     )
     if raw_mode is not False:
-        writer._raw_mode = raw_mode
+        writer._ctx.raw_mode = raw_mode
     return writer
 
 
@@ -484,13 +487,7 @@ async def test_simple_server_output(
     "prompt,response,extra_args,send,expected",
     [
         (b"login: ", b"\r\nwelcome!\r\n", ["--no-repl"], b"user\r", [b"login:", b"welcome!"]),
-        (
-            b"prompt> ",
-            b"\r\ngot it\r\n",
-            ["--line-mode", "--no-repl"],
-            b"hello\r",
-            [b"got it"],
-        ),
+        (b"prompt> ", b"\r\ngot it\r\n", ["--line-mode", "--no-repl"], b"hello\r", [b"got it"]),
     ],
 )
 async def test_echo_sga_interaction(
@@ -718,7 +715,12 @@ async def test_raw_event_loop_reactivates_repl() -> None:
 
     writer = _make_writer()
     writer.log = types.SimpleNamespace(debug=lambda *a, **kw: None, log=lambda *a, **kw: None)
-    writer._raw_mode = None
+    writer._ctx.raw_mode = None
+    writer._ctx.color_filter = None
+    writer._ctx.ascii_eol = False
+    writer._ctx.autoreply_engine = None
+    writer._ctx.autoreply_rules = []
+    writer._ctx.input_filter = None
     writer.is_closing = lambda: False
 
     term = _make_term(writer)
@@ -774,7 +776,7 @@ async def test_send_stdin_with_input_filter() -> None:
     inf = InputFilter(_INPUT_SEQ_XLAT["atascii"], _INPUT_XLAT["atascii"])
 
     writer = _make_writer()
-    writer._input_filter = inf
+    writer._ctx.input_filter = inf
     writer._write = mock.Mock()
     stdout = mock.Mock()
 
@@ -789,7 +791,7 @@ async def test_send_stdin_with_pending_sequence() -> None:
     inf = InputFilter(_INPUT_SEQ_XLAT["atascii"], _INPUT_XLAT["atascii"])
 
     writer = _make_writer()
-    writer._input_filter = inf
+    writer._ctx.input_filter = inf
     writer._write = mock.Mock()
     stdout = mock.Mock()
 
@@ -850,13 +852,12 @@ def test_transform_output_empty_string() -> None:
     assert not _transform_output("", writer, True)
 
 
-@pytest.mark.parametrize(
-    "kwargs,expected", [({}, False), ({"_raw_mode": None}, None), ({"_raw_mode": True}, True)]
-)
-def test_get_raw_mode(kwargs: dict, expected: "bool | None") -> None:
+@pytest.mark.parametrize("raw_mode,expected", [(False, False), (None, None), (True, True)])
+def test_get_raw_mode(raw_mode: "bool | None", expected: "bool | None") -> None:
     from telnetlib3.client_shell import _get_raw_mode
 
-    assert _get_raw_mode(_make_transform_writer(**kwargs)) is expected
+    writer = types.SimpleNamespace(_ctx=types.SimpleNamespace(raw_mode=raw_mode))
+    assert _get_raw_mode(writer) is expected
 
 
 async def test_cooked_to_raw_transition_preserves_crlf(

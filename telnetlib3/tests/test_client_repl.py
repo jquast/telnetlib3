@@ -359,6 +359,7 @@ def test_style_normal_and_autoreply_differ() -> None:
 
 def test_render_input_line_basic() -> None:
     from blessed.line_editor import DisplayState
+
     from telnetlib3.client_repl import _render_input_line
 
     stdout, transport = _mock_stdout()
@@ -424,6 +425,7 @@ def test_resize_pending_flag_is_threading_event() -> None:
 
 def test_load_history_populates_entries(tmp_path: "os.PathLike[str]") -> None:
     from blessed.line_editor import LineHistory
+
     from telnetlib3.client_repl import _load_history
 
     hfile = tmp_path / "history"
@@ -445,6 +447,7 @@ def test_save_history_entry_appends(tmp_path: "os.PathLike[str]") -> None:
 
 def test_load_history_missing_file(tmp_path: "os.PathLike[str]") -> None:
     from blessed.line_editor import LineHistory
+
     from telnetlib3.client_repl import _load_history
 
     history = LineHistory()
@@ -464,7 +467,7 @@ def test_history_path_per_session() -> None:
 
 
 def test_history_path_no_traversal() -> None:
-    from telnetlib3._paths import history_path, DATA_DIR
+    from telnetlib3._paths import DATA_DIR, history_path
 
     malicious = "../../etc/passwd:22"
     result = history_path(malicious)
@@ -477,12 +480,42 @@ def test_history_path_no_traversal() -> None:
 # ---------------------------------------------------------------------------
 
 
-class _WalkWriter:
-    """Mock writer for _randomwalk / _autodiscover tests.
+class _DynamicRoomContext:
+    """SessionContext subclass with property-based current_room_num."""
 
-    Reads of ``_current_room_num`` consume from *room_sequence* when given,
-    simulating movement (or lack thereof).
-    """
+    def __init__(self, room_num: str, room_sequence: list[str] | None) -> None:
+        from telnetlib3.session_context import SessionContext
+
+        self._real_ctx = SessionContext(session_key="test")
+        self._room_val = room_num
+        self._seq_iter = iter(room_sequence) if room_sequence else None
+
+    @property
+    def current_room_num(self) -> str:
+        if self._seq_iter is not None:
+            val = next(self._seq_iter, None)
+            if val is not None:
+                self._room_val = val
+        return self._room_val
+
+    @current_room_num.setter
+    def current_room_num(self, value: str) -> None:
+        self._room_val = value
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._real_ctx, name)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name in ("_real_ctx", "_room_val", "_seq_iter"):
+            super().__setattr__(name, value)
+        elif name == "current_room_num":
+            super().__setattr__("_room_val", value)
+        else:
+            setattr(self._real_ctx, name, value)
+
+
+class _WalkWriter:
+    """Mock writer for _randomwalk / _autodiscover tests."""
 
     def __init__(
         self,
@@ -490,39 +523,16 @@ class _WalkWriter:
         adj: dict[str, dict[str, str]] | None = None,
         room_sequence: list[str] | None = None,
     ) -> None:
-        self._room_val = room_num
-        self._seq_iter = iter(room_sequence) if room_sequence else None
-        self._previous_room_num = ""
-        self._randomwalk_active = False
-        self._randomwalk_total = 0
-        self._randomwalk_current = 0
-        self._randomwalk_task = None
-        self._discover_active = False
-        self._discover_total = 0
-        self._discover_current = 0
-        self._discover_task = None
-        self._autoreply_engine = None
-        self._echo_log: list[str] = []
-        self._echo_command = self._echo_log.append
-        self._wait_for_prompt = None
         self._sent: list[str] = []
-        self._room_graph = types.SimpleNamespace(
+        self._echo_log: list[str] = []
+        self.ctx = _DynamicRoomContext(room_num, room_sequence)
+        self.ctx.writer = self  # type: ignore[assignment]
+        self.ctx.echo_command = self._echo_log.append
+        self.ctx.room_graph = types.SimpleNamespace(
             _adj=adj or {},
             get_room=lambda num: types.SimpleNamespace(name=num),
             find_branches=lambda pos: [],
         )
-
-    @property
-    def _current_room_num(self) -> str:
-        if self._seq_iter is not None:
-            val = next(self._seq_iter, None)
-            if val is not None:
-                self._room_val = val
-        return self._room_val
-
-    @_current_room_num.setter
-    def _current_room_num(self, value: str) -> None:
-        self._room_val = value
 
     def write(self, data: str) -> None:
         self._sent.append(data)
@@ -533,39 +543,34 @@ class _WalkWriter:
 async def test_randomwalk_stuck_room_stops(monkeypatch: pytest.MonkeyPatch) -> None:
     """After 3 consecutive failed moves, randomwalk marks exits exhausted and stops."""
     import logging
+
     from telnetlib3.client_repl import _randomwalk
 
     _real_sleep = asyncio.sleep
     monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
 
-    adj: dict[str, dict[str, str]] = {
-        "room1": {"north": "room2"},
-    }
+    adj: dict[str, dict[str, str]] = {"room1": {"north": "room2"}}
     writer = _WalkWriter(room_num="room1", adj=adj)
 
-    await _randomwalk(writer, logging.getLogger("test"), limit=10)  # type: ignore[arg-type]
+    await _randomwalk(writer.ctx, logging.getLogger("test"), limit=10)
 
     stuck_msgs = [m for m in writer._echo_log if "stuck in room" in m]
     assert len(stuck_msgs) == 1
-    assert not writer._randomwalk_active
+    assert not writer.ctx.randomwalk_active
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
-async def test_randomwalk_resets_stuck_on_success(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_randomwalk_resets_stuck_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
     """A successful room change resets the stuck counter."""
     import logging
+
     from telnetlib3.client_repl import _randomwalk
 
     _real_sleep = asyncio.sleep
     monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
 
-    adj: dict[str, dict[str, str]] = {
-        "room1": {"north": "room2"},
-        "room2": {"south": "room1"},
-    }
+    adj: dict[str, dict[str, str]] = {"room1": {"north": "room2"}, "room2": {"south": "room1"}}
     seq = (
         ["room1"]  # initial read
         + ["room1"] * 31  # fail tick 1 (30 ticks + re-read)
@@ -578,7 +583,7 @@ async def test_randomwalk_resets_stuck_on_success(
     )
     writer = _WalkWriter(room_num="room1", adj=adj, room_sequence=seq)
 
-    await _randomwalk(writer, logging.getLogger("test"), limit=20)  # type: ignore[arg-type]
+    await _randomwalk(writer.ctx, logging.getLogger("test"), limit=20)
 
     no_change_msgs = [m for m in writer._echo_log if "no room change" in m]
     assert len(no_change_msgs) >= 2
@@ -588,11 +593,10 @@ async def test_randomwalk_resets_stuck_on_success(
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
-async def test_autodiscover_stuck_gateway_stops(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_autodiscover_stuck_gateway_stops(monkeypatch: pytest.MonkeyPatch) -> None:
     """After 3 failures from the same room, autodiscover stops."""
     import logging
+
     from telnetlib3.client_repl import _autodiscover
 
     _real_sleep = asyncio.sleep
@@ -607,37 +611,30 @@ async def test_autodiscover_stuck_gateway_stops(
     writer = _WalkWriter(room_num="room1", adj=adj)
 
     def fake_find_branches(pos: str) -> list[tuple[str, str, str]]:
-        return [
-            ("gw1", "east", "target1"),
-            ("gw2", "west", "target2"),
-            ("gw3", "south", "target3"),
-        ]
+        return [("gw1", "east", "target1"), ("gw2", "west", "target2"), ("gw3", "south", "target3")]
 
-    writer._room_graph.find_branches = fake_find_branches
-    writer._room_graph.find_path_with_rooms = lambda src, dst: [("north", dst)]
+    writer.ctx.room_graph.find_branches = fake_find_branches
+    writer.ctx.room_graph.find_path_with_rooms = lambda src, dst: [("north", dst)]
 
     async def fake_fast_travel(*args: object, **kwargs: object) -> None:
         pass
 
-    monkeypatch.setattr(
-        "telnetlib3.client_repl._fast_travel", fake_fast_travel
-    )
+    monkeypatch.setattr("telnetlib3.client_repl._fast_travel", fake_fast_travel)
 
-    await _autodiscover(writer, logging.getLogger("test"), limit=20)  # type: ignore[arg-type]
+    await _autodiscover(writer.ctx, logging.getLogger("test"), limit=20)
 
     stuck_msgs = [m for m in writer._echo_log if "all routes blocked" in m]
     assert len(stuck_msgs) == 1
-    assert not writer._discover_active
+    assert not writer.ctx.discover_active
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
-async def test_send_chained_mixed_uses_move_pacing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_send_chained_mixed_uses_move_pacing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Consecutive identical commands in a mixed list get movement delay pacing."""
     import logging
-    from telnetlib3.client_repl import _send_chained, _MOVE_STEP_DELAY
+
+    from telnetlib3.client_repl import _MOVE_STEP_DELAY, _send_chained
 
     sleep_args: list[float] = []
     _real_sleep = asyncio.sleep
@@ -649,16 +646,147 @@ async def test_send_chained_mixed_uses_move_pacing(
     monkeypatch.setattr(asyncio, "sleep", _tracking_sleep)
 
     writer = _WalkWriter(room_num="room1")
-    writer._wait_for_prompt = None
-    writer._prompt_ready = None
-    writer._room_changed = None
+    writer.ctx.wait_for_prompt = None
+    writer.ctx.prompt_ready = None
+    writer.ctx.room_changed = None
 
     commands = ["e", "e", "e", "n", "n", "rocks"]
     seq = ["room2", "room3", "room4", "room4a", "room4b", "room4c"]
-    writer._seq_iter = iter(seq)
+    writer.ctx._seq_iter = iter(seq)
 
-    await _send_chained(commands, writer, logging.getLogger("test"))  # type: ignore[arg-type]
+    await _send_chained(commands, writer.ctx, logging.getLogger("test"))
 
     assert len(writer._sent) == 5
     move_delays = [d for d in sleep_args if d == _MOVE_STEP_DELAY]
     assert len(move_delays) >= 3
+
+
+def test_collapse_runs_basic() -> None:
+    """Consecutive identical commands are collapsed into count×cmd groups."""
+    from telnetlib3.client_repl import _collapse_runs
+
+    result = _collapse_runs(["e", "e", "e", "n", "n", "rocks"])
+    assert result == [("3\u00d7e", 0, 2), ("2\u00d7n", 3, 4), ("rocks", 5, 5)]
+
+
+def test_collapse_runs_single() -> None:
+    """A single command produces one entry with no count prefix."""
+    from telnetlib3.client_repl import _collapse_runs
+
+    result = _collapse_runs(["look"])
+    assert result == [("look", 0, 0)]
+
+
+def test_collapse_runs_all_same() -> None:
+    """All-identical list collapses to one group."""
+    from telnetlib3.client_repl import _collapse_runs
+
+    result = _collapse_runs(["e", "e", "e", "e"])
+    assert result == [("4\u00d7e", 0, 3)]
+
+
+def test_collapse_runs_with_start() -> None:
+    """Collapsing from a non-zero start skips earlier entries."""
+    from telnetlib3.client_repl import _collapse_runs
+
+    result = _collapse_runs(["e", "e", "e", "n", "n", "rocks"], start=3)
+    assert result == [("2\u00d7n", 3, 4), ("rocks", 5, 5)]
+
+
+def test_collapse_runs_empty_start_past_end() -> None:
+    """Start index beyond commands returns empty list."""
+    from telnetlib3.client_repl import _collapse_runs
+
+    assert _collapse_runs(["e", "n"], start=5) == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.asyncio
+async def test_send_chained_queue_cancellation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Setting cancelled on a CommandQueue stops _send_chained early."""
+    import logging
+
+    from telnetlib3.client_repl import _CommandQueue, _send_chained
+
+    _real_sleep = asyncio.sleep
+
+    async def _fast_sleep(duration: float) -> None:
+        await _real_sleep(0)
+
+    monkeypatch.setattr(asyncio, "sleep", _fast_sleep)
+
+    writer = _WalkWriter(room_num="room1")
+    writer.ctx.wait_for_prompt = None
+    writer.ctx.prompt_ready = None
+    writer.ctx.room_changed = None
+
+    commands = ["e", "e", "e", "e", "e"]
+    seq = ["room2", "room3", "room4", "room5", "room6"]
+    writer.ctx._seq_iter = iter(seq)
+
+    render_calls: list[int] = []
+    queue = _CommandQueue(commands, render=lambda: render_calls.append(1))
+
+    _orig_render = queue.render
+
+    def _cancel_after_two() -> None:
+        _orig_render()
+        if queue.current_idx >= 2:
+            queue.cancelled = True
+            queue.cancel_event.set()
+
+    queue.render = _cancel_after_two
+
+    await _send_chained(commands, writer.ctx, logging.getLogger("test"), queue=queue)
+
+    assert len(writer._sent) <= 2
+    assert queue.cancelled
+    assert len(render_calls) >= 1
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+def test_render_command_queue_truncation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Queue wider than terminal is truncated with ellipsis."""
+    from telnetlib3.client_repl import _get_term, _CommandQueue, _render_command_queue
+
+    stdout, transport = _mock_stdout()
+
+    bt = _get_term()
+    monkeypatch.setattr(type(bt), "width", property(lambda self: 20))
+
+    class FakeScroll:
+        input_row = 10
+
+    cmds = ["north", "south", "east", "west", "north", "south", "east", "west"]
+    queue = _CommandQueue(cmds, render=lambda: None)
+    queue.current_idx = 0
+
+    _render_command_queue(queue, FakeScroll(), stdout)
+
+    output = transport.data.decode("utf-8", errors="replace")
+    assert "\u2026" in output
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+def test_render_command_queue_highlight_active() -> None:
+    """Active run uses paper-white bg SGR, pending runs use dim grey."""
+    from telnetlib3.client_repl import _get_term, _CommandQueue, _render_command_queue
+
+    stdout, transport = _mock_stdout()
+
+    bt = _get_term()
+
+    class FakeScroll:
+        input_row = 10
+
+    cmds = ["e", "e", "n"]
+    queue = _CommandQueue(cmds, render=lambda: None)
+    queue.current_idx = 0
+
+    _render_command_queue(queue, FakeScroll(), stdout)
+
+    output = transport.data.decode("utf-8", errors="replace")
+    active_sgr = bt.on_color_rgb(255, 255, 255) + bt.color_rgb(0, 0, 0)
+    pending_sgr = bt.color_rgb(120, 120, 120)
+    assert active_sgr in output
+    assert pending_sgr in output

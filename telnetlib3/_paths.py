@@ -10,8 +10,8 @@ Constants are frozen at import time from environment variables.
 from __future__ import annotations
 
 # std imports
-import hashlib
 import os
+import hashlib
 import pathlib
 import tempfile
 
@@ -28,7 +28,8 @@ HISTORY_FILE = os.path.join(DATA_DIR, "history")
 
 
 def safe_session_slug(session_key: str) -> str:
-    """Return a filesystem-safe slug for *session_key*.
+    """
+    Return a filesystem-safe slug for *session_key*.
 
     Uses a SHA-256 hash (first 12 hex chars) to avoid path traversal
     and special-character issues with arbitrary hostnames.
@@ -40,7 +41,8 @@ def safe_session_slug(session_key: str) -> str:
 
 
 def history_path(session_key: str) -> str:
-    """Return per-session history file path.
+    """
+    Return per-session history file path.
 
     :param session_key: Session identifier, typically ``host:port``.
     :returns: Absolute path under :data:`DATA_DIR`.

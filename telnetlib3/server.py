@@ -51,7 +51,7 @@ class CONFIG(NamedTuple):
     port: int = 6023
     loglevel: str = "info"
     logfile: Optional[str] = None
-    logfmt: str = accessories._DEFAULT_LOGFMT  # pylint: disable=protected-access
+    logfmt: str = accessories._DEFAULT_LOGFMT
     shell: Callable[..., Any] = accessories.function_lookup("telnetlib3.telnet_server_shell")
     encoding: str = "utf8"
     force_binary: bool = False
@@ -83,7 +83,7 @@ class TelnetServer(server_base.BaseServer):
 
     # Derived methods from base class
 
-    def __init__(  # pylint: disable=too-many-positional-arguments
+    def __init__(
         self,
         term: str = "unknown",
         cols: int = 80,
@@ -137,7 +137,7 @@ class TelnetServer(server_base.BaseServer):
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         """Handle new connection and wire up telnet option callbacks."""
-        from .telopt import (  # pylint: disable=import-outside-toplevel
+        from .telopt import (
             NAWS,
             TTYPE,
             TSPEED,
@@ -178,7 +178,7 @@ class TelnetServer(server_base.BaseServer):
 
     def begin_negotiation(self) -> None:
         """Begin telnet negotiation by requesting terminal type."""
-        from .telopt import DO, TTYPE  # pylint: disable=import-outside-toplevel
+        from .telopt import DO, TTYPE
 
         super().begin_negotiation()
         self.writer.iac(DO, TTYPE)
@@ -195,7 +195,7 @@ class TelnetServer(server_base.BaseServer):
         MUD clients (Mudlet, TinTin++, etc.) interpret ``WILL ECHO`` as
         "password mode" and mask input.  See ``_negotiate_echo()``.
         """
-        from .telopt import (  # pylint: disable=import-outside-toplevel
+        from .telopt import (
             DO,
             SGA,
             NAWS,
@@ -216,7 +216,7 @@ class TelnetServer(server_base.BaseServer):
 
     def check_negotiation(self, final: bool = False) -> bool:
         """Check if negotiation is complete including encoding."""
-        from .telopt import (  # pylint: disable=import-outside-toplevel
+        from .telopt import (
             DO,
             SB,
             TTYPE,
@@ -431,7 +431,7 @@ class TelnetServer(server_base.BaseServer):
             (ttype1=ANSI, ttype2=VT100) because requesting it crashes
             ``telnet.exe``.  See GitHub issue #24.
         """
-        from .telopt import VAR, USERVAR  # pylint: disable=import-outside-toplevel
+        from .telopt import VAR, USERVAR
 
         ttype1 = self.get_extra_info("ttype1") or ""
         ttype2 = self.get_extra_info("ttype2") or ""
@@ -482,7 +482,7 @@ class TelnetServer(server_base.BaseServer):
         lang_val = u_mapping.get("LANG", "")
         has_lang_encoding = "." in lang_val and lang_val != "C"
         if (has_charset or has_lang_encoding) and self.writer is not None:
-            self.writer._force_binary_on_protocol()  # pylint: disable=protected-access
+            self.writer._force_binary_on_protocol()
 
     def on_request_charset(self) -> List[str]:
         """
@@ -604,7 +604,7 @@ class TelnetServer(server_base.BaseServer):
             return
         self._environ_requested = True
 
-        from .telopt import DO, NEW_ENVIRON  # pylint: disable=import-outside-toplevel
+        from .telopt import DO, NEW_ENVIRON
 
         self.writer.iac(DO, NEW_ENVIRON)
 
@@ -629,8 +629,8 @@ class TelnetServer(server_base.BaseServer):
         if self.line_mode:
             return
 
-        from .telopt import ECHO, WILL  # pylint: disable=import-outside-toplevel
-        from .fingerprinting import _is_maybe_mud  # pylint: disable=import-outside-toplevel
+        from .telopt import ECHO, WILL
+        from .fingerprinting import _is_maybe_mud
 
         assert self.writer is not None
         if _is_maybe_mud(self.writer):
@@ -640,7 +640,7 @@ class TelnetServer(server_base.BaseServer):
 
     def _check_encoding(self) -> bool:
         # Periodically check for completion of ``waiter_encoding``.
-        from .telopt import DO, SB, BINARY, CHARSET  # pylint: disable=import-outside-toplevel
+        from .telopt import DO, SB, BINARY, CHARSET
 
         # Check if we need to request client to use BINARY mode for client-to-server communication
         if (
@@ -778,7 +778,6 @@ class Server:
         self._server.close()
         # Close all connected client transports
         for protocol in list(self._protocols):
-            # pylint: disable=protected-access
             if hasattr(protocol, "_transport") and protocol._transport is not None:
                 protocol._transport.close()
 
@@ -826,7 +825,6 @@ class Server:
 
     def _register_protocol(self, protocol: asyncio.Protocol) -> None:
         """Register a new protocol instance (called by factory)."""
-        # pylint: disable=protected-access
         self._protocols.append(protocol)  # type: ignore[arg-type]
         # Only register callbacks if protocol has the required waiters
         # (custom protocols like plain asyncio.Protocol won't have these)
@@ -905,7 +903,7 @@ class StatusLogger:
             self._task.cancel()
 
 
-async def create_server(  # pylint: disable=too-many-positional-arguments
+async def create_server(
     host: Optional[Union[str, Sequence[str]]] = None,
     port: int = 23,
     protocol_factory: Optional[Type[asyncio.Protocol]] = TelnetServer,
@@ -1035,7 +1033,7 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
             )
         else:
             protocol = protocol_factory()
-        telnet_server._register_protocol(protocol)  # pylint: disable=protected-access
+        telnet_server._register_protocol(protocol)
         return protocol
 
     if tls_auto:
@@ -1044,14 +1042,12 @@ async def create_server(  # pylint: disable=too-many-positional-arguments
         def factory() -> asyncio.Protocol:
             return _TLSAutoDetectProtocol(ssl, _make_telnet_protocol)
 
-        # pylint: disable=protected-access
         telnet_server._server = await asyncio.get_event_loop().create_server(factory, host, port)
     else:
 
         def factory() -> asyncio.Protocol:
             return _make_telnet_protocol()
 
-        # pylint: disable=protected-access
         telnet_server._server = await asyncio.get_event_loop().create_server(
             factory, host, port, ssl=ssl
         )
@@ -1201,7 +1197,7 @@ def parse_server_args() -> Dict[str, Any]:
     return result
 
 
-async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-locals
+async def run_server(
     host: str = _config.host,
     port: int = _config.port,
     loglevel: str = _config.loglevel,
@@ -1237,14 +1233,13 @@ async def run_server(  # pylint: disable=too-many-positional-arguments,too-many-
     if pty_exec:
         if not PTY_SUPPORT:
             raise NotImplementedError("PTY support is not available on this platform (Windows?)")
-        from .server_pty_shell import make_pty_shell  # pylint: disable=import-outside-toplevel
+        from .server_pty_shell import make_pty_shell
 
         shell = make_pty_shell(pty_exec, pty_args, raw_mode=pty_raw)
 
     # Wrap shell with guards if enabled
     if robot_check or pty_fork_limit:
-        # pylint: disable=import-outside-toplevel
-        from .guard_shells import robot_shell  # pylint: disable=import-outside-toplevel
+        from .guard_shells import robot_shell
         from .guard_shells import ConnectionCounter, busy_shell
         from .guard_shells import robot_check as do_robot_check
 

@@ -26,7 +26,8 @@ __all__ = ("Macro", "load_macros", "save_macros", "build_macro_dispatch")
 
 @dataclass
 class Macro:
-    """A single key-to-text macro binding.
+    """
+    A single key-to-text macro binding.
 
     :param key: Blessed key name (e.g. ``KEY_F5``, ``KEY_ALT_E``).
     :param text: Text to insert/send, with ``;`` as command separators.
@@ -51,7 +52,8 @@ def _parse_entries(entries: list[dict[str, str]]) -> list[Macro]:
 
 
 def load_macros(path: str, session_key: str) -> list[Macro]:
-    """Load macro definitions for a session from a JSON file.
+    """
+    Load macro definitions for a session from a JSON file.
 
     The file is keyed by session (``"host:port"``).  Each value is
     an object with a ``"macros"`` list.
@@ -71,7 +73,8 @@ def load_macros(path: str, session_key: str) -> list[Macro]:
 
 
 def save_macros(path: str, macros: list[Macro], session_key: str) -> None:
-    """Save macro definitions for a session to a JSON file.
+    """
+    Save macro definitions for a session to a JSON file.
 
     Other sessions' data in the file is preserved.
 
@@ -79,7 +82,7 @@ def save_macros(path: str, macros: list[Macro], session_key: str) -> None:
     :param macros: List of :class:`Macro` instances to save.
     :param session_key: Session identifier (``"host:port"``).
     """
-    import os  # pylint: disable=import-outside-toplevel
+    import os
 
     data: dict[str, Any] = {}
     if os.path.exists(path):
@@ -88,15 +91,11 @@ def save_macros(path: str, macros: list[Macro], session_key: str) -> None:
 
     data[session_key] = {
         "macros": [
-            {
-                "key": m.key,
-                "text": m.text,
-                **({"enabled": False} if not m.enabled else {}),
-            }
+            {"key": m.key, "text": m.text, **({"enabled": False} if not m.enabled else {})}
             for m in macros
         ]
     }
-    from ._paths import _atomic_write  # pylint: disable=import-outside-toplevel
+    from ._paths import _atomic_write
 
     content = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
     _atomic_write(path, content)
@@ -105,7 +104,8 @@ def save_macros(path: str, macros: list[Macro], session_key: str) -> None:
 def build_macro_dispatch(
     macros: list[Macro], writer: Union[TelnetWriter, TelnetWriterUnicode], log: logging.Logger
 ) -> dict[str, Any]:
-    """Build a blessed key name to handler mapping from macro defs.
+    """
+    Build a blessed key name to handler mapping from macro defs.
 
     Keys are matched directly against :attr:`~blessed.keyboard.Keystroke.name`
     (for named keys like ``KEY_F1``) or ``str(keystroke)`` (for single chars).
@@ -117,11 +117,11 @@ def build_macro_dispatch(
     :param log: Logger instance.
     :returns: Dict mapping blessed key names (or raw chars) to handlers.
     """
-    import asyncio  # pylint: disable=import-outside-toplevel
+    import asyncio
 
-    from blessed.line_editor import DEFAULT_KEYMAP  # pylint: disable=import-outside-toplevel
+    from blessed.line_editor import DEFAULT_KEYMAP
 
-    from .client_repl import execute_macro_commands  # pylint: disable=import-outside-toplevel
+    from .client_repl import execute_macro_commands
 
     result: dict[str, Any] = {}
     for macro in macros:

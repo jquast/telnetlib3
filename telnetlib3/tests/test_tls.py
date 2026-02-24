@@ -432,7 +432,7 @@ def _run_in_pty(child_func, timeout: float = _MAX_SUBPROC_SECONDS) -> str:
     if sys.platform == "win32":
         pytest.skip("POSIX-only test")
 
-    import pty  # pylint: disable=import-outside-toplevel
+    import pty
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -445,8 +445,8 @@ def _run_in_pty(child_func, timeout: float = _MAX_SUBPROC_SECONDS) -> str:
             child_func()
         except SystemExit:
             pass
-        except BaseException:  # pylint: disable=broad-exception-caught
-            import traceback  # pylint: disable=import-outside-toplevel
+        except BaseException:
+            import traceback
 
             traceback.print_exc()
             exit_code = 1
@@ -548,7 +548,7 @@ def _pty_run_client(bind_host, port, extra_argv, server_ssl_ctx=None):
             "--connect-maxwait=0.5",
             "--colormatch=none",
         ] + extra_argv
-        from telnetlib3.client import run_client  # pylint: disable=import-outside-toplevel
+        from telnetlib3.client import run_client
 
         asyncio.run(run_client())
 
@@ -577,7 +577,7 @@ def test_cli_run_client(bind_host, unused_tcp_port, server_ssl_ctx, extra_argv, 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only tests")
 def test_cli_run_server_ssl(bind_host, unused_tcp_port, ca, tmp_path, client_ssl_ctx):
     """run_server() with --ssl-certfile exercises the ssl pass-through."""
-    import pty  # pylint: disable=import-outside-toplevel
+    import pty
 
     port = unused_tcp_port
     cert_pem, key_pem = _write_cert_files(ca, tmp_path)
@@ -601,13 +601,13 @@ def test_cli_run_server_ssl(bind_host, unused_tcp_port, ca, tmp_path, client_ssl
                 "--connect-maxwait=0.05",
                 "--loglevel=warning",
             ]
-            from telnetlib3.server import main  # pylint: disable=import-outside-toplevel
+            from telnetlib3.server import main
 
             main()
         except SystemExit:
             pass
-        except BaseException:  # pylint: disable=broad-exception-caught
-            import traceback  # pylint: disable=import-outside-toplevel
+        except BaseException:
+            import traceback
 
             traceback.print_exc()
             exit_code = 1

@@ -239,7 +239,7 @@ def _format_encoding(
     return None
 
 
-def _build_terminal_rows(  # pylint: disable=too-complex,too-many-locals,too-many-branches
+def _build_terminal_rows(
     term: "blessed.Terminal", data: Dict[str, Any]
 ) -> List[Tuple[str, str]]:
     """Build (key, value) tuples for terminal capabilities table."""
@@ -362,7 +362,7 @@ def _build_terminal_rows(  # pylint: disable=too-complex,too-many-locals,too-man
     return pairs
 
 
-def _build_telnet_rows(  # pylint: disable=unused-argument
+def _build_telnet_rows(
     term: "blessed.Terminal", data: Dict[str, Any]
 ) -> List[Tuple[str, str]]:
     """Build (key, value) tuples for telnet protocol table."""
@@ -420,7 +420,7 @@ def _build_telnet_rows(  # pylint: disable=unused-argument
 
 def _make_terminal(**kwargs: Any) -> "blessed.Terminal":
     """Create a blessed Terminal, falling back to ``ansi`` on setupterm failure."""
-    from blessed import Terminal  # pylint: disable=import-outside-toplevel
+    from blessed import Terminal
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
@@ -529,10 +529,10 @@ def _display_compact_summary(
 ) -> bool:
     """Display compact fingerprint summary using prettytable."""
     try:
-        from ucs_detect import (  # pylint: disable=import-outside-toplevel
+        from ucs_detect import (
             _collect_side_by_side_lines,
         )
-        from prettytable import PrettyTable  # pylint: disable=import-outside-toplevel
+        from prettytable import PrettyTable
     except ImportError:
         return False
 
@@ -832,7 +832,7 @@ def _repl_prompt(term: "blessed.Terminal") -> None:
     echo(f"\r{term.clear_eos}{term.normal}{legend}")
 
 
-def _paginate(  # pylint: disable=unused-argument
+def _paginate(
     term: "blessed.Terminal", text: str, **_kw: Any
 ) -> None:
     """Display text."""
@@ -889,13 +889,13 @@ def _strip_empty_features(d: Dict[str, Any]) -> None:
 
 def _normalize_color_hex(hex_color: str) -> str:
     """Normalize X11 color hex to standard 6-digit format."""
-    from blessed.colorspace import hex_to_rgb, rgb_to_hex  # pylint: disable=import-outside-toplevel
+    from blessed.colorspace import hex_to_rgb, rgb_to_hex
 
     r, g, b = hex_to_rgb(hex_color)
     return str(rgb_to_hex(r, g, b))
 
 
-def _filter_terminal_detail(  # pylint: disable=too-many-branches
+def _filter_terminal_detail(
     detail: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
     """Filter terminal session data for display."""
@@ -1073,7 +1073,7 @@ def _show_database(
 ) -> None:
     """Display scrollable database of all known fingerprints."""
     try:
-        from prettytable import PrettyTable  # pylint: disable=import-outside-toplevel
+        from prettytable import PrettyTable
     except ImportError:
         echo("prettytable not installed.\n")
         return
@@ -1279,7 +1279,7 @@ def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
     _setup_term_environ(data)
 
     try:
-        import blessed  # noqa: F401  # pylint: disable=import-outside-toplevel,unused-import
+        import blessed  # noqa: F401
     except ImportError:
         print(json.dumps(data, indent=2, sort_keys=True))
         return

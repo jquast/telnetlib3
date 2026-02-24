@@ -303,13 +303,13 @@ DECODING_TABLE = (
 class Codec(codecs.Codec):
     """PETSCII character map codec."""
 
-    def encode(  # pylint: disable=redefined-builtin
+    def encode(
         self, input: str, errors: str = "strict"
     ) -> tuple[bytes, int]:
         """Encode input string using PETSCII character map."""
         return codecs.charmap_encode(input, errors, ENCODING_TABLE)
 
-    def decode(  # pylint: disable=redefined-builtin
+    def decode(
         self, input: bytes, errors: str = "strict"
     ) -> tuple[str, int]:
         """Decode input bytes using PETSCII character map."""
@@ -319,7 +319,7 @@ class Codec(codecs.Codec):
 class IncrementalEncoder(codecs.IncrementalEncoder):
     """PETSCII incremental encoder."""
 
-    def encode(self, input: str, final: bool = False) -> bytes:  # pylint: disable=redefined-builtin
+    def encode(self, input: str, final: bool = False) -> bytes:
         """Encode input string incrementally."""
         return codecs.charmap_encode(input, self.errors, ENCODING_TABLE)[0]
 
@@ -327,7 +327,7 @@ class IncrementalEncoder(codecs.IncrementalEncoder):
 class IncrementalDecoder(codecs.IncrementalDecoder):
     """PETSCII incremental decoder."""
 
-    def decode(  # type: ignore[override]  # pylint: disable=redefined-builtin
+    def decode(  # type: ignore[override]
         self, input: bytes, final: bool = False
     ) -> str:
         """Decode input bytes incrementally."""

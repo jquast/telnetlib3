@@ -39,7 +39,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     _rx_bytes = 0
     _tx_bytes = 0
 
-    def __init__(  # pylint: disable=too-many-positional-arguments
+    def __init__(
         self,
         shell: Optional[ShellCallback] = None,
         _waiter_connected: Optional[asyncio.Future[None]] = None,
@@ -117,13 +117,13 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         for task in self._tasks:
             try:
                 task.cancel()
-            except Exception:  # pylint: disable=broad-exception-caught
+            except Exception:
                 pass
         # drop references to scheduled tasks/callbacks
         self._tasks.clear()
         try:
             self._waiter_connected.remove_done_callback(self.begin_shell)
-        except Exception:  # pylint: disable=broad-exception-caught
+        except Exception:
             pass
 
         # close transport (may already be closed), cancel Future _waiter_connected.
@@ -132,7 +132,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             try:
                 if hasattr(self._transport, "set_protocol"):
                     self._transport.set_protocol(asyncio.Protocol())
-            except Exception:  # pylint: disable=broad-exception-caught
+            except Exception:
                 pass
             self._transport.close()
         if not self._waiter_connected.cancelled() and not self._waiter_connected.done():
@@ -257,7 +257,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 recv_inband = writer.feed_byte(_ONE_BYTE[data[i]])
             except ValueError as exc:
                 logger.debug("Invalid telnet byte from %s: %s", self, exc)
-            except BaseException:  # pylint: disable=broad-exception-caught
+            except BaseException:
                 self._log_exception(logger.warning, *sys.exc_info())
             else:
                 if recv_inband:
@@ -339,7 +339,6 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         The base implementation **always** returns the encoding given to class
         initializer, or, when unset (None), ``US-ASCII``.
         """
-        # pylint: disable=unused-argument
         return self.default_encoding or "US-ASCII"
 
     def negotiation_should_advance(self) -> bool:
@@ -358,7 +357,7 @@ class BaseServer(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         client_will = sum(enabled for _, enabled in self.writer.local_option.items())
         return bool(server_do or client_will)
 
-    def check_negotiation(self, final: bool = False) -> bool:  # pylint: disable=unused-argument
+    def check_negotiation(self, final: bool = False) -> bool:
         """
         Callback, return whether negotiation is complete.
 

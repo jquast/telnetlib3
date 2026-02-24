@@ -56,12 +56,12 @@ def _latin1_reading(
         return
     orig_fn = reader.fn_encoding
     reader.fn_encoding = lambda **kw: "latin-1"
-    reader._decoder = None  # pylint: disable=protected-access
+    reader._decoder = None
     try:
         yield
     finally:
         reader.fn_encoding = orig_fn
-        reader._decoder = None  # pylint: disable=protected-access
+        reader._decoder = None
 
 
 class ConnectionCounter:

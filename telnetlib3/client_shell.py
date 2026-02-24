@@ -1,11 +1,10 @@
 """Telnet client shell implementations for interactive terminal sessions."""
 
-# pylint: disable=too-complex
 
 # std imports
 import sys
-import logging
 import asyncio
+import logging
 import threading
 import collections
 from typing import Any, Dict, Tuple, Union, Callable, Optional
@@ -18,12 +17,14 @@ log = logging.getLogger(__name__)
 try:
     import blessed as _blessed_mod  # noqa: F401
 
-    _blessed_available = True
+    _BLESSED_AVAILABLE = True
 except ImportError:
-    _blessed_available = False
-from .accessories import TRACE
-from .stream_reader import TelnetReader, TelnetReaderUnicode
-from .stream_writer import TelnetWriter, TelnetWriterUnicode
+    _BLESSED_AVAILABLE = False
+
+# local
+from .accessories import TRACE  # noqa: E402
+from .stream_reader import TelnetReader, TelnetReaderUnicode  # noqa: E402
+from .stream_writer import TelnetWriter, TelnetWriterUnicode  # noqa: E402
 
 __all__ = ("InputFilter", "telnet_client_shell")
 
@@ -223,7 +224,7 @@ else:
 
                 loop.add_signal_handler(signal.SIGWINCH, _on_winch)
                 self._remove_winch = True
-            except Exception:  # pylint: disable=broad-exception-caught
+            except Exception:
                 self._remove_winch = False
 
         def cleanup_winch(self) -> None:
@@ -231,7 +232,7 @@ else:
             if self._istty and self._remove_winch:
                 try:
                     asyncio.get_event_loop().remove_signal_handler(signal.SIGWINCH)
-                except Exception:  # pylint: disable=broad-exception-caught
+                except Exception:
                     pass
                 self._remove_winch = False
 
@@ -305,7 +306,7 @@ else:
 
         def _server_will_sga(self) -> bool:
             """Whether server has negotiated WILL SGA."""
-            from .telopt import SGA  # pylint: disable=import-outside-toplevel
+            from .telopt import SGA
 
             return bool(self.telnet_writer.client and self.telnet_writer.remote_option.enabled(SGA))
 
@@ -446,14 +447,17 @@ else:
         Apply color filter, ASCII EOL substitution, and CRLF normalization.
 
         :param out: Server output text to transform.
-        :param writer: Telnet writer (checked for ``_color_filter`` and ``_ascii_eol``).
+        :param writer: Telnet writer (``_ctx`` provides color filter and ascii_eol).
         :param in_raw_mode: When ``True``, normalize line endings to ``\r\n``.
         :returns: Transformed output string.
         """
-        _cf = getattr(writer, "_color_filter", None)
+        from .session_context import SessionContext
+
+        ctx: Optional[SessionContext] = getattr(writer, "_ctx", None)
+        _cf = ctx.color_filter if ctx is not None else None
         if _cf is not None:
             out = _cf.filter(out)
-        if getattr(writer, "_ascii_eol", False):
+        if ctx is not None and ctx.ascii_eol:
             out = out.replace(_ATASCII_CR_CHAR, "\r").replace(_ATASCII_LF_CHAR, "\n")
         if in_raw_mode:
             out = out.replace("\r\n", "\n").replace("\n", "\r\n")
@@ -478,18 +482,21 @@ else:
         :param local_echo: When ``True``, echo input bytes to stdout.
         :returns: ``(esc_timer_task_or_None, has_pending)`` tuple.
         """
-        _inf = getattr(telnet_writer, "_input_filter", None)
+        from .session_context import SessionContext
+
+        _ctx: Optional[SessionContext] = getattr(telnet_writer, "_ctx", None)
+        _inf = _ctx.input_filter if _ctx is not None else None
         pending = False
         new_timer: Optional[asyncio.Task[None]] = None
         if _inf is not None:
             translated = _inf.feed(inp)
             if translated:
-                telnet_writer._write(translated)  # pylint: disable=protected-access
+                telnet_writer._write(translated)
             if _inf.has_pending:
                 pending = True
                 new_timer = asyncio.ensure_future(asyncio.sleep(_inf.esc_delay))
         else:
-            telnet_writer._write(inp)  # pylint: disable=protected-access
+            telnet_writer._write(inp)
         if local_echo:
             _echo_buf = bytearray()
             for _b in inp:
@@ -504,20 +511,25 @@ else:
         return new_timer, pending
 
     def _get_raw_mode(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> "bool | None":
-        """Return the writer's ``_raw_mode`` attribute (``None``, ``True``, or ``False``)."""
-        return getattr(writer, "_raw_mode", False)
+        """Return the writer's ``_ctx.raw_mode`` (``None``, ``True``, or ``False``)."""
+        from .session_context import SessionContext
+
+        ctx: Optional[SessionContext] = getattr(writer, "_ctx", None)
+        return ctx.raw_mode if ctx is not None else False
 
     def _flush_color_filter(
         writer: Union[TelnetWriter, TelnetWriterUnicode], stdout: asyncio.StreamWriter
     ) -> None:
         """Flush any pending color filter output to stdout."""
-        _cf = getattr(writer, "_color_filter", None)
+        from .session_context import SessionContext
+
+        ctx: Optional[SessionContext] = getattr(writer, "_ctx", None)
+        _cf = ctx.color_filter if ctx is not None else None
         if _cf is not None:
             _flush = _cf.flush()
             if _flush:
                 stdout.write(_flush.encode())
 
-    # pylint: disable=too-many-positional-arguments,too-many-locals,too-many-branches
     async def _raw_event_loop(
         telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
         telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
@@ -558,11 +570,16 @@ else:
             # ESC_DELAY timer fired -- flush buffered partial sequence
             if task is esc_timer_task:
                 esc_timer_task = None
-                _inf = getattr(telnet_writer, "_input_filter", None)
+                from .session_context import (
+                    SessionContext,
+                )
+
+                _es_ctx: Optional[SessionContext] = getattr(telnet_writer, "_ctx", None)
+                _inf = _es_ctx.input_filter if _es_ctx is not None else None
                 if _inf is not None and _inf.has_pending:
                     flushed = _inf.flush()
                     if flushed:
-                        telnet_writer._write(flushed)  # pylint: disable=protected-access
+                        telnet_writer._write(flushed)
                 continue
 
             # client input
@@ -578,7 +595,7 @@ else:
                 if keyboard_escape in inp.decode():
                     try:
                         telnet_writer.close()
-                    except Exception:  # pylint: disable=broad-exception-caught
+                    except Exception:
                         pass
                     if telnet_task in wait_for:
                         telnet_task.cancel()
@@ -605,20 +622,20 @@ else:
                 raw_mode = _get_raw_mode(telnet_writer)
                 in_raw = raw_mode is True or (raw_mode is None and switched_to_raw)
                 out = _transform_output(out, telnet_writer, in_raw)
-                _ar_engine = getattr(telnet_writer, "_autoreply_engine", None)
-                if _ar_engine is None:
-                    _ar_rules = getattr(telnet_writer, "_autoreply_rules", None)
+                _so_ctx: Optional[SessionContext] = getattr(telnet_writer, "_ctx", None)
+                _ar_engine = _so_ctx.autoreply_engine if _so_ctx is not None else None
+                if _ar_engine is None and _so_ctx is not None:
+                    _ar_rules = _so_ctx.autoreply_rules
                     if _ar_rules:
-                        from .autoreply import (  # pylint: disable=import-outside-toplevel
+                        from .autoreply import (
                             AutoreplyEngine,
                         )
 
-                        _ar_wait = getattr(telnet_writer, "_autoreply_wait_fn", None)
+                        _ar_wait = _so_ctx.autoreply_wait_fn
                         _ar_engine = AutoreplyEngine(
-                            _ar_rules, telnet_writer, telnet_writer.log, wait_fn=_ar_wait
+                            _ar_rules, _so_ctx, telnet_writer.log, wait_fn=_ar_wait
                         )
-                        # pylint: disable-next=protected-access
-                        telnet_writer._autoreply_engine = _ar_engine
+                        _so_ctx.autoreply_engine = _ar_engine
                 if _ar_engine is not None:
                     _ar_engine.feed(out)
                 if raw_mode is None:
@@ -668,7 +685,7 @@ else:
             switched_to_raw = False
             last_will_echo = False
             local_echo = tty_shell.software_echo
-            if tty_shell._istty:  # pylint: disable=protected-access
+            if tty_shell._istty:
                 raw_mode = _get_raw_mode(telnet_writer)
                 if telnet_writer.will_echo or raw_mode is True:
                     linesep = "\r\n"
@@ -680,15 +697,19 @@ else:
             _prompt_ready_raw.set()
             _ga_detected_raw = False
 
+            from .session_context import SessionContext
+
+            _sh_ctx: Optional[SessionContext] = getattr(telnet_writer, "_ctx", None)
+
             def _on_prompt_signal_raw(_cmd: bytes) -> None:
                 nonlocal _ga_detected_raw
                 _ga_detected_raw = True
                 _prompt_ready_raw.set()
-                _ar = getattr(telnet_writer, "_autoreply_engine", None)
+                _ar = _sh_ctx.autoreply_engine if _sh_ctx is not None else None
                 if _ar is not None:
                     _ar.on_prompt()
 
-            from .telopt import GA, CMD_EOR  # pylint: disable=import-outside-toplevel
+            from .telopt import GA, CMD_EOR
 
             telnet_writer.set_iac_callback(GA, _on_prompt_signal_raw)
             telnet_writer.set_iac_callback(CMD_EOR, _on_prompt_signal_raw)
@@ -702,43 +723,38 @@ else:
                     pass
                 _prompt_ready_raw.clear()
 
-            # Attach wait_fn to writer so _raw_event_loop can pick it up.
-            # pylint: disable-next=protected-access
-            telnet_writer._autoreply_wait_fn = _wait_for_prompt_raw
+            if _sh_ctx is not None:
+                _sh_ctx.autoreply_wait_fn = _wait_for_prompt_raw
 
-            repl_enabled = getattr(telnet_writer, "_repl_enabled", False)
+            repl_enabled = _sh_ctx.repl_enabled if _sh_ctx is not None else False
             raw_mode_val = _get_raw_mode(telnet_writer)
-            if repl_enabled and not _blessed_available:
+            if repl_enabled and not _BLESSED_AVAILABLE:
                 log.info(
                     "blessed not installed; REPL disabled. "
                     "Install with: pip install telnetlib3[with_tui]"
                 )
             _can_repl = (
-                _blessed_available
+                _BLESSED_AVAILABLE
                 and repl_enabled
                 and raw_mode_val is not True
-                and tty_shell._istty  # pylint: disable=protected-access
+                and tty_shell._istty
             )
 
-            # Build connection banner lines.
             _banner_lines: list[str] = []
-            _n_macros = len(getattr(telnet_writer, "_macro_defs", []) or [])
-            _n_autoreplies = len(getattr(telnet_writer, "_autoreply_rules", []) or [])
-            if _n_macros:
-                _mf = getattr(telnet_writer, "_macros_file", "")
-                _banner_lines.append(f"{_n_macros} macros loaded from {_mf}.")
-            if _n_autoreplies:
-                _af = getattr(telnet_writer, "_autoreplies_file", "")
-                _banner_lines.append(f"{_n_autoreplies} autoreplies loaded from {_af}.")
+            _n_macros = len(_sh_ctx.macro_defs) if _sh_ctx is not None else 0
+            _n_autoreplies = len(_sh_ctx.autoreply_rules) if _sh_ctx is not None else 0
+            if _n_macros and _sh_ctx is not None:
+                _banner_lines.append(f"{_n_macros} macros loaded from {_sh_ctx.macros_file}.")
+            if _n_autoreplies and _sh_ctx is not None:
+                _banner_lines.append(
+                    f"{_n_autoreplies} autoreplies loaded from {_sh_ctx.autoreplies_file}."
+                )
             escape_name = accessories.name_unicode(keyboard_escape)
-            _banner_lines.append(
-                f"Escape character is '{escape_name}' - Press F1 for help!"
-            )
+            _banner_lines.append(f"Escape character is '{escape_name}' - Press F1 for help!")
 
             # In non-REPL mode, emit banner now; in REPL mode, pass it
             # through so it displays after the scroll region is active.
             if not _can_repl:
-                # pylint: disable-next=protected-access
                 _banner_sep = "\r\n" if tty_shell._istty else linesep
                 for _bl in _banner_lines:
                     stdout.write(f"{_bl}{_banner_sep}".encode())
@@ -755,13 +771,15 @@ else:
             # -- outer loop: alternate between REPL and raw event loops --
             while True:
                 if _want_repl():
-                    # pylint: disable-next=import-outside-toplevel,cyclic-import
                     from .client_repl import repl_event_loop
 
-                    history_file = getattr(telnet_writer, "_history_file", None)
+                    history_file = _sh_ctx.history_file if _sh_ctx is not None else None
                     telnet_writer.log.debug("entering REPL (line mode)")
                     mode_switched = await repl_event_loop(
-                        telnet_reader, telnet_writer, tty_shell, stdout,
+                        telnet_reader,
+                        telnet_writer,
+                        tty_shell,
+                        stdout,
                         history_file=history_file,
                         banner_lines=_banner_lines,
                     )
@@ -776,10 +794,9 @@ else:
                 # Set raw mode so ctrl+] and single-byte input works.
                 if (
                     not switched_to_raw
-                    and tty_shell._istty  # pylint: disable=protected-access
-                    and tty_shell._save_mode is not None  # pylint: disable=protected-access
+                    and tty_shell._istty
+                    and tty_shell._save_mode is not None
                 ):
-                    # pylint: disable-next=protected-access
                     tty_shell.set_mode(
                         tty_shell._make_raw(
                             tty_shell._save_mode, suppress_echo=True

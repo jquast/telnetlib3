@@ -9,8 +9,6 @@ import logging
 import collections
 from typing import TYPE_CHECKING, Any, Dict, Callable, Optional, Sequence
 
-# pylint: disable=too-many-lines
-# pylint: disable=duplicate-code
 
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -398,7 +396,7 @@ class TelnetWriter:
         if self._protocol is not None:
             try:
                 self._protocol.connection_lost(None)
-            except Exception:  # pylint: disable=broad-exception-caught
+            except Exception:
                 pass
         if self._transport is not None:
             self._transport.close()
@@ -630,11 +628,10 @@ class TelnetWriter:
             # would not see an error when the socket is closed.
             await asyncio.sleep(0)
         if self._protocol is not None:
-            await self._protocol._drain_helper()  # pylint: disable=protected-access
+            await self._protocol._drain_helper()
 
     # proprietary write helper
 
-    # pylint: disable=too-many-branches,too-complex
     def feed_byte(self, byte: bytes) -> bool:
         """
         Feed a single byte into Telnet option state machine.
@@ -1307,15 +1304,15 @@ class TelnetWriter:
         """
         self._iac_callback[cmd] = func
 
-    def handle_nop(self, cmd: bytes) -> None:  # pylint:disable=unused-argument
+    def handle_nop(self, cmd: bytes) -> None:
         """Handle IAC No-Operation (NOP)."""
         self.log.debug("IAC NOP: Null Operation (unhandled).")
 
-    def handle_ga(self, cmd: bytes) -> None:  # pylint:disable=unused-argument
+    def handle_ga(self, cmd: bytes) -> None:
         """Handle IAC Go-Ahead (GA)."""
         self.log.debug("IAC GA: Go-Ahead (unhandled).")
 
-    def handle_dm(self, cmd: bytes) -> None:  # pylint:disable=unused-argument
+    def handle_dm(self, cmd: bytes) -> None:
         """Handle IAC Data-Mark (DM)."""
         self.log.debug("IAC DM: Data-Mark (unhandled).")
 
@@ -1841,7 +1838,6 @@ class TelnetWriter:
         # Correctly, a DONT can not be declined, so there is no need to
         # affirm in the negative.
 
-    # pylint: disable=too-many-branches,too-complex
     def handle_will(self, opt: bytes) -> None:
         """
         Process byte 3 of series (IAC, WILL, opt) received by remote end.
@@ -3044,7 +3040,7 @@ class TelnetWriterUnicode(TelnetWriter):
         encoding = self.fn_encoding(outgoing=True)
         return bytes(string, encoding, errors or self.encoding_errors)
 
-    def write(  # type: ignore[override]  # pylint: disable=arguments-renamed
+    def write(  # type: ignore[override]
         self, string: str, errors: Optional[str] = None
     ) -> None:
         """
@@ -3076,7 +3072,7 @@ class TelnetWriterUnicode(TelnetWriter):
         """
         self.write(string="".join(lines), errors=errors)
 
-    def echo(  # type: ignore[override]  # pylint: disable=arguments-renamed
+    def echo(  # type: ignore[override]
         self, string: str, errors: Optional[str] = None
     ) -> None:
         """

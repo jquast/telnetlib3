@@ -15,14 +15,14 @@ import json
 import time
 import asyncio
 import logging
-from typing import Any, Union, Callable, Optional, Awaitable
+from typing import TYPE_CHECKING, Any, Callable, Optional, Awaitable
 from dataclasses import field, dataclass
 
 # 3rd party
 from wcwidth import strip_sequences
 
-# local
-from .stream_writer import TelnetWriter, TelnetWriterUnicode
+if TYPE_CHECKING:
+    from .session_context import SessionContext
 
 __all__ = (
     "AutoreplyRule",
@@ -87,20 +87,18 @@ def _compare(value: int, op: str, threshold: int) -> bool:
     raise ValueError(f"unknown operator: {op!r}")
 
 
-def check_condition(
-    when: dict[str, str], writer: Union[TelnetWriter, TelnetWriterUnicode]
-) -> tuple[bool, str]:
+def check_condition(when: dict[str, str], ctx: "SessionContext") -> tuple[bool, str]:
     """
-    Check vital conditions against GMCP data on *writer*.
+    Check vital conditions against GMCP data on *ctx*.
 
     :param when: Condition dict, e.g. ``{"HP%": ">50", "MP%": ">30"}``.
-    :param writer: Telnet writer with ``_gmcp_data`` attribute.
+    :param ctx: Session context with ``gmcp_data`` attribute.
     :returns: ``(ok, failure_description)`` -- *ok* is ``False`` when a
         condition is not met; *failure_description* explains which.
     """
     if not when:
         return True, ""
-    gmcp: Optional[dict[str, Any]] = getattr(writer, "_gmcp_data", None)
+    gmcp: Optional[dict[str, Any]] = ctx.gmcp_data if ctx is not None else None
     if not gmcp:
         return True, ""
     vitals = gmcp.get("Char.Vitals")
@@ -212,8 +210,6 @@ def save_autoreplies(path: str, rules: list[AutoreplyRule], session_key: str) ->
     :param rules: List of :class:`AutoreplyRule` instances to save.
     :param session_key: Session identifier (``"host:port"``).
     """
-    import os  # pylint: disable=import-outside-toplevel
-
     data: dict[str, Any] = {}
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as fh:
@@ -240,7 +236,7 @@ def save_autoreplies(path: str, rules: list[AutoreplyRule], session_key: str) ->
             for r in rules
         ]
     }
-    from ._paths import _atomic_write  # pylint: disable=import-outside-toplevel
+    from ._paths import _atomic_write
 
     content = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
     _atomic_write(path, content)
@@ -413,7 +409,7 @@ class AutoreplyEngine:
     waits for A to complete before starting.
 
     :param rules: Autoreply rules to match against.
-    :param writer: Telnet writer for sending replies.
+    :param ctx: Session context (provides writer for sending and GMCP data).
     :param log: Logger instance.
     :param max_lines: SearchBuffer capacity.
     """
@@ -421,7 +417,7 @@ class AutoreplyEngine:
     def __init__(
         self,
         rules: list[AutoreplyRule],
-        writer: Union[TelnetWriter, TelnetWriterUnicode],
+        ctx: "SessionContext",
         log: logging.Logger,
         max_lines: int = 100,
         insert_fn: Optional[Callable[[str], None]] = None,
@@ -430,7 +426,7 @@ class AutoreplyEngine:
     ) -> None:
         """Initialize AutoreplyEngine with rules and I/O handles."""
         self._rules = rules
-        self._writer = writer
+        self._ctx = ctx
         self._log = log
         self._buffer = SearchBuffer(max_lines=max_lines)
         self._reply_chain: Optional[asyncio.Task[None]] = None
@@ -444,9 +440,7 @@ class AutoreplyEngine:
         self._exclusive_deadline: float = 0.0
         self._post_command: str = ""
         self._sent_commands: set[str] = set()
-        self._sent_commands_max: int = int(
-            os.environ.get("TELNETLIB3_SENT_COMMANDS_MAX", "10000")
-        )
+        self._sent_commands_max: int = int(os.environ.get("TELNETLIB3_SENT_COMMANDS_MAX", "10000"))
         self._prompt_based = False
         self._cycle_matched: set[int] = set()
         self._condition_blocked: set[int] = set()
@@ -586,7 +580,6 @@ class AutoreplyEngine:
         if not searchable:
             return
 
-        # pylint: disable=too-many-nested-blocks
         # Search for all matching rules. We re-fetch searchable text
         # after each match since advance_match changes the window.
         # Cap iterations to len(rules) * 2 as a safety valve -- one
@@ -615,7 +608,7 @@ class AutoreplyEngine:
                         found = True
                         break
                     if rule.when:
-                        ok, desc = check_condition(rule.when, self._writer)
+                        ok, desc = check_condition(rule.when, self._ctx)
                         if not ok:
                             self._log.info(
                                 "autoreply: rule #%d skipped, condition failed: %s",
@@ -693,10 +686,11 @@ class AutoreplyEngine:
                 if match:
                     self._last_matched_pattern = rule.pattern.pattern
                     if rule.when:
-                        ok, desc = check_condition(rule.when, self._writer)
+                        ok, desc = check_condition(rule.when, self._ctx.writer)
                         if not ok:
                             self._log.info(
-                                "autoreply: immediate rule #%d skipped," " condition failed: %s",
+                                "autoreply: immediate rule #%d skipped,"
+                                " condition failed: %s",
                                 rule_idx + 1,
                                 desc,
                             )
@@ -756,7 +750,7 @@ class AutoreplyEngine:
 
         :param reply_text: Fully substituted reply string.
         """
-        from .client_repl import expand_commands  # pylint: disable=import-outside-toplevel
+        from .client_repl import expand_commands
 
         cmds = expand_commands(reply_text)
         sent_count = 0
@@ -792,7 +786,8 @@ class AutoreplyEngine:
             self._sent_commands.clear()
         if self._echo_fn is not None:
             self._echo_fn(cmd)
-        self._writer.write(cmd + "\r\n")  # type: ignore[arg-type]
+        assert self._ctx.writer is not None
+        self._ctx.writer.write(cmd + "\r\n")  # type: ignore[arg-type]
 
     def on_prompt(self) -> None:
         """

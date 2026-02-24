@@ -311,14 +311,14 @@ def _normalize_eol(text: str) -> str:
 class Codec(codecs.Codec):
     """ATASCII character map codec."""
 
-    def encode(  # pylint: disable=redefined-builtin
+    def encode(
         self, input: str, errors: str = "strict"
     ) -> Tuple[bytes, int]:
         """Encode input string using ATASCII character map."""
         input = _normalize_eol(input)
         return codecs.charmap_encode(input, errors, ENCODING_TABLE)
 
-    def decode(  # pylint: disable=redefined-builtin
+    def decode(
         self, input: bytes, errors: str = "strict"
     ) -> Tuple[str, int]:
         """Decode input bytes using ATASCII character map."""
@@ -333,7 +333,7 @@ class IncrementalEncoder(codecs.IncrementalEncoder):
         super().__init__(errors)
         self._pending_cr = False
 
-    def encode(self, input: str, final: bool = False) -> bytes:  # pylint: disable=redefined-builtin
+    def encode(self, input: str, final: bool = False) -> bytes:
         """Encode input string incrementally."""
         if self._pending_cr:
             input = "\r" + input
@@ -360,7 +360,7 @@ class IncrementalEncoder(codecs.IncrementalEncoder):
 class IncrementalDecoder(codecs.IncrementalDecoder):
     """ATASCII incremental decoder."""
 
-    def decode(  # type: ignore[override]  # pylint: disable=redefined-builtin
+    def decode(  # type: ignore[override]
         self, input: bytes, final: bool = False
     ) -> str:
         """Decode input bytes incrementally."""

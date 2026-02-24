@@ -250,7 +250,6 @@ class ColorFilter:
             result = self._bg_sgr + result
         return result
 
-    # pylint: disable-next=too-complex,too-many-branches,too-many-statements
     def _replace_sgr(self, match: Match[str]) -> str:  # noqa: C901
         r"""
         Regex replacement callback for a single SGR sequence.

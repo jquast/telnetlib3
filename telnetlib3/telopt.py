@@ -37,7 +37,7 @@ SB = b"\xfa"
 LOGOUT = b"\x12"
 CHARSET = b"*"
 SNDLOC = b"\x17"
-theNULL = b"\x00"  # pylint: disable=invalid-name
+theNULL = b"\x00"
 ENCRYPT = b"&"
 AUTHENTICATION = b"%"
 TN3270E = b"("

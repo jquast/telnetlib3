@@ -274,7 +274,7 @@ class _VirtualCursor:
         stripped = _ANSI_STRIP_RE.sub(b"", data)
         try:
             text = stripped.decode(self.encoding, errors="replace")
-        # pylint: disable-next=broad-exception-caught,overlapping-except
+        # pylint: disable-next=overlapping-except
         except (LookupError, Exception):
             text = stripped.decode("latin-1")
         for ch in text:
@@ -331,7 +331,7 @@ class _PromptResult(NamedTuple):
     encoding: str | None = None
 
 
-def _detect_yn_prompt(banner: bytes) -> _PromptResult:  # pylint: disable=too-many-return-statements
+def _detect_yn_prompt(banner: bytes) -> _PromptResult:
     r"""
     Return an appropriate first-prompt response based on banner content.
 
@@ -423,7 +423,7 @@ async def fingerprinting_client_shell(
     :param banner_max_bytes: Maximum bytes per banner read call.
     """
     writer.environ_encoding = environ_encoding
-    writer._encoding_explicit = environ_encoding != "ascii"  # pylint: disable=protected-access
+    writer._encoding_explicit = environ_encoding != "ascii"
     try:
         await _fingerprint_session(
             reader,
@@ -444,7 +444,7 @@ async def fingerprinting_client_shell(
         writer.close()
 
 
-async def _fingerprint_session(  # pylint: disable=too-many-locals
+async def _fingerprint_session(
     reader: TelnetReader,
     writer: TelnetWriter,
     *,
@@ -497,12 +497,10 @@ async def _fingerprint_session(  # pylint: disable=too-many-locals
         # Skip if the ESC response was already sent inline during banner
         # collection (time-sensitive botcheck countdowns).
         if detected in (b"\x1b\x1b", b"\x1b") and getattr(writer, "_esc_inline", False):
-            # pylint: disable-next=protected-access
             writer._esc_inline = False  # type: ignore[attr-defined]
             detected = None
         # Skip if the charset menu response was already sent inline.
         if prompt_result.encoding and getattr(writer, "_menu_inline", False):
-            # pylint: disable-next=protected-access
             writer._menu_inline = False  # type: ignore[attr-defined]
             detected = None
         prompt_response = _reencode_prompt(
@@ -876,7 +874,7 @@ def _format_banner(data: bytes, encoding: str = "utf-8") -> str:
         text = data.decode("latin-1")
 
     if encoding.lower() in ("petscii", "cbm", "commodore", "c64", "c128"):
-        from .color_filter import PetsciiColorFilter  # pylint: disable=import-outside-toplevel
+        from .color_filter import PetsciiColorFilter
 
         text = PetsciiColorFilter().filter(text)
         # PETSCII uses CR (0x0D) as line terminator; normalize to LF.
@@ -937,7 +935,7 @@ def _respond_to_dsr(chunk: bytes, writer: TelnetWriter, cursor: _VirtualCursor |
     cursor.advance(chunk[pos:])
 
 
-async def _read_banner_until_quiet(  # pylint: disable=too-many-nested-blocks
+async def _read_banner_until_quiet(
     reader: TelnetReader,
     quiet_time: float = 2.0,
     max_wait: float = 8.0,
@@ -1016,13 +1014,11 @@ async def _read_banner_until_quiet(  # pylint: disable=too-many-nested-blocks
                         writer.write(b"\x1b\x1b")
                         await writer.drain()
                         esc_responded = True
-                        # pylint: disable-next=protected-access
                         writer._esc_inline = True  # type: ignore[attr-defined]
                     elif _ESC_ONCE_RE.search(stripped_chunk):
                         writer.write(b"\x1b")
                         await writer.drain()
                         esc_responded = True
-                        # pylint: disable-next=protected-access
                         writer._esc_inline = True  # type: ignore[attr-defined]
                 if not menu_responded:
                     menu_match = _MENU_UTF8_RE.search(stripped_accum)
@@ -1039,7 +1035,6 @@ async def _read_banner_until_quiet(  # pylint: disable=too-many-nested-blocks
                         protocol = writer.protocol
                         if protocol is not None:
                             protocol.force_binary = True
-                        # pylint: disable-next=protected-access
                         writer._menu_inline = True  # type: ignore[attr-defined]
             chunks.append(chunk)
         except (asyncio.TimeoutError, EOFError):

@@ -140,7 +140,7 @@ class _LineEditor:
 __all__ = ("telnet_server_shell", "readline_async", "readline")
 
 
-async def telnet_server_shell(  # pylint: disable=too-complex,too-many-branches
+async def telnet_server_shell(
     reader: Union[TelnetReader, TelnetReaderUnicode],
     writer: Union[TelnetWriter, TelnetWriterUnicode],
 ) -> None:

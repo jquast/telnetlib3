@@ -15,10 +15,10 @@ import pytest
 # local
 from telnetlib3.autoreply import (
     _DELAY_RE,
-    _compare,
     SearchBuffer,
     AutoreplyRule,
     AutoreplyEngine,
+    _compare,
     check_condition,
     load_autoreplies,
     save_autoreplies,
@@ -263,10 +263,12 @@ def test_compare_unknown_operator_raises():
 
 
 def _mock_writer():
-    """Create a mock writer that records write() calls."""
+    """Create a mock ctx+writer that records write() calls."""
     written: list[str] = []
-    writer = types.SimpleNamespace(write=written.append, log=logging.getLogger("test"))
-    return writer, written
+    writer = types.SimpleNamespace(write=written.append)
+    ctx = types.SimpleNamespace(writer=writer, gmcp_data={})
+    ctx.log = logging.getLogger("test")
+    return ctx, written
 
 
 @pytest.mark.asyncio
@@ -1402,16 +1404,17 @@ async def test_non_exclusive_post_command():
 
 
 def _mock_writer_with_vitals(hp: int, maxhp: int, mp: int, maxmp: int):
-    """Create a mock writer with GMCP vitals data."""
+    """Create a mock ctx with GMCP vitals data."""
     written: list[str] = []
-    writer = types.SimpleNamespace(
-        write=written.append,
+    writer = types.SimpleNamespace(write=written.append)
+    ctx = types.SimpleNamespace(
+        writer=writer,
         log=logging.getLogger("test"),
-        _gmcp_data={
+        gmcp_data={
             "Char.Vitals": {"hp": str(hp), "maxhp": str(maxhp), "mp": str(mp), "maxmp": str(maxmp)}
         },
     )
-    return writer, written
+    return ctx, written
 
 
 @pytest.mark.parametrize(
@@ -1443,14 +1446,14 @@ def test_check_condition(when, hp, maxhp, mp, maxmp, ok):
 
 
 def test_check_condition_no_gmcp():
-    writer = types.SimpleNamespace(log=logging.getLogger("test"))
-    ok, desc = check_condition({"HP%": ">50"}, writer)
+    ctx = types.SimpleNamespace(gmcp_data=None)
+    ok, desc = check_condition({"HP%": ">50"}, ctx)
     assert ok is True
 
 
 def test_check_condition_no_vitals():
-    writer = types.SimpleNamespace(log=logging.getLogger("test"), _gmcp_data={})
-    ok, desc = check_condition({"HP%": ">50"}, writer)
+    ctx = types.SimpleNamespace(gmcp_data={})
+    ok, desc = check_condition({"HP%": ">50"}, ctx)
     assert ok is True
 
 
@@ -1554,7 +1557,7 @@ async def test_condition_blocked_preserves_buffer_for_retry():
     assert not any("kill bear" in w for w in written)
     assert engine.buffer.lines, "buffer should be retained after condition fail"
 
-    writer._gmcp_data["Char.Vitals"]["hp"] = "80"
+    writer.gmcp_data["Char.Vitals"]["hp"] = "80"
     engine.on_prompt()
     await asyncio.sleep(0.1)
     assert any("kill bear" in w for w in written)

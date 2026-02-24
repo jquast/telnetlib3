@@ -135,7 +135,7 @@ DONT = bytes([254])
 DO = bytes([253])
 WONT = bytes([252])
 WILL = bytes([251])
-theNULL = bytes([0])  # pylint: disable=invalid-name
+theNULL = bytes([0])
 
 SE = bytes([240])  # Subnegotiation End
 NOP = bytes([241])  # No Operation
@@ -302,7 +302,7 @@ class Telnet:
 
     def open(
         self, host, port=0, timeout=socket._GLOBAL_DEFAULT_TIMEOUT
-    ):  # pylint: disable=protected-access
+    ):
         """
         Connect to a host.
 
@@ -657,7 +657,7 @@ class Telnet:
             else:
                 sys.stdout.flush()
 
-    def expect(self, list, timeout=None):  # pylint: disable=redefined-builtin
+    def expect(self, list, timeout=None):
         """
         Read until one from a list of a regular expressions matches.
 
@@ -687,7 +687,7 @@ class Telnet:
         for i in indices:
             if not hasattr(list[i], "search"):
                 if not re:
-                    import re  # pylint: disable=import-outside-toplevel
+                    import re
                 list[i] = re.compile(list[i])
         if timeout is not None:
             deadline = _time() + timeout
@@ -718,7 +718,7 @@ class Telnet:
     def __enter__(self):
         return self
 
-    def __exit__(self, type, value, traceback):  # pylint: disable=redefined-builtin
+    def __exit__(self, type, value, traceback):
         self.close()
 
 

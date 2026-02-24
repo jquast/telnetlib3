@@ -112,13 +112,39 @@ disable = [
     "too-many-public-methods",
     "too-few-public-methods",
     "too-many-arguments",
+    "too-many-positional-arguments",
+    "too-many-locals",
+    "too-many-branches",
+    "too-many-statements",
+    "too-many-nested-blocks",
+    "too-many-return-statements",
+    "too-many-lines",
+    "too-complex",
     # intentional re-exports in telnetlib.py and telopt.py
     "duplicate-code",
-    # my deepest apologies to downstream developers who are also type-lovers, our 'writer' can be
-    # *either*  TelnetWriter or TelnetUnicodeWriter, depending on the arguments passed, designed
-    # several years before python first provided Typing, the API can't be changed this late!
     # cyclic-import is a graph-level diagnostic that cannot be suppressed inline
     "cyclic-import",
+    # deliberate deferred imports throughout the codebase
+    "import-outside-toplevel",
+    # internal APIs, common pattern across protocol code
+    "protected-access",
+    # boundary/cleanup code throughout
+    "broad-exception-caught",
+    "broad-except",
+    # codec encode/decode `input` param, __exit__ `type` param
+    "redefined-builtin",
+    # module-level singletons pattern
+    "global-statement",
+    # callback signatures with unused params
+    "unused-argument",
+    # theNULL, PTY_SUPPORT, _editor_active, etc.
+    "invalid-name",
+    # pytest fixtures, subprocess re-imports
+    "redefined-outer-name",
+    "reimported",
+    # deliberate override renames/changes
+    "arguments-renamed",
+    "arguments-differ",
 ]
 
 [tool.pylint.format]

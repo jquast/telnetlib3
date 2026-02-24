@@ -134,10 +134,10 @@ async def test_terminal_determine_mode(monkeypatch):
     _mock_opt = types.SimpleNamespace(enabled=lambda key: False)
     tw = types.SimpleNamespace(
         will_echo=False,
-        _raw_mode=None,
         client=True,
         remote_option=_mock_opt,
         log=types.SimpleNamespace(debug=lambda *a, **k: None),
+        _ctx=types.SimpleNamespace(raw_mode=None),
     )
     term = cs.Terminal(tw)
     mode = cs.Terminal.ModeDef(0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 38400, 38400, [0] * 32)

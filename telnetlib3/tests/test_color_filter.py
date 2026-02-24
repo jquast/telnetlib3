@@ -514,101 +514,110 @@ def test_color_filter_palette_red_foreground(name: str) -> None:
     assert f"38;2;{rgb[0]};{rgb[1]};{rgb[2]}" in result
 
 
-class TestPetsciiColorFilter:
-    def _make_filter(self, **kwargs: object) -> PetsciiColorFilter:
-        cfg = ColorConfig(brightness=1.0, contrast=1.0, **kwargs)  # type: ignore[arg-type]
-        return PetsciiColorFilter(cfg)
+def _make_petscii_filter(**kwargs: object) -> PetsciiColorFilter:
+    cfg = ColorConfig(brightness=1.0, contrast=1.0, **kwargs)  # type: ignore[arg-type]
+    return PetsciiColorFilter(cfg)
 
-    @pytest.mark.parametrize(
-        "ctrl_char,palette_idx",
-        [
-            ("\x05", 1),
-            ("\x1c", 2),
-            ("\x1e", 5),
-            ("\x1f", 6),
-            ("\x81", 8),
-            ("\x90", 0),
-            ("\x95", 9),
-            ("\x96", 10),
-            ("\x97", 11),
-            ("\x98", 12),
-            ("\x99", 13),
-            ("\x9a", 14),
-            ("\x9b", 15),
-            ("\x9c", 4),
-            ("\x9e", 7),
-            ("\x9f", 3),
-        ],
-    )
-    def test_color_code_to_24bit(self, ctrl_char: str, palette_idx: int) -> None:
-        f = self._make_filter()
-        result = f.filter(f"hello{ctrl_char}world")
-        rgb = PALETTES["c64"][palette_idx]
-        assert f"\x1b[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m" in result
-        assert ctrl_char not in result
-        assert "hello" in result
-        assert "world" in result
 
-    def test_rvs_on(self) -> None:
-        f = self._make_filter()
-        result = f.filter("before\x12after")
-        assert "\x1b[7m" in result
-        assert "\x12" not in result
+@pytest.mark.parametrize(
+    "ctrl_char,palette_idx",
+    [
+        ("\x05", 1),
+        ("\x1c", 2),
+        ("\x1e", 5),
+        ("\x1f", 6),
+        ("\x81", 8),
+        ("\x90", 0),
+        ("\x95", 9),
+        ("\x96", 10),
+        ("\x97", 11),
+        ("\x98", 12),
+        ("\x99", 13),
+        ("\x9a", 14),
+        ("\x9b", 15),
+        ("\x9c", 4),
+        ("\x9e", 7),
+        ("\x9f", 3),
+    ],
+)
+def test_petscii_color_code_to_24bit(ctrl_char: str, palette_idx: int) -> None:
+    f = _make_petscii_filter()
+    result = f.filter(f"hello{ctrl_char}world")
+    rgb = PALETTES["c64"][palette_idx]
+    assert f"\x1b[38;2;{rgb[0]};{rgb[1]};{rgb[2]}m" in result
+    assert ctrl_char not in result
+    assert "hello" in result
+    assert "world" in result
 
-    def test_rvs_off(self) -> None:
-        f = self._make_filter()
-        result = f.filter("before\x92after")
-        assert "\x1b[27m" in result
-        assert "\x92" not in result
 
-    def test_mixed_colors_and_rvs(self) -> None:
-        f = self._make_filter()
-        result = f.filter("\x1c\x12hello\x92\x05world")
-        red_rgb = PALETTES["c64"][2]
-        white_rgb = PALETTES["c64"][1]
-        assert f"\x1b[38;2;{red_rgb[0]};{red_rgb[1]};{red_rgb[2]}m" in result
-        assert "\x1b[7m" in result
-        assert "\x1b[27m" in result
-        assert f"\x1b[38;2;{white_rgb[0]};{white_rgb[1]};{white_rgb[2]}m" in result
-        assert "hello" in result
-        assert "world" in result
+def test_petscii_rvs_on() -> None:
+    f = _make_petscii_filter()
+    result = f.filter("before\x12after")
+    assert "\x1b[7m" in result
+    assert "\x12" not in result
 
-    def test_plain_text_unchanged(self) -> None:
-        f = self._make_filter()
-        assert f.filter("hello world") == "hello world"
 
-    def test_non_petscii_control_chars_unchanged(self) -> None:
-        f = self._make_filter()
-        assert f.filter("A\x07B\x0bC") == "A\x07B\x0bC"
+def test_petscii_rvs_off() -> None:
+    f = _make_petscii_filter()
+    result = f.filter("before\x92after")
+    assert "\x1b[27m" in result
+    assert "\x92" not in result
 
-    @pytest.mark.parametrize(
-        "ctrl_char,expected",
-        [
-            ("\x13", "\x1b[H"),
-            ("\x93", "\x1b[2J"),
-            ("\x11", "\x1b[B"),
-            ("\x91", "\x1b[A"),
-            ("\x1d", "\x1b[C"),
-            ("\x9d", "\x1b[D"),
-            ("\x14", "\x08\x1b[P"),
-        ],
-    )
-    def test_cursor_controls_translated(self, ctrl_char: str, expected: str) -> None:
-        f = self._make_filter()
-        assert f.filter(f"A{ctrl_char}B") == f"A{expected}B"
 
-    def test_flush_returns_empty(self) -> None:
-        f = self._make_filter()
-        assert not f.flush()
+def test_petscii_mixed_colors_and_rvs() -> None:
+    f = _make_petscii_filter()
+    result = f.filter("\x1c\x12hello\x92\x05world")
+    red_rgb = PALETTES["c64"][2]
+    white_rgb = PALETTES["c64"][1]
+    assert f"\x1b[38;2;{red_rgb[0]};{red_rgb[1]};{red_rgb[2]}m" in result
+    assert "\x1b[7m" in result
+    assert "\x1b[27m" in result
+    assert f"\x1b[38;2;{white_rgb[0]};{white_rgb[1]};{white_rgb[2]}m" in result
+    assert "hello" in result
+    assert "world" in result
 
-    def test_brightness_contrast_applied(self) -> None:
-        f_full = PetsciiColorFilter(ColorConfig(brightness=1.0, contrast=1.0))
-        f_dim = PetsciiColorFilter(ColorConfig(brightness=0.5, contrast=0.5))
-        assert f_full.filter("\x1c") != f_dim.filter("\x1c")
 
-    def test_default_config(self) -> None:
-        f = PetsciiColorFilter()
-        assert "\x1b[38;2;" in f.filter("\x1c")
+def test_petscii_plain_text_unchanged() -> None:
+    f = _make_petscii_filter()
+    assert f.filter("hello world") == "hello world"
+
+
+def test_petscii_non_petscii_control_chars_unchanged() -> None:
+    f = _make_petscii_filter()
+    assert f.filter("A\x07B\x0bC") == "A\x07B\x0bC"
+
+
+@pytest.mark.parametrize(
+    "ctrl_char,expected",
+    [
+        ("\x13", "\x1b[H"),
+        ("\x93", "\x1b[2J"),
+        ("\x11", "\x1b[B"),
+        ("\x91", "\x1b[A"),
+        ("\x1d", "\x1b[C"),
+        ("\x9d", "\x1b[D"),
+        ("\x14", "\x08\x1b[P"),
+    ],
+)
+def test_petscii_cursor_controls_translated(ctrl_char: str, expected: str) -> None:
+    f = _make_petscii_filter()
+    assert f.filter(f"A{ctrl_char}B") == f"A{expected}B"
+
+
+def test_petscii_flush_returns_empty() -> None:
+    f = _make_petscii_filter()
+    assert not f.flush()
+
+
+def test_petscii_brightness_contrast_applied() -> None:
+    f_full = PetsciiColorFilter(ColorConfig(brightness=1.0, contrast=1.0))
+    f_dim = PetsciiColorFilter(ColorConfig(brightness=0.5, contrast=0.5))
+    assert f_full.filter("\x1c") != f_dim.filter("\x1c")
+
+
+def test_petscii_default_config() -> None:
+    f = PetsciiColorFilter()
+    assert "\x1b[38;2;" in f.filter("\x1c")
 
 
 @pytest.mark.parametrize(

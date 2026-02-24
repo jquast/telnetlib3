@@ -82,7 +82,8 @@ async def test_gmcp_log_enabled():
 @pytest.mark.asyncio
 async def test_gmcp_data_on_writer():
     client, _ = _make_connected_client()
-    assert client.writer._gmcp_data is client._gmcp_data
+    assert client._gmcp_data is not None
+    assert isinstance(client._gmcp_data, dict)
 
 
 @pytest.mark.asyncio
@@ -245,23 +246,25 @@ def test_transform_args_gmcp_modules_none():
 
 
 if sys.platform != "win32":
-    from telnetlib3.client_repl import _vital_bar
+    from telnetlib3.client_repl import _segmented, _vital_bar
 
     def test_vital_bar_shows_vitals():
         bars = _vital_bar(100, 200, 16, "hp")
         text = "".join(t for _, t in bars)
-        assert "100/200 50%" in text
+        assert _segmented("100/200") in text
+        assert _segmented("50%") in text
 
     def test_vital_bar_hp_only():
         bars = _vital_bar(50, None, 16, "hp")
         text = "".join(t for _, t in bars)
-        assert "50" in text
-        assert "HP" in text
+        assert _segmented("50") in text
+        assert "hp" in text
 
     def test_vital_bar_full():
         bars = _vital_bar(100, 100, 16, "hp")
         text = "".join(t for _, t in bars)
-        assert "100/100 100%" in text
+        assert _segmented("100/100") in text
+        assert _segmented("100%") in text
 
     def test_vital_bar_returns_sgr():
         bars = _vital_bar(50, 100, 16, "mp")

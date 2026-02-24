@@ -22,7 +22,7 @@ from typing import Any, Union, Optional, TypedDict, cast
 
 # local
 from . import slc
-from .server import TelnetServer  # pylint: disable=cyclic-import
+from .server import TelnetServer
 from .telopt import (
     BM,
     DO,
@@ -200,7 +200,7 @@ class FingerprintingTelnetServer:
         # pylint: disable-next=no-member
         base: list[Union[str, bytes]] = super().on_request_environ()  # type: ignore[misc]
         # Insert extended keys before the trailing VAR/USERVAR sentinels
-        from .telopt import VAR, USERVAR  # pylint: disable=import-outside-toplevel
+        from .telopt import VAR, USERVAR
 
         extra = [k for k in ENVIRON_EXTENDED if k not in base]
         # Find where VAR/USERVAR sentinels start and insert before them
@@ -496,7 +496,7 @@ def _collect_extra_info(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> dic
 
     protocol = _get_protocol(writer)
     if protocol and hasattr(protocol, "_extra"):
-        for key, value in protocol._extra.items():  # pylint: disable=protected-access
+        for key, value in protocol._extra.items():
             if isinstance(value, tuple):
                 extra[key] = list(value)
             elif isinstance(value, bytes):
@@ -550,7 +550,7 @@ def _collect_protocol_timing(writer: Union[TelnetWriter, TelnetWriterUnicode]) -
         if hasattr(protocol, "idle"):
             timing["idle"] = protocol.idle
         if hasattr(protocol, "_connect_time"):
-            timing["connect_time"] = protocol._connect_time  # pylint: disable=protected-access
+            timing["connect_time"] = protocol._connect_time
     return timing
 
 
@@ -848,7 +848,7 @@ def _validate_suggestion(text: str) -> Optional[str]:
 
 def _cooked_input(prompt: str) -> str:
     """Call :func:`input` with echo and canonical mode temporarily enabled."""
-    import termios  # pylint: disable=import-outside-toplevel
+    import termios
 
     fd = sys.stdin.fileno()
     old_attrs = termios.tcgetattr(fd)
@@ -1041,7 +1041,6 @@ async def fingerprinting_server_shell(
     :param reader: TelnetReader instance.
     :param writer: TelnetWriter instance.
     """
-    # pylint: disable=import-outside-toplevel
     from .server_pty_shell import pty_shell
 
     writer = cast(TelnetWriterUnicode, writer)
@@ -1093,7 +1092,6 @@ def fingerprinting_post_script(filepath: str) -> None:
 
     :param filepath: Path to the saved fingerprint JSON file.
     """
-    # pylint: disable-next=import-outside-toplevel,cyclic-import
     from .fingerprinting_display import fingerprinting_post_script as _fps
 
     _fps(filepath)
@@ -1111,7 +1109,6 @@ def fingerprint_server_main() -> None:
     Accepts ``--data-dir`` to set the fingerprint data directory.
     Falls back to the ``TELNETLIB3_DATA_DIR`` environment variable.
     """
-    # pylint: disable=import-outside-toplevel,global-statement
     # local import is required to prevent circular imports
     from .server import _config, run_server, parse_server_args  # noqa: PLC0415
 

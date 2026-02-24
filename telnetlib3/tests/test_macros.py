@@ -67,10 +67,7 @@ def test_load_macros_no_session(tmp_path):
 
 def test_save_macros_roundtrip(tmp_path):
     fp = tmp_path / "macros.json"
-    original = [
-        Macro(key="KEY_F5", text="look;"),
-        Macro(key="KEY_ALT_N", text="north;"),
-    ]
+    original = [Macro(key="KEY_F5", text="look;"), Macro(key="KEY_ALT_N", text="north;")]
     save_macros(str(fp), original, _SK)
     loaded = load_macros(str(fp), _SK)
     assert len(loaded) == len(original)
@@ -103,6 +100,7 @@ def test_save_macros_unicode(tmp_path):
 
 def test_build_dispatch_skips_editor_keymap_conflicts(caplog):
     import types
+
     from telnetlib3.macros import build_macro_dispatch
 
     writer = types.SimpleNamespace(log=logging.getLogger("test"))

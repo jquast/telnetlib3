@@ -39,7 +39,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     _writer_factory_encoding = TelnetWriterUnicode
     _check_later: Optional[asyncio.Handle] = None
 
-    def __init__(  # pylint: disable=too-many-positional-arguments
+    def __init__(
         self,
         shell: Optional[ShellCallback] = None,
         encoding: Union[str, bool] = "utf8",
@@ -170,7 +170,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         # Attach transport so TelnetReader can apply pause_reading/resume_reading
         try:
             self.reader.set_transport(_transport)
-        except Exception:  # pylint: disable=broad-exception-caught
+        except Exception:
             # Reader may not support transport coupling; ignore.
             pass
 
@@ -240,7 +240,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 try:
                     self._transport.pause_reading()
                     self._reading_paused = True
-                except Exception:  # pylint: disable=broad-exception-caught
+                except Exception:
                     # Some transports may not support pause_reading; ignore.
                     pass
 
@@ -254,7 +254,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         """
         if self.writer is None:
             return
-        from .server_fingerprinting import (  # pylint: disable=import-outside-toplevel
+        from .server_fingerprinting import (
             detect_syncterm_font,
         )
 
@@ -323,7 +323,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         The base implementation **always** returns ``encoding`` argument
         given to class initializer or, when unset (``None``), ``US-ASCII``.
         """
-        # pylint: disable=unused-argument
         return self.default_encoding or "US-ASCII"  # pragma: no cover
 
     def check_negotiation(self, final: bool = False) -> bool:
@@ -347,7 +346,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         Ensure ``super().check_negotiation()`` is called and conditionally
         combined when derived.
         """
-        # pylint: disable=import-outside-toplevel
         from .telopt import TTYPE, CHARSET, NEW_ENVIRON
 
         # First check if there are any pending options
@@ -385,7 +383,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         # Snapshot whether SLC snooping is required for this chunk
         try:
             mode = writer.mode  # property
-        except Exception:  # pylint: disable=broad-exception-caught
+        except Exception:
             mode = "local"
         slc_needed = (mode == "remote") or (mode == "kludge" and writer.slc_simulated)
 
@@ -430,7 +428,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             b = data[i]
             try:
                 recv_inband = writer.feed_byte(_ONE_BYTE[b])
-            except Exception:  # pylint: disable=broad-exception-caught
+            except Exception:
                 self._log_exception(self.log.warning, *sys.exc_info())
             else:
                 if recv_inband:
@@ -474,7 +472,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                         try:
                             self._transport.resume_reading()
                             self._reading_paused = False
-                        except Exception:  # pylint: disable=broad-exception-caught
+                        except Exception:
                             pass
 
                 # Yield periodically to keep loop responsive without excessive context switching

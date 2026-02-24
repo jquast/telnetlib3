@@ -104,7 +104,6 @@ class PTYSession:
 
         :raises PTYSpawnError: If the child process fails to exec.
         """
-        # pylint: disable=import-outside-toplevel
         import pty
         import fcntl
 
@@ -130,7 +129,7 @@ class PTYSession:
             if self.preexec_fn is not None:
                 try:
                     child_cov = self.preexec_fn()
-                except Exception as e:  # pylint: disable=broad-exception-caught
+                except Exception as e:
                     self._write_exec_error(exec_err_pipe_write, e)
                     os._exit(1)
             self._setup_child(env, rows, cols, exec_err_pipe_write, child_cov=child_cov)
@@ -220,7 +219,6 @@ class PTYSession:
     ) -> None:
         """Child process setup before exec."""
         # Note: pty.fork() already calls setsid() for the child, so we don't need to
-        # pylint: disable=import-outside-toplevel
         import fcntl
         import termios
 
@@ -260,7 +258,6 @@ class PTYSession:
 
     def _setup_parent(self) -> None:
         """Parent process setup after fork."""
-        # pylint: disable=import-outside-toplevel
         import fcntl
 
         assert self.master_fd is not None
@@ -291,7 +288,6 @@ class PTYSession:
 
     def _set_window_size(self, rows: int, cols: int) -> None:
         """Set PTY window size and send SIGWINCH to child."""
-        # pylint: disable=import-outside-toplevel
         import fcntl
         import signal
         import termios
@@ -307,7 +303,6 @@ class PTYSession:
 
     async def run(self) -> None:
         """Bridge loop between telnet and PTY."""
-        # pylint: disable=import-outside-toplevel
         import errno
 
         loop = asyncio.get_event_loop()
@@ -399,7 +394,7 @@ class PTYSession:
                     # EAGAIN was hit - flush any remaining partial line
                     self._flush_remaining()
                     pty_read_event.clear()
-            except Exception as e:  # pylint: disable=broad-exception-caught
+            except Exception as e:
                 logger.debug("bridge loop error: %s", e)
                 self._closing = True
                 break
@@ -526,7 +521,6 @@ class PTYSession:
         :param force: If True, use SIGKILL as last resort.
         :returns: True if child was terminated, False otherwise.
         """
-        # pylint: disable=import-outside-toplevel
         import signal
 
         if not self._isalive():

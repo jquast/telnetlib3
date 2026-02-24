@@ -49,10 +49,10 @@ from .sync import *  # noqa
 try:
     from . import server_pty_shell
     from .server_pty_shell import *  # noqa
-    PTY_SUPPORT = True  # pylint: disable=invalid-name
+    PTY_SUPPORT = True
 except ImportError:
     server_pty_shell = None  # type: ignore[assignment]
-    PTY_SUPPORT = False  # pylint: disable=invalid-name
+    PTY_SUPPORT = False
 from .accessories import get_version as _get_version
 # isort: on
 # fmt: on

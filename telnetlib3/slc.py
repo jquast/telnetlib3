@@ -178,7 +178,7 @@ class SLC:
         return f"({value_str}, {'|'.join(flags)})"
 
 
-class SLC_nosupport(SLC):  # pylint: disable=invalid-name
+class SLC_nosupport(SLC):
     """SLC definition inferring our unwillingness to support the option."""
 
     def __init__(self) -> None:

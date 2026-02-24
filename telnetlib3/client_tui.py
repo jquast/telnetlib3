@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import sys
 import json
+import logging
 import datetime
 import subprocess
 from abc import abstractmethod
@@ -22,11 +23,13 @@ from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
 from dataclasses import asdict, fields, dataclass
 
 if TYPE_CHECKING:
+    from rich.text import Text as RichText
     from .rooms import RoomStore
 
 # 3rd party
 from textual import events
-from textual.app import App, ComposeResult
+from rich.style import Style  # pylint: disable=ungrouped-imports
+from textual.app import App, ComposeResult  # pylint: disable=ungrouped-imports
 from textual.screen import Screen
 from textual.binding import Binding
 from textual.widgets import (
@@ -44,10 +47,12 @@ from textual.widgets import (
     ContentSwitcher,
 )
 from textual.containers import Vertical, Horizontal
+from textual.widgets._tree import TreeNode
 
 # Reset SGR, cursor, alt-screen, mouse, and bracketed paste.
 _TERMINAL_CLEANUP = (
-    "\x1b[m\x1b[?25h\x1b[?1049l" "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l"
+    "\x1b[m\x1b[?25h\x1b[?1049l"
+    "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l"
 )
 
 _ENCODINGS = (
@@ -123,7 +128,7 @@ def _handle_arrow_navigation(
     if form_selector:
         try:
             form = screen.query_one(form_selector)
-        except Exception:  # pylint: disable=broad-except
+        except Exception:
             form = None
         if form is not None and form.display:
             form_fields: list[Input | Switch | Button] = [
@@ -175,14 +180,14 @@ _TOOLTIP_CACHE: dict[str, str] | None = None
 
 def _build_tooltips() -> dict[str, str]:
     """Extract help text from argparse and return ``{widget_id: help}``."""
-    global _TOOLTIP_CACHE  # noqa: PLW0603  # pylint: disable=global-statement
+    global _TOOLTIP_CACHE  # noqa: PLW0603
     if _TOOLTIP_CACHE is not None:
         return _TOOLTIP_CACHE
-    from .client import _get_argument_parser  # pylint: disable=import-outside-toplevel
+    from .client import _get_argument_parser
 
     parser = _get_argument_parser()
     tips: dict[str, str] = {}
-    for action in parser._actions:  # pylint: disable=protected-access
+    for action in parser._actions:
         if not action.help:
             continue
         for opt in action.option_strings:
@@ -273,7 +278,7 @@ def load_sessions() -> dict[str, SessionConfig]:
 
 def save_sessions(sessions: dict[str, SessionConfig]) -> None:
     """Save session configs to ``~/.config/telnetlib3/sessions.json``."""
-    from ._paths import _atomic_write  # pylint: disable=import-outside-toplevel
+    from ._paths import _atomic_write
 
     _ensure_dirs()
     data = {key: asdict(cfg) for key, cfg in sessions.items()}
@@ -562,14 +567,24 @@ class SessionListScreen(Screen[None]):
         self.app.push_screen(SessionEditScreen(config=cfg), callback=self._on_edit_result)
 
     def action_delete_session(self) -> None:
-        """Delete the selected session."""
+        """Delete the selected session after confirmation."""
         key = self._require_selected()
         if key is None:
             return
-        del self._sessions[key]
-        self._save()
-        self._refresh_table()
-        self.notify(f"Deleted {key}")
+
+        def _on_confirm(confirmed: bool) -> None:
+            if confirmed:
+                del self._sessions[key]
+                self._save()
+                self._refresh_table()
+                self.notify(f"Deleted {key}")
+
+        self.app.push_screen(
+            _ConfirmDialogScreen(
+                title="Delete Session", body=f"Delete session '{key}'?", show_dont_ask=False
+            ),
+            callback=_on_confirm,
+        )
 
     def action_edit_defaults(self) -> None:
         """Open editor for the default session template."""
@@ -978,7 +993,7 @@ class SessionEditScreen(Screen[SessionConfig | None]):  # type: ignore[misc]
             try:
                 widget = self.query_one(f"#{widget_id}")
                 widget.tooltip = help_text
-            except Exception:  # pylint: disable=broad-except
+            except Exception:
                 pass
         self._update_palette_preview()
 
@@ -1009,7 +1024,7 @@ class SessionEditScreen(Screen[SessionConfig | None]):  # type: ignore[misc]
 
     def _update_palette_preview(self) -> None:
         """Render CP437 full-block color preview for the selected palette."""
-        from .color_filter import PALETTES  # pylint: disable=import-outside-toplevel
+        from .color_filter import PALETTES
 
         palette_name = self.query_one("#colormatch", Select).value
         preview = self.query_one("#palette-preview", Static)
@@ -1193,11 +1208,22 @@ class _EditListScreen(Screen["bool | None"]):
 
     @property
     @abstractmethod
-    def _prefix(self) -> str: ...
+    def _prefix(self) -> str:
+        ...
 
     @property
     @abstractmethod
-    def _items(self) -> list[Any]: ...
+    def _noun(self) -> str:
+        """Display noun for this editor, e.g. 'Macro' or 'Autoreply'."""
+
+    @property
+    @abstractmethod
+    def _items(self) -> list[Any]:
+        ...
+
+    def _item_label(self, idx: int) -> str:
+        """Return a display label for the item at *idx*."""
+        return str(self._items[idx][0]) if idx < len(self._items) else ""
 
     def __init__(self) -> None:
         super().__init__()
@@ -1330,8 +1356,21 @@ class _EditListScreen(Screen["bool | None"]):
                 self._hide_form()
             idx = self._selected_idx()
             if idx is not None and idx < len(self._items):
-                self._items.pop(idx)
-                self._refresh_table()
+                label = self._item_label(idx)
+
+                def _on_confirm(confirmed: bool, _idx: int = idx) -> None:
+                    if confirmed and _idx < len(self._items):
+                        self._items.pop(_idx)
+                        self._refresh_table()
+
+                self.app.push_screen(
+                    _ConfirmDialogScreen(
+                        title=f"Delete {self._noun}",
+                        body=f"Delete {self._noun.lower()} '{label}'?",
+                        show_dont_ask=False,
+                    ),
+                    callback=_on_confirm,
+                )
         elif suffix == "ok":
             self._submit_form()
         elif suffix == "cancel-form":
@@ -1350,16 +1389,20 @@ class _EditListScreen(Screen["bool | None"]):
         """Override to handle subclass-specific buttons."""
 
     @abstractmethod
-    def _show_form(self, *args: Any) -> None: ...
+    def _show_form(self, *args: Any) -> None:
+        ...
 
     @abstractmethod
-    def _submit_form(self) -> None: ...
+    def _submit_form(self) -> None:
+        ...
 
     @abstractmethod
-    def _refresh_table(self) -> None: ...
+    def _refresh_table(self) -> None:
+        ...
 
     @abstractmethod
-    def _save_to_file(self) -> None: ...
+    def _save_to_file(self) -> None:
+        ...
 
 
 class MacroEditScreen(_EditListScreen):
@@ -1426,6 +1469,10 @@ class MacroEditScreen(_EditListScreen):
     @property
     def _prefix(self) -> str:
         return "macro"
+
+    @property
+    def _noun(self) -> str:
+        return "Macro"
 
     @property
     def _items(self) -> list[Any]:
@@ -1496,7 +1543,7 @@ class MacroEditScreen(_EditListScreen):
     def _load_from_file(self) -> None:
         if not os.path.exists(self._path):
             return
-        from .macros import load_macros  # pylint: disable=import-outside-toplevel
+        from .macros import load_macros
 
         try:
             macros = load_macros(self._path, self._session_key)
@@ -1511,7 +1558,7 @@ class MacroEditScreen(_EditListScreen):
             status = "" if enabled else " (off)"
             table.add_row(key, text + status, key=str(i))
 
-    def _show_form(  # pylint: disable=arguments-differ
+    def _show_form(
         self, key_val: str = "", text_val: str = "", enabled: bool = True
     ) -> None:
         self._captured_key = key_val
@@ -1705,7 +1752,7 @@ class MacroEditScreen(_EditListScreen):
         )
 
     def _save_to_file(self) -> None:
-        from .macros import Macro, save_macros  # pylint: disable=import-outside-toplevel
+        from .macros import Macro, save_macros
 
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
         macros = [Macro(key=k, text=t, enabled=ena) for k, t, ena in self._macros]
@@ -1778,6 +1825,10 @@ class AutoreplyEditScreen(_EditListScreen):
     @property
     def _prefix(self) -> str:
         return "autoreply"
+
+    @property
+    def _noun(self) -> str:
+        return "Autoreply"
 
     @property
     def _items(self) -> list[Any]:
@@ -1880,7 +1931,7 @@ class AutoreplyEditScreen(_EditListScreen):
     def _load_from_file(self) -> None:
         if not os.path.exists(self._path):
             return
-        from .autoreply import load_autoreplies  # pylint: disable=import-outside-toplevel
+        from .autoreply import load_autoreplies
 
         try:
             rules = load_autoreplies(self._path, self._session_key)
@@ -1921,7 +1972,7 @@ class AutoreplyEditScreen(_EditListScreen):
             reply_display = rule.reply if len(rule.reply) <= 20 else rule.reply[:19] + "\u2026"
             table.add_row(str(i + 1), pat_display, reply_display, flags.strip(), key=str(i))
 
-    def _show_form(  # pylint: disable=arguments-differ,too-many-positional-arguments
+    def _show_form(
         self,
         pattern_val: str = "",
         reply_val: str = "",
@@ -1946,7 +1997,7 @@ class AutoreplyEditScreen(_EditListScreen):
         if when:
             vital = next(iter(when), "")
             expr = when.get(vital, ">50")
-            import re as _re  # pylint: disable=import-outside-toplevel
+            import re as _re
 
             m = _re.match(r"^(>=|<=|>|<|=)(\d+)$", expr)
             if m:
@@ -1994,7 +2045,7 @@ class AutoreplyEditScreen(_EditListScreen):
                 cond_val = "50"
             when = {cond_vital: f"{cond_op}{cond_val or '50'}"}
         if pattern_val:
-            import re  # pylint: disable=import-outside-toplevel
+            import re
 
             try:
                 re.compile(pattern_val)
@@ -2023,9 +2074,9 @@ class AutoreplyEditScreen(_EditListScreen):
             self.query_one("#autoreply-cond-val", Input).disabled = disabled
 
     def _save_to_file(self) -> None:
-        import re  # pylint: disable=import-outside-toplevel
+        import re
 
-        from .autoreply import (  # pylint: disable=import-outside-toplevel
+        from .autoreply import (
             AutoreplyRule,
             save_autoreplies,
         )
@@ -2048,6 +2099,54 @@ class AutoreplyEditScreen(_EditListScreen):
                 )
             )
         save_autoreplies(self._path, rules, self._session_key)
+
+
+_NAME_COL = 35
+
+# Colors for room tree decorations.
+_DAGGER_STYLE = "bold #d4a017"  # gold, matching bookmark button
+_ARROW_STYLE = "bold #5b8def"  # blue, matching slow-travel button
+
+
+class _RoomTree(Tree[str]):
+    """Room tree with aligned star+arrow prefix columns."""
+
+    ICON_NODE = "\u25c2 "  # ◂
+    ICON_NODE_EXPANDED = "\u25be "  # ▾
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._bookmarked: set[str] = set()
+
+    def render_label(
+        self, node: TreeNode[str], base_style: Style, style: Style
+    ) -> "RichText":
+        """Render label with fixed star+arrow prefix columns."""
+        from rich.text import Text as RichText
+
+        room_num = node.data
+        is_child = node.parent is not None and node.parent.parent is not None
+
+        # Star column (2 chars: dagger + space)
+        if room_num and room_num in self._bookmarked:
+            star = RichText("\u2e38 ", style=_DAGGER_STYLE)
+        else:
+            star = RichText("  ")
+
+        # Arrow column (2 chars: arrow + space) — only for expandable nodes
+        if node._allow_expand:
+            arrow_char = self.ICON_NODE_EXPANDED if node.is_expanded else self.ICON_NODE
+            arrow = RichText(arrow_char, style=_ARROW_STYLE)
+        elif not is_child:
+            arrow = RichText("  ")
+        else:
+            arrow = RichText("")
+
+        node_label = node._label.copy()
+        node_label.stylize(style)
+
+        text = RichText.assemble(star, arrow, node_label)
+        return text
 
 
 class RoomBrowserScreen(Screen["bool | None"]):
@@ -2085,7 +2184,10 @@ class RoomBrowserScreen(Screen["bool | None"]):
     #room-area-frame Static { height: 1; }
     #room-area-select { width: 100%; }
     #room-right { width: 1fr; height: 100%; }
-    #room-table { height: 1fr; min-height: 4; overflow-x: hidden; }
+    #room-tree { height: 1fr; min-height: 4; overflow-x: hidden; }
+    #room-tree > .tree--guides { color: #5b8def; }
+    #room-tree > .tree--guides-hover { color: #5b8def; }
+    #room-tree > .tree--guides-selected { color: #5b8def; }
     #room-status { height: 1; margin-top: 0; }
     #room-count { width: 1fr; }
     #room-distance { width: auto; text-align: right; }
@@ -2134,42 +2236,49 @@ class RoomBrowserScreen(Screen["bool | None"]):
                         )
                 with Vertical(id="room-right"):
                     yield Input(placeholder="Search rooms\u2026", id="room-search")
-                    yield DataTable(id="room-table")
+                    yield _RoomTree("Rooms", id="room-tree")
                     with Horizontal(id="room-status"):
                         yield Static("", id="room-count")
                         yield Static("", id="room-distance")
         yield Footer()
 
     def on_mount(self) -> None:
-        """Load rooms from file and populate table."""
-        table = self.query_one("#room-table", DataTable)
-        table.cursor_type = "row"
-        table.add_columns("\u2605", "Room", "ID")
+        """Load rooms from file and populate tree."""
+        tree = self.query_one("#room-tree", Tree)
+        tree.show_root = False
+        tree.guide_depth = 3
         self._load_rooms()
         self._compute_distances()
         self._populate_area_dropdown()
         self._sort_rooms()
-        self._refresh_table()
+        self._refresh_tree()
         self._mounted = True
+        self.call_after_refresh(self._select_current_room)
 
     def _select_current_room(self) -> None:
-        """Move cursor to the current room row, if known."""
+        """Move cursor to the current room node, if known."""
         if not self._current_room_file:
             return
-        from telnetlib3.rooms import read_current_room  # pylint: disable=import-outside-toplevel
+        from telnetlib3.rooms import read_current_room
 
         current = read_current_room(self._current_room_file)
         if not current:
             return
-        table = self.query_one("#room-table", DataTable)
-        for row_idx, row_key in enumerate(table.rows):
-            if row_key.value == current:
-                table.move_cursor(row=row_idx)
-                break
+        tree = self.query_one("#room-tree", Tree)
+        for node in tree.root.children:
+            if node.data == current:
+                tree.select_node(node)
+                node.expand()
+                return
+            for child in node.children:
+                if child.data == current:
+                    node.expand()
+                    tree.select_node(child)
+                    return
 
     def _load_rooms(self) -> None:
         """Load room data from SQLite database."""
-        from telnetlib3.rooms import (  # pylint: disable=import-outside-toplevel
+        from telnetlib3.rooms import (
             RoomStore,
             read_current_room,
         )
@@ -2200,7 +2309,7 @@ class RoomBrowserScreen(Screen["bool | None"]):
         self._distances = {}
         if not self._current_room_file or self._graph is None:
             return
-        from telnetlib3.rooms import read_current_room  # pylint: disable=import-outside-toplevel
+        from telnetlib3.rooms import read_current_room
 
         current = read_current_room(self._current_room_file)
         if current:
@@ -2229,62 +2338,123 @@ class RoomBrowserScreen(Screen["bool | None"]):
             return num
         return num[: width - 1] + "\u2026"
 
-    def _refresh_table(self, query: str = "") -> None:
-        """Refresh table rows, filtering by search query and selected area."""
-        table = self.query_one("#room-table", DataTable)
-        table.clear()
+    def _room_label(self, num: str) -> str:
+        """Format a child leaf label (blank name, aligned dist + id)."""
+        dist = self._distances.get(num)
+        dist_part = f"[{dist}]".rjust(5) if dist is not None else "     "
+        id_part = f" #{self._short_id(num)}"
+        return f"{''.ljust(_NAME_COL)} {''.rjust(4)} {dist_part}{id_part}"
+
+    def _refresh_tree(self, query: str = "") -> None:
+        """Rebuild tree nodes, grouping rooms with the same name."""
+        tree = self.query_one("#room-tree", Tree)
+        tree.clear()
         q = query.lower()
         select = self.query_one("#room-area-select", Select)
         area_filter = select.value if isinstance(select.value, str) else None
-        short_id = self._short_id
+
+        groups: dict[str, list[tuple[str, str, int, bool]]] = {}
+        group_order: list[str] = []
+        for num, name, area, exits, bookmarked in self._all_rooms:
+            if area_filter and area != area_filter:
+                continue
+            if q and q not in name.lower() and q not in area.lower():
+                continue
+            if name not in groups:
+                groups[name] = []
+                group_order.append(name)
+            groups[name].append((num, area, exits, bookmarked))
+
+        # Populate bookmarked set for the _RoomTree prefix renderer.
+        if isinstance(tree, _RoomTree):
+            tree._bookmarked = {
+                num for num, _, _, _, bm in self._all_rooms if bm
+            }
+
+        n_shown = 0
         with self.app.batch_update():
-            for num, name, area, _exits, bookmarked in self._all_rooms:
-                if area_filter and area != area_filter:
-                    continue
-                if q and q not in name.lower() and q not in area.lower():
-                    continue
-                star = "\u2605" if bookmarked else ""
-                table.add_row(star, name, short_id(num), key=num)
+            for name in group_order:
+                members = groups[name]
+                n_shown += len(members)
+                if len(members) == 1:
+                    num, _area, _exits, bookmarked = members[0]
+                    name_part = name.ljust(_NAME_COL)[:_NAME_COL]
+                    count_part = "(1)".rjust(4)
+                    dist = self._distances.get(num)
+                    dist_part = f"[{dist}]".rjust(5) if dist is not None else "     "
+                    id_part = f" #{self._short_id(num)}"
+                    label = f"{name_part} {count_part} {dist_part}{id_part}"
+                    tree.root.add_leaf(label, data=num)
+                else:
+                    nearest = min(
+                        (self._distances.get(m[0], float("inf")) for m in members),
+                        default=float("inf"),
+                    )
+                    name_part = name.ljust(_NAME_COL)[:_NAME_COL]
+                    count_part = f"({len(members)})".rjust(4)
+                    dist_part = f"[{int(nearest)}]".rjust(5) if nearest != float("inf") else "     "
+                    label = f"{name_part} {count_part} {dist_part}"
+                    parent = tree.root.add(label, data=None)
+                    for num, _area, _exits, bookmarked in members:
+                        parent.add_leaf(self._room_label(num), data=num)
+
         count_label = self.query_one("#room-count", Static)
-        n_shown = table.row_count
         n_total = len(self._all_rooms)
         if query or area_filter:
             count_label.update(f"{n_shown}/{n_total} rooms")
         else:
             count_label.update(f"{n_total} rooms")
-        self._select_current_room()
+
+    def _get_selected_room_num(self) -> "str | None":
+        """Return the room number of the currently highlighted tree node."""
+        tree = self.query_one("#room-tree", Tree)
+        node = tree.cursor_node
+        if node is None:
+            return None
+        if node.data is not None:
+            return node.data
+        if node.children:
+            first = node.children[0]
+            if first.data is not None:
+                return first.data
+        return None
 
     def on_select_changed(self, event: Select.Changed) -> None:
-        """Re-filter table when area dropdown changes."""
+        """Re-filter tree when area dropdown changes."""
         if event.select.id == "room-area-select" and self._mounted:
             search_val = self.query_one("#room-search", Input).value
-            self._refresh_table(search_val)
+            self._refresh_tree(search_val)
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        """Filter table when search input changes."""
+        """Filter tree when search input changes."""
         if event.input.id == "room-search":
-            self._refresh_table(event.value)
+            self._refresh_tree(event.value)
 
-    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        """Update distance label when table cursor moves."""
+    def on_tree_node_highlighted(self, event: Tree.NodeHighlighted[str]) -> None:
+        """Update distance label when tree cursor moves."""
         dist_label = self.query_one("#room-distance", Static)
-        if event.row_key is None or event.row_key.value is None:
+        node = event.node
+        room_num = node.data if node.data is not None else None
+        if room_num is None and node.children:
+            first = node.children[0]
+            if first.data is not None:
+                room_num = first.data
+        if room_num is None:
             dist_label.update("")
             return
-        dst_num = event.row_key.value
         if not self._current_room_file or self._graph is None:
             dist_label.update("")
             return
-        from telnetlib3.rooms import read_current_room  # pylint: disable=import-outside-toplevel
+        from telnetlib3.rooms import read_current_room
 
         current = read_current_room(self._current_room_file)
         if not current:
             dist_label.update("")
             return
-        if current == dst_num:
+        if current == room_num:
             dist_label.update("Distance: 0 turns")
             return
-        path = self._graph.find_path(current, dst_num)
+        path = self._graph.find_path(current, room_num)
         if path is None:
             dist_label.update("Distance: \u2014")
         else:
@@ -2303,24 +2473,17 @@ class RoomBrowserScreen(Screen["bool | None"]):
             self._do_toggle_bookmark()
 
     def on_key(self, event: events.Key) -> None:
-        """Arrow/Home/End keys navigate between search, buttons, and the room table."""
-        if event.key in ("home", "end"):
-            table = self.query_one("#room-table", DataTable)
-            if self.focused is table and table.row_count > 0:
-                row = 0 if event.key == "home" else table.row_count - 1
-                table.move_cursor(row=row)
-                event.prevent_default()
-            return
+        """Arrow keys navigate between search, buttons, and the room tree."""
         if event.key not in ("up", "down", "left", "right"):
             return
         focused = self.focused
         search = self.query_one("#room-search", Input)
-        table = self.query_one("#room-table", DataTable)
+        tree = self.query_one("#room-tree", Tree)
         buttons = list(self.query("#room-button-col Button"))
         if focused is search:
             if event.key == "down":
-                table.focus()
-                event.prevent_default()
+                tree.focus()
+                event.stop()
             elif event.key == "left" and buttons:
                 buttons[0].focus()
                 event.prevent_default()
@@ -2346,18 +2509,25 @@ class RoomBrowserScreen(Screen["bool | None"]):
                 buttons[-1].focus()
                 event.prevent_default()
             elif event.key == "right":
-                table.focus()
+                tree.focus()
                 event.prevent_default()
             return
-        if focused is table and event.key == "up":
-            if table.cursor_coordinate.row == 0:
+        if focused is tree:
+            node = tree.cursor_node
+            if event.key == "up" and tree.cursor_line == 0:
                 search.focus()
                 event.prevent_default()
-                return
-        if focused is table and event.key == "left":
-            if buttons:
-                buttons[0].focus()
-            event.prevent_default()
+            elif event.key == "left":
+                if node is not None and node.allow_expand and node.is_expanded:
+                    node.collapse()
+                elif buttons:
+                    buttons[0].focus()
+                event.prevent_default()
+            elif event.key == "right":
+                if node is not None and node.allow_expand and node.is_collapsed:
+                    node.expand()
+                    event.prevent_default()
+            return
 
     def action_close(self) -> None:
         """Close the room browser."""
@@ -2384,10 +2554,10 @@ class RoomBrowserScreen(Screen["bool | None"]):
         self._apply_sort()
 
     def _apply_sort(self) -> None:
-        """Re-sort rooms and refresh the table."""
+        """Re-sort rooms and refresh the tree."""
         self._sort_rooms()
         search_val = self.query_one("#room-search", Input).value
-        self._refresh_table(search_val)
+        self._refresh_tree(search_val)
 
     def action_toggle_bookmark(self) -> None:
         """Toggle bookmark on the selected room."""
@@ -2395,15 +2565,11 @@ class RoomBrowserScreen(Screen["bool | None"]):
 
     def _do_toggle_bookmark(self) -> None:
         """Toggle bookmark flag on the currently selected room."""
-        table = self.query_one("#room-table", DataTable)
-        if table.row_count == 0:
-            return
-        row_key, _ = table.coordinate_to_cell_key(table.cursor_coordinate)
-        num = row_key.value
+        num = self._get_selected_room_num()
         if num is None:
             return
 
-        from telnetlib3.rooms import RoomStore  # pylint: disable=import-outside-toplevel
+        from telnetlib3.rooms import RoomStore
 
         store = RoomStore(self._rooms_path)
         store.toggle_bookmark(num)
@@ -2417,15 +2583,11 @@ class RoomBrowserScreen(Screen["bool | None"]):
 
     def _do_fast_travel(self, slow: bool = False) -> None:
         """Calculate path and write fast travel file."""
-        table = self.query_one("#room-table", DataTable)
-        if table.row_count == 0:
-            return
-        row_key, _ = table.coordinate_to_cell_key(table.cursor_coordinate)
-        dst_num = row_key.value
+        dst_num = self._get_selected_room_num()
         if dst_num is None:
             return
 
-        from telnetlib3.rooms import (  # pylint: disable=import-outside-toplevel
+        from telnetlib3.rooms import (
             RoomStore,
             write_fasttravel,
             read_current_room,
@@ -2484,7 +2646,7 @@ class RoomPickerScreen(RoomBrowserScreen):
                         )
                 with Vertical(id="room-right"):
                     yield Input(placeholder="Search rooms\u2026", id="room-search")
-                    yield DataTable(id="room-table")
+                    yield _RoomTree("Rooms", id="room-tree")
                     with Horizontal(id="room-status"):
                         yield Static("", id="room-count")
                         yield Static("", id="room-distance")
@@ -2503,11 +2665,7 @@ class RoomPickerScreen(RoomBrowserScreen):
 
     def _do_select(self) -> None:
         """Dismiss with the selected room ID string."""
-        table = self.query_one("#room-table", DataTable)
-        if table.row_count == 0:
-            return
-        row_key, _ = table.coordinate_to_cell_key(table.cursor_coordinate)
-        num = row_key.value
+        num = self._get_selected_room_num()
         if num is None:
             return
         self.dismiss(num)
@@ -2533,8 +2691,17 @@ class _EditorApp(App[None]):
 
     def on_mount(self) -> None:
         """Push the editor screen."""
+        _log = logging.getLogger(__name__)
+        driver = self._driver
+        _log.debug(
+            "EditorApp mounted: driver._mouse=%s input_tty=%s "
+            "driver._file=%r driver.fileno=%s",
+            getattr(driver, "_mouse", "?"),
+            getattr(driver, "input_tty", "?"),
+            getattr(driver, "_file", "?"),
+            getattr(driver, "fileno", "?"),
+        )
         self.push_screen(self._editor_screen, callback=lambda _: self.exit())
-
 
 
 def _patch_writer_thread_queue() -> None:
@@ -2549,7 +2716,7 @@ def _patch_writer_thread_queue() -> None:
     prevents the deadlock.
     """
     try:
-        import textual.drivers._writer_thread as _wt  # pylint: disable=import-outside-toplevel
+        import textual.drivers._writer_thread as _wt
 
         _wt.MAX_QUEUED_WRITES = 0
     except (ImportError, AttributeError):
@@ -2568,13 +2735,34 @@ def _restore_blocking_fds() -> None:
     so a non-blocking stderr causes the thread to die silently,
     freezing the app.
     """
-    import os  # pylint: disable=import-outside-toplevel,redefined-outer-name,reimported
+    import os as _os
+    import sys as _sys
+    import logging as _logging
 
+    _log = _logging.getLogger(__name__)
+    _log.debug(
+        "child pre-fix: fd0_blocking=%s fd1=%s fd2=%s "
+        "stdin_isatty=%s __stdin___isatty=%s "
+        "stderr_isatty=%s __stderr___isatty=%s",
+        _os.get_blocking(0),
+        _os.get_blocking(1),
+        _os.get_blocking(2),
+        _sys.stdin.isatty(),
+        _sys.__stdin__.isatty(),
+        _sys.stderr.isatty(),
+        _sys.__stderr__.isatty(),
+    )
     for fd in (0, 1, 2):
         try:
-            os.set_blocking(fd, True)
+            _os.set_blocking(fd, True)
         except OSError:
             pass
+    _log.debug(
+        "child post-fix: fd0_blocking=%s fd1=%s fd2=%s",
+        _os.get_blocking(0),
+        _os.get_blocking(1),
+        _os.get_blocking(2),
+    )
 
 
 def edit_macros_main(
@@ -2669,13 +2857,21 @@ class _ConfirmDialogScreen(Screen[bool]):
     }
     """
 
-    def __init__(self, title: str, body: str, warning: str = "", result_file: str = "") -> None:
+    def __init__(
+        self,
+        title: str,
+        body: str,
+        warning: str = "",
+        result_file: str = "",
+        show_dont_ask: bool = True,
+    ) -> None:
         """Initialize confirm dialog with title, body, and optional warning."""
         super().__init__()
         self._title = title
         self._body = body
         self._warning = warning
         self._result_file = result_file
+        self._show_dont_ask = show_dont_ask
 
     def compose(self) -> ComposeResult:
         """Build the confirm dialog layout."""
@@ -2684,9 +2880,10 @@ class _ConfirmDialogScreen(Screen[bool]):
             yield Static(self._body, id="confirm-body")
             if self._warning:
                 yield Static(self._warning, id="confirm-warning")
-            with Horizontal(id="confirm-checkbox-row"):
-                yield Switch(value=False, id="confirm-dont-ask")
-                yield Label("Don't ask me again")
+            if self._show_dont_ask:
+                with Horizontal(id="confirm-checkbox-row"):
+                    yield Switch(value=False, id="confirm-dont-ask")
+                    yield Label("Don't ask me again")
             with Horizontal(id="confirm-buttons"):
                 yield Button("Cancel", variant="default", id="confirm-cancel")
                 yield Button("OK", variant="success", id="confirm-ok")
@@ -2713,7 +2910,8 @@ class _ConfirmDialogScreen(Screen[bool]):
         """Write result to file for the parent process to read."""
         if not self._result_file:
             return
-        dont_ask = self.query_one("#confirm-dont-ask", Switch).value
+        nodes = self.query("#confirm-dont-ask")
+        dont_ask = nodes.first(Switch).value if nodes else False
         result = json.dumps({"confirmed": confirmed, "dont_ask": dont_ask})
         with open(self._result_file, "w", encoding="utf-8") as f:
             f.write(result)
