@@ -15,10 +15,10 @@ import pytest
 # local
 from telnetlib3.autoreply import (
     _DELAY_RE,
+    _compare,
     SearchBuffer,
     AutoreplyRule,
     AutoreplyEngine,
-    _parse_delay,
     check_condition,
     load_autoreplies,
     save_autoreplies,
@@ -257,27 +257,15 @@ def test_substitute_groups_invalid_index():
     assert _substitute_groups("\\1 \\5", m) == "hello \\5"
 
 
-@pytest.mark.parametrize(
-    "token,expected",
-    [
-        ("`delay 100ms`", 0.1),
-        ("`delay 1s`", 1.0),
-        ("`delay 2.5s`", 2.5),
-        ("`delay 500ms`", 0.5),
-        ("`delay 0.5s`", 0.5),
-        ("invalid", 0.0),
-    ],
-)
-def test_parse_delay(token, expected):
-    assert _parse_delay(token) == pytest.approx(expected)
+def test_compare_unknown_operator_raises():
+    with pytest.raises(ValueError, match="unknown operator"):
+        _compare(50, "~", 30)
 
 
 def _mock_writer():
     """Create a mock writer that records write() calls."""
     written: list[str] = []
-    writer = types.SimpleNamespace(
-        write=written.append, log=logging.getLogger("test")
-    )
+    writer = types.SimpleNamespace(write=written.append, log=logging.getLogger("test"))
     return writer, written
 
 
@@ -411,6 +399,16 @@ def test_send_command_valid():
     engine = AutoreplyEngine([], writer, writer.log)
     engine._send_command("look")
     assert "look\r\n" in written
+
+
+def test_sent_commands_bounded(monkeypatch):
+    monkeypatch.setenv("TELNETLIB3_SENT_COMMANDS_MAX", "5")
+    writer, _ = _mock_writer()
+    engine = AutoreplyEngine([], writer, writer.log)
+    assert engine._sent_commands_max == 5
+    for i in range(10):
+        engine._send_command(f"cmd{i}")
+    assert len(engine._sent_commands) <= 5
 
 
 @pytest.mark.asyncio
@@ -1514,7 +1512,7 @@ async def test_engine_skips_rule_on_condition_fail():
     engine.feed("A bear appears.\n")
     await asyncio.sleep(0.1)
     assert not any("kill bear" in w for w in written)
-    failed = engine.condition_failed
+    failed = engine.pop_condition_failed()
     assert failed is not None
     assert failed[0] == 1
     assert "HP%" in failed[1]
@@ -1528,7 +1526,7 @@ async def test_engine_fires_rule_when_condition_passes():
     engine.feed("A bear appears.\n")
     await asyncio.sleep(0.1)
     assert any("kill bear" in w for w in written)
-    assert engine.condition_failed is None
+    assert engine.pop_condition_failed() is None
 
 
 @pytest.mark.asyncio
@@ -1538,17 +1536,15 @@ async def test_condition_failed_clears_on_read():
     engine = AutoreplyEngine(rules, writer, writer.log)
     engine.feed("A bear appears.\n")
     await asyncio.sleep(0.1)
-    assert engine.condition_failed is not None
-    assert engine.condition_failed is None
+    assert engine.pop_condition_failed() is not None
+    assert engine.pop_condition_failed() is None
 
 
 @pytest.mark.asyncio
 async def test_condition_blocked_preserves_buffer_for_retry():
     """Buffer is retained when condition fails so rule can fire after HP heals."""
     writer, written = _mock_writer_with_vitals(30, 100, 50, 100)
-    rules = [AutoreplyRule(
-        pattern=re.compile(r"bear"), reply="kill bear;", when={"HP%": ">50"},
-    )]
+    rules = [AutoreplyRule(pattern=re.compile(r"bear"), reply="kill bear;", when={"HP%": ">50"})]
     engine = AutoreplyEngine(rules, writer, writer.log)
     engine.on_prompt()
 
@@ -1569,11 +1565,7 @@ async def test_condition_blocked_clears_buffer_on_repeated_failure():
     """Buffer is cleared when the same condition fails twice to prevent loops."""
     writer, written = _mock_writer_with_vitals(30, 100, 50, 100)
     rules = [
-        AutoreplyRule(
-            pattern=re.compile(r"bear"),
-            reply="kill bear;",
-            when={"HP%": ">50"},
-        ),
+        AutoreplyRule(pattern=re.compile(r"bear"), reply="kill bear;", when={"HP%": ">50"}),
         AutoreplyRule(pattern=re.compile(r"corpse"), reply="loot corpse;"),
     ]
     engine = AutoreplyEngine(rules, writer, writer.log)

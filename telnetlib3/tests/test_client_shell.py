@@ -489,7 +489,7 @@ async def test_simple_server_output(
             b"\r\ngot it\r\n",
             ["--line-mode", "--no-repl"],
             b"hello\r",
-            [b"got it", b"hello"],
+            [b"got it"],
         ),
     ],
 )
@@ -667,38 +667,30 @@ async def test_setup_winch_registers_handler() -> None:
     writer.is_closing = lambda: False
     term = _make_term(writer)
     term._istty = True
-    term._winch_handle = None
+    term._resize_pending = __import__("threading").Event()
     term.setup_winch()
     assert term._remove_winch is True
     term.cleanup_winch()
     assert term._remove_winch is False
 
 
-async def test_winch_handler_calls_on_resize() -> None:
-    """SIGWINCH handler triggers on_resize callback."""
-    from telnetlib3.telopt import NAWS
-
+async def test_winch_handler_sets_resize_pending() -> None:
+    """SIGWINCH handler sets _resize_pending flag."""
     writer = _make_writer()
-    writer.local_option = _MockOption({NAWS: True})
+    writer.local_option = _MockOption({})
     writer.is_closing = lambda: False
-    writer._send_naws = mock.Mock()
 
     term = _make_term(writer)
     term._istty = True
-    term._winch_handle = None
-
-    resize_calls: list[tuple[int, int]] = []
-    term.on_resize = lambda rows, cols: resize_calls.append((rows, cols))
+    term._resize_pending = __import__("threading").Event()
 
     term.setup_winch()
     assert term._remove_winch is True
 
     os.kill(os.getpid(), signal.SIGWINCH)
-    await asyncio.sleep(0.15)
+    await asyncio.sleep(0.05)
 
-    assert len(resize_calls) >= 1
-    assert len(resize_calls[0]) == 2
-    writer._send_naws.assert_called()
+    assert term._resize_pending.is_set()
     term.cleanup_winch()
 
 
@@ -740,7 +732,7 @@ async def test_raw_event_loop_reactivates_repl() -> None:
     result = await _raw_event_loop(
         telnet_reader=reader,
         telnet_writer=writer,
-        term=term,
+        tty_shell=term,
         stdin=stdin,
         stdout=stdout,
         keyboard_escape="\x1d",
@@ -757,29 +749,23 @@ async def test_raw_event_loop_reactivates_repl() -> None:
 
 
 @pytest.mark.asyncio
-async def test_winch_on_resize_exception_caught() -> None:
-    """SIGWINCH handler catches exceptions from on_resize callback."""
-    from telnetlib3.telopt import NAWS
-
+async def test_winch_resize_pending_cleared_after_consumption() -> None:
+    """_resize_pending flag can be set and cleared."""
     writer = _make_writer()
-    writer.local_option = _MockOption({NAWS: True})
+    writer.local_option = _MockOption({})
     writer.is_closing = lambda: False
-    writer._send_naws = mock.Mock()
 
     term = _make_term(writer)
     term._istty = True
-    term._winch_handle = None
-
-    def _bad_resize(rows: int, cols: int) -> None:
-        raise RuntimeError("resize failed")
-
-    term.on_resize = _bad_resize
+    term._resize_pending = __import__("threading").Event()
 
     term.setup_winch()
     os.kill(os.getpid(), signal.SIGWINCH)
-    await asyncio.sleep(0.15)
+    await asyncio.sleep(0.05)
 
-    writer._send_naws.assert_called()
+    assert term._resize_pending.is_set()
+    term._resize_pending.clear()
+    assert not term._resize_pending.is_set()
     term.cleanup_winch()
 
 

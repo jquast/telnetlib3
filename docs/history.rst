@@ -1,8 +1,8 @@
 History
 =======
-2.7.0
+3.0.0
   * new: REPL line editor for ``telnetlib3-client`` with command history,
-    autosuggestion, and password masking.  Powered by ``prompt_toolkit``
+    autosuggestion, and password masking.  Powered by ``blessed``
     (``pip install telnetlib3[with_tui]``).  Use ``--no-repl`` to disable.
   * new: TUI session manager — ``telnetlib3-client`` without a host argument
     launches a multi-session TUI (requires ``textual``, included in with_tui).
@@ -15,6 +15,17 @@ History
   * enhancement: Microsoft Telnet (``telnet.exe``) compatibility refined — server
     now sends ``DO NEW_ENVIRON`` but excludes ``USER`` variable instead of
     skipping the option entirely, :ghissue:`24`.
+  * **Breaking changes**:
+    - ``connect_minwait`` default now 0 (was 1.0 in library API, already 0 in
+      CLI since 2.5.0).
+    - ``force_binary`` auto-enabled for non-ASCII encodings (UTF-8, etc.).
+    - ``--connect-timeout`` default now 10 seconds (was unlimited).
+    - ``--reverse-video`` CLI option removed (replaced by ``--ice-colors``).
+    - CGA and EGA palettes removed from ``--colormatch``; use ``vga`` instead.
+    - GMCP: client no longer proactively sends ``DO GMCP``; passively accepts
+      server's ``WILL GMCP``.
+    - Room storage migrated from JSON to SQLite.
+    - ``ColorConfig`` defaults changed (palette now ``vga``).
 
 2.6.0
   * new: TLS support (TELNETS).  :func:`~telnetlib3.client.open_connection`

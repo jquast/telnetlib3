@@ -2,8 +2,12 @@
 Macro key binding support for the REPL client.
 
 Provides :class:`Macro` for representing key-to-text bindings and
-:func:`bind_macros` for registering them on a prompt_toolkit
-:class:`~prompt_toolkit.key_binding.KeyBindings` instance.
+:func:`build_macro_dispatch` for building a blessed key name to handler
+mapping.
+
+Keys are stored as blessed key names (e.g. ``KEY_F1``, ``KEY_ALT_E``)
+or single characters, matching :attr:`blessed.keyboard.Keystroke.name`
+and ``str(keystroke)`` respectively.
 """
 
 from __future__ import annotations
@@ -17,19 +21,18 @@ from dataclasses import dataclass
 # local
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
-__all__ = ("Macro", "load_macros", "save_macros", "bind_macros")
+__all__ = ("Macro", "load_macros", "save_macros", "build_macro_dispatch")
 
 
 @dataclass
 class Macro:
-    """
-    A single key-to-text macro binding.
+    """A single key-to-text macro binding.
 
-    :param keys: Sequence of prompt_toolkit key names.
+    :param key: Blessed key name (e.g. ``KEY_F5``, ``KEY_ALT_E``).
     :param text: Text to insert/send, with ``;`` as command separators.
     """
 
-    keys: tuple[str, ...]
+    key: str
     text: str
     enabled: bool = True
 
@@ -38,19 +41,17 @@ def _parse_entries(entries: list[dict[str, str]]) -> list[Macro]:
     """Parse a list of macro entry dicts into :class:`Macro` instances."""
     macros: list[Macro] = []
     for entry in entries:
-        key_str = entry.get("key", "").strip()
+        key = entry.get("key", "").strip()
         text = entry.get("text", "")
-        if not key_str:
+        if not key:
             continue
         enabled = bool(entry.get("enabled", True))
-        keys = tuple(key_str.split())
-        macros.append(Macro(keys=keys, text=text, enabled=enabled))
+        macros.append(Macro(key=key, text=text, enabled=enabled))
     return macros
 
 
 def load_macros(path: str, session_key: str) -> list[Macro]:
-    """
-    Load macro definitions for a session from a JSON file.
+    """Load macro definitions for a session from a JSON file.
 
     The file is keyed by session (``"host:port"``).  Each value is
     an object with a ``"macros"`` list.
@@ -70,8 +71,7 @@ def load_macros(path: str, session_key: str) -> list[Macro]:
 
 
 def save_macros(path: str, macros: list[Macro], session_key: str) -> None:
-    """
-    Save macro definitions for a session to a JSON file.
+    """Save macro definitions for a session to a JSON file.
 
     Other sessions' data in the file is preserved.
 
@@ -89,66 +89,51 @@ def save_macros(path: str, macros: list[Macro], session_key: str) -> None:
     data[session_key] = {
         "macros": [
             {
-                "key": " ".join(m.keys),
+                "key": m.key,
                 "text": m.text,
                 **({"enabled": False} if not m.enabled else {}),
             }
             for m in macros
         ]
     }
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, indent=2, ensure_ascii=False)
-        fh.write("\n")
+    from ._paths import _atomic_write  # pylint: disable=import-outside-toplevel
+
+    content = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    _atomic_write(path, content)
 
 
-def bind_macros(
-    kb: Any,
-    macros: list[Macro],
-    writer: Union[TelnetWriter, TelnetWriterUnicode],
-    log: logging.Logger,
-) -> None:
-    r"""
-    Register macro key bindings on a prompt_toolkit KeyBindings instance.
+def build_macro_dispatch(
+    macros: list[Macro], writer: Union[TelnetWriter, TelnetWriterUnicode], log: logging.Logger
+) -> dict[str, Any]:
+    """Build a blessed key name to handler mapping from macro defs.
 
-    For each macro, adds a handler that splits ``text`` on ``;`` and expands
-    repeat prefixes (e.g. ``3e`` -> 3 × ``e``), sending each command followed
-    by ``\r\n``.  If the text does not end with ``;``, the final segment is
-    inserted into the prompt buffer without sending.
+    Keys are matched directly against :attr:`~blessed.keyboard.Keystroke.name`
+    (for named keys like ``KEY_F1``) or ``str(keystroke)`` (for single chars).
+    Macros bound to keys in :data:`blessed.line_editor.DEFAULT_KEYMAP` are
+    skipped with a warning.
 
-    :param kb: prompt_toolkit ``KeyBindings`` to register on.
     :param macros: Macro definitions to bind.
     :param writer: Telnet writer for sending commands.
     :param log: Logger instance.
-    """
-    for macro in macros:
-        if not macro.enabled:
-            continue
-        _bind_one(kb, macro, writer, log)
-
-
-def _bind_one(
-    kb: Any, macro: Macro, writer: Union[TelnetWriter, TelnetWriterUnicode], log: logging.Logger
-) -> None:
-    """
-    Bind a single macro to the KeyBindings instance.
-
-    :param kb: prompt_toolkit ``KeyBindings``.
-    :param macro: Macro to bind.
-    :param writer: Telnet writer.
-    :param log: Logger instance.
+    :returns: Dict mapping blessed key names (or raw chars) to handlers.
     """
     import asyncio  # pylint: disable=import-outside-toplevel
 
+    from blessed.line_editor import DEFAULT_KEYMAP  # pylint: disable=import-outside-toplevel
+
     from .client_repl import execute_macro_commands  # pylint: disable=import-outside-toplevel
 
-    keys = macro.keys
-    text = macro.text
+    result: dict[str, Any] = {}
+    for macro in macros:
+        if not macro.enabled:
+            continue
+        if macro.key in DEFAULT_KEYMAP:
+            log.warning("macro %r conflicts with editor keymap, skipping", macro.key)
+            continue
+        text = macro.text
 
-    try:
-
-        @kb.add(*keys)  # type: ignore[untyped-decorator]
-        def _handler(_event: Any, _text: str = text) -> None:
+        async def _handler(_text: str = text) -> None:
             asyncio.ensure_future(execute_macro_commands(_text, writer, log))
 
-    except (ValueError, KeyError) as exc:
-        log.warning("macro: could not bind %s: %s", keys, exc)
+        result[macro.key] = _handler
+    return result

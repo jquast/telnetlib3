@@ -1,9 +1,9 @@
 """
-Room graph tracking, BFS pathfinding, and persistence for GMCP Room.Info data.
+Room graph tracking, BFS pathfinding, and SQLite persistence for GMCP Room.Info data.
 
 Incrementally builds a directed graph from GMCP ``Room.Info`` messages,
 supports shortest-path search via BFS, and persists per-session room
-data to ``~/.local/share/telnetlib3/rooms-{host}_{port}.json``.
+data to ``~/.local/share/telnetlib3/rooms-{host}_{port}.db``.
 """
 
 from __future__ import annotations
@@ -11,11 +11,14 @@ from __future__ import annotations
 # std imports
 import os
 import json
-import tempfile
-from typing import Any
+import sqlite3
+from typing import Any, Optional
 from datetime import datetime, timezone
 from collections import deque
-from dataclasses import field, asdict, dataclass
+from dataclasses import field, dataclass
+
+# local
+from ._paths import _atomic_write
 
 
 @dataclass
@@ -32,12 +35,120 @@ class Room:
     last_visited: str = ""
 
 
-class RoomGraph:
-    """Directed graph of rooms built from GMCP Room.Info messages."""
+class RoomStore:
+    """SQLite-backed room graph with in-memory adjacency cache."""
 
-    def __init__(self) -> None:
-        """Initialize an empty room graph."""
-        self.rooms: dict[str, Room] = {}
+    def __init__(self, db_path: str, read_only: bool = False) -> None:
+        """
+        Open or create an SQLite room database.
+
+        :param db_path: Path to the ``.db`` file.
+        :param read_only: Open in read-only mode (no table creation).
+        """
+        dir_path = os.path.dirname(db_path)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
+        mode = "ro" if read_only else "rwc"
+        uri = f"file:{db_path}?mode={mode}"
+        self._conn = sqlite3.connect(uri, uri=True)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
+        if not read_only:
+            self._create_tables()
+        self._adj: dict[str, dict[str, str]] = {}
+        self._load_adjacency()
+
+    def _create_tables(self) -> None:
+        """Create schema tables if they do not exist."""
+        self._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS room (
+                num TEXT PRIMARY KEY,
+                name TEXT NOT NULL DEFAULT '',
+                area TEXT NOT NULL DEFAULT '',
+                environment TEXT NOT NULL DEFAULT '',
+                bookmarked INTEGER NOT NULL DEFAULT 0,
+                visit_count INTEGER NOT NULL DEFAULT 0,
+                last_visited TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS exit (
+                src_num TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                dst_num TEXT NOT NULL,
+                PRIMARY KEY (src_num, direction)
+            );
+            CREATE TABLE IF NOT EXISTS meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+        """)
+        self._conn.execute(
+            "INSERT OR IGNORE INTO meta VALUES ('version', '1')"
+        )
+        self._conn.commit()
+
+    def _load_adjacency(self) -> None:
+        """Load full adjacency graph into memory for BFS."""
+        self._adj.clear()
+        try:
+            for src, direction, dst in self._conn.execute(
+                "SELECT src_num, direction, dst_num FROM exit"
+            ):
+                self._adj.setdefault(src, {})[direction] = dst
+        except sqlite3.OperationalError:
+            pass
+
+    def close(self) -> None:
+        """Close the database connection."""
+        self._conn.close()
+
+    def _row_to_room(self, row: tuple[Any, ...]) -> Room:
+        """Convert a SELECT row to a :class:`Room`."""
+        num = row[0]
+        exits = dict(self._adj.get(num, {}))
+        return Room(
+            num=num, name=row[1], area=row[2],
+            environment=row[3], exits=exits,
+            bookmarked=bool(row[4]),
+            visit_count=row[5], last_visited=row[6],
+        )
+
+    _ROOM_COLS = (
+        "num, name, area, environment, bookmarked,"
+        " visit_count, last_visited"
+    )
+
+    @property
+    def rooms(self) -> dict[str, Room]:
+        """Return all rooms as a dict (for compatibility). Not cached."""
+        result: dict[str, Room] = {}
+        for row in self._conn.execute(
+            f"SELECT {self._ROOM_COLS} FROM room"
+        ):
+            room = self._row_to_room(row)
+            result[room.num] = room
+        return result
+
+    def get_room(self, num: str) -> Optional[Room]:
+        """
+        Get a single room by number.
+
+        :param num: Room number.
+        :returns: :class:`Room` or ``None`` if not found.
+        """
+        row = self._conn.execute(
+            f"SELECT {self._ROOM_COLS} FROM room WHERE num = ?",
+            (num,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_room(row)
+
+    def _has_room(self, num: str) -> bool:
+        """Return ``True`` if room *num* exists in the database."""
+        row = self._conn.execute(
+            "SELECT 1 FROM room WHERE num = ?", (num,)
+        ).fetchone()
+        return row is not None
 
     def update_room(self, info: dict[str, Any]) -> None:
         """
@@ -52,44 +163,70 @@ class RoomGraph:
         else:
             exits = {}
 
-        if num in self.rooms:
-            room = self.rooms[num]
-            room.name = str(info.get("name", room.name))
-            room.area = str(info.get("area", room.area))
-            room.environment = str(info.get("environment", room.environment))
-            room.exits = exits
-            room.visit_count += 1
-            room.last_visited = datetime.now(timezone.utc).isoformat()
-        else:
-            self.rooms[num] = Room(
-                num=num,
-                name=str(info.get("name", "")),
-                area=str(info.get("area", "")),
-                environment=str(info.get("environment", "")),
-                exits=exits,
-                visit_count=1,
-                last_visited=datetime.now(timezone.utc).isoformat(),
+        name = str(info.get("name", ""))
+        area = str(info.get("area", ""))
+        environment = str(info.get("environment", ""))
+        now = datetime.now(timezone.utc).isoformat()
+
+        self._conn.execute(
+            "INSERT INTO room"
+            " (num, name, area, environment, visit_count, last_visited)"
+            " VALUES (?, ?, ?, ?, 1, ?)"
+            " ON CONFLICT(num) DO UPDATE SET"
+            " name=excluded.name, area=excluded.area,"
+            " environment=excluded.environment,"
+            " visit_count=visit_count+1,"
+            " last_visited=excluded.last_visited",
+            (num, name, area, environment, now),
+        )
+        self._conn.execute(
+            "DELETE FROM exit WHERE src_num = ?", (num,)
+        )
+        for direction, dst in exits.items():
+            self._conn.execute(
+                "INSERT INTO exit (src_num, direction, dst_num)"
+                " VALUES (?, ?, ?)",
+                (num, direction, dst),
             )
+        self._conn.commit()
+        self._adj[num] = exits
+
+    def toggle_bookmark(self, num: str) -> bool:
+        """
+        Toggle bookmark on a room.
+
+        :param num: Room number.
+        :returns: New bookmark state, or ``False`` if room not found.
+        """
+        row = self._conn.execute(
+            "SELECT bookmarked FROM room WHERE num = ?", (num,)
+        ).fetchone()
+        if row is None:
+            return False
+        new_state = not bool(row[0])
+        self._conn.execute(
+            "UPDATE room SET bookmarked = ? WHERE num = ?",
+            (int(new_state), num),
+        )
+        self._conn.commit()
+        return new_state
 
     def bfs_distances(self, src: str) -> dict[str, int]:
         """
         BFS from *src* returning distance to every reachable room.
 
         :param src: Source room number.
-        :returns: ``{room_num: distance}`` for all reachable rooms (including src=0).
+        :returns: ``{room_num: distance}`` for all reachable rooms.
         """
-        if src not in self.rooms:
+        if not self._has_room(src):
             return {}
         distances: dict[str, int] = {src: 0}
         queue: deque[str] = deque([src])
         while queue:
             current = queue.popleft()
             d = distances[current]
-            room = self.rooms.get(current)
-            if room is None:
-                continue
-            for target in room.exits.values():
-                if target not in distances and target in self.rooms:
+            for target in self._adj.get(current, {}).values():
+                if target not in distances and self._has_room(target):
                     distances[target] = d + 1
                     queue.append(target)
         return distances
@@ -102,62 +239,57 @@ class RoomGraph:
         """
         if src == dst:
             return []
-        if src not in self.rooms:
+        if not self._has_room(src):
             return None
 
         visited: set[str] = {src}
-        queue: deque[tuple[str, list[str]]] = deque()
-        queue.append((src, []))
+        queue: deque[tuple[str, list[str]]] = deque([(src, [])])
 
         while queue:
             current, path = queue.popleft()
-            room = self.rooms.get(current)
-            if room is None:
-                continue
-            for direction, target in room.exits.items():
+            for direction, target in self._adj.get(
+                current, {}
+            ).items():
                 if target == dst:
                     return path + [direction]
-                if target not in visited and target in self.rooms:
+                if target not in visited and self._has_room(target):
                     visited.add(target)
                     queue.append((target, path + [direction]))
 
         return None
 
-    def find_path_with_rooms(self, src: str, dst: str) -> list[tuple[str, str]] | None:
+    def find_path_with_rooms(
+        self, src: str, dst: str,
+    ) -> list[tuple[str, str]] | None:
         """
         BFS shortest path returning ``[(direction, target_room_num), ...]``.
-
-        Used by fast travel to verify arrival at each step.
 
         :returns: List of (direction, expected_room_num) pairs, or ``None``.
         """
         if src == dst:
             return []
-        if src not in self.rooms:
+        if not self._has_room(src):
             return None
 
         visited: set[str] = {src}
-        queue: deque[tuple[str, list[tuple[str, str]]]] = deque()
-        queue.append((src, []))
+        queue: deque[tuple[str, list[tuple[str, str]]]] = deque(
+            [(src, [])]
+        )
 
         while queue:
             current, path = queue.popleft()
-            room = self.rooms.get(current)
-            if room is None:
-                continue
-            for direction, target in room.exits.items():
+            for direction, target in self._adj.get(
+                current, {}
+            ).items():
                 if target == dst:
                     return path + [(direction, target)]
-                if target not in visited and target in self.rooms:
+                if target not in visited and self._has_room(target):
                     visited.add(target)
-                    queue.append((target, path + [(direction, target)]))
+                    queue.append(
+                        (target, path + [(direction, target)])
+                    )
 
         return None
-
-    def toggle_bookmark(self, num: str) -> None:
-        """Toggle the bookmark flag on a room."""
-        if num in self.rooms:
-            self.rooms[num].bookmarked = not self.rooms[num].bookmarked
 
     def find_same_name(self, num: str, limit: int = 99) -> list[Room]:
         """
@@ -167,45 +299,51 @@ class RoomGraph:
         :param limit: Maximum results to return.
         :returns: List of matching rooms, excluding *num* itself.
         """
-        room = self.rooms.get(num)
-        if room is None or not room.name:
+        row = self._conn.execute(
+            "SELECT name FROM room WHERE num = ?", (num,)
+        ).fetchone()
+        if row is None or not row[0]:
             return []
-        target_name = room.name
-        matches = [r for r in self.rooms.values() if r.num != num and r.name == target_name]
-        matches.sort(key=lambda r: r.last_visited)
-        return matches[:limit]
+        target_name = row[0]
+        rows = self._conn.execute(
+            f"SELECT {self._ROOM_COLS}"
+            " FROM room WHERE name = ? AND num != ?"
+            " ORDER BY last_visited ASC LIMIT ?",
+            (target_name, num, limit),
+        ).fetchall()
+        return [self._row_to_room(r) for r in rows]
 
     def find_branches(
-        self, src: str, limit: int = 99
+        self, src: str, limit: int = 99,
     ) -> list[tuple[str, str, str]]:
         """
         Find exits from known rooms leading to unvisited or unknown rooms.
 
-        Uses BFS from *src* to discover frontier exits -- exits that point to
-        rooms with ``visit_count == 0`` or rooms not yet in the graph.
-
         :param src: Source room number to search from.
         :param limit: Maximum number of branches to return.
-        :returns: ``[(gateway_room_num, direction, target_num), ...]`` sorted
-            by BFS distance from *src*.
+        :returns: ``[(gateway_room_num, direction, target_num), ...]``
+            sorted by BFS distance from *src*.
         """
-        if src not in self.rooms:
+        if not self._has_room(src):
             return []
 
-        # BFS to find all reachable rooms in distance order.
         visited: set[str] = {src}
         queue: deque[tuple[str, int]] = deque([(src, 0)])
         branches: list[tuple[int, str, str, str]] = []
 
         while queue:
             current, dist = queue.popleft()
-            room = self.rooms.get(current)
-            if room is None:
-                continue
-            for direction, target in room.exits.items():
-                target_room = self.rooms.get(target)
-                if target_room is None or target_room.visit_count == 0:
-                    branches.append((dist, current, direction, target))
+            for direction, target in self._adj.get(
+                current, {}
+            ).items():
+                target_vc = self._conn.execute(
+                    "SELECT visit_count FROM room WHERE num = ?",
+                    (target,),
+                ).fetchone()
+                if target_vc is None or target_vc[0] == 0:
+                    branches.append(
+                        (dist, current, direction, target)
+                    )
                 elif target not in visited:
                     visited.add(target)
                     queue.append((target, dist + 1))
@@ -220,10 +358,21 @@ class RoomGraph:
         :param query: Search string.
         :returns: Matching rooms sorted bookmarked-first, then by name.
         """
-        q = query.lower()
-        results = [r for r in self.rooms.values() if q in r.name.lower() or q in r.area.lower()]
-        results.sort(key=lambda r: (not r.bookmarked, r.name.lower()))
+        q = f"%{query}%"
+        rows = self._conn.execute(
+            f"SELECT {self._ROOM_COLS}"
+            " FROM room WHERE name LIKE ? COLLATE NOCASE"
+            " OR area LIKE ? COLLATE NOCASE",
+            (q, q),
+        ).fetchall()
+        results = [self._row_to_room(r) for r in rows]
+        results.sort(
+            key=lambda r: (not r.bookmarked, r.name.lower())
+        )
         return results
+
+
+RoomGraph = RoomStore
 
 
 def _xdg_data_dir() -> str:
@@ -233,37 +382,16 @@ def _xdg_data_dir() -> str:
     return DATA_DIR
 
 
-def _atomic_write(path: str, content: str) -> None:
-    """
-    Atomically write *content* to *path* using a temp file and :func:`os.replace`.
-
-    :param path: Target file path.
-    :param content: String content to write.
-    """
-    dir_path = os.path.dirname(path)
-    os.makedirs(dir_path, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=dir_path, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-
-
 def _session_file_path(prefix: str, session_key: str, ext: str = "") -> str:
     """Return a per-session file path under the XDG data directory."""
-    safe = session_key.replace(":", "_")
-    return os.path.join(_xdg_data_dir(), f"{prefix}{safe}{ext}")
+    from ._paths import safe_session_slug  # pylint: disable=import-outside-toplevel
+
+    return os.path.join(_xdg_data_dir(), f"{prefix}{safe_session_slug(session_key)}{ext}")
 
 
 def rooms_path(session_key: str) -> str:
-    """Return path to room graph JSON for *session_key* (``host:port``)."""
-    return _session_file_path("rooms-", session_key, ".json")
+    """Return path to room graph SQLite DB for *session_key* (``host:port``)."""
+    return _session_file_path("rooms-", session_key, ".db")
 
 
 def current_room_path(session_key: str) -> str:
@@ -308,45 +436,6 @@ def save_prefs(session_key: str, prefs: dict[str, bool]) -> None:
     """
     path = prefs_path(session_key)
     _atomic_write(path, json.dumps(prefs, separators=(",", ":")))
-
-
-def load_rooms(path: str) -> RoomGraph:
-    """
-    Load a room graph from JSON file.
-
-    :param path: Path to rooms JSON file.
-    :returns: Populated :class:`RoomGraph`.
-    """
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    graph = RoomGraph()
-    rooms_data = data.get("rooms", {})
-    for num, rdata in rooms_data.items():
-        graph.rooms[str(num)] = Room(
-            num=str(rdata.get("num", num)),
-            name=rdata.get("name", ""),
-            area=rdata.get("area", ""),
-            environment=rdata.get("environment", ""),
-            exits=rdata.get("exits", {}),
-            bookmarked=rdata.get("bookmarked", False),
-            visit_count=rdata.get("visit_count", 0),
-            last_visited=rdata.get("last_visited", ""),
-        )
-    return graph
-
-
-def save_rooms(path: str, graph: RoomGraph) -> None:
-    """
-    Atomically save a room graph to JSON file.
-
-    Uses a temporary file and :func:`os.replace` for crash safety.
-
-    :param path: Target path.
-    :param graph: Room graph to persist.
-    """
-    data = {"version": 1, "rooms": {num: asdict(room) for num, room in graph.rooms.items()}}
-    _atomic_write(path, json.dumps(data, separators=(",", ":")))
 
 
 def write_current_room(path: str, room_num: str) -> None:

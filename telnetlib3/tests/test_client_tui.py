@@ -220,27 +220,27 @@ def test_macro_screen_loads_file(tmp_path) -> None:
 
     sk = "test.host:23"
     fp = tmp_path / "macros.json"
-    fp.write_text(json.dumps({sk: {"macros": [{"key": "f5", "text": "look;"}]}}))
+    fp.write_text(json.dumps({sk: {"macros": [{"key": "KEY_F5", "text": "look;"}]}}))
     screen = MacroEditScreen(path=str(fp), session_key=sk)
     screen._load_from_file()
     assert len(screen._macros) == 1
-    assert screen._macros[0] == ("f5", "look;", True)
+    assert screen._macros[0] == ("KEY_F5", "look;", True)
 
 
 def test_macro_screen_save(tmp_path) -> None:
     sk = "test.host:23"
     fp = tmp_path / "macros.json"
     screen = MacroEditScreen(path=str(fp), session_key=sk)
-    screen._macros = [("f5", "look;", True), ("escape n", "north;", True)]
+    screen._macros = [("KEY_F5", "look;", True), ("KEY_ALT_N", "north;", True)]
     screen._save_to_file()
 
     from telnetlib3.macros import load_macros
 
     loaded = load_macros(str(fp), sk)
     assert len(loaded) == 2
-    assert loaded[0].keys == ("f5",)
+    assert loaded[0].key == "KEY_F5"
     assert loaded[0].text == "look;"
-    assert loaded[1].keys == ("escape", "n")
+    assert loaded[1].key == "KEY_ALT_N"
 
 
 def test_autoreply_screen_loads_empty(tmp_path) -> None:

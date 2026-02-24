@@ -201,7 +201,7 @@ def test_transform_args_history_file():
     result = cl._transform_args(parser.parse_args(["myhost"]))
     assert result["history_file"] is not None
     assert "telnetlib3" in result["history_file"]
-    assert result["history_file"].endswith("history")
+    assert "history-" in result["history_file"]
 
     result_custom = cl._transform_args(
         parser.parse_args(["myhost", "--history-file", "/tmp/my-history"])

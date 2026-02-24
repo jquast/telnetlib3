@@ -20,7 +20,11 @@ import warnings
 import functools
 import contextlib
 import subprocess
-from typing import Any, Dict, List, Tuple, Optional, Generator
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Optional, Generator
+
+if TYPE_CHECKING:
+    import blessed
+    import prettytable
 
 # local
 from .accessories import PATIENCE_MESSAGES
@@ -171,7 +175,7 @@ def _wrap_options(options: List[str], max_width: int = 30) -> str:
     return "\n".join(textwrap.wrap(", ".join(options), width=max_width))
 
 
-def _color_yes_no(term: Any, value: bool) -> str:
+def _color_yes_no(term: "blessed.Terminal", value: bool) -> str:
     """Apply green/red coloring to boolean value."""
     if value:
         return str(term.forestgreen("Yes"))
@@ -236,7 +240,7 @@ def _format_encoding(
 
 
 def _build_terminal_rows(  # pylint: disable=too-complex,too-many-locals,too-many-branches
-    term: Any, data: Dict[str, Any]
+    term: "blessed.Terminal", data: Dict[str, Any]
 ) -> List[Tuple[str, str]]:
     """Build (key, value) tuples for terminal capabilities table."""
     pairs: List[Tuple[str, str]] = []
@@ -359,7 +363,7 @@ def _build_terminal_rows(  # pylint: disable=too-complex,too-many-locals,too-man
 
 
 def _build_telnet_rows(  # pylint: disable=unused-argument
-    term: Any, data: Dict[str, Any]
+    term: "blessed.Terminal", data: Dict[str, Any]
 ) -> List[Tuple[str, str]]:
     """Build (key, value) tuples for telnet protocol table."""
     pairs: List[Tuple[str, str]] = []
@@ -414,7 +418,7 @@ def _build_telnet_rows(  # pylint: disable=unused-argument
     return pairs
 
 
-def _make_terminal(**kwargs: Any) -> Any:
+def _make_terminal(**kwargs: Any) -> "blessed.Terminal":
     """Create a blessed Terminal, falling back to ``ansi`` on setupterm failure."""
     from blessed import Terminal  # pylint: disable=import-outside-toplevel
 
@@ -495,17 +499,17 @@ def _has_truecolor(data: Dict[str, Any]) -> bool:
     return n is not None and n >= 16777216
 
 
-def _hotkey(term: Any, key: str) -> str:
+def _hotkey(term: "blessed.Terminal", key: str) -> str:
     """Format a hotkey as ``key-`` with key and dash in magenta."""
     return f"{term.bold_magenta(key)}{term.bold_magenta('-')}"
 
 
-def _bracket_key(term: Any, key: str) -> str:
+def _bracket_key(term: "blessed.Terminal", key: str) -> str:
     """Format a hotkey as ``[key]`` with brackets in cyan, key in magenta."""
     return f"{term.cyan('[')}{term.bold_magenta(key)}{term.cyan(']')}"
 
 
-def _apply_unicode_borders(tbl: Any) -> None:
+def _apply_unicode_borders(tbl: "prettytable.PrettyTable") -> None:
     """Apply double-line box-drawing characters to a PrettyTable."""
     tbl.horizontal_char = "\u2550"
     tbl.vertical_char = "\u2551"
@@ -520,7 +524,9 @@ def _apply_unicode_borders(tbl: Any) -> None:
     tbl.bottom_right_junction_char = "\u255d"
 
 
-def _display_compact_summary(data: Dict[str, Any], term: Any = None) -> bool:
+def _display_compact_summary(
+    data: Dict[str, Any], term: Optional["blessed.Terminal"] = None
+) -> bool:
     """Display compact fingerprint summary using prettytable."""
     try:
         from ucs_detect import (  # pylint: disable=import-outside-toplevel
@@ -699,7 +705,9 @@ def _find_nearest_match(
 
 
 def _build_seen_counts(
-    data: Dict[str, Any], names: Optional[Dict[str, str]] = None, term: Any = None
+    data: Dict[str, Any],
+    names: Optional[Dict[str, str]] = None,
+    term: Optional["blessed.Terminal"] = None,
 ) -> str:
     """Build friendly "seen before" text from folder and session counts."""
     if DATA_DIR is None or not os.path.exists(DATA_DIR):
@@ -768,7 +776,7 @@ def _build_seen_counts(
     return ""
 
 
-def _color_match(term: Any, name: str, score: float) -> str:
+def _color_match(term: "blessed.Terminal", name: str, score: float) -> str:
     """
     Color a nearest-match result by confidence threshold.
 
@@ -788,7 +796,7 @@ def _color_match(term: Any, name: str, score: float) -> str:
 def _nearest_match_lines(
     data: Dict[str, Any],
     names: Dict[str, str],
-    term: Any,
+    term: "blessed.Terminal",
     telnet_unknown: bool = False,
     terminal_unknown: bool = False,
 ) -> List[str]:
@@ -814,7 +822,7 @@ def _nearest_match_lines(
     return result_lines
 
 
-def _repl_prompt(term: Any) -> None:
+def _repl_prompt(term: "blessed.Terminal") -> None:
     """Write the REPL prompt with hotkey legend."""
     bk = _bracket_key
     legend = (
@@ -824,13 +832,15 @@ def _repl_prompt(term: Any) -> None:
     echo(f"\r{term.clear_eos}{term.normal}{legend}")
 
 
-def _paginate(term: Any, text: str, **_kw: Any) -> None:  # pylint: disable=unused-argument
+def _paginate(  # pylint: disable=unused-argument
+    term: "blessed.Terminal", text: str, **_kw: Any
+) -> None:
     """Display text."""
     for line in text.split("\n"):
         echo(line + "\n")
 
 
-def _colorize_json(data: Any, term: Any = None) -> str:
+def _colorize_json(data: Any, term: Optional["blessed.Terminal"] = None) -> str:
     """
     Format JSON with color, preferring bat/batcat over jq.
 
@@ -879,10 +889,7 @@ def _strip_empty_features(d: Dict[str, Any]) -> None:
 
 def _normalize_color_hex(hex_color: str) -> str:
     """Normalize X11 color hex to standard 6-digit format."""
-    from blessed.colorspace import (  # pylint: disable=import-outside-toplevel
-        hex_to_rgb,
-        rgb_to_hex,
-    )
+    from blessed.colorspace import hex_to_rgb, rgb_to_hex  # pylint: disable=import-outside-toplevel
 
     r, g, b = hex_to_rgb(hex_color)
     return str(rgb_to_hex(r, g, b))
@@ -975,7 +982,7 @@ def _filter_telnet_detail(detail: Optional[Dict[str, Any]]) -> Optional[Dict[str
     return result
 
 
-def _show_detail(term: Any, data: Dict[str, Any], section: str) -> None:
+def _show_detail(term: "blessed.Terminal", data: Dict[str, Any], section: str) -> None:
     """Show detailed JSON for a fingerprint section with pagination."""
     if section == "terminal":
         terminal_probe = data.get("terminal-probe", {})
@@ -1062,7 +1069,7 @@ def _build_database_entries(
 
 
 def _show_database(
-    term: Any, data: Dict[str, Any], entries: List[Tuple[str, str, int, int]]
+    term: "blessed.Terminal", data: Dict[str, Any], entries: List[Tuple[str, str, int, int]]
 ) -> None:
     """Display scrollable database of all known fingerprints."""
     try:
@@ -1094,7 +1101,7 @@ def _show_database(
 
 
 def _fingerprint_repl(
-    term: Any,
+    term: "blessed.Terminal",
     data: Dict[str, Any],
     seen_counts: str = "",
     filepath: Optional[str] = None,
@@ -1163,7 +1170,7 @@ def _has_unknown_hashes(data: Dict[str, Any], names: Dict[str, str]) -> bool:
 
 
 def _prompt_fingerprint_identification(
-    term: Any, data: Dict[str, Any], filepath: str, names: Dict[str, str]
+    term: "blessed.Terminal", data: Dict[str, Any], filepath: str, names: Dict[str, str]
 ) -> None:
     """Prompt user to identify unknown fingerprint hashes."""
     telnet_probe = data.get("telnet-probe", {})

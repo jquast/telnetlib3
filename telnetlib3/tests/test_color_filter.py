@@ -35,12 +35,12 @@ def test_palette_rgb_in_range(name: str) -> None:
 
 
 def test_all_expected_palettes_exist() -> None:
-    assert set(PALETTES.keys()) == {"ega", "cga", "vga", "xterm", "c64"}
+    assert set(PALETTES.keys()) == {"vga", "xterm", "c64"}
 
 
 def test_color_config_defaults() -> None:
     cfg = ColorConfig()
-    assert cfg.palette_name == "ega"
+    assert cfg.palette_name == "vga"
     assert cfg.brightness == 1.0
     assert cfg.contrast == 1.0
     assert cfg.background_color == (0, 0, 0)
@@ -142,7 +142,7 @@ def test_adjust_color_in_range() -> None:
 def test_color_filter_basic_translation(sgr: str, palette_idx: int, prefix: str) -> None:
     f = _make_filter()
     result = f.filter(f"\x1b[{sgr}m")
-    rgb = PALETTES["ega"][palette_idx]
+    rgb = PALETTES["vga"][palette_idx]
     assert f"{prefix};{rgb[0]};{rgb[1]};{rgb[2]}" in result
 
 
@@ -152,7 +152,7 @@ def test_color_filter_basic_translation(sgr: str, palette_idx: int, prefix: str)
 def test_all_normal_foreground_colors(code: int, idx: int) -> None:
     f = _make_filter()
     result = f.filter(f"\x1b[{code}m")
-    rgb = PALETTES["ega"][idx]
+    rgb = PALETTES["vga"][idx]
     assert f"38;2;{rgb[0]};{rgb[1]};{rgb[2]}" in result
 
 
@@ -162,7 +162,7 @@ def test_all_normal_foreground_colors(code: int, idx: int) -> None:
 def test_all_normal_background_colors(code: int, idx: int) -> None:
     f = _make_filter()
     result = f.filter(f"\x1b[{code}m")
-    rgb = PALETTES["ega"][idx]
+    rgb = PALETTES["vga"][idx]
     assert f"48;2;{rgb[0]};{rgb[1]};{rgb[2]}" in result
 
 
@@ -279,15 +279,15 @@ def test_default_color_translated(sgr_code: str, expected_prefix: str) -> None:
 def test_bold_plus_red_uses_bright() -> None:
     f = _make_filter()
     result = f.filter("\x1b[1;31m")
-    bright_red = PALETTES["ega"][9]
+    bright_red = PALETTES["vga"][9]
     assert f"38;2;{bright_red[0]};{bright_red[1]};{bright_red[2]}" in result
 
 
 def test_red_fg_green_bg() -> None:
     f = _make_filter()
     result = f.filter("\x1b[31;42m")
-    fg_rgb = PALETTES["ega"][1]
-    bg_rgb = PALETTES["ega"][2]
+    fg_rgb = PALETTES["vga"][1]
+    bg_rgb = PALETTES["vga"][2]
     assert f"38;2;{fg_rgb[0]};{fg_rgb[1]};{fg_rgb[2]}" in result
     assert f"48;2;{bg_rgb[0]};{bg_rgb[1]};{bg_rgb[2]}" in result
 
@@ -296,7 +296,7 @@ def test_red_fg_green_bg() -> None:
 def test_bold_single_seq_uses_bright(seq: str) -> None:
     f = _make_filter()
     result = f.filter(seq)
-    bright_black = PALETTES["ega"][8]
+    bright_black = PALETTES["vga"][8]
     assert f"38;2;{bright_black[0]};{bright_black[1]};{bright_black[2]}" in result
 
 
@@ -315,21 +315,21 @@ def test_bold_state_across_sequences(
     for seq in setup_seqs:
         f.filter(seq)
     result = f.filter(test_seq)
-    rgb = PALETTES["ega"][palette_idx]
+    rgb = PALETTES["vga"][palette_idx]
     assert f"38;2;{rgb[0]};{rgb[1]};{rgb[2]}" in result
 
 
 def test_bold_does_not_affect_bright_colors() -> None:
     f = _make_filter()
     result = f.filter("\x1b[1;90m")
-    bright_black = PALETTES["ega"][8]
+    bright_black = PALETTES["vga"][8]
     assert f"38;2;{bright_black[0]};{bright_black[1]};{bright_black[2]}" in result
 
 
 def test_bold_does_not_affect_background() -> None:
     f = _make_filter()
     result = f.filter("\x1b[1;40m")
-    normal_black = PALETTES["ega"][0]
+    normal_black = PALETTES["vga"][0]
     assert f"48;2;{normal_black[0]};{normal_black[1]};{normal_black[2]}" in result
 
 
@@ -339,14 +339,14 @@ def test_bold_does_not_affect_background() -> None:
 def test_all_bold_fg_use_bright_palette(code: int, normal_idx: int) -> None:
     f = _make_filter()
     result = f.filter(f"\x1b[1;{code}m")
-    bright_rgb = PALETTES["ega"][normal_idx + 8]
+    bright_rgb = PALETTES["vga"][normal_idx + 8]
     assert f"38;2;{bright_rgb[0]};{bright_rgb[1]};{bright_rgb[2]}" in result
 
 
 def test_reset_bold_color_in_same_seq() -> None:
     f = _make_filter()
     result = f.filter("\x1b[0;1;34m")
-    bright_blue = PALETTES["ega"][12]
+    bright_blue = PALETTES["vga"][12]
     assert f"38;2;{bright_blue[0]};{bright_blue[1]};{bright_blue[2]}" in result
 
 
@@ -358,7 +358,7 @@ def _make_ice_filter(ice_colors: bool = True) -> ColorFilter:
 def test_ice_blink_single_seq_uses_bright(seq: str) -> None:
     f = _make_ice_filter()
     result = f.filter(seq)
-    bright_black = PALETTES["ega"][8]
+    bright_black = PALETTES["vga"][8]
     assert f"48;2;{bright_black[0]};{bright_black[1]};{bright_black[2]}" in result
 
 
@@ -377,21 +377,21 @@ def test_ice_blink_state_across_sequences(
     for seq in setup_seqs:
         f.filter(seq)
     result = f.filter(test_seq)
-    rgb = PALETTES["ega"][palette_idx]
+    rgb = PALETTES["vga"][palette_idx]
     assert f"48;2;{rgb[0]};{rgb[1]};{rgb[2]}" in result
 
 
 def test_ice_blink_does_not_affect_foreground() -> None:
     f = _make_ice_filter()
     result = f.filter("\x1b[5;30m")
-    normal_black = PALETTES["ega"][0]
+    normal_black = PALETTES["vga"][0]
     assert f"38;2;{normal_black[0]};{normal_black[1]};{normal_black[2]}" in result
 
 
 def test_ice_blink_does_not_affect_bright_bg() -> None:
     f = _make_ice_filter()
     result = f.filter("\x1b[5;100m")
-    bright_black = PALETTES["ega"][8]
+    bright_black = PALETTES["vga"][8]
     assert f"48;2;{bright_black[0]};{bright_black[1]};{bright_black[2]}" in result
 
 
@@ -401,14 +401,14 @@ def test_ice_blink_does_not_affect_bright_bg() -> None:
 def test_all_blink_bg_use_bright_palette(code: int, normal_idx: int) -> None:
     f = _make_ice_filter()
     result = f.filter(f"\x1b[5;{code}m")
-    bright_rgb = PALETTES["ega"][normal_idx + 8]
+    bright_rgb = PALETTES["vga"][normal_idx + 8]
     assert f"48;2;{bright_rgb[0]};{bright_rgb[1]};{bright_rgb[2]}" in result
 
 
 def test_ice_reset_blink_bg_in_same_seq() -> None:
     f = _make_ice_filter()
     result = f.filter("\x1b[0;5;41m")
-    bright_red = PALETTES["ega"][9]
+    bright_red = PALETTES["vga"][9]
     assert f"48;2;{bright_red[0]};{bright_red[1]};{bright_red[2]}" in result
 
 
@@ -416,7 +416,7 @@ def test_ice_colors_disabled() -> None:
     f = _make_ice_filter(ice_colors=False)
     f.filter("x")
     result = f.filter("\x1b[5;40m")
-    normal_black = PALETTES["ega"][0]
+    normal_black = PALETTES["vga"][0]
     assert f"48;2;{normal_black[0]};{normal_black[1]};{normal_black[2]}" in result
     params = result.split("\x1b[")[1].split("m")[0]
     assert "5" in params.split(";")
@@ -428,7 +428,7 @@ def test_chunked_split_at_esc() -> None:
     assert "hello" in result1
     assert result1.endswith("hello")
     result2 = f.filter("[31mworld")
-    rgb = PALETTES["ega"][1]
+    rgb = PALETTES["vga"][1]
     assert f"38;2;{rgb[0]};{rgb[1]};{rgb[2]}" in result2
     assert "world" in result2
 
@@ -438,7 +438,7 @@ def test_chunked_split_mid_params() -> None:
     result1 = f.filter("hello\x1b[3")
     assert "hello" in result1
     result2 = f.filter("1mworld")
-    rgb = PALETTES["ega"][1]
+    rgb = PALETTES["vga"][1]
     assert f"38;2;{rgb[0]};{rgb[1]};{rgb[2]}" in result2
     assert "world" in result2
 
@@ -483,7 +483,7 @@ def test_color_filter_empty_string() -> None:
 def test_color_filter_reduced_brightness() -> None:
     f = ColorFilter(ColorConfig(brightness=0.5, contrast=1.0))
     result = f.filter("\x1b[37m")
-    ega_white = PALETTES["ega"][7]
+    ega_white = PALETTES["vga"][7]
     adjusted = _adjust_color(*ega_white, 0.5, 1.0)
     assert f"38;2;{adjusted[0]};{adjusted[1]};{adjusted[2]}" in result
 
@@ -491,7 +491,7 @@ def test_color_filter_reduced_brightness() -> None:
 def test_color_filter_reduced_contrast() -> None:
     f = ColorFilter(ColorConfig(brightness=1.0, contrast=0.5))
     result = f.filter("\x1b[31m")
-    ega_red = PALETTES["ega"][1]
+    ega_red = PALETTES["vga"][1]
     adjusted = _adjust_color(*ega_red, 1.0, 0.5)
     assert f"38;2;{adjusted[0]};{adjusted[1]};{adjusted[2]}" in result
 

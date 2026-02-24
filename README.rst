@@ -109,7 +109,7 @@ REPL Input Mode
 ~~~~~~~~~~~~~~~
 
 When connecting in line mode, ``telnetlib3-client`` will use an enhanced REPL
-powered by `prompt_toolkit`_ when installed::
+powered by `blessed`_ when installed::
 
     pip install telnetlib3[with_tui]
 
@@ -276,7 +276,7 @@ The following RFC specifications are implemented:
 .. _sync API documentation: https://telnetlib3.readthedocs.io/en/latest/api/sync.html
 .. _miniboa: https://github.com/shmup/miniboa
 .. _asyncio: https://docs.python.org/3/library/asyncio.html
-.. _prompt_toolkit: https://python-prompt-toolkit.readthedocs.io/
+.. _blessed: https://blessed.readthedocs.io/
 
 Further Reading
 ---------------

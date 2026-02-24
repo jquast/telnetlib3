@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
 from dataclasses import asdict, fields, dataclass
 
 if TYPE_CHECKING:
-    from .rooms import RoomGraph
+    from .rooms import RoomStore
 
 # 3rd party
 from textual import events
@@ -44,8 +44,10 @@ from textual.widgets import (
 )
 from textual.containers import Vertical, Horizontal
 
-# local
-from ._ansi import TERMINAL_CLEANUP, cup
+# Reset SGR, cursor, alt-screen, mouse, and bracketed paste.
+_TERMINAL_CLEANUP = (
+    "\x1b[m\x1b[?25h\x1b[?1049l" "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l"
+)
 
 _ENCODINGS = (
     "utf-8",
@@ -270,11 +272,12 @@ def load_sessions() -> dict[str, SessionConfig]:
 
 def save_sessions(sessions: dict[str, SessionConfig]) -> None:
     """Save session configs to ``~/.config/telnetlib3/sessions.json``."""
+    from ._paths import _atomic_write  # pylint: disable=import-outside-toplevel
+
     _ensure_dirs()
     data = {key: asdict(cfg) for key, cfg in sessions.items()}
-    with open(SESSIONS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-        f.write("\n")
+    content = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    _atomic_write(str(SESSIONS_FILE), content)
 
 
 _CMD_STR_FLAGS: list[tuple[str, str, object]] = [
@@ -358,7 +361,11 @@ def _relative_time(iso_str: str) -> str:
         return ""
     try:
         then = datetime.datetime.fromisoformat(iso_str)
-        delta = datetime.datetime.now() - then
+        if then.tzinfo is None:
+            now = datetime.datetime.now()
+        else:
+            now = datetime.datetime.now(datetime.timezone.utc)
+        delta = now - then
         seconds = int(delta.total_seconds())
         if seconds < 0:
             return ""
@@ -616,7 +623,7 @@ class SessionListScreen(Screen[None]):
             # Move to bottom-right and print newline so the TUI
             # scrolls cleanly off screen before the client starts.
             _tsize = os.get_terminal_size()
-            sys.stdout.write(cup(_tsize.lines, _tsize.columns) + "\r\n")
+            sys.stdout.write(f"\x1b[{_tsize.lines};{_tsize.columns}H\r\n")
             sys.stdout.flush()
             try:
                 # stderr must NOT be piped -- the child may launch
@@ -640,7 +647,7 @@ class SessionListScreen(Screen[None]):
                 # Reset terminal to known-good state -- the child may
                 # have left raw mode, SGR attributes, mouse tracking,
                 # or alternate screen active.
-                sys.stdout.write(TERMINAL_CLEANUP)
+                sys.stdout.write(_TERMINAL_CLEANUP)
                 sys.stdout.flush()
         self._refresh_table()
 
@@ -1185,13 +1192,11 @@ class _EditListScreen(Screen["bool | None"]):
 
     @property
     @abstractmethod
-    def _prefix(self) -> str:
-        ...
+    def _prefix(self) -> str: ...
 
     @property
     @abstractmethod
-    def _items(self) -> list[Any]:
-        ...
+    def _items(self) -> list[Any]: ...
 
     def __init__(self) -> None:
         super().__init__()
@@ -1344,20 +1349,16 @@ class _EditListScreen(Screen["bool | None"]):
         """Override to handle subclass-specific buttons."""
 
     @abstractmethod
-    def _show_form(self, *args: Any) -> None:
-        ...
+    def _show_form(self, *args: Any) -> None: ...
 
     @abstractmethod
-    def _submit_form(self) -> None:
-        ...
+    def _submit_form(self) -> None: ...
 
     @abstractmethod
-    def _refresh_table(self) -> None:
-        ...
+    def _refresh_table(self) -> None: ...
 
     @abstractmethod
-    def _save_to_file(self) -> None:
-        ...
+    def _save_to_file(self) -> None: ...
 
 
 class MacroEditScreen(_EditListScreen):
@@ -1498,7 +1499,7 @@ class MacroEditScreen(_EditListScreen):
 
         try:
             macros = load_macros(self._path, self._session_key)
-            self._macros = [(" ".join(m.keys), m.text, m.enabled) for m in macros]
+            self._macros = [(m.key, m.text, m.enabled) for m in macros]
         except (ValueError, FileNotFoundError):
             pass
 
@@ -1510,7 +1511,7 @@ class MacroEditScreen(_EditListScreen):
             table.add_row(key, text + status, key=str(i))
 
     def _show_form(  # pylint: disable=arguments-differ
-        self, key_val: str = "", text_val: str = "", enabled: bool = True,
+        self, key_val: str = "", text_val: str = "", enabled: bool = True
     ) -> None:
         self._captured_key = key_val
         self._capturing = False
@@ -1558,7 +1559,7 @@ class MacroEditScreen(_EditListScreen):
 
     @staticmethod
     def _textual_to_pt(key: str) -> str:
-        """Convert a Textual key name to prompt_toolkit format."""
+        """Convert a Textual key name to macro key format."""
         if key.startswith("ctrl+"):
             return "c-" + key[5:]
         return key
@@ -1706,7 +1707,7 @@ class MacroEditScreen(_EditListScreen):
         from .macros import Macro, save_macros  # pylint: disable=import-outside-toplevel
 
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
-        macros = [Macro(keys=tuple(k.split()), text=t, enabled=ena) for k, t, ena in self._macros]
+        macros = [Macro(key=k, text=t, enabled=ena) for k, t, ena in self._macros]
         save_macros(self._path, macros, self._session_key)
 
 
@@ -1721,7 +1722,7 @@ class _AutoreplyTuple(NamedTuple):
     enabled: bool = True
     exclusive_timeout: float = 10.0
     post_command: str = ""
-    when: dict[str, str] = {}
+    when: dict[str, str] | None = None
     immediate: bool = False
 
 
@@ -1892,7 +1893,7 @@ class AutoreplyEditScreen(_EditListScreen):
                     r.enabled,
                     r.exclusive_timeout,
                     r.post_command,
-                    dict(r.when),
+                    dict(r.when) or None,
                     r.immediate,
                 )
                 for r in rules
@@ -1984,7 +1985,7 @@ class AutoreplyEditScreen(_EditListScreen):
         cond_vital = self.query_one("#autoreply-cond-vital", Select).value
         cond_op = self.query_one("#autoreply-cond-op", Select).value
         cond_val = self.query_one("#autoreply-cond-val", Input).value.strip()
-        when: dict[str, str] = {}
+        when: dict[str, str] | None = None
         if cond_vital and isinstance(cond_vital, str) and cond_vital in ("HP%", "MP%"):
             try:
                 int(cond_val or "50")
@@ -2041,7 +2042,7 @@ class AutoreplyEditScreen(_EditListScreen):
                     always=t.always,
                     enabled=t.enabled,
                     exclusive_timeout=t.exclusive_timeout,
-                    when=t.when,
+                    when=t.when or {},
                     immediate=t.immediate,
                 )
             )
@@ -2105,7 +2106,7 @@ class RoomBrowserScreen(Screen["bool | None"]):
         self._fasttravel_file = fasttravel_file
         self._all_rooms: list[tuple[str, str, str, int, bool]] = []
         self._current_area: str = ""
-        self._graph: "RoomGraph | None" = None
+        self._graph: "RoomStore | None" = None
         self._mounted = False
         self._sort_mode: str = "name"
         self._distances: dict[str, int] = {}
@@ -2166,23 +2167,23 @@ class RoomBrowserScreen(Screen["bool | None"]):
                 break
 
     def _load_rooms(self) -> None:
-        """Load room data from JSON file."""
-        if not os.path.exists(self._rooms_path):
-            return
+        """Load room data from SQLite database."""
         from telnetlib3.rooms import (  # pylint: disable=import-outside-toplevel
-            load_rooms,
+            RoomStore,
             read_current_room,
         )
 
-        graph = load_rooms(self._rooms_path)
+        graph = RoomStore(self._rooms_path, read_only=True)
         self._graph = graph
+        all_rooms = graph.rooms
         self._all_rooms = [
-            (r.num, r.name, r.area, len(r.exits), r.bookmarked) for r in graph.rooms.values()
+            (r.num, r.name, r.area, len(r.exits), r.bookmarked)
+            for r in all_rooms.values()
         ]
         if self._current_room_file:
             current = read_current_room(self._current_room_file)
-            if current and current in graph.rooms:
-                self._current_area = graph.rooms[current].area
+            if current and current in all_rooms:
+                self._current_area = all_rooms[current].area
 
     def _populate_area_dropdown(self) -> None:
         """Populate the area dropdown from loaded rooms."""
@@ -2404,14 +2405,11 @@ class RoomBrowserScreen(Screen["bool | None"]):
         if num is None:
             return
 
-        from telnetlib3.rooms import (  # pylint: disable=import-outside-toplevel
-            load_rooms,
-            save_rooms,
-        )
+        from telnetlib3.rooms import RoomStore  # pylint: disable=import-outside-toplevel
 
-        graph = load_rooms(self._rooms_path)
-        graph.toggle_bookmark(num)
-        save_rooms(self._rooms_path, graph)
+        store = RoomStore(self._rooms_path)
+        store.toggle_bookmark(num)
+        store.close()
 
         for i, (rnum, name, area, exits, bm) in enumerate(self._all_rooms):
             if rnum == num:
@@ -2430,7 +2428,7 @@ class RoomBrowserScreen(Screen["bool | None"]):
             return
 
         from telnetlib3.rooms import (  # pylint: disable=import-outside-toplevel
-            load_rooms,
+            RoomStore,
             write_fasttravel,
             read_current_room,
         )
@@ -2446,8 +2444,9 @@ class RoomBrowserScreen(Screen["bool | None"]):
             count.update("Already in this room")
             return
 
-        graph = load_rooms(self._rooms_path)
+        graph = RoomStore(self._rooms_path, read_only=True)
         path = graph.find_path_with_rooms(current, dst_num)
+        graph.close()
         if path is None:
             dst_name = ""
             for rnum, name, *_ in self._all_rooms:
@@ -2539,22 +2538,6 @@ class _EditorApp(App[None]):
         self.push_screen(self._editor_screen, callback=lambda _: self.exit())
 
 
-_faulthandler_file: Any = None  # pylint: disable=invalid-name
-
-
-def _enable_faulthandler() -> None:
-    """Enable faulthandler with SIGUSR1 for non-fatal traceback dumps."""
-    global _faulthandler_file  # noqa: PLW0603  # pylint: disable=global-statement
-    import signal  # pylint: disable=import-outside-toplevel
-    import faulthandler  # pylint: disable=import-outside-toplevel
-
-    if _faulthandler_file is None:
-        _faulthandler_file = open(  # noqa: SIM115  # pylint: disable=consider-using-with
-            "/tmp/textual-faulthandler.log", "a", encoding="utf-8"
-        )
-    faulthandler.enable(file=_faulthandler_file)
-    faulthandler.register(signal.SIGUSR1, file=_faulthandler_file, all_threads=True)
-
 
 def _patch_writer_thread_queue() -> None:
     """
@@ -2580,7 +2563,7 @@ def _restore_blocking_fds() -> None:
     Restore blocking mode on stdin/stdout/stderr.
 
     The parent process may set ``O_NONBLOCK`` on the shared PTY file
-    description (via asyncio ``connect_read_pipe`` or prompt_toolkit).
+    description (via asyncio ``connect_read_pipe``).
     Since stdin, stdout, and stderr all reference the same kernel file
     description, the child subprocess inherits non-blocking mode.
     Textual's ``WriterThread`` does not handle ``BlockingIOError``,
@@ -2601,7 +2584,6 @@ def edit_macros_main(
 ) -> None:
     """Launch standalone macro editor TUI."""
     _restore_blocking_fds()
-    _enable_faulthandler()
     _patch_writer_thread_queue()
     app = _EditorApp(
         MacroEditScreen(
@@ -2617,7 +2599,6 @@ def edit_macros_main(
 def edit_autoreplies_main(path: str, session_key: str = "", select_pattern: str = "") -> None:
     """Launch standalone autoreply editor TUI."""
     _restore_blocking_fds()
-    _enable_faulthandler()
     _patch_writer_thread_queue()
     app = _EditorApp(
         AutoreplyEditScreen(path=path, session_key=session_key, select_pattern=select_pattern)
@@ -2630,7 +2611,6 @@ def edit_rooms_main(
 ) -> None:
     """Launch standalone room browser TUI."""
     _restore_blocking_fds()
-    _enable_faulthandler()
     _patch_writer_thread_queue()
     app = _EditorApp(
         RoomBrowserScreen(
@@ -2646,9 +2626,7 @@ def edit_rooms_main(
 class _ConfirmDialogScreen(Screen[bool]):
     """Confirmation dialog with optional warning and 'don't ask again' checkbox."""
 
-    BINDINGS = [
-        Binding("escape", "cancel", "Cancel", show=False),
-    ]
+    BINDINGS = [Binding("escape", "cancel", "Cancel", show=False)]
 
     DEFAULT_CSS = """
     _ConfirmDialogScreen {
@@ -2693,13 +2671,7 @@ class _ConfirmDialogScreen(Screen[bool]):
     }
     """
 
-    def __init__(
-        self,
-        title: str,
-        body: str,
-        warning: str = "",
-        result_file: str = "",
-    ) -> None:
+    def __init__(self, title: str, body: str, warning: str = "", result_file: str = "") -> None:
         """Initialize confirm dialog with title, body, and optional warning."""
         super().__init__()
         self._title = title
@@ -2749,19 +2721,11 @@ class _ConfirmDialogScreen(Screen[bool]):
             f.write(result)
 
 
-def confirm_dialog_main(
-    title: str,
-    body: str,
-    warning: str = "",
-    result_file: str = "",
-) -> None:
+def confirm_dialog_main(title: str, body: str, warning: str = "", result_file: str = "") -> None:
     """Launch standalone confirm dialog TUI."""
     _restore_blocking_fds()
-    _enable_faulthandler()
     _patch_writer_thread_queue()
-    screen = _ConfirmDialogScreen(
-        title=title, body=body, warning=warning, result_file=result_file,
-    )
+    screen = _ConfirmDialogScreen(title=title, body=body, warning=warning, result_file=result_file)
     app = _EditorApp(screen)
     app.run()
 

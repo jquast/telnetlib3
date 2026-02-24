@@ -4,23 +4,23 @@ ANSI color palette translation for telnet client output.
 Most modern terminals use custom palette colors for ANSI colors 0-15 (e.g.
 Solarized, Dracula, Gruvbox themes).  When connecting to MUDs and BBS systems,
 the artwork and text colors were designed for specific hardware palettes such as
-IBM EGA/VGA or Commodore 64.  The terminal's custom palette distorts the intended
+IBM VGA or Commodore 64.  The terminal's custom palette distorts the intended
 colors, often ruining ANSI artwork.
 
 By translating basic 16-color SGR codes into their exact 24-bit RGB equivalents
 from named hardware palettes, we bypass the terminal's palette entirely and
 display the colors the artist intended.
 
-This feature is enabled by default using the EGA palette.  Use
+This feature is enabled by default using the VGA palette.  Use
 ``--colormatch=none`` on the ``telnetlib3-client`` command line to disable it.
 
 Example usage::
 
-    # Default EGA palette with brightness/contrast adjustment
+    # Default VGA palette with brightness/contrast adjustment
     telnetlib3-client mud.example.com 4000
 
-    # Use VGA palette instead
-    telnetlib3-client --colormatch=vga mud.example.com
+    # Use xterm palette instead
+    telnetlib3-client --colormatch=xterm mud.example.com
 
     # Disable color translation entirely
     telnetlib3-client --colormatch=none mud.example.com
@@ -47,9 +47,9 @@ PaletteRGB = tuple[tuple[int, int, int], ...]
 
 # Hardware color palettes.  Each defines exact RGB values for ANSI colors 0-15.
 PALETTES: Dict[str, PaletteRGB] = {
-    # IBM Enhanced Graphics Adapter -- the classic DOS palette used by most
+    # IBM VGA text-mode palette -- the classic DOS palette used by most
     # BBS and MUD ANSI artwork.
-    "ega": (
+    "vga": (
         (0, 0, 0),
         (170, 0, 0),
         (0, 170, 0),
@@ -109,9 +109,6 @@ PALETTES: Dict[str, PaletteRGB] = {
     ),
 }
 
-# CGA and VGA text mode share the same palette as EGA.
-PALETTES["cga"] = PALETTES["ega"]
-PALETTES["vga"] = PALETTES["ega"]
 
 # Detect potentially incomplete escape sequence at end of a chunk.
 _TRAILING_ESC = re.compile(r"\x1b(\[[\d;:]*)?$")
@@ -129,7 +126,7 @@ class ColorConfig(NamedTuple):
         (iCE colors), promoting background 40-47 to palette 8-15.
     """
 
-    palette_name: str = "ega"
+    palette_name: str = "vga"
     brightness: float = 1.0
     contrast: float = 1.0
     background_color: Tuple[int, int, int] = (0, 0, 0)

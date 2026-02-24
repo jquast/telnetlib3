@@ -9,6 +9,7 @@ with delay/chaining support.
 from __future__ import annotations
 
 # std imports
+import os
 import re
 import json
 import time
@@ -83,7 +84,7 @@ def _compare(value: int, op: str, threshold: int) -> bool:
         return value <= threshold
     if op == "=":
         return value == threshold
-    return True
+    raise ValueError(f"unknown operator: {op!r}")
 
 
 def check_condition(
@@ -239,9 +240,10 @@ def save_autoreplies(path: str, rules: list[AutoreplyRule], session_key: str) ->
             for r in rules
         ]
     }
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, indent=2, ensure_ascii=False)
-        fh.write("\n")
+    from ._paths import _atomic_write  # pylint: disable=import-outside-toplevel
+
+    content = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    _atomic_write(path, content)
 
 
 def _substitute_groups(template: str, match: re.Match[str]) -> str:
@@ -262,23 +264,6 @@ def _substitute_groups(template: str, match: re.Match[str]) -> str:
         return val if val is not None else ""
 
     return _GROUP_RE.sub(_repl, template)
-
-
-def _parse_delay(token: str) -> float:
-    """
-    Parse a delay value string into seconds.
-
-    :param token: Numeric string portion of a delay token.
-    :returns: Delay in seconds.
-    """
-    m = _DELAY_RE.match(token)
-    if m is None:
-        return 0.0
-    value = float(m.group(1))
-    unit = m.group(2)
-    if unit == "ms":
-        value /= 1000.0
-    return value
 
 
 class SearchBuffer:
@@ -459,6 +444,9 @@ class AutoreplyEngine:
         self._exclusive_deadline: float = 0.0
         self._post_command: str = ""
         self._sent_commands: set[str] = set()
+        self._sent_commands_max: int = int(
+            os.environ.get("TELNETLIB3_SENT_COMMANDS_MAX", "10000")
+        )
         self._prompt_based = False
         self._cycle_matched: set[int] = set()
         self._condition_blocked: set[int] = set()
@@ -469,12 +457,12 @@ class AutoreplyEngine:
         self._condition_failed: Optional[tuple[int, str]] = None
         self._exclusive_prompt_count: int = 0
 
-    @property
-    def condition_failed(self) -> Optional[tuple[int, str]]:
+    def pop_condition_failed(self) -> Optional[tuple[int, str]]:
         """
-        ``(rule_index_1based, description)`` if last match failed a condition.
+        Return and clear the last condition failure.
 
-        Reading this property clears the value.
+        :returns: ``(rule_index_1based, description)`` if last match failed
+            a condition, otherwise ``None``.
         """
         val = self._condition_failed
         self._condition_failed = None
@@ -623,9 +611,7 @@ class AutoreplyEngine:
                     self._last_matched_pattern = rule.pattern.pattern
                     if rule.exclusive and self._suppress_exclusive:
                         self._cycle_matched.add(rule_idx)
-                        self._buffer.advance_match(
-                            match.start(), len(match.group(0))
-                        )
+                        self._buffer.advance_match(match.start(), len(match.group(0)))
                         found = True
                         break
                     if rule.when:
@@ -641,9 +627,7 @@ class AutoreplyEngine:
                             found = True
                             break
                     self._cycle_matched.add(rule_idx)
-                    self._buffer.advance_match(
-                        match.start(), len(match.group(0))
-                    )
+                    self._buffer.advance_match(match.start(), len(match.group(0)))
                     reply = _substitute_groups(rule.reply, match)
                     if not reply.rstrip().endswith(";"):
                         reply = reply.rstrip() + ";"
@@ -712,8 +696,7 @@ class AutoreplyEngine:
                         ok, desc = check_condition(rule.when, self._writer)
                         if not ok:
                             self._log.info(
-                                "autoreply: immediate rule #%d skipped,"
-                                " condition failed: %s",
+                                "autoreply: immediate rule #%d skipped," " condition failed: %s",
                                 rule_idx + 1,
                                 desc,
                             )
@@ -722,9 +705,7 @@ class AutoreplyEngine:
                             found = True
                             break
                     self._cycle_matched.add(rule_idx)
-                    self._buffer.advance_match(
-                        match.start(), len(match.group(0))
-                    )
+                    self._buffer.advance_match(match.start(), len(match.group(0)))
                     reply = _substitute_groups(rule.reply, match)
                     if not reply.rstrip().endswith(";"):
                         reply = reply.rstrip() + ";"
@@ -769,20 +750,17 @@ class AutoreplyEngine:
         """
         Execute a single reply: split on ``;``, expand repeats, handle delays, send.
 
-        Delay segments: ```delay Ns``` or ```delay Nms``` (e.g. ```delay 2s```, ```delay 500ms```).
-        Command segments support repeat prefixes (e.g. ``3e`` -> ``e;e;e``).
-
-        If the reply ends with ``;``, all commands are sent immediately.
-        Otherwise the final command is inserted into the prompt for review.
+        Delay segments: ```delay Ns``` or ```delay Nms``` (e.g. ```delay 2s```,
+        ```delay 500ms```).  Command segments support repeat prefixes
+        (e.g. ``3e`` -> ``e;e;e``).
 
         :param reply_text: Fully substituted reply string.
         """
         from .client_repl import expand_commands  # pylint: disable=import-outside-toplevel
 
-        send_all = True
         cmds = expand_commands(reply_text)
         sent_count = 0
-        for j, cmd in enumerate(cmds):
+        for cmd in cmds:
             dm = _DELAY_RE.match(cmd)
             if dm:
                 value = float(dm.group(1))
@@ -792,18 +770,13 @@ class AutoreplyEngine:
                     await asyncio.sleep(delay)
                 continue
 
-            is_last = j == len(cmds) - 1
-            if is_last and not send_all and self._insert_fn is not None:
-                self._log.info("autoreply: inserting %r into prompt", cmd)
-                self._insert_fn(cmd)
-            else:
-                # Skip wait_fn for the first command -- the match was
-                # triggered by output that ended with a GA/EOR prompt
-                # signal, so the server is already ready for input.
-                if sent_count > 0 and self._wait_fn is not None:
-                    await self._wait_fn()
-                self._send_command(cmd)
-                sent_count += 1
+            # Skip wait_fn for the first command -- the match was
+            # triggered by output that ended with a GA/EOR prompt
+            # signal, so the server is already ready for input.
+            if sent_count > 0 and self._wait_fn is not None:
+                await self._wait_fn()
+            self._send_command(cmd)
+            sent_count += 1
 
     def _send_command(self, cmd: str) -> None:
         """
@@ -815,6 +788,8 @@ class AutoreplyEngine:
             return
         self._log.info("autoreply: sending %r", cmd)
         self._sent_commands.add(cmd.strip())
+        if len(self._sent_commands) > self._sent_commands_max:
+            self._sent_commands.clear()
         if self._echo_fn is not None:
             self._echo_fn(cmd)
         self._writer.write(cmd + "\r\n")  # type: ignore[arg-type]

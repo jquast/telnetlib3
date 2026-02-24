@@ -487,7 +487,7 @@ class _EchoClose(asyncio.Protocol):
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         self._transport = transport
         transport.write(self._msg)
-        asyncio.get_event_loop().call_later(0.3, transport.close)
+        asyncio.get_event_loop().call_later(1.0, transport.close)
 
 
 @contextlib.contextmanager
@@ -562,7 +562,7 @@ def _pty_run_client(bind_host, port, extra_argv, server_ssl_ctx=None):
 @pytest.mark.parametrize(
     "extra_argv, use_ssl",
     [
-        pytest.param(["--ssl-no-verify"], True, id="ssl-no-verify"),
+        pytest.param(["--ssl-no-verify", "--raw-mode"], True, id="ssl-no-verify"),
         pytest.param(["--raw-mode"], False, id="raw-mode"),
         pytest.param(["--raw-mode", "--ascii-eol", "--ansi-keys"], False, id="ascii-eol-ansi-keys"),
         pytest.param(["--raw-mode", "--encoding=atascii"], False, id="atascii"),

@@ -4,12 +4,23 @@
 
 # std imports
 import sys
+import logging
 import asyncio
+import threading
 import collections
 from typing import Any, Dict, Tuple, Union, Callable, Optional
 
 # local
 from . import accessories
+
+log = logging.getLogger(__name__)
+
+try:
+    import blessed as _blessed_mod  # noqa: F401
+
+    _blessed_available = True
+except ImportError:
+    _blessed_available = False
 from .accessories import TRACE
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
@@ -196,43 +207,19 @@ else:
             self._save_mode: Optional[Terminal.ModeDef] = None
             self.software_echo = False
             self._remove_winch = False
-            self._winch_handle: Optional[asyncio.TimerHandle] = None
+            self._resize_pending = threading.Event()
             self.on_resize: Optional[Callable[[int, int], None]] = None
             self._stdin_transport: Optional[asyncio.BaseTransport] = None
 
         def setup_winch(self) -> None:
-            """Register SIGWINCH handler to send NAWS on terminal resize."""
+            """Register SIGWINCH handler to set ``_resize_pending`` flag."""
             if not self._istty or not hasattr(signal, "SIGWINCH"):
                 return
             try:
                 loop = asyncio.get_event_loop()
-                writer = self.telnet_writer
-
-                def _handle_resize() -> None:
-                    from .telopt import NAWS  # pylint: disable=import-outside-toplevel
-
-                    # pylint: disable-next=import-outside-toplevel,cyclic-import
-                    from .client_repl import _get_terminal_size
-
-                    try:
-                        if self.on_resize is not None:
-                            rows, cols = _get_terminal_size()
-                            self.on_resize(rows, cols)
-                    except Exception:  # pylint: disable=broad-exception-caught
-                        pass
-                    try:
-                        if writer.local_option.enabled(NAWS) and not writer.is_closing():
-                            writer._send_naws()  # pylint: disable=protected-access
-                    except Exception:  # pylint: disable=broad-exception-caught
-                        pass
 
                 def _on_winch() -> None:
-                    if self._winch_handle is not None and not self._winch_handle.cancelled():
-                        try:
-                            self._winch_handle.cancel()
-                        except Exception:  # pylint: disable=broad-exception-caught
-                            pass
-                    self._winch_handle = loop.call_later(0.05, _handle_resize)
+                    self._resize_pending.set()
 
                 loop.add_signal_handler(signal.SIGWINCH, _on_winch)
                 self._remove_winch = True
@@ -240,19 +227,13 @@ else:
                 self._remove_winch = False
 
         def cleanup_winch(self) -> None:
-            """Remove SIGWINCH handler and cancel pending timer."""
+            """Remove SIGWINCH handler."""
             if self._istty and self._remove_winch:
                 try:
                     asyncio.get_event_loop().remove_signal_handler(signal.SIGWINCH)
                 except Exception:  # pylint: disable=broad-exception-caught
                     pass
                 self._remove_winch = False
-            if self._winch_handle is not None:
-                try:
-                    self._winch_handle.cancel()
-                except Exception:  # pylint: disable=broad-exception-caught
-                    pass
-                self._winch_handle = None
 
         def __enter__(self) -> "Terminal":
             self._save_mode = self.get_mode()
@@ -265,9 +246,7 @@ else:
             self.cleanup_winch()
             if self._istty:
                 assert self._save_mode is not None
-                termios.tcsetattr(
-                    self._fileno, termios.TCSAFLUSH, list(self._save_mode)
-                )
+                termios.tcsetattr(self._fileno, termios.TCSAFLUSH, list(self._save_mode))
 
         def get_mode(self) -> Optional["Terminal.ModeDef"]:
             """Return current terminal mode if attached to a tty, otherwise None."""
@@ -420,7 +399,7 @@ else:
 
             This does **not** connect stdin -- call :meth:`connect_stdin`
             separately when an asyncio stdin reader is needed (the REPL
-            manages its own stdin via prompt_toolkit).
+            manages its own stdin via blessed async_inkey).
             """
             write_fobj = sys.stdout
             if self._istty:
@@ -435,8 +414,8 @@ else:
             """
             Connect sys.stdin to an asyncio StreamReader.
 
-            Must be called **after** any prompt_toolkit session has finished, because prompt_toolkit
-            and asyncio cannot both own the stdin file descriptor at the same time.
+            Must be called **after** any REPL session has finished, because the REPL and asyncio
+            cannot both own the stdin file descriptor at the same time.
             """
             reader = asyncio.StreamReader()
             reader_protocol = asyncio.StreamReaderProtocol(reader)
@@ -447,7 +426,7 @@ else:
             return reader
 
         def disconnect_stdin(self, reader: asyncio.StreamReader) -> None:
-            """Disconnect stdin pipe so prompt_toolkit can reclaim it."""
+            """Disconnect stdin pipe so the REPL can reclaim it."""
             transport = getattr(self, "_stdin_transport", None)
             if transport is not None:
                 transport.close()
@@ -542,7 +521,7 @@ else:
     async def _raw_event_loop(
         telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
         telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
-        term: "Terminal",
+        tty_shell: "Terminal",
         stdin: asyncio.StreamReader,
         stdout: asyncio.StreamWriter,
         keyboard_escape: str,
@@ -643,7 +622,7 @@ else:
                 if _ar_engine is not None:
                     _ar_engine.feed(out)
                 if raw_mode is None:
-                    mode_result = term.check_auto_mode(switched_to_raw, last_will_echo)
+                    mode_result = tty_shell.check_auto_mode(switched_to_raw, last_will_echo)
                     if mode_result is not None:
                         if not switched_to_raw:
                             linesep = "\r\n"
@@ -684,33 +663,17 @@ else:
         """
         keyboard_escape = "\x1d"
 
-        with Terminal(telnet_writer=telnet_writer) as term:
+        with Terminal(telnet_writer=telnet_writer) as tty_shell:
             linesep = "\n"
             switched_to_raw = False
             last_will_echo = False
-            local_echo = term.software_echo
-            if term._istty:  # pylint: disable=protected-access
+            local_echo = tty_shell.software_echo
+            if tty_shell._istty:  # pylint: disable=protected-access
                 raw_mode = _get_raw_mode(telnet_writer)
                 if telnet_writer.will_echo or raw_mode is True:
                     linesep = "\r\n"
-            stdout = await term.make_stdout()
-            _banner_sep = "\r\n" if term._istty else linesep  # pylint: disable=protected-access
-            _n_macros = len(getattr(telnet_writer, "_macro_defs", []) or [])
-            _n_autoreplies = len(getattr(telnet_writer, "_autoreply_rules", []) or [])
-            if _n_macros:
-                _mf = getattr(telnet_writer, "_macros_file", "")
-                stdout.write(f"{_n_macros} macros loaded from {_mf}.{_banner_sep}".encode())
-            if _n_autoreplies:
-                _af = getattr(telnet_writer, "_autoreplies_file", "")
-                stdout.write(
-                    f"{_n_autoreplies} autoreplies loaded from {_af}.{_banner_sep}".encode()
-                )
-            escape_name = accessories.name_unicode(keyboard_escape)
-            stdout.write(
-                f"Escape character is '{escape_name}'"
-                f" - Press F1 for help!{_banner_sep}".encode()
-            )
-            term.setup_winch()
+            stdout = await tty_shell.make_stdout()
+            tty_shell.setup_winch()
 
             # EOR/GA-based command pacing for raw-mode autoreplies.
             _prompt_ready_raw = asyncio.Event()
@@ -745,16 +708,46 @@ else:
 
             repl_enabled = getattr(telnet_writer, "_repl_enabled", False)
             raw_mode_val = _get_raw_mode(telnet_writer)
+            if repl_enabled and not _blessed_available:
+                log.info(
+                    "blessed not installed; REPL disabled. "
+                    "Install with: pip install telnetlib3[with_tui]"
+                )
             _can_repl = (
-                repl_enabled
+                _blessed_available
+                and repl_enabled
                 and raw_mode_val is not True
-                and term._istty  # pylint: disable=protected-access
+                and tty_shell._istty  # pylint: disable=protected-access
             )
+
+            # Build connection banner lines.
+            _banner_lines: list[str] = []
+            _n_macros = len(getattr(telnet_writer, "_macro_defs", []) or [])
+            _n_autoreplies = len(getattr(telnet_writer, "_autoreply_rules", []) or [])
+            if _n_macros:
+                _mf = getattr(telnet_writer, "_macros_file", "")
+                _banner_lines.append(f"{_n_macros} macros loaded from {_mf}.")
+            if _n_autoreplies:
+                _af = getattr(telnet_writer, "_autoreplies_file", "")
+                _banner_lines.append(f"{_n_autoreplies} autoreplies loaded from {_af}.")
+            escape_name = accessories.name_unicode(keyboard_escape)
+            _banner_lines.append(
+                f"Escape character is '{escape_name}' - Press F1 for help!"
+            )
+
+            # In non-REPL mode, emit banner now; in REPL mode, pass it
+            # through so it displays after the scroll region is active.
+            if not _can_repl:
+                # pylint: disable-next=protected-access
+                _banner_sep = "\r\n" if tty_shell._istty else linesep
+                for _bl in _banner_lines:
+                    stdout.write(f"{_bl}{_banner_sep}".encode())
+                _banner_lines = []
 
             def _handle_close(msg: str) -> None:
                 _flush_color_filter(telnet_writer, stdout)
                 stdout.write(f"\033[m{linesep}{msg}{linesep}".encode())
-                term.cleanup_winch()
+                tty_shell.cleanup_winch()
 
             def _want_repl() -> bool:
                 return _can_repl and telnet_writer.mode == "local"
@@ -768,35 +761,39 @@ else:
                     history_file = getattr(telnet_writer, "_history_file", None)
                     telnet_writer.log.debug("entering REPL (line mode)")
                     mode_switched = await repl_event_loop(
-                        telnet_reader, telnet_writer, term, stdout, history_file=history_file
+                        telnet_reader, telnet_writer, tty_shell, stdout,
+                        history_file=history_file,
+                        banner_lines=_banner_lines,
                     )
+                    _banner_lines = []
                     if not mode_switched:
                         return
                     telnet_writer.log.debug("REPL deactivated, switching to standard event loop")
                     continue
 
                 # Standard event loop (byte-at-a-time).
-                # After REPL exit, prompt_toolkit restores cooked mode.
+                # After REPL exit, restore cooked mode.
                 # Set raw mode so ctrl+] and single-byte input works.
                 if (
                     not switched_to_raw
-                    and term._istty  # pylint: disable=protected-access
-                    and term._save_mode is not None  # pylint: disable=protected-access
+                    and tty_shell._istty  # pylint: disable=protected-access
+                    and tty_shell._save_mode is not None  # pylint: disable=protected-access
                 ):
-                    term.set_mode(
-                        term._make_raw(  # pylint: disable=protected-access
-                            term._save_mode, suppress_echo=True  # pylint: disable=protected-access
+                    # pylint: disable-next=protected-access
+                    tty_shell.set_mode(
+                        tty_shell._make_raw(
+                            tty_shell._save_mode, suppress_echo=True
                         )
                     )
                     switched_to_raw = True
                     local_echo = not telnet_writer.will_echo
                     linesep = "\r\n"
-                stdin = await term.connect_stdin()
+                stdin = await tty_shell.connect_stdin()
                 _reactivate_repl, switched_to_raw, last_will_echo, local_echo, linesep = (
                     await _raw_event_loop(
                         telnet_reader,
                         telnet_writer,
-                        term,
+                        tty_shell,
                         stdin,
                         stdout,
                         keyboard_escape,
@@ -808,7 +805,7 @@ else:
                         _want_repl,
                     )
                 )
-                term.disconnect_stdin(stdin)
+                tty_shell.disconnect_stdin(stdin)
                 if _reactivate_repl:
                     continue
                 break

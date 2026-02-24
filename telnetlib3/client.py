@@ -133,6 +133,11 @@ class TelnetClient(client_base.BaseClient):
             self.writer.set_ext_send_callback(opt, func)
 
         # Override the default handle_will method to detect when both sides support CHARSET
+        # Store the original only on first connection to prevent chain growth on reconnect.
+        if not hasattr(self.writer, '_original_handle_will'):
+            self.writer._original_handle_will = self.writer.handle_will  # type: ignore[attr-defined]
+        else:
+            self.writer.handle_will = self.writer._original_handle_will  # type: ignore[attr-defined]
         original_handle_will = self.writer.handle_will
         writer = self.writer
 
@@ -160,6 +165,9 @@ class TelnetClient(client_base.BaseClient):
         # pylint: disable-next=protected-access
         self.writer._gmcp_data = self._gmcp_data
 
+        # Capture current handle_will (already includes CHARSET wrapper).
+        # On reconnect, _original_handle_will was already restored in connection_made,
+        # so this always wraps exactly once.
         original_handle_will_gmcp = self.writer.handle_will
 
         def _detect_gmcp_will(opt: bytes) -> None:
@@ -198,7 +206,7 @@ class TelnetClient(client_base.BaseClient):
         room_graph = getattr(self.writer, "_room_graph", None)
         if room_graph is None:
             return
-        from .rooms import save_rooms, write_current_room  # pylint: disable=import-outside-toplevel
+        from .rooms import write_current_room  # pylint: disable=import-outside-toplevel
 
         room_graph.update_room(data)
         # pylint: disable-next=protected-access
@@ -206,9 +214,6 @@ class TelnetClient(client_base.BaseClient):
         room_changed = getattr(self.writer, "_room_changed", None)
         if room_changed is not None:
             room_changed.set()
-        rooms_file = getattr(self.writer, "_rooms_file", None)
-        if rooms_file:
-            save_rooms(rooms_file, room_graph)
         current_room_file = getattr(self.writer, "_current_room_file", None)
         if current_room_file:
             write_current_room(current_room_file, str(data["num"]))
@@ -650,10 +655,9 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             orig_connection_made(transport)
             if always_will:
                 client.writer.always_will = always_will
+            client.writer.always_do = always_do
             from .telopt import GMCP as _GMCP  # pylint: disable=import-outside-toplevel
-
-            _do = always_do | {_GMCP}
-            client.writer.always_do = _do
+            client.writer.passive_do = {_GMCP}
             client.writer._encoding_explicit = encoding_explicit  # pylint: disable=protected-access
 
         client.connection_made = _patched_connection_made  # type: ignore[method-assign]
@@ -793,18 +797,15 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
 
     # Room graph for GMCP Room.Info automapper
     # pylint: disable=import-outside-toplevel
-    from .rooms import RoomGraph, load_rooms
+    from .rooms import RoomStore
     from .rooms import rooms_path as _rooms_path_fn
     from .rooms import current_room_path as _current_room_path_fn
+
     # pylint: enable=import-outside-toplevel
 
     _rooms_path = _rooms_path_fn(_session_key)
     _current_room_file = _current_room_path_fn(_session_key)
-    _room_graph: RoomGraph
-    if os.path.exists(_rooms_path):
-        _room_graph = load_rooms(_rooms_path)
-    else:
-        _room_graph = RoomGraph()
+    _room_graph = RoomStore(_rooms_path)
 
     _inner_session = shell_callback
 
@@ -935,7 +936,7 @@ def _get_argument_parser() -> argparse.ArgumentParser:
             "translate basic 16-color ANSI codes to exact 24-bit RGB values"
             " from a named hardware palette, bypassing the terminal's custom"
             " palette to preserve intended MUD/BBS artwork colors"
-            " (ega, cga, vga, xterm, none)"
+            " (vga, xterm, none)"
         ),
     )
     parser.add_argument(
@@ -1017,7 +1018,7 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         "--no-repl",
         action="store_true",
         default=False,
-        help="disable prompt_toolkit REPL input line in linemode "
+        help="disable linemode REPL input line in linemode "
         "(use standard line-buffered input instead)",
     )
     parser.add_argument(
@@ -1060,10 +1061,18 @@ def _parse_background_color(value: str) -> Tuple[int, int, int]:
     return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
 
-def _resolve_history_file(value: Optional[str]) -> Optional[str]:
-    """Resolve ``--history-file`` to an absolute path or ``None``."""
+def _resolve_history_file(value: Optional[str], session_key: str = "") -> Optional[str]:
+    """Resolve ``--history-file`` to an absolute path or ``None``.
+
+    :param value: Explicit path from CLI args, or ``None`` for auto.
+    :param session_key: Session identifier (``host:port``) for per-session default.
+    """
     if value is not None:
         return str(value) if value else None
+    if session_key:
+        from ._paths import history_path  # pylint: disable=import-outside-toplevel
+
+        return history_path(session_key)
     from ._paths import HISTORY_FILE  # pylint: disable=import-outside-toplevel
 
     return HISTORY_FILE
@@ -1126,7 +1135,9 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "ansi_keys": args.ansi_keys,
         "ssl": ssl_ctx,
         "no_repl": args.no_repl,
-        "history_file": _resolve_history_file(args.history_file),
+        "history_file": _resolve_history_file(
+            args.history_file, f"{args.host}:{args.port}"
+        ),
         "gmcp_modules": (
             [m.strip() for m in args.gmcp_modules.split(",") if m.strip()]
             if args.gmcp_modules

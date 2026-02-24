@@ -235,6 +235,10 @@ class TelnetWriter:
         #: DONT rejection in :meth:`handle_will`.
         self.always_do: set[bytes] = set()
 
+        #: Set of option byte(s) for which the client sends DO only
+        #: in response to a server WILL (passive negotiation).
+        self.passive_do: set[bytes] = set()
+
         #: Whether the encoding was explicitly set (not just the default
         #: ``"ascii"``).  Used by fingerprinting and client connection logic
         #: to decide whether to negotiate CHARSET.
@@ -1893,7 +1897,7 @@ class TelnetWriter:
                 return
             # Client declines MUD protocols unless explicitly opted in.
             if self.client and opt in _MUD_PROTOCOL_OPTIONS:
-                if opt in self.always_do:
+                if opt in self.always_do or opt in self.passive_do:
                     if not self.remote_option.enabled(opt):
                         self.iac(DO, opt)
                         self.remote_option[opt] = True

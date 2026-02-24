@@ -2,8 +2,6 @@
 
 # std imports
 import sys
-import types
-import logging
 from unittest import mock
 
 # 3rd party
@@ -90,7 +88,9 @@ async def test_gmcp_data_on_writer():
 @pytest.mark.asyncio
 async def test_ext_callback_registered_for_gmcp():
     client, _ = _make_connected_client()
-    assert client.writer._ext_callback[GMCP] == client._on_gmcp  # pylint: disable=comparison-with-callable
+    assert (
+        client.writer._ext_callback[GMCP] == client._on_gmcp
+    )  # pylint: disable=comparison-with-callable
 
 
 @pytest.mark.asyncio
@@ -245,71 +245,26 @@ def test_transform_args_gmcp_modules_none():
 
 
 if sys.platform != "win32":
-    from telnetlib3.client_repl import HAS_PROMPT_TOOLKIT
+    from telnetlib3.client_repl import _vital_bar
 
-    if HAS_PROMPT_TOOLKIT:
-        from telnetlib3.client_repl import PromptToolkitRepl
+    def test_vital_bar_shows_vitals():
+        bars = _vital_bar(100, 200, 16, "hp")
+        text = "".join(t for _, t in bars)
+        assert "100/200 50%" in text
 
-        def _mock_writer(gmcp_data=None):
-            return types.SimpleNamespace(
-                will_echo=False,
-                log=types.SimpleNamespace(debug=lambda *a, **kw: None),
-                get_extra_info=lambda name, default=None: default,
-                _gmcp_data=gmcp_data,
-            )
+    def test_vital_bar_hp_only():
+        bars = _vital_bar(50, None, 16, "hp")
+        text = "".join(t for _, t in bars)
+        assert "50" in text
+        assert "HP" in text
 
-        def _toolbar_text(repl):
-            """Join toolbar formatted text tuples into a single string."""
-            result = repl._get_toolbar()
-            if result is None:
-                return ""
-            return "".join(t for _, t in result)
+    def test_vital_bar_full():
+        bars = _vital_bar(100, 100, 16, "hp")
+        text = "".join(t for _, t in bars)
+        assert "100/100 100%" in text
 
-        def test_toolbar_static_when_no_gmcp():
-            w = _mock_writer()
-            repl = PromptToolkitRepl(w, logging.getLogger("test"))
-            text = _toolbar_text(repl)
-            assert isinstance(text, str)
-
-        def test_toolbar_static_when_empty_gmcp():
-            w = _mock_writer(gmcp_data={})
-            repl = PromptToolkitRepl(w, logging.getLogger("test"))
-            text = _toolbar_text(repl)
-            assert isinstance(text, str)
-
-        def test_toolbar_shows_vitals():
-            gmcp = {"Char.Vitals": {"hp": 100, "maxhp": 200, "mp": 50}}
-            w = _mock_writer(gmcp_data=gmcp)
-            repl = PromptToolkitRepl(w, logging.getLogger("test"))
-            text = _toolbar_text(repl)
-            assert "100/200 50%" in text
-            assert "50" in text
-
-        def test_toolbar_shows_room_info():
-            gmcp = {"Room.Info": {"name": "Castle Entrance"}}
-            w = _mock_writer(gmcp_data=gmcp)
-            repl = PromptToolkitRepl(w, logging.getLogger("test"))
-            text = _toolbar_text(repl)
-            assert "Castle Entrance" in text
-
-        def test_toolbar_shows_room_name_string():
-            gmcp = {"Room.Name": "Dark Forest"}
-            w = _mock_writer(gmcp_data=gmcp)
-            repl = PromptToolkitRepl(w, logging.getLogger("test"))
-            text = _toolbar_text(repl)
-            assert "Dark Forest" in text
-
-        def test_toolbar_includes_static_parts():
-            gmcp = {"Char.Vitals": {"hp": 100, "maxhp": 100}}
-            w = _mock_writer(gmcp_data=gmcp)
-            repl = PromptToolkitRepl(w, logging.getLogger("test"))
-            text = _toolbar_text(repl)
-            assert "100/100 100%" in text
-
-        def test_toolbar_hp_only_display():
-            gmcp = {"Char.Vitals": {"hp": 50}}
-            w = _mock_writer(gmcp_data=gmcp)
-            repl = PromptToolkitRepl(w, logging.getLogger("test"))
-            text = _toolbar_text(repl)
-            assert "50" in text
-            assert "HP:" in text
+    def test_vital_bar_returns_sgr():
+        bars = _vital_bar(50, 100, 16, "mp")
+        for sgr, _text in bars:
+            assert not sgr.startswith("fg:#")
+            assert not sgr.startswith("bg:#")
