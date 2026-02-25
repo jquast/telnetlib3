@@ -587,403 +587,465 @@ def _layout_toolbar(
     return ([s.fragments for s in left], [s.fragments for s in right])
 
 
-def _render_toolbar(
-    ctx: "SessionContext",
-    scroll: Any,
-    out: asyncio.StreamWriter,
-    autoreply_engine: Any,
-    toolbar_state: dict[str, Any],
-) -> bool:
-    """
-    Render GMCP vitals toolbar at ``scroll.input_row + 1``.
+class VitalTracker:
+    """Track one vital stat (HP, MP) with flash-on-change timing."""
 
-    :returns: ``True`` if a flash is active and the caller should
-        schedule a re-render.
-    """
-    from .client_repl import _RESERVE_WITH_TOOLBAR
+    __slots__ = ("last_value", "flash_time")
 
-    gmcp_data: Optional[dict[str, Any]] = ctx.gmcp_data or None
-    if not toolbar_state.get("has_gmcp"):
-        if not gmcp_data:
-            return False
-        toolbar_state["has_gmcp"] = True
-        scroll.grow_reserve(_RESERVE_WITH_TOOLBAR)
-        if ctx.on_gmcp_ready is not None:
-            ctx.on_gmcp_ready()
-            ctx.on_gmcp_ready = None
+    def __init__(self) -> None:
+        self.last_value: Optional[int] = None
+        self.flash_time: float = 0.0
 
-    engine = autoreply_engine
-    ar_active = engine is not None and (engine.exclusive_active or engine.reply_pending)
-    wander_active = ctx.wander_active
-    discover_active = ctx.discover_active
-    randomwalk_active = ctx.randomwalk_active
+    def update(self, raw: Any, now: float) -> float:
+        """
+        Update tracker with *raw* value at time *now*.
 
-    slots: List[_ToolbarSlot] = []
-    room_name = ""
-    now = time.monotonic()
-    needs_reflash = False
-
-    if gmcp_data:
-        status = gmcp_data.get("Char.Status")
-        if isinstance(status, dict):
-            level = status.get("level")
-            if level is not None:
-                lv_text = _segmented(f"Lv.{level}")
-                lv_frags: List[Tuple[str, str]] = [(_sgr_fg("#aaaaaa"), lv_text)]
-                slots.append(
-                    _ToolbarSlot(
-                        priority=7,
-                        display_order=0,
-                        width=_wcswidth(lv_text),
-                        fragments=lv_frags,
-                        side="left",
-                        min_width=0,
-                        label="",
-                    )
-                )
-
-            money = status.get("money")
-            if money is not None:
-                try:
-                    money_int = int(money)
-                    money_str = _segmented(f"${money_int:,}")
-                except (TypeError, ValueError):
-                    money_str = _segmented(f"${money}")
-                cash_frags: List[Tuple[str, str]] = [(_sgr_fg("#aaaaaa"), money_str)]
-                slots.append(
-                    _ToolbarSlot(
-                        priority=6,
-                        display_order=1,
-                        width=_wcswidth(money_str),
-                        fragments=cash_frags,
-                        side="left",
-                        min_width=0,
-                        label="",
-                    )
-                )
-
-        vitals = gmcp_data.get("Char.Vitals")
-        if isinstance(vitals, dict):
-            hp = vitals.get("hp", vitals.get("HP"))
-            maxhp = vitals.get("maxhp", vitals.get("maxHP", vitals.get("max_hp")))
-            if hp is not None:
-                try:
-                    hp_int = int(hp)
-                except (TypeError, ValueError):
-                    hp_int = 0
-                last_hp = toolbar_state.get("last_hp")
-                if last_hp is not None and hp_int != last_hp:
-                    toolbar_state["hp_flash"] = now
-                toolbar_state["last_hp"] = hp_int
-                hp_flash = toolbar_state.get("hp_flash", 0.0)
-                hp_elapsed = now - hp_flash
-                if hp_elapsed < _FLASH_DURATION:
-                    needs_reflash = True
-                hp_frags = _vital_bar(
-                    hp,
-                    maxhp,
-                    _BAR_WIDTH,
-                    "hp",
-                    flash_elapsed=hp_elapsed if hp_elapsed < _FLASH_DURATION else -1.0,
-                )
-                hp_w = sum(_wcswidth(t) for _, t in hp_frags)
-                slots.append(
-                    _ToolbarSlot(
-                        priority=1,
-                        display_order=2,
-                        width=hp_w,
-                        fragments=hp_frags,
-                        side="left",
-                        min_width=0,
-                        label="",
-                    )
-                )
-
-            mp = vitals.get(
-                "mp", vitals.get("MP", vitals.get("mana", vitals.get("sp", vitals.get("SP"))))
-            )
-            maxmp = vitals.get(
-                "maxmp",
-                vitals.get("maxMP", vitals.get("max_mp", vitals.get("maxsp", vitals.get("maxSP")))),
-            )
-            if mp is not None:
-                try:
-                    mp_int = int(mp)
-                except (TypeError, ValueError):
-                    mp_int = 0
-                last_mp = toolbar_state.get("last_mp")
-                if last_mp is not None and mp_int != last_mp:
-                    toolbar_state["mp_flash"] = now
-                toolbar_state["last_mp"] = mp_int
-                mp_flash = toolbar_state.get("mp_flash", 0.0)
-                mp_elapsed = now - mp_flash
-                if mp_elapsed < _FLASH_DURATION:
-                    needs_reflash = True
-                mp_frags = _vital_bar(
-                    mp,
-                    maxmp,
-                    _BAR_WIDTH,
-                    "mp",
-                    flash_elapsed=mp_elapsed if mp_elapsed < _FLASH_DURATION else -1.0,
-                )
-                mp_w = sum(_wcswidth(t) for _, t in mp_frags)
-                slots.append(
-                    _ToolbarSlot(
-                        priority=4,
-                        display_order=3,
-                        width=mp_w,
-                        fragments=mp_frags,
-                        side="left",
-                        min_width=0,
-                        label="",
-                    )
-                )
-
-        if isinstance(status, dict):
-            xp_raw = status.get("xp", status.get("XP", status.get("experience")))
-            maxxp = status.get(
-                "maxxp", status.get("maxXP", status.get("max_xp", status.get("maxexp")))
-            )
-            if xp_raw is not None:
-                try:
-                    xp_int = int(xp_raw)
-                except (TypeError, ValueError):
-                    xp_int = 0
-                last_xp = toolbar_state.get("last_xp")
-                xp_history = toolbar_state.setdefault("xp_history", collections.deque())
-                if last_xp is not None and xp_int != last_xp:
-                    toolbar_state["xp_flash"] = now
-                    xp_history.append((now, xp_int))
-                elif last_xp is None:
-                    xp_history.append((now, xp_int))
-                toolbar_state["last_xp"] = xp_int
-
-                cutoff = now - 300.0
-                while xp_history and xp_history[0][0] < cutoff:
-                    xp_history.popleft()
-
-                xp_flash = toolbar_state.get("xp_flash", 0.0)
-                xp_elapsed = now - xp_flash
-                if xp_elapsed < _FLASH_DURATION:
-                    needs_reflash = True
-                xp_frags = _vital_bar(
-                    xp_raw,
-                    maxxp,
-                    _BAR_WIDTH,
-                    "xp",
-                    flash_elapsed=xp_elapsed if xp_elapsed < _FLASH_DURATION else -1.0,
-                )
-                xp_w = sum(_wcswidth(t) for _, t in xp_frags)
-                slots.append(
-                    _ToolbarSlot(
-                        priority=5,
-                        display_order=4,
-                        width=xp_w,
-                        fragments=xp_frags,
-                        side="left",
-                        min_width=0,
-                        label="",
-                    )
-                )
-
-                if len(xp_history) >= 2 and maxxp is not None:
-                    oldest_t, oldest_xp = xp_history[0]
-                    span = now - oldest_t
-                    if span > 0:
-                        rate_per_sec = (xp_int - oldest_xp) / span
-                        try:
-                            remaining = int(maxxp) - xp_int
-                        except (TypeError, ValueError):
-                            remaining = 0
-                        if rate_per_sec > 0 and remaining > 0:
-                            eta_sec = remaining / rate_per_sec
-                            eta_hr = eta_sec / 3600.0
-                            if eta_hr >= 1.0:
-                                eta_text = _segmented(f"ETA {eta_hr:.1f}h")
-                            else:
-                                eta_min = int(eta_sec / 60.0)
-                                eta_text = _segmented(f"ETA {eta_min}m")
-                            eta_frags: List[Tuple[str, str]] = [(_sgr_fg("#888888"), eta_text)]
-                            slots.append(
-                                _ToolbarSlot(
-                                    priority=8,
-                                    display_order=5,
-                                    width=_wcswidth(eta_text),
-                                    fragments=eta_frags,
-                                    side="left",
-                                    min_width=0,
-                                    label="",
-                                )
-                            )
-
-        room_info = gmcp_data.get("Room.Info", gmcp_data.get("Room.Name"))
-        if isinstance(room_info, dict):
-            room_name = str(room_info.get("name", room_info.get("Name", "")))
-        elif isinstance(room_info, str):
-            room_name = room_info
-
-    if room_name:
-        toolbar_state["rprompt_text"] = room_name
-
-    is_autoreply_bg = wander_active or discover_active or randomwalk_active or ar_active
-
-    if randomwalk_active:
-        rwcur = ctx.randomwalk_current
-        rwtot = ctx.randomwalk_total
-        mode_frags = _vital_bar(rwcur, rwtot, 16, "randomwalk")
-        mode_w = sum(_wcswidth(t) for _, t in mode_frags)
-        slots.append(
-            _ToolbarSlot(
-                priority=3,
-                display_order=10,
-                width=mode_w,
-                fragments=mode_frags,
-                side="right",
-                min_width=0,
-                label="",
-            )
-        )
-    elif wander_active:
-        wcur = ctx.wander_current
-        wtot = ctx.wander_total
-        mode_frags = _vital_bar(wcur, wtot, 12, "wander")
-        mode_w = sum(_wcswidth(t) for _, t in mode_frags)
-        slots.append(
-            _ToolbarSlot(
-                priority=3,
-                display_order=10,
-                width=mode_w,
-                fragments=mode_frags,
-                side="right",
-                min_width=0,
-                label="",
-            )
-        )
-    elif discover_active:
-        dcur = ctx.discover_current
-        dtot = ctx.discover_total
-        mode_frags = _vital_bar(dcur, dtot, 12, "discover")
-        mode_w = sum(_wcswidth(t) for _, t in mode_frags)
-        slots.append(
-            _ToolbarSlot(
-                priority=3,
-                display_order=10,
-                width=mode_w,
-                fragments=mode_frags,
-                side="right",
-                min_width=0,
-                label="",
-            )
-        )
-    elif ar_active:
-        idx = getattr(engine, "exclusive_rule_index", None)
-        ar_label = f"Autoreply #{idx}" if idx is not None else "Autoreply"
-        ar_text = " " + ar_label
-        slots.append(
-            _ToolbarSlot(
-                priority=3,
-                display_order=10,
-                width=len(ar_text),
-                fragments=[("", ar_text)],
-                side="right",
-                min_width=0,
-                label="",
-            )
-        )
-    else:
-        loc_text = toolbar_state.get("rprompt_text", "")
-        if loc_text:
-            full_text = " " + loc_text
-            full_w = _wcswidth(full_text)
-            loc_sgr = _sgr_fg("#dddddd")
-            slots.append(
-                _ToolbarSlot(
-                    priority=2,
-                    display_order=10,
-                    width=full_w,
-                    fragments=[(loc_sgr, full_text)],
-                    side="right",
-                    min_width=5,
-                    label=full_text,
-                )
-            )
-
-    blessed_term = _get_term()
-    cols = blessed_term.width
-    left_items, right_items = _layout_toolbar(slots, cols)
-
-    toolbar_row = scroll.input_row + 1
-    out.write(blessed_term.move_yx(toolbar_row, 0).encode())
-
-    if is_autoreply_bg:
-        bg_sgr = blessed_term.on_color_rgb(26, 18, 0) + blessed_term.color_rgb(184, 134, 11)
-    else:
-        bg_sgr = blessed_term.on_color_rgb(26, 0, 0)
-    out.write(bg_sgr.encode())
-
-    left_total = 0
-    for i, frags in enumerate(left_items):
-        if i > 0:
-            out.write("   ".encode())
-            left_total += _SEPARATOR_WIDTH
-        for sgr, text in frags:
-            out.write(f"{sgr}{text}".encode())
-            out.write(bg_sgr.encode())
-            left_total += _wcswidth(text)
-
-    right_total = 0
-    for i, frags in enumerate(right_items):
-        if i > 0:
-            right_total += _SEPARATOR_WIDTH
-        right_total += sum(_wcswidth(t) for _, t in frags)
-
-    stoplight: Optional[_Stoplight] = toolbar_state.get("stoplight")
-    modem_w = _MODEM_WIDTH if stoplight is not None else 0
-
-    pad = max(1, cols - left_total - right_total - modem_w)
-    out.write((" " * pad).encode())
-
-    right_sgr = _sgr_fg("#dddddd") if not is_autoreply_bg else ""
-    for i, frags in enumerate(right_items):
-        if i > 0:
-            out.write("   ".encode())
-        for sgr, text in frags:
-            effective_sgr = sgr if sgr else right_sgr
-            out.write(f"{effective_sgr}{text}".encode())
-            out.write(bg_sgr.encode())
-
-    if stoplight is not None:
-        ch, (r, g, b) = stoplight.frame(autoreply_bg=is_autoreply_bg)
-        out.write(f"{blessed_term.color_rgb(r, g, b)}{ch}".encode())
-        out.write(bg_sgr.encode())
-        if stoplight.is_animating():
-            needs_reflash = True
-
-    out.write(blessed_term.normal.encode())
-    return needs_reflash
+        :returns: Elapsed seconds since last flash (or negative if no flash).
+        """
+        try:
+            val = int(raw)
+        except (TypeError, ValueError):
+            val = 0
+        if self.last_value is not None and val != self.last_value:
+            self.flash_time = now
+        self.last_value = val
+        elapsed = now - self.flash_time
+        return elapsed if elapsed < _FLASH_DURATION else -1.0
 
 
-def _schedule_flash_frame(
-    loop: asyncio.AbstractEventLoop,
-    ctx: "SessionContext",
-    scroll: Any,
-    out: asyncio.StreamWriter,
-    autoreply_engine: Any,
-    toolbar_state: dict[str, Any],
-    editor: "blessed.line_editor.LiveLineEditor",
-    bt: "blessed.Terminal",
-) -> None:
-    """Schedule repeating flash animation frames via ``loop.call_later``."""
+class XPTracker(VitalTracker):
+    """Vital tracker with XP history for ETA calculation."""
 
-    def _tick() -> None:
-        out.write(CURSOR_HIDE.encode())
-        still = _render_toolbar(ctx, scroll, out, autoreply_engine, toolbar_state)
-        cursor_col = editor.display.cursor
-        out.write(bt.move_yx(scroll.input_row, cursor_col).encode())
-        out.write(CURSOR_SHOW.encode())
-        if still:
-            loop.call_later(_FLASH_INTERVAL, _tick)
+    __slots__ = ("history",)
+
+    _HISTORY_WINDOW: float = 300.0
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.history: collections.deque[Tuple[float, int]] = collections.deque()
+
+    def update(self, raw: Any, now: float) -> float:
+        """Update tracker, also maintaining XP history for ETA."""
+        try:
+            val = int(raw)
+        except (TypeError, ValueError):
+            val = 0
+        if self.last_value is not None and val != self.last_value:
+            self.flash_time = now
+            self.history.append((now, val))
+        elif self.last_value is None:
+            self.history.append((now, val))
+        self.last_value = val
+
+        cutoff = now - self._HISTORY_WINDOW
+        while self.history and self.history[0][0] < cutoff:
+            self.history.popleft()
+
+        elapsed = now - self.flash_time
+        return elapsed if elapsed < _FLASH_DURATION else -1.0
+
+    def eta_fragments(
+        self, maxxp: Any, now: float
+    ) -> Optional[List[Tuple[str, str]]]:
+        """
+        Compute ETA fragments from XP history.
+
+        :returns: Fragment list for the ETA slot, or ``None`` if unavailable.
+        """
+        if len(self.history) < 2 or maxxp is None or self.last_value is None:
+            return None
+        oldest_t, oldest_xp = self.history[0]
+        span = now - oldest_t
+        if span <= 0:
+            return None
+        rate_per_sec = (self.last_value - oldest_xp) / span
+        try:
+            remaining = int(maxxp) - self.last_value
+        except (TypeError, ValueError):
+            return None
+        if rate_per_sec <= 0 or remaining <= 0:
+            return None
+        eta_sec = remaining / rate_per_sec
+        eta_hr = eta_sec / 3600.0
+        if eta_hr >= 1.0:
+            eta_text = _segmented(f"ETA {eta_hr:.1f}h")
         else:
-            toolbar_state["_flash_active"] = False
+            eta_min = int(eta_sec / 60.0)
+            eta_text = _segmented(f"ETA {eta_min}m")
+        return [(_sgr_fg("#888888"), eta_text)]
 
-    loop.call_later(_FLASH_INTERVAL, _tick)
+
+class ToolbarRenderer:
+    """
+    Encapsulates GMCP vitals toolbar state and rendering.
+
+    Replaces the former ``_render_toolbar`` function and its ``toolbar_state``
+    dict with typed attributes and small focused methods.
+    """
+
+    def __init__(
+        self,
+        ctx: "SessionContext",
+        scroll: Any,
+        out: asyncio.StreamWriter,
+        stoplight: Optional[Stoplight],
+        rprompt_text: str = "",
+    ) -> None:
+        self.ctx = ctx
+        self.scroll = scroll
+        self.out = out
+        self.stoplight = stoplight
+        self.rprompt_text = rprompt_text
+        self.flash_active: bool = False
+        self._has_gmcp: bool = False
+        self.hp = VitalTracker()
+        self.mp = VitalTracker()
+        self.xp = XPTracker()
+
+    def render(self, autoreply_engine: Any) -> bool:
+        """
+        Render GMCP vitals toolbar at ``scroll.input_row + 1``.
+
+        :returns: ``True`` if a flash is active and the caller should
+            schedule a re-render.
+        """
+        if not self._ensure_gmcp_ready():
+            return False
+
+        engine = autoreply_engine
+        ar_active = engine is not None and (
+            engine.exclusive_active or engine.reply_pending
+        )
+        wander_active = self.ctx.wander_active
+        discover_active = self.ctx.discover_active
+        randomwalk_active = self.ctx.randomwalk_active
+
+        now = time.monotonic()
+        slots, needs_reflash = self._build_slots(
+            engine, ar_active, wander_active, discover_active,
+            randomwalk_active, now,
+        )
+        is_autoreply_bg = (
+            wander_active or discover_active or randomwalk_active or ar_active
+        )
+        return self._paint(slots, is_autoreply_bg, needs_reflash)
+
+    def _ensure_gmcp_ready(self) -> bool:
+        """Initialize toolbar on first GMCP data; return ``False`` if no data yet."""
+        from .client_repl import _RESERVE_WITH_TOOLBAR
+
+        gmcp_data: Optional[dict[str, Any]] = self.ctx.gmcp_data or None
+        if not self._has_gmcp:
+            if not gmcp_data:
+                return False
+            self._has_gmcp = True
+            self.scroll.grow_reserve(_RESERVE_WITH_TOOLBAR)
+            if self.ctx.on_gmcp_ready is not None:
+                self.ctx.on_gmcp_ready()
+                self.ctx.on_gmcp_ready = None
+        return True
+
+    def _build_slots(
+        self,
+        engine: Any,
+        ar_active: bool,
+        wander_active: bool,
+        discover_active: bool,
+        randomwalk_active: bool,
+        now: float,
+    ) -> Tuple[List[_ToolbarSlot], bool]:
+        """Build all toolbar slots and return ``(slots, needs_reflash)``."""
+        slots: List[_ToolbarSlot] = []
+        needs_reflash = False
+        gmcp_data: Optional[dict[str, Any]] = self.ctx.gmcp_data or None
+
+        if gmcp_data:
+            status = gmcp_data.get("Char.Status")
+            if isinstance(status, dict):
+                self._status_slots(status, slots)
+
+            vitals = gmcp_data.get("Char.Vitals")
+            if isinstance(vitals, dict):
+                hp = vitals.get("hp", vitals.get("HP"))
+                maxhp = vitals.get(
+                    "maxhp", vitals.get("maxHP", vitals.get("max_hp"))
+                )
+                if hp is not None:
+                    if self._vital_slot(
+                        self.hp, hp, maxhp, _BAR_WIDTH, "hp", 1, 2, now, slots,
+                    ):
+                        needs_reflash = True
+
+                mp = vitals.get(
+                    "mp", vitals.get(
+                        "MP", vitals.get(
+                            "mana", vitals.get("sp", vitals.get("SP"))
+                        )
+                    )
+                )
+                maxmp = vitals.get(
+                    "maxmp", vitals.get(
+                        "maxMP", vitals.get(
+                            "max_mp", vitals.get(
+                                "maxsp", vitals.get("maxSP")
+                            )
+                        )
+                    ),
+                )
+                if mp is not None:
+                    if self._vital_slot(
+                        self.mp, mp, maxmp, _BAR_WIDTH, "mp", 4, 3, now, slots,
+                    ):
+                        needs_reflash = True
+
+            if isinstance(status, dict):
+                xp_raw = status.get(
+                    "xp", status.get("XP", status.get("experience"))
+                )
+                maxxp = status.get(
+                    "maxxp", status.get(
+                        "maxXP", status.get(
+                            "max_xp", status.get("maxexp")
+                        )
+                    )
+                )
+                if xp_raw is not None:
+                    if self._vital_slot(
+                        self.xp, xp_raw, maxxp, _BAR_WIDTH, "xp", 5, 4,
+                        now, slots,
+                    ):
+                        needs_reflash = True
+                    self._xp_eta_slot(maxxp, now, slots)
+
+            room_info = gmcp_data.get(
+                "Room.Info", gmcp_data.get("Room.Name")
+            )
+            if isinstance(room_info, dict):
+                room_name = str(
+                    room_info.get("name", room_info.get("Name", ""))
+                )
+            elif isinstance(room_info, str):
+                room_name = room_info
+            else:
+                room_name = ""
+            if room_name:
+                self.rprompt_text = room_name
+
+        self._right_slot(
+            engine, ar_active, wander_active, discover_active,
+            randomwalk_active, slots,
+        )
+        return slots, needs_reflash
+
+    def _status_slots(
+        self, status: dict[str, Any], slots: List[_ToolbarSlot]
+    ) -> None:
+        """Add Level and Money slots from ``Char.Status``."""
+        level = status.get("level")
+        if level is not None:
+            lv_text = _segmented(f"Lv.{level}")
+            slots.append(_ToolbarSlot(
+                priority=7, display_order=0, width=_wcswidth(lv_text),
+                fragments=[(_sgr_fg("#aaaaaa"), lv_text)],
+                side="left", min_width=0, label="",
+            ))
+        money = status.get("money")
+        if money is not None:
+            try:
+                money_int = int(money)
+                money_str = _segmented(f"${money_int:,}")
+            except (TypeError, ValueError):
+                money_str = _segmented(f"${money}")
+            slots.append(_ToolbarSlot(
+                priority=6, display_order=1, width=_wcswidth(money_str),
+                fragments=[(_sgr_fg("#aaaaaa"), money_str)],
+                side="left", min_width=0, label="",
+            ))
+
+    @staticmethod
+    def _vital_slot(
+        tracker: VitalTracker,
+        raw: Any,
+        maxval: Any,
+        width: int,
+        kind: str,
+        priority: int,
+        order: int,
+        now: float,
+        slots: List[_ToolbarSlot],
+    ) -> bool:
+        """
+        Update *tracker* and append a vital bar slot.
+
+        :returns: ``True`` if a flash animation is active.
+        """
+        flash_elapsed = tracker.update(raw, now)
+        needs_reflash = flash_elapsed >= 0.0
+        frags = _vital_bar(raw, maxval, width, kind, flash_elapsed=flash_elapsed)
+        frags_w = sum(_wcswidth(t) for _, t in frags)
+        slots.append(_ToolbarSlot(
+            priority=priority, display_order=order, width=frags_w,
+            fragments=frags, side="left", min_width=0, label="",
+        ))
+        return needs_reflash
+
+    def _xp_eta_slot(
+        self, maxxp: Any, now: float, slots: List[_ToolbarSlot]
+    ) -> None:
+        """Append an ETA slot if XP history is sufficient."""
+        eta_frags = self.xp.eta_fragments(maxxp, now)
+        if eta_frags is not None:
+            eta_text = eta_frags[0][1]
+            slots.append(_ToolbarSlot(
+                priority=8, display_order=5, width=_wcswidth(eta_text),
+                fragments=eta_frags, side="left", min_width=0, label="",
+            ))
+
+    def _right_slot(
+        self,
+        engine: Any,
+        ar_active: bool,
+        wander_active: bool,
+        discover_active: bool,
+        randomwalk_active: bool,
+        slots: List[_ToolbarSlot],
+    ) -> None:
+        """Append the right-side slot (walk mode, autoreply, or room name)."""
+        if randomwalk_active:
+            self._mode_bar_slot(
+                self.ctx.randomwalk_current, self.ctx.randomwalk_total,
+                16, "randomwalk", slots,
+            )
+        elif wander_active:
+            self._mode_bar_slot(
+                self.ctx.wander_current, self.ctx.wander_total,
+                12, "wander", slots,
+            )
+        elif discover_active:
+            self._mode_bar_slot(
+                self.ctx.discover_current, self.ctx.discover_total,
+                12, "discover", slots,
+            )
+        elif ar_active:
+            idx = getattr(engine, "exclusive_rule_index", None)
+            ar_label = (
+                f"Autoreply #{idx}" if idx is not None else "Autoreply"
+            )
+            ar_text = " " + ar_label
+            slots.append(_ToolbarSlot(
+                priority=3, display_order=10, width=len(ar_text),
+                fragments=[("", ar_text)],
+                side="right", min_width=0, label="",
+            ))
+        else:
+            loc_text = self.rprompt_text
+            if loc_text:
+                full_text = " " + loc_text
+                full_w = _wcswidth(full_text)
+                slots.append(_ToolbarSlot(
+                    priority=2, display_order=10, width=full_w,
+                    fragments=[(_sgr_fg("#dddddd"), full_text)],
+                    side="right", min_width=5, label=full_text,
+                ))
+
+    @staticmethod
+    def _mode_bar_slot(
+        cur: Any, tot: Any, width: int, kind: str,
+        slots: List[_ToolbarSlot],
+    ) -> None:
+        """Append a walk-mode progress bar slot."""
+        mode_frags = _vital_bar(cur, tot, width, kind)
+        mode_w = sum(_wcswidth(t) for _, t in mode_frags)
+        slots.append(_ToolbarSlot(
+            priority=3, display_order=10, width=mode_w,
+            fragments=mode_frags, side="right", min_width=0, label="",
+        ))
+
+    def _paint(
+        self,
+        slots: List[_ToolbarSlot],
+        is_autoreply_bg: bool,
+        needs_reflash: bool,
+    ) -> bool:
+        """Write ANSI sequences for the toolbar row."""
+        blessed_term = _get_term()
+        cols = blessed_term.width
+        left_items, right_items = _layout_toolbar(slots, cols)
+
+        toolbar_row = self.scroll.input_row + 1
+        self.out.write(blessed_term.move_yx(toolbar_row, 0).encode())
+
+        if is_autoreply_bg:
+            bg_sgr = (
+                blessed_term.on_color_rgb(26, 18, 0)
+                + blessed_term.color_rgb(184, 134, 11)
+            )
+        else:
+            bg_sgr = blessed_term.on_color_rgb(26, 0, 0)
+        self.out.write(bg_sgr.encode())
+
+        left_total = 0
+        for i, frags in enumerate(left_items):
+            if i > 0:
+                self.out.write("   ".encode())
+                left_total += _SEPARATOR_WIDTH
+            for sgr, text in frags:
+                self.out.write(f"{sgr}{text}".encode())
+                self.out.write(bg_sgr.encode())
+                left_total += _wcswidth(text)
+
+        right_total = 0
+        for i, frags in enumerate(right_items):
+            if i > 0:
+                right_total += _SEPARATOR_WIDTH
+            right_total += sum(_wcswidth(t) for _, t in frags)
+
+        modem_w = _MODEM_WIDTH if self.stoplight is not None else 0
+
+        pad = max(1, cols - left_total - right_total - modem_w)
+        self.out.write((" " * pad).encode())
+
+        right_sgr = _sgr_fg("#dddddd") if not is_autoreply_bg else ""
+        for i, frags in enumerate(right_items):
+            if i > 0:
+                self.out.write("   ".encode())
+            for sgr, text in frags:
+                effective_sgr = sgr if sgr else right_sgr
+                self.out.write(f"{effective_sgr}{text}".encode())
+                self.out.write(bg_sgr.encode())
+
+        if self.stoplight is not None:
+            ch, (r, g, b) = self.stoplight.frame(
+                autoreply_bg=is_autoreply_bg
+            )
+            self.out.write(
+                f"{blessed_term.color_rgb(r, g, b)}{ch}".encode()
+            )
+            self.out.write(bg_sgr.encode())
+            if self.stoplight.is_animating():
+                needs_reflash = True
+
+        self.out.write(blessed_term.normal.encode())
+        return needs_reflash
+
+    def schedule_flash(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        autoreply_engine: Any,
+        editor: "blessed.line_editor.LiveLineEditor",
+        bt: "blessed.Terminal",
+    ) -> None:
+        """Schedule repeating flash animation frames via ``loop.call_later``."""
+
+        def _tick() -> None:
+            self.out.write(CURSOR_HIDE.encode())
+            still = self.render(autoreply_engine)
+            cursor_col = editor.display.cursor
+            self.out.write(bt.move_yx(self.scroll.input_row, cursor_col).encode())
+            self.out.write(CURSOR_SHOW.encode())
+            if still:
+                loop.call_later(_FLASH_INTERVAL, _tick)
+            else:
+                self.flash_active = False
+
+        loop.call_later(_FLASH_INTERVAL, _tick)

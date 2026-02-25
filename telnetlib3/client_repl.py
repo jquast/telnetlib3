@@ -57,6 +57,7 @@ from .client_repl_render import (  # noqa: F401
     CURSOR_STEADY_UNDERLINE,
     CURSOR_BLINKING_UNDERLINE,
     ActivityDot,
+    ToolbarRenderer,
     _sgr_bg,
     _sgr_fg,
     lerp_rgb,
@@ -73,9 +74,7 @@ from .client_repl_render import (  # noqa: F401
     _ToolbarSlot,
     _vital_color,
     _layout_toolbar,
-    _render_toolbar,
     _center_truncate,
-    _schedule_flash_frame,
 )
 from .client_repl_travel import (  # noqa: F401
     _DEFAULT_WALK_LIMIT,
@@ -238,7 +237,7 @@ def _safe_terminal_size() -> str:
 # Maximum bytes retained in the output replay ring buffer for Ctrl-L repaint.
 _REPLAY_BUFFER_MAX = 65536
 
-__all__ = ("ScrollRegion", "repl_event_loop", "_split_incomplete_esc")
+__all__ = ("ScrollRegion", "ReplSession", "repl_event_loop", "_split_incomplete_esc")
 
 
 def _split_incomplete_esc(data: bytes) -> tuple[bytes, bytes]:
@@ -355,7 +354,9 @@ def _restore_after_subprocess(
     dmz = scroll_bottom + 1
     input_row = tsize.lines - reserve
     if dmz < input_row:
-        sys.stdout.write(blessed_term.move_yx(dmz, 0) + blessed_term.clear_eol + _dmz_line(tsize.columns))
+        sys.stdout.write(
+            blessed_term.move_yx(dmz, 0) + blessed_term.clear_eol + _dmz_line(tsize.columns)
+        )
     for r in range(input_row, tsize.lines):
         sys.stdout.write(blessed_term.move_yx(r, 0) + blessed_term.clear_eol)
     # Re-enable in-band window resize notifications (DEC mode 2048) — the
@@ -400,7 +401,9 @@ def _repaint_screen(
         dmz = scroll_bottom + 1
         input_row = tsize.lines - reserve
         if dmz < input_row:
-            sys.stdout.write(blessed_term.move_yx(dmz, 0) + blessed_term.clear_eol + _dmz_line(tsize.columns))
+            sys.stdout.write(
+                blessed_term.move_yx(dmz, 0) + blessed_term.clear_eol + _dmz_line(tsize.columns)
+            )
         for r in range(input_row, tsize.lines):
             sys.stdout.write(blessed_term.move_yx(r, 0) + blessed_term.clear_eol)
         sys.stdout.write(blessed_term.move_yx(input_row, 0))
@@ -494,14 +497,18 @@ if sys.platform != "win32":
             self._reserve = new_reserve
             if self._active:
                 for r in range(old_input_row, old_input_row + new_reserve):
-                    self._stdout.write((blessed_term.move_yx(r, 0) + blessed_term.clear_eol).encode())
+                    self._stdout.write(
+                        (blessed_term.move_yx(r, 0) + blessed_term.clear_eol).encode()
+                    )
                 self._set_scroll_region()
                 self._stdout.write(blessed_term.restore.encode())
                 if extra > 0:
                     self._stdout.write(blessed_term.move_up(extra).encode())
                 self._stdout.write(blessed_term.save.encode())
                 for r in range(self.input_row, self.input_row + new_reserve):
-                    self._stdout.write((blessed_term.move_yx(r, 0) + blessed_term.clear_eol).encode())
+                    self._stdout.write(
+                        (blessed_term.move_yx(r, 0) + blessed_term.clear_eol).encode()
+                    )
                 self._dirty = True
 
         def update_size(self, rows: int, cols: int) -> None:
@@ -518,11 +525,15 @@ if sys.platform != "win32":
             blessed_term = _get_term()
             if self._active:
                 for r in range(old_input_row, old_input_row + self._reserve):
-                    self._stdout.write((blessed_term.move_yx(r, 0) + blessed_term.clear_eol).encode())
+                    self._stdout.write(
+                        (blessed_term.move_yx(r, 0) + blessed_term.clear_eol).encode()
+                    )
                 self._set_scroll_region()
                 self._stdout.write(blessed_term.save.encode())
                 for r in range(self.input_row, self.input_row + self._reserve):
-                    self._stdout.write((blessed_term.move_yx(r, 0) + blessed_term.clear_eol).encode())
+                    self._stdout.write(
+                        (blessed_term.move_yx(r, 0) + blessed_term.clear_eol).encode()
+                    )
                 self._dirty = True
 
         def _set_scroll_region(self) -> None:
@@ -533,7 +544,11 @@ if sys.platform != "win32":
             dmz = bottom + 1
             if dmz < self.input_row:
                 self._stdout.write(
-                    (blessed_term.move_yx(dmz, 0) + blessed_term.clear_eol + _dmz_line(self._cols)).encode()
+                    (
+                        blessed_term.move_yx(dmz, 0)
+                        + blessed_term.clear_eol
+                        + _dmz_line(self._cols)
+                    ).encode()
                 )
             self._stdout.write(blessed_term.move_yx(bottom, 0).encode())
 
@@ -675,6 +690,716 @@ if sys.platform != "win32":
                 return self._by_seq[key_str]
             return None
 
+    class ReplSession:
+        """
+        Encapsulates the REPL event loop state and logic.
+
+        Replaces the former ``_repl_event_loop()`` monolithic function,
+        converting captured locals and closures into explicit instance
+        attributes and methods.
+
+        :param telnet_reader: Server-side reader stream.
+        :param telnet_writer: Server-side writer stream.
+        :param tty_shell: ``Terminal`` instance from ``client_shell``.
+        :param stdout: asyncio StreamWriter for local terminal output.
+        :param history_file: Optional path for persistent line history.
+        :param banner_lines: Lines to display after the scroll region is active.
+        """
+
+        def __init__(
+            self,
+            telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
+            telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
+            tty_shell: "client_shell.Terminal",
+            stdout: asyncio.StreamWriter,
+            history_file: Optional[str] = None,
+            banner_lines: Optional[List[str]] = None,
+        ) -> None:
+            self.telnet_reader = telnet_reader
+            self.telnet_writer = telnet_writer
+            self.tty_shell = tty_shell
+            self.stdout = stdout
+            self.history_file = history_file
+            self.banner_lines = banner_lines
+
+            self.ctx: SessionContext = telnet_writer._ctx
+            self.is_ssl = telnet_writer.get_extra_info("ssl_object") is not None
+            self.conn_info = self.ctx.session_key + (" SSL" if self.is_ssl else "")
+
+            self.mode_switched = False
+            self.server_done = False
+            self.ga_detected = False
+            self.prompt_pending = False
+            self.gmcp_keys_registered = False
+            self._last_resize_size: list[int] = [0, 0]
+            self._last_input_style: Optional[dict[str, str]] = None
+            self.scroll: Optional[ScrollRegion] = None
+            self.autoreply_engine: Optional["AutoreplyEngine"] = None
+            self.ar_rules_ref: object = None
+            self.prompt_ready = asyncio.Event()
+            self.prompt_ready.set()
+
+            # Late-initialized in _init_* methods.
+            self.blessed_term: "blessed.Terminal" = None  # type: ignore[assignment]
+            self.replay_buf: OutputRingBuffer = None  # type: ignore[assignment]
+            self.history: "blessed.line_editor.LineHistory" = None  # type: ignore[assignment]
+            self.editor: "blessed.line_editor.LineEditor" = None  # type: ignore[assignment]
+            self.stoplight: Stoplight = None  # type: ignore[assignment]
+            self.toolbar: ToolbarRenderer = None  # type: ignore[assignment]
+            self.dispatch: _KeyDispatch = None  # type: ignore[assignment]
+            self.macro_defs: "Optional[list[Macro]]" = None
+            self.loop: asyncio.AbstractEventLoop = None  # type: ignore[assignment]
+            self._dialogs_mod: Any = None
+
+        def _init_terminal(self) -> None:
+            """Import blessed, create terminal singleton, styles, replay buffer."""
+            import telnetlib3.client_repl_dialogs as _dialogs_mod
+
+            self._dialogs_mod = _dialogs_mod
+            self.loop = asyncio.get_event_loop()
+            self.blessed_term = _get_term()
+            _make_styles()
+            self.replay_buf = OutputRingBuffer()
+
+        def _init_editor(self) -> None:
+            """Create line history and editor."""
+            import blessed.line_editor  # pylint: disable=import-outside-toplevel,no-name-in-module
+
+            self.history = blessed.line_editor.LineHistory()  # pylint: disable=no-member
+            if self.history_file:
+                _load_history(self.history, self.history_file)
+
+            term_cols = self.blessed_term.width
+            self.editor = blessed.line_editor.LineEditor(  # pylint: disable=no-member
+                history=self.history,
+                password=bool(self.telnet_writer.will_echo),
+                max_width=term_cols,
+                **_STYLE_NORMAL,
+            )
+
+        def _init_ui(self) -> None:
+            """Create stoplight, toolbar, key dispatch, macros."""
+            self.stoplight = Stoplight.create()
+            self.ctx.tx_dot = self.stoplight.tx
+            self.ctx.cx_dot = self.stoplight.cx
+            self.ctx.rx_dot = self.stoplight.rx
+
+            self.dispatch = _KeyDispatch()
+            self.macro_defs = self.ctx.macro_defs or None
+            if self.macro_defs is not None:
+                self.dispatch.set_macros(self.macro_defs, self.ctx, self.telnet_writer.log)
+            self.ctx.key_dispatch = self.dispatch
+
+        def _echo_autoreply(self, cmd: str) -> None:
+            """Echo an autoreply command into the scroll region."""
+            assert self.scroll is not None
+            self.stdout.write(self.blessed_term.restore.encode())
+            colored = f"{self.blessed_term.cyan}{cmd}" f"{self.blessed_term.normal}\r\n"
+            self.stdout.write(colored.encode())
+            self.replay_buf.append(colored.encode())
+            self.stdout.write(self.blessed_term.save.encode())
+            cursor_col = self.editor.display.cursor
+            self.stdout.write(self.blessed_term.move_yx(self.scroll.input_row, cursor_col).encode())
+
+        def _insert_into_prompt(self, text: str) -> None:
+            """Insert text into the line editor buffer."""
+            self.editor.insert_text(text)
+
+        def _on_prompt_signal(self, _cmd: bytes) -> None:
+            """Handle GA / EOR prompt signals."""
+            self.ga_detected = True
+            self.prompt_ready.set()
+            self.prompt_pending = True
+            self.telnet_reader._wakeup_waiter()
+
+        async def _wait_for_prompt(self) -> None:
+            """Wait for a prompt signal if GA has been detected."""
+            if not self.ga_detected:
+                return
+            try:
+                await asyncio.wait_for(self.prompt_ready.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                pass
+            self.prompt_ready.clear()
+
+        def _refresh_autoreply_engine(self) -> None:
+            """Rebuild the autoreply engine when rules change."""
+            cur_rules = self.ctx.autoreply_rules or None
+            if cur_rules is self.ar_rules_ref:
+                return
+            self.ar_rules_ref = cur_rules
+            prev_suppress = (
+                self.autoreply_engine.suppress_exclusive
+                if self.autoreply_engine is not None
+                else False
+            )
+            if self.autoreply_engine is not None:
+                self.autoreply_engine.cancel()
+                self.autoreply_engine = None
+            if cur_rules:
+                from .autoreply import AutoreplyEngine
+
+                self.autoreply_engine = AutoreplyEngine(
+                    cur_rules,
+                    self.ctx,
+                    self.telnet_writer.log,
+                    insert_fn=self._insert_into_prompt,
+                    echo_fn=self._echo_autoreply,
+                    wait_fn=self._wait_for_prompt,
+                )
+                self.autoreply_engine.suppress_exclusive = prev_suppress
+            self.ctx.autoreply_engine = self.autoreply_engine
+
+        def _reg_close(self) -> None:
+            """Handle Ctrl+] — close the connection."""
+            self.server_done = True
+            self.telnet_writer.close()
+
+        def _has_gmcp(self) -> bool:
+            """Return whether GMCP data is available."""
+            return bool(self.ctx.gmcp_data)
+
+        def _toggle_autoreplies(self) -> None:
+            """Toggle the autoreply engine on/off."""
+            if self.autoreply_engine is None:
+                return
+            self.autoreply_engine.enabled = not self.autoreply_engine.enabled
+            state = "ON" if self.autoreply_engine.enabled else "OFF"
+            self._echo_autoreply(f"AUTOREPLIES {state}")
+
+        def _discover_mode(self) -> None:
+            """Launch or cancel autodiscover mode."""
+            if self.ctx.discover_active:
+                task = self.ctx.discover_task
+                if task is not None:
+                    task.cancel()
+                return
+            from .rooms import load_prefs, save_prefs
+
+            skey = self.ctx.session_key
+            prefs = load_prefs(skey) if skey else {}
+            if not prefs.get("skip_autodiscover_confirm"):
+                ok, dont_ask = _confirm_dialog(
+                    "Autodiscover",
+                    "Autodiscover explores exits from nearby rooms "
+                    "that lead to unvisited places. It will travel "
+                    "to each frontier exit, check the room, then "
+                    "return before trying the next branch.",
+                    warning=(
+                        "WARNING: This can lead to dangerous areas, "
+                        "death traps, or aggressive monsters! Your "
+                        "character may die. Use with caution."
+                    ),
+                    replay_buf=self.replay_buf,
+                )
+                if not ok:
+                    return
+                if dont_ask and skey:
+                    prefs["skip_autodiscover_confirm"] = True
+                    save_prefs(skey, prefs)
+            t = asyncio.ensure_future(_autodiscover(self.ctx, self.telnet_writer.log))
+            self.ctx.discover_task = t
+
+        def _wander_mode(self) -> None:
+            """Launch or cancel autowander mode."""
+            if self.ctx.wander_active:
+                task = self.ctx.wander_task
+                if task is not None:
+                    task.cancel()
+                return
+            from .rooms import load_prefs, save_prefs
+
+            skey = self.ctx.session_key
+            prefs = load_prefs(skey) if skey else {}
+            if not prefs.get("skip_autowander_confirm"):
+                ok, dont_ask = _confirm_dialog(
+                    "Autowander",
+                    "Autowander visits all rooms with the same "
+                    "name as the current room using slow travel. "
+                    "Autoreplies fire in each room visited. The "
+                    "route is optimised to minimise backtracking.",
+                    replay_buf=self.replay_buf,
+                )
+                if not ok:
+                    return
+                if dont_ask and skey:
+                    prefs["skip_autowander_confirm"] = True
+                    save_prefs(skey, prefs)
+            task = asyncio.ensure_future(_autowander(self.ctx, self.telnet_writer.log))
+            self.ctx.wander_task = task
+
+        def _randomwalk_mode(self) -> None:
+            """Launch or cancel random walk mode."""
+            if self.ctx.randomwalk_active:
+                task = self.ctx.randomwalk_task
+                if task is not None:
+                    task.cancel()
+                return
+            from .rooms import load_prefs, save_prefs
+
+            skey = self.ctx.session_key
+            prefs = load_prefs(skey) if skey else {}
+            if not prefs.get("skip_randomwalk_confirm"):
+                ok, dont_ask = _confirm_dialog(
+                    "Random Walk",
+                    "Random walk explores rooms by picking "
+                    "random exits, preferring unvisited rooms. "
+                    "It never returns through the entrance you "
+                    "came from. Autoreplies fire in each room. "
+                    "Stops when all reachable rooms are visited.",
+                    replay_buf=self.replay_buf,
+                )
+                if not ok:
+                    return
+                if dont_ask and skey:
+                    prefs["skip_randomwalk_confirm"] = True
+                    save_prefs(skey, prefs)
+            task = asyncio.ensure_future(_randomwalk(self.ctx, self.telnet_writer.log))
+            self.ctx.randomwalk_task = task
+
+        def _register_gmcp_keys(self) -> None:
+            """Register GMCP-dependent hotkeys (F3-F7) once."""
+            if self.gmcp_keys_registered:
+                return
+            self.gmcp_keys_registered = True
+            self.dispatch.register("KEY_F3", self._randomwalk_mode)
+            self.dispatch.register("KEY_F4", self._discover_mode)
+            self.dispatch.register("KEY_F5", self._wander_mode)
+            self.dispatch.register(
+                "KEY_F7", lambda: _launch_room_browser(self.ctx, self.replay_buf)
+            )
+
+        def _update_input_style(self) -> None:
+            """Update editor style based on autoreply / walk state."""
+            assert self.scroll is not None
+            self.editor.set_password_mode(bool(self.telnet_writer.will_echo))
+            engine = self.autoreply_engine
+            ar_active = engine is not None and (engine.exclusive_active or engine.reply_pending)
+            wander = self.ctx.wander_active
+            disc = self.ctx.discover_active
+            rwalk = self.ctx.randomwalk_active
+            style = _STYLE_AUTOREPLY if (wander or disc or rwalk or ar_active) else _STYLE_NORMAL
+            changed = self._last_input_style is not style
+            self._last_input_style = style
+            for attr, val in style.items():
+                setattr(self.editor, attr, val)
+            if changed:
+                active = style is _STYLE_AUTOREPLY
+                dmz_row = self.scroll.scroll_bottom + 1
+                if dmz_row < self.scroll.input_row:
+                    self.stdout.write(
+                        (
+                            self.blessed_term.move_yx(dmz_row, 0)
+                            + _dmz_line(self.scroll._cols, active)
+                        ).encode()
+                    )
+                if self.ctx.command_queue is None and self.ctx.active_command is None:
+                    self.stdout.write(
+                        self.editor.render(
+                            self.blessed_term, self.scroll.input_row, self.blessed_term.width
+                        ).encode()
+                    )
+
+        def _on_resize_repaint(self, _rows: int, _cols: int) -> None:
+            """Repaint screen after terminal resize."""
+            if [_rows, _cols] == self._last_resize_size:
+                return
+            self._last_resize_size[:] = [_rows, _cols]
+            bt = _get_term()
+            sr = self.scroll
+            reserve = sr._reserve if sr is not None else _RESERVE_WITH_TOOLBAR
+            self.stdout.write(CURSOR_HIDE.encode())
+            self.stdout.write((bt.clear + bt.home + bt.move_yx(0, 0)).encode())
+            data = self.replay_buf.replay()
+            if data:
+                self.stdout.write(data)
+            self.stdout.write(bt.save.encode())
+            input_row = _rows - reserve
+            for r in range(input_row, _rows):
+                self.stdout.write((bt.move_yx(r, 0) + bt.clear_eol).encode())
+            if sr is not None:
+                dmz = sr.scroll_bottom + 1
+                if dmz < sr.input_row:
+                    self.stdout.write((bt.move_yx(dmz, 0) + _dmz_line(_cols)).encode())
+            cs = self.ctx.cursor_style or _DEFAULT_CURSOR_STYLE
+            self.stdout.write(_CURSOR_STYLES.get(cs, CURSOR_STEADY_BLOCK).encode())
+            self.stdout.write(CURSOR_SHOW.encode())
+            self.editor.max_width = _cols
+
+        def _fire_resize(self) -> None:
+            """Handle resize: update scroll region, NAWS, re-render UI."""
+            assert self.scroll is not None
+            bt = _get_term()
+            new_rows, new_cols = bt.height, bt.width
+            if self.tty_shell.on_resize is not None:
+                self.tty_shell.on_resize(new_rows, new_cols)
+            from .telopt import NAWS
+
+            if (
+                self.telnet_writer.local_option.enabled(NAWS)
+                and not self.telnet_writer.is_closing()
+            ):
+                self.telnet_writer._send_naws()
+            self.stdout.write(CURSOR_HIDE.encode())
+            self.stdout.write(self.editor.render(bt, self.scroll.input_row, bt.width).encode())
+            self.toolbar.render(self.autoreply_engine)
+            cursor_col = self.editor.display.cursor
+            self.stdout.write(bt.move_yx(self.scroll.input_row, cursor_col).encode())
+            self.stdout.write(CURSOR_SHOW.encode())
+
+        def _register_callbacks(self) -> None:
+            """Wire up IAC callbacks, hotkeys, and context hooks."""
+            from .telopt import GA, CMD_EOR
+
+            self.telnet_writer.set_iac_callback(GA, self._on_prompt_signal)
+            self.telnet_writer.set_iac_callback(CMD_EOR, self._on_prompt_signal)
+
+            self.ctx.wait_for_prompt = self._wait_for_prompt
+            self.ctx.echo_command = self._echo_autoreply
+            self.ctx.prompt_ready = self.prompt_ready
+
+            self._refresh_autoreply_engine()
+
+            self.dispatch.register_seq("\x1d", self._reg_close)  # Ctrl+]
+            assert self.scroll is not None
+            scroll = self.scroll
+            replay_buf = self.replay_buf
+            self.dispatch.register_seq(
+                "\x0c", lambda: _repaint_screen(replay_buf, scroll=scroll)
+            )  # Ctrl+L
+
+            self.dispatch.register(
+                "KEY_F1",
+                lambda: _show_help(
+                    self.macro_defs, replay_buf=self.replay_buf, has_gmcp=self._has_gmcp()
+                ),
+            )
+            self.dispatch.register(
+                "KEY_F8", lambda: _launch_tui_editor("macros", self.ctx, self.replay_buf)
+            )
+            self.dispatch.register(
+                "KEY_F9", lambda: _launch_tui_editor("autoreplies", self.ctx, self.replay_buf)
+            )
+            self.dispatch.register("KEY_F21", self._toggle_autoreplies)  # Shift+F9
+
+            self.ctx.on_gmcp_ready = self._register_gmcp_keys
+
+        def _submit_command_queue(
+            self, commands: list[str], chained_task_ref: list[Optional["asyncio.Task[None]"]]
+        ) -> None:
+            """Create a command queue and start chained send."""
+            assert self.scroll is not None
+            scroll = self.scroll
+            q = _CommandQueue(
+                commands,
+                render=lambda: _render_command_queue(self.ctx.command_queue, scroll, self.stdout),
+            )
+            self.ctx.command_queue = q
+            q.render()
+            task = asyncio.ensure_future(
+                _send_chained(commands, self.ctx, self.telnet_writer.log, queue=q)
+            )
+            task.add_done_callback(lambda _f: _clear_command_queue(self.ctx))
+            chained_task_ref[0] = task
+
+        async def _read_server(self) -> None:
+            """Read and display server output until EOF or kludge switch."""
+            from .client_shell import _transform_output, _flush_color_filter
+
+            assert self.scroll is not None
+            scroll = self.scroll
+            bt = self.blessed_term
+            esc_hold = b""
+            rx_dot = self.stoplight.rx
+            while not self.server_done:
+                out = await self.telnet_reader.read(2**24)
+                if not out:
+                    if self.telnet_reader.at_eof():
+                        self.server_done = True
+                        if esc_hold:
+                            self.stdout.write(bt.restore.encode())
+                            self.stdout.write(esc_hold)
+                            self.replay_buf.append(esc_hold)
+                            self.stdout.write(bt.save.encode())
+                        _flush_color_filter(self.telnet_writer, self.stdout)
+                        self.stdout.write(bt.restore.encode())
+                        self.stdout.write(b"\r\nConnection closed by foreign host.\r\n")
+                        return
+                    if self.prompt_pending and self.autoreply_engine is not None:
+                        self.prompt_pending = False
+                        self.autoreply_engine.on_prompt()
+                        self._update_input_style()
+                    continue
+                rx_dot.trigger()
+                if isinstance(out, bytes):
+                    out = out.decode("utf-8", errors="replace")
+                out = _transform_output(out, self.telnet_writer, True)
+                self._refresh_autoreply_engine()
+                if self.autoreply_engine is not None:
+                    self.autoreply_engine.feed(out)
+                    if self.prompt_pending:
+                        self.prompt_pending = False
+                        self.autoreply_engine.on_prompt()
+                if self._dialogs_mod._editor_active:
+                    self._dialogs_mod._editor_buffer.append(out.encode())
+                    continue
+                self.stdout.write(CURSOR_HIDE.encode())
+                self.stdout.write(bt.restore.encode())
+                if self._dialogs_mod._editor_buffer:
+                    for chunk in self._dialogs_mod._editor_buffer:
+                        self.stdout.write(chunk)
+                        self.replay_buf.append(chunk)
+                    self._dialogs_mod._editor_buffer.clear()
+                encoded = esc_hold + out.encode()
+                encoded, esc_hold = _split_incomplete_esc(encoded)
+                if encoded:
+                    self.stdout.write(encoded)
+                    self.replay_buf.append(encoded)
+                self.stdout.write(bt.save.encode())
+                self._update_input_style()
+                self.stdout.write(self.editor.render(bt, scroll.input_row, bt.width).encode())
+                cursor_col = self.editor.display.cursor
+                self.stdout.write(bt.move_yx(scroll.input_row, cursor_col).encode())
+                needs_reflash = self.toolbar.render(self.autoreply_engine)
+                if needs_reflash and not self.toolbar.flash_active:
+                    self.toolbar.flash_active = True
+                    self.toolbar.schedule_flash(self.loop, self.autoreply_engine, self.editor, bt)
+                self.stdout.write(bt.move_yx(scroll.input_row, cursor_col).encode())
+                self.stdout.write(CURSOR_SHOW.encode())
+                if self.telnet_writer.mode == "kludge":
+                    self.mode_switched = True
+                    self.server_done = True
+                    return
+
+        async def _read_input(self) -> None:
+            """Read keyboard input until server done or EOF."""
+            assert self.scroll is not None
+            scroll = self.scroll
+            bt = self.blessed_term
+            tx_dot = self.stoplight.tx
+            self._update_input_style()
+            self.stdout.write(self.editor.render(bt, scroll.input_row, bt.width).encode())
+            chained_task_ref: list[Optional[asyncio.Task[None]]] = [None]
+            with bt.raw(), bt.notify_on_resize():
+                while not self.server_done:
+                    key = await bt.async_inkey(timeout=0.1)
+
+                    if key.name == "RESIZE_EVENT":
+                        self.tty_shell._resize_pending.set()
+                        continue
+
+                    if not key:
+                        if self.tty_shell._resize_pending.is_set():
+                            self.tty_shell._resize_pending.clear()
+                            self._fire_resize()
+                        continue
+
+                    if self.tty_shell._resize_pending.is_set():
+                        self.tty_shell._resize_pending.clear()
+                        self._fire_resize()
+
+                    cq = self.ctx.command_queue
+                    if cq is not None and not cq.cancelled:
+                        cq.cancelled = True
+                        cq.cancel_event.set()
+                        chained = chained_task_ref[0]
+                        if chained is not None and not chained.done():
+                            chained.cancel()
+                        self.ctx.command_queue = None
+                        self.stdout.write(CURSOR_HIDE.encode())
+                        self.stdout.write(
+                            self.editor.render(bt, scroll.input_row, bt.width).encode()
+                        )
+                        cursor_col = self.editor.display.cursor
+                        self.stdout.write(bt.move_yx(scroll.input_row, cursor_col).encode())
+                        self.stdout.write(CURSOR_SHOW.encode())
+                        continue
+
+                    ac = self.ctx.active_command
+                    if ac is not None:
+                        self.ctx.active_command = None
+                        for _wname, wtask in (
+                            ("AUTOWANDER", self.ctx.wander_task),
+                            ("AUTODISCOVER", self.ctx.discover_task),
+                            ("RANDOMWALK", self.ctx.randomwalk_task),
+                        ):
+                            if wtask is not None and not wtask.done():
+                                wtask.cancel()
+                        self._update_input_style()
+
+                    action = self.dispatch.lookup(key)
+                    if action is not None:
+                        result = action()
+                        if asyncio.iscoroutine(result):
+                            await result
+                        self.stdout.write(CURSOR_HIDE.encode())
+                        self._update_input_style()
+                        self.stdout.write(
+                            self.editor.render(bt, scroll.input_row, bt.width).encode()
+                        )
+                        self.toolbar.render(self.autoreply_engine)
+                        cursor_col = self.editor.display.cursor
+                        self.stdout.write(bt.move_yx(scroll.input_row, cursor_col).encode())
+                        self.stdout.write(CURSOR_SHOW.encode())
+                        continue
+
+                    result = self.editor.feed_key(key)
+
+                    if result.eof:
+                        self.server_done = True
+                        self.telnet_writer.close()
+                        return
+
+                    if result.interrupt:
+                        self.stdout.write(CURSOR_HIDE.encode())
+                        self._update_input_style()
+                        self.stdout.write(
+                            self.editor.render(bt, scroll.input_row, bt.width).encode()
+                        )
+                        cursor_col = self.editor.display.cursor
+                        self.stdout.write(bt.move_yx(scroll.input_row, cursor_col).encode())
+                        self.stdout.write(CURSOR_SHOW.encode())
+                        continue
+
+                    if result.line is not None:
+                        line = result.line
+
+                        if self.history_file and not self.telnet_writer.will_echo:
+                            _save_history_entry(line, self.history_file)
+
+                        is_pw = self.telnet_writer.will_echo
+                        echo = "*" * len(line) if is_pw else line
+                        self.stdout.write(bt.restore.encode())
+                        colored = f"{bt.yellow}{echo}{bt.normal}\r\n"
+                        self.stdout.write(colored.encode())
+                        self.replay_buf.append(colored.encode())
+                        self.stdout.write(bt.save.encode())
+
+                        if self.ga_detected:
+                            try:
+                                await asyncio.wait_for(self.prompt_ready.wait(), timeout=2.0)
+                            except asyncio.TimeoutError:
+                                pass
+
+                        if self.autoreply_engine is not None:
+                            self.autoreply_engine.cancel()
+                        wander_task = self.ctx.wander_task
+                        if wander_task is not None and not wander_task.done():
+                            wander_task.cancel()
+                        disc_task = self.ctx.discover_task
+                        if disc_task is not None and not disc_task.done():
+                            disc_task.cancel()
+                        rw_task = self.ctx.randomwalk_task
+                        if rw_task is not None and not rw_task.done():
+                            rw_task.cancel()
+
+                        parts = expand_commands(line)
+                        if parts and _TRAVEL_RE.match(parts[0]):
+                            remainder = await _handle_travel_commands(
+                                parts, self.ctx, self.telnet_writer.log
+                            )
+                            if remainder:
+                                tx_dot.trigger()
+                                self.telnet_writer.write(
+                                    remainder[0] + "\r\n"  # type: ignore[arg-type]
+                                )
+                                if self.ga_detected:
+                                    self.prompt_ready.clear()
+                                if len(remainder) > 1:
+                                    self._submit_command_queue(remainder, chained_task_ref)
+                        elif parts:
+                            tx_dot.trigger()
+                            self.telnet_writer.write(parts[0] + "\r\n")  # type: ignore[arg-type]
+                            if self.ga_detected:
+                                self.prompt_ready.clear()
+                            if len(parts) > 1:
+                                self._submit_command_queue(parts, chained_task_ref)
+                        else:
+                            tx_dot.trigger()
+                            self.telnet_writer.write("\r\n")  # type: ignore[arg-type]
+
+                    if result.changed:
+                        self.stdout.write(CURSOR_HIDE.encode())
+                        cq2 = self.ctx.command_queue
+                        ac2 = self.ctx.active_command
+                        if cq2 is not None:
+                            _render_command_queue(cq2, scroll, self.stdout)
+                        elif ac2 is not None:
+                            _render_active_command(ac2, scroll, self.stdout)
+                        else:
+                            self._update_input_style()
+                            self.stdout.write(
+                                self.editor.render(bt, scroll.input_row, bt.width).encode()
+                            )
+                        needs_reflash = self.toolbar.render(self.autoreply_engine)
+                        if needs_reflash and not self.toolbar.flash_active:
+                            self.toolbar.flash_active = True
+                            self.toolbar.schedule_flash(
+                                self.loop, self.autoreply_engine, self.editor, bt
+                            )
+                        cursor_col = self.editor.display.cursor
+                        self.stdout.write(bt.move_yx(scroll.input_row, cursor_col).encode())
+                        self.stdout.write(CURSOR_SHOW.encode())
+
+        def _cleanup(self) -> None:
+            """Cancel autoreply engine, restore cursor, clear kludge DMZ."""
+            if self.autoreply_engine is not None:
+                self.autoreply_engine.cancel()
+            self.stdout.write(CURSOR_DEFAULT.encode())
+            if self.mode_switched:
+                assert self.scroll is not None
+                dmz_row = self.scroll.scroll_bottom + 1
+                self.stdout.write(self.blessed_term.save.encode())
+                self.stdout.write(self.blessed_term.move_yx(dmz_row, 0).encode())
+                self.stdout.write(self.blessed_term.normal.encode())
+                self.stdout.write(self.blessed_term.clear_eos.encode())
+                self.stdout.write(self.blessed_term.restore.encode())
+
+        async def run(self) -> bool:
+            """
+            Run the REPL event loop.
+
+            :returns: ``True`` if the server switched to kludge mode,
+                ``False`` if the connection closed normally.
+            """
+            self._init_terminal()
+            self._init_editor()
+            self._init_ui()
+
+            async with _repl_scaffold(
+                self.telnet_writer,
+                self.tty_shell,
+                self.stdout,
+                reserve_bottom=_RESERVE_INITIAL,
+                on_resize=self._on_resize_repaint,
+            ) as (scroll, _):
+                self.scroll = scroll
+                self.blessed_term = _get_term()
+                self.toolbar = ToolbarRenderer(
+                    ctx=self.ctx,
+                    scroll=scroll,
+                    out=self.stdout,
+                    stoplight=self.stoplight,
+                    rprompt_text=self.conn_info,
+                )
+
+                if self.banner_lines:
+                    for bl in self.banner_lines:
+                        self.stdout.write(f"{bl}\r\n".encode())
+
+                self.stdout.write(self.blessed_term.save.encode())
+                cs = self.ctx.cursor_style or _DEFAULT_CURSOR_STYLE
+                self.stdout.write(_CURSOR_STYLES.get(cs, CURSOR_STEADY_BLOCK).encode())
+
+                self._register_callbacks()
+
+                try:
+                    await _run_repl_tasks(self._read_server(), self._read_input())
+                finally:
+                    self._cleanup()
+
+            return self.mode_switched
+
     async def repl_event_loop(
         telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
         telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
@@ -691,12 +1416,12 @@ if sys.platform != "win32":
         history and auto-suggest.
 
         :param tty_shell: ``Terminal`` instance from ``client_shell``.
-        :param banner_lines: Lines to display after the scroll region is active.
+        :param banner_lines: Lines to display after scroll region is active.
         :returns: ``True`` if the server switched to kludge mode
             (caller should fall through to the standard event loop),
             ``False`` if the connection closed normally.
         """
-        return await _repl_event_loop(
+        session = ReplSession(
             telnet_reader,
             telnet_writer,
             tty_shell,
@@ -704,633 +1429,4 @@ if sys.platform != "win32":
             history_file=history_file,
             banner_lines=banner_lines,
         )
-
-    async def _repl_event_loop(
-        telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
-        telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
-        tty_shell: "client_shell.Terminal",
-        stdout: asyncio.StreamWriter,
-        history_file: Optional[str] = None,
-        banner_lines: Optional[List[str]] = None,
-    ) -> bool:
-        """Unified REPL event loop using blessed LineEditor + async_inkey."""
-        import blessed  # pylint: disable=import-outside-toplevel
-        import blessed.line_editor  # pylint: disable=import-outside-toplevel,no-name-in-module
-
-        import telnetlib3.client_repl_dialogs as _dialogs_mod
-        from .client_shell import _transform_output, _flush_color_filter
-
-        mode_switched = False
-        loop = asyncio.get_event_loop()
-
-        ctx: SessionContext = telnet_writer._ctx
-        session_key = ctx.session_key
-        is_ssl = telnet_writer.get_extra_info("ssl_object") is not None
-        conn_info = session_key + (" SSL" if is_ssl else "")
-        blessed_term = _get_term()
-        _make_styles()
-
-        replay_buf = OutputRingBuffer()
-
-        history = blessed.line_editor.LineHistory()  # pylint: disable=no-member
-        if history_file:
-            _load_history(history, history_file)
-
-        term_cols = blessed_term.width
-        editor = blessed.line_editor.LineEditor(  # pylint: disable=no-member
-            history=history,
-            password=bool(telnet_writer.will_echo),
-            max_width=term_cols,
-            **_STYLE_NORMAL,
-        )
-
-        stoplight = Stoplight.create()
-        ctx.tx_dot = stoplight.tx
-        ctx.cx_dot = stoplight.cx
-        ctx.rx_dot = stoplight.rx
-        toolbar_state: dict[str, Any] = {"rprompt_text": conn_info, "stoplight": stoplight}
-
-        dispatch = _KeyDispatch()
-        macro_defs = ctx.macro_defs or None
-        if macro_defs is not None:
-            dispatch.set_macros(macro_defs, ctx, telnet_writer.log)
-        ctx.key_dispatch = dispatch
-
-        _last_resize_size: list[int] = [0, 0]
-
-        def _on_resize_repaint(_rows: int, _cols: int) -> None:
-            if [_rows, _cols] == _last_resize_size:
-                return
-            _last_resize_size[:] = [_rows, _cols]
-            blessed_term = _get_term()
-            sr = _scroll_ref[0]
-            reserve = sr._reserve if sr is not None else _RESERVE_WITH_TOOLBAR
-            stdout.write(CURSOR_HIDE.encode())
-            stdout.write((blessed_term.clear + blessed_term.home + blessed_term.move_yx(0, 0)).encode())
-            data = replay_buf.replay()
-            if data:
-                stdout.write(data)
-            stdout.write(blessed_term.save.encode())
-            input_row = _rows - reserve
-            for r in range(input_row, _rows):
-                stdout.write((blessed_term.move_yx(r, 0) + blessed_term.clear_eol).encode())
-            if sr is not None:
-                dmz = sr.scroll_bottom + 1
-                if dmz < sr.input_row:
-                    stdout.write((blessed_term.move_yx(dmz, 0) + _dmz_line(_cols)).encode())
-            cs = ctx.cursor_style or _DEFAULT_CURSOR_STYLE
-            stdout.write(_CURSOR_STYLES.get(cs, CURSOR_STEADY_BLOCK).encode())
-            stdout.write(CURSOR_SHOW.encode())
-            editor.max_width = _cols
-
-        _scroll_ref: list[Any] = [None]
-
-        async with _repl_scaffold(
-            telnet_writer,
-            tty_shell,
-            stdout,
-            reserve_bottom=_RESERVE_INITIAL,
-            on_resize=_on_resize_repaint,
-        ) as (scroll, _):
-            _scroll_ref[0] = scroll
-            blessed_term = _get_term()
-
-            if banner_lines:
-                for bl in banner_lines:
-                    stdout.write(f"{bl}\r\n".encode())
-
-            stdout.write(blessed_term.save.encode())
-            cursor_style_name = ctx.cursor_style or _DEFAULT_CURSOR_STYLE
-            cursor_seq = _CURSOR_STYLES.get(cursor_style_name, CURSOR_STEADY_BLOCK)
-            stdout.write(cursor_seq.encode())
-
-            def _echo_autoreply(cmd: str) -> None:
-                stdout.write(blessed_term.restore.encode())
-                colored = f"{blessed_term.cyan}{cmd}{blessed_term.normal}\r\n"
-                stdout.write(colored.encode())
-                replay_buf.append(colored.encode())
-                stdout.write(blessed_term.save.encode())
-                cursor_col = editor.display.cursor
-                stdout.write(blessed_term.move_yx(scroll.input_row, cursor_col).encode())
-
-            def _insert_into_prompt(text: str) -> None:
-                editor.insert_text(text)
-
-            prompt_ready = asyncio.Event()
-            prompt_ready.set()
-            ga_detected = False
-            prompt_pending = False
-
-            def _on_prompt_signal(_cmd: bytes) -> None:
-                nonlocal ga_detected, prompt_pending
-                ga_detected = True
-                prompt_ready.set()
-                prompt_pending = True
-                telnet_reader._wakeup_waiter()
-
-            from .telopt import GA, CMD_EOR
-
-            telnet_writer.set_iac_callback(GA, _on_prompt_signal)
-            telnet_writer.set_iac_callback(CMD_EOR, _on_prompt_signal)
-
-            async def _wait_for_prompt() -> None:
-                if not ga_detected:
-                    return
-                try:
-                    await asyncio.wait_for(prompt_ready.wait(), timeout=2.0)
-                except asyncio.TimeoutError:
-                    pass
-                prompt_ready.clear()
-
-            ctx.wait_for_prompt = _wait_for_prompt
-            ctx.echo_command = _echo_autoreply
-            ctx.prompt_ready = prompt_ready
-
-            autoreply_engine: Optional["AutoreplyEngine"] = None
-            ar_rules_ref: object = None
-
-            def _refresh_autoreply_engine() -> None:
-                nonlocal autoreply_engine, ar_rules_ref
-                cur_rules = ctx.autoreply_rules or None
-                if cur_rules is ar_rules_ref:
-                    return
-                ar_rules_ref = cur_rules
-                prev_suppress = (
-                    autoreply_engine.suppress_exclusive if autoreply_engine is not None else False
-                )
-                if autoreply_engine is not None:
-                    autoreply_engine.cancel()
-                    autoreply_engine = None
-                if cur_rules:
-                    from .autoreply import AutoreplyEngine
-
-                    autoreply_engine = AutoreplyEngine(
-                        cur_rules,
-                        ctx,
-                        telnet_writer.log,
-                        insert_fn=_insert_into_prompt,
-                        echo_fn=_echo_autoreply,
-                        wait_fn=_wait_for_prompt,
-                    )
-                    autoreply_engine.suppress_exclusive = prev_suppress
-                ctx.autoreply_engine = autoreply_engine
-
-            _refresh_autoreply_engine()
-
-            server_done = False
-
-            # Register builtin hotkeys.
-            def _reg_close() -> None:
-                nonlocal server_done
-                server_done = True
-                telnet_writer.close()
-
-            dispatch.register_seq("\x1d", _reg_close)  # Ctrl+]
-            dispatch.register_seq(
-                "\x0c", lambda: _repaint_screen(replay_buf, scroll=scroll)
-            )  # Ctrl+L
-
-            gmcp_keys_registered = False
-
-            def _has_gmcp() -> bool:
-                return bool(ctx.gmcp_data)
-
-            dispatch.register(
-                "KEY_F1",
-                lambda: _show_help(macro_defs, replay_buf=replay_buf, has_gmcp=_has_gmcp()),
-            )
-            dispatch.register("KEY_F8", lambda: _launch_tui_editor("macros", ctx, replay_buf))
-            dispatch.register("KEY_F9", lambda: _launch_tui_editor("autoreplies", ctx, replay_buf))
-
-            def _toggle_autoreplies() -> None:
-                if autoreply_engine is None:
-                    return
-                autoreply_engine.enabled = not autoreply_engine.enabled
-                state = "ON" if autoreply_engine.enabled else "OFF"
-                _echo_autoreply(f"AUTOREPLIES {state}")
-
-            dispatch.register("KEY_F21", _toggle_autoreplies)  # Shift+F9
-
-            def _discover_mode() -> None:
-                if ctx.discover_active:
-                    task = ctx.discover_task
-                    if task is not None:
-                        task.cancel()
-                    return
-                from .rooms import load_prefs, save_prefs
-
-                skey = ctx.session_key
-                prefs = load_prefs(skey) if skey else {}
-                if not prefs.get("skip_autodiscover_confirm"):
-                    ok, dont_ask = _confirm_dialog(
-                        "Autodiscover",
-                        "Autodiscover explores exits from nearby rooms "
-                        "that lead to unvisited places. It will travel "
-                        "to each frontier exit, check the room, then "
-                        "return before trying the next branch.",
-                        warning=(
-                            "WARNING: This can lead to dangerous areas, "
-                            "death traps, or aggressive monsters! Your "
-                            "character may die. Use with caution."
-                        ),
-                        replay_buf=replay_buf,
-                    )
-                    if not ok:
-                        return
-                    if dont_ask and skey:
-                        prefs["skip_autodiscover_confirm"] = True
-                        save_prefs(skey, prefs)
-                t = asyncio.ensure_future(_autodiscover(ctx, telnet_writer.log))
-                ctx.discover_task = t
-
-            def _wander_mode() -> None:
-                if ctx.wander_active:
-                    task = ctx.wander_task
-                    if task is not None:
-                        task.cancel()
-                    return
-                from .rooms import load_prefs, save_prefs
-
-                skey = ctx.session_key
-                prefs = load_prefs(skey) if skey else {}
-                if not prefs.get("skip_autowander_confirm"):
-                    ok, dont_ask = _confirm_dialog(
-                        "Autowander",
-                        "Autowander visits all rooms with the same "
-                        "name as the current room using slow travel. "
-                        "Autoreplies fire in each room visited. The "
-                        "route is optimised to minimise backtracking.",
-                        replay_buf=replay_buf,
-                    )
-                    if not ok:
-                        return
-                    if dont_ask and skey:
-                        prefs["skip_autowander_confirm"] = True
-                        save_prefs(skey, prefs)
-                task = asyncio.ensure_future(_autowander(ctx, telnet_writer.log))
-                ctx.wander_task = task
-
-            def _randomwalk_mode() -> None:
-                if ctx.randomwalk_active:
-                    task = ctx.randomwalk_task
-                    if task is not None:
-                        task.cancel()
-                    return
-                from .rooms import load_prefs, save_prefs
-
-                skey = ctx.session_key
-                prefs = load_prefs(skey) if skey else {}
-                if not prefs.get("skip_randomwalk_confirm"):
-                    ok, dont_ask = _confirm_dialog(
-                        "Random Walk",
-                        "Random walk explores rooms by picking "
-                        "random exits, preferring unvisited rooms. "
-                        "It never returns through the entrance you "
-                        "came from. Autoreplies fire in each room. "
-                        "Stops when all reachable rooms are visited.",
-                        replay_buf=replay_buf,
-                    )
-                    if not ok:
-                        return
-                    if dont_ask and skey:
-                        prefs["skip_randomwalk_confirm"] = True
-                        save_prefs(skey, prefs)
-                task = asyncio.ensure_future(_randomwalk(ctx, telnet_writer.log))
-                ctx.randomwalk_task = task
-
-            def _register_gmcp_keys() -> None:
-                nonlocal gmcp_keys_registered
-                if gmcp_keys_registered:
-                    return
-                gmcp_keys_registered = True
-                dispatch.register("KEY_F3", _randomwalk_mode)
-                dispatch.register("KEY_F4", _discover_mode)
-                dispatch.register("KEY_F5", _wander_mode)
-                dispatch.register("KEY_F7", lambda: _launch_room_browser(ctx, replay_buf))
-
-            ctx.on_gmcp_ready = _register_gmcp_keys
-
-            _last_input_style: list[Optional[dict[str, str]]] = [None]
-
-            def _update_input_style() -> None:
-                editor.set_password_mode(bool(telnet_writer.will_echo))
-                engine = autoreply_engine
-                ar_active = engine is not None and (engine.exclusive_active or engine.reply_pending)
-                wander = ctx.wander_active
-                disc = ctx.discover_active
-                rwalk = ctx.randomwalk_active
-                style = (
-                    _STYLE_AUTOREPLY if (wander or disc or rwalk or ar_active) else _STYLE_NORMAL
-                )
-                changed = _last_input_style[0] is not style
-                _last_input_style[0] = style
-                for attr, val in style.items():
-                    setattr(editor, attr, val)
-                if changed:
-                    active = style is _STYLE_AUTOREPLY
-                    dmz_row = scroll.scroll_bottom + 1
-                    if dmz_row < scroll.input_row:
-                        stdout.write(
-                            (blessed_term.move_yx(dmz_row, 0) + _dmz_line(scroll._cols, active)).encode()
-                        )
-                    if ctx.command_queue is None and ctx.active_command is None:
-                        stdout.write(editor.render(blessed_term, scroll.input_row, blessed_term.width).encode())
-
-            rx_dot = stoplight.rx
-            tx_dot = stoplight.tx
-
-            async def _read_server() -> None:
-                nonlocal server_done, mode_switched, prompt_pending
-                esc_hold = b""
-                while not server_done:
-                    out = await telnet_reader.read(2**24)
-                    if not out:
-                        if telnet_reader.at_eof():
-                            server_done = True
-                            if esc_hold:
-                                stdout.write(blessed_term.restore.encode())
-                                stdout.write(esc_hold)
-                                replay_buf.append(esc_hold)
-                                stdout.write(blessed_term.save.encode())
-                            _flush_color_filter(telnet_writer, stdout)
-                            stdout.write(blessed_term.restore.encode())
-                            stdout.write(b"\r\nConnection closed by foreign host.\r\n")
-                            return
-                        if prompt_pending and autoreply_engine is not None:
-                            prompt_pending = False
-                            autoreply_engine.on_prompt()
-                            _update_input_style()
-                        continue
-                    rx_dot.trigger()
-                    if isinstance(out, bytes):
-                        out = out.decode("utf-8", errors="replace")
-                    out = _transform_output(out, telnet_writer, True)
-                    _refresh_autoreply_engine()
-                    if autoreply_engine is not None:
-                        autoreply_engine.feed(out)
-                        if prompt_pending:
-                            prompt_pending = False
-                            autoreply_engine.on_prompt()
-                    if _dialogs_mod._editor_active:
-                        _dialogs_mod._editor_buffer.append(out.encode())
-                        continue
-                    stdout.write(CURSOR_HIDE.encode())
-                    stdout.write(blessed_term.restore.encode())
-                    if _dialogs_mod._editor_buffer:
-                        for chunk in _dialogs_mod._editor_buffer:
-                            stdout.write(chunk)
-                            replay_buf.append(chunk)
-                        _dialogs_mod._editor_buffer.clear()
-                    encoded = esc_hold + out.encode()
-                    encoded, esc_hold = _split_incomplete_esc(encoded)
-                    if encoded:
-                        stdout.write(encoded)
-                        replay_buf.append(encoded)
-                    stdout.write(blessed_term.save.encode())
-                    _update_input_style()
-                    stdout.write(editor.render(blessed_term, scroll.input_row, blessed_term.width).encode())
-                    cursor_col = editor.display.cursor
-                    stdout.write(blessed_term.move_yx(scroll.input_row, cursor_col).encode())
-                    needs_reflash = _render_toolbar(
-                        ctx, scroll, stdout, autoreply_engine, toolbar_state
-                    )
-                    if needs_reflash and not toolbar_state.get("_flash_active"):
-                        toolbar_state["_flash_active"] = True
-                        _schedule_flash_frame(
-                            loop, ctx, scroll, stdout, autoreply_engine, toolbar_state, editor, blessed_term
-                        )
-                    stdout.write(blessed_term.move_yx(scroll.input_row, cursor_col).encode())
-                    stdout.write(CURSOR_SHOW.encode())
-                    if telnet_writer.mode == "kludge":
-                        mode_switched = True
-                        server_done = True
-                        return
-
-            def _fire_resize() -> None:
-                blessed_term = _get_term()
-                new_rows, new_cols = blessed_term.height, blessed_term.width
-                if tty_shell.on_resize is not None:
-                    tty_shell.on_resize(new_rows, new_cols)
-                from .telopt import NAWS
-
-                if telnet_writer.local_option.enabled(NAWS) and not telnet_writer.is_closing():
-                    telnet_writer._send_naws()
-                stdout.write(CURSOR_HIDE.encode())
-                stdout.write(editor.render(blessed_term, scroll.input_row, blessed_term.width).encode())
-                _render_toolbar(ctx, scroll, stdout, autoreply_engine, toolbar_state)
-                cursor_col = editor.display.cursor
-                stdout.write(blessed_term.move_yx(scroll.input_row, cursor_col).encode())
-                stdout.write(CURSOR_SHOW.encode())
-
-            async def _read_input() -> None:
-                nonlocal server_done
-                _update_input_style()
-                stdout.write(editor.render(blessed_term, scroll.input_row, blessed_term.width).encode())
-                chained_task: Optional[asyncio.Task[None]] = None
-                with blessed_term.raw(), blessed_term.notify_on_resize():
-                    while not server_done:
-                        key = await blessed_term.async_inkey(timeout=0.1)
-
-                        if key.name == "RESIZE_EVENT":
-                            tty_shell._resize_pending.set()
-                            continue
-
-                        if not key:
-                            if tty_shell._resize_pending.is_set():
-                                tty_shell._resize_pending.clear()
-                                _fire_resize()
-                            continue
-
-                        if tty_shell._resize_pending.is_set():
-                            tty_shell._resize_pending.clear()
-                            _fire_resize()
-
-                        # Cancel active command queue on any keypress.
-                        cq = ctx.command_queue
-                        if cq is not None and not cq.cancelled:
-                            cq.cancelled = True
-                            cq.cancel_event.set()
-                            if chained_task is not None and not chained_task.done():
-                                chained_task.cancel()
-                            ctx.command_queue = None
-                            stdout.write(CURSOR_HIDE.encode())
-                            stdout.write(editor.render(blessed_term, scroll.input_row, blessed_term.width).encode())
-                            cursor_col = editor.display.cursor
-                            stdout.write(blessed_term.move_yx(scroll.input_row, cursor_col).encode())
-                            stdout.write(CURSOR_SHOW.encode())
-                            continue
-
-                        # Cancel active walk command on any keypress, then
-                        # fall through so the keystroke is still processed.
-                        ac = ctx.active_command
-                        if ac is not None:
-                            ctx.active_command = None
-                            for _wname, wtask in (
-                                ("AUTOWANDER", ctx.wander_task),
-                                ("AUTODISCOVER", ctx.discover_task),
-                                ("RANDOMWALK", ctx.randomwalk_task),
-                            ):
-                                if wtask is not None and not wtask.done():
-                                    wtask.cancel()
-                            _update_input_style()
-
-                        action = dispatch.lookup(key)
-                        if action is not None:
-                            result = action()
-                            if asyncio.iscoroutine(result):
-                                await result
-                            stdout.write(CURSOR_HIDE.encode())
-                            _update_input_style()
-                            stdout.write(editor.render(blessed_term, scroll.input_row, blessed_term.width).encode())
-                            _render_toolbar(ctx, scroll, stdout, autoreply_engine, toolbar_state)
-                            cursor_col = editor.display.cursor
-                            stdout.write(blessed_term.move_yx(scroll.input_row, cursor_col).encode())
-                            stdout.write(CURSOR_SHOW.encode())
-                            continue
-
-                        result = editor.feed_key(key)
-
-                        if result.eof:
-                            server_done = True
-                            telnet_writer.close()
-                            return
-
-                        if result.interrupt:
-                            stdout.write(CURSOR_HIDE.encode())
-                            _update_input_style()
-                            stdout.write(editor.render(blessed_term, scroll.input_row, blessed_term.width).encode())
-                            cursor_col = editor.display.cursor
-                            stdout.write(blessed_term.move_yx(scroll.input_row, cursor_col).encode())
-                            stdout.write(CURSOR_SHOW.encode())
-                            continue
-
-                        if result.line is not None:
-                            line = result.line
-
-                            if history_file and not telnet_writer.will_echo:
-                                _save_history_entry(line, history_file)
-
-                            is_pw = telnet_writer.will_echo
-                            echo = "*" * len(line) if is_pw else line
-                            stdout.write(blessed_term.restore.encode())
-                            colored = f"{blessed_term.yellow}{echo}{blessed_term.normal}\r\n"
-                            stdout.write(colored.encode())
-                            replay_buf.append(colored.encode())
-                            stdout.write(blessed_term.save.encode())
-
-                            if ga_detected:
-                                try:
-                                    await asyncio.wait_for(prompt_ready.wait(), timeout=2.0)
-                                except asyncio.TimeoutError:
-                                    pass
-
-                            if autoreply_engine is not None:
-                                autoreply_engine.cancel()
-                            wander_task = ctx.wander_task
-                            if wander_task is not None and not wander_task.done():
-                                wander_task.cancel()
-                            disc_task = ctx.discover_task
-                            if disc_task is not None and not disc_task.done():
-                                disc_task.cancel()
-                            rw_task = ctx.randomwalk_task
-                            if rw_task is not None and not rw_task.done():
-                                rw_task.cancel()
-
-                            parts = expand_commands(line)
-                            if parts and _TRAVEL_RE.match(parts[0]):
-                                remainder = await _handle_travel_commands(
-                                    parts, ctx, telnet_writer.log
-                                )
-                                if remainder:
-                                    tx_dot.trigger()
-                                    telnet_writer.write(
-                                        remainder[0] + "\r\n"  # type: ignore[arg-type]
-                                    )
-                                    if ga_detected:
-                                        prompt_ready.clear()
-                                    if len(remainder) > 1:
-                                        q = _CommandQueue(
-                                            remainder,
-                                            render=lambda: _render_command_queue(
-                                                ctx.command_queue, scroll, stdout
-                                            ),
-                                        )
-                                        ctx.command_queue = q
-                                        q.render()
-                                        chained_task = asyncio.ensure_future(
-                                            _send_chained(
-                                                remainder, ctx, telnet_writer.log, queue=q
-                                            )
-                                        )
-                                        chained_task.add_done_callback(
-                                            lambda _f: _clear_command_queue(ctx)
-                                        )
-                            elif parts:
-                                tx_dot.trigger()
-                                telnet_writer.write(parts[0] + "\r\n")  # type: ignore[arg-type]
-                                if ga_detected:
-                                    prompt_ready.clear()
-                                if len(parts) > 1:
-                                    q = _CommandQueue(
-                                        parts,
-                                        render=lambda: _render_command_queue(
-                                            ctx.command_queue, scroll, stdout
-                                        ),
-                                    )
-                                    ctx.command_queue = q
-                                    q.render()
-                                    chained_task = asyncio.ensure_future(
-                                        _send_chained(parts, ctx, telnet_writer.log, queue=q)
-                                    )
-                                    chained_task.add_done_callback(
-                                        lambda _f: _clear_command_queue(ctx)
-                                    )
-                            else:
-                                tx_dot.trigger()
-                                telnet_writer.write("\r\n")  # type: ignore[arg-type]
-
-                        if result.changed:
-                            stdout.write(CURSOR_HIDE.encode())
-                            cq2 = ctx.command_queue
-                            ac2 = ctx.active_command
-                            if cq2 is not None:
-                                _render_command_queue(cq2, scroll, stdout)
-                            elif ac2 is not None:
-                                _render_active_command(ac2, scroll, stdout)
-                            else:
-                                _update_input_style()
-                                stdout.write(editor.render(blessed_term, scroll.input_row, blessed_term.width).encode())
-                            needs_reflash = _render_toolbar(
-                                ctx, scroll, stdout, autoreply_engine, toolbar_state
-                            )
-                            if needs_reflash and not toolbar_state.get("_flash_active"):
-                                toolbar_state["_flash_active"] = True
-                                _schedule_flash_frame(
-                                    loop,
-                                    ctx,
-                                    scroll,
-                                    stdout,
-                                    autoreply_engine,
-                                    toolbar_state,
-                                    editor,
-                                    blessed_term,
-                                )
-                            cursor_col = editor.display.cursor
-                            stdout.write(blessed_term.move_yx(scroll.input_row, cursor_col).encode())
-                            stdout.write(CURSOR_SHOW.encode())
-
-            try:
-                await _run_repl_tasks(_read_server(), _read_input())
-            finally:
-                if autoreply_engine is not None:
-                    autoreply_engine.cancel()
-                stdout.write(CURSOR_DEFAULT.encode())
-                if mode_switched:
-                    dmz_row = scroll.scroll_bottom + 1
-                    stdout.write(blessed_term.save.encode())
-                    stdout.write(blessed_term.move_yx(dmz_row, 0).encode())
-                    stdout.write(blessed_term.normal.encode())
-                    stdout.write(blessed_term.clear_eos.encode())
-                    stdout.write(blessed_term.restore.encode())
-
-        return mode_switched
+        return await session.run()
