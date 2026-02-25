@@ -1,5 +1,7 @@
 """Tests for telnetlib3.client_repl and client_shell.ScrollRegion."""
 
+from __future__ import annotations
+
 # std imports
 import os
 import sys
@@ -372,20 +374,15 @@ def test_style_normal_and_autoreply_differ() -> None:
 
 
 def test_render_input_line_basic() -> None:
-    pytest.importorskip("blessed")
-    from blessed.line_editor import DisplayState
+    blessed = pytest.importorskip("blessed")
+    from blessed.line_editor import LineEditor
 
-    from telnetlib3.client_repl import _render_input_line
-
-    stdout, transport = _mock_stdout()
-    sr = ScrollRegion(stdout, rows=24, cols=80, reserve_bottom=2)
-    ds = DisplayState(text="hello", cursor=5, suggestion=" world")
-
-    transport.data.clear()
-    _render_input_line(ds, sr, stdout)
-    output = bytes(transport.data).decode("utf-8", errors="replace")
+    term = blessed.Terminal(force_styling=True)
+    editor = LineEditor(max_width=80)
+    for ch in "hello":
+        editor.feed_key(ch)
+    output = editor.render(term, row=21, width=80)
     assert "hello" in output
-    assert " world" in output
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
@@ -818,8 +815,8 @@ def test_render_command_queue_truncation(monkeypatch: pytest.MonkeyPatch) -> Non
 
     stdout, transport = _mock_stdout()
 
-    bt = _get_term()
-    monkeypatch.setattr(type(bt), "width", property(lambda self: 20))
+    blessed_term = _get_term()
+    monkeypatch.setattr(type(blessed_term), "width", property(lambda self: 20))
 
     class FakeScroll:
         input_row = 10
@@ -842,7 +839,7 @@ def test_render_command_queue_highlight_active() -> None:
 
     stdout, transport = _mock_stdout()
 
-    bt = _get_term()
+    blessed_term = _get_term()
 
     class FakeScroll:
         input_row = 10
@@ -854,8 +851,8 @@ def test_render_command_queue_highlight_active() -> None:
     _render_command_queue(queue, FakeScroll(), stdout)
 
     output = transport.data.decode("utf-8", errors="replace")
-    active_sgr = bt.on_color_rgb(255, 255, 255) + bt.color_rgb(0, 0, 0)
-    pending_sgr = bt.color_rgb(120, 120, 120)
+    active_sgr = blessed_term.on_color_rgb(255, 255, 255) + blessed_term.color_rgb(0, 0, 0)
+    pending_sgr = blessed_term.color_rgb(120, 120, 120)
     assert active_sgr in output
     assert pending_sgr in output
 

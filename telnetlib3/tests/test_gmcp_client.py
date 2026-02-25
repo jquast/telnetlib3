@@ -243,40 +243,40 @@ def test_transform_args_gmcp_modules_none():
     assert result["gmcp_modules"] is None
 
 
-_blessed_available = sys.platform != "win32"
-try:
-    from telnetlib3.client_repl import _segmented, _vital_bar
-except ModuleNotFoundError:
-    _blessed_available = False
+if sys.platform != "win32":
 
+    def test_vital_bar_shows_vitals():
+        pytest.importorskip("blessed")
+        from telnetlib3.client_repl import _segmented, _vital_bar
 
-@pytest.mark.skipif(not _blessed_available, reason="requires blessed + POSIX")
-def test_vital_bar_shows_vitals():
-    bars = _vital_bar(100, 200, 16, "hp")
-    text = "".join(t for _, t in bars)
-    assert _segmented("100/200") in text
-    assert _segmented("50%") in text
+        bars = _vital_bar(100, 200, 16, "hp")
+        text = "".join(t for _, t in bars)
+        assert _segmented("100/200") in text
+        assert _segmented("50%") in text
 
+    def test_vital_bar_hp_only():
+        pytest.importorskip("blessed")
+        from telnetlib3.client_repl import _segmented, _vital_bar
 
-@pytest.mark.skipif(not _blessed_available, reason="requires blessed + POSIX")
-def test_vital_bar_hp_only():
-    bars = _vital_bar(50, None, 16, "hp")
-    text = "".join(t for _, t in bars)
-    assert _segmented("50") in text
-    assert "hp" in text
+        bars = _vital_bar(50, None, 16, "hp")
+        text = "".join(t for _, t in bars)
+        assert _segmented("50") in text
+        assert "hp" in text
 
+    def test_vital_bar_full():
+        pytest.importorskip("blessed")
+        from telnetlib3.client_repl import _segmented, _vital_bar
 
-@pytest.mark.skipif(not _blessed_available, reason="requires blessed + POSIX")
-def test_vital_bar_full():
-    bars = _vital_bar(100, 100, 16, "hp")
-    text = "".join(t for _, t in bars)
-    assert _segmented("100/100") in text
-    assert _segmented("100%") in text
+        bars = _vital_bar(100, 100, 16, "hp")
+        text = "".join(t for _, t in bars)
+        assert _segmented("100/100") in text
+        assert _segmented("100%") in text
 
+    def test_vital_bar_returns_sgr():
+        pytest.importorskip("blessed")
+        from telnetlib3.client_repl import _segmented, _vital_bar
 
-@pytest.mark.skipif(not _blessed_available, reason="requires blessed + POSIX")
-def test_vital_bar_returns_sgr():
-    bars = _vital_bar(50, 100, 16, "mp")
-    for sgr, _text in bars:
-        assert not sgr.startswith("fg:#")
-        assert not sgr.startswith("bg:#")
+        bars = _vital_bar(50, 100, 16, "mp")
+        for sgr, _text in bars:
+            assert not sgr.startswith("fg:#")
+            assert not sgr.startswith("bg:#")

@@ -99,15 +99,15 @@ def _collapse_runs(commands: list[str], start: int = 0) -> list[tuple[str, int, 
 
 def _render_active_command(command: str, scroll: "Any", out: "asyncio.StreamWriter") -> None:
     """Render a single highlighted active command on the input row."""
-    bt = _get_term()
-    cols = bt.width
-    active_sgr = bt.on_color_rgb(255, 255, 255) + bt.color_rgb(0, 0, 0)
-    normal = bt.normal
+    blessed_term = _get_term()
+    cols = blessed_term.width
+    active_sgr = blessed_term.on_color_rgb(255, 255, 255) + blessed_term.color_rgb(0, 0, 0)
+    normal = blessed_term.normal
 
     text = command[: cols - 1] if _wcswidth(command) >= cols else command
     w = _wcswidth(text)
 
-    out.write(bt.move_yx(scroll.input_row, 0).encode())
+    out.write(blessed_term.move_yx(scroll.input_row, 0).encode())
     out.write(f"{active_sgr}{text}{normal}".encode())
     pad = cols - w
     if pad > 0:
@@ -133,16 +133,16 @@ def _render_command_queue(
     """
     if queue is None:
         return
-    bt = _get_term()
-    cols = bt.width
+    blessed_term = _get_term()
+    cols = blessed_term.width
 
     runs = _collapse_runs(queue.commands, queue.current_idx)
     if not runs:
         return
 
-    active_sgr = bt.on_color_rgb(255, 255, 255) + bt.color_rgb(0, 0, 0)
-    pending_sgr = bt.color_rgb(120, 120, 120)
-    normal = bt.normal
+    active_sgr = blessed_term.on_color_rgb(255, 255, 255) + blessed_term.color_rgb(0, 0, 0)
+    pending_sgr = blessed_term.color_rgb(120, 120, 120)
+    normal = blessed_term.normal
 
     # Build fragments: (sgr, text) for each run.
     frags: list[tuple[str, str]] = []
@@ -165,7 +165,7 @@ def _render_command_queue(
         built.append((sgr, text))
         total_w += w
 
-    out.write(bt.move_yx(scroll.input_row, 0).encode())
+    out.write(blessed_term.move_yx(scroll.input_row, 0).encode())
     for sgr, text in built:
         out.write(f"{sgr}{text}{normal}".encode())
     pad = cols - total_w

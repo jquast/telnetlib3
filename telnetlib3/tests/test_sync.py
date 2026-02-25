@@ -624,19 +624,22 @@ def test_client_cleanup_exception_handling(bind_host, unused_tcp_port, started_s
     conn._cleanup()
 
 
+@pytest.mark.timeout(30)
 def test_server_connection_read_some(serve_with_handler):
     """ServerConnection.read_some returns available data."""
     result = []
+    done = threading.Event()
 
     def handler(server_conn):
-        data = server_conn.read_some(timeout=5)
+        data = server_conn.read_some(timeout=10)
         result.append(data)
+        done.set()
 
     host, port = serve_with_handler(handler)
-    with TelnetConnection(host, port, timeout=5, encoding=False) as conn:
+    with TelnetConnection(host, port, timeout=10, encoding=False) as conn:
         conn.write(b"hello")
-        conn.flush(timeout=5)
-        time.sleep(0.3)
+        conn.flush(timeout=10)
+        done.wait(timeout=10)
 
     assert len(result) == 1
 

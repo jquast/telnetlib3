@@ -229,23 +229,23 @@ _STYLE_AUTOREPLY: dict[str, str] = {}
 
 def _make_styles() -> None:
     """Populate style dicts using blessed color API."""
-    t = _get_term()
+    blessed_term = _get_term()
     _STYLE_NORMAL.clear()
     _STYLE_NORMAL.update(
         {
-            "text_sgr": t.color_rgb(255, 239, 213),
-            "suggestion_sgr": t.color_rgb(60, 40, 40),
-            "bg_sgr": t.on_color_rgb(26, 0, 0),
-            "ellipsis_sgr": t.color_rgb(190, 190, 190),
+            "text_sgr": blessed_term.color_rgb(255, 239, 213),
+            "suggestion_sgr": blessed_term.color_rgb(60, 40, 40),
+            "bg_sgr": blessed_term.on_color_rgb(26, 0, 0),
+            "ellipsis_sgr": blessed_term.color_rgb(190, 190, 190),
         }
     )
     _STYLE_AUTOREPLY.clear()
     _STYLE_AUTOREPLY.update(
         {
-            "text_sgr": t.color_rgb(184, 134, 11),
-            "suggestion_sgr": t.color_rgb(80, 60, 0),
-            "bg_sgr": t.on_color_rgb(26, 18, 0),
-            "ellipsis_sgr": t.color_rgb(80, 60, 0),
+            "text_sgr": blessed_term.color_rgb(184, 134, 11),
+            "suggestion_sgr": blessed_term.color_rgb(80, 60, 0),
+            "bg_sgr": blessed_term.on_color_rgb(26, 18, 0),
+            "ellipsis_sgr": blessed_term.color_rgb(80, 60, 0),
         }
     )
 
@@ -396,9 +396,9 @@ def _dmz_line(cols: int, active: bool = False) -> str:
     :param cols: Terminal width.
     :param active: Use gold color when autoreply/wander/discover is active.
     """
-    t = _get_term()
-    color = t.color_rgb(184, 134, 11) if active else t.color_rgb(50, 10, 10)
-    return str(color) + (_DMZ_CHAR * cols) + str(t.normal)
+    blessed_term = _get_term()
+    color = blessed_term.color_rgb(184, 134, 11) if active else blessed_term.color_rgb(50, 10, 10)
+    return str(color) + (_DMZ_CHAR * cols) + str(blessed_term.normal)
 
 
 def _segmented(text: str) -> str:
@@ -908,17 +908,17 @@ def _render_toolbar(
                 )
             )
 
-    bt = _get_term()
-    cols = bt.width
+    blessed_term = _get_term()
+    cols = blessed_term.width
     left_items, right_items = _layout_toolbar(slots, cols)
 
     toolbar_row = scroll.input_row + 1
-    out.write(bt.move_yx(toolbar_row, 0).encode())
+    out.write(blessed_term.move_yx(toolbar_row, 0).encode())
 
     if is_autoreply_bg:
-        bg_sgr = bt.on_color_rgb(26, 18, 0) + bt.color_rgb(184, 134, 11)
+        bg_sgr = blessed_term.on_color_rgb(26, 18, 0) + blessed_term.color_rgb(184, 134, 11)
     else:
-        bg_sgr = bt.on_color_rgb(26, 0, 0)
+        bg_sgr = blessed_term.on_color_rgb(26, 0, 0)
     out.write(bg_sgr.encode())
 
     left_total = 0
@@ -954,12 +954,12 @@ def _render_toolbar(
 
     if stoplight is not None:
         ch, (r, g, b) = stoplight.frame(autoreply_bg=is_autoreply_bg)
-        out.write(f"{bt.color_rgb(r, g, b)}{ch}".encode())
+        out.write(f"{blessed_term.color_rgb(r, g, b)}{ch}".encode())
         out.write(bg_sgr.encode())
         if stoplight.is_animating():
             needs_reflash = True
 
-    out.write(bt.normal.encode())
+    out.write(blessed_term.normal.encode())
     return needs_reflash
 
 
@@ -987,45 +987,3 @@ def _schedule_flash_frame(
             toolbar_state["_flash_active"] = False
 
     loop.call_later(_FLASH_INTERVAL, _tick)
-
-
-def _render_input_line(
-    display: "blessed.line_editor.DisplayState", scroll: Any, out: asyncio.StreamWriter
-) -> None:
-    """
-    Render editor display state at ``scroll.input_row``.
-
-    Horizontal scrolling is handled by the blessed :class:`LineEditor`
-    via its ``max_width`` parameter.  The ``display`` object provides
-    already-clipped text, suggestion, cursor position,
-    ``clipped_left`` / ``clipped_right`` flags for ellipsis indicators,
-    and SGR style fields.
-    """
-    bt = _get_term()
-    cols = bt.width
-
-    out.write(bt.move_yx(scroll.input_row, 0).encode())
-    out.write(display.bg_sgr.encode())
-
-    if display.overflow_left:
-        out.write(f"{display.ellipsis_sgr}{_ELLIPSIS}".encode())
-        out.write(display.bg_sgr.encode())
-
-    if display.text_sgr:
-        out.write(display.text_sgr.encode())
-    out.write(display.text.encode())
-
-    if display.suggestion:
-        out.write(f"{display.suggestion_sgr}{display.suggestion}".encode())
-
-    if display.overflow_right:
-        out.write(f"{display.ellipsis_sgr}{_ELLIPSIS}".encode())
-
-    text_w = _wcswidth(display.text) + _wcswidth(display.suggestion)
-    rendered = (1 if display.overflow_left else 0) + text_w + (1 if display.overflow_right else 0)
-    pad = cols - rendered
-    if pad > 0:
-        out.write(f"{display.bg_sgr}{' ' * pad}".encode())
-    out.write(bt.normal.encode())
-
-    out.write(bt.move_yx(scroll.input_row, display.cursor).encode())

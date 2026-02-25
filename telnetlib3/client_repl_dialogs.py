@@ -94,9 +94,9 @@ def _confirm_dialog(
         os.environ.get("COLORTERM", ""),
         _safe_terminal_size(),
     )
-    t = _get_term()
+    blessed_term = _get_term()
     sys.stdout.write(_terminal_cleanup())
-    sys.stdout.write(t.change_scroll_region(0, t.height - 1))
+    sys.stdout.write(blessed_term.change_scroll_region(0, blessed_term.height - 1))
     sys.stdout.flush()
     sys.stderr.flush()
     sys.__stderr__.flush()
@@ -141,10 +141,10 @@ def _show_help(
     from .client_repl import _get_term, _restore_after_subprocess
 
     global _editor_active  # noqa: PLW0603
-    t = _get_term()
+    blessed_term = _get_term()
     sys.stdout.write(CURSOR_HIDE)
-    sys.stdout.write(t.enter_fullscreen)
-    sys.stdout.write(t.home + t.clear)
+    sys.stdout.write(blessed_term.enter_fullscreen)
+    sys.stdout.write(blessed_term.home + blessed_term.clear)
     lines = ["", "  telnetlib3 \u2014 Keybindings", "", "  F1          This help screen"]
     if has_gmcp:
         lines += [
@@ -199,14 +199,14 @@ def _show_help(
 
     _editor_active = True
     try:
-        with t.raw():
+        with blessed_term.raw():
             os.set_blocking(sys.stdin.fileno(), True)
             select.select([sys.stdin.fileno()], [], [])
             os.read(sys.stdin.fileno(), 1)
     finally:
         _editor_active = False
 
-    sys.stdout.write(t.exit_fullscreen)
+    sys.stdout.write(blessed_term.exit_fullscreen)
     sys.stdout.flush()
     _restore_after_subprocess(replay_buf)
 
@@ -283,9 +283,9 @@ def _launch_tui_editor(
         os.environ.get("COLORTERM", ""),
         _safe_terminal_size(),
     )
-    t = _get_term()
+    blessed_term = _get_term()
     sys.stdout.write(_terminal_cleanup())
-    sys.stdout.write(t.change_scroll_region(0, t.height - 1))
+    sys.stdout.write(blessed_term.change_scroll_region(0, blessed_term.height - 1))
     sys.stdout.flush()
     sys.stderr.flush()
     sys.__stderr__.flush()
@@ -397,9 +397,9 @@ def _launch_room_browser(ctx: "SessionContext", replay_buf: Optional[Any] = None
         os.environ.get("COLORTERM", ""),
         _safe_terminal_size(),
     )
-    t = _get_term()
+    blessed_term = _get_term()
     sys.stdout.write(_terminal_cleanup())
-    sys.stdout.write(t.change_scroll_region(0, t.height - 1))
+    sys.stdout.write(blessed_term.change_scroll_region(0, blessed_term.height - 1))
     sys.stdout.flush()
     sys.stderr.flush()
     sys.__stderr__.flush()

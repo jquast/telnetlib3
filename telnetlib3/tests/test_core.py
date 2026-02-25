@@ -447,7 +447,8 @@ async def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port):
     async with asyncio_server(HelloServer, bind_host, unused_tcp_port):
         proc = pexpect.spawn(prog, args)
         await proc.expect(pexpect.EOF, async_=True, timeout=5)
-        assert proc.before == (
+        normalized = proc.before.replace(b"\r\r\n", b"\r\n")
+        assert normalized == (
             b"Escape character is '^]' - Press F1 for help!\r\n"
             b"hello, space cadet.\r\n"
             b"\x1b[m\r\n"

@@ -75,7 +75,6 @@ from .client_repl_render import (  # noqa: F401
     _layout_toolbar,
     _render_toolbar,
     _center_truncate,
-    _render_input_line,
     _schedule_flash_frame,
 )
 from .client_repl_travel import (  # noqa: F401
@@ -210,11 +209,11 @@ def _blocking_fds() -> Generator[None, None, None]:
 
 def _terminal_cleanup() -> str:
     """Reset SGR, cursor, alt-screen, mouse tracking, and bracketed paste."""
-    t = _get_term()
+    blessed_term = _get_term()
     return (
-        str(t.normal)
-        + str(t.cursor_normal)
-        + str(t.exit_fullscreen)
+        str(blessed_term.normal)
+        + str(blessed_term.cursor_normal)
+        + str(blessed_term.exit_fullscreen)
         + "\x1b[?1000l"  # xterm -- disable basic mouse
         + "\x1b[?1002l"  # xterm -- disable button-event mouse
         + "\x1b[?1003l"  # xterm -- disable any-event mouse
@@ -337,7 +336,7 @@ def _restore_after_subprocess(
         os.set_blocking(sys.stdin.fileno(), True)
     except OSError:
         pass
-    t = _get_term()
+    blessed_term = _get_term()
     sys.stdout.write(CURSOR_HIDE)
     sys.stdout.write(_terminal_cleanup())
     try:
@@ -345,20 +344,20 @@ def _restore_after_subprocess(
     except OSError:
         tsize = os.terminal_size((80, 24))
     scroll_bottom = max(0, tsize.lines - reserve - 2)
-    sys.stdout.write(t.clear + t.home)
-    sys.stdout.write(t.change_scroll_region(0, scroll_bottom))
-    sys.stdout.write(t.move_yx(0, 0))
+    sys.stdout.write(blessed_term.clear + blessed_term.home)
+    sys.stdout.write(blessed_term.change_scroll_region(0, scroll_bottom))
+    sys.stdout.write(blessed_term.move_yx(0, 0))
     if replay_buf is not None:
         data = replay_buf.replay()
         if data:
             sys.stdout.write(data.decode("utf-8", errors="replace"))
-    sys.stdout.write(t.save)
+    sys.stdout.write(blessed_term.save)
     dmz = scroll_bottom + 1
     input_row = tsize.lines - reserve
     if dmz < input_row:
-        sys.stdout.write(t.move_yx(dmz, 0) + t.clear_eol + _dmz_line(tsize.columns))
+        sys.stdout.write(blessed_term.move_yx(dmz, 0) + blessed_term.clear_eol + _dmz_line(tsize.columns))
     for r in range(input_row, tsize.lines):
-        sys.stdout.write(t.move_yx(r, 0) + t.clear_eol)
+        sys.stdout.write(blessed_term.move_yx(r, 0) + blessed_term.clear_eol)
     # Re-enable in-band window resize notifications (DEC mode 2048) — the
     # subprocess may have reset terminal modes, disabling the notification
     # that blessed's notify_on_resize() context manager originally enabled.
@@ -387,24 +386,24 @@ def _repaint_screen(
     was_blocking = os.get_blocking(fd)
     os.set_blocking(fd, True)
     try:
-        t = _get_term()
+        blessed_term = _get_term()
         scroll_bottom = max(0, tsize.lines - reserve - 2)
         sys.stdout.write(CURSOR_HIDE)
-        sys.stdout.write(t.clear + t.home)
-        sys.stdout.write(t.change_scroll_region(0, scroll_bottom))
-        sys.stdout.write(t.move_yx(0, 0))
+        sys.stdout.write(blessed_term.clear + blessed_term.home)
+        sys.stdout.write(blessed_term.change_scroll_region(0, scroll_bottom))
+        sys.stdout.write(blessed_term.move_yx(0, 0))
         if replay_buf is not None:
             data = replay_buf.replay()
             if data:
                 sys.stdout.write(data.decode("utf-8", errors="replace"))
-        sys.stdout.write(t.save)
+        sys.stdout.write(blessed_term.save)
         dmz = scroll_bottom + 1
         input_row = tsize.lines - reserve
         if dmz < input_row:
-            sys.stdout.write(t.move_yx(dmz, 0) + t.clear_eol + _dmz_line(tsize.columns))
+            sys.stdout.write(blessed_term.move_yx(dmz, 0) + blessed_term.clear_eol + _dmz_line(tsize.columns))
         for r in range(input_row, tsize.lines):
-            sys.stdout.write(t.move_yx(r, 0) + t.clear_eol)
-        sys.stdout.write(t.move_yx(input_row, 0))
+            sys.stdout.write(blessed_term.move_yx(r, 0) + blessed_term.clear_eol)
+        sys.stdout.write(blessed_term.move_yx(input_row, 0))
         sys.stdout.write(CURSOR_SHOW)
         sys.stdout.flush()
     finally:
@@ -487,22 +486,22 @@ if sys.platform != "win32":
                 return
             extra = new_reserve - self._reserve
             old_input_row = self.input_row
-            t = _get_term()
+            blessed_term = _get_term()
             if self._active:
                 old_bottom = self.scroll_bottom
-                self._stdout.write(t.move_yx(old_bottom, 0).encode())
+                self._stdout.write(blessed_term.move_yx(old_bottom, 0).encode())
                 self._stdout.write(b"\n" * extra)
             self._reserve = new_reserve
             if self._active:
                 for r in range(old_input_row, old_input_row + new_reserve):
-                    self._stdout.write((t.move_yx(r, 0) + t.clear_eol).encode())
+                    self._stdout.write((blessed_term.move_yx(r, 0) + blessed_term.clear_eol).encode())
                 self._set_scroll_region()
-                self._stdout.write(t.restore.encode())
+                self._stdout.write(blessed_term.restore.encode())
                 if extra > 0:
-                    self._stdout.write(t.move_up(extra).encode())
-                self._stdout.write(t.save.encode())
+                    self._stdout.write(blessed_term.move_up(extra).encode())
+                self._stdout.write(blessed_term.save.encode())
                 for r in range(self.input_row, self.input_row + new_reserve):
-                    self._stdout.write((t.move_yx(r, 0) + t.clear_eol).encode())
+                    self._stdout.write((blessed_term.move_yx(r, 0) + blessed_term.clear_eol).encode())
                 self._dirty = True
 
         def update_size(self, rows: int, cols: int) -> None:
@@ -516,39 +515,39 @@ if sys.platform != "win32":
             old_input_row = self.input_row
             self._rows = rows
             self._cols = cols
-            t = _get_term()
+            blessed_term = _get_term()
             if self._active:
                 for r in range(old_input_row, old_input_row + self._reserve):
-                    self._stdout.write((t.move_yx(r, 0) + t.clear_eol).encode())
+                    self._stdout.write((blessed_term.move_yx(r, 0) + blessed_term.clear_eol).encode())
                 self._set_scroll_region()
-                self._stdout.write(t.save.encode())
+                self._stdout.write(blessed_term.save.encode())
                 for r in range(self.input_row, self.input_row + self._reserve):
-                    self._stdout.write((t.move_yx(r, 0) + t.clear_eol).encode())
+                    self._stdout.write((blessed_term.move_yx(r, 0) + blessed_term.clear_eol).encode())
                 self._dirty = True
 
         def _set_scroll_region(self) -> None:
             """Write DECSTBM escape sequence to set scroll region."""
-            t = _get_term()
+            blessed_term = _get_term()
             bottom = self.scroll_bottom
-            self._stdout.write(t.change_scroll_region(0, bottom).encode())
+            self._stdout.write(blessed_term.change_scroll_region(0, bottom).encode())
             dmz = bottom + 1
             if dmz < self.input_row:
                 self._stdout.write(
-                    (t.move_yx(dmz, 0) + t.clear_eol + _dmz_line(self._cols)).encode()
+                    (blessed_term.move_yx(dmz, 0) + blessed_term.clear_eol + _dmz_line(self._cols)).encode()
                 )
-            self._stdout.write(t.move_yx(bottom, 0).encode())
+            self._stdout.write(blessed_term.move_yx(bottom, 0).encode())
 
         def _reset_scroll_region(self) -> None:
             """Reset scroll region to full terminal height."""
-            t = _get_term()
-            self._stdout.write(t.change_scroll_region(0, self._rows - 1).encode())
+            blessed_term = _get_term()
+            self._stdout.write(blessed_term.change_scroll_region(0, self._rows - 1).encode())
 
         def save_and_goto_input(self) -> None:
             """Save cursor, move to input line, clear it."""
-            t = _get_term()
-            self._stdout.write(t.save.encode())
-            self._stdout.write(t.move_yx(self.input_row, 0).encode())
-            self._stdout.write(t.clear_eol.encode())
+            blessed_term = _get_term()
+            self._stdout.write(blessed_term.save.encode())
+            self._stdout.write(blessed_term.move_yx(self.input_row, 0).encode())
+            self._stdout.write(blessed_term.clear_eol.encode())
 
         def restore_cursor(self) -> None:
             """Restore cursor to saved position in scroll region."""
@@ -562,8 +561,8 @@ if sys.platform != "win32":
         def __exit__(self, *_: Any) -> None:
             self._active = False
             self._reset_scroll_region()
-            t = _get_term()
-            self._stdout.write(t.move_yx(self._rows - 1, 0).encode())
+            blessed_term = _get_term()
+            self._stdout.write(blessed_term.move_yx(self._rows - 1, 0).encode())
 
     import contextlib
 
@@ -763,22 +762,22 @@ if sys.platform != "win32":
             if [_rows, _cols] == _last_resize_size:
                 return
             _last_resize_size[:] = [_rows, _cols]
-            t = _get_term()
+            blessed_term = _get_term()
             sr = _scroll_ref[0]
             reserve = sr._reserve if sr is not None else _RESERVE_WITH_TOOLBAR
             stdout.write(CURSOR_HIDE.encode())
-            stdout.write((t.clear + t.home + t.move_yx(0, 0)).encode())
+            stdout.write((blessed_term.clear + blessed_term.home + blessed_term.move_yx(0, 0)).encode())
             data = replay_buf.replay()
             if data:
                 stdout.write(data)
-            stdout.write(t.save.encode())
+            stdout.write(blessed_term.save.encode())
             input_row = _rows - reserve
             for r in range(input_row, _rows):
-                stdout.write((t.move_yx(r, 0) + t.clear_eol).encode())
+                stdout.write((blessed_term.move_yx(r, 0) + blessed_term.clear_eol).encode())
             if sr is not None:
                 dmz = sr.scroll_bottom + 1
                 if dmz < sr.input_row:
-                    stdout.write((t.move_yx(dmz, 0) + _dmz_line(_cols)).encode())
+                    stdout.write((blessed_term.move_yx(dmz, 0) + _dmz_line(_cols)).encode())
             cs = ctx.cursor_style or _DEFAULT_CURSOR_STYLE
             stdout.write(_CURSOR_STYLES.get(cs, CURSOR_STEADY_BLOCK).encode())
             stdout.write(CURSOR_SHOW.encode())
@@ -794,25 +793,25 @@ if sys.platform != "win32":
             on_resize=_on_resize_repaint,
         ) as (scroll, _):
             _scroll_ref[0] = scroll
-            t = _get_term()
+            blessed_term = _get_term()
 
             if banner_lines:
                 for bl in banner_lines:
                     stdout.write(f"{bl}\r\n".encode())
 
-            stdout.write(t.save.encode())
+            stdout.write(blessed_term.save.encode())
             cursor_style_name = ctx.cursor_style or _DEFAULT_CURSOR_STYLE
             cursor_seq = _CURSOR_STYLES.get(cursor_style_name, CURSOR_STEADY_BLOCK)
             stdout.write(cursor_seq.encode())
 
             def _echo_autoreply(cmd: str) -> None:
-                stdout.write(t.restore.encode())
-                colored = f"{t.cyan}{cmd}{t.normal}\r\n"
+                stdout.write(blessed_term.restore.encode())
+                colored = f"{blessed_term.cyan}{cmd}{blessed_term.normal}\r\n"
                 stdout.write(colored.encode())
                 replay_buf.append(colored.encode())
-                stdout.write(t.save.encode())
+                stdout.write(blessed_term.save.encode())
                 cursor_col = editor.display.cursor
-                stdout.write(t.move_yx(scroll.input_row, cursor_col).encode())
+                stdout.write(blessed_term.move_yx(scroll.input_row, cursor_col).encode())
 
             def _insert_into_prompt(text: str) -> None:
                 editor.insert_text(text)
@@ -1032,10 +1031,10 @@ if sys.platform != "win32":
                     dmz_row = scroll.scroll_bottom + 1
                     if dmz_row < scroll.input_row:
                         stdout.write(
-                            (t.move_yx(dmz_row, 0) + _dmz_line(scroll._cols, active)).encode()
+                            (blessed_term.move_yx(dmz_row, 0) + _dmz_line(scroll._cols, active)).encode()
                         )
                     if ctx.command_queue is None and ctx.active_command is None:
-                        _render_input_line(editor.display, scroll, stdout)
+                        stdout.write(editor.render(blessed_term, scroll.input_row, blessed_term.width).encode())
 
             rx_dot = stoplight.rx
             tx_dot = stoplight.tx
@@ -1049,12 +1048,12 @@ if sys.platform != "win32":
                         if telnet_reader.at_eof():
                             server_done = True
                             if esc_hold:
-                                stdout.write(t.restore.encode())
+                                stdout.write(blessed_term.restore.encode())
                                 stdout.write(esc_hold)
                                 replay_buf.append(esc_hold)
-                                stdout.write(t.save.encode())
+                                stdout.write(blessed_term.save.encode())
                             _flush_color_filter(telnet_writer, stdout)
-                            stdout.write(t.restore.encode())
+                            stdout.write(blessed_term.restore.encode())
                             stdout.write(b"\r\nConnection closed by foreign host.\r\n")
                             return
                         if prompt_pending and autoreply_engine is not None:
@@ -1076,7 +1075,7 @@ if sys.platform != "win32":
                         _dialogs_mod._editor_buffer.append(out.encode())
                         continue
                     stdout.write(CURSOR_HIDE.encode())
-                    stdout.write(t.restore.encode())
+                    stdout.write(blessed_term.restore.encode())
                     if _dialogs_mod._editor_buffer:
                         for chunk in _dialogs_mod._editor_buffer:
                             stdout.write(chunk)
@@ -1087,20 +1086,20 @@ if sys.platform != "win32":
                     if encoded:
                         stdout.write(encoded)
                         replay_buf.append(encoded)
-                    stdout.write(t.save.encode())
+                    stdout.write(blessed_term.save.encode())
                     _update_input_style()
-                    _render_input_line(editor.display, scroll, stdout)
+                    stdout.write(editor.render(blessed_term, scroll.input_row, blessed_term.width).encode())
                     cursor_col = editor.display.cursor
-                    stdout.write(t.move_yx(scroll.input_row, cursor_col).encode())
+                    stdout.write(blessed_term.move_yx(scroll.input_row, cursor_col).encode())
                     needs_reflash = _render_toolbar(
                         ctx, scroll, stdout, autoreply_engine, toolbar_state
                     )
                     if needs_reflash and not toolbar_state.get("_flash_active"):
                         toolbar_state["_flash_active"] = True
                         _schedule_flash_frame(
-                            loop, ctx, scroll, stdout, autoreply_engine, toolbar_state, editor, t
+                            loop, ctx, scroll, stdout, autoreply_engine, toolbar_state, editor, blessed_term
                         )
-                    stdout.write(t.move_yx(scroll.input_row, cursor_col).encode())
+                    stdout.write(blessed_term.move_yx(scroll.input_row, cursor_col).encode())
                     stdout.write(CURSOR_SHOW.encode())
                     if telnet_writer.mode == "kludge":
                         mode_switched = True
@@ -1108,8 +1107,8 @@ if sys.platform != "win32":
                         return
 
             def _fire_resize() -> None:
-                bt = _get_term()
-                new_rows, new_cols = bt.height, bt.width
+                blessed_term = _get_term()
+                new_rows, new_cols = blessed_term.height, blessed_term.width
                 if tty_shell.on_resize is not None:
                     tty_shell.on_resize(new_rows, new_cols)
                 from .telopt import NAWS
@@ -1117,16 +1116,16 @@ if sys.platform != "win32":
                 if telnet_writer.local_option.enabled(NAWS) and not telnet_writer.is_closing():
                     telnet_writer._send_naws()
                 stdout.write(CURSOR_HIDE.encode())
-                _render_input_line(editor.display, scroll, stdout)
+                stdout.write(editor.render(blessed_term, scroll.input_row, blessed_term.width).encode())
                 _render_toolbar(ctx, scroll, stdout, autoreply_engine, toolbar_state)
                 cursor_col = editor.display.cursor
-                stdout.write(t.move_yx(scroll.input_row, cursor_col).encode())
+                stdout.write(blessed_term.move_yx(scroll.input_row, cursor_col).encode())
                 stdout.write(CURSOR_SHOW.encode())
 
             async def _read_input() -> None:
                 nonlocal server_done
                 _update_input_style()
-                _render_input_line(editor.display, scroll, stdout)
+                stdout.write(editor.render(blessed_term, scroll.input_row, blessed_term.width).encode())
                 chained_task: Optional[asyncio.Task[None]] = None
                 with blessed_term.raw(), blessed_term.notify_on_resize():
                     while not server_done:
@@ -1155,9 +1154,9 @@ if sys.platform != "win32":
                                 chained_task.cancel()
                             ctx.command_queue = None
                             stdout.write(CURSOR_HIDE.encode())
-                            _render_input_line(editor.display, scroll, stdout)
+                            stdout.write(editor.render(blessed_term, scroll.input_row, blessed_term.width).encode())
                             cursor_col = editor.display.cursor
-                            stdout.write(t.move_yx(scroll.input_row, cursor_col).encode())
+                            stdout.write(blessed_term.move_yx(scroll.input_row, cursor_col).encode())
                             stdout.write(CURSOR_SHOW.encode())
                             continue
 
@@ -1182,10 +1181,10 @@ if sys.platform != "win32":
                                 await result
                             stdout.write(CURSOR_HIDE.encode())
                             _update_input_style()
-                            _render_input_line(editor.display, scroll, stdout)
+                            stdout.write(editor.render(blessed_term, scroll.input_row, blessed_term.width).encode())
                             _render_toolbar(ctx, scroll, stdout, autoreply_engine, toolbar_state)
                             cursor_col = editor.display.cursor
-                            stdout.write(t.move_yx(scroll.input_row, cursor_col).encode())
+                            stdout.write(blessed_term.move_yx(scroll.input_row, cursor_col).encode())
                             stdout.write(CURSOR_SHOW.encode())
                             continue
 
@@ -1199,9 +1198,9 @@ if sys.platform != "win32":
                         if result.interrupt:
                             stdout.write(CURSOR_HIDE.encode())
                             _update_input_style()
-                            _render_input_line(editor.display, scroll, stdout)
+                            stdout.write(editor.render(blessed_term, scroll.input_row, blessed_term.width).encode())
                             cursor_col = editor.display.cursor
-                            stdout.write(t.move_yx(scroll.input_row, cursor_col).encode())
+                            stdout.write(blessed_term.move_yx(scroll.input_row, cursor_col).encode())
                             stdout.write(CURSOR_SHOW.encode())
                             continue
 
@@ -1213,11 +1212,11 @@ if sys.platform != "win32":
 
                             is_pw = telnet_writer.will_echo
                             echo = "*" * len(line) if is_pw else line
-                            stdout.write(t.restore.encode())
-                            colored = f"{t.yellow}{echo}{t.normal}\r\n"
+                            stdout.write(blessed_term.restore.encode())
+                            colored = f"{blessed_term.yellow}{echo}{blessed_term.normal}\r\n"
                             stdout.write(colored.encode())
                             replay_buf.append(colored.encode())
-                            stdout.write(t.save.encode())
+                            stdout.write(blessed_term.save.encode())
 
                             if ga_detected:
                                 try:
@@ -1300,7 +1299,7 @@ if sys.platform != "win32":
                                 _render_active_command(ac2, scroll, stdout)
                             else:
                                 _update_input_style()
-                                _render_input_line(editor.display, scroll, stdout)
+                                stdout.write(editor.render(blessed_term, scroll.input_row, blessed_term.width).encode())
                             needs_reflash = _render_toolbar(
                                 ctx, scroll, stdout, autoreply_engine, toolbar_state
                             )
@@ -1314,10 +1313,10 @@ if sys.platform != "win32":
                                     autoreply_engine,
                                     toolbar_state,
                                     editor,
-                                    t,
+                                    blessed_term,
                                 )
                             cursor_col = editor.display.cursor
-                            stdout.write(t.move_yx(scroll.input_row, cursor_col).encode())
+                            stdout.write(blessed_term.move_yx(scroll.input_row, cursor_col).encode())
                             stdout.write(CURSOR_SHOW.encode())
 
             try:
@@ -1328,10 +1327,10 @@ if sys.platform != "win32":
                 stdout.write(CURSOR_DEFAULT.encode())
                 if mode_switched:
                     dmz_row = scroll.scroll_bottom + 1
-                    stdout.write(t.save.encode())
-                    stdout.write(t.move_yx(dmz_row, 0).encode())
-                    stdout.write(t.normal.encode())
-                    stdout.write(t.clear_eos.encode())
-                    stdout.write(t.restore.encode())
+                    stdout.write(blessed_term.save.encode())
+                    stdout.write(blessed_term.move_yx(dmz_row, 0).encode())
+                    stdout.write(blessed_term.normal.encode())
+                    stdout.write(blessed_term.clear_eos.encode())
+                    stdout.write(blessed_term.restore.encode())
 
         return mode_switched
