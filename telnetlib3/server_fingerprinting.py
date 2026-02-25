@@ -569,16 +569,7 @@ async def _fingerprint_session(
     )
     if writer.mssp_data is not None:
         session_data["mssp"] = writer.mssp_data
-    if writer.zmp_data:
-        session_data["zmp"] = writer.zmp_data
-    if writer.atcp_data:
-        session_data["atcp"] = [{"package": pkg, "value": val} for pkg, val in writer.atcp_data]
-    if writer.aardwolf_data:
-        session_data["aardwolf"] = writer.aardwolf_data
-    if writer.mxp_data:
-        session_data["mxp"] = [d.hex() if d else "activated" for d in writer.mxp_data]
-    if writer.comport_data:
-        session_data["comport"] = writer.comport_data
+    session_data.update(_collect_mud_data(writer))
 
     session_entry: dict[str, Any] = {
         "host": host,
@@ -587,7 +578,11 @@ async def _fingerprint_session(
         "connected": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
 
-    # 7. Save
+    # 7. Compute fingerprint once for save/name/display
+    protocol_fp = _create_server_protocol_fingerprint(writer, probe_results, scan_type=scan_type)
+    protocol_hash = _hash_fingerprint(protocol_fp)
+
+    # 8. Save
     _save_server_fingerprint_data(
         writer=writer,
         probe_results=probe_results,
@@ -595,26 +590,20 @@ async def _fingerprint_session(
         session_entry=session_entry,
         save_path=save_path,
         scan_type=scan_type,
+        protocol_fp=protocol_fp,
+        protocol_hash=protocol_hash,
     )
 
-    # 8. Set name in fingerprint_names.json
+    # 9. Set name in fingerprint_names.json
     if set_name is not None:
-        protocol_fp = _create_server_protocol_fingerprint(
-            writer, probe_results, scan_type=scan_type
-        )
-        protocol_hash = _hash_fingerprint(protocol_fp)
         try:
             _save_fingerprint_name(protocol_hash, set_name)
             logger.info("set name %r for %s", set_name, protocol_hash)
         except ValueError:
-            logger.warning("--set-name requires --data-dir or $TELNETLIB3_DATA_DIR")
+            logger.warning("--set-name requires --data-dir" " or $TELNETLIB3_DATA_DIR")
 
-    # 9. Display
+    # 10. Display
     if not silent:
-        protocol_fp = _create_server_protocol_fingerprint(
-            writer, probe_results, scan_type=scan_type
-        )
-        protocol_hash = _hash_fingerprint(protocol_fp)
         _print_json(
             {
                 "server-probe": {
@@ -772,6 +761,22 @@ def _create_server_protocol_fingerprint(
     }
 
 
+def _collect_mud_data(writer: TelnetWriter) -> dict[str, Any]:
+    """Collect MUD protocol data from *writer* into a dict."""
+    result: dict[str, Any] = {}
+    if writer.zmp_data:
+        result["zmp"] = writer.zmp_data
+    if writer.atcp_data:
+        result["atcp"] = [{"package": pkg, "value": val} for pkg, val in writer.atcp_data]
+    if writer.aardwolf_data:
+        result["aardwolf"] = writer.aardwolf_data
+    if writer.mxp_data:
+        result["mxp"] = [d.hex() if d else "activated" for d in writer.mxp_data]
+    if writer.comport_data:
+        result["comport"] = writer.comport_data
+    return result
+
+
 def _save_server_fingerprint_data(
     writer: TelnetWriter,
     probe_results: dict[str, _fps.ProbeResult],
@@ -780,6 +785,8 @@ def _save_server_fingerprint_data(
     *,
     save_path: str | None = None,
     scan_type: str = "quick",
+    protocol_fp: dict[str, Any] | None = None,
+    protocol_hash: str | None = None,
 ) -> str | None:
     """
     Save server fingerprint data to a JSON file.
@@ -788,16 +795,23 @@ def _save_server_fingerprint_data(
 
     :param writer: :class:`~telnetlib3.stream_writer.TelnetWriter` instance.
     :param probe_results: Results from :func:`probe_server_capabilities`.
-    :param session_data: Pre-built dict with ``option_states``, ``banner_before_return``,
-        ``banner_after_return``, and ``timing`` keys.
-    :param session_entry: Pre-built dict with ``host``, ``ip``, ``port``,
-        and ``connected`` keys.
+    :param session_data: Pre-built dict with ``option_states``,
+        ``banner_before_return``, ``banner_after_return``, and
+        ``timing`` keys.
+    :param session_entry: Pre-built dict with ``host``, ``ip``,
+        ``port``, and ``connected`` keys.
     :param save_path: If set, write directly to this path.
     :param scan_type: ``"quick"`` or ``"full"`` probe depth used.
+    :param protocol_fp: Pre-computed protocol fingerprint dict.
+    :param protocol_hash: Pre-computed fingerprint hash string.
     :returns: Path to saved file, or ``None`` if saving was skipped.
     """
-    protocol_fp = _create_server_protocol_fingerprint(writer, probe_results, scan_type=scan_type)
-    protocol_hash = _hash_fingerprint(protocol_fp)
+    if protocol_fp is None:
+        protocol_fp = _create_server_protocol_fingerprint(
+            writer, probe_results, scan_type=scan_type
+        )
+    if protocol_hash is None:
+        protocol_hash = _hash_fingerprint(protocol_fp)
 
     data: dict[str, Any] = {
         "server-probe": {

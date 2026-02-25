@@ -18,6 +18,7 @@ from telnetlib3.autoreply import (
     AutoreplyRule,
     AutoreplyEngine,
     _compare,
+    _ExclusiveState,
     check_condition,
     load_autoreplies,
     save_autoreplies,
@@ -596,7 +597,7 @@ async def test_exclusive_until_cleared_after_two_prompts():
     engine.feed("A brown mouse\n")
     await asyncio.sleep(0.05)
     assert engine.exclusive_active is True
-    assert engine._until_pattern is not None
+    assert engine._excl.until_pattern is not None
 
     engine.on_prompt()  # skipped (same-chunk GA/EOR)
     assert engine.exclusive_active is True
@@ -606,7 +607,7 @@ async def test_exclusive_until_cleared_after_two_prompts():
 
     engine.on_prompt()  # prompt_count=2 -> bail out
     assert engine.exclusive_active is False
-    assert engine._until_pattern is None
+    assert engine._excl.until_pattern is None
 
     engine.feed("treasure\n")
     engine.on_prompt()
@@ -1643,3 +1644,23 @@ async def test_immediate_and_normal_rules_together():
     engine.on_prompt()
     await asyncio.sleep(0.1)
     assert any("deferred" in w for w in written)
+
+
+def test_exclusive_state_clear():
+    state = _ExclusiveState(
+        active=True,
+        rule_index=3,
+        until_pattern=re.compile("stop"),
+        skip_next_prompt=True,
+        deadline=99.9,
+        post_command="post;",
+        prompt_count=5,
+    )
+    state.clear()
+    assert state.active is False
+    assert state.rule_index == 0
+    assert state.until_pattern is None
+    assert state.skip_next_prompt is False
+    assert state.deadline == 0.0
+    assert state.post_command == ""
+    assert state.prompt_count == 0

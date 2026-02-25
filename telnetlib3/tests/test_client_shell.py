@@ -694,7 +694,7 @@ async def test_winch_handler_sets_resize_pending() -> None:
 @pytest.mark.asyncio
 async def test_raw_event_loop_reactivates_repl() -> None:
     """_raw_event_loop breaks when want_repl() returns True."""
-    from telnetlib3.client_shell import _raw_event_loop
+    from telnetlib3.client_shell import _RawLoopState, _raw_event_loop
 
     class _StrReader:
         def __init__(self) -> None:
@@ -731,23 +731,22 @@ async def test_raw_event_loop_reactivates_repl() -> None:
 
     close_calls: list[str] = []
 
-    result = await _raw_event_loop(
+    state = _RawLoopState(
+        switched_to_raw=True, last_will_echo=False, local_echo=False, linesep="\r\n"
+    )
+    await _raw_event_loop(
         telnet_reader=reader,
         telnet_writer=writer,
         tty_shell=term,
         stdin=stdin,
         stdout=stdout,
         keyboard_escape="\x1d",
-        local_echo=False,
-        switched_to_raw=True,
-        last_will_echo=False,
-        linesep="\r\n",
+        state=state,
         handle_close=close_calls.append,
         want_repl=lambda: True,
     )
-    reactivate_repl, switched, last_echo, local_echo, linesep = result
-    assert reactivate_repl is True
-    assert switched is False
+    assert state.reactivate_repl is True
+    assert state.switched_to_raw is False
 
 
 @pytest.mark.asyncio

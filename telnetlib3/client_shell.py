@@ -7,6 +7,7 @@ import logging
 import threading
 import collections
 from typing import Any, Dict, Tuple, Union, Callable, Optional
+from dataclasses import dataclass
 
 # local
 from . import accessories
@@ -172,6 +173,17 @@ class InputFilter:
             self._buf = self._buf[1:]
             result.append(self._byte_xlat.get(b, b))
         return bytes(result)
+
+
+@dataclass
+class _RawLoopState:
+    """Mutable state bundle for :func:`_raw_event_loop`."""
+
+    switched_to_raw: bool
+    last_will_echo: bool
+    local_echo: bool
+    linesep: str
+    reactivate_repl: bool = False
 
 
 if sys.platform == "win32":
@@ -529,6 +541,25 @@ else:
             if flush:
                 stdout.write(flush.encode())
 
+    def _ensure_autoreply_engine(
+        telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
+    ) -> "Optional[Any]":
+        """Return or lazily create the autoreply engine for *telnet_writer*."""
+        from .autoreply import AutoreplyEngine
+        from .session_context import SessionContext
+
+        ctx: Optional[SessionContext] = getattr(telnet_writer, "_ctx", None)
+        if ctx is None:
+            return None
+        if ctx.autoreply_engine is not None:
+            return ctx.autoreply_engine
+        ar_rules = ctx.autoreply_rules
+        if not ar_rules:
+            return None
+        engine = AutoreplyEngine(ar_rules, ctx, telnet_writer.log, wait_fn=ctx.autoreply_wait_fn)
+        ctx.autoreply_engine = engine
+        return engine
+
     async def _raw_event_loop(
         telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
         telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
@@ -536,24 +567,15 @@ else:
         stdin: asyncio.StreamReader,
         stdout: asyncio.StreamWriter,
         keyboard_escape: str,
-        local_echo: bool,
-        switched_to_raw: bool,
-        last_will_echo: bool,
-        linesep: str,
+        state: _RawLoopState,
         handle_close: Callable[[str], None],
         want_repl: Callable[[], bool],
-    ) -> "tuple[bool, bool, bool, bool, str]":
-        """
-        Standard byte-at-a-time event loop.
-
-        :returns: ``(reactivate_repl, switched_to_raw, last_will_echo,
-            local_echo, linesep)`` tuple.
-        """
+    ) -> None:
+        """Standard byte-at-a-time event loop (mutates *state* in-place)."""
         stdin_task = accessories.make_reader_task(stdin)
         telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
         esc_timer_task: Optional[asyncio.Task[None]] = None
         wait_for: set[asyncio.Task[Any]] = {stdin_task, telnet_task}
-        reactivate_repl = False
 
         while wait_for:
             done, _ = await asyncio.wait(wait_for, return_when=asyncio.FIRST_COMPLETED)
@@ -599,7 +621,7 @@ else:
                         wait_for.remove(telnet_task)
                     handle_close("Connection closed.")
                     break
-                new_timer, has_pending = _send_stdin(inp, telnet_writer, stdout, local_echo)
+                new_timer, has_pending = _send_stdin(inp, telnet_writer, stdout, state.local_echo)
                 if has_pending and esc_timer_task not in wait_for:
                     esc_timer_task = new_timer
                     if esc_timer_task is not None:
@@ -617,48 +639,37 @@ else:
                     handle_close("Connection closed by foreign host.")
                     continue
                 raw_mode = _get_raw_mode(telnet_writer)
-                in_raw = raw_mode is True or (raw_mode is None and switched_to_raw)
+                in_raw = raw_mode is True or (raw_mode is None and state.switched_to_raw)
                 out = _transform_output(out, telnet_writer, in_raw)
-                _so_ctx: Optional[SessionContext] = getattr(telnet_writer, "_ctx", None)
-                ar_engine = _so_ctx.autoreply_engine if _so_ctx is not None else None
-                if ar_engine is None and _so_ctx is not None:
-                    ar_rules = _so_ctx.autoreply_rules
-                    if ar_rules:
-                        from .autoreply import AutoreplyEngine
-
-                        ar_wait = _so_ctx.autoreply_wait_fn
-                        ar_engine = AutoreplyEngine(
-                            ar_rules, _so_ctx, telnet_writer.log, wait_fn=ar_wait
-                        )
-                        _so_ctx.autoreply_engine = ar_engine
+                ar_engine = _ensure_autoreply_engine(telnet_writer)
                 if ar_engine is not None:
                     ar_engine.feed(out)
                 if raw_mode is None:
-                    mode_result = tty_shell.check_auto_mode(switched_to_raw, last_will_echo)
+                    mode_result = tty_shell.check_auto_mode(
+                        state.switched_to_raw, state.last_will_echo
+                    )
                     if mode_result is not None:
-                        if not switched_to_raw:
-                            linesep = "\r\n"
-                        switched_to_raw, last_will_echo, local_echo = mode_result
+                        if not state.switched_to_raw:
+                            state.linesep = "\r\n"
+                        state.switched_to_raw, state.last_will_echo, state.local_echo = mode_result
                         # When transitioning cooked -> raw, the data was
                         # processed for ONLCR (\r\n -> \n) but the terminal
                         # now has ONLCR disabled.  Re-normalize so bare \n
                         # becomes \r\n for correct display.
-                        if switched_to_raw and not in_raw:
+                        if state.switched_to_raw and not in_raw:
                             out = out.replace("\n", "\r\n")
                     if want_repl():
-                        reactivate_repl = True
+                        state.reactivate_repl = True
                 stdout.write(out.encode())
-                if reactivate_repl:
+                if state.reactivate_repl:
                     telnet_writer.log.debug("mode returned to local, reactivating REPL")
                     if stdin_task in wait_for:
                         stdin_task.cancel()
                         wait_for.discard(stdin_task)
-                    switched_to_raw = False
+                    state.switched_to_raw = False
                     break
                 telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
                 wait_for.add(telnet_task)
-
-        return (reactivate_repl, switched_to_raw, last_will_echo, local_echo, linesep)
 
     async def telnet_client_shell(
         telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
@@ -795,23 +806,28 @@ else:
                     local_echo = not telnet_writer.will_echo
                     linesep = "\r\n"
                 stdin = await tty_shell.connect_stdin()
-                _reactivate_repl, switched_to_raw, last_will_echo, local_echo, linesep = (
-                    await _raw_event_loop(
-                        telnet_reader,
-                        telnet_writer,
-                        tty_shell,
-                        stdin,
-                        stdout,
-                        keyboard_escape,
-                        local_echo,
-                        switched_to_raw,
-                        last_will_echo,
-                        linesep,
-                        _handle_close,
-                        _want_repl,
-                    )
+                state = _RawLoopState(
+                    switched_to_raw=switched_to_raw,
+                    last_will_echo=last_will_echo,
+                    local_echo=local_echo,
+                    linesep=linesep,
                 )
+                await _raw_event_loop(
+                    telnet_reader,
+                    telnet_writer,
+                    tty_shell,
+                    stdin,
+                    stdout,
+                    keyboard_escape,
+                    state,
+                    _handle_close,
+                    _want_repl,
+                )
+                switched_to_raw = state.switched_to_raw
+                last_will_echo = state.last_will_echo
+                local_echo = state.local_echo
+                linesep = state.linesep
                 tty_shell.disconnect_stdin(stdin)
-                if _reactivate_repl:
+                if state.reactivate_repl:
                     continue
                 break

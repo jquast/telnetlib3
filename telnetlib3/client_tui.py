@@ -24,6 +24,7 @@ from dataclasses import asdict, fields, dataclass
 
 if TYPE_CHECKING:
     from rich.text import Text as RichText
+    from textual.widget import Widget
     from .rooms import RoomStore
 
 # 3rd party
@@ -831,10 +832,112 @@ class SessionEditScreen(Screen[SessionConfig | None]):  # type: ignore[misc]
         ("Advanced", "tab-advanced"),
     ]
 
+    @staticmethod
+    def _field_row(label: str, *widgets: "Widget", row_class: str = "field-row") -> Horizontal:
+        """Return a ``Horizontal`` row with a label and widgets."""
+        return Horizontal(Label(label, classes="field-label"), *widgets, classes=row_class)
+
+    def _compose_connection_tab(self, cfg: SessionConfig) -> ComposeResult:
+        """Yield widgets for the Connection tab pane."""
+        if not self._is_defaults:
+            yield self._field_row(
+                "Name",
+                Input(value=cfg.name, placeholder="session name", id="name", classes="field-input"),
+            )
+            yield Horizontal(
+                Label("Host:Port", classes="field-label"),
+                Input(value=cfg.host, placeholder="hostname", id="host", classes="field-input"),
+                Static(":", id="host-port-sep"),
+                Input(value=str(cfg.port), placeholder="23", id="port"),
+                classes="field-row",
+            )
+        with Horizontal(classes="switch-row"):
+            yield Label("SSL/TLS", classes="field-label")
+            yield Switch(value=cfg.ssl, id="ssl")
+            yield Label("Timeout", id="timeout-label")
+            yield Input(value=str(cfg.connect_timeout), id="connect-timeout")
+
+    def _compose_terminal_tab(self, cfg: SessionConfig) -> ComposeResult:
+        """Yield widgets for the Terminal tab pane."""
+        yield self._field_row(
+            "TERM",
+            Input(
+                value=cfg.term,
+                placeholder=os.environ.get("TERM", "unknown"),
+                id="term",
+                classes="field-input",
+            ),
+        )
+        with Horizontal(id="mode-repl-row"):
+            with Vertical(id="mode-col"):
+                yield Label("Terminal Mode")
+                with RadioSet(id="mode-radio"):
+                    yield RadioButton("Auto-detect", value=cfg.mode == "auto", id="mode-auto")
+                    yield RadioButton("Raw mode", value=cfg.mode == "raw", id="mode-raw")
+                    yield RadioButton("Line mode", value=cfg.mode == "line", id="mode-line")
+            with Vertical(id="repl-col"):
+                with Horizontal(classes="switch-row"):
+                    _repl_dim = "" if cfg.mode != "raw" else " dimmed"
+                    yield Label("Advanced REPL", id="repl-label", classes=f"field-label{_repl_dim}")
+                    yield Switch(value=not cfg.no_repl, id="use-repl", disabled=cfg.mode == "raw")
+        _enc = cfg.encoding or "utf-8"
+        _is_retro = _enc.lower() in ("atascii", "petscii")
+        with Horizontal(classes="field-row"):
+            yield Label("Encoding", id="enc-label")
+            yield Select(
+                [(e, e) for e in _ENCODINGS],
+                value=_enc if _enc in _ENCODINGS else "utf-8",
+                id="encoding",
+                allow_blank=False,
+            )
+            yield Label("Errors", id="enc-errors-label")
+            yield Select(
+                [(v, v) for v in ("replace", "ignore", "strict")],
+                value=cfg.encoding_errors,
+                id="encoding-errors",
+            )
+        _dim = "" if _is_retro else " dimmed"
+        with Horizontal(id="keys-eol-row"):
+            with Horizontal(classes="switch-row"):
+                yield Label("ANSI Keys", id="ansi-keys-label", classes=f"field-label{_dim}")
+                yield Switch(value=cfg.ansi_keys, id="ansi-keys", disabled=not _is_retro)
+            with Horizontal(classes="switch-row"):
+                yield Label("ASCII EOL", id="ascii-eol-label", classes=f"field-label{_dim}")
+                yield Switch(value=cfg.ascii_eol, id="ascii-eol", disabled=not _is_retro)
+
+    def _compose_display_tab(self, cfg: SessionConfig) -> ComposeResult:
+        """Yield widgets for the Display tab pane."""
+        yield Horizontal(
+            Label("Color Palette", classes="field-label"),
+            Select(
+                [(v, v) for v in ("vga", "xterm", "none")], value=cfg.colormatch, id="colormatch"
+            ),
+            Static("", id="palette-preview"),
+            classes="field-row",
+        )
+        with Horizontal(classes="switch-row"):
+            yield Label("iCE Colors", classes="field-label")
+            yield Switch(value=cfg.ice_colors, id="ice-colors")
+
+    def _compose_advanced_tab(self, cfg: SessionConfig) -> ComposeResult:
+        """Yield widgets for the Advanced tab pane."""
+        yield self._field_row(
+            "Send Environ", Input(value=cfg.send_environ, id="send-environ", classes="field-input")
+        )
+        yield Horizontal(
+            Label("Log Level, File", classes="field-label"),
+            Select(
+                [(v, v) for v in ("trace", "debug", "info", "warn", "error", "critical")],
+                value=cfg.loglevel,
+                id="loglevel",
+            ),
+            Input(value=cfg.logfile, placeholder="path", id="logfile", classes="field-input"),
+            classes="field-row",
+        )
+
     def compose(self) -> ComposeResult:
         """Build the tabbed session editor layout."""
         cfg = self._config
-
         with Vertical(id="edit-panel"):
             title = (
                 "Edit Defaults"
@@ -852,133 +955,13 @@ class SessionEditScreen(Screen[SessionConfig | None]):  # type: ignore[misc]
 
             with ContentSwitcher(id="tab-content", initial="tab-connection"):
                 with Vertical(id="tab-connection", classes="tab-pane"):
-                    if not self._is_defaults:
-                        with Horizontal(classes="field-row"):
-                            yield Label("Name", classes="field-label")
-                            yield Input(
-                                value=cfg.name,
-                                placeholder="session name",
-                                id="name",
-                                classes="field-input",
-                            )
-                        with Horizontal(classes="field-row"):
-                            yield Label("Host:Port", classes="field-label")
-                            yield Input(
-                                value=cfg.host,
-                                placeholder="hostname",
-                                id="host",
-                                classes="field-input",
-                            )
-                            yield Static(":", id="host-port-sep")
-                            yield Input(value=str(cfg.port), placeholder="23", id="port")
-                    with Horizontal(classes="switch-row"):
-                        yield Label("SSL/TLS", classes="field-label")
-                        yield Switch(value=cfg.ssl, id="ssl")
-                        yield Label("Timeout", id="timeout-label")
-                        yield Input(value=str(cfg.connect_timeout), id="connect-timeout")
-
+                    yield from self._compose_connection_tab(cfg)
                 with Vertical(id="tab-terminal", classes="tab-pane"):
-                    with Horizontal(classes="field-row"):
-                        yield Label("TERM", classes="field-label")
-                        yield Input(
-                            value=cfg.term,
-                            placeholder=os.environ.get("TERM", "unknown"),
-                            id="term",
-                            classes="field-input",
-                        )
-                    with Horizontal(id="mode-repl-row"):
-                        with Vertical(id="mode-col"):
-                            yield Label("Terminal Mode")
-                            with RadioSet(id="mode-radio"):
-                                yield RadioButton(
-                                    "Auto-detect", value=cfg.mode == "auto", id="mode-auto"
-                                )
-                                yield RadioButton(
-                                    "Raw mode", value=cfg.mode == "raw", id="mode-raw"
-                                )
-                                yield RadioButton(
-                                    "Line mode", value=cfg.mode == "line", id="mode-line"
-                                )
-                        with Vertical(id="repl-col"):
-                            with Horizontal(classes="switch-row"):
-                                _repl_dim = "" if cfg.mode != "raw" else " dimmed"
-                                yield Label(
-                                    "Advanced REPL",
-                                    id="repl-label",
-                                    classes=f"field-label{_repl_dim}",
-                                )
-                                yield Switch(
-                                    value=not cfg.no_repl, id="use-repl", disabled=cfg.mode == "raw"
-                                )
-                    _enc = cfg.encoding or "utf-8"
-                    _is_retro = _enc.lower() in ("atascii", "petscii")
-                    with Horizontal(classes="field-row"):
-                        yield Label("Encoding", id="enc-label")
-                        yield Select(
-                            [(e, e) for e in _ENCODINGS],
-                            value=_enc if _enc in _ENCODINGS else "utf-8",
-                            id="encoding",
-                            allow_blank=False,
-                        )
-                        yield Label("Errors", id="enc-errors-label")
-                        yield Select(
-                            [(v, v) for v in ("replace", "ignore", "strict")],
-                            value=cfg.encoding_errors,
-                            id="encoding-errors",
-                        )
-                    _dim = "" if _is_retro else " dimmed"
-                    with Horizontal(id="keys-eol-row"):
-                        with Horizontal(classes="switch-row"):
-                            yield Label(
-                                "ANSI Keys", id="ansi-keys-label", classes=f"field-label{_dim}"
-                            )
-                            yield Switch(
-                                value=cfg.ansi_keys, id="ansi-keys", disabled=not _is_retro
-                            )
-                        with Horizontal(classes="switch-row"):
-                            yield Label(
-                                "ASCII EOL", id="ascii-eol-label", classes=f"field-label{_dim}"
-                            )
-                            yield Switch(
-                                value=cfg.ascii_eol, id="ascii-eol", disabled=not _is_retro
-                            )
-
+                    yield from self._compose_terminal_tab(cfg)
                 with Vertical(id="tab-display", classes="tab-pane"):
-                    with Horizontal(classes="field-row"):
-                        yield Label("Color Palette", classes="field-label")
-                        yield Select(
-                            [(v, v) for v in ("vga", "xterm", "none")],
-                            value=cfg.colormatch,
-                            id="colormatch",
-                        )
-                        yield Static("", id="palette-preview")
-                    with Horizontal(classes="switch-row"):
-                        yield Label("iCE Colors", classes="field-label")
-                        yield Switch(value=cfg.ice_colors, id="ice-colors")
-
+                    yield from self._compose_display_tab(cfg)
                 with Vertical(id="tab-advanced", classes="tab-pane"):
-                    with Horizontal(classes="field-row"):
-                        yield Label("Send Environ", classes="field-label")
-                        yield Input(
-                            value=cfg.send_environ, id="send-environ", classes="field-input"
-                        )
-
-                    with Horizontal(classes="field-row"):
-                        yield Label("Log Level, File", classes="field-label")
-                        yield Select(
-                            [
-                                (v, v)
-                                for v in ("trace", "debug", "info", "warn", "error", "critical")
-                            ],
-                            value=cfg.loglevel,
-                            id="loglevel",
-                        )
-                        yield Input(
-                            value=cfg.logfile,
-                            placeholder="path",
-                            id="logfile",
-                            classes="field-input",
-                        )
+                    yield from self._compose_advanced_tab(cfg)
 
             with Horizontal(id="bottom-bar"):
                 yield Button("Cancel", variant="error", id="cancel-btn")

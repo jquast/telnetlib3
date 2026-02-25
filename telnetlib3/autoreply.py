@@ -401,6 +401,29 @@ class SearchBuffer:
             self._last_match_col = 0
 
 
+@dataclass
+class _ExclusiveState:
+    """Mutable bundle of exclusive-mode state variables."""
+
+    active: bool = False
+    rule_index: int = 0
+    until_pattern: Optional[re.Pattern[str]] = None
+    skip_next_prompt: bool = False
+    deadline: float = 0.0
+    post_command: str = ""
+    prompt_count: int = 0
+
+    def clear(self) -> None:
+        """Reset all fields to defaults."""
+        self.active = False
+        self.rule_index = 0
+        self.until_pattern = None
+        self.skip_next_prompt = False
+        self.deadline = 0.0
+        self.post_command = ""
+        self.prompt_count = 0
+
+
 class AutoreplyEngine:
     """
     Matches server output against autoreply rules and queues replies.
@@ -433,12 +456,7 @@ class AutoreplyEngine:
         self._insert_fn = insert_fn
         self._echo_fn = echo_fn
         self._wait_fn = wait_fn
-        self._exclusive_active = False
-        self._exclusive_rule_index: int = 0
-        self._until_pattern: Optional[re.Pattern[str]] = None
-        self._skip_next_prompt = False
-        self._exclusive_deadline: float = 0.0
-        self._post_command: str = ""
+        self._excl = _ExclusiveState()
         self._sent_commands: set[str] = set()
         self._sent_commands_max: int = int(os.environ.get("TELNETLIB3_SENT_COMMANDS_MAX", "10000"))
         self._prompt_based = False
@@ -449,7 +467,6 @@ class AutoreplyEngine:
         self._enabled = True
         self._last_matched_pattern: str = ""
         self._condition_failed: Optional[tuple[int, str]] = None
-        self._exclusive_prompt_count: int = 0
 
     def pop_condition_failed(self) -> Optional[tuple[int, str]]:
         """
@@ -470,12 +487,12 @@ class AutoreplyEngine:
     @property
     def exclusive_active(self) -> bool:
         """``True`` when an exclusive rule is suppressing normal matching."""
-        return self._exclusive_active
+        return self._excl.active
 
     @property
     def exclusive_rule_index(self) -> int:
         """1-based index of the active exclusive rule, or 0 if none."""
-        return self._exclusive_rule_index
+        return self._excl.rule_index
 
     @property
     def suppress_exclusive(self) -> bool:
@@ -523,31 +540,27 @@ class AutoreplyEngine:
             return
         self._buffer.add_text(text, self._sent_commands)
 
-        if self._exclusive_active:
+        if self._excl.active:
             # Check timeout.
             if self.check_timeout():
                 self._buffer.add_text(text, self._sent_commands)
                 # fall through to normal matching below
             # Check until pattern to see if exclusive should end.
-            elif self._until_pattern is not None:
+            elif self._excl.until_pattern is not None:
                 searchable = self._buffer.get_searchable_text()
-                if searchable and self._until_pattern.search(searchable):
+                if searchable and self._excl.until_pattern.search(searchable):
                     self._log.info(
                         "autoreply: exclusive cleared by until pattern %r",
-                        self._until_pattern.pattern,
+                        self._excl.until_pattern.pattern,
                     )
-                    self._exclusive_active = False
-                    self._exclusive_rule_index = 0
-                    self._until_pattern = None
-                    self._skip_next_prompt = False
+                    post = self._excl.post_command
+                    self._excl.clear()
                     self._buffer.clear()
-                    if self._post_command:
-                        self._log.info("autoreply: queuing post_command %r", self._post_command)
-                        post = self._post_command
+                    if post:
+                        self._log.info("autoreply: queuing post_command %r", post)
                         if not post.rstrip().endswith(";"):
                             post = post.rstrip() + ";"
                         self._queue_reply(post)
-                        self._post_command = ""
                     return
                 self._match_always_rules()
                 return
@@ -564,26 +577,28 @@ class AutoreplyEngine:
         # mid-output.  Rules with immediate=True still fire here so
         # that asynchronous MUD events (no trailing GA/EOR) are caught.
         if self._prompt_based:
-            self._match_immediate_rules()
+            self._match_rules(immediate_only=True)
             return
 
         self._match_rules()
 
-    def _match_rules(self) -> None:
+    def _match_rules(self, immediate_only: bool = False) -> None:
         """
-        Run normal (non-exclusive) rule matching on buffered text.
+        Run rule matching on buffered text.
 
-        Called from :meth:`feed` before prompt-based mode is active,
+        When *immediate_only* is ``False`` (default), all enabled rules
+        are checked — called from :meth:`feed` before prompt-based mode
         and from :meth:`on_prompt` once prompt-based mode is active.
+
+        When *immediate_only* is ``True``, only rules with
+        ``immediate=True`` are checked and exclusive/post_command
+        handling is skipped.
         """
         searchable = self._buffer.get_searchable_text()
         if not searchable:
             return
 
-        # Search for all matching rules. We re-fetch searchable text
-        # after each match since advance_match changes the window.
-        # Cap iterations to len(rules) * 2 as a safety valve -- one
-        # chunk of text should never produce more matches than that.
+        log_prefix = "immediate rule" if immediate_only else "rule"
         max_iterations = len(self._rules) * 2
         found = True
         while found and max_iterations > 0:
@@ -595,14 +610,17 @@ class AutoreplyEngine:
             for rule_idx, rule in enumerate(self._rules):
                 if not rule.enabled:
                     continue
-                if self._prompt_based and rule_idx in self._cycle_matched:
+                if immediate_only and not rule.immediate:
                     continue
+                if rule_idx in self._cycle_matched:
+                    if immediate_only or self._prompt_based:
+                        continue
                 if rule_idx in self._condition_blocked:
                     continue
                 match = rule.pattern.search(searchable)
                 if match:
                     self._last_matched_pattern = rule.pattern.pattern
-                    if rule.exclusive and self._suppress_exclusive:
+                    if not immediate_only and rule.exclusive and self._suppress_exclusive:
                         self._cycle_matched.add(rule_idx)
                         self._buffer.advance_match(match.start(), len(match.group(0)))
                         found = True
@@ -611,7 +629,8 @@ class AutoreplyEngine:
                         ok, desc = check_condition(rule.when, self._ctx)
                         if not ok:
                             self._log.info(
-                                "autoreply: rule #%d skipped, condition failed: %s",
+                                "autoreply: %s #%d skipped," " condition failed: %s",
+                                log_prefix,
                                 rule_idx + 1,
                                 desc,
                             )
@@ -625,84 +644,34 @@ class AutoreplyEngine:
                     if not reply.rstrip().endswith(";"):
                         reply = reply.rstrip() + ";"
                     self._queue_reply(reply)
-                    if not rule.exclusive and rule.post_command:
-                        post = _substitute_groups(rule.post_command, match)
-                        if not post.rstrip().endswith(";"):
-                            post = post.rstrip() + ";"
-                        self._queue_reply(post)
-                    if rule.exclusive:
-                        self._exclusive_active = True
-                        self._exclusive_rule_index = rule_idx + 1
-                        self._skip_next_prompt = True
-                        self._exclusive_prompt_count = 0
-                        self._post_command = rule.post_command
-                        self._exclusive_deadline = (
-                            time.monotonic() + rule.exclusive_timeout
-                            if rule.exclusive_timeout > 0
-                            else 0.0
-                        )
-                        if rule.until:
-                            until_str = _substitute_groups(rule.until, match)
-                            try:
-                                self._until_pattern = re.compile(
-                                    until_str, re.MULTILINE | re.DOTALL
-                                )
-                            except re.error:
-                                self._until_pattern = None
-                        else:
-                            self._until_pattern = None
-                        return
-                    found = True
-                    break  # re-fetch searchable text and start over
-
-    def _match_immediate_rules(self) -> None:
-        """
-        Match only rules with ``immediate=True`` during prompt-based deferral.
-
-        This is a restricted variant of :meth:`_match_rules` that fires
-        immediately from :meth:`feed` even when ``_prompt_based`` is active,
-        so that asynchronous MUD events without a trailing GA/EOR are caught.
-        """
-        searchable = self._buffer.get_searchable_text()
-        if not searchable:
-            return
-
-        max_iterations = len(self._rules) * 2
-        found = True
-        while found and max_iterations > 0:
-            found = False
-            max_iterations -= 1
-            searchable = self._buffer.get_searchable_text()
-            if not searchable:
-                break
-            for rule_idx, rule in enumerate(self._rules):
-                if not rule.enabled or not rule.immediate:
-                    continue
-                if rule_idx in self._cycle_matched:
-                    continue
-                if rule_idx in self._condition_blocked:
-                    continue
-                match = rule.pattern.search(searchable)
-                if match:
-                    self._last_matched_pattern = rule.pattern.pattern
-                    if rule.when:
-                        ok, desc = check_condition(rule.when, self._ctx)
-                        if not ok:
-                            self._log.info(
-                                "autoreply: immediate rule #%d skipped, condition failed: %s",
-                                rule_idx + 1,
-                                desc,
+                    if not immediate_only:
+                        if not rule.exclusive and rule.post_command:
+                            post = _substitute_groups(rule.post_command, match)
+                            if not post.rstrip().endswith(";"):
+                                post = post.rstrip() + ";"
+                            self._queue_reply(post)
+                        if rule.exclusive:
+                            self._excl.active = True
+                            self._excl.rule_index = rule_idx + 1
+                            self._excl.skip_next_prompt = True
+                            self._excl.prompt_count = 0
+                            self._excl.post_command = rule.post_command
+                            self._excl.deadline = (
+                                time.monotonic() + rule.exclusive_timeout
+                                if rule.exclusive_timeout > 0
+                                else 0.0
                             )
-                            self._condition_failed = (rule_idx + 1, desc)
-                            self._condition_blocked.add(rule_idx)
-                            found = True
-                            break
-                    self._cycle_matched.add(rule_idx)
-                    self._buffer.advance_match(match.start(), len(match.group(0)))
-                    reply = _substitute_groups(rule.reply, match)
-                    if not reply.rstrip().endswith(";"):
-                        reply = reply.rstrip() + ";"
-                    self._queue_reply(reply)
+                            if rule.until:
+                                until_str = _substitute_groups(rule.until, match)
+                                try:
+                                    self._excl.until_pattern = re.compile(
+                                        until_str, re.MULTILINE | re.DOTALL
+                                    )
+                                except re.error:
+                                    self._excl.until_pattern = None
+                            else:
+                                self._excl.until_pattern = None
+                            return
                     found = True
                     break
 
@@ -815,7 +784,7 @@ class AutoreplyEngine:
             return
         # Match on accumulated buffer before clearing -- this is where
         # deferred matches from feed() actually fire.
-        if not self._exclusive_active:
+        if not self._excl.active:
             self._match_rules()
         # When rules matched text but their ``when`` condition failed
         # (e.g. HP too low), preserve the buffer so the text can be
@@ -836,25 +805,21 @@ class AutoreplyEngine:
             self._condition_retried = False
             self._cycle_matched.clear()
             self._buffer.clear()
-        if self._skip_next_prompt:
-            self._skip_next_prompt = False
+        if self._excl.skip_next_prompt:
+            self._excl.skip_next_prompt = False
             return
-        if self._until_pattern is not None:
-            self._exclusive_prompt_count += 1
-            if self._exclusive_prompt_count >= 2:
+        if self._excl.until_pattern is not None:
+            self._excl.prompt_count += 1
+            if self._excl.prompt_count >= 2:
                 self._log.info(
-                    "autoreply: exclusive cleared after %d prompts without until match",
-                    self._exclusive_prompt_count,
+                    "autoreply: exclusive cleared after %d prompts" " without until match",
+                    self._excl.prompt_count,
                 )
-                self._exclusive_active = False
-                self._exclusive_rule_index = 0
-                self._until_pattern = None
-                self._post_command = ""
-                self._exclusive_prompt_count = 0
+                self._excl.clear()
             return
-        self._exclusive_active = False
-        self._exclusive_rule_index = 0
-        self._post_command = ""
+        self._excl.active = False
+        self._excl.rule_index = 0
+        self._excl.post_command = ""
 
     def check_timeout(self) -> bool:
         """
@@ -862,18 +827,9 @@ class AutoreplyEngine:
 
         :returns: ``True`` if exclusive was cleared by timeout.
         """
-        if (
-            self._exclusive_active
-            and self._exclusive_deadline
-            and time.monotonic() > self._exclusive_deadline
-        ):
+        if self._excl.active and self._excl.deadline and time.monotonic() > self._excl.deadline:
             self._log.info("autoreply: exclusive timed out")
-            self._exclusive_active = False
-            self._exclusive_rule_index = 0
-            self._until_pattern = None
-            self._skip_next_prompt = False
-            self._post_command = ""
-            self._exclusive_prompt_count = 0
+            self._excl.clear()
             self._buffer.clear()
             return True
         return False
@@ -883,13 +839,7 @@ class AutoreplyEngine:
         if self._reply_chain is not None and not self._reply_chain.done():
             self._reply_chain.cancel()
             self._reply_chain = None
-        self._exclusive_active = False
-        self._exclusive_rule_index = 0
-        self._until_pattern = None
-        self._skip_next_prompt = False
-        self._post_command = ""
-        self._exclusive_deadline = 0.0
-        self._exclusive_prompt_count = 0
+        self._excl.clear()
         self._condition_blocked.clear()
         self._condition_retried = False
         self._sent_commands.clear()

@@ -644,9 +644,7 @@ class XPTracker(VitalTracker):
         elapsed = now - self.flash_time
         return elapsed if elapsed < _FLASH_DURATION else -1.0
 
-    def eta_fragments(
-        self, maxxp: Any, now: float
-    ) -> Optional[List[Tuple[str, str]]]:
+    def eta_fragments(self, maxxp: Any, now: float) -> Optional[List[Tuple[str, str]]]:
         """
         Compute ETA fragments from XP history.
 
@@ -713,21 +711,16 @@ class ToolbarRenderer:
             return False
 
         engine = autoreply_engine
-        ar_active = engine is not None and (
-            engine.exclusive_active or engine.reply_pending
-        )
+        ar_active = engine is not None and (engine.exclusive_active or engine.reply_pending)
         wander_active = self.ctx.wander_active
         discover_active = self.ctx.discover_active
         randomwalk_active = self.ctx.randomwalk_active
 
         now = time.monotonic()
         slots, needs_reflash = self._build_slots(
-            engine, ar_active, wander_active, discover_active,
-            randomwalk_active, now,
+            engine, ar_active, wander_active, discover_active, randomwalk_active, now
         )
-        is_autoreply_bg = (
-            wander_active or discover_active or randomwalk_active or ar_active
-        )
+        is_autoreply_bg = wander_active or discover_active or randomwalk_active or ar_active
         return self._paint(slots, is_autoreply_bg, needs_reflash)
 
     def _ensure_gmcp_ready(self) -> bool:
@@ -767,63 +760,37 @@ class ToolbarRenderer:
             vitals = gmcp_data.get("Char.Vitals")
             if isinstance(vitals, dict):
                 hp = vitals.get("hp", vitals.get("HP"))
-                maxhp = vitals.get(
-                    "maxhp", vitals.get("maxHP", vitals.get("max_hp"))
-                )
+                maxhp = vitals.get("maxhp", vitals.get("maxHP", vitals.get("max_hp")))
                 if hp is not None:
-                    if self._vital_slot(
-                        self.hp, hp, maxhp, _BAR_WIDTH, "hp", 1, 2, now, slots,
-                    ):
+                    if self._vital_slot(self.hp, hp, maxhp, _BAR_WIDTH, "hp", 1, 2, now, slots):
                         needs_reflash = True
 
                 mp = vitals.get(
-                    "mp", vitals.get(
-                        "MP", vitals.get(
-                            "mana", vitals.get("sp", vitals.get("SP"))
-                        )
-                    )
+                    "mp", vitals.get("MP", vitals.get("mana", vitals.get("sp", vitals.get("SP"))))
                 )
                 maxmp = vitals.get(
-                    "maxmp", vitals.get(
-                        "maxMP", vitals.get(
-                            "max_mp", vitals.get(
-                                "maxsp", vitals.get("maxSP")
-                            )
-                        )
+                    "maxmp",
+                    vitals.get(
+                        "maxMP", vitals.get("max_mp", vitals.get("maxsp", vitals.get("maxSP")))
                     ),
                 )
                 if mp is not None:
-                    if self._vital_slot(
-                        self.mp, mp, maxmp, _BAR_WIDTH, "mp", 4, 3, now, slots,
-                    ):
+                    if self._vital_slot(self.mp, mp, maxmp, _BAR_WIDTH, "mp", 4, 3, now, slots):
                         needs_reflash = True
 
             if isinstance(status, dict):
-                xp_raw = status.get(
-                    "xp", status.get("XP", status.get("experience"))
-                )
+                xp_raw = status.get("xp", status.get("XP", status.get("experience")))
                 maxxp = status.get(
-                    "maxxp", status.get(
-                        "maxXP", status.get(
-                            "max_xp", status.get("maxexp")
-                        )
-                    )
+                    "maxxp", status.get("maxXP", status.get("max_xp", status.get("maxexp")))
                 )
                 if xp_raw is not None:
-                    if self._vital_slot(
-                        self.xp, xp_raw, maxxp, _BAR_WIDTH, "xp", 5, 4,
-                        now, slots,
-                    ):
+                    if self._vital_slot(self.xp, xp_raw, maxxp, _BAR_WIDTH, "xp", 5, 4, now, slots):
                         needs_reflash = True
                     self._xp_eta_slot(maxxp, now, slots)
 
-            room_info = gmcp_data.get(
-                "Room.Info", gmcp_data.get("Room.Name")
-            )
+            room_info = gmcp_data.get("Room.Info", gmcp_data.get("Room.Name"))
             if isinstance(room_info, dict):
-                room_name = str(
-                    room_info.get("name", room_info.get("Name", ""))
-                )
+                room_name = str(room_info.get("name", room_info.get("Name", "")))
             elif isinstance(room_info, str):
                 room_name = room_info
             else:
@@ -832,23 +799,26 @@ class ToolbarRenderer:
                 self.rprompt_text = room_name
 
         self._right_slot(
-            engine, ar_active, wander_active, discover_active,
-            randomwalk_active, slots,
+            engine, ar_active, wander_active, discover_active, randomwalk_active, slots
         )
         return slots, needs_reflash
 
-    def _status_slots(
-        self, status: dict[str, Any], slots: List[_ToolbarSlot]
-    ) -> None:
+    def _status_slots(self, status: dict[str, Any], slots: List[_ToolbarSlot]) -> None:
         """Add Level and Money slots from ``Char.Status``."""
         level = status.get("level")
         if level is not None:
             lv_text = _segmented(f"Lv.{level}")
-            slots.append(_ToolbarSlot(
-                priority=7, display_order=0, width=_wcswidth(lv_text),
-                fragments=[(_sgr_fg("#aaaaaa"), lv_text)],
-                side="left", min_width=0, label="",
-            ))
+            slots.append(
+                _ToolbarSlot(
+                    priority=7,
+                    display_order=0,
+                    width=_wcswidth(lv_text),
+                    fragments=[(_sgr_fg("#aaaaaa"), lv_text)],
+                    side="left",
+                    min_width=0,
+                    label="",
+                )
+            )
         money = status.get("money")
         if money is not None:
             try:
@@ -856,11 +826,17 @@ class ToolbarRenderer:
                 money_str = _segmented(f"${money_int:,}")
             except (TypeError, ValueError):
                 money_str = _segmented(f"${money}")
-            slots.append(_ToolbarSlot(
-                priority=6, display_order=1, width=_wcswidth(money_str),
-                fragments=[(_sgr_fg("#aaaaaa"), money_str)],
-                side="left", min_width=0, label="",
-            ))
+            slots.append(
+                _ToolbarSlot(
+                    priority=6,
+                    display_order=1,
+                    width=_wcswidth(money_str),
+                    fragments=[(_sgr_fg("#aaaaaa"), money_str)],
+                    side="left",
+                    min_width=0,
+                    label="",
+                )
+            )
 
     @staticmethod
     def _vital_slot(
@@ -883,23 +859,35 @@ class ToolbarRenderer:
         needs_reflash = flash_elapsed >= 0.0
         frags = _vital_bar(raw, maxval, width, kind, flash_elapsed=flash_elapsed)
         frags_w = sum(_wcswidth(t) for _, t in frags)
-        slots.append(_ToolbarSlot(
-            priority=priority, display_order=order, width=frags_w,
-            fragments=frags, side="left", min_width=0, label="",
-        ))
+        slots.append(
+            _ToolbarSlot(
+                priority=priority,
+                display_order=order,
+                width=frags_w,
+                fragments=frags,
+                side="left",
+                min_width=0,
+                label="",
+            )
+        )
         return needs_reflash
 
-    def _xp_eta_slot(
-        self, maxxp: Any, now: float, slots: List[_ToolbarSlot]
-    ) -> None:
+    def _xp_eta_slot(self, maxxp: Any, now: float, slots: List[_ToolbarSlot]) -> None:
         """Append an ETA slot if XP history is sufficient."""
         eta_frags = self.xp.eta_fragments(maxxp, now)
         if eta_frags is not None:
             eta_text = eta_frags[0][1]
-            slots.append(_ToolbarSlot(
-                priority=8, display_order=5, width=_wcswidth(eta_text),
-                fragments=eta_frags, side="left", min_width=0, label="",
-            ))
+            slots.append(
+                _ToolbarSlot(
+                    priority=8,
+                    display_order=5,
+                    width=_wcswidth(eta_text),
+                    fragments=eta_frags,
+                    side="left",
+                    min_width=0,
+                    label="",
+                )
+            )
 
     def _right_slot(
         self,
@@ -913,60 +901,66 @@ class ToolbarRenderer:
         """Append the right-side slot (walk mode, autoreply, or room name)."""
         if randomwalk_active:
             self._mode_bar_slot(
-                self.ctx.randomwalk_current, self.ctx.randomwalk_total,
-                16, "randomwalk", slots,
+                self.ctx.randomwalk_current, self.ctx.randomwalk_total, 16, "randomwalk", slots
             )
         elif wander_active:
-            self._mode_bar_slot(
-                self.ctx.wander_current, self.ctx.wander_total,
-                12, "wander", slots,
-            )
+            self._mode_bar_slot(self.ctx.wander_current, self.ctx.wander_total, 12, "wander", slots)
         elif discover_active:
             self._mode_bar_slot(
-                self.ctx.discover_current, self.ctx.discover_total,
-                12, "discover", slots,
+                self.ctx.discover_current, self.ctx.discover_total, 12, "discover", slots
             )
         elif ar_active:
             idx = getattr(engine, "exclusive_rule_index", None)
-            ar_label = (
-                f"Autoreply #{idx}" if idx is not None else "Autoreply"
-            )
+            ar_label = f"Autoreply #{idx}" if idx is not None else "Autoreply"
             ar_text = " " + ar_label
-            slots.append(_ToolbarSlot(
-                priority=3, display_order=10, width=len(ar_text),
-                fragments=[("", ar_text)],
-                side="right", min_width=0, label="",
-            ))
+            slots.append(
+                _ToolbarSlot(
+                    priority=3,
+                    display_order=10,
+                    width=len(ar_text),
+                    fragments=[("", ar_text)],
+                    side="right",
+                    min_width=0,
+                    label="",
+                )
+            )
         else:
             loc_text = self.rprompt_text
             if loc_text:
                 full_text = " " + loc_text
                 full_w = _wcswidth(full_text)
-                slots.append(_ToolbarSlot(
-                    priority=2, display_order=10, width=full_w,
-                    fragments=[(_sgr_fg("#dddddd"), full_text)],
-                    side="right", min_width=5, label=full_text,
-                ))
+                slots.append(
+                    _ToolbarSlot(
+                        priority=2,
+                        display_order=10,
+                        width=full_w,
+                        fragments=[(_sgr_fg("#dddddd"), full_text)],
+                        side="right",
+                        min_width=5,
+                        label=full_text,
+                    )
+                )
 
     @staticmethod
     def _mode_bar_slot(
-        cur: Any, tot: Any, width: int, kind: str,
-        slots: List[_ToolbarSlot],
+        cur: Any, tot: Any, width: int, kind: str, slots: List[_ToolbarSlot]
     ) -> None:
         """Append a walk-mode progress bar slot."""
         mode_frags = _vital_bar(cur, tot, width, kind)
         mode_w = sum(_wcswidth(t) for _, t in mode_frags)
-        slots.append(_ToolbarSlot(
-            priority=3, display_order=10, width=mode_w,
-            fragments=mode_frags, side="right", min_width=0, label="",
-        ))
+        slots.append(
+            _ToolbarSlot(
+                priority=3,
+                display_order=10,
+                width=mode_w,
+                fragments=mode_frags,
+                side="right",
+                min_width=0,
+                label="",
+            )
+        )
 
-    def _paint(
-        self,
-        slots: List[_ToolbarSlot],
-        is_autoreply_bg: bool,
-        needs_reflash: bool,
-    ) -> bool:
+    def _paint(self, slots: List[_ToolbarSlot], is_autoreply_bg: bool, needs_reflash: bool) -> bool:
         """Write ANSI sequences for the toolbar row."""
         blessed_term = _get_term()
         cols = blessed_term.width
@@ -976,10 +970,7 @@ class ToolbarRenderer:
         self.out.write(blessed_term.move_yx(toolbar_row, 0).encode())
 
         if is_autoreply_bg:
-            bg_sgr = (
-                blessed_term.on_color_rgb(26, 18, 0)
-                + blessed_term.color_rgb(184, 134, 11)
-            )
+            bg_sgr = blessed_term.on_color_rgb(26, 18, 0) + blessed_term.color_rgb(184, 134, 11)
         else:
             bg_sgr = blessed_term.on_color_rgb(26, 0, 0)
         self.out.write(bg_sgr.encode())
@@ -1015,12 +1006,8 @@ class ToolbarRenderer:
                 self.out.write(bg_sgr.encode())
 
         if self.stoplight is not None:
-            ch, (r, g, b) = self.stoplight.frame(
-                autoreply_bg=is_autoreply_bg
-            )
-            self.out.write(
-                f"{blessed_term.color_rgb(r, g, b)}{ch}".encode()
-            )
+            ch, (r, g, b) = self.stoplight.frame(autoreply_bg=is_autoreply_bg)
+            self.out.write(f"{blessed_term.color_rgb(r, g, b)}{ch}".encode())
             self.out.write(bg_sgr.encode())
             if self.stoplight.is_animating():
                 needs_reflash = True
