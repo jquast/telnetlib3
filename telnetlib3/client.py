@@ -135,11 +135,9 @@ class TelnetClient(client_base.BaseClient):
         # Override the default handle_will method to detect when both sides support CHARSET
         # Store the original only on first connection to prevent chain growth on reconnect.
         if not hasattr(self.writer, "_original_handle_will"):
-            self.writer._original_handle_will = (  # type: ignore[attr-defined]
-                self.writer.handle_will
-            )
+            self.writer._original_handle_will = self.writer.handle_will
         else:
-            self.writer.handle_will = (  # type: ignore[attr-defined]
+            self.writer.handle_will = (  # type: ignore[method-assign]
                 self.writer._original_handle_will
             )
         original_handle_will = self.writer.handle_will
@@ -418,13 +416,13 @@ class TelnetClient(client_base.BaseClient):
             )
 
         # may we encode in the direction indicated?
-        _outgoing_only = outgoing and not incoming
-        _incoming_only = not outgoing and incoming
-        _bidirectional = outgoing and incoming
+        outgoing_only = outgoing and not incoming
+        incoming_only = not outgoing and incoming
+        bidirectional = outgoing and incoming
         may_encode = (
-            (_outgoing_only and self.writer.outbinary)
-            or (_incoming_only and self.writer.inbinary)
-            or (_bidirectional and self.writer.outbinary and self.writer.inbinary)
+            (outgoing_only and self.writer.outbinary)
+            or (incoming_only and self.writer.inbinary)
+            or (bidirectional and self.writer.outbinary and self.writer.inbinary)
         )
 
         if self.force_binary or may_encode:
@@ -470,7 +468,6 @@ class TelnetTerminalClient(TelnetClient):
             rows, cols, _, _ = struct.unpack(fmt, val)
             return rows, cols
         except (ImportError, IOError):
-            # TODO: mock import error, or test on windows or other non-posix.
             return (int(os.environ.get("LINES", 25)), int(os.environ.get("COLUMNS", 80)))
 
 
@@ -713,7 +710,7 @@ async def run_client() -> None:
             reader: Union[TelnetReader, TelnetReaderUnicode],
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
-            ctx: SessionContext = writer_arg._ctx  # type: ignore[union-attr]
+            ctx: SessionContext = writer_arg._ctx
             ctx.color_filter = color_filter_obj
             await original_shell(reader, writer_arg)
 
@@ -741,7 +738,7 @@ async def run_client() -> None:
             reader: Union[TelnetReader, TelnetReaderUnicode],
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
-            ctx: SessionContext = writer_arg._ctx  # type: ignore[union-attr]
+            ctx: SessionContext = writer_arg._ctx
             ctx.raw_mode = raw_mode_val
             if ascii_eol:
                 ctx.ascii_eol = True
@@ -759,7 +756,7 @@ async def run_client() -> None:
             reader: Union[TelnetReader, TelnetReaderUnicode],
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
-            ctx: SessionContext = writer_arg._ctx  # type: ignore[union-attr]
+            ctx: SessionContext = writer_arg._ctx
             ctx.repl_enabled = True
             ctx.history_file = args.get("history_file")
             await _inner_repl(reader, writer_arg)
@@ -769,36 +766,36 @@ async def run_client() -> None:
     # Auto-load autoreplies and macros from default config path
     from ._paths import CONFIG_DIR as _cfg_dir
 
-    _session_key = f"{args['host']}:{args['port']}"
+    session_key = f"{args['host']}:{args['port']}"
 
-    _ar_path = os.path.join(_cfg_dir, "autoreplies.json")
-    _autoreply_rules: list[Any] = []
-    if os.path.exists(_ar_path):
+    ar_path = os.path.join(_cfg_dir, "autoreplies.json")
+    autoreply_rules: list[Any] = []
+    if os.path.exists(ar_path):
         from .autoreply import load_autoreplies
 
         try:
-            _autoreply_rules = load_autoreplies(_ar_path, _session_key)
+            autoreply_rules = load_autoreplies(ar_path, session_key)
         except ValueError:
-            _autoreply_rules = []
+            autoreply_rules = []
 
-    _macro_path = os.path.join(_cfg_dir, "macros.json")
-    _macro_defs: list[Any] = []
-    if os.path.exists(_macro_path):
+    macro_path = os.path.join(_cfg_dir, "macros.json")
+    macro_defs: list[Any] = []
+    if os.path.exists(macro_path):
         from .macros import load_macros
 
         try:
-            _macro_defs = load_macros(_macro_path, _session_key)
+            macro_defs = load_macros(macro_path, session_key)
         except ValueError:
-            _macro_defs = []
+            macro_defs = []
 
     # Room graph for GMCP Room.Info automapper
     from .rooms import RoomStore
     from .rooms import rooms_path as _rooms_path_fn
     from .rooms import current_room_path as _current_room_path_fn
 
-    _rooms_path = _rooms_path_fn(_session_key)
-    _current_room_file = _current_room_path_fn(_session_key)
-    _room_graph = RoomStore(_rooms_path)
+    rooms_path = _rooms_path_fn(session_key)
+    current_room_file = _current_room_path_fn(session_key)
+    room_graph = RoomStore(rooms_path)
 
     _inner_session = shell_callback
 
@@ -806,17 +803,17 @@ async def run_client() -> None:
         reader: Union[TelnetReader, TelnetReaderUnicode],
         writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
     ) -> None:
-        ctx = SessionContext(session_key=_session_key)
+        ctx = SessionContext(session_key=session_key)
         ctx.writer = writer_arg
-        ctx.autoreply_rules = _autoreply_rules
-        ctx.autoreplies_file = _ar_path
-        ctx.macro_defs = _macro_defs
-        ctx.macros_file = _macro_path
-        ctx.room_graph = _room_graph
-        ctx.rooms_file = _rooms_path
-        ctx.current_room_file = _current_room_file
-        ctx.gmcp_data = writer_arg.protocol._gmcp_data  # type: ignore[union-attr]
-        writer_arg._ctx = ctx  # type: ignore[union-attr]
+        ctx.autoreply_rules = autoreply_rules
+        ctx.autoreplies_file = ar_path
+        ctx.macro_defs = macro_defs
+        ctx.macros_file = macro_path
+        ctx.room_graph = room_graph
+        ctx.rooms_file = rooms_path
+        ctx.current_room_file = current_room_file
+        ctx.gmcp_data = writer_arg.protocol._gmcp_data
+        writer_arg._ctx = ctx
         await _inner_session(reader, writer_arg)
 
     shell_callback = _session_shell

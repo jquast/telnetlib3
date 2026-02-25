@@ -15,18 +15,10 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Sextant stoplight -- activity indicators for the REPL toolbar.
-#
-# A single-cell stoplight using Unicode sextant characters (2x3 grid)
-# with time-division multiplexing to show three independently colored
-# lights (TX, CX, RX) in one terminal cell.
-# ---------------------------------------------------------------------------
-
-WARM_UP = 0.050  # 50 ms ramp from idle to peak
-HOLD = 0.050  # 50 ms hold at peak
-GLOW_DOWN = 0.500  # 500 ms ramp from peak back to idle
-DURATION = WARM_UP + HOLD + GLOW_DOWN  # 600 ms total
+WARM_UP = 0.025  # 25 ms ramp from idle to peak
+HOLD = 0.025  # 25 ms hold at peak
+GLOW_DOWN = 0.250  # 250 ms ramp from peak back to idle
+DURATION = WARM_UP + HOLD + GLOW_DOWN  # 300 ms total
 
 IDLE_RGB = (26, 0, 0)  # matches toolbar bg on_color_rgb(26,0,0)
 IDLE_AR_RGB = (26, 18, 0)  # matches autoreply toolbar bg
@@ -73,7 +65,7 @@ class ActivityDot:
     """
     Activity indicator with warm-up / hold / glow-down animation.
 
-    Timing: 50 ms warm-up, 50 ms hold at peak, 500 ms glow-down.
+    Timing: 25 ms warm-up, 25 ms hold at peak, 250 ms glow-down.
     Re-triggering during any phase snaps proportionally faster toward hold.
 
     :param peak_rgb: Peak glow color as ``(r, g, b)`` tuple.

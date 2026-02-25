@@ -68,13 +68,11 @@ def test_warning_passed_in_command(_mock_subprocess: Any) -> None:
     assert ok is False
 
 
-# -- In-app _ConfirmDialogScreen tests (Textual pilot) --
-
 pytest.importorskip("textual")
 
 # 3rd party
 from textual.app import App, ComposeResult  # noqa: E402
-from textual.widgets import Button, Switch  # noqa: E402
+from textual.widgets import Button  # noqa: E402
 
 # local
 from telnetlib3.client_tui import _ConfirmDialogScreen  # noqa: E402

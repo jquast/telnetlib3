@@ -120,8 +120,8 @@ async def _fast_travel(
                 remaining_steps[j] = (d, new_target)
 
     room_changed = ctx.room_changed
-    _max_retries = 3
-    _max_reroutes = 3
+    max_retries = 3
+    max_reroutes = 3
 
     if not destination and steps:
         destination = steps[-1][1]
@@ -134,7 +134,7 @@ async def _fast_travel(
             direction, expected_room = steps[step_idx]
             prev_room = ctx.current_room_num
 
-            for attempt in range(_max_retries + 1):
+            for attempt in range(max_retries + 1):
                 # Delay between steps (and retries) for server rate limits.
                 if step_idx > 0 or attempt > 0:
                     await asyncio.sleep(_MOVE_STEP_DELAY)
@@ -162,9 +162,9 @@ async def _fast_travel(
                 # prompt + GMCP vitals updates), and stale signals
                 # from the previous step cause wait_fn to return
                 # before the current room output has been received.
-                _prompt_ready = ctx.prompt_ready
-                if _prompt_ready is not None:
-                    _prompt_ready.clear()
+                prompt_ready = ctx.prompt_ready
+                if prompt_ready is not None:
+                    prompt_ready.clear()
 
                 ctx.active_command = direction
                 if ctx.cx_dot is not None:
@@ -181,7 +181,7 @@ async def _fast_travel(
                 await asyncio.sleep(0)
 
                 engine = _get_engine()
-                _cond_cancelled = False
+                cond_cancelled = False
                 if engine is not None:
                     while engine.reply_pending:
                         await asyncio.sleep(0.05)
@@ -197,7 +197,7 @@ async def _fast_travel(
                             log.warning("%s", msg)
                             if echo_fn is not None:
                                 echo_fn(msg)
-                            _cond_cancelled = True
+                            cond_cancelled = True
                     # In slow mode, exclusive rules enter exclusive mode
                     # (e.g. "kill" sent, waiting for "died\.").  Wait for
                     # combat to finish before moving to the next room.
@@ -206,9 +206,9 @@ async def _fast_travel(
                     # autoreply command is processed -- it may trigger
                     # new matches (cascading always-rules).
                     if slow and (engine.exclusive_active or engine.reply_pending):
-                        _settle_passes = 0
-                        _max_settle = 20  # safety cap
-                        while _settle_passes < _max_settle:
+                        settle_passes = 0
+                        max_settle = 20  # safety cap
+                        while settle_passes < max_settle:
                             if engine.exclusive_active:
                                 while engine.exclusive_active:
                                     engine.check_timeout()
@@ -226,8 +226,8 @@ async def _fast_travel(
                             # after the prompt, we've converged.
                             if not engine.exclusive_active and not engine.reply_pending:
                                 break
-                            _settle_passes += 1
-                if _cond_cancelled:
+                            settle_passes += 1
+                if cond_cancelled:
                     break
 
                 # GMCP Room.Info may arrive after the EOR.  Wait for it.
@@ -264,12 +264,12 @@ async def _fast_travel(
                     break
                 # Room didn't change -- server likely rejected move (rate limit).
                 # Retry unless we've exhausted attempts.
-                if actual == prev_room and attempt < _max_retries:
+                if actual == prev_room and attempt < max_retries:
                     continue
                 # Arrived at wrong room -- try to re-route.
                 break
 
-            if _cond_cancelled:
+            if cond_cancelled:
                 break
             if expected_room and actual and actual != expected_room:
                 move_blocked = actual == prev_room
@@ -313,7 +313,7 @@ async def _fast_travel(
                     destination
                     and actual
                     and actual != destination
-                    and reroute_count < _max_reroutes
+                    and reroute_count < max_reroutes
                     and graph is not None
                 ):
                     new_steps = graph.find_path_with_rooms(actual, destination)
@@ -322,7 +322,7 @@ async def _fast_travel(
                         msg = (
                             f"{mode}: re-routing from "
                             f"{_room_name(actual)}"
-                            f" ({reroute_count}/{_max_reroutes})"
+                            f" ({reroute_count}/{max_reroutes})"
                         )
                         log.info("%s", msg)
                         if echo_fn is not None:
@@ -410,7 +410,7 @@ async def _autowander(
         pos = chosen.num
     targets = ordered[:limit]
 
-    _leg_retries = 3
+    leg_retries = 3
     visited: set[str] = {current}
     ctx.wander_active = True
     ctx.wander_total = len(targets)
@@ -423,7 +423,7 @@ async def _autowander(
                 continue
 
             arrived = False
-            for leg_attempt in range(_leg_retries + 1):
+            for leg_attempt in range(leg_retries + 1):
                 pos = ctx.current_room_num
                 steps = graph.find_path_with_rooms(pos, target_room.num)
                 if steps is None:
@@ -449,20 +449,20 @@ async def _autowander(
                 # post_command "glance" from the previous kill can
                 # trigger a new "kill X" that enters exclusive mode
                 # AFTER _fast_travel's settle loop has returned.
-                _ar = ctx.autoreply_engine
-                if _ar is not None:
-                    _settle = 0
-                    while _settle < 60:
-                        if _ar.exclusive_active:
-                            while _ar.exclusive_active:
-                                _ar.check_timeout()
+                ar = ctx.autoreply_engine
+                if ar is not None:
+                    settle = 0
+                    while settle < 60:
+                        if ar.exclusive_active:
+                            while ar.exclusive_active:
+                                ar.check_timeout()
                                 await asyncio.sleep(0.1)
-                        while _ar.reply_pending:
+                        while ar.reply_pending:
                             await asyncio.sleep(0.05)
                         await asyncio.sleep(0.1)
-                        if not _ar.exclusive_active and not _ar.reply_pending:
+                        if not ar.exclusive_active and not ar.reply_pending:
                             break
-                        _settle += 1
+                        settle += 1
                 actual = ctx.current_room_num
                 if actual == target_room.num:
                     arrived = True
@@ -471,12 +471,12 @@ async def _autowander(
                 # Mark any intermediate room we passed through.
                 if actual:
                     visited.add(actual)
-                if leg_attempt < _leg_retries:
+                if leg_attempt < leg_retries:
                     log.info(
                         "AUTOWANDER: leg to %s failed, retrying (%d/%d)",
                         target_room.num[:8],
                         leg_attempt + 1,
-                        _leg_retries,
+                        leg_retries,
                     )
                     await asyncio.sleep(1.0)
             actual = ctx.current_room_num
@@ -620,34 +620,34 @@ async def _autodiscover(
                     f"AUTODISCOVER [{step_count}]: " f"exploring {direction} from {gw_room[:8]}"
                 )
             ctx.active_command = direction
-            _send = ctx.send_line
+            send = ctx.send_line
             if ctx.cx_dot is not None:
                 ctx.cx_dot.trigger()
             if ctx.tx_dot is not None:
                 ctx.tx_dot.trigger()
-            if _send is not None:
-                _send(direction)
+            if send is not None:
+                send(direction)
             elif isinstance(ctx.writer, TelnetWriterUnicode):
                 ctx.writer.write(direction + "\r\n")
             else:
                 ctx.writer.write((direction + "\r\n").encode("utf-8"))
             # Wait for room arrival using the event instead of polling.
-            _room_changed = ctx.room_changed
-            _arrived = False
-            if _room_changed is not None:
-                _room_changed.clear()
+            room_changed = ctx.room_changed
+            arrived = False
+            if room_changed is not None:
+                room_changed.clear()
                 try:
-                    await asyncio.wait_for(_room_changed.wait(), timeout=ctx.room_arrival_timeout)
+                    await asyncio.wait_for(room_changed.wait(), timeout=ctx.room_arrival_timeout)
                 except asyncio.TimeoutError:
                     pass
-                _arrived = ctx.current_room_num != gw_room
+                arrived = ctx.current_room_num != gw_room
             else:
                 for _wait in range(30):
                     await asyncio.sleep(0.3)
                     if ctx.current_room_num != gw_room:
-                        _arrived = True
+                        arrived = True
                         break
-            if not _arrived:
+            if not arrived:
                 ctx.active_command = None
                 tried.add((gw_room, direction))
                 if target_num:
@@ -668,20 +668,20 @@ async def _autodiscover(
                     )
 
             # Wait for any autoreply to settle.
-            _ar = ctx.autoreply_engine
-            if _ar is not None:
-                _settle = 0
-                while _settle < 60:
-                    if _ar.exclusive_active:
-                        while _ar.exclusive_active:
-                            _ar.check_timeout()
+            ar = ctx.autoreply_engine
+            if ar is not None:
+                settle = 0
+                while settle < 60:
+                    if ar.exclusive_active:
+                        while ar.exclusive_active:
+                            ar.check_timeout()
                             await asyncio.sleep(0.1)
-                    while _ar.reply_pending:
+                    while ar.reply_pending:
                         await asyncio.sleep(0.05)
                     await asyncio.sleep(0.1)
-                    if not _ar.exclusive_active and not _ar.reply_pending:
+                    if not ar.exclusive_active and not ar.reply_pending:
                         break
-                    _settle += 1
+                    settle += 1
 
             # Stay where we are — next iteration re-discovers branches
             # from current position, so nearby clusters get swept without
@@ -823,22 +823,22 @@ async def _randomwalk(
                 ctx.writer.write((direction + "\r\n").encode("utf-8"))
 
             # Wait for room change using event instead of polling.
-            _room_changed = ctx.room_changed
-            _arrived = False
-            if _room_changed is not None:
-                _room_changed.clear()
+            room_changed = ctx.room_changed
+            arrived = False
+            if room_changed is not None:
+                room_changed.clear()
                 try:
-                    await asyncio.wait_for(_room_changed.wait(), timeout=ctx.room_arrival_timeout)
+                    await asyncio.wait_for(room_changed.wait(), timeout=ctx.room_arrival_timeout)
                 except asyncio.TimeoutError:
                     pass
-                _arrived = ctx.current_room_num != current
+                arrived = ctx.current_room_num != current
             else:
                 for _tick in range(30):
                     await asyncio.sleep(0.3)
                     if ctx.current_room_num != current:
-                        _arrived = True
+                        arrived = True
                         break
-            if not _arrived:
+            if not arrived:
                 ctx.active_command = None
                 stuck_count += 1
                 if echo_fn is not None:
@@ -863,6 +863,8 @@ async def _randomwalk(
             walk_counts[actual] = walk_counts.get(actual, 0) + 1
             visited.add(actual)
 
+            await asyncio.sleep(_MOVE_STEP_DELAY)
+
             # Re-flood: the room graph's adjacency is updated live by
             # GMCP Room.Info, so newly discovered exits expand the
             # reachable set dynamically.
@@ -872,20 +874,20 @@ async def _randomwalk(
                 ctx.randomwalk_total = min(limit, len(reachable))
 
             # Wait for autoreplies to settle.
-            _ar = ctx.autoreply_engine
-            if _ar is not None:
-                _settle = 0
-                while _settle < 60:
-                    if _ar.exclusive_active:
-                        while _ar.exclusive_active:
-                            _ar.check_timeout()
+            ar = ctx.autoreply_engine
+            if ar is not None:
+                settle = 0
+                while settle < 60:
+                    if ar.exclusive_active:
+                        while ar.exclusive_active:
+                            ar.check_timeout()
                             await asyncio.sleep(0.1)
-                    while _ar.reply_pending:
+                    while ar.reply_pending:
                         await asyncio.sleep(0.05)
                     await asyncio.sleep(0.1)
-                    if not _ar.exclusive_active and not _ar.reply_pending:
+                    if not ar.exclusive_active and not ar.reply_pending:
                         break
-                    _settle += 1
+                    settle += 1
     except asyncio.CancelledError:
         pass
     finally:
@@ -906,8 +908,8 @@ async def _handle_travel_commands(
 
     - ```fast travel <id>``` -- fast travel to room *id*
     - ```slow travel <id>``` -- slow travel to room *id*
-    - ```return fast``` -- fast travel to the current room (snapshot)
-    - ```return slow``` -- slow travel to the current room (snapshot)
+    - ```return fast``` -- fast travel back to the macro's starting room
+    - ```return slow``` -- slow travel back to the macro's starting room
     - ```autowander``` -- visit all same-named rooms via slow travel
     - ```autodiscover``` -- explore unvisited exits from nearby rooms
     - ```randomwalk``` -- random walk preferring unvisited rooms
@@ -950,7 +952,7 @@ async def _handle_travel_commands(
         is_return = verb.startswith("return")
 
         if is_return:
-            room_id = ctx.current_room_num
+            room_id = ctx.macro_start_room or ctx.current_room_num
         else:
             room_id = arg
 

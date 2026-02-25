@@ -4,7 +4,6 @@ from __future__ import annotations
 
 # std imports
 import os
-import json
 from typing import Any
 
 # 3rd party
@@ -12,7 +11,6 @@ import pytest
 
 # local
 from telnetlib3.rooms import (
-    Room,
     RoomGraph,
     RoomStore,
     load_prefs,

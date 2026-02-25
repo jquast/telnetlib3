@@ -14,7 +14,6 @@ import pytest
 
 # local
 from telnetlib3.autoreply import (
-    _DELAY_RE,
     SearchBuffer,
     AutoreplyRule,
     AutoreplyEngine,

@@ -1,7 +1,7 @@
 """Command expansion, queuing, chained command sending, and macro execution."""
 
 # std imports
-import re as _re
+import re
 import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Optional
@@ -12,8 +12,8 @@ if TYPE_CHECKING:
 # local
 from .client_repl_render import _ELLIPSIS, _get_term, _wcswidth
 
-_REPEAT_RE = _re.compile(r"^(\d+)([A-Za-z].*)$")
-_BACKTICK_RE = _re.compile(r"`[^`]*`")
+_REPEAT_RE = re.compile(r"^(\d+)([A-Za-z].*)$")
+_BACKTICK_RE = re.compile(r"`[^`]*`")
 
 
 def expand_commands(line: str) -> list[str]:
@@ -35,7 +35,7 @@ def expand_commands(line: str) -> list[str]:
     # Replace backtick tokens with placeholders to protect from ; splitting.
     placeholders: list[str] = []
 
-    def _replace_bt(m: _re.Match[str]) -> str:
+    def _replace_bt(m: re.Match[str]) -> str:
         placeholders.append(m.group(0))
         return f"\x00BT{len(placeholders) - 1}\x00"
 
@@ -63,10 +63,10 @@ def expand_commands(line: str) -> list[str]:
     return result
 
 
-_TRAVEL_RE = _re.compile(
+_TRAVEL_RE = re.compile(
     r"^`(fast travel|slow travel|return fast|return slow"
     r"|autowander|autodiscover|randomwalk)\s*(.*?)`$",
-    _re.IGNORECASE,
+    re.IGNORECASE,
 )
 
 _MOVE_STEP_DELAY = 0.20
@@ -319,6 +319,9 @@ async def execute_macro_commands(text: str, ctx: "SessionContext", log: logging.
     if not parts:
         return
 
+    # snapshot starting room so ``return fast`` can navigate back
+    ctx.macro_start_room = ctx.current_room_num
+
     wait_fn = ctx.wait_for_prompt
     echo_fn = ctx.echo_command
     prompt_ready = ctx.prompt_ready
@@ -361,3 +364,5 @@ async def execute_macro_commands(text: str, ctx: "SessionContext", log: logging.
             ctx.tx_dot.trigger()
         ctx.writer.write(cmd + "\r\n")  # type: ignore[arg-type]
         idx += 1
+
+    ctx.macro_start_room = ""

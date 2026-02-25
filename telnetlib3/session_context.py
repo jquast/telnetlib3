@@ -48,6 +48,7 @@ class SessionContext:
         self.current_room_file: str = ""
         self.current_room_num: str = ""
         self.previous_room_num: str = ""
+        self.macro_start_room: str = ""
         self.room_changed: asyncio.Event = asyncio.Event()
         self.room_arrival_timeout: float = 5.0
 

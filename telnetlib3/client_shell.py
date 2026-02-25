@@ -246,7 +246,7 @@ else:
             self.cleanup_winch()
             if self._istty:
                 assert self._save_mode is not None
-                termios.tcsetattr(self._fileno, termios.TCSAFLUSH, list(self._save_mode))
+                termios.tcsetattr(self._fileno, termios.TCSADRAIN, list(self._save_mode))
 
         def get_mode(self) -> Optional["Terminal.ModeDef"]:
             """Return current terminal mode if attached to a tty, otherwise None."""
@@ -256,7 +256,7 @@ else:
 
         def set_mode(self, mode: "Terminal.ModeDef") -> None:
             """Set terminal mode attributes."""
-            termios.tcsetattr(sys.stdin.fileno(), termios.TCSAFLUSH, list(mode))
+            termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, list(mode))
 
         @staticmethod
         def _suppress_echo(mode: "Terminal.ModeDef") -> "Terminal.ModeDef":
@@ -322,33 +322,33 @@ else:
             """
             if not self._istty:
                 return None
-            _wecho = self.telnet_writer.will_echo
-            _wsga = self._server_will_sga()
+            wecho = self.telnet_writer.will_echo
+            wsga = self._server_will_sga()
             # WILL ECHO alone = line mode with server echo (suppress local echo)
             # WILL SGA (with or without ECHO) = raw/character-at-a-time
-            _should_go_raw = not switched_to_raw and _wsga
-            _should_suppress_echo = not switched_to_raw and _wecho and not _wsga
-            _echo_changed = switched_to_raw and _wecho != last_will_echo
-            if not (_should_go_raw or _should_suppress_echo or _echo_changed):
+            should_go_raw = not switched_to_raw and wsga
+            should_suppress_echo = not switched_to_raw and wecho and not wsga
+            echo_changed = switched_to_raw and wecho != last_will_echo
+            if not (should_go_raw or should_suppress_echo or echo_changed):
                 return None
             assert self._save_mode is not None
-            if _should_suppress_echo:
+            if should_suppress_echo:
                 self.set_mode(self._suppress_echo(self._save_mode))
                 self.telnet_writer.log.debug(
                     "auto: server echo without SGA, line mode (server WILL ECHO)"
                 )
-                return (False, _wecho, False)
+                return (False, wecho, False)
             self.set_mode(self._make_raw(self._save_mode, suppress_echo=True))
             self.telnet_writer.log.debug(
                 "auto: %s (server %s ECHO)",
                 (
                     "switching to raw mode"
-                    if _should_go_raw
-                    else ("disabling" if _wecho else "enabling") + " software echo"
+                    if should_go_raw
+                    else ("disabling" if wecho else "enabling") + " software echo"
                 ),
-                "WILL" if _wecho else "WONT",
+                "WILL" if wecho else "WONT",
             )
-            return (True if _should_go_raw else switched_to_raw, _wecho, not _wecho)
+            return (True if should_go_raw else switched_to_raw, wecho, not wecho)
 
         def determine_mode(self, mode: "Terminal.ModeDef") -> "Terminal.ModeDef":
             """
@@ -453,9 +453,9 @@ else:
         from .session_context import SessionContext
 
         ctx: Optional[SessionContext] = getattr(writer, "_ctx", None)
-        _cf = ctx.color_filter if ctx is not None else None
-        if _cf is not None:
-            out = _cf.filter(out)
+        cf = ctx.color_filter if ctx is not None else None
+        if cf is not None:
+            out = cf.filter(out)
         if ctx is not None and ctx.ascii_eol:
             out = out.replace(_ATASCII_CR_CHAR, "\r").replace(_ATASCII_LF_CHAR, "\n")
         if in_raw_mode:
@@ -484,29 +484,29 @@ else:
         from .session_context import SessionContext
 
         _ctx: Optional[SessionContext] = getattr(telnet_writer, "_ctx", None)
-        _inf = _ctx.input_filter if _ctx is not None else None
+        inf = _ctx.input_filter if _ctx is not None else None
         pending = False
         new_timer: Optional[asyncio.Task[None]] = None
-        if _inf is not None:
-            translated = _inf.feed(inp)
+        if inf is not None:
+            translated = inf.feed(inp)
             if translated:
                 telnet_writer._write(translated)
-            if _inf.has_pending:
+            if inf.has_pending:
                 pending = True
-                new_timer = asyncio.ensure_future(asyncio.sleep(_inf.esc_delay))
+                new_timer = asyncio.ensure_future(asyncio.sleep(inf.esc_delay))
         else:
             telnet_writer._write(inp)
         if local_echo:
-            _echo_buf = bytearray()
-            for _b in inp:
-                if _b in (0x7F, 0x08):
-                    _echo_buf.extend(b"\b \b")
-                elif _b == 0x0D:
-                    _echo_buf.extend(b"\r\n")
-                elif _b >= 0x20:
-                    _echo_buf.append(_b)
-            if _echo_buf:
-                stdout.write(bytes(_echo_buf))
+            echo_buf = bytearray()
+            for b in inp:
+                if b in (0x7F, 0x08):
+                    echo_buf.extend(b"\b \b")
+                elif b == 0x0D:
+                    echo_buf.extend(b"\r\n")
+                elif b >= 0x20:
+                    echo_buf.append(b)
+            if echo_buf:
+                stdout.write(bytes(echo_buf))
         return new_timer, pending
 
     def _get_raw_mode(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> "bool | None":
@@ -523,11 +523,11 @@ else:
         from .session_context import SessionContext
 
         ctx: Optional[SessionContext] = getattr(writer, "_ctx", None)
-        _cf = ctx.color_filter if ctx is not None else None
-        if _cf is not None:
-            _flush = _cf.flush()
-            if _flush:
-                stdout.write(_flush.encode())
+        cf = ctx.color_filter if ctx is not None else None
+        if cf is not None:
+            flush = cf.flush()
+            if flush:
+                stdout.write(flush.encode())
 
     async def _raw_event_loop(
         telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
@@ -572,9 +572,9 @@ else:
                 from .session_context import SessionContext
 
                 _es_ctx: Optional[SessionContext] = getattr(telnet_writer, "_ctx", None)
-                _inf = _es_ctx.input_filter if _es_ctx is not None else None
-                if _inf is not None and _inf.has_pending:
-                    flushed = _inf.flush()
+                inf = _es_ctx.input_filter if _es_ctx is not None else None
+                if inf is not None and inf.has_pending:
+                    flushed = inf.flush()
                     if flushed:
                         telnet_writer._write(flushed)
                 continue
@@ -620,19 +620,19 @@ else:
                 in_raw = raw_mode is True or (raw_mode is None and switched_to_raw)
                 out = _transform_output(out, telnet_writer, in_raw)
                 _so_ctx: Optional[SessionContext] = getattr(telnet_writer, "_ctx", None)
-                _ar_engine = _so_ctx.autoreply_engine if _so_ctx is not None else None
-                if _ar_engine is None and _so_ctx is not None:
-                    _ar_rules = _so_ctx.autoreply_rules
-                    if _ar_rules:
+                ar_engine = _so_ctx.autoreply_engine if _so_ctx is not None else None
+                if ar_engine is None and _so_ctx is not None:
+                    ar_rules = _so_ctx.autoreply_rules
+                    if ar_rules:
                         from .autoreply import AutoreplyEngine
 
-                        _ar_wait = _so_ctx.autoreply_wait_fn
-                        _ar_engine = AutoreplyEngine(
-                            _ar_rules, _so_ctx, telnet_writer.log, wait_fn=_ar_wait
+                        ar_wait = _so_ctx.autoreply_wait_fn
+                        ar_engine = AutoreplyEngine(
+                            ar_rules, _so_ctx, telnet_writer.log, wait_fn=ar_wait
                         )
-                        _so_ctx.autoreply_engine = _ar_engine
-                if _ar_engine is not None:
-                    _ar_engine.feed(out)
+                        _so_ctx.autoreply_engine = ar_engine
+                if ar_engine is not None:
+                    ar_engine.feed(out)
                 if raw_mode is None:
                     mode_result = tty_shell.check_auto_mode(switched_to_raw, last_will_echo)
                     if mode_result is not None:
@@ -688,21 +688,21 @@ else:
             tty_shell.setup_winch()
 
             # EOR/GA-based command pacing for raw-mode autoreplies.
-            _prompt_ready_raw = asyncio.Event()
-            _prompt_ready_raw.set()
-            _ga_detected_raw = False
+            prompt_ready_raw = asyncio.Event()
+            prompt_ready_raw.set()
+            ga_detected_raw = False
 
             from .session_context import SessionContext
 
             _sh_ctx: Optional[SessionContext] = getattr(telnet_writer, "_ctx", None)
 
             def _on_prompt_signal_raw(_cmd: bytes) -> None:
-                nonlocal _ga_detected_raw
-                _ga_detected_raw = True
-                _prompt_ready_raw.set()
-                _ar = _sh_ctx.autoreply_engine if _sh_ctx is not None else None
-                if _ar is not None:
-                    _ar.on_prompt()
+                nonlocal ga_detected_raw
+                ga_detected_raw = True
+                prompt_ready_raw.set()
+                ar = _sh_ctx.autoreply_engine if _sh_ctx is not None else None
+                if ar is not None:
+                    ar.on_prompt()
 
             from .telopt import GA, CMD_EOR
 
@@ -710,13 +710,13 @@ else:
             telnet_writer.set_iac_callback(CMD_EOR, _on_prompt_signal_raw)
 
             async def _wait_for_prompt_raw() -> None:
-                if not _ga_detected_raw:
+                if not ga_detected_raw:
                     return
                 try:
-                    await asyncio.wait_for(_prompt_ready_raw.wait(), timeout=2.0)
+                    await asyncio.wait_for(prompt_ready_raw.wait(), timeout=2.0)
                 except asyncio.TimeoutError:
                     pass
-                _prompt_ready_raw.clear()
+                prompt_ready_raw.clear()
 
             if _sh_ctx is not None:
                 _sh_ctx.autoreply_wait_fn = _wait_for_prompt_raw
@@ -728,32 +728,32 @@ else:
                     "blessed not installed; REPL disabled. "
                     "Install with: pip install telnetlib3[with_tui]"
                 )
-            _can_repl = (
+            can_repl = (
                 _BLESSED_AVAILABLE
                 and repl_enabled
                 and raw_mode_val is not True
                 and tty_shell._istty
             )
 
-            _banner_lines: list[str] = []
-            _n_macros = len(_sh_ctx.macro_defs) if _sh_ctx is not None else 0
-            _n_autoreplies = len(_sh_ctx.autoreply_rules) if _sh_ctx is not None else 0
-            if _n_macros and _sh_ctx is not None:
-                _banner_lines.append(f"{_n_macros} macros loaded from {_sh_ctx.macros_file}.")
-            if _n_autoreplies and _sh_ctx is not None:
-                _banner_lines.append(
-                    f"{_n_autoreplies} autoreplies loaded from {_sh_ctx.autoreplies_file}."
+            banner_lines: list[str] = []
+            n_macros = len(_sh_ctx.macro_defs) if _sh_ctx is not None else 0
+            n_autoreplies = len(_sh_ctx.autoreply_rules) if _sh_ctx is not None else 0
+            if n_macros and _sh_ctx is not None:
+                banner_lines.append(f"{n_macros} macros loaded from {_sh_ctx.macros_file}.")
+            if n_autoreplies and _sh_ctx is not None:
+                banner_lines.append(
+                    f"{n_autoreplies} autoreplies loaded from {_sh_ctx.autoreplies_file}."
                 )
             escape_name = accessories.name_unicode(keyboard_escape)
-            _banner_lines.append(f"Escape character is '{escape_name}' - Press F1 for help!")
+            banner_lines.append(f"Escape character is '{escape_name}' - Press F1 for help!")
 
             # In non-REPL mode, emit banner now; in REPL mode, pass it
             # through so it displays after the scroll region is active.
-            if not _can_repl:
-                _banner_sep = "\r\n" if tty_shell._istty else linesep
-                for _bl in _banner_lines:
-                    stdout.write(f"{_bl}{_banner_sep}".encode())
-                _banner_lines = []
+            if not can_repl:
+                banner_sep = "\r\n" if tty_shell._istty else linesep
+                for bl in banner_lines:
+                    stdout.write(f"{bl}{banner_sep}".encode())
+                banner_lines = []
 
             def _handle_close(msg: str) -> None:
                 _flush_color_filter(telnet_writer, stdout)
@@ -761,7 +761,7 @@ else:
                 tty_shell.cleanup_winch()
 
             def _want_repl() -> bool:
-                return _can_repl and telnet_writer.mode == "local"
+                return can_repl and telnet_writer.mode == "local"
 
             # -- outer loop: alternate between REPL and raw event loops --
             while True:
@@ -776,9 +776,9 @@ else:
                         tty_shell,
                         stdout,
                         history_file=history_file,
-                        banner_lines=_banner_lines,
+                        banner_lines=banner_lines,
                     )
-                    _banner_lines = []
+                    banner_lines = []
                     if not mode_switched:
                         return
                     telnet_writer.log.debug("REPL deactivated, switching to standard event loop")

@@ -3,6 +3,8 @@
 # 3rd party
 import pytest
 
+pytest.importorskip("blessed")
+
 # local
 from telnetlib3.client_repl import (
     _FLASH_HOLD,

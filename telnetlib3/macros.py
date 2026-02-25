@@ -15,11 +15,8 @@ from __future__ import annotations
 # std imports
 import json
 import logging
-from typing import Any, Union
+from typing import Any
 from dataclasses import dataclass
-
-# local
-from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
 __all__ = ("Macro", "load_macros", "save_macros", "build_macro_dispatch")
 
@@ -101,9 +98,7 @@ def save_macros(path: str, macros: list[Macro], session_key: str) -> None:
     _atomic_write(path, content)
 
 
-def build_macro_dispatch(
-    macros: list[Macro], writer: Union[TelnetWriter, TelnetWriterUnicode], log: logging.Logger
-) -> dict[str, Any]:
+def build_macro_dispatch(macros: list[Macro], ctx: Any, log: logging.Logger) -> dict[str, Any]:
     """
     Build a blessed key name to handler mapping from macro defs.
 
@@ -113,7 +108,7 @@ def build_macro_dispatch(
     skipped with a warning.
 
     :param macros: Macro definitions to bind.
-    :param writer: Telnet writer for sending commands.
+    :param ctx: :class:`~telnetlib3.session_context.SessionContext` instance.
     :param log: Logger instance.
     :returns: Dict mapping blessed key names (or raw chars) to handlers.
     """
@@ -133,7 +128,7 @@ def build_macro_dispatch(
         text = macro.text
 
         async def _handler(_text: str = text) -> None:
-            asyncio.ensure_future(execute_macro_commands(_text, writer, log))
+            asyncio.ensure_future(execute_macro_commands(_text, ctx, log))
 
         result[macro.key] = _handler
     return result

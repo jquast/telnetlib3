@@ -51,7 +51,7 @@ from textual.widgets._tree import TreeNode
 
 # Reset SGR, cursor, alt-screen, mouse, and bracketed paste.
 _TERMINAL_CLEANUP = (
-    "\x1b[m\x1b[?25h\x1b[?1049l" "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l"
+    "\x1b[m\x1b[?25h\x1b[?1049l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l"
 )
 
 _ENCODINGS = (
@@ -1354,7 +1354,9 @@ class _EditListScreen(Screen["bool | None"]):
             if idx is not None and idx < len(self._items):
                 label = self._item_label(idx)
 
-                def _on_confirm(confirmed: bool, _idx: int = idx) -> None:
+                safe_idx: int = idx
+
+                def _on_confirm(confirmed: bool, _idx: int = safe_idx) -> None:
                     if confirmed and _idx < len(self._items):
                         self._items.pop(_idx)
                         self._refresh_table()
@@ -2392,11 +2394,11 @@ class RoomBrowserScreen(Screen["bool | None"]):
         if node is None:
             return None
         if node.data is not None:
-            return node.data
+            return str(node.data)
         if node.children:
             first = node.children[0]
             if first.data is not None:
-                return first.data
+                return str(first.data)
         return None
 
     def on_select_changed(self, event: Select.Changed) -> None:
@@ -2968,3 +2970,8 @@ def tui_main() -> None:
     """Launch the Textual TUI session manager."""
     app = TelnetSessionApp()
     app.run()
+    # Move cursor to bottom-right corner and print a newline while still in
+    # the alternate screen, then exit fullscreen and print another newline
+    # so the shell prompt appears on a clean line.
+    sys.stdout.write("\x1b[999;999H\n" + _TERMINAL_CLEANUP + "\n")
+    sys.stdout.flush()

@@ -64,7 +64,7 @@ def _confirm_dialog(
     fd, result_path = tempfile.mkstemp(suffix=".json", prefix="confirm-")
     os.close(fd)
 
-    _logfile = _get_logfile_path()
+    logfile = _get_logfile_path()
     cmd = [
         sys.executable,
         "-c",
@@ -76,12 +76,12 @@ def _confirm_dialog(
         body,
         warning or "",
         result_path,
-        _logfile,
+        logfile,
     ]
 
     global _editor_active  # noqa: PLW0603
-    _log = logging.getLogger(__name__)
-    _log.debug(
+    log = logging.getLogger(__name__)
+    log.debug(
         "confirm_dialog: pre-subprocess fd0_blocking=%s fd1=%s fd2=%s "
         "stdin_isatty=%s stderr_isatty=%s "
         "TERM=%s COLORTERM=%s terminal_size=%s",
@@ -226,17 +226,17 @@ def _launch_tui_editor(
     from ._paths import CONFIG_DIR as _config_dir
     from .client_repl import _get_term, _blocking_fds, _terminal_cleanup, _restore_after_subprocess
 
-    _session_key = ctx.session_key
+    session_key = ctx.session_key
 
-    _logfile = _get_logfile_path()
+    logfile = _get_logfile_path()
 
     if editor_type == "macros":
         path = ctx.macros_file or os.path.join(_config_dir, "macros.json")
         from .rooms import rooms_path as _rooms_path_fn
         from .rooms import current_room_path as _current_room_path_fn
 
-        _rp = ctx.rooms_file or _rooms_path_fn(_session_key)
-        _crp = ctx.current_room_file or _current_room_path_fn(_session_key)
+        rp = ctx.rooms_file or _rooms_path_fn(session_key)
+        crp = ctx.current_room_file or _current_room_path_fn(session_key)
         cmd = [
             sys.executable,
             "-c",
@@ -245,15 +245,15 @@ def _launch_tui_editor(
             " rooms_file=sys.argv[3], current_room_file=sys.argv[4],"
             " logfile=sys.argv[5])",
             path,
-            _session_key,
-            _rp,
-            _crp,
-            _logfile,
+            session_key,
+            rp,
+            crp,
+            logfile,
         ]
     else:
         path = ctx.autoreplies_file or os.path.join(_config_dir, "autoreplies.json")
         engine = ctx.autoreply_engine
-        _select = getattr(engine, "last_matched_pattern", "") if engine else ""
+        select = getattr(engine, "last_matched_pattern", "") if engine else ""
         cmd = [
             sys.executable,
             "-c",
@@ -261,9 +261,9 @@ def _launch_tui_editor(
             "edit_autoreplies_main(sys.argv[1], sys.argv[2],"
             " select_pattern=sys.argv[3], logfile=sys.argv[4])",
             path,
-            _session_key,
-            _select,
-            _logfile,
+            session_key,
+            select,
+            logfile,
         ]
 
     log = logging.getLogger(__name__)
@@ -300,9 +300,9 @@ def _launch_tui_editor(
         _restore_after_subprocess(replay_buf)
 
     if editor_type == "macros":
-        _reload_macros(ctx, path, _session_key, log)
+        _reload_macros(ctx, path, session_key, log)
     else:
-        _reload_autoreplies(ctx, path, _session_key, log)
+        _reload_autoreplies(ctx, path, session_key, log)
 
 
 def _reload_macros(ctx: "SessionContext", path: str, session_key: str, log: logging.Logger) -> None:
@@ -317,7 +317,7 @@ def _reload_macros(ctx: "SessionContext", path: str, session_key: str, log: logg
         ctx.macros_file = path
         dispatch = ctx.key_dispatch
         if dispatch is not None:
-            dispatch.set_macros(new_defs, ctx.writer, log)
+            dispatch.set_macros(new_defs, ctx, log)
         log.info("reloaded %d macros from %s", len(new_defs), path)
     except ValueError as exc:
         log.warning("failed to reload macros: %s", exc)
@@ -354,8 +354,8 @@ def _launch_room_browser(ctx: "SessionContext", replay_buf: Optional[Any] = None
     from .client_repl import _get_term, _blocking_fds, _terminal_cleanup, _restore_after_subprocess
     from .client_repl_travel import _fast_travel
 
-    _session_key = ctx.session_key
-    if not _session_key:
+    session_key = ctx.session_key
+    if not session_key:
         return
 
     from .rooms import rooms_path as _rooms_path_fn
@@ -363,22 +363,22 @@ def _launch_room_browser(ctx: "SessionContext", replay_buf: Optional[Any] = None
     from .rooms import read_fasttravel
     from .rooms import current_room_path as _current_room_path_fn
 
-    _rp = ctx.rooms_file or _rooms_path_fn(_session_key)
-    _crp = ctx.current_room_file or _current_room_path_fn(_session_key)
-    _ftp = _fasttravel_path_fn(_session_key)
+    rp = ctx.rooms_file or _rooms_path_fn(session_key)
+    crp = ctx.current_room_file or _current_room_path_fn(session_key)
+    ftp = _fasttravel_path_fn(session_key)
 
-    _logfile = _get_logfile_path()
+    logfile = _get_logfile_path()
     cmd = [
         sys.executable,
         "-c",
         "import sys; from telnetlib3.client_tui import edit_rooms_main; "
         "edit_rooms_main(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4],"
         " logfile=sys.argv[5])",
-        _rp,
-        _session_key,
-        _crp,
-        _ftp,
-        _logfile,
+        rp,
+        session_key,
+        crp,
+        ftp,
+        logfile,
     ]
 
     log = logging.getLogger(__name__)
@@ -417,7 +417,7 @@ def _launch_room_browser(ctx: "SessionContext", replay_buf: Optional[Any] = None
     if room_graph is not None:
         room_graph._load_adjacency()
 
-    steps, slow = read_fasttravel(_ftp)
+    steps, slow = read_fasttravel(ftp)
     if steps:
         log.debug("fast travel: scheduling %d steps (slow=%s)", len(steps), slow)
         asyncio.ensure_future(_fast_travel(steps, ctx, log, slow=slow))

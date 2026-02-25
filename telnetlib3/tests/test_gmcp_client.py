@@ -243,29 +243,40 @@ def test_transform_args_gmcp_modules_none():
     assert result["gmcp_modules"] is None
 
 
-if sys.platform != "win32":
+_blessed_available = sys.platform != "win32"
+try:
     from telnetlib3.client_repl import _segmented, _vital_bar
+except ModuleNotFoundError:
+    _blessed_available = False
 
-    def test_vital_bar_shows_vitals():
-        bars = _vital_bar(100, 200, 16, "hp")
-        text = "".join(t for _, t in bars)
-        assert _segmented("100/200") in text
-        assert _segmented("50%") in text
 
-    def test_vital_bar_hp_only():
-        bars = _vital_bar(50, None, 16, "hp")
-        text = "".join(t for _, t in bars)
-        assert _segmented("50") in text
-        assert "hp" in text
+@pytest.mark.skipif(not _blessed_available, reason="requires blessed + POSIX")
+def test_vital_bar_shows_vitals():
+    bars = _vital_bar(100, 200, 16, "hp")
+    text = "".join(t for _, t in bars)
+    assert _segmented("100/200") in text
+    assert _segmented("50%") in text
 
-    def test_vital_bar_full():
-        bars = _vital_bar(100, 100, 16, "hp")
-        text = "".join(t for _, t in bars)
-        assert _segmented("100/100") in text
-        assert _segmented("100%") in text
 
-    def test_vital_bar_returns_sgr():
-        bars = _vital_bar(50, 100, 16, "mp")
-        for sgr, _text in bars:
-            assert not sgr.startswith("fg:#")
-            assert not sgr.startswith("bg:#")
+@pytest.mark.skipif(not _blessed_available, reason="requires blessed + POSIX")
+def test_vital_bar_hp_only():
+    bars = _vital_bar(50, None, 16, "hp")
+    text = "".join(t for _, t in bars)
+    assert _segmented("50") in text
+    assert "hp" in text
+
+
+@pytest.mark.skipif(not _blessed_available, reason="requires blessed + POSIX")
+def test_vital_bar_full():
+    bars = _vital_bar(100, 100, 16, "hp")
+    text = "".join(t for _, t in bars)
+    assert _segmented("100/100") in text
+    assert _segmented("100%") in text
+
+
+@pytest.mark.skipif(not _blessed_available, reason="requires blessed + POSIX")
+def test_vital_bar_returns_sgr():
+    bars = _vital_bar(50, 100, 16, "mp")
+    for sgr, _text in bars:
+        assert not sgr.startswith("fg:#")
+        assert not sgr.startswith("bg:#")

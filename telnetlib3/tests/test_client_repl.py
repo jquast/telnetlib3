@@ -69,6 +69,7 @@ def test_scroll_region_input_row_reserve_2() -> None:
 
 
 def test_scroll_region_decstbm_enter_exit() -> None:
+    pytest.importorskip("blessed")
     stdout, transport = _mock_stdout()
     with ScrollRegion(stdout, rows=24, cols=80, reserve_bottom=1) as sr:
         assert sr._active
@@ -77,6 +78,7 @@ def test_scroll_region_decstbm_enter_exit() -> None:
 
 
 def test_scroll_region_update_size() -> None:
+    pytest.importorskip("blessed")
     stdout, transport = _mock_stdout()
     with ScrollRegion(stdout, rows=24, cols=80, reserve_bottom=1) as sr:
         transport.data.clear()
@@ -87,6 +89,7 @@ def test_scroll_region_update_size() -> None:
 
 
 def test_scroll_region_update_size_inactive() -> None:
+    pytest.importorskip("blessed")
     stdout, transport = _mock_stdout()
     sr = ScrollRegion(stdout, rows=24, cols=80, reserve_bottom=1)
     transport.data.clear()
@@ -95,6 +98,7 @@ def test_scroll_region_update_size_inactive() -> None:
 
 
 def test_scroll_region_grow_reserve_emits_newlines() -> None:
+    pytest.importorskip("blessed")
     stdout, transport = _mock_stdout()
     with ScrollRegion(stdout, rows=24, cols=80, reserve_bottom=1) as sr:
         assert sr.scroll_rows == 21
@@ -106,6 +110,7 @@ def test_scroll_region_grow_reserve_emits_newlines() -> None:
 
 
 def test_scroll_region_grow_reserve_noop_if_smaller() -> None:
+    pytest.importorskip("blessed")
     stdout, transport = _mock_stdout()
     with ScrollRegion(stdout, rows=24, cols=80, reserve_bottom=2) as sr:
         transport.data.clear()
@@ -115,6 +120,7 @@ def test_scroll_region_grow_reserve_noop_if_smaller() -> None:
 
 
 def test_scroll_region_save_and_goto_input() -> None:
+    pytest.importorskip("blessed")
     stdout, transport = _mock_stdout()
     sr = ScrollRegion(stdout, rows=24, cols=80)
     transport.data.clear()
@@ -124,6 +130,7 @@ def test_scroll_region_save_and_goto_input() -> None:
 
 
 def test_scroll_region_restore_cursor() -> None:
+    pytest.importorskip("blessed")
     stdout, transport = _mock_stdout()
     sr = ScrollRegion(stdout, rows=24, cols=80)
     transport.data.clear()
@@ -134,6 +141,7 @@ def test_scroll_region_restore_cursor() -> None:
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
 async def test_adjusted_naws_active_scroll() -> None:
+    pytest.importorskip("blessed")
     from telnetlib3.client_repl import _repl_scaffold
 
     writer = _mock_writer()
@@ -154,6 +162,7 @@ async def test_adjusted_naws_active_scroll() -> None:
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
 async def test_adjusted_naws_inactive_returns_terminal_size() -> None:
+    pytest.importorskip("blessed")
     from telnetlib3.client_repl import _repl_scaffold
 
     writer = _mock_writer()
@@ -176,6 +185,7 @@ async def test_adjusted_naws_inactive_returns_terminal_size() -> None:
 @pytest.mark.asyncio
 async def test_naws_restored_on_exception() -> None:
     """handle_send_naws is restored even if _repl_scaffold body raises."""
+    pytest.importorskip("blessed")
     from telnetlib3.client_repl import _repl_scaffold
 
     def orig_handler() -> tuple[int, int]:
@@ -200,6 +210,7 @@ async def test_naws_restored_on_exception() -> None:
 @pytest.mark.asyncio
 async def test_naws_restored_on_normal_exit() -> None:
     """handle_send_naws is restored after normal scaffold exit."""
+    pytest.importorskip("blessed")
     from telnetlib3.client_repl import _repl_scaffold
 
     def orig_handler() -> tuple[int, int]:
@@ -325,6 +336,7 @@ def test_travel_re_matching(cmd: str, match: bool) -> None:
 
 
 def test_style_normal_populated() -> None:
+    pytest.importorskip("blessed")
     from telnetlib3.client_repl import _make_styles
 
     _make_styles()
@@ -337,6 +349,7 @@ def test_style_normal_populated() -> None:
 
 
 def test_style_autoreply_populated() -> None:
+    pytest.importorskip("blessed")
     from telnetlib3.client_repl import _make_styles
 
     _make_styles()
@@ -348,6 +361,7 @@ def test_style_autoreply_populated() -> None:
 
 
 def test_style_normal_and_autoreply_differ() -> None:
+    pytest.importorskip("blessed")
     from telnetlib3.client_repl import _make_styles
 
     _make_styles()
@@ -358,6 +372,7 @@ def test_style_normal_and_autoreply_differ() -> None:
 
 
 def test_render_input_line_basic() -> None:
+    pytest.importorskip("blessed")
     from blessed.line_editor import DisplayState
 
     from telnetlib3.client_repl import _render_input_line
@@ -377,6 +392,7 @@ def test_render_input_line_basic() -> None:
 @pytest.mark.asyncio
 async def test_scaffold_resize_handler_updates_scroll() -> None:
     """_repl_scaffold resize handler updates scroll region dimensions."""
+    pytest.importorskip("blessed")
     from telnetlib3.client_repl import _repl_scaffold
 
     writer = _mock_writer()
@@ -424,6 +440,7 @@ def test_resize_pending_flag_is_threading_event() -> None:
 
 
 def test_load_history_populates_entries(tmp_path: "os.PathLike[str]") -> None:
+    pytest.importorskip("blessed")
     from blessed.line_editor import LineHistory
 
     from telnetlib3.client_repl import _load_history
@@ -446,6 +463,7 @@ def test_save_history_entry_appends(tmp_path: "os.PathLike[str]") -> None:
 
 
 def test_load_history_missing_file(tmp_path: "os.PathLike[str]") -> None:
+    pytest.importorskip("blessed")
     from blessed.line_editor import LineHistory
 
     from telnetlib3.client_repl import _load_history
@@ -473,11 +491,6 @@ def test_history_path_no_traversal() -> None:
     result = history_path(malicious)
     assert result.startswith(DATA_DIR)
     assert ".." not in os.path.basename(result)
-
-
-# ---------------------------------------------------------------------------
-# _randomwalk / _autodiscover stuck-loop tests
-# ---------------------------------------------------------------------------
 
 
 class _DynamicRoomContext:
@@ -800,6 +813,7 @@ async def test_send_chained_queue_cancellation(monkeypatch: pytest.MonkeyPatch) 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 def test_render_command_queue_truncation(monkeypatch: pytest.MonkeyPatch) -> None:
     """Queue wider than terminal is truncated with ellipsis."""
+    pytest.importorskip("blessed")
     from telnetlib3.client_repl import _get_term, _CommandQueue, _render_command_queue
 
     stdout, transport = _mock_stdout()
@@ -823,6 +837,7 @@ def test_render_command_queue_truncation(monkeypatch: pytest.MonkeyPatch) -> Non
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 def test_render_command_queue_highlight_active() -> None:
     """Active run uses paper-white bg SGR, pending runs use dim grey."""
+    pytest.importorskip("blessed")
     from telnetlib3.client_repl import _get_term, _CommandQueue, _render_command_queue
 
     stdout, transport = _mock_stdout()

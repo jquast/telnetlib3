@@ -99,6 +99,7 @@ def test_save_macros_unicode(tmp_path):
 
 
 def test_build_dispatch_skips_editor_keymap_conflicts(caplog):
+    pytest.importorskip("blessed")
     import types
 
     from telnetlib3.macros import build_macro_dispatch
