@@ -530,6 +530,7 @@ class _WalkWriter:
         self.ctx.echo_command = self._echo_log.append
         self.ctx.room_graph = types.SimpleNamespace(
             _adj=adj or {},
+            rooms={},
             get_room=lambda num: types.SimpleNamespace(name=num),
             find_branches=lambda pos: [],
         )
@@ -626,6 +627,59 @@ async def test_autodiscover_stuck_gateway_stops(monkeypatch: pytest.MonkeyPatch)
     stuck_msgs = [m for m in writer._echo_log if "all routes blocked" in m]
     assert len(stuck_msgs) == 1
     assert not writer.ctx.discover_active
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.asyncio
+async def test_autodiscover_blocked_edge_avoids_retrying(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When a path edge is impassable, subsequent gateways behind it are skipped."""
+    import logging
+
+    from telnetlib3.client_repl import _autodiscover
+
+    _real_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
+
+    adj: dict[str, dict[str, str]] = {
+        "start": {"portal": "island"},
+        "island": {"east": "gw1", "west": "gw2"},
+        "gw1": {"north": "t1"},
+        "gw2": {"south": "t2"},
+    }
+    writer = _WalkWriter(room_num="start", adj=adj)
+
+    branch_idx = 0
+
+    def fake_find_branches(pos: str) -> list[tuple[str, str, str]]:
+        nonlocal branch_idx
+        branch_idx += 1
+        if branch_idx == 1:
+            return [("gw1", "north", "t1"), ("gw2", "south", "t2")]
+        return [("gw2", "south", "t2")]
+
+    writer.ctx.room_graph.find_branches = fake_find_branches
+
+    def fake_find_path(src: str, dst: str) -> list[tuple[str, str]] | None:
+        if src == "start" and "portal" not in adj.get("start", {}):
+            return None
+        return [("portal", "island"), ("east", dst)]
+
+    writer.ctx.room_graph.find_path_with_rooms = fake_find_path
+
+    fast_travel_calls = 0
+
+    async def fake_fast_travel(*args: object, **kwargs: object) -> None:
+        nonlocal fast_travel_calls
+        fast_travel_calls += 1
+
+    monkeypatch.setattr("telnetlib3.client_repl._fast_travel", fake_fast_travel)
+
+    await _autodiscover(writer.ctx, logging.getLogger("test"), limit=20)
+
+    assert fast_travel_calls == 1
+    assert "portal" in adj["start"]
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
@@ -790,3 +844,96 @@ def test_render_command_queue_highlight_active() -> None:
     pending_sgr = bt.color_rgb(120, 120, 120)
     assert active_sgr in output
     assert pending_sgr in output
+
+
+from telnetlib3.tui_blinken_lights import (  # noqa: E402
+    ActivityDot,
+    IDLE_RGB,
+    IDLE_AR_RGB,
+    PEAK_RED,
+    PEAK_YELLOW,
+    DURATION,
+    WARM_UP,
+    HOLD,
+    lerp_rgb,
+)
+
+
+def test_modem_dot_idle_before_trigger():
+    dot = ActivityDot()
+    assert dot.intensity() == 0.0
+    assert not dot.is_animating()
+    assert dot.color() == IDLE_RGB
+
+
+def test_modem_dot_peak_after_trigger(monkeypatch):
+    import time as _time
+
+    now = [1000.0]
+    monkeypatch.setattr(_time, "monotonic", lambda: now[0])
+
+    dot = ActivityDot()
+    dot.trigger()
+    now[0] += WARM_UP + 0.001
+    assert dot.intensity() == pytest.approx(1.0, abs=0.05)
+    assert dot.is_animating()
+    r, g, b = dot.color()
+    assert r == PEAK_RED[0]
+    assert g == PEAK_RED[1]
+
+
+def test_modem_dot_idle_after_duration(monkeypatch):
+    import time as _time
+
+    now = [1000.0]
+    monkeypatch.setattr(_time, "monotonic", lambda: now[0])
+
+    dot = ActivityDot()
+    dot.trigger()
+    now[0] += DURATION + 0.001
+    assert dot.intensity() == 0.0
+    assert not dot.is_animating()
+    assert dot.color() == IDLE_RGB
+
+
+def test_modem_dot_yellow_peak():
+    dot = ActivityDot(peak_rgb=PEAK_YELLOW)
+    assert dot.color() == IDLE_RGB
+
+
+def test_modem_dot_retrigger_during_glowdown(monkeypatch):
+    import time as _time
+
+    now = [1000.0]
+    monkeypatch.setattr(_time, "monotonic", lambda: now[0])
+
+    dot = ActivityDot()
+    dot.trigger()
+    now[0] += WARM_UP + HOLD + 0.050
+    mid_intensity = dot.intensity()
+    assert 0.0 < mid_intensity < 1.0
+
+    dot.trigger()
+    now[0] += WARM_UP * 0.5
+    assert dot.intensity() > mid_intensity
+
+
+def test_modem_dot_autoreply_bg_uses_alt_idle():
+    dot = ActivityDot()
+    assert dot.color(autoreply_bg=True) == IDLE_AR_RGB
+
+
+def testlerp_rgb_endpoints():
+    c1 = (0, 0, 0)
+    c2 = (100, 200, 50)
+    assert lerp_rgb(c1, c2, 0.0) == c1
+    assert lerp_rgb(c1, c2, 1.0) == c2
+
+
+def testlerp_rgb_midpoint():
+    c1 = (0, 0, 0)
+    c2 = (100, 200, 50)
+    r, g, b = lerp_rgb(c1, c2, 0.5)
+    assert r == 50
+    assert g == 100
+    assert b == 25

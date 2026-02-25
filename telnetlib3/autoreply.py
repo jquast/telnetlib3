@@ -785,6 +785,10 @@ class AutoreplyEngine:
             self._sent_commands.clear()
         if self._echo_fn is not None:
             self._echo_fn(cmd)
+        if self._ctx.cx_dot is not None:
+            self._ctx.cx_dot.trigger()
+        if self._ctx.tx_dot is not None:
+            self._ctx.tx_dot.trigger()
         assert self._ctx.writer is not None
         self._ctx.writer.write(cmd + "\r\n")  # type: ignore[arg-type]
 

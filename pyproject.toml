@@ -131,36 +131,30 @@ disable = [
     # boundary/cleanup code throughout
     "broad-exception-caught",
     "broad-except",
+    # callback signatures with unused params
+    "unused-argument",
     # codec encode/decode `input` param, __exit__ `type` param
     "redefined-builtin",
     # module-level singletons pattern
     "global-statement",
-    # callback signatures with unused params
-    "unused-argument",
-    # theNULL, PTY_SUPPORT, _editor_active, etc.
+    # theNULL, PTY_SUPPORT, SLC_nosupport, _editor_active, etc.
     "invalid-name",
-    # pytest fixtures, subprocess re-imports
-    "redefined-outer-name",
+    # subprocess re-imports after fork
     "reimported",
+    "redefined-outer-name",
     # deliberate override renames/changes
     "arguments-renamed",
     "arguments-differ",
-    # blessed uses dynamic attributes (line_editor submodule)
-    "no-member",
-    # optional deps may not be installed
+    # optional deps may not be installed (blessed, textual)
     "import-error",
-    "no-name-in-module",
-    # false positives on mixed-type comparisons, unpacking, etc.
-    "unpacking-non-sequence",
-    "possibly-used-before-assignment",
-    "comparison-with-callable",
-    "use-implicit-booleaness-not-comparison-to-string",
-    "consider-using-from-import",
-    "ungrouped-imports",
-    "consider-using-with",
+    # pylint false-positive family
     "overlapping-except",
     "redefined-variable-type",
     "unsupported-assignment-operation",
+    "use-implicit-booleaness-not-comparison-to-string",
+    "ungrouped-imports",
+    "consider-using-with",
+    "consider-using-from-import",
 ]
 
 [tool.pylint.format]

@@ -2670,11 +2670,15 @@ class _EditorApp(App[None]):
         _log = logging.getLogger(__name__)
         driver = self._driver
         _log.debug(
-            "EditorApp mounted: driver._mouse=%s input_tty=%s " "driver._file=%r driver.fileno=%s",
+            "EditorApp mounted: driver._mouse=%s input_tty=%s "
+            "driver._file=%r driver.fileno=%s "
+            "driver._mouse_pixels=%s driver._in_band_window_resize=%s",
             getattr(driver, "_mouse", "?"),
             getattr(driver, "input_tty", "?"),
             getattr(driver, "_file", "?"),
             getattr(driver, "fileno", "?"),
+            getattr(driver, "_mouse_pixels", "?"),
+            getattr(driver, "_in_band_window_resize", "?"),
         )
         self.push_screen(self._editor_screen, callback=lambda _: self.exit())
 
@@ -2698,7 +2702,7 @@ def _patch_writer_thread_queue() -> None:
         pass
 
 
-def _restore_blocking_fds() -> None:
+def _restore_blocking_fds(logfile: str = "") -> None:
     """
     Restore blocking mode on stdin/stdout/stderr.
 
@@ -2709,10 +2713,19 @@ def _restore_blocking_fds() -> None:
     Textual's ``WriterThread`` does not handle ``BlockingIOError``,
     so a non-blocking stderr causes the thread to die silently,
     freezing the app.
+
+    :param logfile: Optional path to the parent's logfile for child logging.
     """
     import os as _os
     import sys as _sys
     import logging as _logging
+
+    if logfile:
+        _logging.basicConfig(
+            filename=logfile,
+            level=_logging.DEBUG,
+            format="%(asctime)s %(levelname)-5s %(name)s: %(message)s",
+        )
 
     _log = _logging.getLogger(__name__)
     _log.debug(
@@ -2740,11 +2753,36 @@ def _restore_blocking_fds() -> None:
     )
 
 
+def _log_child_diagnostics() -> None:
+    """Log environment and terminal diagnostics in the child subprocess."""
+    _log = logging.getLogger(__name__)
+    _env_keys = ("TERM", "COLORTERM", "LANG", "LC_ALL", "LC_CTYPE")
+    _env = {k: os.environ.get(k, "") for k in _env_keys}
+    try:
+        _tsize = os.get_terminal_size()
+        _tsize_str = f"{_tsize.columns}x{_tsize.lines}"
+    except OSError:
+        _tsize_str = "?"
+    _log.debug(
+        "child env: %s terminal_size=%s fd0_blocking=%s fd2_blocking=%s",
+        _env,
+        _tsize_str,
+        os.get_blocking(0),
+        os.get_blocking(2),
+    )
+    os.environ["TEXTUAL_DEBUG"] = "1"
+
+
 def edit_macros_main(
-    path: str, session_key: str = "", rooms_file: str = "", current_room_file: str = ""
+    path: str,
+    session_key: str = "",
+    rooms_file: str = "",
+    current_room_file: str = "",
+    logfile: str = "",
 ) -> None:
     """Launch standalone macro editor TUI."""
-    _restore_blocking_fds()
+    _restore_blocking_fds(logfile)
+    _log_child_diagnostics()
     _patch_writer_thread_queue()
     app = _EditorApp(
         MacroEditScreen(
@@ -2757,9 +2795,12 @@ def edit_macros_main(
     app.run()
 
 
-def edit_autoreplies_main(path: str, session_key: str = "", select_pattern: str = "") -> None:
+def edit_autoreplies_main(
+    path: str, session_key: str = "", select_pattern: str = "", logfile: str = ""
+) -> None:
     """Launch standalone autoreply editor TUI."""
-    _restore_blocking_fds()
+    _restore_blocking_fds(logfile)
+    _log_child_diagnostics()
     _patch_writer_thread_queue()
     app = _EditorApp(
         AutoreplyEditScreen(path=path, session_key=session_key, select_pattern=select_pattern)
@@ -2768,10 +2809,15 @@ def edit_autoreplies_main(path: str, session_key: str = "", select_pattern: str 
 
 
 def edit_rooms_main(
-    rooms_path: str, session_key: str = "", current_room_file: str = "", fasttravel_file: str = ""
+    rooms_path: str,
+    session_key: str = "",
+    current_room_file: str = "",
+    fasttravel_file: str = "",
+    logfile: str = "",
 ) -> None:
     """Launch standalone room browser TUI."""
-    _restore_blocking_fds()
+    _restore_blocking_fds(logfile)
+    _log_child_diagnostics()
     _patch_writer_thread_queue()
     app = _EditorApp(
         RoomBrowserScreen(
@@ -2892,9 +2938,12 @@ class _ConfirmDialogScreen(Screen[bool]):
             f.write(result)
 
 
-def confirm_dialog_main(title: str, body: str, warning: str = "", result_file: str = "") -> None:
+def confirm_dialog_main(
+    title: str, body: str, warning: str = "", result_file: str = "", logfile: str = ""
+) -> None:
     """Launch standalone confirm dialog TUI."""
-    _restore_blocking_fds()
+    _restore_blocking_fds(logfile)
+    _log_child_diagnostics()
     _patch_writer_thread_queue()
     screen = _ConfirmDialogScreen(title=title, body=body, warning=warning, result_file=result_file)
     app = _EditorApp(screen)

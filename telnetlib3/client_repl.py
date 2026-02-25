@@ -7,8 +7,11 @@ import time
 import random
 import asyncio
 import logging
+import contextlib
 import collections
-from typing import TYPE_CHECKING, Any, List, Tuple, Union, Callable, Optional, NamedTuple
+from typing import (
+    TYPE_CHECKING, Any, Generator, List, Tuple, Union, Callable, Optional, NamedTuple,
+)
 
 # local
 from .stream_reader import TelnetReader, TelnetReaderUnicode
@@ -79,6 +82,35 @@ def _get_term() -> "blessed.Terminal":
     return blessed_term
 
 
+@contextlib.contextmanager
+def _blocking_fds() -> Generator[None, None, None]:
+    """
+    Context manager to ensure FDs 0/1/2 are blocking for a subprocess.
+
+    asyncio's ``connect_write_pipe`` sets ``O_NONBLOCK`` on the PTY file
+    description.  A Textual subprocess inherits non-blocking FDs, which can
+    cause its ``WriterThread`` to silently fail mouse-enable escape sequences.
+    This saves and restores the blocking state around subprocess calls.
+    """
+    saved = {}
+    for fd in (0, 1, 2):
+        try:
+            saved[fd] = os.get_blocking(fd)
+            if not saved[fd]:
+                os.set_blocking(fd, True)
+        except OSError:
+            pass
+    try:
+        yield
+    finally:
+        for fd, was_blocking in saved.items():
+            try:
+                if not was_blocking:
+                    os.set_blocking(fd, False)
+            except OSError:
+                pass
+
+
 def _terminal_cleanup() -> str:
     """Reset SGR, cursor, alt-screen, mouse tracking, and bracketed paste."""
     t = _get_term()
@@ -90,8 +122,29 @@ def _terminal_cleanup() -> str:
         + "\x1b[?1002l"  # xterm -- disable button-event mouse
         + "\x1b[?1003l"  # xterm -- disable any-event mouse
         + "\x1b[?1006l"  # xterm -- disable SGR mouse ext
+        + "\x1b[?1016l"  # xterm -- disable SGR-Pixel mouse ext
         + "\x1b[?2004l"  # xterm -- disable bracketed paste
+        + "\x1b[?2048l"  # xterm -- disable in-band resize
+        + "\x1b[r"  # DECSTBM -- reset scroll region to default
+        + "\x1b[<u"  # kitty -- disable kitty keyboard protocol
     )
+
+
+def _get_logfile_path() -> str:
+    """Return the path of the first FileHandler on the root logger, or ``""``."""
+    for handler in logging.getLogger().handlers:
+        if isinstance(handler, logging.FileHandler) and handler.baseFilename:
+            return handler.baseFilename
+    return ""
+
+
+def _safe_terminal_size() -> str:
+    """Return ``os.get_terminal_size()`` as a string, or ``"?"`` on error."""
+    try:
+        sz = os.get_terminal_size()
+        return f"{sz.columns}x{sz.lines}"
+    except OSError:
+        return "?"
 
 
 # SGR style dicts keyed to LineEditor constructor / attribute names.
@@ -110,16 +163,18 @@ def _make_styles() -> None:
         "suggestion_sgr": t.color_rgb(60, 40, 40),
         "bg_sgr": t.on_color_rgb(26, 0, 0),
         "ellipsis_sgr": t.color_rgb(190, 190, 190),
-        "cursor_seq": "\x1b[5 q",  # DECSCUSR -- blinking bar
     }
     _STYLE_AUTOREPLY = {
         "text_sgr": t.color_rgb(184, 134, 11),
         "suggestion_sgr": t.color_rgb(80, 60, 0),
         "bg_sgr": t.on_color_rgb(26, 18, 0),
         "ellipsis_sgr": t.color_rgb(80, 60, 0),
-        "cursor_seq": "\x1b[5 q",  # DECSCUSR -- blinking bar
     }
 
+
+# DECTCEM cursor visibility.
+CURSOR_HIDE: str = "\x1b[?25l"
+CURSOR_SHOW: str = "\x1b[?25h"
 
 # DECSCUSR cursor shape escapes (xterm extension, no terminfo equivalent).
 CURSOR_BLINKING_BLOCK: str = "\x1b[1 q"  # DECSCUSR 1
@@ -137,7 +192,7 @@ _CURSOR_STYLES: dict[str, str] = {
     "blinking_underline": CURSOR_BLINKING_UNDERLINE,
     "steady_underline": CURSOR_STEADY_UNDERLINE,
 }
-_DEFAULT_CURSOR_STYLE = "blinking_bar"
+_DEFAULT_CURSOR_STYLE = "steady_block"
 
 # Default ellipsis for overflow indicator (used as fallback).
 _ELLIPSIS = "\u2026"
@@ -252,6 +307,7 @@ def _restore_after_subprocess(
     except OSError:
         pass
     t = _get_term()
+    sys.stdout.write(CURSOR_HIDE)
     sys.stdout.write(_terminal_cleanup())
     try:
         _tsize = os.get_terminal_size()
@@ -276,6 +332,7 @@ def _restore_after_subprocess(
     # subprocess may have reset terminal modes, disabling the notification
     # that blessed's notify_on_resize() context manager originally enabled.
     sys.stdout.write("\x1b[?2048h")
+    sys.stdout.write(CURSOR_SHOW)
     sys.stdout.flush()
 
 
@@ -409,15 +466,26 @@ _FLASH_DURATION = 0.700  # total: ramp_up + hold + ramp_down = 700ms
 _FLASH_INTERVAL = 0.033  # ~33ms between frames (~30fps)
 
 
+from .tui_blinken_lights import (  # noqa: E402
+    Stoplight as _Stoplight,
+    WIDTH as _MODEM_WIDTH,
+)
+
+
 _BAR_CAP_LEFT = "\U0001fb2b"  # 🬫 Block Sextant-2346
 _BAR_CAP_RIGHT = "\U0001fb1b"  # 🬛 Block Sextant-1345
 _DMZ_CHAR = "\u2581"  # ▁ Lower One Eighth Block
 
 
-def _dmz_line(cols: int) -> str:
-    """Return a styled DMZ divider line of *cols* width."""
+def _dmz_line(cols: int, active: bool = False) -> str:
+    """Return a styled DMZ divider line of *cols* width.
+
+    :param cols: Terminal width.
+    :param active: Use gold color when autoreply/wander/discover is active.
+    """
     t = _get_term()
-    return t.color_rgb(50, 10, 10) + (_DMZ_CHAR * cols) + t.normal
+    color = t.color_rgb(184, 134, 11) if active else t.color_rgb(50, 10, 10)
+    return color + (_DMZ_CHAR * cols) + t.normal
 
 
 def _segmented(text: str) -> str:
@@ -558,6 +626,7 @@ def _repaint_screen(
     try:
         t = _get_term()
         scroll_bottom = max(0, _tsize.lines - reserve - 2)
+        sys.stdout.write(CURSOR_HIDE)
         sys.stdout.write(t.clear + t.home)
         sys.stdout.write(t.change_scroll_region(0, scroll_bottom))
         sys.stdout.write(t.move_yx(0, 0))
@@ -573,6 +642,7 @@ def _repaint_screen(
         for _r in range(_input_row, _tsize.lines):
             sys.stdout.write(t.move_yx(_r, 0) + t.clear_eol)
         sys.stdout.write(t.move_yx(_input_row, 0))
+        sys.stdout.write(CURSOR_SHOW)
         sys.stdout.flush()
     finally:
         os.set_blocking(fd, was_blocking)
@@ -601,28 +671,35 @@ def _confirm_dialog(
     fd, result_path = tempfile.mkstemp(suffix=".json", prefix="confirm-")
     os.close(fd)
 
+    _logfile = _get_logfile_path()
     cmd = [
         sys.executable,
         "-c",
         "import sys; from telnetlib3.client_tui import confirm_dialog_main; "
         "confirm_dialog_main(sys.argv[1], sys.argv[2],"
-        " warning=sys.argv[3], result_file=sys.argv[4])",
+        " warning=sys.argv[3], result_file=sys.argv[4],"
+        " logfile=sys.argv[5])",
         title,
         body,
         warning or "",
         result_path,
+        _logfile,
     ]
 
     global _editor_active  # noqa: PLW0603
     _log = logging.getLogger(__name__)
     _log.debug(
         "confirm_dialog: pre-subprocess fd0_blocking=%s fd1=%s fd2=%s "
-        "stdin_isatty=%s stderr_isatty=%s",
+        "stdin_isatty=%s stderr_isatty=%s "
+        "TERM=%s COLORTERM=%s terminal_size=%s",
         os.get_blocking(0),
         os.get_blocking(1),
         os.get_blocking(2),
         sys.stdin.isatty(),
         sys.__stderr__.isatty(),
+        os.environ.get("TERM", ""),
+        os.environ.get("COLORTERM", ""),
+        _safe_terminal_size(),
     )
     t = _get_term()
     sys.stdout.write(_terminal_cleanup())
@@ -632,7 +709,8 @@ def _confirm_dialog(
     sys.__stderr__.flush()
     _editor_active = True
     try:
-        subprocess.run(cmd, check=False)
+        with _blocking_fds():
+            subprocess.run(cmd, check=False)
     except FileNotFoundError:
         pass
     finally:
@@ -666,6 +744,7 @@ def _show_help(macro_defs: "Any" = None, replay_buf: Optional[OutputRingBuffer] 
     """
     global _editor_active  # noqa: PLW0603
     t = _get_term()
+    sys.stdout.write(CURSOR_HIDE)
     sys.stdout.write(t.enter_fullscreen)
     sys.stdout.write(t.home + t.clear)
     lines = [
@@ -734,6 +813,8 @@ def _launch_tui_editor(
 
     _session_key = ctx.session_key
 
+    _logfile = _get_logfile_path()
+
     if editor_type == "macros":
         path = ctx.macros_file or os.path.join(_config_dir, "macros.json")
         from .rooms import rooms_path as _rooms_path_fn
@@ -746,11 +827,13 @@ def _launch_tui_editor(
             "-c",
             "import sys; from telnetlib3.client_tui import edit_macros_main; "
             "edit_macros_main(sys.argv[1], sys.argv[2],"
-            " rooms_file=sys.argv[3], current_room_file=sys.argv[4])",
+            " rooms_file=sys.argv[3], current_room_file=sys.argv[4],"
+            " logfile=sys.argv[5])",
             path,
             _session_key,
             _rp,
             _crp,
+            _logfile,
         ]
     else:
         path = ctx.autoreplies_file or os.path.join(_config_dir, "autoreplies.json")
@@ -761,10 +844,11 @@ def _launch_tui_editor(
             "-c",
             "import sys; from telnetlib3.client_tui import edit_autoreplies_main; "
             "edit_autoreplies_main(sys.argv[1], sys.argv[2],"
-            " select_pattern=sys.argv[3])",
+            " select_pattern=sys.argv[3], logfile=sys.argv[4])",
             path,
             _session_key,
             _select,
+            _logfile,
         ]
 
     log = logging.getLogger(__name__)
@@ -772,13 +856,17 @@ def _launch_tui_editor(
     global _editor_active  # noqa: PLW0603
     log.debug(
         "tui_editor: pre-subprocess fd0_blocking=%s fd1=%s fd2=%s "
-        "stdin_isatty=%s stderr_isatty=%s editor_type=%s",
+        "stdin_isatty=%s stderr_isatty=%s editor_type=%s "
+        "TERM=%s COLORTERM=%s terminal_size=%s",
         os.get_blocking(0),
         os.get_blocking(1),
         os.get_blocking(2),
         sys.stdin.isatty(),
         sys.__stderr__.isatty(),
         editor_type,
+        os.environ.get("TERM", ""),
+        os.environ.get("COLORTERM", ""),
+        _safe_terminal_size(),
     )
     t = _get_term()
     sys.stdout.write(_terminal_cleanup())
@@ -788,7 +876,8 @@ def _launch_tui_editor(
     sys.__stderr__.flush()
     _editor_active = True
     try:
-        subprocess.run(cmd, check=False)
+        with _blocking_fds():
+            subprocess.run(cmd, check=False)
     except FileNotFoundError:
         log.warning("could not launch TUI editor subprocess")
     finally:
@@ -862,20 +951,36 @@ def _launch_room_browser(
     _crp = ctx.current_room_file or _current_room_path_fn(_session_key)
     _ftp = _fasttravel_path_fn(_session_key)
 
+    _logfile = _get_logfile_path()
     cmd = [
         sys.executable,
         "-c",
         "import sys; from telnetlib3.client_tui import edit_rooms_main; "
-        "edit_rooms_main(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4])",
+        "edit_rooms_main(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4],"
+        " logfile=sys.argv[5])",
         _rp,
         _session_key,
         _crp,
         _ftp,
+        _logfile,
     ]
 
     log = logging.getLogger(__name__)
 
     global _editor_active  # noqa: PLW0603
+    log.debug(
+        "room_browser: pre-subprocess fd0_blocking=%s fd1=%s fd2=%s "
+        "stdin_isatty=%s stderr_isatty=%s "
+        "TERM=%s COLORTERM=%s terminal_size=%s",
+        os.get_blocking(0),
+        os.get_blocking(1),
+        os.get_blocking(2),
+        sys.stdin.isatty(),
+        sys.__stderr__.isatty(),
+        os.environ.get("TERM", ""),
+        os.environ.get("COLORTERM", ""),
+        _safe_terminal_size(),
+    )
     t = _get_term()
     sys.stdout.write(_terminal_cleanup())
     sys.stdout.write(t.change_scroll_region(0, t.height - 1))
@@ -884,7 +989,8 @@ def _launch_room_browser(
     sys.__stderr__.flush()
     _editor_active = True
     try:
-        subprocess.run(cmd, check=False)
+        with _blocking_fds():
+            subprocess.run(cmd, check=False)
     except FileNotFoundError:
         log.warning("could not launch room browser subprocess")
     finally:
@@ -1049,6 +1155,10 @@ async def _fast_travel(
                     _prompt_ready.clear()
 
                 ctx.active_command = direction
+                if ctx.cx_dot is not None:
+                    ctx.cx_dot.trigger()
+                if ctx.tx_dot is not None:
+                    ctx.tx_dot.trigger()
                 ctx.writer.write(direction + "\r\n")  # type: ignore[arg-type]
 
                 if wait_fn is not None:
@@ -1153,14 +1263,18 @@ async def _fast_travel(
                 move_blocked = actual == prev_room
                 if move_blocked:
                     # Exit is impassable (server rejected the move after
-                    # all retries).  Temporarily remove it from the graph
-                    # so re-routing won't try it again.
+                    # all retries).  Temporarily remove it from both the
+                    # Room.exits dict and the BFS adjacency cache so
+                    # re-routing won't try it again.
                     graph = _get_graph()
                     if graph is not None:
                         prev = graph.rooms.get(prev_room)
                         if prev is not None and direction in prev.exits:
                             blocked_exits.append((prev_room, direction, prev.exits[direction]))
                             del prev.exits[direction]
+                            adj_exits = graph._adj.get(prev_room)
+                            if adj_exits is not None:
+                                adj_exits.pop(direction, None)
                             log.info(
                                 "%s: blocked exit %s of %s (impassable)",
                                 mode,
@@ -1227,6 +1341,7 @@ async def _fast_travel(
                     prev = graph.rooms.get(room_num)
                     if prev is not None and exit_dir not in prev.exits:
                         prev.exits[exit_dir] = target
+                    graph._adj.setdefault(room_num, {})[exit_dir] = target
         ctx.active_command = None
         engine = _get_engine()
         if engine is not None:
@@ -1401,6 +1516,7 @@ async def _autodiscover(
 
     tried: set[tuple[str, str]] = set()
     inaccessible: set[str] = set()
+    blocked_edges: dict[tuple[str, str], str] = {}
 
     branches = graph.find_branches(current)
     if not branches:
@@ -1446,12 +1562,30 @@ async def _autodiscover(
                     continue
                 if echo_fn is not None:
                     echo_fn(f"AUTODISCOVER [{step_count}]: " f"heading to gateway {gw_room[:8]}")
+                pre_travel = ctx.current_room_num
                 await _fast_travel(steps, ctx, log, slow=False, destination=gw_room)
                 actual = ctx.current_room_num
                 if actual != gw_room:
                     tried.add((gw_room, direction))
                     if target_num:
                         inaccessible.add(target_num)
+                    # Identify the edge that blocked us: if the player
+                    # didn't move at all, the first step of the path is
+                    # impassable.  Remove it from the BFS adjacency
+                    # cache so subsequent pathfinding avoids it.
+                    if actual == pre_travel and steps:
+                        fail_dir, fail_target = steps[0]
+                        edge = (pre_travel, fail_dir)
+                        if edge not in blocked_edges:
+                            blocked_edges[edge] = fail_target
+                            adj_exits = graph._adj.get(pre_travel)
+                            if adj_exits is not None:
+                                adj_exits.pop(fail_dir, None)
+                            log.info(
+                                "AUTODISCOVER: blocked edge %s from %s",
+                                fail_dir,
+                                pre_travel[:8],
+                            )
                     log.info("AUTODISCOVER: failed to reach gateway %s", gw_room[:8])
                     if echo_fn is not None:
                         echo_fn(
@@ -1480,19 +1614,33 @@ async def _autodiscover(
                 )
             ctx.active_command = direction
             _send = ctx.send_line
+            if ctx.cx_dot is not None:
+                ctx.cx_dot.trigger()
+            if ctx.tx_dot is not None:
+                ctx.tx_dot.trigger()
             if _send is not None:
                 _send(direction)
             elif isinstance(ctx.writer, TelnetWriterUnicode):
                 ctx.writer.write(direction + "\r\n")
             else:
                 ctx.writer.write((direction + "\r\n").encode("utf-8"))
-            # Wait for room arrival.
-            for _wait in range(30):
-                await asyncio.sleep(0.3)
-                new_room = ctx.current_room_num
-                if new_room != gw_room:
-                    break
+            # Wait for room arrival using the event instead of polling.
+            _room_changed = ctx.room_changed
+            _arrived = False
+            if _room_changed is not None:
+                _room_changed.clear()
+                try:
+                    await asyncio.wait_for(_room_changed.wait(), timeout=ctx.room_arrival_timeout)
+                except asyncio.TimeoutError:
+                    pass
+                _arrived = ctx.current_room_num != gw_room
             else:
+                for _wait in range(30):
+                    await asyncio.sleep(0.3)
+                    if ctx.current_room_num != gw_room:
+                        _arrived = True
+                        break
+            if not _arrived:
                 ctx.active_command = None
                 tried.add((gw_room, direction))
                 if target_num:
@@ -1539,6 +1687,10 @@ async def _autodiscover(
         ctx.discover_total = 0
         ctx.discover_task = None
         ctx.active_command = None
+        # Restore blocked edges so the graph stays accurate for future
+        # pathfinding (the block may be transient, e.g. a level gate).
+        for (room_num, exit_dir), target in blocked_edges.items():
+            graph._adj.setdefault(room_num, {})[exit_dir] = target
 
 
 async def _randomwalk(
@@ -1654,18 +1806,32 @@ async def _randomwalk(
             ctx.active_command = direction
             if wait_fn is not None:
                 await wait_fn()
+            if ctx.cx_dot is not None:
+                ctx.cx_dot.trigger()
+            if ctx.tx_dot is not None:
+                ctx.tx_dot.trigger()
             if isinstance(ctx.writer, TelnetWriterUnicode):
                 ctx.writer.write(direction + "\r\n")
             else:
                 ctx.writer.write((direction + "\r\n").encode("utf-8"))
 
-            # Wait for room change.
-            for _tick in range(30):
-                await asyncio.sleep(0.3)
-                new_room = ctx.current_room_num
-                if new_room != current:
-                    break
+            # Wait for room change using event instead of polling.
+            _room_changed = ctx.room_changed
+            _arrived = False
+            if _room_changed is not None:
+                _room_changed.clear()
+                try:
+                    await asyncio.wait_for(_room_changed.wait(), timeout=ctx.room_arrival_timeout)
+                except asyncio.TimeoutError:
+                    pass
+                _arrived = ctx.current_room_num != current
             else:
+                for _tick in range(30):
+                    await asyncio.sleep(0.3)
+                    if ctx.current_room_num != current:
+                        _arrived = True
+                        break
+            if not _arrived:
                 ctx.active_command = None
                 stuck_count += 1
                 if echo_fn is not None:
@@ -2036,6 +2202,10 @@ async def _send_chained(
             log.debug("chained command: %r", cmd)
             if echo_fn is not None:
                 echo_fn(cmd)
+            if ctx.cx_dot is not None:
+                ctx.cx_dot.trigger()
+            if ctx.tx_dot is not None:
+                ctx.tx_dot.trigger()
             ctx.writer.write(cmd + "\r\n")  # type: ignore[arg-type]
             continue
 
@@ -2059,6 +2229,10 @@ async def _send_chained(
                     echo_fn(cmd)
             else:
                 log.info("chained retry %d: %r", attempt, cmd)
+            if ctx.cx_dot is not None:
+                ctx.cx_dot.trigger()
+            if ctx.tx_dot is not None:
+                ctx.tx_dot.trigger()
             ctx.writer.write(cmd + "\r\n")  # type: ignore[arg-type]
 
             if not prev_room:
@@ -2144,6 +2318,10 @@ async def execute_macro_commands(text: str, ctx: SessionContext, log: logging.Lo
         log.info("macro: sending %r", cmd)
         if echo_fn is not None:
             echo_fn(cmd)
+        if ctx.cx_dot is not None:
+            ctx.cx_dot.trigger()
+        if ctx.tx_dot is not None:
+            ctx.tx_dot.trigger()
         ctx.writer.write(cmd + "\r\n")  # type: ignore[arg-type]
         idx += 1
 
@@ -2789,7 +2967,10 @@ if sys.platform != "win32":
                 right_total += _SEPARATOR_WIDTH
             right_total += sum(_wcswidth(t) for _, t in frags)
 
-        pad = max(1, cols - left_total - right_total)
+        stoplight: Optional[_Stoplight] = toolbar_state.get("stoplight")
+        modem_w = _MODEM_WIDTH if stoplight is not None else 0
+
+        pad = max(1, cols - left_total - right_total - modem_w)
         out.write((" " * pad).encode())
 
         right_sgr = _sgr_fg("#dddddd") if not is_autoreply_bg else ""
@@ -2800,6 +2981,13 @@ if sys.platform != "win32":
                 effective_sgr = sgr if sgr else right_sgr
                 out.write(f"{effective_sgr}{text}".encode())
                 out.write(bg_sgr.encode())
+
+        if stoplight is not None:
+            ch, (r, g, b) = stoplight.frame(autoreply_bg=is_autoreply_bg)
+            out.write(f"{bt.color_rgb(r, g, b)}{ch}".encode())
+            out.write(bg_sgr.encode())
+            if stoplight.is_animating():
+                needs_reflash = True
 
         out.write(bt.normal.encode())
         return needs_reflash
@@ -2817,9 +3005,11 @@ if sys.platform != "win32":
         """Schedule repeating flash animation frames via ``loop.call_later``."""
 
         def _tick() -> None:
+            out.write(CURSOR_HIDE.encode())
             still = _render_toolbar(ctx, scroll, out, autoreply_engine, toolbar_state)
             cursor_col = editor.display.cursor
             out.write(bt.move_yx(scroll.input_row, cursor_col).encode())
+            out.write(CURSOR_SHOW.encode())
             if still:
                 loop.call_later(_FLASH_INTERVAL, _tick)
             else:
@@ -2976,12 +3166,19 @@ if sys.platform != "win32":
         _term_cols = blessed_term.width
         editor = blessed.line_editor.LineEditor(
             history=history,
-            is_password=lambda: bool(telnet_writer.will_echo),
+            password=bool(telnet_writer.will_echo),
             max_width=_term_cols,
             **_STYLE_NORMAL,
         )
 
-        toolbar_state: dict[str, Any] = {"rprompt_text": _conn_info}
+        _stoplight = _Stoplight.create()
+        ctx.tx_dot = _stoplight.tx
+        ctx.cx_dot = _stoplight.cx
+        ctx.rx_dot = _stoplight.rx
+        toolbar_state: dict[str, Any] = {
+            "rprompt_text": _conn_info,
+            "stoplight": _stoplight,
+        }
 
         dispatch = _KeyDispatch()
         macro_defs = ctx.macro_defs or None
@@ -2998,6 +3195,7 @@ if sys.platform != "win32":
             t = _get_term()
             _sr = _scroll_ref[0]
             _reserve = _sr._reserve if _sr is not None else _RESERVE_WITH_TOOLBAR
+            stdout.write(CURSOR_HIDE.encode())
             stdout.write((t.clear + t.home + t.move_yx(0, 0)).encode())
             data = replay_buf.replay()
             if data:
@@ -3011,7 +3209,8 @@ if sys.platform != "win32":
                 if dmz < _sr.input_row:
                     stdout.write((t.move_yx(dmz, 0) + _dmz_line(_cols)).encode())
             _cs = ctx.cursor_style or _DEFAULT_CURSOR_STYLE
-            stdout.write(_CURSOR_STYLES.get(_cs, CURSOR_BLINKING_BAR).encode())
+            stdout.write(_CURSOR_STYLES.get(_cs, CURSOR_STEADY_BLOCK).encode())
+            stdout.write(CURSOR_SHOW.encode())
             editor.max_width = _cols
 
         _scroll_ref: list[Any] = [None]
@@ -3032,7 +3231,7 @@ if sys.platform != "win32":
 
             stdout.write(t.save.encode())
             _cursor_style_name = ctx.cursor_style or _DEFAULT_CURSOR_STYLE
-            _cursor_seq = _CURSOR_STYLES.get(_cursor_style_name, CURSOR_BLINKING_BAR)
+            _cursor_seq = _CURSOR_STYLES.get(_cursor_style_name, CURSOR_STEADY_BLOCK)
             stdout.write(_cursor_seq.encode())
 
             def _echo_autoreply(cmd: str) -> None:
@@ -3231,6 +3430,7 @@ if sys.platform != "win32":
             _last_input_style: list[Optional[dict[str, str]]] = [None]
 
             def _update_input_style() -> None:
+                editor.set_password_mode(bool(telnet_writer.will_echo))
                 if ctx.command_queue is not None:
                     return
                 if ctx.active_command is not None:
@@ -3249,6 +3449,12 @@ if sys.platform != "win32":
                     setattr(editor, attr, val)
                 if changed:
                     _render_input_line(editor.display, scroll, stdout)
+                    _active = style is _STYLE_AUTOREPLY
+                    _dmz_row = scroll.scroll_bottom + 1
+                    if _dmz_row < scroll.input_row:
+                        stdout.write(
+                            (t.move_yx(_dmz_row, 0) + _dmz_line(scroll._cols, _active)).encode()
+                        )
 
             async def _read_server() -> None:
                 nonlocal server_done, mode_switched, _prompt_pending
@@ -3271,6 +3477,7 @@ if sys.platform != "win32":
                             _prompt_pending = False
                             autoreply_engine.on_prompt()
                         continue
+                    _rx_dot.trigger()
                     if isinstance(out, bytes):
                         out = out.decode("utf-8", errors="replace")
                     out = _transform_output(out, telnet_writer, True)
@@ -3283,6 +3490,7 @@ if sys.platform != "win32":
                     if _editor_active:
                         _editor_buffer.append(out.encode())
                         continue
+                    stdout.write(CURSOR_HIDE.encode())
                     stdout.write(t.restore.encode())
                     if _editor_buffer:
                         for chunk in _editor_buffer:
@@ -3295,10 +3503,27 @@ if sys.platform != "win32":
                         stdout.write(encoded)
                         replay_buf.append(encoded)
                     stdout.write(t.save.encode())
+                    _update_input_style()
+                    _render_input_line(editor.display, scroll, stdout)
                     cursor_col = editor.display.cursor
                     stdout.write(t.move_yx(scroll.input_row, cursor_col).encode())
-                    _render_toolbar(ctx, scroll, stdout, autoreply_engine, toolbar_state)
+                    needs_reflash = _render_toolbar(
+                        ctx, scroll, stdout, autoreply_engine, toolbar_state
+                    )
+                    if needs_reflash and not toolbar_state.get("_flash_active"):
+                        toolbar_state["_flash_active"] = True
+                        _schedule_flash_frame(
+                            loop,
+                            ctx,
+                            scroll,
+                            stdout,
+                            autoreply_engine,
+                            toolbar_state,
+                            editor,
+                            t,
+                        )
                     stdout.write(t.move_yx(scroll.input_row, cursor_col).encode())
+                    stdout.write(CURSOR_SHOW.encode())
                     if telnet_writer.mode == "kludge":
                         mode_switched = True
                         server_done = True
@@ -3313,10 +3538,12 @@ if sys.platform != "win32":
 
                 if telnet_writer.local_option.enabled(NAWS) and not telnet_writer.is_closing():
                     telnet_writer._send_naws()
+                stdout.write(CURSOR_HIDE.encode())
                 _render_input_line(editor.display, scroll, stdout)
                 _render_toolbar(ctx, scroll, stdout, autoreply_engine, toolbar_state)
                 cursor_col = editor.display.cursor
                 stdout.write(t.move_yx(scroll.input_row, cursor_col).encode())
+                stdout.write(CURSOR_SHOW.encode())
 
             async def _read_input() -> None:
                 nonlocal server_done
@@ -3349,21 +3576,38 @@ if sys.platform != "win32":
                             if _chained_task is not None and not _chained_task.done():
                                 _chained_task.cancel()
                             ctx.command_queue = None
+                            stdout.write(CURSOR_HIDE.encode())
                             _render_input_line(editor.display, scroll, stdout)
                             cursor_col = editor.display.cursor
                             stdout.write(t.move_yx(scroll.input_row, cursor_col).encode())
+                            stdout.write(CURSOR_SHOW.encode())
                             continue
 
                         # Cancel active walk command on any keypress.
                         _ac = ctx.active_command
                         if _ac is not None:
                             ctx.active_command = None
-                            for _wtask in (ctx.wander_task, ctx.discover_task, ctx.randomwalk_task):
+                            _cancel_labels = []
+                            for _wname, _wtask in (
+                                ("AUTOWANDER", ctx.wander_task),
+                                ("AUTODISCOVER", ctx.discover_task),
+                                ("RANDOMWALK", ctx.randomwalk_task),
+                            ):
                                 if _wtask is not None and not _wtask.done():
                                     _wtask.cancel()
+                                    _cancel_labels.append(_wname)
+                            if _cancel_labels and _echo_autoreply is not None:
+                                _label = _cancel_labels[0]
+                                _echo_autoreply(
+                                    f"{_label}: cancelled by keypress"
+                                    f" {key!r}"
+                                )
+                            stdout.write(CURSOR_HIDE.encode())
+                            _update_input_style()
                             _render_input_line(editor.display, scroll, stdout)
                             cursor_col = editor.display.cursor
                             stdout.write(t.move_yx(scroll.input_row, cursor_col).encode())
+                            stdout.write(CURSOR_SHOW.encode())
                             continue
 
                         action = dispatch.lookup(key)
@@ -3371,11 +3615,13 @@ if sys.platform != "win32":
                             result = action()
                             if asyncio.iscoroutine(result):
                                 await result
+                            stdout.write(CURSOR_HIDE.encode())
                             _update_input_style()
                             _render_input_line(editor.display, scroll, stdout)
                             _render_toolbar(ctx, scroll, stdout, autoreply_engine, toolbar_state)
                             cursor_col = editor.display.cursor
                             stdout.write(t.move_yx(scroll.input_row, cursor_col).encode())
+                            stdout.write(CURSOR_SHOW.encode())
                             continue
 
                         result = editor.feed_key(key)
@@ -3386,8 +3632,12 @@ if sys.platform != "win32":
                             return
 
                         if result.interrupt:
+                            stdout.write(CURSOR_HIDE.encode())
                             _update_input_style()
                             _render_input_line(editor.display, scroll, stdout)
+                            cursor_col = editor.display.cursor
+                            stdout.write(t.move_yx(scroll.input_row, cursor_col).encode())
+                            stdout.write(CURSOR_SHOW.encode())
                             continue
 
                         if result.line is not None:
@@ -3428,6 +3678,7 @@ if sys.platform != "win32":
                                     parts, ctx, telnet_writer.log
                                 )
                                 if remainder:
+                                    _tx_dot.trigger()
                                     telnet_writer.write(
                                         remainder[0] + "\r\n"  # type: ignore[arg-type]
                                     )
@@ -3451,6 +3702,7 @@ if sys.platform != "win32":
                                             lambda _f: _clear_command_queue(ctx)
                                         )
                             elif parts:
+                                _tx_dot.trigger()
                                 telnet_writer.write(parts[0] + "\r\n")  # type: ignore[arg-type]
                                 if _ga_detected:
                                     prompt_ready.clear()
@@ -3470,9 +3722,11 @@ if sys.platform != "win32":
                                         lambda _f: _clear_command_queue(ctx)
                                     )
                             else:
+                                _tx_dot.trigger()
                                 telnet_writer.write("\r\n")  # type: ignore[arg-type]
 
                         if result.changed:
+                            stdout.write(CURSOR_HIDE.encode())
                             _cq2 = ctx.command_queue
                             _ac2 = ctx.active_command
                             if _cq2 is not None:
@@ -3499,6 +3753,7 @@ if sys.platform != "win32":
                                 )
                             cursor_col = editor.display.cursor
                             stdout.write(t.move_yx(scroll.input_row, cursor_col).encode())
+                            stdout.write(CURSOR_SHOW.encode())
 
             try:
                 await _run_repl_tasks(_read_server(), _read_input())
