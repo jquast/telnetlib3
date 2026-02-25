@@ -119,7 +119,7 @@ def build_macro_dispatch(
     """
     import asyncio
 
-    from blessed.line_editor import DEFAULT_KEYMAP
+    from blessed.line_editor import DEFAULT_KEYMAP  # pylint: disable=no-name-in-module
 
     from .client_repl import execute_macro_commands
 

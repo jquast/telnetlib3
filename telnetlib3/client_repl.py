@@ -736,12 +736,12 @@ if sys.platform != "win32":
 
         replay_buf = OutputRingBuffer()
 
-        history = blessed.line_editor.LineHistory()
+        history = blessed.line_editor.LineHistory()  # pylint: disable=no-member
         if history_file:
             _load_history(history, history_file)
 
         _term_cols = blessed_term.width
-        editor = blessed.line_editor.LineEditor(
+        editor = blessed.line_editor.LineEditor(  # pylint: disable=no-member
             history=history,
             password=bool(telnet_writer.will_echo),
             max_width=_term_cols,

@@ -464,7 +464,7 @@ def _vital_bar(
     pct = int(round(frac * 100))
 
     bar_color = _vital_color(frac, kind)
-    if flash_elapsed >= 0.0 and flash_elapsed < _FLASH_DURATION:
+    if 0.0 <= flash_elapsed < _FLASH_DURATION:
         fill_bg = _flash_color(bar_color, flash_elapsed)
         empty_bg = _flash_color("#2a2a2a", flash_elapsed)
         filled_sgr = _sgr_fg("#101010") + _sgr_bg(fill_bg)

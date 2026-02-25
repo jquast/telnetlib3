@@ -689,7 +689,7 @@ class AutoreplyEngine:
                         ok, desc = check_condition(rule.when, self._ctx)
                         if not ok:
                             self._log.info(
-                                "autoreply: immediate rule #%d skipped," " condition failed: %s",
+                                "autoreply: immediate rule #%d skipped, condition failed: %s",
                                 rule_idx + 1,
                                 desc,
                             )
