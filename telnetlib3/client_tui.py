@@ -1206,7 +1206,8 @@ class _EditListScreen(Screen["bool | None"]):
 
     @property
     @abstractmethod
-    def _prefix(self) -> str: ...
+    def _prefix(self) -> str:
+        ...
 
     @property
     @abstractmethod
@@ -1215,7 +1216,8 @@ class _EditListScreen(Screen["bool | None"]):
 
     @property
     @abstractmethod
-    def _items(self) -> list[Any]: ...
+    def _items(self) -> list[Any]:
+        ...
 
     def _item_label(self, idx: int) -> str:
         """Return a display label for the item at *idx*."""
@@ -1385,16 +1387,20 @@ class _EditListScreen(Screen["bool | None"]):
         """Override to handle subclass-specific buttons."""
 
     @abstractmethod
-    def _show_form(self, *args: Any) -> None: ...
+    def _show_form(self, *args: Any) -> None:
+        ...
 
     @abstractmethod
-    def _submit_form(self) -> None: ...
+    def _submit_form(self) -> None:
+        ...
 
     @abstractmethod
-    def _refresh_table(self) -> None: ...
+    def _refresh_table(self) -> None:
+        ...
 
     @abstractmethod
-    def _save_to_file(self) -> None: ...
+    def _save_to_file(self) -> None:
+        ...
 
 
 class MacroEditScreen(_EditListScreen):

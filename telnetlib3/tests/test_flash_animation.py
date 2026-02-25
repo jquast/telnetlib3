@@ -73,13 +73,13 @@ class TestFlashColor:
     def test_at_exact_duration_returns_original(self):
         assert _flash_color("#ff0000", _FLASH_DURATION) == "#ff0000"
 
-    def test_at_hold_midpoint_returns_inverse(self):
+    def test_at_hold_midpoint_returns_white(self):
         mid = _FLASH_RAMP_UP + _FLASH_HOLD / 2.0
         result = _flash_color("#ff0000", mid)
         r = int(result[1:3], 16)
         g = int(result[3:5], 16)
         b = int(result[5:7], 16)
-        assert r < 10
+        assert r > 240
         assert g > 240
         assert b > 240
 

@@ -22,7 +22,7 @@ def _mock_subprocess(tmp_path: Any, monkeypatch: Any) -> Any:
         data = result_data
 
     def fake_run(cmd: Any, check: bool = False) -> None:
-        path = cmd[-1]
+        path = cmd[-2]
         with open(path, "w", encoding="utf-8") as f:
             json.dump(_Holder.data, f)
 

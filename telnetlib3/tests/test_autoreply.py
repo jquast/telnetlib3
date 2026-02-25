@@ -266,7 +266,7 @@ def _mock_writer():
     """Create a mock ctx+writer that records write() calls."""
     written: list[str] = []
     writer = types.SimpleNamespace(write=written.append)
-    ctx = types.SimpleNamespace(writer=writer, gmcp_data={})
+    ctx = types.SimpleNamespace(writer=writer, gmcp_data={}, cx_dot=None, tx_dot=None)
     ctx.log = logging.getLogger("test")
     return ctx, written
 
@@ -1410,6 +1410,8 @@ def _mock_writer_with_vitals(hp: int, maxhp: int, mp: int, maxmp: int):
     ctx = types.SimpleNamespace(
         writer=writer,
         log=logging.getLogger("test"),
+        cx_dot=None,
+        tx_dot=None,
         gmcp_data={
             "Char.Vitals": {"hp": str(hp), "maxhp": str(maxhp), "mp": str(mp), "maxmp": str(maxmp)}
         },

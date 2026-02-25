@@ -686,7 +686,7 @@ class AutoreplyEngine:
                 if match:
                     self._last_matched_pattern = rule.pattern.pattern
                     if rule.when:
-                        ok, desc = check_condition(rule.when, self._ctx.writer)
+                        ok, desc = check_condition(rule.when, self._ctx)
                         if not ok:
                             self._log.info(
                                 "autoreply: immediate rule #%d skipped," " condition failed: %s",

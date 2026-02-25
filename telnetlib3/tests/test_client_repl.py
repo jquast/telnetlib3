@@ -528,6 +528,7 @@ class _WalkWriter:
         self.ctx = _DynamicRoomContext(room_num, room_sequence)
         self.ctx.writer = self  # type: ignore[assignment]
         self.ctx.echo_command = self._echo_log.append
+        self.ctx.room_arrival_timeout = 0.0
         self.ctx.room_graph = types.SimpleNamespace(
             _adj=adj or {},
             rooms={},
@@ -620,7 +621,7 @@ async def test_autodiscover_stuck_gateway_stops(monkeypatch: pytest.MonkeyPatch)
     async def fake_fast_travel(*args: object, **kwargs: object) -> None:
         pass
 
-    monkeypatch.setattr("telnetlib3.client_repl._fast_travel", fake_fast_travel)
+    monkeypatch.setattr("telnetlib3.client_repl_travel._fast_travel", fake_fast_travel)
 
     await _autodiscover(writer.ctx, logging.getLogger("test"), limit=20)
 
@@ -631,9 +632,7 @@ async def test_autodiscover_stuck_gateway_stops(monkeypatch: pytest.MonkeyPatch)
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
-async def test_autodiscover_blocked_edge_avoids_retrying(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_autodiscover_blocked_edge_avoids_retrying(monkeypatch: pytest.MonkeyPatch) -> None:
     """When a path edge is impassable, subsequent gateways behind it are skipped."""
     import logging
 
@@ -674,7 +673,7 @@ async def test_autodiscover_blocked_edge_avoids_retrying(
         nonlocal fast_travel_calls
         fast_travel_calls += 1
 
-    monkeypatch.setattr("telnetlib3.client_repl._fast_travel", fake_fast_travel)
+    monkeypatch.setattr("telnetlib3.client_repl_travel._fast_travel", fake_fast_travel)
 
     await _autodiscover(writer.ctx, logging.getLogger("test"), limit=20)
 
@@ -846,15 +845,16 @@ def test_render_command_queue_highlight_active() -> None:
     assert pending_sgr in output
 
 
-from telnetlib3.tui_blinken_lights import (  # noqa: E402
-    ActivityDot,
-    IDLE_RGB,
-    IDLE_AR_RGB,
-    PEAK_RED,
-    PEAK_YELLOW,
-    DURATION,
-    WARM_UP,
+# local
+from telnetlib3.client_repl_render import (  # noqa: E402
     HOLD,
+    WARM_UP,
+    DURATION,
+    IDLE_RGB,
+    PEAK_RED,
+    IDLE_AR_RGB,
+    PEAK_YELLOW,
+    ActivityDot,
     lerp_rgb,
 )
 

@@ -83,6 +83,7 @@ class SessionContext:
 
         # GMCP
         self.gmcp_data: dict[str, Any] = {}
+        self.on_gmcp_ready: Optional[Callable[[], None]] = None
 
         # rendering / input config
         self.color_filter: Optional[Any] = None
