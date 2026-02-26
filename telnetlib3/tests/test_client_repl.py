@@ -566,7 +566,7 @@ async def test_randomwalk_stuck_room_stops(monkeypatch: pytest.MonkeyPatch) -> N
 
     await _randomwalk(writer.ctx, logging.getLogger("test"), limit=10)
 
-    stuck_msgs = [m for m in writer._echo_log if "stuck in room" in m]
+    stuck_msgs = [m for m in writer._echo_log if "all exits blocked" in m]
     assert len(stuck_msgs) == 1
     assert not writer.ctx.randomwalk_active
 
@@ -574,7 +574,7 @@ async def test_randomwalk_stuck_room_stops(monkeypatch: pytest.MonkeyPatch) -> N
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
 async def test_randomwalk_resets_stuck_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A successful room change resets the stuck counter."""
+    """A successful move after a blocked exit continues walking."""
     import logging
 
     from telnetlib3.client_repl import _randomwalk
@@ -582,15 +582,16 @@ async def test_randomwalk_resets_stuck_on_success(monkeypatch: pytest.MonkeyPatc
     _real_sleep = asyncio.sleep
     monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
 
-    adj: dict[str, dict[str, str]] = {"room1": {"north": "room2"}, "room2": {"south": "room1"}}
+    adj: dict[str, dict[str, str]] = {
+        "room1": {"north": "room2", "south": "room3"},
+        "room2": {"south": "room1"},
+        "room3": {"north": "room1"},
+    }
     seq = (
         ["room1"]  # initial read
-        + ["room1"] * 31  # fail tick 1 (30 ticks + re-read)
-        + ["room1"] * 31  # fail tick 2
-        + ["room2"] * 31  # success — moves to room2
-        + ["room2"] * 31  # fail from room2
-        + ["room2"] * 31  # fail from room2
-        + ["room1"] * 31  # success — moves to room1
+        + ["room1"] * 31  # fail north
+        + ["room3"] * 31  # succeed south -> room3
+        + ["room1"] * 31  # succeed north -> room1
         + ["room1"] * 100  # more failures
     )
     writer = _WalkWriter(room_num="room1", adj=adj, room_sequence=seq)
@@ -598,9 +599,8 @@ async def test_randomwalk_resets_stuck_on_success(monkeypatch: pytest.MonkeyPatc
     await _randomwalk(writer.ctx, logging.getLogger("test"), limit=20)
 
     no_change_msgs = [m for m in writer._echo_log if "no room change" in m]
-    assert len(no_change_msgs) >= 2
-    stuck_msgs = [m for m in writer._echo_log if "stuck in room" in m]
-    assert len(stuck_msgs) <= 1
+    assert len(no_change_msgs) >= 1
+    assert ("room1", "north") in writer.ctx.blocked_exits
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
@@ -949,3 +949,190 @@ def testlerp_rgb_midpoint():
     assert r == 50
     assert g == 100
     assert b == 25
+
+
+class _CommandTrackingContext(_DynamicRoomContext):
+    """Context that changes room based on commands written, not read count."""
+
+    def __init__(
+        self,
+        room_num: str,
+        adj: dict[str, dict[str, str]],
+        blocked_directions: set[tuple[str, str]],
+    ) -> None:
+        super().__init__(room_num, room_sequence=None)
+        self._adj = adj
+        self._blocked = blocked_directions
+
+    def on_write(self, data: str | bytes) -> None:
+        text = data.decode("utf-8") if isinstance(data, bytes) else data
+        direction = text.strip()
+        current = self._room_val
+        if (current, direction) in self._blocked:
+            return
+        exits = self._adj.get(current, {})
+        if direction in exits:
+            self._room_val = exits[direction]
+
+
+class _TrackingWalkWriter(_WalkWriter):
+    """Walk writer that updates room based on commands sent."""
+
+    def __init__(
+        self,
+        room_num: str,
+        adj: dict[str, dict[str, str]],
+        blocked_directions: set[tuple[str, str]],
+    ) -> None:
+        self._sent: list[str] = []
+        self._echo_log: list[str] = []
+        self.ctx = _CommandTrackingContext(room_num, adj, blocked_directions)
+        self.ctx.writer = self  # type: ignore[assignment]
+        self.ctx.echo_command = self._echo_log.append
+        self.ctx.room_arrival_timeout = 0.1
+        self.ctx.room_graph = types.SimpleNamespace(
+            _adj=adj,
+            rooms={},
+            get_room=lambda num: types.SimpleNamespace(name=num),
+            find_branches=lambda pos: [],
+        )
+
+    def write(self, data: str) -> None:
+        self._sent.append(data)
+        self.ctx.on_write(data)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.asyncio
+async def test_randomwalk_blocked_exit_tries_other_direction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When one exit is blocked, randomwalk marks it and uses the other."""
+    import logging
+
+    from telnetlib3.client_repl import _randomwalk
+
+    _real_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
+
+    adj: dict[str, dict[str, str]] = {
+        "room1": {"north": "room2", "south": "room3"},
+        "room2": {"south": "room1"},
+        "room3": {"north": "room1"},
+    }
+    blocked = {("room1", "north")}
+    writer = _TrackingWalkWriter(room_num="room1", adj=adj, blocked_directions=blocked)
+
+    await _randomwalk(writer.ctx, logging.getLogger("test"), limit=5)
+
+    assert ("room1", "north") in writer.ctx.blocked_exits
+    assert "room3" in writer.ctx.last_walk_visited
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.asyncio
+async def test_autodiscover_skips_persistently_blocked_exits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pre-seeded blocked_exits are never attempted by autodiscover."""
+    import logging
+
+    from telnetlib3.client_repl import _autodiscover
+
+    _real_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
+
+    adj: dict[str, dict[str, str]] = {
+        "room1": {"east": "room2", "west": "room3"},
+    }
+    writer = _WalkWriter(room_num="room1", adj=adj)
+
+    explored_dirs: list[str] = []
+
+    def fake_find_branches(pos: str) -> list[tuple[str, str, str]]:
+        return [("room1", "east", "room2"), ("room1", "west", "room3")]
+
+    writer.ctx.room_graph.find_branches = fake_find_branches
+
+    orig_send_line = writer.ctx.send_line
+
+    def track_send(direction: str) -> None:
+        explored_dirs.append(direction)
+
+    writer.ctx.send_line = track_send
+
+    # Pre-seed east as blocked
+    writer.ctx.blocked_exits.add(("room1", "east"))
+
+    await _autodiscover(writer.ctx, logging.getLogger("test"), limit=10)
+
+    assert "east" not in explored_dirs
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.asyncio
+async def test_resume_randomwalk_from_same_room(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resume carries over visited set from the previous randomwalk."""
+    import logging
+
+    from telnetlib3.client_repl import _randomwalk
+
+    _real_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
+
+    adj: dict[str, dict[str, str]] = {
+        "room1": {"north": "room2"},
+        "room2": {"south": "room1"},
+    }
+    writer = _WalkWriter(room_num="room1", adj=adj)
+
+    # Run once — walks nowhere (north blocked), saves state
+    await _randomwalk(writer.ctx, logging.getLogger("test"), limit=2)
+
+    assert writer.ctx.last_walk_mode == "randomwalk"
+    assert writer.ctx.last_walk_room == "room1"
+    saved_visited = writer.ctx.last_walk_visited.copy()
+    assert "room1" in saved_visited
+
+    # Resume: visited set should be carried over
+    await _randomwalk(writer.ctx, logging.getLogger("test"), limit=2, resume=True)
+
+    assert saved_visited.issubset(writer.ctx.last_walk_visited)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.asyncio
+async def test_resume_not_used_on_room_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resume state is NOT used when the room changed since last walk."""
+    import logging
+
+    from telnetlib3.client_repl import _handle_travel_commands
+
+    _real_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
+
+    adj: dict[str, dict[str, str]] = {"room1": {"north": "room2"}}
+    writer = _WalkWriter(room_num="room1", adj=adj)
+
+    # Simulate previous walk ended at different room
+    writer.ctx.last_walk_mode = "randomwalk"
+    writer.ctx.last_walk_room = "room99"
+    writer.ctx.last_walk_visited = {"room99"}
+
+    parts = ["`resume`"]
+    remainder = await _handle_travel_commands(parts, writer.ctx, logging.getLogger("test"))
+
+    refuse_msgs = [m for m in writer._echo_log if "cannot resume" in m]
+    assert len(refuse_msgs) == 1
+    assert remainder == []
+
+
+def test_travel_re_matches_resume() -> None:
+    from telnetlib3.client_repl import _TRAVEL_RE
+
+    assert _TRAVEL_RE.match("`resume`") is not None
+    assert _TRAVEL_RE.match("`RESUME`") is not None

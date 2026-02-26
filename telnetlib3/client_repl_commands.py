@@ -65,7 +65,7 @@ def expand_commands(line: str) -> list[str]:
 
 _TRAVEL_RE = re.compile(
     r"^`(fast travel|slow travel|return fast|return slow"
-    r"|autowander|autodiscover|randomwalk)\s*(.*?)`$",
+    r"|autowander|autodiscover|randomwalk|resume)\s*(.*?)`$",
     re.IGNORECASE,
 )
 

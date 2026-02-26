@@ -83,8 +83,28 @@ async def _fast_travel(
                 return f"{room.name} ({num[:8]}...)"
         return num
 
+    # Track room IDs the graph already knew about before this travel
+    # started, so we can distinguish "ID rotation" (new hash for same
+    # room) from "different room with the same name" (cave grids).
+    _pre_existing_rooms: set[str] = set()
+    graph = _get_graph()
+    if graph is not None:
+        _pre_existing_rooms = set(graph.rooms.keys())
+
     def _names_match(expected_num: str, actual_num: str) -> bool:
-        """Check whether two room IDs refer to rooms with the same name."""
+        """Check whether two room IDs likely refer to the same physical room.
+
+        This handles MUDs that rotate room IDs (same physical room, new hash
+        each visit).  Returns ``True`` only when:
+
+        1. Both rooms share the same name.
+        2. The *actual* room ID was **not** already in the graph before this
+           travel began.  Pre-existing rooms are distinct locations that
+           happen to share a name (e.g. a grid of "A cave" rooms).  A
+           rotated ID produces a hash the graph has never seen.
+        """
+        if actual_num in _pre_existing_rooms:
+            return False
         graph = _get_graph()
         if graph is None:
             return False
@@ -99,9 +119,17 @@ async def _fast_travel(
         direction: str,
         old_target: str,
         new_target: str,
-        remaining_steps: list[tuple[str, str]],
+        step_idx: int,
+        steps_list: list[tuple[str, str]],
     ) -> None:
-        """Update the graph edge and rewrite remaining steps in-place."""
+        """Update the graph edge and rewrite only the current step.
+
+        Earlier versions rewrote *all* remaining steps matching *old_target*,
+        which corrupted paths through grids of same-named rooms (e.g. a cave
+        system where many rooms share the name "A cave" but are distinct
+        locations with different IDs).  Now only the step at *step_idx* is
+        updated.
+        """
         graph = _get_graph()
         if graph is not None:
             prev = graph.rooms.get(prev_num)
@@ -115,9 +143,10 @@ async def _fast_travel(
                     old_target[:8],
                     new_target[:8],
                 )
-        for j, (d, r) in enumerate(remaining_steps):
+        if step_idx < len(steps_list):
+            d, r = steps_list[step_idx]
             if r == old_target:
-                remaining_steps[j] = (d, new_target)
+                steps_list[step_idx] = (d, new_target)
 
     room_changed = ctx.room_changed
     max_retries = 3
@@ -259,7 +288,7 @@ async def _fast_travel(
                         expected_room[:8],
                         actual[:8],
                     )
-                    _correct_edge(prev_room, direction, expected_room, actual, steps)
+                    _correct_edge(prev_room, direction, expected_room, actual, step_idx, steps)
                     expected_room = actual
                     break
                 # Room didn't change -- server likely rejected move (rate limit).
@@ -361,7 +390,10 @@ async def _fast_travel(
 
 
 async def _autowander(
-    ctx: "SessionContext", log: logging.Logger, limit: int = _DEFAULT_WALK_LIMIT
+    ctx: "SessionContext",
+    log: logging.Logger,
+    limit: int = _DEFAULT_WALK_LIMIT,
+    resume: bool = False,
 ) -> None:
     """
     Visit same-named rooms using slow travel.
@@ -412,6 +444,8 @@ async def _autowander(
 
     leg_retries = 3
     visited: set[str] = {current}
+    if resume and ctx.last_walk_mode == "autowander" and ctx.last_walk_visited:
+        visited |= ctx.last_walk_visited
     ctx.wander_active = True
     ctx.wander_total = len(targets)
     try:
@@ -485,10 +519,13 @@ async def _autowander(
                     echo_fn(
                         f"AUTOWANDER [{i + 1}/{len(targets)}]: "
                         f"could not reach {target_room.name} "
-                        f"({target_room.num[:8]})"
+                        f"({target_room.num[:8]}), skipping"
                     )
-                break
+                continue
     finally:
+        ctx.last_walk_mode = "autowander"
+        ctx.last_walk_room = ctx.current_room_num
+        ctx.last_walk_visited = visited
         ctx.wander_active = False
         ctx.wander_current = 0
         ctx.wander_total = 0
@@ -497,7 +534,10 @@ async def _autowander(
 
 
 async def _autodiscover(
-    ctx: "SessionContext", log: logging.Logger, limit: int = _DEFAULT_WALK_LIMIT
+    ctx: "SessionContext",
+    log: logging.Logger,
+    limit: int = _DEFAULT_WALK_LIMIT,
+    resume: bool = False,
 ) -> None:
     """
     Explore unvisited exits reachable from the current room.
@@ -523,7 +563,9 @@ async def _autodiscover(
             echo_fn("AUTODISCOVER: no room data")
         return
 
-    tried: set[tuple[str, str]] = set()
+    tried: set[tuple[str, str]] = set(ctx.blocked_exits)
+    if resume and ctx.last_walk_mode == "autodiscover" and ctx.last_walk_tried:
+        tried |= ctx.last_walk_tried
     inaccessible: set[str] = set()
     blocked_edges: dict[tuple[str, str], str] = {}
 
@@ -650,6 +692,7 @@ async def _autodiscover(
             if not arrived:
                 ctx.active_command = None
                 tried.add((gw_room, direction))
+                ctx.blocked_exits.add((gw_room, direction))
                 if target_num:
                     inaccessible.add(target_num)
                 if echo_fn is not None:
@@ -689,6 +732,9 @@ async def _autodiscover(
     except asyncio.CancelledError:
         pass
     finally:
+        ctx.last_walk_mode = "autodiscover"
+        ctx.last_walk_room = ctx.current_room_num
+        ctx.last_walk_tried = tried
         ctx.discover_active = False
         ctx.discover_current = 0
         ctx.discover_total = 0
@@ -701,7 +747,10 @@ async def _autodiscover(
 
 
 async def _randomwalk(
-    ctx: "SessionContext", log: logging.Logger, limit: int = _DEFAULT_WALK_LIMIT
+    ctx: "SessionContext",
+    log: logging.Logger,
+    limit: int = _DEFAULT_WALK_LIMIT,
+    resume: bool = False,
 ) -> None:
     """
     Random walk up to *limit* rooms, preferring unvisited exits.
@@ -748,6 +797,13 @@ async def _randomwalk(
     if entrance_room:
         walk_counts[entrance_room] = float("inf")
 
+    # Seed blocked exits from persistent set.
+    for blk_room, blk_dir in ctx.blocked_exits:
+        if blk_room in adj:
+            blk_dst = adj[blk_room].get(blk_dir)
+            if blk_dst:
+                walk_counts[blk_dst] = float("inf")
+
     def _flood_reachable() -> set[str]:
         """BFS flood from current room, excluding the entrance."""
         result: set[str] = set()
@@ -770,6 +826,8 @@ async def _randomwalk(
     ctx.randomwalk_total = min(limit, len(reachable)) if reachable else limit
     ctx.randomwalk_current = 0
     visited: set[str] = {current}
+    if resume and ctx.last_walk_mode == "randomwalk" and ctx.last_walk_visited:
+        visited |= ctx.last_walk_visited
 
     try:
         stuck_count = 0
@@ -846,13 +904,19 @@ async def _randomwalk(
                         f"RANDOMWALK [{step + 1}/{ctx.randomwalk_total}]: "
                         f"no room change after {direction}"
                     )
-                if stuck_count >= 3:
-                    for dst in exits.values():
-                        walk_counts[dst] = float("inf")
+                # Mark only this specific exit as blocked.
+                ctx.blocked_exits.add((current, direction))
+                walk_counts[dst_num] = float("inf")
+                # Check if ALL exits from current room are now blocked.
+                all_blocked = all(
+                    walk_counts.get(d, 0) == float("inf")
+                    for d in adj.get(current, {}).values()
+                )
+                if all_blocked:
                     if echo_fn is not None:
                         echo_fn(
                             f"RANDOMWALK [{step + 1}/{ctx.randomwalk_total}]: "
-                            f"stuck in room, stopping"
+                            f"all exits blocked, stopping"
                         )
                     break
                 continue
@@ -891,6 +955,9 @@ async def _randomwalk(
     except asyncio.CancelledError:
         pass
     finally:
+        ctx.last_walk_mode = "randomwalk"
+        ctx.last_walk_room = ctx.current_room_num
+        ctx.last_walk_visited = visited
         ctx.randomwalk_active = False
         ctx.randomwalk_current = 0
         ctx.randomwalk_total = 0
@@ -933,19 +1000,43 @@ async def _handle_travel_commands(
         verb = m.group(1).lower()
         arg = m.group(2).strip()
 
-        if verb in ("autowander", "autodiscover", "randomwalk"):
+        if verb in ("autowander", "autodiscover", "randomwalk", "resume"):
             walk_limit = _DEFAULT_WALK_LIMIT
             if arg:
                 try:
                     walk_limit = int(arg)
                 except ValueError:
                     pass
-            if verb == "autowander":
-                await _autowander(ctx, log, limit=walk_limit)
-            elif verb == "autodiscover":
-                await _autodiscover(ctx, log, limit=walk_limit)
+
+            echo_fn = ctx.echo_command
+            if verb == "resume":
+                if not ctx.last_walk_mode:
+                    if echo_fn is not None:
+                        echo_fn("RESUME: no previous walk to resume")
+                    return parts[idx + 1 :]
+                if ctx.last_walk_room != ctx.current_room_num:
+                    if echo_fn is not None:
+                        echo_fn(
+                            "RESUME: room changed since last walk, "
+                            "cannot resume"
+                        )
+                    return parts[idx + 1 :]
+                verb = ctx.last_walk_mode
+                do_resume = True
             else:
-                await _randomwalk(ctx, log, limit=walk_limit)
+                # Auto-resume: if re-running the same mode from the
+                # same room, carry over visited/tried state.
+                do_resume = (
+                    ctx.last_walk_mode == verb
+                    and ctx.last_walk_room == ctx.current_room_num
+                )
+
+            if verb == "autowander":
+                await _autowander(ctx, log, limit=walk_limit, resume=do_resume)
+            elif verb == "autodiscover":
+                await _autodiscover(ctx, log, limit=walk_limit, resume=do_resume)
+            else:
+                await _randomwalk(ctx, log, limit=walk_limit, resume=do_resume)
             return parts[idx + 1 :]
 
         slow = "slow" in verb

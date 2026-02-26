@@ -66,6 +66,13 @@ class SessionContext:
         self.randomwalk_total: int = 0
         self.randomwalk_task: Optional[asyncio.Task[None]] = None
         self.active_command: Optional[str] = None
+        self.blocked_exits: set[tuple[str, str]] = set()  # (room_num, direction)
+
+        # walk resume state
+        self.last_walk_mode: str = ""
+        self.last_walk_room: str = ""
+        self.last_walk_visited: set[str] = set()
+        self.last_walk_tried: set[tuple[str, str]] = set()
 
         # command queue
         self.command_queue: Optional[_CommandQueue] = None
