@@ -53,10 +53,6 @@ class SessionContext:
         self.room_arrival_timeout: float = 5.0
 
         # walk automation
-        self.wander_active: bool = False
-        self.wander_current: int = 0
-        self.wander_total: int = 0
-        self.wander_task: Optional[asyncio.Task[None]] = None
         self.discover_active: bool = False
         self.discover_current: int = 0
         self.discover_total: int = 0
@@ -112,3 +108,48 @@ class SessionContext:
         self.send_line: Optional[Callable[[str], None]] = None
         self.autoreply_wait_fn: Optional[Callable[..., Awaitable[None]]] = None
         self.send_naws: Optional[Callable[[], None]] = None
+
+        # debounced timestamp persistence
+        self._macros_dirty: bool = False
+        self._autoreplies_dirty: bool = False
+        self._save_timer: Optional[asyncio.TimerHandle] = None
+
+    def mark_macros_dirty(self) -> None:
+        """Mark macros as needing a save and schedule a debounced flush."""
+        self._macros_dirty = True
+        self._schedule_flush()
+
+    def mark_autoreplies_dirty(self) -> None:
+        """Mark autoreplies as needing a save and schedule a debounced flush."""
+        self._autoreplies_dirty = True
+        self._schedule_flush()
+
+    def _schedule_flush(self) -> None:
+        """Schedule :meth:`flush_timestamps` after 30 seconds if not already pending."""
+        if self._save_timer is not None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self._save_timer = loop.call_later(30, self._flush_timestamps_sync)
+
+    def _flush_timestamps_sync(self) -> None:
+        """Synchronous wrapper called by the event loop timer."""
+        self._save_timer = None
+        self.flush_timestamps()
+
+    def flush_timestamps(self) -> None:
+        """Persist macro/autoreply timestamps if dirty."""
+        if self._macros_dirty and self.macros_file and self.macro_defs:
+            from .macros import save_macros
+
+            save_macros(self.macros_file, self.macro_defs, self.session_key)
+            self._macros_dirty = False
+        if self._autoreplies_dirty and self.autoreplies_file and self.autoreply_rules:
+            from .autoreply import save_autoreplies
+
+            save_autoreplies(
+                self.autoreplies_file, self.autoreply_rules, self.session_key
+            )
+            self._autoreplies_dirty = False

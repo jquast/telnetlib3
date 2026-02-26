@@ -11,6 +11,7 @@ from __future__ import annotations
 # std imports
 import os
 import json
+import random
 import sqlite3
 from typing import Any, Optional
 from datetime import datetime, timezone
@@ -129,20 +130,21 @@ class RoomStore:
             result[room.num] = room
         return result
 
-    def room_summaries(self) -> list[tuple[str, str, str, int, bool]]:
+    def room_summaries(self) -> list[tuple[str, str, str, int, bool, str]]:
         """
-        Return lightweight ``(num, name, area, exit_count, bookmarked)`` tuples.
+        Return lightweight ``(num, name, area, exit_count, bookmarked, last_visited)`` tuples.
 
         Counts exits via SQL aggregation instead of materialising
         :class:`Room` objects, which avoids copying exit dicts for every
         room.
         """
         rows = self._conn.execute(
-            "SELECT r.num, r.name, r.area, COUNT(e.direction), r.bookmarked"
+            "SELECT r.num, r.name, r.area, COUNT(e.direction),"
+            " r.bookmarked, r.last_visited"
             " FROM room r LEFT JOIN exit e ON r.num = e.src_num"
             " GROUP BY r.num"
         ).fetchall()
-        return [(r[0], r[1], r[2], r[3], bool(r[4])) for r in rows]
+        return [(r[0], r[1], r[2], r[3], bool(r[4]), r[5]) for r in rows]
 
     def room_area(self, num: str) -> str:
         """Return the area of a single room, or ``""`` if not found."""
@@ -345,7 +347,20 @@ class RoomStore:
                     queue.append((target, dist + 1))
 
         branches.sort(key=lambda b: b[0])
-        return [(gw, d, t) for _, gw, d, t in branches[:limit]]
+        # Shuffle branches within each distance tier so autodiscover
+        # does not deterministically prefer one direction.
+        shuffled: list[tuple[int, str, str, str]] = []
+        i = 0
+        while i < len(branches):
+            dist = branches[i][0]
+            j = i
+            while j < len(branches) and branches[j][0] == dist:
+                j += 1
+            tier = branches[i:j]
+            random.shuffle(tier)
+            shuffled.extend(tier)
+            i = j
+        return [(gw, d, t) for _, gw, d, t in shuffled[:limit]]
 
     def search(self, query: str) -> list[Room]:
         """

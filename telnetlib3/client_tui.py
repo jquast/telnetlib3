@@ -363,30 +363,9 @@ def build_command(config: SessionConfig) -> list[str]:
 
 def _relative_time(iso_str: str) -> str:
     """Return a short relative-time string like ``'5m ago'`` or ``'3d ago'``."""
-    if not iso_str:
-        return ""
-    try:
-        then = datetime.datetime.fromisoformat(iso_str)
-        if then.tzinfo is None:
-            now = datetime.datetime.now()
-        else:
-            now = datetime.datetime.now(datetime.timezone.utc)
-        delta = now - then
-        seconds = int(delta.total_seconds())
-        if seconds < 0:
-            return ""
-        if seconds < 60:
-            return f"{seconds}s ago"
-        minutes = seconds // 60
-        if minutes < 60:
-            return f"{minutes}m ago"
-        hours = minutes // 60
-        if hours < 24:
-            return f"{hours}h ago"
-        days = hours // 24
-        return f"{days}d ago"
-    except (ValueError, TypeError):
-        return iso_str[:10]
+    from ._util import relative_time
+
+    return relative_time(iso_str)
 
 
 class SessionListScreen(Screen[None]):
@@ -1183,7 +1162,7 @@ class _EditListScreen(Screen["bool | None"]):
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("escape", "cancel_or_close", "Cancel", priority=True),
-        Binding("plus", "reorder_hint", "Change Priority", key_display="+/-", show=True),
+        Binding("plus", "reorder_hint", "Change Priority", key_display="+/=/-", show=True),
         Binding("enter", "save_hint", "Save", show=True),
     ]
 
@@ -1207,6 +1186,8 @@ class _EditListScreen(Screen["bool | None"]):
     def __init__(self) -> None:
         super().__init__()
         self._editing_idx: int | None = None
+        self._filtered_indices: list[int] = []
+        self._search_query: str = ""
 
     @property
     def _form_visible(self) -> bool:
@@ -1222,6 +1203,10 @@ class _EditListScreen(Screen["bool | None"]):
         pfx = self._prefix
         self.query_one(f"#{pfx}-form").display = False
         self.query_one(f"#{pfx}-table").display = True
+        try:
+            self.query_one(f"#{pfx}-search", Input).display = True
+        except Exception:
+            pass
         self._editing_idx = None
         self._set_action_buttons_disabled(False)
         self.query_one(f"#{pfx}-table", DataTable).focus()
@@ -1244,7 +1229,12 @@ class _EditListScreen(Screen["bool | None"]):
         if table.row_count == 0:
             return None
         row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
-        return int(str(row_key.value))
+        row_pos = int(str(row_key.value))
+        if self._filtered_indices:
+            if row_pos < len(self._filtered_indices):
+                return self._filtered_indices[row_pos]
+            return None
+        return row_pos
 
     def _edit_selected(self) -> None:
         idx = self._selected_idx()
@@ -1292,8 +1282,36 @@ class _EditListScreen(Screen["bool | None"]):
     def action_save_hint(self) -> None:
         """Placeholder for save key binding hint."""
 
+    def _matches_search(self, idx: int, query: str) -> bool:
+        """Return True if item at *idx* matches the search *query*."""
+        return True
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Filter table when search input changes."""
+        if event.input.id == f"{self._prefix}-search":
+            self._search_query = event.value
+            self._refresh_table()
+
     def on_key(self, event: events.Key) -> None:
         """Arrow/Home/End/+/- keys navigate and reorder the table."""
+        pfx = self._prefix
+        search_id = f"#{pfx}-search"
+        try:
+            search_input = self.query_one(search_id, Input)
+        except Exception:
+            search_input = None
+
+        if search_input is not None and event.key in ("up", "down"):
+            table = self.query_one(f"#{pfx}-table", DataTable)
+            if self.focused is search_input and event.key == "down":
+                table.focus()
+                event.prevent_default()
+                return
+            if self.focused is table and event.key == "up" and table.cursor_row == 0:
+                search_input.focus()
+                event.prevent_default()
+                return
+
         if event.key in ("home", "end"):
             table = self.query_one(f"#{self._prefix}-table", DataTable)
             if self.focused is table and table.row_count > 0:
@@ -1308,8 +1326,8 @@ class _EditListScreen(Screen["bool | None"]):
                 f"#{self._prefix}-table",
                 f"#{self._prefix}-form",
             )
-        elif event.key in ("plus", "minus") and not self._form_visible:
-            self._reorder(event.key == "plus")
+        elif event.key in ("plus", "minus", "equals_sign") and not self._form_visible:
+            self._reorder(event.key in ("plus", "equals_sign"))
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Double-click or Enter on a table row opens it for editing."""
@@ -1385,6 +1403,13 @@ class _EditListScreen(Screen["bool | None"]):
 class MacroEditScreen(_EditListScreen):
     """Editor screen for macro key bindings."""
 
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "cancel_or_close", "Cancel", priority=True),
+        Binding("plus", "reorder_hint", "Change Priority", key_display="+/=/-", show=True),
+        Binding("enter", "save_hint", "Save", show=True),
+        Binding("l", "sort_last", "Recent", show=True),
+    ]
+
     CSS = """
     MacroEditScreen { align: center middle; }
     #macro-panel {
@@ -1402,6 +1427,7 @@ class MacroEditScreen(_EditListScreen):
     #macro-copy { background: #6670a0; color: #e8ecf8; }
     #macro-copy:hover { background: #8088b8; }
     #macro-right { width: 1fr; height: 100%; }
+    #macro-search { height: auto; }
     #macro-table { height: 1fr; min-height: 4; overflow-x: hidden; }
     #macro-form { height: 1fr; padding: 0; }
     #macro-form .field-row { height: 3; margin: 0; }
@@ -1438,8 +1464,9 @@ class MacroEditScreen(_EditListScreen):
         self._session_key = session_key
         self._rooms_file = rooms_file
         self._current_room_file = current_room_file
-        self._macros: list[tuple[str, str, bool]] = []
+        self._macros: list[tuple[str, str, bool, str]] = []
         self._capturing: bool = False
+        self._sort_mode: str = ""
         self._capture_escape_pending: bool = False
         self._captured_key: str = ""
 
@@ -1470,6 +1497,7 @@ class MacroEditScreen(_EditListScreen):
                     yield Button("Save", variant="primary", id="macro-save")
                     yield Button("Cancel", id="macro-close")
                 with Vertical(id="macro-right"):
+                    yield Input(placeholder="Search macros\u2026", id="macro-search")
                     yield DataTable(id="macro-table")
                     with Vertical(id="macro-form"):
                         with Horizontal(classes="field-row"):
@@ -1497,7 +1525,6 @@ class MacroEditScreen(_EditListScreen):
                                 "Return Slow", id="macro-return-slow", classes="insert-btn"
                             )
                         with Horizontal(classes="field-row"):
-                            yield Button("Autowander", id="macro-autowander", classes="insert-btn")
                             yield Button(
                                 "Autodiscover", id="macro-autodiscover", classes="insert-btn"
                             )
@@ -1512,7 +1539,7 @@ class MacroEditScreen(_EditListScreen):
         """Load macros from file and populate table."""
         table = self.query_one("#macro-table", DataTable)
         table.cursor_type = "row"
-        table.add_columns("Key", "Text")
+        table.add_columns("Key", "Text", "Last")
         self._load_from_file()
         self._refresh_table()
         self.query_one("#macro-form").display = False
@@ -1524,18 +1551,44 @@ class MacroEditScreen(_EditListScreen):
 
         try:
             macros = load_macros(self._path, self._session_key)
-            self._macros = [(m.key, m.text, m.enabled) for m in macros]
+            self._macros = [(m.key, m.text, m.enabled, m.last_used) for m in macros]
         except (ValueError, FileNotFoundError):
             pass
+
+    def _matches_search(self, idx: int, query: str) -> bool:
+        """Match macro key or text against search query."""
+        key, text, _enabled, _lu = self._macros[idx]
+        q = query.lower()
+        return q in key.lower() or q in text.lower()
 
     def _refresh_table(self) -> None:
         table = self.query_one("#macro-table", DataTable)
         table.clear()
-        for i, (key, text, enabled) in enumerate(self._macros):
+        q = self._search_query
+        self._filtered_indices = []
+        order = list(range(len(self._macros)))
+        if self._sort_mode == "last_used":
+            order.sort(key=lambda i: _invert_ts(self._macros[i][3]))
+        for i in order:
+            key, text, enabled, last_used = self._macros[i]
+            if q and not self._matches_search(i, q):
+                continue
             status = "" if enabled else " (off)"
-            table.add_row(key, text + status, key=str(i))
+            lu = _relative_time(last_used) if last_used else ""
+            self._filtered_indices.append(i)
+            table.add_row(
+                key, text + status, lu,
+                key=str(len(self._filtered_indices) - 1),
+            )
 
-    def _show_form(self, key_val: str = "", text_val: str = "", enabled: bool = True) -> None:
+    def action_sort_last(self) -> None:
+        """Toggle sorting macros by last used time."""
+        self._sort_mode = "last_used" if self._sort_mode != "last_used" else ""
+        self._refresh_table()
+
+    def _show_form(
+        self, key_val: str = "", text_val: str = "", enabled: bool = True, last_used: str = ""
+    ) -> None:
         self._captured_key = key_val
         self._capturing = False
         self._capture_escape_pending = False
@@ -1545,6 +1598,7 @@ class MacroEditScreen(_EditListScreen):
         self.query_one("#macro-capture-status", Static).update("")
         self.query_one("#macro-text", Input).value = text_val
         self.query_one("#macro-enabled", Switch).value = enabled
+        self.query_one("#macro-search", Input).display = False
         self.query_one("#macro-table").display = False
         self.query_one("#macro-form").display = True
         self._set_action_buttons_disabled(True)
@@ -1560,7 +1614,8 @@ class MacroEditScreen(_EditListScreen):
         key_val = self._captured_key.strip()
         text_val = self.query_one("#macro-text", Input).value
         enabled = self.query_one("#macro-enabled", Switch).value
-        self._finalize_edit((key_val, text_val, enabled), bool(key_val))
+        lu = self._macros[self._editing_idx][3] if self._editing_idx is not None else ""
+        self._finalize_edit((key_val, text_val, enabled, lu), bool(key_val))
 
     _REJECTED_KEYS: ClassVar[frozenset[str]] = frozenset(
         {
@@ -1674,8 +1729,6 @@ class MacroEditScreen(_EditListScreen):
             self._insert_command("`return fast`")
         elif suffix == "return-slow":
             self._insert_command("`return slow`")
-        elif suffix == "autowander":
-            self._insert_command("`autowander`")
         elif suffix == "autodiscover":
             self._insert_command("`autodiscover`")
         elif suffix == "delay":
@@ -1730,7 +1783,10 @@ class MacroEditScreen(_EditListScreen):
         from .macros import Macro, save_macros
 
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
-        macros = [Macro(key=k, text=t, enabled=ena) for k, t, ena in self._macros]
+        macros = [
+            Macro(key=k, text=t, enabled=ena, last_used=lu)
+            for k, t, ena, lu in self._macros
+        ]
         save_macros(self._path, macros, self._session_key)
 
 
@@ -1747,10 +1803,18 @@ class _AutoreplyTuple(NamedTuple):
     post_command: str = ""
     when: dict[str, str] | None = None
     immediate: bool = False
+    last_fired: str = ""
 
 
 class AutoreplyEditScreen(_EditListScreen):
     """Editor screen for autoreply rules."""
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "cancel_or_close", "Cancel", priority=True),
+        Binding("plus", "reorder_hint", "Change Priority", key_display="+/=/-", show=True),
+        Binding("enter", "save_hint", "Save", show=True),
+        Binding("l", "sort_last", "Recent", show=True),
+    ]
 
     CSS = """
     AutoreplyEditScreen { align: center middle; }
@@ -1768,6 +1832,7 @@ class AutoreplyEditScreen(_EditListScreen):
     #autoreply-copy { background: #6670a0; color: #e8ecf8; }
     #autoreply-copy:hover { background: #8088b8; }
     #autoreply-right { width: 1fr; height: 100%; }
+    #autoreply-search { height: auto; }
     #autoreply-table { height: 1fr; min-height: 4; overflow-x: hidden; }
     #autoreply-form { height: 1fr; padding: 0 0 0 4; }
     #autoreply-form .field-row { height: 3; margin: 0; }
@@ -1796,6 +1861,7 @@ class AutoreplyEditScreen(_EditListScreen):
         self._session_key = session_key
         self._select_pattern = select_pattern
         self._rules: list[_AutoreplyTuple] = []
+        self._sort_mode: str = ""
 
     @property
     def _prefix(self) -> str:
@@ -1826,6 +1892,7 @@ class AutoreplyEditScreen(_EditListScreen):
                     yield Button("Save", variant="primary", id="autoreply-save")
                     yield Button("Cancel", id="autoreply-close")
                 with Vertical(id="autoreply-right"):
+                    yield Input(placeholder="Search autoreplies\u2026", id="autoreply-search")
                     yield DataTable(id="autoreply-table")
                     with Vertical(id="autoreply-form"):
                         with Horizontal(classes="field-row"):
@@ -1893,7 +1960,7 @@ class AutoreplyEditScreen(_EditListScreen):
         """Load autoreplies from file and populate table."""
         table = self.query_one("#autoreply-table", DataTable)
         table.cursor_type = "row"
-        table.add_columns("#", "Pattern", "Reply", "Flags")
+        table.add_columns("#", "Pattern", "Reply", "Flags", "Last")
         self._load_from_file()
         self._refresh_table()
         self.query_one("#autoreply-form").display = False
@@ -1922,16 +1989,32 @@ class AutoreplyEditScreen(_EditListScreen):
                     r.post_command,
                     dict(r.when) or None,
                     r.immediate,
+                    r.last_fired,
                 )
                 for r in rules
             ]
         except (ValueError, FileNotFoundError):
             pass
 
+    def _matches_search(self, idx: int, query: str) -> bool:
+        """Match autoreply pattern or reply against search query."""
+        rule = self._rules[idx]
+        q = query.lower()
+        return q in rule.pattern.lower() or q in rule.reply.lower()
+
     def _refresh_table(self) -> None:
         table = self.query_one("#autoreply-table", DataTable)
         table.clear()
-        for i, rule in enumerate(self._rules):
+        q = self._search_query
+        self._filtered_indices = []
+        order = list(range(len(self._rules)))
+        if self._sort_mode == "last_fired":
+            order.sort(key=lambda i: _invert_ts(self._rules[i].last_fired))
+        for i in order:
+            rule = self._rules[i]
+            if q and not self._matches_search(i, q):
+                continue
+            self._filtered_indices.append(i)
             flags = ""
             if not rule.enabled:
                 flags = "X"
@@ -1945,7 +2028,16 @@ class AutoreplyEditScreen(_EditListScreen):
                 flags = (flags + " C") if flags else "C"
             pat_display = rule.pattern if len(rule.pattern) <= 30 else rule.pattern[:29] + "\u2026"
             reply_display = rule.reply if len(rule.reply) <= 20 else rule.reply[:19] + "\u2026"
-            table.add_row(str(i + 1), pat_display, reply_display, flags.strip(), key=str(i))
+            lf = _relative_time(rule.last_fired) if rule.last_fired else ""
+            row_pos = len(self._filtered_indices) - 1
+            table.add_row(
+                str(i + 1), pat_display, reply_display, flags.strip(), lf, key=str(row_pos)
+            )
+
+    def action_sort_last(self) -> None:
+        """Toggle sorting autoreplies by last fired time."""
+        self._sort_mode = "last_fired" if self._sort_mode != "last_fired" else ""
+        self._refresh_table()
 
     def _show_form(
         self,
@@ -1959,6 +2051,7 @@ class AutoreplyEditScreen(_EditListScreen):
         post_command: str = "",
         when: dict[str, str] | None = None,
         immediate: bool = False,
+        last_fired: str = "",
     ) -> None:
         self.query_one("#autoreply-pattern", Input).value = pattern_val
         self.query_one("#autoreply-reply", Input).value = reply_val
@@ -1990,6 +2083,7 @@ class AutoreplyEditScreen(_EditListScreen):
         cond_none = not when
         self.query_one("#autoreply-cond-op", Select).disabled = cond_none
         self.query_one("#autoreply-cond-val", Input).disabled = cond_none
+        self.query_one("#autoreply-search", Input).display = False
         self.query_one("#autoreply-table").display = False
         self.query_one("#autoreply-form").display = True
         self._set_action_buttons_disabled(True)
@@ -2027,6 +2121,7 @@ class AutoreplyEditScreen(_EditListScreen):
             except re.error as exc:
                 self.notify(f"Invalid regex: {exc}", severity="error")
                 return
+        lf = self._rules[self._editing_idx].last_fired if self._editing_idx is not None else ""
         entry = _AutoreplyTuple(
             pattern_val,
             reply_val,
@@ -2038,6 +2133,7 @@ class AutoreplyEditScreen(_EditListScreen):
             post_cmd,
             when,
             immediate,
+            lf,
         )
         self._finalize_edit(entry, bool(pattern_val))
 
@@ -2068,6 +2164,7 @@ class AutoreplyEditScreen(_EditListScreen):
                     exclusive_timeout=t.exclusive_timeout,
                     when=t.when or {},
                     immediate=t.immediate,
+                    last_fired=t.last_fired,
                 )
             )
         save_autoreplies(self._path, rules, self._session_key)
@@ -2119,6 +2216,17 @@ class _RoomTree(Tree[str]):
         return text
 
 
+def _invert_ts(iso_str: str) -> str:
+    """Return a sort key that orders ISO timestamps most-recent-first.
+
+    Empty strings sort last (after any real timestamp).
+    """
+    if not iso_str:
+        return "\xff"
+    digits = "".join(c for c in iso_str if c.isdigit())
+    return "".join(chr(ord("9") - ord(c) + ord("0")) for c in digits)
+
+
 class RoomBrowserScreen(Screen["bool | None"]):
     """Browser screen for GMCP room graph with search, bookmarks, fast travel."""
 
@@ -2131,6 +2239,7 @@ class RoomBrowserScreen(Screen["bool | None"]):
         Binding("n", "sort_name", "Name sort", show=True),
         Binding("i", "sort_id", "ID sort", show=True),
         Binding("d", "sort_distance", "Dist sort", show=True),
+        Binding("l", "sort_last", "Recent", show=True),
     ]
 
     CSS = """
@@ -2177,7 +2286,7 @@ class RoomBrowserScreen(Screen["bool | None"]):
         self._session_key = session_key
         self._current_room_file = current_room_file
         self._fasttravel_file = fasttravel_file
-        self._all_rooms: list[tuple[str, str, str, int, bool]] = []
+        self._all_rooms: list[tuple[str, str, str, int, bool, str]] = []
         self._current_area: str = ""
         self._graph: "RoomStore | None" = None
         self._mounted = False
@@ -2225,6 +2334,25 @@ class RoomBrowserScreen(Screen["bool | None"]):
         self._mounted = True
         self.call_after_refresh(self._select_current_room)
 
+    def _select_room_node(self, room_num: str) -> bool:
+        """
+        Select the tree node matching *room_num*.
+
+        Return True on success.
+        """
+        tree = self.query_one("#room-tree", Tree)
+        for node in tree.root.children:
+            if node.data == room_num:
+                tree.select_node(node)
+                node.expand()
+                return True
+            for child in node.children:
+                if child.data == room_num:
+                    node.expand()
+                    tree.select_node(child)
+                    return True
+        return False
+
     def _select_current_room(self) -> None:
         """Move cursor to the current room node, if known."""
         if not self._current_room_file:
@@ -2234,17 +2362,7 @@ class RoomBrowserScreen(Screen["bool | None"]):
         current = read_current_room(self._current_room_file)
         if not current:
             return
-        tree = self.query_one("#room-tree", Tree)
-        for node in tree.root.children:
-            if node.data == current:
-                tree.select_node(node)
-                node.expand()
-                return
-            for child in node.children:
-                if child.data == current:
-                    node.expand()
-                    tree.select_node(child)
-                    return
+        self._select_room_node(current)
 
     def _load_rooms(self) -> None:
         """Load room data from SQLite database."""
@@ -2261,7 +2379,7 @@ class RoomBrowserScreen(Screen["bool | None"]):
     def _populate_area_dropdown(self) -> None:
         """Populate the area dropdown from loaded rooms."""
         areas: set[str] = set()
-        for _, _, area, _, _ in self._all_rooms:
+        for _, _, area, _, _, _ in self._all_rooms:
             if area:
                 areas.add(area)
         sorted_areas = sorted(areas, key=str.lower)
@@ -2293,6 +2411,10 @@ class RoomBrowserScreen(Screen["bool | None"]):
                     r[1].lower(),
                 )
             )
+        elif self._sort_mode == "last_visited":
+            def _lv_key(r: tuple[str, str, str, int, bool, str]) -> tuple[bool, str, str]:
+                return (not r[4], _invert_ts(r[5]), r[1].lower())
+            self._all_rooms.sort(key=_lv_key)
         elif self._sort_mode == "id":
             self._all_rooms.sort(key=lambda r: (not r[4], r[0].lower()))
         else:
@@ -2322,7 +2444,7 @@ class RoomBrowserScreen(Screen["bool | None"]):
 
         groups: dict[str, list[tuple[str, str, int, bool]]] = {}
         group_order: list[str] = []
-        for num, name, area, exits, bookmarked in self._all_rooms:
+        for num, name, area, exits, bookmarked, _lv in self._all_rooms:
             if area_filter and area != area_filter:
                 continue
             if q and q not in name.lower() and q not in area.lower():
@@ -2334,7 +2456,7 @@ class RoomBrowserScreen(Screen["bool | None"]):
 
         # Populate bookmarked set for the _RoomTree prefix renderer.
         if isinstance(tree, _RoomTree):
-            tree._bookmarked = {num for num, _, _, _, bm in self._all_rooms if bm}
+            tree._bookmarked = {num for num, _, _, _, bm, _ in self._all_rooms if bm}
 
         n_shown = 0
         with self.app.batch_update():
@@ -2360,6 +2482,7 @@ class RoomBrowserScreen(Screen["bool | None"]):
                     dist_part = f"[{int(nearest)}]".rjust(5) if nearest != float("inf") else "     "
                     label = f"{name_part} {count_part} {dist_part}"
                     parent = tree.root.add(label, data=None)
+                    members.sort(key=lambda m: self._distances.get(m[0], float("inf")))
                     for num, _area, _exits, bookmarked in members:
                         parent.add_leaf(self._room_label(num), data=num)
 
@@ -2518,11 +2641,20 @@ class RoomBrowserScreen(Screen["bool | None"]):
         self._compute_distances()
         self._apply_sort()
 
-    def _apply_sort(self) -> None:
-        """Re-sort rooms and refresh the tree."""
+    def action_sort_last(self) -> None:
+        """Sort rooms by last visited time, most recent first."""
+        self._sort_mode = "last_visited"
+        self._apply_sort()
+
+    def _apply_sort(self, select_num: str | None = None) -> None:
+        """Re-sort rooms and refresh the tree, preserving selection."""
+        if select_num is None:
+            select_num = self._get_selected_room_num()
         self._sort_rooms()
         search_val = self.query_one("#room-search", Input).value
         self._refresh_tree(search_val)
+        if select_num:
+            self._select_room_node(select_num)
 
     def action_toggle_bookmark(self) -> None:
         """Toggle bookmark on the selected room."""
@@ -2540,11 +2672,11 @@ class RoomBrowserScreen(Screen["bool | None"]):
         store.toggle_bookmark(num)
         store.close()
 
-        for i, (rnum, name, area, exits, bm) in enumerate(self._all_rooms):
+        for i, (rnum, name, area, exits, bm, lv) in enumerate(self._all_rooms):
             if rnum == num:
-                self._all_rooms[i] = (rnum, name, area, exits, not bm)
+                self._all_rooms[i] = (rnum, name, area, exits, not bm, lv)
                 break
-        self._apply_sort()
+        self._apply_sort(select_num=num)
 
     def _do_fast_travel(self, slow: bool = False) -> None:
         """Calculate path and write fast travel file."""
@@ -2591,6 +2723,7 @@ class RoomPickerScreen(RoomBrowserScreen):
         Binding("n", "sort_name", "Name sort", show=True),
         Binding("i", "sort_id", "ID sort", show=True),
         Binding("d", "sort_distance", "Dist sort", show=True),
+        Binding("l", "sort_last", "Recent", show=True),
     ]
 
     def compose(self) -> ComposeResult:

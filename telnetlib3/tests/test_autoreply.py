@@ -1664,3 +1664,39 @@ def test_exclusive_state_clear():
     assert state.deadline == 0.0
     assert state.post_command == ""
     assert state.prompt_count == 0
+
+
+def test_autoreply_last_fired_round_trip(tmp_path):
+    path = str(tmp_path / "autoreplies.json")
+    rules = [
+        AutoreplyRule(
+            pattern=re.compile("hello"),
+            reply="world",
+            last_fired="2025-06-01T12:00:00+00:00",
+        ),
+        AutoreplyRule(pattern=re.compile("foo"), reply="bar"),
+    ]
+    save_autoreplies(path, rules, "localhost:23")
+    loaded = load_autoreplies(path, "localhost:23")
+    assert loaded[0].last_fired == "2025-06-01T12:00:00+00:00"
+    assert loaded[1].last_fired == ""
+
+
+@pytest.mark.asyncio
+async def test_autoreply_engine_stamps_last_fired():
+    ctx = types.SimpleNamespace(
+        writer=types.SimpleNamespace(
+            write=lambda s: None,
+        ),
+        gmcp_data={},
+        cx_dot=None,
+        tx_dot=None,
+    )
+    rule = AutoreplyRule(pattern=re.compile("hello"), reply="world;")
+    engine = AutoreplyEngine(
+        rules=[rule],
+        ctx=ctx,
+        log=logging.getLogger("test"),
+    )
+    engine.feed("hello\n")
+    assert rule.last_fired != ""

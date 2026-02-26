@@ -224,14 +224,14 @@ def test_macro_screen_loads_file(tmp_path) -> None:
     screen = MacroEditScreen(path=str(fp), session_key=sk)
     screen._load_from_file()
     assert len(screen._macros) == 1
-    assert screen._macros[0] == ("KEY_F5", "look;", True)
+    assert screen._macros[0] == ("KEY_F5", "look;", True, "")
 
 
 def test_macro_screen_save(tmp_path) -> None:
     sk = "test.host:23"
     fp = tmp_path / "macros.json"
     screen = MacroEditScreen(path=str(fp), session_key=sk)
-    screen._macros = [("KEY_F5", "look;", True), ("KEY_ALT_N", "north;", True)]
+    screen._macros = [("KEY_F5", "look;", True, ""), ("KEY_ALT_N", "north;", True, "")]
     screen._save_to_file()
 
     from telnetlib3.macros import load_macros

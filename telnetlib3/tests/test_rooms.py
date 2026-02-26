@@ -507,10 +507,10 @@ def test_prefs_path_format() -> None:
 
 def test_save_load_roundtrip(tmp_path: Any, monkeypatch: Any) -> None:
     monkeypatch.setattr("telnetlib3.rooms._xdg_data_dir", lambda: str(tmp_path))
-    prefs = {"skip_autowander_confirm": True, "skip_autodiscover_confirm": False}
+    prefs = {"skip_randomwalk_confirm": True, "skip_autodiscover_confirm": False}
     save_prefs("host:1234", prefs)
     loaded = load_prefs("host:1234")
-    assert loaded["skip_autowander_confirm"] is True
+    assert loaded["skip_randomwalk_confirm"] is True
     assert loaded["skip_autodiscover_confirm"] is False
 
 
@@ -521,7 +521,41 @@ def test_load_missing_file() -> None:
 
 def test_save_overwrites(tmp_path: Any, monkeypatch: Any) -> None:
     monkeypatch.setattr("telnetlib3.rooms._xdg_data_dir", lambda: str(tmp_path))
-    save_prefs("h:1", {"skip_autowander_confirm": False})
-    save_prefs("h:1", {"skip_autowander_confirm": True})
+    save_prefs("h:1", {"skip_randomwalk_confirm": False})
+    save_prefs("h:1", {"skip_randomwalk_confirm": True})
     loaded = load_prefs("h:1")
-    assert loaded["skip_autowander_confirm"] is True
+    assert loaded["skip_randomwalk_confirm"] is True
+
+
+def test_find_branches_shuffles_equal_distance(tmp_path: Any) -> None:
+    db_path = str(tmp_path / "rooms.db")
+    store = RoomStore(db_path)
+    store.update_room(
+        {
+            "num": "A",
+            "name": "A",
+            "exits": {"east": "X1", "west": "X2", "north": "X3", "south": "X4"},
+        }
+    )
+
+    orders: set[tuple[str, ...]] = set()
+    for _ in range(50):
+        branches = store.find_branches("A")
+        dirs = tuple(d for _, d, _ in branches)
+        orders.add(dirs)
+
+    assert len(orders) > 1
+    store.close()
+
+
+def test_room_summaries_includes_last_visited(store: RoomStore) -> None:
+    store.update_room({"num": "1", "name": "Room A", "area": "zone", "exits": {"n": "2"}})
+    store.update_room({"num": "2", "name": "Room B", "area": "zone", "exits": {}})
+    summaries = store.room_summaries()
+    assert len(summaries) == 2
+    for num, name, area, exit_count, bookmarked, last_visited in summaries:
+        assert isinstance(last_visited, str)
+        assert last_visited != ""
+    by_num = {s[0]: s for s in summaries}
+    assert by_num["1"][3] == 1
+    assert by_num["2"][3] == 0

@@ -78,7 +78,6 @@ from .client_repl_render import (  # noqa: F401
 )
 from .client_repl_travel import (  # noqa: F401
     _DEFAULT_WALK_LIMIT,
-    _autowander,
     _randomwalk,
     _fast_travel,
     _autodiscover,
@@ -98,7 +97,7 @@ from .client_repl_commands import (  # noqa: F401
     _REPEAT_RE,
     _TRAVEL_RE,
     _BACKTICK_RE,
-    _MOVE_STEP_DELAY,
+    _COMMAND_DELAY,
     _MOVE_MAX_RETRIES,
     _send_chained,
     _collapse_runs,
@@ -770,11 +769,14 @@ if sys.platform != "win32":
                 _load_history(self.history, self.history_file)
 
             term_cols = self.blessed_term.width
+            editor_style = {
+                k: v for k, v in _STYLE_NORMAL.items() if k != "cursor_sgr"
+            }
             self.editor = blessed.line_editor.LineEditor(  # pylint: disable=no-member
                 history=self.history,
                 password=bool(self.telnet_writer.will_echo),
                 max_width=term_cols,
-                **_STYLE_NORMAL,
+                **editor_style,
             )
 
         def _init_ui(self) -> None:
@@ -900,33 +902,41 @@ if sys.platform != "win32":
             t = asyncio.ensure_future(_autodiscover(self.ctx, self.telnet_writer.log))
             self.ctx.discover_task = t
 
-        def _wander_mode(self) -> None:
-            """Launch or cancel autowander mode."""
-            if self.ctx.wander_active:
-                task = self.ctx.wander_task
-                if task is not None:
-                    task.cancel()
+        def _resume_last_walk(self) -> None:
+            """Resume the most recent walk (autodiscover, randomwalk, or travel)."""
+            echo_fn = self.ctx.echo_command
+            mode = self.ctx.last_walk_mode
+            if not mode:
+                if echo_fn is not None:
+                    echo_fn("RESUME: no previous walk to resume")
                 return
-            from .rooms import load_prefs, save_prefs
-
-            skey = self.ctx.session_key
-            prefs = load_prefs(skey) if skey else {}
-            if not prefs.get("skip_autowander_confirm"):
-                ok, dont_ask = _confirm_dialog(
-                    "Autowander",
-                    "Autowander visits all rooms with the same "
-                    "name as the current room using slow travel. "
-                    "Autoreplies fire in each room visited. The "
-                    "route is optimised to minimise backtracking.",
-                    replay_buf=self.replay_buf,
-                )
-                if not ok:
+            if self.ctx.last_walk_room != self.ctx.current_room_num:
+                if echo_fn is not None:
+                    echo_fn("RESUME: room changed since last walk, cannot resume")
+                return
+            if mode == "autodiscover":
+                if self.ctx.discover_active:
+                    task = self.ctx.discover_task
+                    if task is not None:
+                        task.cancel()
                     return
-                if dont_ask and skey:
-                    prefs["skip_autowander_confirm"] = True
-                    save_prefs(skey, prefs)
-            task = asyncio.ensure_future(_autowander(self.ctx, self.telnet_writer.log))
-            self.ctx.wander_task = task
+                t = asyncio.ensure_future(
+                    _autodiscover(self.ctx, self.telnet_writer.log, resume=True)
+                )
+                self.ctx.discover_task = t
+            elif mode == "randomwalk":
+                if self.ctx.randomwalk_active:
+                    task = self.ctx.randomwalk_task
+                    if task is not None:
+                        task.cancel()
+                    return
+                t = asyncio.ensure_future(
+                    _randomwalk(self.ctx, self.telnet_writer.log, resume=True)
+                )
+                self.ctx.randomwalk_task = t
+            else:
+                if echo_fn is not None:
+                    echo_fn(f"RESUME: cannot resume mode '{mode}'")
 
         def _randomwalk_mode(self) -> None:
             """Launch or cancel random walk mode."""
@@ -964,9 +974,12 @@ if sys.platform != "win32":
             self.gmcp_keys_registered = True
             self.dispatch.register("KEY_F3", self._randomwalk_mode)
             self.dispatch.register("KEY_F4", self._discover_mode)
-            self.dispatch.register("KEY_F5", self._wander_mode)
+            self.dispatch.register("KEY_F5", self._resume_last_walk)
             self.dispatch.register(
                 "KEY_F7", lambda: _launch_room_browser(self.ctx, self.replay_buf)
+            )
+            self.toolbar.schedule_eta_refresh(
+                self.loop, self.autoreply_engine, self.editor, self.blessed_term
             )
 
         def _update_input_style(self) -> None:
@@ -975,10 +988,9 @@ if sys.platform != "win32":
             self.editor.set_password_mode(bool(self.telnet_writer.will_echo))
             engine = self.autoreply_engine
             ar_active = engine is not None and (engine.exclusive_active or engine.reply_pending)
-            wander = self.ctx.wander_active
             disc = self.ctx.discover_active
             rwalk = self.ctx.randomwalk_active
-            style = _STYLE_AUTOREPLY if (wander or disc or rwalk or ar_active) else _STYLE_NORMAL
+            style = _STYLE_AUTOREPLY if (disc or rwalk or ar_active) else _STYLE_NORMAL
             changed = self._last_input_style is not style
             self._last_input_style = style
             for attr, val in style.items():
@@ -1000,6 +1012,54 @@ if sys.platform != "win32":
                         ).encode()
                     )
 
+        @property
+        def _is_autoreply_bg(self) -> bool:
+            """Return ``True`` when the input line uses the autoreply color scheme."""
+            engine = self.autoreply_engine
+            ar = engine is not None and (engine.exclusive_active or engine.reply_pending)
+            return self.ctx.discover_active or self.ctx.randomwalk_active or ar
+
+        _CANCEL_HINT = "press return to cancel"
+
+        def _render_cancel_hint(self, row: int) -> None:
+            """
+            Draw a dim right-aligned cancel hint on the input row.
+
+            Shown only when the editor is empty and an automatic mode (randomwalk, discover, or
+            autoreply) is active.
+            """
+            if self.editor._buf or not self._is_autoreply_bg:
+                return
+            bt = self.blessed_term
+            hint = self._CANCEL_HINT
+            hint_w = len(hint)
+            col = bt.width - hint_w
+            if col < 2:
+                return
+            dim = bt.color_rgb(60, 40, 40)
+            bg = _STYLE_AUTOREPLY["bg_sgr"]
+            self.stdout.write(bt.move_yx(row, col).encode())
+            self.stdout.write(f"{bg}{dim}{hint}{bt.normal}".encode())
+
+        def _show_cursor_or_light(self, row: int, col: int) -> None:
+            """
+            Show cursor or draw modem-light glyph at the edit position.
+
+            If the stoplight is animating, draw the sextant character at
+            ``(row, col)`` and keep the terminal cursor hidden.  Otherwise
+            set the cursor color and show the normal terminal cursor.
+            Also draws a right-aligned cancel hint when applicable.
+            """
+            bt = self.blessed_term
+            ar = self._is_autoreply_bg
+            self._render_cancel_hint(row)
+            drew = self.toolbar.cursor_light(bt, row, col, ar)
+            if not drew:
+                style = _STYLE_AUTOREPLY if ar else _STYLE_NORMAL
+                self.stdout.write(bt.move_yx(row, col).encode())
+                self.stdout.write(style["cursor_sgr"].encode())
+                self.stdout.write(CURSOR_SHOW.encode())
+
         def _on_resize_repaint(self, _rows: int, _cols: int) -> None:
             """Repaint screen after terminal resize."""
             if [_rows, _cols] == self._last_resize_size:
@@ -1017,12 +1077,15 @@ if sys.platform != "win32":
             input_row = _rows - reserve
             for r in range(input_row, _rows):
                 self.stdout.write((bt.move_yx(r, 0) + bt.clear_eol).encode())
+            ar_bg = self._is_autoreply_bg
             if sr is not None:
                 dmz = sr.scroll_bottom + 1
                 if dmz < sr.input_row:
-                    self.stdout.write((bt.move_yx(dmz, 0) + _dmz_line(_cols)).encode())
+                    self.stdout.write((bt.move_yx(dmz, 0) + _dmz_line(_cols, ar_bg)).encode())
             cs = self.ctx.cursor_style or _DEFAULT_CURSOR_STYLE
+            style = _STYLE_AUTOREPLY if ar_bg else _STYLE_NORMAL
             self.stdout.write(_CURSOR_STYLES.get(cs, CURSOR_STEADY_BLOCK).encode())
+            self.stdout.write(style["cursor_sgr"].encode())
             self.stdout.write(CURSOR_SHOW.encode())
             self.editor.max_width = _cols
 
@@ -1041,11 +1104,11 @@ if sys.platform != "win32":
             ):
                 self.telnet_writer._send_naws()
             self.stdout.write(CURSOR_HIDE.encode())
+            self._update_input_style()
             self.stdout.write(self.editor.render(bt, self.scroll.input_row, bt.width).encode())
             self.toolbar.render(self.autoreply_engine)
             cursor_col = self.editor.display.cursor
-            self.stdout.write(bt.move_yx(self.scroll.input_row, cursor_col).encode())
-            self.stdout.write(CURSOR_SHOW.encode())
+            self._show_cursor_or_light(self.scroll.input_row, cursor_col)
 
         def _register_callbacks(self) -> None:
             """Wire up IAC callbacks, hotkeys, and context hooks."""
@@ -1159,13 +1222,11 @@ if sys.platform != "win32":
                 self._update_input_style()
                 self.stdout.write(self.editor.render(bt, scroll.input_row, bt.width).encode())
                 cursor_col = self.editor.display.cursor
-                self.stdout.write(bt.move_yx(scroll.input_row, cursor_col).encode())
                 needs_reflash = self.toolbar.render(self.autoreply_engine)
                 if needs_reflash and not self.toolbar.flash_active:
                     self.toolbar.flash_active = True
                     self.toolbar.schedule_flash(self.loop, self.autoreply_engine, self.editor, bt)
-                self.stdout.write(bt.move_yx(scroll.input_row, cursor_col).encode())
-                self.stdout.write(CURSOR_SHOW.encode())
+                self._show_cursor_or_light(scroll.input_row, cursor_col)
                 if self.telnet_writer.mode == "kludge":
                     self.mode_switched = True
                     self.server_done = True
@@ -1211,21 +1272,8 @@ if sys.platform != "win32":
                             self.editor.render(bt, scroll.input_row, bt.width).encode()
                         )
                         cursor_col = self.editor.display.cursor
-                        self.stdout.write(bt.move_yx(scroll.input_row, cursor_col).encode())
-                        self.stdout.write(CURSOR_SHOW.encode())
+                        self._show_cursor_or_light(scroll.input_row, cursor_col)
                         continue
-
-                    ac = self.ctx.active_command
-                    if ac is not None:
-                        self.ctx.active_command = None
-                        for _wname, wtask in (
-                            ("AUTOWANDER", self.ctx.wander_task),
-                            ("AUTODISCOVER", self.ctx.discover_task),
-                            ("RANDOMWALK", self.ctx.randomwalk_task),
-                        ):
-                            if wtask is not None and not wtask.done():
-                                wtask.cancel()
-                        self._update_input_style()
 
                     action = self.dispatch.lookup(key)
                     if action is not None:
@@ -1239,8 +1287,7 @@ if sys.platform != "win32":
                         )
                         self.toolbar.render(self.autoreply_engine)
                         cursor_col = self.editor.display.cursor
-                        self.stdout.write(bt.move_yx(scroll.input_row, cursor_col).encode())
-                        self.stdout.write(CURSOR_SHOW.encode())
+                        self._show_cursor_or_light(scroll.input_row, cursor_col)
                         continue
 
                     result = self.editor.feed_key(key)
@@ -1257,8 +1304,7 @@ if sys.platform != "win32":
                             self.editor.render(bt, scroll.input_row, bt.width).encode()
                         )
                         cursor_col = self.editor.display.cursor
-                        self.stdout.write(bt.move_yx(scroll.input_row, cursor_col).encode())
-                        self.stdout.write(CURSOR_SHOW.encode())
+                        self._show_cursor_or_light(scroll.input_row, cursor_col)
                         continue
 
                     if result.line is not None:
@@ -1283,9 +1329,6 @@ if sys.platform != "win32":
 
                         if self.autoreply_engine is not None:
                             self.autoreply_engine.cancel()
-                        wander_task = self.ctx.wander_task
-                        if wander_task is not None and not wander_task.done():
-                            wander_task.cancel()
                         disc_task = self.ctx.discover_task
                         if disc_task is not None and not disc_task.done():
                             disc_task.cancel()
@@ -1338,13 +1381,13 @@ if sys.platform != "win32":
                                 self.loop, self.autoreply_engine, self.editor, bt
                             )
                         cursor_col = self.editor.display.cursor
-                        self.stdout.write(bt.move_yx(scroll.input_row, cursor_col).encode())
-                        self.stdout.write(CURSOR_SHOW.encode())
+                        self._show_cursor_or_light(scroll.input_row, cursor_col)
 
         def _cleanup(self) -> None:
             """Cancel autoreply engine, restore cursor, clear kludge DMZ."""
             if self.autoreply_engine is not None:
                 self.autoreply_engine.cancel()
+            self.ctx.flush_timestamps()
             self.stdout.write(CURSOR_DEFAULT.encode())
             if self.mode_switched:
                 assert self.scroll is not None

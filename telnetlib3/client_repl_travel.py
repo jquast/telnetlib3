@@ -1,4 +1,4 @@
-"""Movement and pathfinding: fast/slow travel, autowander, autodiscover, randomwalk."""
+"""Movement and pathfinding: fast/slow travel, autodiscover, randomwalk."""
 
 # std imports
 import random
@@ -9,13 +9,30 @@ from typing import TYPE_CHECKING, Optional
 
 # local
 from .stream_writer import TelnetWriterUnicode
+from .client_repl_commands import _COMMAND_DELAY
 
 if TYPE_CHECKING:
-    from .rooms import Room
     from .session_context import SessionContext
 
-_MOVE_STEP_DELAY = 0.20
+_DISCOVER_ARRIVAL_TIMEOUT = 3.0
 _DEFAULT_WALK_LIMIT = 999
+_STANDARD_DIRS = frozenset(
+    {
+        "north",
+        "south",
+        "east",
+        "west",
+        "northeast",
+        "northwest",
+        "southeast",
+        "southwest",
+        "ne",
+        "nw",
+        "se",
+        "sw",
+    }
+)
+_BOUNCE_THRESHOLD = 3
 
 
 async def _fast_travel(
@@ -51,7 +68,7 @@ async def _fast_travel(
     :param destination: Final target room ID for re-pathfinding on detour.
     :param correct_names: If ``True`` (default), rewrite graph edges when
         arriving at a same-name room with a different ID.  Set to ``False``
-        for autowander where distinct room IDs must be preserved.
+        when distinct room IDs must be preserved.
     """
     wait_fn = ctx.wait_for_prompt
     echo_fn = ctx.echo_command
@@ -92,7 +109,8 @@ async def _fast_travel(
         _pre_existing_rooms = set(graph.rooms.keys())
 
     def _names_match(expected_num: str, actual_num: str) -> bool:
-        """Check whether two room IDs likely refer to the same physical room.
+        """
+        Check whether two room IDs likely refer to the same physical room.
 
         This handles MUDs that rotate room IDs (same physical room, new hash
         each visit).  Returns ``True`` only when:
@@ -122,12 +140,12 @@ async def _fast_travel(
         step_idx: int,
         steps_list: list[tuple[str, str]],
     ) -> None:
-        """Update the graph edge and rewrite only the current step.
+        """
+        Update the graph edge and rewrite only the current step.
 
-        Earlier versions rewrote *all* remaining steps matching *old_target*,
-        which corrupted paths through grids of same-named rooms (e.g. a cave
-        system where many rooms share the name "A cave" but are distinct
-        locations with different IDs).  Now only the step at *step_idx* is
+        Earlier versions rewrote *all* remaining steps matching *old_target*, which corrupted paths
+        through grids of same-named rooms (e.g. a cave system where many rooms share the name "A
+        cave" but are distinct locations with different IDs).  Now only the step at *step_idx* is
         updated.
         """
         graph = _get_graph()
@@ -166,7 +184,7 @@ async def _fast_travel(
             for attempt in range(max_retries + 1):
                 # Delay between steps (and retries) for server rate limits.
                 if step_idx > 0 or attempt > 0:
-                    await asyncio.sleep(_MOVE_STEP_DELAY)
+                    await asyncio.sleep(_COMMAND_DELAY)
 
                 if room_changed is not None:
                     room_changed.clear()
@@ -272,8 +290,8 @@ async def _fast_travel(
                     break
                 # Same-name room with different ID -- correct the edge
                 # and continue as if we arrived at the expected room.
-                # Skipped when correct_names=False (autowander) to preserve
-                # distinct room IDs in grids of same-named rooms.
+                # Skipped when correct_names=False to preserve distinct
+                # room IDs in grids of same-named rooms.
                 if (
                     correct_names
                     and expected_room
@@ -387,150 +405,6 @@ async def _fast_travel(
         engine = _get_engine()
         if engine is not None:
             engine.suppress_exclusive = False
-
-
-async def _autowander(
-    ctx: "SessionContext",
-    log: logging.Logger,
-    limit: int = _DEFAULT_WALK_LIMIT,
-    resume: bool = False,
-) -> None:
-    """
-    Visit same-named rooms using slow travel.
-
-    Computes a list of rooms with the same name as the current room, sorted by least-recently-
-    visited, then walks through them one leg at a time with slow travel (autoreplies fire in each
-    room). Stops after *limit* rooms or when all targets are exhausted.
-
-    :param ctx: Session context with room graph and session attributes.
-    :param log: Logger.
-    :param limit: Maximum number of rooms to visit.
-    """
-    if ctx.wander_active:
-        return
-
-    current = ctx.current_room_num
-    graph = ctx.room_graph
-    echo_fn = ctx.echo_command
-    if not current or graph is None:
-        if echo_fn is not None:
-            echo_fn("AUTOWANDER: no room data")
-        return
-
-    targets = graph.find_same_name(current)
-    if not targets:
-        if echo_fn is not None:
-            echo_fn("AUTOWANDER: no matching rooms")
-        return
-
-    # Nearest-neighbor ordering: greedily pick the closest unvisited
-    # target from the current position to minimise backtracking.
-    ordered: list[Room] = []
-    remaining = list(targets)
-    pos = current
-    while remaining:
-        best_idx = 0
-        best_dist = float("inf")
-        for idx, candidate in enumerate(remaining):
-            path = graph.find_path_with_rooms(pos, candidate.num)
-            dist = len(path) if path is not None else float("inf")
-            if dist < best_dist:
-                best_dist = dist
-                best_idx = idx
-        chosen = remaining.pop(best_idx)
-        ordered.append(chosen)
-        pos = chosen.num
-    targets = ordered[:limit]
-
-    leg_retries = 3
-    visited: set[str] = {current}
-    if resume and ctx.last_walk_mode == "autowander" and ctx.last_walk_visited:
-        visited |= ctx.last_walk_visited
-    ctx.wander_active = True
-    ctx.wander_total = len(targets)
-    try:
-        for i, target_room in enumerate(targets):
-            ctx.wander_current = i + 1
-            pos = ctx.current_room_num
-            if pos == target_room.num or target_room.num in visited:
-                visited.add(target_room.num)
-                continue
-
-            arrived = False
-            for leg_attempt in range(leg_retries + 1):
-                pos = ctx.current_room_num
-                steps = graph.find_path_with_rooms(pos, target_room.num)
-                if steps is None:
-                    if echo_fn is not None:
-                        echo_fn(
-                            f"AUTOWANDER [{i + 1}/{len(targets)}]: "
-                            f"no path to {target_room.name} "
-                            f"({target_room.num[:8]})"
-                        )
-                    break
-                if echo_fn is not None:
-                    tag = "" if leg_attempt == 0 else f" (retry {leg_attempt})"
-                    echo_fn(
-                        f"AUTOWANDER [{i + 1}/{len(targets)}]: "
-                        f"heading to {target_room.name} "
-                        f"({target_room.num[:8]}){tag}"
-                    )
-                await _fast_travel(
-                    steps, ctx, log, slow=True, destination=target_room.num, correct_names=False
-                )
-                # Wait for any autoreply combat triggered by the
-                # arrival glance to finish before moving on.  The
-                # post_command "glance" from the previous kill can
-                # trigger a new "kill X" that enters exclusive mode
-                # AFTER _fast_travel's settle loop has returned.
-                ar = ctx.autoreply_engine
-                if ar is not None:
-                    settle = 0
-                    while settle < 60:
-                        if ar.exclusive_active:
-                            while ar.exclusive_active:
-                                ar.check_timeout()
-                                await asyncio.sleep(0.1)
-                        while ar.reply_pending:
-                            await asyncio.sleep(0.05)
-                        await asyncio.sleep(0.1)
-                        if not ar.exclusive_active and not ar.reply_pending:
-                            break
-                        settle += 1
-                actual = ctx.current_room_num
-                if actual == target_room.num:
-                    arrived = True
-                    visited.add(actual)
-                    break
-                # Mark any intermediate room we passed through.
-                if actual:
-                    visited.add(actual)
-                if leg_attempt < leg_retries:
-                    log.info(
-                        "AUTOWANDER: leg to %s failed, retrying (%d/%d)",
-                        target_room.num[:8],
-                        leg_attempt + 1,
-                        leg_retries,
-                    )
-                    await asyncio.sleep(1.0)
-            actual = ctx.current_room_num
-            if not arrived and actual != target_room.num:
-                if echo_fn is not None:
-                    echo_fn(
-                        f"AUTOWANDER [{i + 1}/{len(targets)}]: "
-                        f"could not reach {target_room.name} "
-                        f"({target_room.num[:8]}), skipping"
-                    )
-                continue
-    finally:
-        ctx.last_walk_mode = "autowander"
-        ctx.last_walk_room = ctx.current_room_num
-        ctx.last_walk_visited = visited
-        ctx.wander_active = False
-        ctx.wander_current = 0
-        ctx.wander_total = 0
-        ctx.wander_task = None
-        ctx.active_command = None
 
 
 async def _autodiscover(
@@ -661,6 +535,7 @@ async def _autodiscover(
                 echo_fn(
                     f"AUTODISCOVER [{step_count}]: " f"exploring {direction} from {gw_room[:8]}"
                 )
+            await asyncio.sleep(_COMMAND_DELAY)
             ctx.active_command = direction
             send = ctx.send_line
             if ctx.cx_dot is not None:
@@ -679,7 +554,7 @@ async def _autodiscover(
             if room_changed is not None:
                 room_changed.clear()
                 try:
-                    await asyncio.wait_for(room_changed.wait(), timeout=ctx.room_arrival_timeout)
+                    await asyncio.wait_for(room_changed.wait(), timeout=_DISCOVER_ARRIVAL_TIMEOUT)
                 except asyncio.TimeoutError:
                     pass
                 arrived = ctx.current_room_num != gw_room
@@ -797,12 +672,10 @@ async def _randomwalk(
     if entrance_room:
         walk_counts[entrance_room] = float("inf")
 
-    # Seed blocked exits from persistent set.
-    for blk_room, blk_dir in ctx.blocked_exits:
-        if blk_room in adj:
-            blk_dst = adj[blk_room].get(blk_dir)
-            if blk_dst:
-                walk_counts[blk_dst] = float("inf")
+    # blocked_exits is consulted per-room at scoring time rather than
+    # seeding walk_counts globally — a blocked exit (A, east) should
+    # only penalize that specific exit, not the destination room from
+    # every other direction.
 
     def _flood_reachable() -> set[str]:
         """BFS flood from current room, excluding the entrance."""
@@ -831,6 +704,8 @@ async def _randomwalk(
 
     try:
         stuck_count = 0
+        bounce_count = 0
+        prev_room: Optional[str] = None
         for step in range(limit):
             ctx.randomwalk_current = step + 1
             current = ctx.current_room_num
@@ -852,9 +727,23 @@ async def _randomwalk(
                 break
 
             # Score each exit by walk visit count (lower is better).
+            # Skip exits known to be blocked from this room.
+            # Non-cardinal directions get a 0.1 penalty so they are
+            # tried after cardinal exits at the same visit count.
             scored: list[tuple[float, str, str]] = []
             for d, dst in exits.items():
-                scored.append((walk_counts.get(dst, 0), d, dst))
+                if (current, d) in ctx.blocked_exits:
+                    continue
+                penalty = 0.0 if d in _STANDARD_DIRS else 0.1
+                scored.append((walk_counts.get(dst, 0) + penalty, d, dst))
+
+            if not scored:
+                if echo_fn is not None:
+                    echo_fn(
+                        f"RANDOMWALK [{step + 1}/{ctx.randomwalk_total}]: "
+                        f"all exits blocked, stopping"
+                    )
+                break
 
             min_count = min(s[0] for s in scored)
             best = [(d, dst) for cnt, d, dst in scored if cnt == min_count]
@@ -906,12 +795,8 @@ async def _randomwalk(
                     )
                 # Mark only this specific exit as blocked.
                 ctx.blocked_exits.add((current, direction))
-                walk_counts[dst_num] = float("inf")
                 # Check if ALL exits from current room are now blocked.
-                all_blocked = all(
-                    walk_counts.get(d, 0) == float("inf")
-                    for d in adj.get(current, {}).values()
-                )
+                all_blocked = all((current, d) in ctx.blocked_exits for d in adj.get(current, {}))
                 if all_blocked:
                     if echo_fn is not None:
                         echo_fn(
@@ -927,7 +812,33 @@ async def _randomwalk(
             walk_counts[actual] = walk_counts.get(actual, 0) + 1
             visited.add(actual)
 
-            await asyncio.sleep(_MOVE_STEP_DELAY)
+            # Bounce detection: if we returned to the room we were in
+            # 2 steps ago, we are ping-ponging.
+            if prev_room is not None and actual == prev_room:
+                bounce_count += 1
+                if bounce_count >= _BOUNCE_THRESHOLD:
+                    ctx.blocked_exits.add((current, direction))
+                    if echo_fn is not None:
+                        echo_fn(
+                            f"RANDOMWALK [{step + 1}/{ctx.randomwalk_total}]: "
+                            f"bounce detected on {direction}, blocking"
+                        )
+                    bounce_count = 0
+                    # Check if all exits from actual (where we are now)
+                    # are blocked after adding the bounce block.
+                    all_blocked = all((actual, d) in ctx.blocked_exits for d in adj.get(actual, {}))
+                    if all_blocked:
+                        if echo_fn is not None:
+                            echo_fn(
+                                f"RANDOMWALK [{step + 1}/{ctx.randomwalk_total}]: "
+                                f"all exits blocked after bounce, stopping"
+                            )
+                        break
+            else:
+                bounce_count = 0
+            prev_room = current
+
+            await asyncio.sleep(_COMMAND_DELAY)
 
             # Re-flood: the room graph's adjacency is updated live by
             # GMCP Room.Info, so newly discovered exits expand the
@@ -977,7 +888,6 @@ async def _handle_travel_commands(
     - ```slow travel <id>``` -- slow travel to room *id*
     - ```return fast``` -- fast travel back to the macro's starting room
     - ```return slow``` -- slow travel back to the macro's starting room
-    - ```autowander``` -- visit all same-named rooms via slow travel
     - ```autodiscover``` -- explore unvisited exits from nearby rooms
     - ```randomwalk``` -- random walk preferring unvisited rooms
 
@@ -1000,7 +910,7 @@ async def _handle_travel_commands(
         verb = m.group(1).lower()
         arg = m.group(2).strip()
 
-        if verb in ("autowander", "autodiscover", "randomwalk", "resume"):
+        if verb in ("autodiscover", "randomwalk", "resume"):
             walk_limit = _DEFAULT_WALK_LIMIT
             if arg:
                 try:
@@ -1016,10 +926,7 @@ async def _handle_travel_commands(
                     return parts[idx + 1 :]
                 if ctx.last_walk_room != ctx.current_room_num:
                     if echo_fn is not None:
-                        echo_fn(
-                            "RESUME: room changed since last walk, "
-                            "cannot resume"
-                        )
+                        echo_fn("RESUME: room changed since last walk, " "cannot resume")
                     return parts[idx + 1 :]
                 verb = ctx.last_walk_mode
                 do_resume = True
@@ -1027,13 +934,10 @@ async def _handle_travel_commands(
                 # Auto-resume: if re-running the same mode from the
                 # same room, carry over visited/tried state.
                 do_resume = (
-                    ctx.last_walk_mode == verb
-                    and ctx.last_walk_room == ctx.current_room_num
+                    ctx.last_walk_mode == verb and ctx.last_walk_room == ctx.current_room_num
                 )
 
-            if verb == "autowander":
-                await _autowander(ctx, log, limit=walk_limit, resume=do_resume)
-            elif verb == "autodiscover":
+            if verb == "autodiscover":
                 await _autodiscover(ctx, log, limit=walk_limit, resume=do_resume)
             else:
                 await _randomwalk(ctx, log, limit=walk_limit, resume=do_resume)

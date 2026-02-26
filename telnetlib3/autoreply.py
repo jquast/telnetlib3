@@ -15,6 +15,7 @@ import json
 import time
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable, Optional, Awaitable
 from dataclasses import field, dataclass
 
@@ -139,6 +140,7 @@ class AutoreplyRule:
     exclusive_timeout: float = 10.0
     when: dict[str, str] = field(default_factory=dict)
     immediate: bool = False
+    last_fired: str = ""
 
 
 def _parse_entries(entries: list[dict[str, str]]) -> list[AutoreplyRule]:
@@ -158,6 +160,7 @@ def _parse_entries(entries: list[dict[str, str]]) -> list[AutoreplyRule]:
         when_raw: Any = entry.get("when", {})
         when = dict(when_raw) if isinstance(when_raw, dict) else {}
         immediate = bool(entry.get("immediate", False))
+        last_fired = str(entry.get("last_fired", ""))
         try:
             compiled = re.compile(pattern_str, re.MULTILINE | re.DOTALL)
         except re.error as exc:
@@ -174,6 +177,7 @@ def _parse_entries(entries: list[dict[str, str]]) -> list[AutoreplyRule]:
                 exclusive_timeout=exclusive_timeout,
                 when=when,
                 immediate=immediate,
+                last_fired=last_fired,
             )
         )
     return rules
@@ -232,6 +236,7 @@ def save_autoreplies(path: str, rules: list[AutoreplyRule], session_key: str) ->
                 ),
                 **({"when": dict(r.when)} if r.when else {}),
                 **({"immediate": True} if r.immediate else {}),
+                **({"last_fired": r.last_fired} if r.last_fired else {}),
             }
             for r in rules
         ]
@@ -640,6 +645,9 @@ class AutoreplyEngine:
                             break
                     self._cycle_matched.add(rule_idx)
                     self._buffer.advance_match(match.start(), len(match.group(0)))
+                    rule.last_fired = datetime.now(timezone.utc).isoformat()
+                    if hasattr(self._ctx, "mark_autoreplies_dirty"):
+                        self._ctx.mark_autoreplies_dirty()
                     reply = _substitute_groups(rule.reply, match)
                     if not reply.rstrip().endswith(";"):
                         reply = reply.rstrip() + ";"
@@ -690,6 +698,9 @@ class AutoreplyEngine:
                 self._last_matched_pattern = rule.pattern.pattern
                 self._cycle_matched.add(rule_idx)
                 self._buffer.advance_match(match.start(), len(match.group(0)))
+                rule.last_fired = datetime.now(timezone.utc).isoformat()
+                if hasattr(self._ctx, "mark_autoreplies_dirty"):
+                    self._ctx.mark_autoreplies_dirty()
                 reply = _substitute_groups(rule.reply, match)
                 self._queue_reply(reply)
 

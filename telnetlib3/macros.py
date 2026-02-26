@@ -33,6 +33,7 @@ class Macro:
     key: str
     text: str
     enabled: bool = True
+    last_used: str = ""
 
 
 def _parse_entries(entries: list[dict[str, str]]) -> list[Macro]:
@@ -44,7 +45,8 @@ def _parse_entries(entries: list[dict[str, str]]) -> list[Macro]:
         if not key:
             continue
         enabled = bool(entry.get("enabled", True))
-        macros.append(Macro(key=key, text=text, enabled=enabled))
+        last_used = str(entry.get("last_used", ""))
+        macros.append(Macro(key=key, text=text, enabled=enabled, last_used=last_used))
     return macros
 
 
@@ -88,7 +90,12 @@ def save_macros(path: str, macros: list[Macro], session_key: str) -> None:
 
     data[session_key] = {
         "macros": [
-            {"key": m.key, "text": m.text, **({"enabled": False} if not m.enabled else {})}
+            {
+                "key": m.key,
+                "text": m.text,
+                **({"enabled": False} if not m.enabled else {}),
+                **({"last_used": m.last_used} if m.last_used else {}),
+            }
             for m in macros
         ]
     }
@@ -113,6 +120,7 @@ def build_macro_dispatch(macros: list[Macro], ctx: Any, log: logging.Logger) -> 
     :returns: Dict mapping blessed key names (or raw chars) to handlers.
     """
     import asyncio
+    from datetime import datetime, timezone
 
     from blessed.line_editor import DEFAULT_KEYMAP  # pylint: disable=no-name-in-module
 
@@ -126,8 +134,12 @@ def build_macro_dispatch(macros: list[Macro], ctx: Any, log: logging.Logger) -> 
             log.warning("macro %r conflicts with editor keymap, skipping", macro.key)
             continue
         text = macro.text
+        _macro_ref = macro
 
-        async def _handler(_text: str = text) -> None:
+        async def _handler(_text: str = text, _m: Macro = _macro_ref) -> None:
+            _m.last_used = datetime.now(timezone.utc).isoformat()
+            if hasattr(ctx, "mark_macros_dirty"):
+                ctx.mark_macros_dirty()
             asyncio.ensure_future(execute_macro_commands(_text, ctx, log))
 
         result[macro.key] = _handler

@@ -4,7 +4,7 @@
 import re
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, NamedTuple, Optional
 
 if TYPE_CHECKING:
     from .session_context import SessionContext, _CommandQueue
@@ -14,6 +14,24 @@ from .client_repl_render import _ELLIPSIS, _get_term, _wcswidth
 
 _REPEAT_RE = re.compile(r"^(\d+)([A-Za-z].*)$")
 _BACKTICK_RE = re.compile(r"`[^`]*`")
+
+_WHEN_RE = re.compile(
+    r"^`when\s+(HP%|MP%)\s*(>=|<=|>|<|=)\s*(\d+)`$", re.IGNORECASE
+)
+_UNTIL_RE = re.compile(r"^`until(?:\s+(\d+(?:\.\d+)?))?\s+(.+)`$")
+_UNTILS_RE = re.compile(r"^`untils(?:\s+(\d+(?:\.\d+)?))?\s+(.+)`$")
+
+
+class ExpandedCommands(NamedTuple):
+    """Result of :func:`expand_commands_ex`.
+
+    :param commands: Flat list of individual commands.
+    :param immediate_set: Indices of commands whose preceding separator
+        was ``:`` (send immediately, no GA/EOR wait).
+    """
+
+    commands: list[str]
+    immediate_set: frozenset[int]
 
 
 def expand_commands(line: str) -> list[str]:
@@ -65,11 +83,11 @@ def expand_commands(line: str) -> list[str]:
 
 _TRAVEL_RE = re.compile(
     r"^`(fast travel|slow travel|return fast|return slow"
-    r"|autowander|autodiscover|randomwalk|resume)\s*(.*?)`$",
+    r"|autodiscover|randomwalk|resume)\s*(.*?)`$",
     re.IGNORECASE,
 )
 
-_MOVE_STEP_DELAY = 0.20
+_COMMAND_DELAY = 0.25
 _MOVE_MAX_RETRIES = 2
 
 
@@ -252,7 +270,7 @@ async def _send_chained(
             # Always delay -- the first repeated command needs spacing
             # from the caller's initial send, and retries need a longer
             # back-off to respect the server's rate limit.
-            delay = _MOVE_STEP_DELAY if attempt == 0 else 1.0
+            delay = _COMMAND_DELAY if attempt == 0 else 1.0
             if await _cancellable_sleep(delay):
                 return
             if room_changed is not None:

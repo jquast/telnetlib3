@@ -130,7 +130,7 @@ class Stoplight:
     and its foreground color.
     """
 
-    __slots__ = ("tx", "cx", "rx", "_frame")
+    __slots__ = ("tx", "cx", "rx", "_frame", "_last_result")
 
     def __init__(self, tx: ActivityDot, cx: ActivityDot, rx: ActivityDot) -> None:
         """Initialize stoplight with three activity dots."""
@@ -138,6 +138,7 @@ class Stoplight:
         self.cx = cx
         self.rx = rx
         self._frame: int = 0
+        self._last_result: Tuple[str, Tuple[int, int, int]] = (" ", IDLE_RGB)
 
     @classmethod
     def create(cls) -> "Stoplight":
@@ -175,17 +176,20 @@ class Stoplight:
         if intensity > 0.01:
             bits = SEXTANT_BITS[li][col]
             rgb = dots[li].color(ar)
-            return SEXTANT[bits], rgb
+            self._last_result = SEXTANT[bits], rgb
+            return self._last_result
 
         # This light is idle -- show the other active light instead.
         other = b_idx if li == a_idx else a_idx
         if dots[other].intensity() > 0.01:
             bits = SEXTANT_BITS[other][col]
             rgb = dots[other].color(ar)
-            return SEXTANT[bits], rgb
+            self._last_result = SEXTANT[bits], rgb
+            return self._last_result
 
         idle = IDLE_AR_RGB if ar else IDLE_RGB
-        return " ", idle
+        self._last_result = " ", idle
+        return self._last_result
 
 
 def _get_term() -> "blessed.Terminal":
@@ -217,6 +221,11 @@ _CURSOR_STYLES: dict[str, str] = {
 }
 _DEFAULT_CURSOR_STYLE = "steady_block"
 
+# Cursor color: medium red-brown foreground on the input-line background.
+# Set at the cursor position before DECTCEM show so the block cursor
+# inherits this color rather than the text color.
+CURSOR_COLOR_RGB = (140, 60, 30)
+
 # Default ellipsis for overflow indicator (used as fallback).
 _ELLIPSIS = "\u2026"
 
@@ -230,6 +239,8 @@ _STYLE_AUTOREPLY: dict[str, str] = {}
 def _make_styles() -> None:
     """Populate style dicts using blessed color API."""
     blessed_term = _get_term()
+    cr, cg, cb = CURSOR_COLOR_RGB
+    cursor_fg = blessed_term.color_rgb(cr, cg, cb)
     _STYLE_NORMAL.clear()
     _STYLE_NORMAL.update(
         {
@@ -237,6 +248,7 @@ def _make_styles() -> None:
             "suggestion_sgr": blessed_term.color_rgb(60, 40, 40),
             "bg_sgr": blessed_term.on_color_rgb(26, 0, 0),
             "ellipsis_sgr": blessed_term.color_rgb(190, 190, 190),
+            "cursor_sgr": cursor_fg + blessed_term.on_color_rgb(26, 0, 0),
         }
     )
     _STYLE_AUTOREPLY.clear()
@@ -246,6 +258,7 @@ def _make_styles() -> None:
             "suggestion_sgr": blessed_term.color_rgb(80, 60, 0),
             "bg_sgr": blessed_term.on_color_rgb(26, 18, 0),
             "ellipsis_sgr": blessed_term.color_rgb(80, 60, 0),
+            "cursor_sgr": cursor_fg + blessed_term.on_color_rgb(26, 18, 0),
         }
     )
 
@@ -349,10 +362,6 @@ def _vital_color(fraction: float, kind: str) -> str:
     elif kind == "xp":
         # Purple (270) -> cyan (180) as XP fills.
         hue = 270.0 - fraction * 90.0
-        sat, val = 0.7, 0.8
-    elif kind == "wander":
-        # Cyan (180) -> yellow (60) as autowander progresses.
-        hue = 180.0 - fraction * 120.0
         sat, val = 0.7, 0.8
     elif kind == "discover":
         # Green (120) -> magenta (300) as autodiscover progresses.
@@ -696,6 +705,8 @@ class ToolbarRenderer:
         self.rprompt_text = rprompt_text
         self.flash_active: bool = False
         self._has_gmcp: bool = False
+        self._eta_refresh_active: bool = False
+        self._last_eta_text: str = ""
         self.hp = VitalTracker()
         self.mp = VitalTracker()
         self.xp = XPTracker()
@@ -712,15 +723,14 @@ class ToolbarRenderer:
 
         engine = autoreply_engine
         ar_active = engine is not None and (engine.exclusive_active or engine.reply_pending)
-        wander_active = self.ctx.wander_active
         discover_active = self.ctx.discover_active
         randomwalk_active = self.ctx.randomwalk_active
 
         now = time.monotonic()
         slots, needs_reflash = self._build_slots(
-            engine, ar_active, wander_active, discover_active, randomwalk_active, now
+            engine, ar_active, discover_active, randomwalk_active, now
         )
-        is_autoreply_bg = wander_active or discover_active or randomwalk_active or ar_active
+        is_autoreply_bg = discover_active or randomwalk_active or ar_active
         return self._paint(slots, is_autoreply_bg, needs_reflash)
 
     def _ensure_gmcp_ready(self) -> bool:
@@ -742,7 +752,6 @@ class ToolbarRenderer:
         self,
         engine: Any,
         ar_active: bool,
-        wander_active: bool,
         discover_active: bool,
         randomwalk_active: bool,
         now: float,
@@ -798,9 +807,7 @@ class ToolbarRenderer:
             if room_name:
                 self.rprompt_text = room_name
 
-        self._right_slot(
-            engine, ar_active, wander_active, discover_active, randomwalk_active, slots
-        )
+        self._right_slot(engine, ar_active, discover_active, randomwalk_active, slots)
         return slots, needs_reflash
 
     def _status_slots(self, status: dict[str, Any], slots: List[_ToolbarSlot]) -> None:
@@ -893,7 +900,6 @@ class ToolbarRenderer:
         self,
         engine: Any,
         ar_active: bool,
-        wander_active: bool,
         discover_active: bool,
         randomwalk_active: bool,
         slots: List[_ToolbarSlot],
@@ -903,8 +909,6 @@ class ToolbarRenderer:
             self._mode_bar_slot(
                 self.ctx.randomwalk_current, self.ctx.randomwalk_total, 16, "randomwalk", slots
             )
-        elif wander_active:
-            self._mode_bar_slot(self.ctx.wander_current, self.ctx.wander_total, 12, "wander", slots)
         elif discover_active:
             self._mode_bar_slot(
                 self.ctx.discover_current, self.ctx.discover_total, 12, "discover", slots
@@ -1015,6 +1019,32 @@ class ToolbarRenderer:
         self.out.write(blessed_term.normal.encode())
         return needs_reflash
 
+    def cursor_light(
+        self, bt: "blessed.Terminal", row: int, col: int, is_autoreply_bg: bool
+    ) -> bool:
+        """
+        Draw the stoplight sextant at the cursor position.
+
+        When the stoplight is animating, this replaces the terminal block cursor
+        with the modem-lights glyph.  The terminal cursor must be hidden
+        (DECTCEM off) by the caller while this is active.
+
+        Uses the cached frame from the last :meth:`Stoplight.frame` call
+        so that the cursor light stays in sync with the toolbar stoplight.
+
+        :returns: ``True`` if the light was drawn, ``False`` if idle.
+        """
+        if self.stoplight is None or not self.stoplight.is_animating():
+            return False
+        ch, (r, g, b) = self.stoplight._last_result
+        if ch == " ":
+            return False
+        bg = _STYLE_AUTOREPLY["bg_sgr"] if is_autoreply_bg else _STYLE_NORMAL["bg_sgr"]
+        self.out.write(bt.move_yx(row, col).encode())
+        self.out.write(f"{bg}{bt.color_rgb(r, g, b)}{ch}{bt.normal}".encode())
+        self.out.write(bt.move_yx(row, col).encode())
+        return True
+
     def schedule_flash(
         self,
         loop: asyncio.AbstractEventLoop,
@@ -1028,11 +1058,72 @@ class ToolbarRenderer:
             self.out.write(CURSOR_HIDE.encode())
             still = self.render(autoreply_engine)
             cursor_col = editor.display.cursor
-            self.out.write(bt.move_yx(self.scroll.input_row, cursor_col).encode())
-            self.out.write(CURSOR_SHOW.encode())
+            input_row = self.scroll.input_row
+            engine = autoreply_engine
+            ar = engine is not None and (engine.exclusive_active or engine.reply_pending)
+            is_ar_bg = self.ctx.discover_active or self.ctx.randomwalk_active or ar
+            drew = self.cursor_light(bt, input_row, cursor_col, is_ar_bg)
+            if not drew:
+                style = _STYLE_AUTOREPLY if is_ar_bg else _STYLE_NORMAL
+                self.out.write(bt.move_yx(input_row, cursor_col).encode())
+                self.out.write(style["cursor_sgr"].encode())
+                self.out.write(CURSOR_SHOW.encode())
             if still:
                 loop.call_later(_FLASH_INTERVAL, _tick)
             else:
+                self.out.write(editor.render(bt, input_row, bt.width).encode())
+                cursor_col = editor.display.cursor
+                style = _STYLE_AUTOREPLY if is_ar_bg else _STYLE_NORMAL
+                self.out.write(bt.move_yx(input_row, cursor_col).encode())
+                self.out.write(style["cursor_sgr"].encode())
+                self.out.write(CURSOR_SHOW.encode())
                 self.flash_active = False
 
         loop.call_later(_FLASH_INTERVAL, _tick)
+
+    _ETA_REFRESH_INTERVAL = 0.25
+
+    def schedule_eta_refresh(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        autoreply_engine: Any,
+        editor: "blessed.line_editor.LiveLineEditor",
+        bt: "blessed.Terminal",
+    ) -> None:
+        """
+        Schedule a periodic ETA refresh at 250 ms intervals.
+
+        Only redraws the toolbar when the ETA text has changed since the last render, to avoid
+        unnecessary flicker.
+        """
+        if self._eta_refresh_active:
+            return
+        self._eta_refresh_active = True
+
+        def _eta_tick() -> None:
+            if not self._has_gmcp:
+                self._eta_refresh_active = False
+                return
+            gmcp_data = self.ctx.gmcp_data or {}
+            maxxp = gmcp_data.get("maxxp")
+            now = time.monotonic()
+            frags = self.xp.eta_fragments(maxxp, now)
+            eta_text = frags[0][1] if frags else ""
+            if eta_text != self._last_eta_text:
+                self._last_eta_text = eta_text
+                self.out.write(CURSOR_HIDE.encode())
+                self.render(autoreply_engine)
+                cursor_col = editor.display.cursor
+                input_row = self.scroll.input_row
+                engine = autoreply_engine
+                ar = engine is not None and (engine.exclusive_active or engine.reply_pending)
+                is_ar_bg = self.ctx.discover_active or self.ctx.randomwalk_active or ar
+                drew = self.cursor_light(bt, input_row, cursor_col, is_ar_bg)
+                if not drew:
+                    style = _STYLE_AUTOREPLY if is_ar_bg else _STYLE_NORMAL
+                    self.out.write(bt.move_yx(input_row, cursor_col).encode())
+                    self.out.write(style["cursor_sgr"].encode())
+                    self.out.write(CURSOR_SHOW.encode())
+            loop.call_later(self._ETA_REFRESH_INTERVAL, _eta_tick)
+
+        loop.call_later(self._ETA_REFRESH_INTERVAL, _eta_tick)
