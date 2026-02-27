@@ -7,6 +7,7 @@ import asyncio
 import logging
 import contextlib
 import collections
+from time import monotonic as _monotonic
 from typing import TYPE_CHECKING, Any, List, Tuple, Union, Callable, Optional, Generator
 
 # local
@@ -44,6 +45,8 @@ from .client_repl_render import (  # noqa: F401
     _CURSOR_STYLES,
     _FLASH_RAMP_UP,
     CURSOR_DEFAULT,
+    CURSOR_COLOR_OSC,
+    CURSOR_COLOR_RESET_OSC,
     _FLASH_DURATION,
     _FLASH_INTERVAL,
     _FLASH_RAMP_DOWN,
@@ -73,6 +76,9 @@ from .client_repl_render import (  # noqa: F401
     _make_styles,
     _ToolbarSlot,
     _vital_color,
+    _activity_hint,
+    _until_progress,
+    _write_hint,
     _layout_toolbar,
     _center_truncate,
 )
@@ -89,9 +95,11 @@ from .client_repl_dialogs import (  # noqa: F401
     _editor_buffer,
     _reload_macros,
     _confirm_dialog,
+    _randomwalk_dialog,
     _launch_tui_editor,
     _reload_autoreplies,
     _launch_room_browser,
+    _launch_chat_viewer,
 )
 from .client_repl_commands import (  # noqa: F401
     _REPEAT_RE,
@@ -103,6 +111,7 @@ from .client_repl_commands import (  # noqa: F401
     _collapse_runs,
 )
 from .client_repl_commands import expand_commands as expand_commands  # noqa: F401
+from .client_repl_commands import expand_commands_ex as expand_commands_ex  # noqa: F401
 from .client_repl_commands import (  # noqa: F401
     _clear_command_queue,
     _render_command_queue,
@@ -124,6 +133,28 @@ if TYPE_CHECKING:
 PASSWORD_CHAR = "\u25cf"
 
 log = logging.getLogger(__name__)
+
+
+def _clipboard_copy(editor: "blessed.line_editor.LineEditor") -> "LineEditResult":
+    """Keymap handler: copy current input line to system clipboard via OSC 52."""
+    from blessed.line_editor import LineEditResult  # pylint: disable=import-outside-toplevel,no-name-in-module
+    from ._clipboard import copy_to_clipboard  # pylint: disable=import-outside-toplevel
+
+    text = editor.line
+    if text:
+        copy_to_clipboard(text)
+    return LineEditResult()
+
+
+def _clipboard_paste(editor: "blessed.line_editor.LineEditor") -> "LineEditResult":
+    """Keymap handler: paste system clipboard contents into input line."""
+    from blessed.line_editor import LineEditResult  # pylint: disable=import-outside-toplevel,no-name-in-module
+    from ._clipboard import paste_from_clipboard  # pylint: disable=import-outside-toplevel
+
+    text = paste_from_clipboard()
+    if text:
+        return editor.insert_text(text)
+    return LineEditResult()
 
 
 def _load_history(history: "blessed.line_editor.LineHistory", path: str) -> None:
@@ -220,6 +251,7 @@ def _terminal_cleanup() -> str:
         + "\x1b[?2004l"  # xterm -- disable bracketed paste
         + "\x1b[?2048l"  # xterm -- disable in-band resize
         + "\x1b[r"  # DECSTBM -- reset scroll region to default
+        + CURSOR_COLOR_RESET_OSC  # OSC 112 -- reset cursor color
         + "\x1b[<u"  # kitty -- disable kitty keyboard protocol
     )
 
@@ -367,13 +399,17 @@ def _restore_after_subprocess(
 
 
 def _repaint_screen(
-    replay_buf: Optional[OutputRingBuffer], scroll: Optional["ScrollRegion"] = None
+    replay_buf: Optional[OutputRingBuffer],
+    scroll: Optional["ScrollRegion"] = None,
+    active: bool = False,
 ) -> None:
     """
     Clear screen and replay recent output from the ring buffer.
 
     Re-establishes the DECSTBM scroll region and replays buffered output so recent MUD text
     reappears with colors intact.
+
+    :param active: Use gold DMZ color when autoreply/walk/discover is active.
     """
     reserve = scroll._reserve if scroll is not None else _RESERVE_WITH_TOOLBAR
     try:
@@ -401,7 +437,9 @@ def _repaint_screen(
         input_row = tsize.lines - reserve
         if dmz < input_row:
             sys.stdout.write(
-                blessed_term.move_yx(dmz, 0) + blessed_term.clear_eol + _dmz_line(tsize.columns)
+                blessed_term.move_yx(dmz, 0)
+                + blessed_term.clear_eol
+                + _dmz_line(tsize.columns, active)
             )
         for r in range(input_row, tsize.lines):
             sys.stdout.write(blessed_term.move_yx(r, 0) + blessed_term.clear_eol)
@@ -689,6 +727,84 @@ if sys.platform != "win32":
                 return self._by_seq[key_str]
             return None
 
+    _LINE_HOLD_TIMEOUT = 0.15
+
+    class _LineHoldBuffer:
+        """Hold back incomplete trailing lines from display.
+
+        Server output split across TCP segments may arrive mid-line.  This
+        buffer accumulates text and splits it into "ready to emit" (complete
+        lines terminated by ``\\n``) and a held-back trailing fragment.
+
+        :param highlight_engine_getter: callable returning the current
+            :class:`HighlightEngine` (or ``None``).
+        """
+
+        def __init__(
+            self,
+            highlight_engine_getter: Callable[[], Any],
+        ) -> None:
+            self._pending: str = ""
+            self._get_engine = highlight_engine_getter
+
+        def add(self, text: str) -> tuple[str, str]:
+            """Accept new server text, return ``(emit_now, held_back)``.
+
+            Complete lines (everything up to and including the last ``\\n``)
+            are run through the highlight engine and returned as *emit_now*.
+            The trailing incomplete fragment is stored internally and returned
+            as *held_back* (for the caller to decide whether to schedule a
+            timer).
+            """
+            combined = self._pending + text
+            nl_pos = combined.rfind("\n")
+            if nl_pos == -1:
+                self._pending = combined
+                return ("", combined)
+            emit_raw = combined[: nl_pos + 1]
+            self._pending = combined[nl_pos + 1 :]
+            emit_now = self._highlight_lines(emit_raw)
+            return (emit_now, self._pending)
+
+        def flush_raw(self) -> str:
+            """Return and clear held text without highlight processing."""
+            text = self._pending
+            self._pending = ""
+            return text
+
+        def flush_for_prompt(self) -> str:
+            """Return and clear held text with highlight processing."""
+            text = self._pending
+            self._pending = ""
+            if not text:
+                return ""
+            return self._highlight_lines(text)
+
+        @property
+        def pending(self) -> str:
+            """The currently held-back text."""
+            return self._pending
+
+        def _highlight_lines(self, text: str) -> str:
+            """Run each complete line through the highlight engine."""
+            engine = self._get_engine()
+            if engine is None or not engine.enabled:
+                return text
+            parts = text.split("\n")
+            result: list[str] = []
+            for i, part in enumerate(parts):
+                is_last = i == len(parts) - 1
+                if is_last:
+                    if part:
+                        highlighted, _matched = engine.process_line(part)
+                        result.append(highlighted)
+                    else:
+                        result.append(part)
+                else:
+                    highlighted, _matched = engine.process_line(part)
+                    result.append(highlighted)
+            return "\n".join(result)
+
     class ReplSession:
         """
         Encapsulates the REPL event loop state and logic.
@@ -749,6 +865,10 @@ if sys.platform != "win32":
             self.macro_defs: "Optional[list[Macro]]" = None
             self.loop: asyncio.AbstractEventLoop = None  # type: ignore[assignment]
             self._dialogs_mod: Any = None
+            self._line_hold: _LineHoldBuffer = _LineHoldBuffer(
+                lambda: self.ctx.highlight_engine
+            )
+            self._line_hold_timer: Optional[asyncio.TimerHandle] = None
 
         def _init_terminal(self) -> None:
             """Import blessed, create terminal singleton, styles, replay buffer."""
@@ -776,6 +896,10 @@ if sys.platform != "win32":
                 history=self.history,
                 password=bool(self.telnet_writer.will_echo),
                 max_width=term_cols,
+                keymap={
+                    "KEY_CTRL_C": _clipboard_copy,
+                    "KEY_CTRL_V": _clipboard_paste,
+                },
                 **editor_style,
             )
 
@@ -808,7 +932,14 @@ if sys.platform != "win32":
             self.editor.insert_text(text)
 
         def _on_prompt_signal(self, _cmd: bytes) -> None:
-            """Handle GA / EOR prompt signals."""
+            """Handle GA / EOR prompt signals.
+
+            The prompt text typically appears in the same TCP segment as the
+            IAC GA/EOR, so it hasn't been delivered to ``_read_server`` yet
+            when this callback fires.  We set ``prompt_pending`` and let the
+            reader loop flush ``_line_hold`` with highlight processing once
+            the text has been added to the buffer.
+            """
             self.ga_detected = True
             self.prompt_ready.set()
             self.prompt_pending = True
@@ -852,6 +983,64 @@ if sys.platform != "win32":
                 self.autoreply_engine.suppress_exclusive = prev_suppress
             self.ctx.autoreply_engine = self.autoreply_engine
 
+        def _refresh_highlight_engine(self) -> None:
+            """Rebuild the highlight engine when rules or autoreplies change."""
+            from .highlighter import HighlightEngine
+
+            hl_rules = self.ctx.highlight_rules or []
+            ar_rules = self.ctx.autoreply_rules or []
+            prev_enabled = (
+                self.ctx.highlight_engine.enabled
+                if self.ctx.highlight_engine is not None
+                else True
+            )
+            self.ctx.highlight_engine = HighlightEngine(
+                hl_rules, ar_rules, self.blessed_term, self.ctx,
+            )
+            self.ctx.highlight_engine.enabled = prev_enabled
+
+        def _cancel_line_hold_timer(self) -> None:
+            """Cancel any pending line-hold flush timer."""
+            if self._line_hold_timer is not None:
+                self._line_hold_timer.cancel()
+                self._line_hold_timer = None
+
+        def _schedule_line_hold_flush(self) -> None:
+            """Schedule a timer to flush held-back text after timeout."""
+            self._cancel_line_hold_timer()
+            self._line_hold_timer = self.loop.call_later(
+                _LINE_HOLD_TIMEOUT, self._flush_line_hold_timer
+            )
+
+        def _flush_line_hold_timer(self) -> None:
+            """Timer callback: flush held text raw (no highlight processing)."""
+            self._line_hold_timer = None
+            text = self._line_hold.flush_raw()
+            if not text:
+                return
+            bt = self.blessed_term
+            self.stdout.write(bt.restore.encode())
+            encoded = text.encode()
+            self.stdout.write(encoded)
+            self.replay_buf.append(encoded)
+            self.stdout.write(bt.save.encode())
+            assert self.scroll is not None
+            self._update_input_style()
+            self.stdout.write(
+                self.editor.render(bt, self.scroll.input_row, self._input_width()).encode()
+            )
+            cursor_col = self.editor.display.cursor
+            self._show_cursor_or_light(self.scroll.input_row, cursor_col)
+
+        def _toggle_highlights(self) -> None:
+            """Toggle the highlight engine on/off."""
+            engine = self.ctx.highlight_engine
+            if engine is None:
+                return
+            engine.enabled = not engine.enabled
+            state = "ON" if engine.enabled else "OFF"
+            self._echo_autoreply(f"HIGHLIGHTS {state}")
+
         def _reg_close(self) -> None:
             """Handle Ctrl+] — close the connection."""
             self.server_done = True
@@ -869,6 +1058,20 @@ if sys.platform != "win32":
             state = "ON" if self.autoreply_engine.enabled else "OFF"
             self._echo_autoreply(f"AUTOREPLIES {state}")
 
+        def _on_walk_done(self, _task: "asyncio.Task[None]") -> None:
+            """Repaint the input line when a walk task finishes."""
+            if self.scroll is None:
+                return
+            bt = self.blessed_term
+            self._update_input_style()
+            self.stdout.write(CURSOR_HIDE.encode())
+            self.stdout.write(
+                self.editor.render(bt, self.scroll.input_row, self._input_width()).encode()
+            )
+            self.toolbar.render(self.autoreply_engine)
+            cursor_col = self.editor.display.cursor
+            self._show_cursor_or_light(self.scroll.input_row, cursor_col)
+
         def _discover_mode(self) -> None:
             """Launch or cancel autodiscover mode."""
             if self.ctx.discover_active:
@@ -876,30 +1079,23 @@ if sys.platform != "win32":
                 if task is not None:
                     task.cancel()
                 return
-            from .rooms import load_prefs, save_prefs
-
-            skey = self.ctx.session_key
-            prefs = load_prefs(skey) if skey else {}
-            if not prefs.get("skip_autodiscover_confirm"):
-                ok, dont_ask = _confirm_dialog(
-                    "Autodiscover",
-                    "Autodiscover explores exits from nearby rooms "
-                    "that lead to unvisited places. It will travel "
-                    "to each frontier exit, check the room, then "
-                    "return before trying the next branch.",
-                    warning=(
-                        "WARNING: This can lead to dangerous areas, "
-                        "death traps, or aggressive monsters! Your "
-                        "character may die. Use with caution."
-                    ),
-                    replay_buf=self.replay_buf,
-                )
-                if not ok:
-                    return
-                if dont_ask and skey:
-                    prefs["skip_autodiscover_confirm"] = True
-                    save_prefs(skey, prefs)
+            ok = _confirm_dialog(
+                "Autodiscover",
+                "Autodiscover explores exits from nearby rooms "
+                "that lead to unvisited places. It will travel "
+                "to each frontier exit, check the room, then "
+                "return before trying the next branch.",
+                warning=(
+                    "WARNING: This can lead to dangerous areas, "
+                    "death traps, or aggressive monsters! Your "
+                    "character may die. Use with caution."
+                ),
+                replay_buf=self.replay_buf,
+            )
+            if not ok:
+                return
             t = asyncio.ensure_future(_autodiscover(self.ctx, self.telnet_writer.log))
+            t.add_done_callback(self._on_walk_done)
             self.ctx.discover_task = t
 
         def _resume_last_walk(self) -> None:
@@ -923,6 +1119,7 @@ if sys.platform != "win32":
                 t = asyncio.ensure_future(
                     _autodiscover(self.ctx, self.telnet_writer.log, resume=True)
                 )
+                t.add_done_callback(self._on_walk_done)
                 self.ctx.discover_task = t
             elif mode == "randomwalk":
                 if self.ctx.randomwalk_active:
@@ -933,6 +1130,7 @@ if sys.platform != "win32":
                 t = asyncio.ensure_future(
                     _randomwalk(self.ctx, self.telnet_writer.log, resume=True)
                 )
+                t.add_done_callback(self._on_walk_done)
                 self.ctx.randomwalk_task = t
             else:
                 if echo_fn is not None:
@@ -949,22 +1147,20 @@ if sys.platform != "win32":
 
             skey = self.ctx.session_key
             prefs = load_prefs(skey) if skey else {}
-            if not prefs.get("skip_randomwalk_confirm"):
-                ok, dont_ask = _confirm_dialog(
-                    "Random Walk",
-                    "Random walk explores rooms by picking "
-                    "random exits, preferring unvisited rooms. "
-                    "It never returns through the entrance you "
-                    "came from. Autoreplies fire in each room. "
-                    "Stops when all reachable rooms are visited.",
-                    replay_buf=self.replay_buf,
-                )
-                if not ok:
-                    return
-                if dont_ask and skey:
-                    prefs["skip_randomwalk_confirm"] = True
-                    save_prefs(skey, prefs)
-            task = asyncio.ensure_future(_randomwalk(self.ctx, self.telnet_writer.log))
+            saved_level = int(prefs.get("randomwalk_visit_level", 2))
+            ok, visit_level = _randomwalk_dialog(
+                replay_buf=self.replay_buf,
+                default_visit_level=saved_level,
+            )
+            if not ok:
+                return
+            if skey:
+                prefs["randomwalk_visit_level"] = visit_level
+                save_prefs(skey, prefs)
+            task = asyncio.ensure_future(
+                _randomwalk(self.ctx, self.telnet_writer.log, visit_level=visit_level)
+            )
+            task.add_done_callback(self._on_walk_done)
             self.ctx.randomwalk_task = task
 
         def _register_gmcp_keys(self) -> None:
@@ -977,6 +1173,9 @@ if sys.platform != "win32":
             self.dispatch.register("KEY_F5", self._resume_last_walk)
             self.dispatch.register(
                 "KEY_F7", lambda: _launch_room_browser(self.ctx, self.replay_buf)
+            )
+            self.dispatch.register(
+                "KEY_F10", lambda: _launch_chat_viewer(self.ctx, self.replay_buf)
             )
             self.toolbar.schedule_eta_refresh(
                 self.loop, self.autoreply_engine, self.editor, self.blessed_term
@@ -1005,10 +1204,15 @@ if sys.platform != "win32":
                             + _dmz_line(self.scroll._cols, active)
                         ).encode()
                     )
-                if self.ctx.command_queue is None and self.ctx.active_command is None:
+                ac_age = _monotonic() - self.ctx.active_command_time
+                cmd_visible = (
+                    self.ctx.command_queue is not None
+                    or (self.ctx.active_command is not None and ac_age < _FLASH_DURATION)
+                )
+                if not cmd_visible:
                     self.stdout.write(
                         self.editor.render(
-                            self.blessed_term, self.scroll.input_row, self.blessed_term.width
+                            self.blessed_term, self.scroll.input_row, self._input_width()
                         ).encode()
                     )
 
@@ -1019,27 +1223,47 @@ if sys.platform != "win32":
             ar = engine is not None and (engine.exclusive_active or engine.reply_pending)
             return self.ctx.discover_active or self.ctx.randomwalk_active or ar
 
-        _CANCEL_HINT = "press return to cancel"
+        _HELP_HINT = "press F1 for help"
 
-        def _render_cancel_hint(self, row: int) -> None:
-            """
-            Draw a dim right-aligned cancel hint on the input row.
+        def _activity_hint(self) -> str:
+            """Build a short status string for the current activity."""
+            return _activity_hint(self.autoreply_engine)
 
-            Shown only when the editor is empty and an automatic mode (randomwalk, discover, or
-            autoreply) is active.
-            """
-            if self.editor._buf or not self._is_autoreply_bg:
+        def _hint_text(self) -> str:
+            """Return the current hint string (activity or help)."""
+            if self.editor._buf:
+                return ""
+            ar = self._is_autoreply_bg
+            hint = self._activity_hint() if ar else self._HELP_HINT
+            return hint if hint else self._HELP_HINT
+
+        def _input_width(self) -> int:
+            """Return editor width, reserving space for the right-aligned hint."""
+            bt = self.blessed_term
+            hint = self._hint_text()
+            if hint:
+                return max(2, bt.width - len(hint))
+            return bt.width
+
+        def _render_input_hint(self, row: int) -> None:
+            """Draw a dim right-aligned hint on the input row."""
+            hint = self._hint_text()
+            if not hint:
                 return
             bt = self.blessed_term
-            hint = self._CANCEL_HINT
             hint_w = len(hint)
             col = bt.width - hint_w
             if col < 2:
                 return
-            dim = bt.color_rgb(60, 40, 40)
-            bg = _STYLE_AUTOREPLY["bg_sgr"]
+            ar = self._is_autoreply_bg
+            bg = _STYLE_AUTOREPLY["bg_sgr"] if ar else _STYLE_NORMAL["bg_sgr"]
+            prog = _until_progress(self.autoreply_engine)
             self.stdout.write(bt.move_yx(row, col).encode())
-            self.stdout.write(f"{bg}{dim}{hint}{bt.normal}".encode())
+            _write_hint(hint, self.stdout, bt, progress=prog, bg_sgr=bg)
+            if prog is not None:
+                self.toolbar.schedule_until_progress(
+                    self.loop, self.autoreply_engine, self.editor, bt,
+                )
 
         def _show_cursor_or_light(self, row: int, col: int) -> None:
             """
@@ -1052,13 +1276,15 @@ if sys.platform != "win32":
             """
             bt = self.blessed_term
             ar = self._is_autoreply_bg
-            self._render_cancel_hint(row)
+            self._render_input_hint(row)
             drew = self.toolbar.cursor_light(bt, row, col, ar)
             if not drew:
                 style = _STYLE_AUTOREPLY if ar else _STYLE_NORMAL
                 self.stdout.write(bt.move_yx(row, col).encode())
+                self.stdout.write(CURSOR_COLOR_OSC.encode())
                 self.stdout.write(style["cursor_sgr"].encode())
                 self.stdout.write(CURSOR_SHOW.encode())
+                self.stdout.write(bt.normal.encode())
 
         def _on_resize_repaint(self, _rows: int, _cols: int) -> None:
             """Repaint screen after terminal resize."""
@@ -1085,6 +1311,7 @@ if sys.platform != "win32":
             cs = self.ctx.cursor_style or _DEFAULT_CURSOR_STYLE
             style = _STYLE_AUTOREPLY if ar_bg else _STYLE_NORMAL
             self.stdout.write(_CURSOR_STYLES.get(cs, CURSOR_STEADY_BLOCK).encode())
+            self.stdout.write(CURSOR_COLOR_OSC.encode())
             self.stdout.write(style["cursor_sgr"].encode())
             self.stdout.write(CURSOR_SHOW.encode())
             self.editor.max_width = _cols
@@ -1105,7 +1332,7 @@ if sys.platform != "win32":
                 self.telnet_writer._send_naws()
             self.stdout.write(CURSOR_HIDE.encode())
             self._update_input_style()
-            self.stdout.write(self.editor.render(bt, self.scroll.input_row, bt.width).encode())
+            self.stdout.write(self.editor.render(bt, self.scroll.input_row, self._input_width()).encode())
             self.toolbar.render(self.autoreply_engine)
             cursor_col = self.editor.display.cursor
             self._show_cursor_or_light(self.scroll.input_row, cursor_col)
@@ -1122,13 +1349,17 @@ if sys.platform != "win32":
             self.ctx.prompt_ready = self.prompt_ready
 
             self._refresh_autoreply_engine()
+            self._refresh_highlight_engine()
 
             self.dispatch.register_seq("\x1d", self._reg_close)  # Ctrl+]
             assert self.scroll is not None
             scroll = self.scroll
             replay_buf = self.replay_buf
             self.dispatch.register_seq(
-                "\x0c", lambda: _repaint_screen(replay_buf, scroll=scroll)
+                "\x0c",
+                lambda: _repaint_screen(
+                    replay_buf, scroll=scroll, active=self._is_autoreply_bg
+                ),
             )  # Ctrl+L
 
             self.dispatch.register(
@@ -1144,23 +1375,39 @@ if sys.platform != "win32":
                 "KEY_F9", lambda: _launch_tui_editor("autoreplies", self.ctx, self.replay_buf)
             )
             self.dispatch.register("KEY_F21", self._toggle_autoreplies)  # Shift+F9
+            self.dispatch.register(
+                "KEY_F6", lambda: _launch_tui_editor("highlights", self.ctx, self.replay_buf)
+            )
+            self.dispatch.register("KEY_F18", self._toggle_highlights)  # Shift+F6
 
             self.ctx.on_gmcp_ready = self._register_gmcp_keys
 
         def _submit_command_queue(
-            self, commands: list[str], chained_task_ref: list[Optional["asyncio.Task[None]"]]
+            self,
+            commands: list[str],
+            chained_task_ref: list[Optional["asyncio.Task[None]"]],
+            immediate_set: frozenset[int] = frozenset(),
         ) -> None:
             """Create a command queue and start chained send."""
             assert self.scroll is not None
             scroll = self.scroll
             q = _CommandQueue(
                 commands,
-                render=lambda: _render_command_queue(self.ctx.command_queue, scroll, self.stdout),
+                render=lambda: _render_command_queue(
+                    self.ctx.command_queue, scroll, self.stdout,
+                    flash_elapsed=_monotonic() - self.ctx.active_command_time,
+                    hint=self._activity_hint(),
+                    progress=_until_progress(self.autoreply_engine),
+                ),
             )
             self.ctx.command_queue = q
+            self.ctx.active_command_time = _monotonic()
             q.render()
             task = asyncio.ensure_future(
-                _send_chained(commands, self.ctx, self.telnet_writer.log, queue=q)
+                _send_chained(
+                    commands, self.ctx, self.telnet_writer.log,
+                    queue=q, immediate_set=immediate_set,
+                )
             )
             task.add_done_callback(lambda _f: _clear_command_queue(self.ctx))
             chained_task_ref[0] = task
@@ -1179,6 +1426,14 @@ if sys.platform != "win32":
                 if not out:
                     if self.telnet_reader.at_eof():
                         self.server_done = True
+                        self._cancel_line_hold_timer()
+                        held = self._line_hold.flush_raw()
+                        if held:
+                            self.stdout.write(bt.restore.encode())
+                            held_enc = held.encode()
+                            self.stdout.write(held_enc)
+                            self.replay_buf.append(held_enc)
+                            self.stdout.write(bt.save.encode())
                         if esc_hold:
                             self.stdout.write(bt.restore.encode())
                             self.stdout.write(esc_hold)
@@ -1188,9 +1443,18 @@ if sys.platform != "win32":
                         self.stdout.write(bt.restore.encode())
                         self.stdout.write(b"\r\nConnection closed by foreign host.\r\n")
                         return
-                    if self.prompt_pending and self.autoreply_engine is not None:
+                    if self.prompt_pending:
+                        self._cancel_line_hold_timer()
+                        held = self._line_hold.flush_for_prompt()
+                        if held:
+                            self.stdout.write(bt.restore.encode())
+                            held_enc = held.encode()
+                            self.stdout.write(held_enc)
+                            self.replay_buf.append(held_enc)
+                            self.stdout.write(bt.save.encode())
                         self.prompt_pending = False
-                        self.autoreply_engine.on_prompt()
+                        if self.autoreply_engine is not None:
+                            self.autoreply_engine.on_prompt()
                         self._update_input_style()
                     continue
                 rx_dot.trigger()
@@ -1198,6 +1462,8 @@ if sys.platform != "win32":
                     out = out.decode("utf-8", errors="replace")
                 out = _transform_output(out, self.telnet_writer, True)
                 self._refresh_autoreply_engine()
+                self._refresh_highlight_engine()
+                is_prompt = self.prompt_pending
                 if self.autoreply_engine is not None:
                     self.autoreply_engine.feed(out)
                     if self.prompt_pending:
@@ -1206,6 +1472,18 @@ if sys.platform != "win32":
                 if self._dialogs_mod._editor_active:
                     self._dialogs_mod._editor_buffer.append(out.encode())
                     continue
+                emit_now, held_back = self._line_hold.add(out)
+                if held_back and is_prompt:
+                    self._cancel_line_hold_timer()
+                    emit_now += self._line_hold.flush_for_prompt()
+                    held_back = ""
+                    self.prompt_pending = False
+                if held_back:
+                    self._schedule_line_hold_flush()
+                if not emit_now and not self._dialogs_mod._editor_buffer:
+                    continue
+                if emit_now:
+                    self._cancel_line_hold_timer()
                 self.stdout.write(CURSOR_HIDE.encode())
                 self.stdout.write(bt.restore.encode())
                 if self._dialogs_mod._editor_buffer:
@@ -1213,15 +1491,35 @@ if sys.platform != "win32":
                         self.stdout.write(chunk)
                         self.replay_buf.append(chunk)
                     self._dialogs_mod._editor_buffer.clear()
-                encoded = esc_hold + out.encode()
+                encoded = esc_hold + emit_now.encode()
                 encoded, esc_hold = _split_incomplete_esc(encoded)
                 if encoded:
                     self.stdout.write(encoded)
                     self.replay_buf.append(encoded)
                 self.stdout.write(bt.save.encode())
-                self._update_input_style()
-                self.stdout.write(self.editor.render(bt, scroll.input_row, bt.width).encode())
-                cursor_col = self.editor.display.cursor
+                cq_s = self.ctx.command_queue
+                ac_s = self.ctx.active_command
+                ac_elapsed = _monotonic() - self.ctx.active_command_time
+                hint = self._activity_hint()
+                prog = _until_progress(self.autoreply_engine)
+                if cq_s is not None:
+                    cursor_col = _render_command_queue(
+                        cq_s, scroll, self.stdout,
+                        flash_elapsed=ac_elapsed, hint=hint,
+                        progress=prog,
+                    )
+                elif ac_s is not None and ac_elapsed < _FLASH_DURATION:
+                    cursor_col = _render_active_command(
+                        ac_s, scroll, self.stdout,
+                        flash_elapsed=ac_elapsed, hint=hint,
+                        progress=prog,
+                    )
+                else:
+                    self._update_input_style()
+                    self.stdout.write(
+                        self.editor.render(bt, scroll.input_row, self._input_width()).encode()
+                    )
+                    cursor_col = self.editor.display.cursor
                 needs_reflash = self.toolbar.render(self.autoreply_engine)
                 if needs_reflash and not self.toolbar.flash_active:
                     self.toolbar.flash_active = True
@@ -1239,7 +1537,7 @@ if sys.platform != "win32":
             bt = self.blessed_term
             tx_dot = self.stoplight.tx
             self._update_input_style()
-            self.stdout.write(self.editor.render(bt, scroll.input_row, bt.width).encode())
+            self.stdout.write(self.editor.render(bt, scroll.input_row, self._input_width()).encode())
             chained_task_ref: list[Optional[asyncio.Task[None]]] = [None]
             with bt.raw(), bt.notify_on_resize():
                 while not self.server_done:
@@ -1259,22 +1557,6 @@ if sys.platform != "win32":
                         self.tty_shell._resize_pending.clear()
                         self._fire_resize()
 
-                    cq = self.ctx.command_queue
-                    if cq is not None and not cq.cancelled:
-                        cq.cancelled = True
-                        cq.cancel_event.set()
-                        chained = chained_task_ref[0]
-                        if chained is not None and not chained.done():
-                            chained.cancel()
-                        self.ctx.command_queue = None
-                        self.stdout.write(CURSOR_HIDE.encode())
-                        self.stdout.write(
-                            self.editor.render(bt, scroll.input_row, bt.width).encode()
-                        )
-                        cursor_col = self.editor.display.cursor
-                        self._show_cursor_or_light(scroll.input_row, cursor_col)
-                        continue
-
                     action = self.dispatch.lookup(key)
                     if action is not None:
                         result = action()
@@ -1283,7 +1565,7 @@ if sys.platform != "win32":
                         self.stdout.write(CURSOR_HIDE.encode())
                         self._update_input_style()
                         self.stdout.write(
-                            self.editor.render(bt, scroll.input_row, bt.width).encode()
+                            self.editor.render(bt, scroll.input_row, self._input_width()).encode()
                         )
                         self.toolbar.render(self.autoreply_engine)
                         cursor_col = self.editor.display.cursor
@@ -1301,7 +1583,7 @@ if sys.platform != "win32":
                         self.stdout.write(CURSOR_HIDE.encode())
                         self._update_input_style()
                         self.stdout.write(
-                            self.editor.render(bt, scroll.input_row, bt.width).encode()
+                            self.editor.render(bt, scroll.input_row, self._input_width()).encode()
                         )
                         cursor_col = self.editor.display.cursor
                         self._show_cursor_or_light(scroll.input_row, cursor_col)
@@ -1309,6 +1591,15 @@ if sys.platform != "win32":
 
                     if result.line is not None:
                         line = result.line
+
+                        cq = self.ctx.command_queue
+                        if cq is not None and not cq.cancelled:
+                            cq.cancelled = True
+                            cq.cancel_event.set()
+                            chained = chained_task_ref[0]
+                            if chained is not None and not chained.done():
+                                chained.cancel()
+                            self.ctx.command_queue = None
 
                         if self.history_file and not self.telnet_writer.will_echo:
                             _save_history_entry(line, self.history_file)
@@ -1336,7 +1627,9 @@ if sys.platform != "win32":
                         if rw_task is not None and not rw_task.done():
                             rw_task.cancel()
 
-                        parts = expand_commands(line)
+                        _expanded = expand_commands_ex(line)
+                        parts = _expanded.commands
+                        _imm = _expanded.immediate_set
                         if parts and _TRAVEL_RE.match(parts[0]):
                             remainder = await _handle_travel_commands(
                                 parts, self.ctx, self.telnet_writer.log
@@ -1349,14 +1642,18 @@ if sys.platform != "win32":
                                 if self.ga_detected:
                                     self.prompt_ready.clear()
                                 if len(remainder) > 1:
-                                    self._submit_command_queue(remainder, chained_task_ref)
+                                    self._submit_command_queue(
+                                        remainder, chained_task_ref
+                                    )
                         elif parts:
                             tx_dot.trigger()
                             self.telnet_writer.write(parts[0] + "\r\n")  # type: ignore[arg-type]
                             if self.ga_detected:
                                 self.prompt_ready.clear()
                             if len(parts) > 1:
-                                self._submit_command_queue(parts, chained_task_ref)
+                                self._submit_command_queue(
+                                    parts, chained_task_ref, immediate_set=_imm,
+                                )
                         else:
                             tx_dot.trigger()
                             self.telnet_writer.write("\r\n")  # type: ignore[arg-type]
@@ -1364,23 +1661,26 @@ if sys.platform != "win32":
                     if result.changed:
                         self.stdout.write(CURSOR_HIDE.encode())
                         cq2 = self.ctx.command_queue
-                        ac2 = self.ctx.active_command
                         if cq2 is not None:
-                            _render_command_queue(cq2, scroll, self.stdout)
-                        elif ac2 is not None:
-                            _render_active_command(ac2, scroll, self.stdout)
+                            ac_elapsed2 = _monotonic() - self.ctx.active_command_time
+                            cursor_col = _render_command_queue(
+                                cq2, scroll, self.stdout,
+                                flash_elapsed=ac_elapsed2,
+                                hint=self._activity_hint(),
+                                progress=_until_progress(self.autoreply_engine),
+                            )
                         else:
                             self._update_input_style()
                             self.stdout.write(
-                                self.editor.render(bt, scroll.input_row, bt.width).encode()
+                                self.editor.render(bt, scroll.input_row, self._input_width()).encode()
                             )
+                            cursor_col = self.editor.display.cursor
                         needs_reflash = self.toolbar.render(self.autoreply_engine)
                         if needs_reflash and not self.toolbar.flash_active:
                             self.toolbar.flash_active = True
                             self.toolbar.schedule_flash(
                                 self.loop, self.autoreply_engine, self.editor, bt
                             )
-                        cursor_col = self.editor.display.cursor
                         self._show_cursor_or_light(scroll.input_row, cursor_col)
 
         def _cleanup(self) -> None:
@@ -1389,6 +1689,7 @@ if sys.platform != "win32":
                 self.autoreply_engine.cancel()
             self.ctx.flush_timestamps()
             self.stdout.write(CURSOR_DEFAULT.encode())
+            self.stdout.write(CURSOR_COLOR_RESET_OSC.encode())
             if self.mode_switched:
                 assert self.scroll is not None
                 dmz_row = self.scroll.scroll_bottom + 1

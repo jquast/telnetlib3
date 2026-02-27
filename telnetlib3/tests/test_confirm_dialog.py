@@ -16,7 +16,7 @@ from telnetlib3.client_repl import _confirm_dialog
 @pytest.fixture()
 def _mock_subprocess(tmp_path: Any, monkeypatch: Any) -> Any:
     """Stub subprocess.run to write a result file without launching Textual."""
-    result_data: dict[str, bool] = {"confirmed": False, "dont_ask": False}
+    result_data: dict[str, bool] = {"confirmed": False}
 
     class _Holder:
         data = result_data
@@ -33,38 +33,28 @@ def _mock_subprocess(tmp_path: Any, monkeypatch: Any) -> Any:
 
 
 def test_cancel_returns_false(_mock_subprocess: Any) -> None:
-    _mock_subprocess.data = {"confirmed": False, "dont_ask": False}
-    ok, dont_ask = _confirm_dialog("Test", "body")
+    _mock_subprocess.data = {"confirmed": False}
+    ok = _confirm_dialog("Test", "body")
     assert ok is False
-    assert dont_ask is False
 
 
 def test_confirmed_returns_true(_mock_subprocess: Any) -> None:
-    _mock_subprocess.data = {"confirmed": True, "dont_ask": False}
-    ok, dont_ask = _confirm_dialog("Test", "body")
+    _mock_subprocess.data = {"confirmed": True}
+    ok = _confirm_dialog("Test", "body")
     assert ok is True
-    assert dont_ask is False
-
-
-def test_dont_ask_again(_mock_subprocess: Any) -> None:
-    _mock_subprocess.data = {"confirmed": True, "dont_ask": True}
-    ok, dont_ask = _confirm_dialog("Test", "body")
-    assert ok is True
-    assert dont_ask is True
 
 
 def test_missing_result_file(monkeypatch: Any) -> None:
     monkeypatch.setattr("subprocess.run", lambda cmd, check=False: None)
     monkeypatch.setattr("telnetlib3.client_repl._restore_after_subprocess", lambda buf: None)
     monkeypatch.setattr("telnetlib3.client_repl._terminal_cleanup", lambda: "")
-    ok, dont_ask = _confirm_dialog("Test", "body")
+    ok = _confirm_dialog("Test", "body")
     assert ok is False
-    assert dont_ask is False
 
 
 def test_warning_passed_in_command(_mock_subprocess: Any) -> None:
-    _mock_subprocess.data = {"confirmed": False, "dont_ask": False}
-    ok, _ = _confirm_dialog("Test", "body", warning="Danger!")
+    _mock_subprocess.data = {"confirmed": False}
+    ok = _confirm_dialog("Test", "body", warning="Danger!")
     assert ok is False
 
 
@@ -99,7 +89,7 @@ class _ConfirmTestApp(App[bool]):
 
 @pytest.mark.asyncio()
 async def test_dismiss_true_on_ok() -> None:
-    app = _ConfirmTestApp(title="Delete?", body="Really delete?", show_dont_ask=False)
+    app = _ConfirmTestApp(title="Delete?", body="Really delete?")
     async with app.run_test() as pilot:
         await pilot.click("#confirm-ok")
         assert app.result is True
@@ -107,7 +97,7 @@ async def test_dismiss_true_on_ok() -> None:
 
 @pytest.mark.asyncio()
 async def test_dismiss_false_on_cancel() -> None:
-    app = _ConfirmTestApp(title="Delete?", body="Really delete?", show_dont_ask=False)
+    app = _ConfirmTestApp(title="Delete?", body="Really delete?")
     async with app.run_test() as pilot:
         await pilot.click("#confirm-cancel")
         assert app.result is False
@@ -115,27 +105,7 @@ async def test_dismiss_false_on_cancel() -> None:
 
 @pytest.mark.asyncio()
 async def test_dismiss_false_on_escape() -> None:
-    app = _ConfirmTestApp(title="Delete?", body="Really delete?", show_dont_ask=False)
+    app = _ConfirmTestApp(title="Delete?", body="Really delete?")
     async with app.run_test() as pilot:
         await pilot.press("escape")
         assert app.result is False
-
-
-@pytest.mark.asyncio()
-async def test_show_dont_ask_true_renders_checkbox() -> None:
-    app = _ConfirmTestApp(title="Confirm", body="Do it?", show_dont_ask=True)
-    async with app.run_test() as pilot:
-        screen = app.screen
-        switches = screen.query("#confirm-dont-ask")
-        assert len(switches) == 1
-        await pilot.press("escape")
-
-
-@pytest.mark.asyncio()
-async def test_show_dont_ask_false_hides_checkbox() -> None:
-    app = _ConfirmTestApp(title="Confirm", body="Do it?", show_dont_ask=False)
-    async with app.run_test() as pilot:
-        screen = app.screen
-        switches = screen.query("#confirm-dont-ask")
-        assert len(switches) == 0
-        await pilot.press("escape")

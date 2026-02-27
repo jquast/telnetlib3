@@ -52,6 +52,7 @@ docs = [
     "Sphinx>3",
     "sphinx_rtd_theme",
     "sphinx-autodoc-typehints",
+    "myst-parser",
 ]
 with_tui = [
     "blessed>=1.20",
@@ -87,6 +88,7 @@ include = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["telnetlib3"]
+artifacts = ["telnetlib3/help/*.md"]
 
 [tool.pylint.main]
 load-plugins = [

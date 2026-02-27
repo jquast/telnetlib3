@@ -42,12 +42,13 @@ from textual.widgets import (
     Select,
     Static,
     Switch,
+    Markdown,
     RadioSet,
     DataTable,
     RadioButton,
     ContentSwitcher,
 )
-from textual.containers import Vertical, Horizontal
+from textual.containers import Vertical, Horizontal, VerticalScroll
 from textual.widgets._tree import TreeNode
 
 # Reset SGR, cursor, alt-screen, mouse, and bracketed paste.
@@ -403,7 +404,7 @@ class SessionListScreen(Screen[None]):
         overflow-x: hidden;
     }
     #button-col {
-        width: 14;
+        width: 12;
         height: auto;
         padding-right: 1;
     }
@@ -560,8 +561,7 @@ class SessionListScreen(Screen[None]):
 
         self.app.push_screen(
             _ConfirmDialogScreen(
-                title="Delete Session", body=f"Delete session '{key}'?", show_dont_ask=False
-            ),
+                title="Delete Session", body=f"Delete session '{key}'?",             ),
             callback=_on_confirm,
         )
 
@@ -918,13 +918,6 @@ class SessionEditScreen(Screen[SessionConfig | None]):  # type: ignore[misc]
         """Build the tabbed session editor layout."""
         cfg = self._config
         with Vertical(id="edit-panel"):
-            title = (
-                "Edit Defaults"
-                if self._is_defaults
-                else ("Add Session" if self._is_new else f"Edit: {cfg.name or cfg.host}")
-            )
-            yield Static(title, id="edit-title")
-
             with Horizontal(id="tab-bar"):
                 for i, (label, tab_id) in enumerate(self._TAB_IDS):
                     btn = Button(label, id=f"tabbtn-{tab_id}")
@@ -1157,11 +1150,76 @@ def _float_val(text: str, default: float) -> float:
         return default
 
 
+def _get_help_topic(topic: str) -> str:
+    """Load help text for a TUI dialog topic from bundled markdown files."""
+    from telnetlib3.help import get_help  # noqa: E501  # deferred to avoid import cost
+    return get_help(topic)
+
+
+class _CommandHelpScreen(Screen[None]):
+    """Scrollable help screen with context-specific documentation."""
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "close", "Close", show=False),
+        Binding("q", "close", "Close", show=False),
+    ]
+
+    DEFAULT_CSS = """
+    _CommandHelpScreen {
+        align: center middle;
+    }
+    #help-dialog {
+        width: 88;
+        height: 90%;
+        border: round $surface-lighten-2;
+        background: $surface;
+        padding: 1 2;
+    }
+    #help-scroll {
+        height: 1fr;
+    }
+    #help-scroll Markdown {
+        margin: 0 1;
+    }
+    #help-close-row {
+        height: 3;
+        align-horizontal: right;
+    }
+    #help-close-row Button {
+        width: auto;
+        min-width: 12;
+    }
+    """
+
+    def __init__(self, topic: str = "macro") -> None:
+        super().__init__()
+        self._topic = topic
+
+    def compose(self) -> ComposeResult:
+        content = _get_help_topic(self._topic)
+        with Vertical(id="help-dialog"):
+            with VerticalScroll(id="help-scroll"):
+                yield Markdown(content, id="help-content")
+            with Horizontal(id="help-close-row"):
+                yield Button("Close", variant="primary", id="help-close")
+
+    def on_mount(self) -> None:
+        self.query_one("#help-close", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "help-close":
+            self.dismiss(None)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
 class _EditListScreen(Screen["bool | None"]):
     """Base class for list-editor screens (macros, autoreplies)."""
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("escape", "cancel_or_close", "Cancel", priority=True),
+        Binding("f1", "show_help", "Help", show=True),
         Binding("plus", "reorder_hint", "Change Priority", key_display="+/=/-", show=True),
         Binding("enter", "save_hint", "Save", show=True),
     ]
@@ -1183,6 +1241,9 @@ class _EditListScreen(Screen["bool | None"]):
         """Return a display label for the item at *idx*."""
         return str(self._items[idx][0]) if idx < len(self._items) else ""
 
+    _growable_keys: list[str] = []
+    """Column keys (from ``add_column(key=…)``) that should expand to fill space."""
+
     def __init__(self) -> None:
         super().__init__()
         self._editing_idx: int | None = None
@@ -1192,6 +1253,34 @@ class _EditListScreen(Screen["bool | None"]):
     @property
     def _form_visible(self) -> bool:
         return bool(self.query_one(f"#{self._prefix}-form").display)
+
+    def _fit_growable_columns(self) -> None:
+        """Distribute remaining table width equally among growable columns."""
+        table = self.query_one(f"#{self._prefix}-table", DataTable)
+        avail = table.size.width
+        if avail <= 0:
+            return
+        pad = table.cell_padding
+        fixed_total = 0
+        growable: list[Any] = []
+        for col in table.ordered_columns:
+            if str(col.key) in self._growable_keys:
+                growable.append(col)
+            else:
+                fixed_total += col.get_render_width(table)
+        if not growable:
+            return
+        remaining = max(avail - fixed_total - 2, len(growable))
+        each = remaining // len(growable)
+        for col in growable:
+            col.auto_width = False
+            col.width = max(each - 2 * pad, 4)
+        table.refresh()
+
+    def on_resize(self, event: events.Resize) -> None:
+        """Recompute growable column widths on terminal resize."""
+        if self._growable_keys:
+            self.call_after_refresh(self._fit_growable_columns)
 
     def _set_action_buttons_disabled(self, disabled: bool) -> None:
         """Enable or disable the add/edit/copy buttons."""
@@ -1282,6 +1371,10 @@ class _EditListScreen(Screen["bool | None"]):
     def action_save_hint(self) -> None:
         """Placeholder for save key binding hint."""
 
+    def action_show_help(self) -> None:
+        """Open the context-sensitive help screen."""
+        self.app.push_screen(_CommandHelpScreen(topic=self._prefix))
+
     def _matches_search(self, idx: int, query: str) -> bool:
         """Return True if item at *idx* matches the search *query*."""
         return True
@@ -1331,7 +1424,14 @@ class _EditListScreen(Screen["bool | None"]):
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Double-click or Enter on a table row opens it for editing."""
-        idx = int(str(event.row_key.value))
+        row_pos = int(str(event.row_key.value))
+        if self._filtered_indices:
+            if row_pos < len(self._filtered_indices):
+                idx = self._filtered_indices[row_pos]
+            else:
+                return
+        else:
+            idx = row_pos
         if idx < len(self._items):
             self._editing_idx = idx
             self._show_form(*self._items[idx])
@@ -1381,11 +1481,44 @@ class _EditListScreen(Screen["bool | None"]):
             self.dismiss(True)
         elif suffix == "close":
             self.dismiss(None)
+        elif suffix == "help":
+            self.app.push_screen(_CommandHelpScreen(topic=self._prefix))
         else:
             self._on_extra_button(suffix, btn)
 
+    @property
+    def _text_input_id(self) -> str:
+        """ID of the text/reply Input widget for command insertion."""
+        return f"{self._prefix}-text"
+
+    def _insert_command(self, cmd: str) -> None:
+        """Insert a command at the cursor position, adding ``;`` separators."""
+        if self._form_visible:
+            inp = self.query_one(f"#{self._text_input_id}", Input)
+            val = inp.value
+            pos = inp.cursor_position
+            before = val[:pos]
+            after = val[pos:]
+            if before and not before.endswith(";"):
+                cmd = ";" + cmd
+            if after and not after.startswith(";"):
+                cmd = cmd + ";"
+            inp.value = before + cmd + after
+            inp.cursor_position = len(before) + len(cmd)
+        else:
+            self._editing_idx = None
+            self._show_form()
+
     def _on_extra_button(self, suffix: str, btn: str) -> None:
-        """Override to handle subclass-specific buttons."""
+        """Handle shared command-builder buttons; override for extras."""
+        if suffix == "btn-when":
+            self._insert_command("`when HP%>=99`")
+        elif suffix == "btn-until":
+            self._insert_command("`until 10 pattern`")
+        elif suffix == "btn-delay":
+            self._insert_command("`delay 1s`")
+        elif suffix == "btn-randomwalk":
+            self._insert_command("`randomwalk`")
 
     @abstractmethod
     def _show_form(self, *args: Any) -> None: ...
@@ -1403,8 +1536,11 @@ class _EditListScreen(Screen["bool | None"]):
 class MacroEditScreen(_EditListScreen):
     """Editor screen for macro key bindings."""
 
+    _growable_keys: list[str] = ["text"]
+
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("escape", "cancel_or_close", "Cancel", priority=True),
+        Binding("f1", "show_help", "Help", show=True),
         Binding("plus", "reorder_hint", "Change Priority", key_display="+/=/-", show=True),
         Binding("enter", "save_hint", "Save", show=True),
         Binding("l", "sort_last", "Recent", show=True),
@@ -1413,12 +1549,12 @@ class MacroEditScreen(_EditListScreen):
     CSS = """
     MacroEditScreen { align: center middle; }
     #macro-panel {
-        width: 91; height: 100%; max-height: 24;
+        width: 100%; height: 100%;
         border: round $surface-lighten-2; background: $surface; padding: 1 1;
     }
     #macro-body { height: 1fr; }
     #macro-button-col {
-        width: 13; height: auto; padding-right: 1;
+        width: 11; height: auto; padding-right: 1;
     }
     #macro-button-col Button {
         width: 100%; min-width: 0; margin-bottom: 0;
@@ -1450,6 +1586,8 @@ class MacroEditScreen(_EditListScreen):
     .form-label { width: 8; padding-top: 1; }
     .form-label-short { width: 9; padding-top: 1; }
     .form-label-mid { width: 5; padding-top: 1; }
+    .toggle-label { width: auto; padding-top: 1; content-align-horizontal: right; }
+    .toggle-gap { width: 1fr; max-width: 6; }
     #macro-form .form-gap { width: 10; }
     .form-gap { width: 2; }
     .form-btn-spacer { width: 1; }
@@ -1485,15 +1623,13 @@ class MacroEditScreen(_EditListScreen):
     def compose(self) -> ComposeResult:
         """Build the macro editor layout."""
         with Vertical(id="macro-panel"):
-            yield Static(
-                f"Macro Editor -- {self._session_key}" if self._session_key else "Macro Editor"
-            )
             with Horizontal(id="macro-body"):
                 with Vertical(id="macro-button-col"):
                     yield Button("Add", variant="success", id="macro-add")
                     yield Button("Edit", variant="warning", id="macro-edit")
                     yield Button("Copy", id="macro-copy")
                     yield Button("Delete", variant="error", id="macro-delete")
+                    yield Button("Help", variant="success", id="macro-help")
                     yield Button("Save", variant="primary", id="macro-save")
                     yield Button("Cancel", id="macro-close")
                 with Vertical(id="macro-right"):
@@ -1501,7 +1637,7 @@ class MacroEditScreen(_EditListScreen):
                     yield DataTable(id="macro-table")
                     with Vertical(id="macro-form"):
                         with Horizontal(classes="field-row"):
-                            yield Label("Enabled", classes="form-label-short")
+                            yield Label("Enabled:", classes="toggle-label")
                             yield Switch(value=True, id="macro-enabled")
                             yield Label("", classes="form-gap")
                             yield Label("Key", classes="form-label-mid")
@@ -1528,18 +1664,30 @@ class MacroEditScreen(_EditListScreen):
                             yield Button(
                                 "Autodiscover", id="macro-autodiscover", classes="insert-btn"
                             )
+                            yield Button(
+                                "Random Walk", id="macro-btn-randomwalk", classes="insert-btn"
+                            )
                             yield Button("Delay", id="macro-delay", classes="insert-btn")
+                            yield Button(
+                                "When", id="macro-btn-when", classes="insert-btn"
+                            )
+                            yield Button(
+                                "Until", id="macro-btn-until", classes="insert-btn"
+                            )
                         with Horizontal(id="macro-form-buttons"):
                             yield Label(" ", classes="form-btn-spacer")
                             yield Button("Cancel", variant="default", id="macro-cancel-form")
                             yield Button("OK", variant="success", id="macro-ok")
+                    yield Static("", id="macro-count")
         yield Footer()
 
     def on_mount(self) -> None:
         """Load macros from file and populate table."""
         table = self.query_one("#macro-table", DataTable)
         table.cursor_type = "row"
-        table.add_columns("Key", "Text", "Last")
+        table.add_column("Key", width=14, key="key")
+        table.add_column("Command Text", key="text")
+        table.add_column("Last", width=8, key="last")
         self._load_from_file()
         self._refresh_table()
         self.query_one("#macro-form").display = False
@@ -1580,6 +1728,14 @@ class MacroEditScreen(_EditListScreen):
                 key, text + status, lu,
                 key=str(len(self._filtered_indices) - 1),
             )
+        n_total = len(self._macros)
+        n_shown = len(self._filtered_indices)
+        label = self.query_one("#macro-count", Static)
+        if q:
+            label.update(f"{n_shown:,}/{n_total:,} Macros")
+        else:
+            label.update(f"{n_total:,} Macros")
+        self.call_after_refresh(self._fit_growable_columns)
 
     def action_sort_last(self) -> None:
         """Toggle sorting macros by last used time."""
@@ -1733,6 +1889,8 @@ class MacroEditScreen(_EditListScreen):
             self._insert_command("`autodiscover`")
         elif suffix == "delay":
             self._insert_command("`delay 1s`")
+        elif suffix in ("btn-when", "btn-until", "btn-delay", "btn-randomwalk"):
+            super()._on_extra_button(suffix, btn)
         elif suffix == "capture":
             self._capturing = True
             self._capture_escape_pending = False
@@ -1740,24 +1898,6 @@ class MacroEditScreen(_EditListScreen):
             label.update("press keystroke to capture ...")
             label.add_class("capturing")
             self.query_one("#macro-capture-status", Static).update("")
-
-    def _insert_command(self, cmd: str) -> None:
-        """Insert a command at the cursor position, adding ``;`` separators."""
-        if self._form_visible:
-            inp = self.query_one("#macro-text", Input)
-            val = inp.value
-            pos = inp.cursor_position
-            before = val[:pos]
-            after = val[pos:]
-            if before and not before.endswith(";"):
-                cmd = ";" + cmd
-            if after and not after.startswith(";"):
-                cmd = cmd + ";"
-            inp.value = before + cmd + after
-            inp.cursor_position = len(before) + len(cmd)
-        else:
-            self._editing_idx = None
-            self._show_form(text_val=cmd)
 
     def _pick_room_for_travel(self, slow: bool = False) -> None:
         """Open room picker and insert a travel command into the text field."""
@@ -1795,22 +1935,22 @@ class _AutoreplyTuple(NamedTuple):
 
     pattern: str
     reply: str
-    exclusive: bool = False
-    until: str = ""
     always: bool = False
     enabled: bool = True
-    exclusive_timeout: float = 10.0
-    post_command: str = ""
     when: dict[str, str] | None = None
     immediate: bool = False
     last_fired: str = ""
+    case_sensitive: bool = False
 
 
 class AutoreplyEditScreen(_EditListScreen):
     """Editor screen for autoreply rules."""
 
+    _growable_keys: list[str] = ["pattern", "reply"]
+
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("escape", "cancel_or_close", "Cancel", priority=True),
+        Binding("f1", "show_help", "Help", show=True),
         Binding("plus", "reorder_hint", "Change Priority", key_display="+/=/-", show=True),
         Binding("enter", "save_hint", "Save", show=True),
         Binding("l", "sort_last", "Recent", show=True),
@@ -1819,12 +1959,12 @@ class AutoreplyEditScreen(_EditListScreen):
     CSS = """
     AutoreplyEditScreen { align: center middle; }
     #autoreply-panel {
-        width: 91; height: 100%; max-height: 26;
+        width: 100%; height: 100%;
         border: round $surface-lighten-2; background: $surface; padding: 1 1;
     }
     #autoreply-body { height: 1fr; }
     #autoreply-button-col {
-        width: 13; height: auto; padding-right: 1;
+        width: 11; height: auto; padding-right: 1;
     }
     #autoreply-button-col Button {
         width: 100%; min-width: 0; margin-bottom: 0;
@@ -1845,7 +1985,7 @@ class AutoreplyEditScreen(_EditListScreen):
     #autoreply-form .form-label-mid { width: 9; padding-top: 1; }
     #autoreply-form .form-gap { width: 2; }
     #autoreply-form .form-btn-spacer { width: 1; }
-    #autoreply-timeout { width: 5; }
+    #autoreply-form .insert-btn { width: auto; min-width: 0; margin: 0; padding: 0 1; }
     .form-gap-wide { width: 5; }
     #autoreply-cond-vital { width: 14; }
     #autoreply-cond-op { width: 8; }
@@ -1875,20 +2015,20 @@ class AutoreplyEditScreen(_EditListScreen):
     def _items(self) -> list[Any]:
         return self._rules
 
+    @property
+    def _text_input_id(self) -> str:
+        return "autoreply-reply"
+
     def compose(self) -> ComposeResult:
         """Build the autoreply editor layout."""
         with Vertical(id="autoreply-panel"):
-            yield Static(
-                f"Autoreply Editor -- {self._session_key}"
-                if self._session_key
-                else "Autoreply Editor"
-            )
             with Horizontal(id="autoreply-body"):
                 with Vertical(id="autoreply-button-col"):
                     yield Button("Add", variant="success", id="autoreply-add")
                     yield Button("Edit", variant="warning", id="autoreply-edit")
                     yield Button("Copy", id="autoreply-copy")
                     yield Button("Delete", variant="error", id="autoreply-delete")
+                    yield Button("Help", variant="success", id="autoreply-help")
                     yield Button("Save", variant="primary", id="autoreply-save")
                     yield Button("Cancel", id="autoreply-close")
                 with Vertical(id="autoreply-right"):
@@ -1896,71 +2036,129 @@ class AutoreplyEditScreen(_EditListScreen):
                     yield DataTable(id="autoreply-table")
                     with Vertical(id="autoreply-form"):
                         with Horizontal(classes="field-row"):
-                            yield Label("Enabled", classes="form-label-short")
+                            yield Label("Enabled:", classes="toggle-label")
                             yield Switch(value=True, id="autoreply-enabled")
-                            yield Label("", classes="form-gap")
-                            yield Label("Pattern", classes="form-label-mid")
-                            yield Input(placeholder="regex pattern", id="autoreply-pattern")
-                        with Horizontal(classes="field-row"):
-                            excl = Switch(value=False, id="autoreply-exclusive")
-                            excl.tooltip = (
-                                "Only this rule matches until cleared by prompt or until pattern"
+                            yield Label("", classes="toggle-gap")
+                            alw = Switch(value=False, id="autoreply-always")
+                            alw.tooltip = (
+                                "Match even while another rule's chain is active"
                             )
-                            yield Label("Exclusive", classes="form-label-short")
-                            yield excl
-                            yield Label("", classes="form-gap")
-                            yield Label("Reply", classes="form-label-mid")
+                            yield Label("Always:", classes="toggle-label")
+                            yield alw
+                            yield Label("", classes="toggle-gap")
+                            imm = Switch(value=False, id="autoreply-immediate")
+                            imm.tooltip = (
+                                "Reply immediately without waiting for prompt"
+                            )
+                            yield Label("Immediate:", classes="toggle-label")
+                            yield imm
+                            yield Label("", classes="toggle-gap")
+                            cs = Switch(value=False, id="autoreply-case-sensitive")
+                            cs.tooltip = "Case-sensitive pattern matching"
+                            yield Label("Case Sensitive:", classes="toggle-label")
+                            yield cs
+                        with Horizontal(classes="field-row"):
+                            yield Label("Pattern", classes="form-label-short")
                             yield Input(
-                                placeholder=r"reply with \1 refs, ; separators",
+                                placeholder="regex pattern",
+                                id="autoreply-pattern",
+                            )
+                        with Horizontal(classes="field-row"):
+                            yield Label("Reply", classes="form-label-short")
+                            yield Input(
+                                placeholder=r"reply with \1 refs, ;/: seps",
                                 id="autoreply-reply",
                             )
                         with Horizontal(classes="field-row"):
-                            alw = Switch(value=False, id="autoreply-always")
-                            alw.tooltip = "Match even while another exclusive rule is active"
-                            yield Label("Always", classes="form-label-short")
-                            yield alw
-                            imm = Switch(value=False, id="autoreply-immediate")
-                            imm.tooltip = (
-                                "Reply immediately without waiting for prompt/GA/EOR; "
-                                "needed for scripted actions displayed without a final prompt"
-                            )
-                            yield Label("Imm", classes="form-label-short")
-                            yield imm
-                            yield Label("Until", classes="form-label-mid")
-                            yield Input(placeholder=r"optional: \1 died\.", id="autoreply-until")
-                        with Horizontal(classes="field-row"):
-                            yield Label("Timeout", classes="form-label-short")
-                            yield Input(value="10.0", placeholder="seconds", id="autoreply-timeout")
-                            yield Label("", classes="form-gap-wide")
-                            yield Label("Post Cmd", classes="form-label-mid")
-                            yield Input(placeholder="optional: glance", id="autoreply-post-command")
-                        with Horizontal(classes="field-row"):
                             yield Label("Condition", classes="form-label-short")
                             yield Select(
-                                [("(none)", ""), ("HP%", "HP%"), ("MP%", "MP%")],
+                                [
+                                    ("(none)", ""),
+                                    ("HP%", "HP%"),
+                                    ("MP%", "MP%"),
+                                ],
                                 value="",
                                 allow_blank=False,
                                 id="autoreply-cond-vital",
                             )
                             yield Select(
-                                [(">", ">"), ("<", "<"), (">=", ">="), ("<=", "<="), ("=", "=")],
+                                [
+                                    (">", ">"),
+                                    ("<", "<"),
+                                    (">=", ">="),
+                                    ("<=", "<="),
+                                    ("=", "="),
+                                ],
                                 value=">",
                                 allow_blank=False,
                                 id="autoreply-cond-op",
                             )
-                            yield Input(value="50", placeholder="50", id="autoreply-cond-val")
+                            yield Input(
+                                value="99",
+                                placeholder="99",
+                                id="autoreply-cond-val",
+                            )
                             yield Label("(as percent)", classes="form-label-pct")
+                        with Horizontal(classes="field-row"):
+                            yield Button(
+                                "When", id="autoreply-btn-when",
+                                classes="insert-btn",
+                            )
+                            yield Button(
+                                "Until", id="autoreply-btn-until",
+                                classes="insert-btn",
+                            )
+                            yield Button(
+                                "Delay", id="autoreply-btn-delay",
+                                classes="insert-btn",
+                            )
+                            yield Button(
+                                "Fast Travel",
+                                id="autoreply-fast-travel",
+                                classes="insert-btn",
+                            )
+                            yield Button(
+                                "Slow Travel",
+                                id="autoreply-slow-travel",
+                                classes="insert-btn",
+                            )
+                        with Horizontal(classes="field-row"):
+                            yield Button(
+                                "Return Fast",
+                                id="autoreply-return-fast",
+                                classes="insert-btn",
+                            )
+                            yield Button(
+                                "Return Slow",
+                                id="autoreply-return-slow",
+                                classes="insert-btn",
+                            )
+                            yield Button(
+                                "Autodiscover",
+                                id="autoreply-autodiscover",
+                                classes="insert-btn",
+                            )
+                            yield Button(
+                                "Random Walk",
+                                id="autoreply-btn-randomwalk",
+                                classes="insert-btn",
+                            )
                         with Horizontal(id="autoreply-form-buttons"):
                             yield Label(" ", classes="form-btn-spacer")
                             yield Button("Cancel", variant="default", id="autoreply-cancel-form")
                             yield Button("OK", variant="success", id="autoreply-ok")
+                    yield Static("", id="autoreply-count")
         yield Footer()
 
     def on_mount(self) -> None:
         """Load autoreplies from file and populate table."""
         table = self.query_one("#autoreply-table", DataTable)
         table.cursor_type = "row"
-        table.add_columns("#", "Pattern", "Reply", "Flags", "Last")
+        table.add_column("#", width=4, key="num")
+        table.add_column("Pattern", key="pattern")
+        table.add_column("Reply", key="reply")
+        table.add_column("Flags", width=8, key="flags")
+        table.add_column("Last", width=8, key="last")
         self._load_from_file()
         self._refresh_table()
         self.query_one("#autoreply-form").display = False
@@ -1981,15 +2179,12 @@ class AutoreplyEditScreen(_EditListScreen):
                 _AutoreplyTuple(
                     r.pattern.pattern,
                     r.reply,
-                    r.exclusive,
-                    r.until,
                     r.always,
                     r.enabled,
-                    r.exclusive_timeout,
-                    r.post_command,
                     dict(r.when) or None,
                     r.immediate,
                     r.last_fired,
+                    r.case_sensitive,
                 )
                 for r in rules
             ]
@@ -2018,21 +2213,27 @@ class AutoreplyEditScreen(_EditListScreen):
             flags = ""
             if not rule.enabled:
                 flags = "X"
-            if rule.exclusive:
-                flags = (flags + " E*") if rule.until else (flags + " E")
             if rule.always:
                 flags = (flags + " A") if flags else "A"
             if rule.immediate:
                 flags = (flags + " I") if flags else "I"
-            if rule.when:
+            if rule.case_sensitive:
                 flags = (flags + " C") if flags else "C"
-            pat_display = rule.pattern if len(rule.pattern) <= 30 else rule.pattern[:29] + "\u2026"
-            reply_display = rule.reply if len(rule.reply) <= 20 else rule.reply[:19] + "\u2026"
+            if rule.when:
+                flags = (flags + " W") if flags else "W"
             lf = _relative_time(rule.last_fired) if rule.last_fired else ""
             row_pos = len(self._filtered_indices) - 1
             table.add_row(
-                str(i + 1), pat_display, reply_display, flags.strip(), lf, key=str(row_pos)
+                str(i + 1), rule.pattern, rule.reply, flags.strip(), lf, key=str(row_pos)
             )
+        n_total = len(self._rules)
+        n_shown = len(self._filtered_indices)
+        label = self.query_one("#autoreply-count", Static)
+        if q:
+            label.update(f"{n_shown:,}/{n_total:,} Autoreplies")
+        else:
+            label.update(f"{n_total:,} Autoreplies")
+        self.call_after_refresh(self._fit_growable_columns)
 
     def action_sort_last(self) -> None:
         """Toggle sorting autoreplies by last fired time."""
@@ -2043,28 +2244,22 @@ class AutoreplyEditScreen(_EditListScreen):
         self,
         pattern_val: str = "",
         reply_val: str = "",
-        exclusive: bool = False,
-        until: str = "",
         always: bool = False,
         enabled: bool = True,
-        exclusive_timeout: float = 10.0,
-        post_command: str = "",
         when: dict[str, str] | None = None,
         immediate: bool = False,
         last_fired: str = "",
+        case_sensitive: bool = False,
     ) -> None:
         self.query_one("#autoreply-pattern", Input).value = pattern_val
         self.query_one("#autoreply-reply", Input).value = reply_val
-        self.query_one("#autoreply-until", Input).value = until
-        self.query_one("#autoreply-post-command", Input).value = post_command
-        self.query_one("#autoreply-exclusive", Switch).value = exclusive
         self.query_one("#autoreply-always", Switch).value = always
         self.query_one("#autoreply-enabled", Switch).value = enabled
         self.query_one("#autoreply-immediate", Switch).value = immediate
-        self.query_one("#autoreply-timeout", Input).value = str(exclusive_timeout)
+        self.query_one("#autoreply-case-sensitive", Switch).value = case_sensitive
         if when:
             vital = next(iter(when), "")
-            expr = when.get(vital, ">50")
+            expr = when.get(vital, ">99")
             import re as _re
 
             m = _re.match(r"^(>=|<=|>|<|=)(\d+)$", expr)
@@ -2075,11 +2270,11 @@ class AutoreplyEditScreen(_EditListScreen):
             else:
                 self.query_one("#autoreply-cond-vital", Select).value = ""
                 self.query_one("#autoreply-cond-op", Select).value = ">"
-                self.query_one("#autoreply-cond-val", Input).value = "50"
+                self.query_one("#autoreply-cond-val", Input).value = "99"
         else:
             self.query_one("#autoreply-cond-vital", Select).value = ""
             self.query_one("#autoreply-cond-op", Select).value = ">"
-            self.query_one("#autoreply-cond-val", Input).value = "50"
+            self.query_one("#autoreply-cond-val", Input).value = "99"
         cond_none = not when
         self.query_one("#autoreply-cond-op", Select).disabled = cond_none
         self.query_one("#autoreply-cond-val", Input).disabled = cond_none
@@ -2093,26 +2288,20 @@ class AutoreplyEditScreen(_EditListScreen):
         """Accept the current inline form values."""
         pattern_val = self.query_one("#autoreply-pattern", Input).value.strip()
         reply_val = self.query_one("#autoreply-reply", Input).value
-        until_val = self.query_one("#autoreply-until", Input).value.strip()
-        post_cmd = self.query_one("#autoreply-post-command", Input).value.strip()
-        exclusive = self.query_one("#autoreply-exclusive", Switch).value
         always = self.query_one("#autoreply-always", Switch).value
         enabled = self.query_one("#autoreply-enabled", Switch).value
         immediate = self.query_one("#autoreply-immediate", Switch).value
-        try:
-            timeout_val = float(self.query_one("#autoreply-timeout", Input).value.strip() or "10")
-        except ValueError:
-            timeout_val = 10.0
+        case_sensitive = self.query_one("#autoreply-case-sensitive", Switch).value
         cond_vital = self.query_one("#autoreply-cond-vital", Select).value
         cond_op = self.query_one("#autoreply-cond-op", Select).value
         cond_val = self.query_one("#autoreply-cond-val", Input).value.strip()
         when: dict[str, str] | None = None
         if cond_vital and isinstance(cond_vital, str) and cond_vital in ("HP%", "MP%"):
             try:
-                int(cond_val or "50")
+                int(cond_val or "99")
             except ValueError:
-                cond_val = "50"
-            when = {cond_vital: f"{cond_op}{cond_val or '50'}"}
+                cond_val = "99"
+            when = {cond_vital: f"{cond_op}{cond_val or '99'}"}
         if pattern_val:
             import re
 
@@ -2125,15 +2314,12 @@ class AutoreplyEditScreen(_EditListScreen):
         entry = _AutoreplyTuple(
             pattern_val,
             reply_val,
-            exclusive,
-            until_val,
             always,
             enabled,
-            timeout_val,
-            post_cmd,
             when,
             immediate,
             lf,
+            case_sensitive,
         )
         self._finalize_edit(entry, bool(pattern_val))
 
@@ -2144,6 +2330,41 @@ class AutoreplyEditScreen(_EditListScreen):
             self.query_one("#autoreply-cond-op", Select).disabled = disabled
             self.query_one("#autoreply-cond-val", Input).disabled = disabled
 
+    def _on_extra_button(self, suffix: str, btn: str) -> None:
+        """Handle autoreply-specific buttons (travel, etc.)."""
+        if suffix == "fast-travel":
+            self._pick_room_for_travel(slow=False)
+        elif suffix == "slow-travel":
+            self._pick_room_for_travel(slow=True)
+        elif suffix == "return-fast":
+            self._insert_command("`return fast`")
+        elif suffix == "return-slow":
+            self._insert_command("`return slow`")
+        elif suffix == "autodiscover":
+            self._insert_command("`autodiscover`")
+        else:
+            super()._on_extra_button(suffix, btn)
+
+    def _pick_room_for_travel(self, slow: bool = False) -> None:
+        """Open room picker and insert a travel command into the reply field."""
+        rooms_file = os.path.join(os.path.dirname(self._path), "rooms.json")
+        if not os.path.exists(rooms_file):
+            return
+
+        def _on_pick(room_id: "str | None") -> None:
+            if room_id is None:
+                return
+            cmd = f"`slow travel {room_id}`" if slow else f"`fast travel {room_id}`"
+            self._insert_command(cmd)
+
+        self.app.push_screen(
+            RoomPickerScreen(
+                rooms_path=rooms_file,
+                session_key=self._session_key,
+            ),
+            callback=_on_pick,
+        )
+
     def _save_to_file(self) -> None:
         import re
 
@@ -2152,33 +2373,350 @@ class AutoreplyEditScreen(_EditListScreen):
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
         rules = []
         for t in self._rules:
+            flags = re.MULTILINE | re.DOTALL
+            if not t.case_sensitive:
+                flags |= re.IGNORECASE
             rules.append(
                 AutoreplyRule(
-                    pattern=re.compile(t.pattern, re.MULTILINE | re.DOTALL),
+                    pattern=re.compile(t.pattern, flags),
                     reply=t.reply,
-                    exclusive=t.exclusive,
-                    until=t.until,
-                    post_command=t.post_command,
                     always=t.always,
                     enabled=t.enabled,
-                    exclusive_timeout=t.exclusive_timeout,
                     when=t.when or {},
                     immediate=t.immediate,
                     last_fired=t.last_fired,
+                    case_sensitive=t.case_sensitive,
                 )
             )
         save_autoreplies(self._path, rules, self._session_key)
 
 
+class _HighlightTuple(NamedTuple):
+    """Lightweight tuple for highlight rules in the TUI editor."""
+
+    pattern: str
+    highlight: str
+    enabled: bool = True
+    stop_movement: bool = False
+    builtin: bool = False
+    case_sensitive: bool = False
+
+
+class HighlightEditScreen(_EditListScreen):
+    """Editor screen for highlight rules."""
+
+    _growable_keys: list[str] = ["pattern"]
+
+    CSS = """
+    HighlightEditScreen { align: center middle; }
+    #highlight-panel {
+        width: 100%; height: 100%;
+        border: round $surface-lighten-2; background: $surface; padding: 1 1;
+    }
+    #highlight-body { height: 1fr; }
+    #highlight-button-col {
+        width: 11; height: auto; padding-right: 1;
+    }
+    #highlight-button-col Button {
+        width: 100%; min-width: 0; margin-bottom: 0;
+    }
+    #highlight-copy { background: #6670a0; color: #e8ecf8; }
+    #highlight-copy:hover { background: #8088b8; }
+    #highlight-right { width: 1fr; height: 100%; }
+    #highlight-search { height: auto; }
+    #highlight-table { height: 1fr; min-height: 4; overflow-x: hidden; }
+    #highlight-form { height: 1fr; padding: 0 0 0 4; }
+    #highlight-form .field-row { height: 3; margin: 0; }
+    #highlight-form Input { width: 1fr; border: tall grey; }
+    #highlight-form Input:focus { border: tall $accent; }
+    #highlight-form-buttons { height: 3; align-horizontal: right; }
+    #highlight-form-buttons Button { width: auto; min-width: 10; margin-left: 1; }
+    #highlight-form .form-label { width: 12; padding-top: 1; }
+    #highlight-form .form-label-short { width: 9; padding-top: 1; }
+    """
+
+    def __init__(self, path: str, session_key: str = "") -> None:
+        super().__init__()
+        self._path = path
+        self._session_key = session_key
+        self._rules: list[_HighlightTuple] = []
+
+    @property
+    def _prefix(self) -> str:
+        return "highlight"
+
+    @property
+    def _noun(self) -> str:
+        return "Highlight"
+
+    @property
+    def _items(self) -> list[Any]:
+        return self._rules
+
+    def _item_label(self, idx: int) -> str:
+        if idx < len(self._rules):
+            return self._rules[idx].pattern
+        return ""
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="highlight-panel"):
+            with Horizontal(id="highlight-body"):
+                with Vertical(id="highlight-button-col"):
+                    yield Button("Add", variant="success", id="highlight-add")
+                    yield Button("Edit", variant="warning", id="highlight-edit")
+                    yield Button("Copy", id="highlight-copy")
+                    yield Button("Delete", variant="error", id="highlight-delete")
+                    yield Button("Help", variant="success", id="highlight-help")
+                    yield Button("Save", variant="primary", id="highlight-save")
+                    yield Button("Cancel", id="highlight-close")
+                with Vertical(id="highlight-right"):
+                    yield Input(
+                        placeholder="Search highlights\u2026", id="highlight-search"
+                    )
+                    yield DataTable(id="highlight-table")
+                    with Vertical(id="highlight-form"):
+                        with Horizontal(classes="field-row"):
+                            yield Label("Enabled:", classes="toggle-label")
+                            yield Switch(value=True, id="highlight-enabled")
+                            yield Label("", classes="toggle-gap")
+                            sm = Switch(value=False, id="highlight-stop-movement")
+                            sm.tooltip = (
+                                "Cancel autodiscover/randomwalk when matched"
+                            )
+                            yield Label("Stop:", classes="toggle-label")
+                            yield sm
+                            yield Label("", classes="toggle-gap")
+                            cs = Switch(value=False, id="highlight-case-sensitive")
+                            cs.tooltip = "Case-sensitive pattern matching"
+                            yield Label("Case Sensitive:", classes="toggle-label")
+                            yield cs
+                        with Horizontal(classes="field-row"):
+                            yield Label("Pattern", classes="form-label-short")
+                            yield Input(
+                                placeholder="regex pattern",
+                                id="highlight-pattern",
+                            )
+                        with Horizontal(classes="field-row"):
+                            yield Label("Highlight", classes="form-label-short")
+                            yield Input(
+                                placeholder="eg. blink_black_on_yellow",
+                                id="highlight-style",
+                            )
+                        with Horizontal(id="highlight-form-buttons"):
+                            yield Label(" ", classes="form-btn-spacer")
+                            yield Button(
+                                "Cancel", variant="default", id="highlight-cancel-form"
+                            )
+                            yield Button("OK", variant="success", id="highlight-ok")
+                    yield Static("", id="highlight-count")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        table = self.query_one("#highlight-table", DataTable)
+        table.cursor_type = "row"
+        table.add_column("#", width=4, key="num")
+        table.add_column("Pattern", key="pattern")
+        table.add_column("Highlight", width=24, key="highlight")
+        table.add_column("Flags", width=6, key="flags")
+        self._load_from_file()
+        self._refresh_table()
+        self.query_one("#highlight-form").display = False
+
+    _AUTOREPLY_PATTERN = "<Autoreply pattern>"
+
+    def _ensure_builtin(self) -> None:
+        """Ensure the builtin autoreply highlight rule exists."""
+        from .highlighter import _DEFAULT_AUTOREPLY_HIGHLIGHT
+
+        if not any(r.builtin for r in self._rules):
+            self._rules.insert(
+                0,
+                _HighlightTuple(
+                    self._AUTOREPLY_PATTERN,
+                    _DEFAULT_AUTOREPLY_HIGHLIGHT,
+                    enabled=True,
+                    stop_movement=False,
+                    builtin=True,
+                ),
+            )
+
+    def _load_from_file(self) -> None:
+        if not os.path.exists(self._path):
+            self._ensure_builtin()
+            return
+        from .highlighter import load_highlights
+
+        try:
+            rules = load_highlights(self._path, self._session_key)
+            self._rules = [
+                _HighlightTuple(
+                    r.pattern.pattern,
+                    r.highlight,
+                    r.enabled,
+                    r.stop_movement,
+                    r.builtin,
+                    r.case_sensitive,
+                )
+                for r in rules
+            ]
+        except (ValueError, FileNotFoundError):
+            pass
+        self._ensure_builtin()
+
+    def _matches_search(self, idx: int, query: str) -> bool:
+        rule = self._rules[idx]
+        q = query.lower()
+        return q in rule.pattern.lower() or q in rule.highlight.lower()
+
+    def _refresh_table(self) -> None:
+        table = self.query_one("#highlight-table", DataTable)
+        table.clear()
+        q = self._search_query
+        self._filtered_indices = []
+        for i, rule in enumerate(self._rules):
+            if q and not self._matches_search(i, q):
+                continue
+            self._filtered_indices.append(i)
+            flags = ""
+            if not rule.enabled:
+                flags = "X"
+            if rule.stop_movement:
+                flags = (flags + " S") if flags else "S"
+            if rule.case_sensitive:
+                flags = (flags + " CS") if flags else "CS"
+            row_pos = len(self._filtered_indices) - 1
+            table.add_row(
+                str(i + 1), rule.pattern, rule.highlight, flags.strip(), key=str(row_pos)
+            )
+        n_total = len(self._rules)
+        n_shown = len(self._filtered_indices)
+        label = self.query_one("#highlight-count", Static)
+        if q:
+            label.update(f"{n_shown:,}/{n_total:,} Highlights")
+        else:
+            label.update(f"{n_total:,} Highlights")
+        self.call_after_refresh(self._fit_growable_columns)
+
+    def _show_form(
+        self,
+        pattern_val: str = "",
+        highlight_val: str = "",
+        enabled: bool = True,
+        stop_movement: bool = False,
+        builtin: bool = False,
+        case_sensitive: bool = False,
+    ) -> None:
+        pat_input = self.query_one("#highlight-pattern", Input)
+        pat_input.value = pattern_val
+        pat_input.disabled = builtin
+        self.query_one("#highlight-style", Input).value = highlight_val
+        self.query_one("#highlight-enabled", Switch).value = enabled
+        stop_sw = self.query_one("#highlight-stop-movement", Switch)
+        stop_sw.value = stop_movement
+        stop_sw.disabled = builtin
+        cs_sw = self.query_one("#highlight-case-sensitive", Switch)
+        cs_sw.value = case_sensitive
+        cs_sw.disabled = builtin
+        self.query_one("#highlight-search", Input).display = False
+        self.query_one("#highlight-table").display = False
+        self.query_one("#highlight-form").display = True
+        self._set_action_buttons_disabled(True)
+        if builtin:
+            self.query_one("#highlight-style", Input).focus()
+        else:
+            pat_input.focus()
+
+    def _submit_form(self) -> None:
+        import re as _re
+
+        pattern_val = self.query_one("#highlight-pattern", Input).value.strip()
+        highlight_val = self.query_one("#highlight-style", Input).value.strip()
+        enabled = self.query_one("#highlight-enabled", Switch).value
+        stop_movement = self.query_one("#highlight-stop-movement", Switch).value
+        case_sensitive = self.query_one("#highlight-case-sensitive", Switch).value
+        if pattern_val:
+            try:
+                _re.compile(pattern_val)
+            except _re.error as exc:
+                self.notify(f"Invalid regex: {exc}", severity="error")
+                return
+            for i, existing in enumerate(self._rules):
+                if (
+                    i != self._editing_idx
+                    and not existing.builtin
+                    and existing.pattern == pattern_val
+                ):
+                    self.notify(
+                        f"Duplicate pattern: {pattern_val!r}", severity="error",
+                    )
+                    return
+        if highlight_val:
+            from .highlighter import validate_highlight
+            from .client_repl import _get_term
+
+            try:
+                term = _get_term()
+            except Exception:
+                term = None
+            if term is not None and not validate_highlight(term, highlight_val):
+                self.notify(
+                    f"Invalid highlight style: {highlight_val!r}", severity="error"
+                )
+                return
+        builtin = False
+        if self._editing_idx is not None:
+            builtin = self._rules[self._editing_idx].builtin
+        entry = _HighlightTuple(
+            pattern_val, highlight_val, enabled, stop_movement, builtin,
+            case_sensitive,
+        )
+        self._finalize_edit(entry, bool(pattern_val and highlight_val))
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        btn = event.button.id or ""
+        if btn == "highlight-delete":
+            idx = self._selected_idx()
+            if idx is not None and idx < len(self._rules) and self._rules[idx].builtin:
+                self.notify("Cannot delete the builtin autoreply highlight rule.")
+                return
+        super().on_button_pressed(event)
+
+    def _save_to_file(self) -> None:
+        import re as _re
+
+        from .highlighter import HighlightRule, save_highlights
+
+        os.makedirs(os.path.dirname(self._path) or ".", exist_ok=True)
+        rules = []
+        for t in self._rules:
+            flags = _re.MULTILINE | _re.DOTALL
+            if not t.case_sensitive:
+                flags |= _re.IGNORECASE
+            rules.append(
+                HighlightRule(
+                    pattern=_re.compile(t.pattern, flags),
+                    highlight=t.highlight,
+                    enabled=t.enabled,
+                    stop_movement=t.stop_movement,
+                    builtin=t.builtin,
+                    case_sensitive=t.case_sensitive,
+                )
+            )
+        save_highlights(self._path, rules, self._session_key)
+
+
 _NAME_COL = 35
 
 # Colors for room tree decorations.
-_DAGGER_STYLE = "bold #d4a017"  # gold, matching bookmark button
-_ARROW_STYLE = "bold #5b8def"  # blue, matching slow-travel button
+_BOOKMARK_STYLE = "#ffffff"
+_ARROW_STYLE = "#5b8def"  # blue, matching slow-travel button
+_HOME_STYLE = "#ffffff"
+_BLOCKED_STYLE = "#e04040"  # red
+_MARKED_STYLE = "#ffffff"
 
 
 class _RoomTree(Tree[str]):
-    """Room tree with aligned star+arrow prefix columns."""
+    """Room tree with aligned icon+arrow prefix columns."""
 
     ICON_NODE = "\u25c2 "  # ◂
     ICON_NODE_EXPANDED = "\u25be "  # ▾
@@ -2186,19 +2724,28 @@ class _RoomTree(Tree[str]):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._bookmarked: set[str] = set()
+        self._blocked: set[str] = set()
+        self._home: set[str] = set()
+        self._marked: set[str] = set()
 
     def render_label(self, node: TreeNode[str], base_style: Style, style: Style) -> "RichText":
-        """Render label with fixed star+arrow prefix columns."""
+        """Render label with fixed icon+arrow prefix columns."""
         from rich.text import Text as RichText
 
         room_num = node.data
         is_child = node.parent is not None and node.parent.parent is not None
 
-        # Star column (2 chars: dagger + space)
-        if room_num and room_num in self._bookmarked:
-            star = RichText("\u2e38 ", style=_DAGGER_STYLE)
+        # Icon column (2 chars): priority — home > blocked > marked > bookmark
+        if room_num and room_num in self._home:
+            icon = RichText("\u2302 ", style=_HOME_STYLE)
+        elif room_num and room_num in self._blocked:
+            icon = RichText("\u2300 ", style=_BLOCKED_STYLE)
+        elif room_num and room_num in self._marked:
+            icon = RichText("\u27bd ", style=_MARKED_STYLE)
+        elif room_num and room_num in self._bookmarked:
+            icon = RichText("\u257e ", style=_BOOKMARK_STYLE)
         else:
-            star = RichText("  ")
+            icon = RichText("  ")
 
         # Arrow column (2 chars: arrow + space) — only for expandable nodes
         if node._allow_expand:
@@ -2212,7 +2759,7 @@ class _RoomTree(Tree[str]):
         node_label = node._label.copy()
         node_label.stylize(style)
 
-        text = RichText.assemble(star, arrow, node_label)
+        text = RichText.assemble(icon, arrow, node_label)
         return text
 
 
@@ -2232,10 +2779,14 @@ class RoomBrowserScreen(Screen["bool | None"]):
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("escape", "close", "Close", priority=True),
+        Binding("f1", "show_help", "Help", show=True),
         Binding("enter", "fast_travel", "Travel", show=True),
         Binding(
             "asterisk", "toggle_bookmark", "Bookmark", key_display="*", show=True, priority=True
         ),
+        Binding("b", "toggle_block", "Block", show=True),
+        Binding("h", "toggle_home", "Home", show=True),
+        Binding("m", "toggle_mark", "Mark", show=True),
         Binding("n", "sort_name", "Name sort", show=True),
         Binding("i", "sort_id", "ID sort", show=True),
         Binding("d", "sort_distance", "Dist sort", show=True),
@@ -2245,13 +2796,13 @@ class RoomBrowserScreen(Screen["bool | None"]):
     CSS = """
     RoomBrowserScreen { align: center middle; }
     #room-panel {
-        width: 91; height: 100%; max-height: 26;
+        width: 100%; height: 100%;
         border: round $surface-lighten-2; background: $surface; padding: 1 1;
     }
     #room-search { height: auto; }
     #room-body { height: 1fr; }
     #room-button-col {
-        width: 22; height: auto; padding-right: 1;
+        width: 20; height: auto; padding-right: 1;
     }
     #room-button-col Button {
         width: 100%; min-width: 0; margin-bottom: 0;
@@ -2267,9 +2818,14 @@ class RoomBrowserScreen(Screen["bool | None"]):
     #room-tree > .tree--guides { color: #5b8def; }
     #room-tree > .tree--guides-hover { color: #5b8def; }
     #room-tree > .tree--guides-selected { color: #5b8def; }
+    #room-heading { height: 1; text-style: bold; }
     #room-status { height: 1; margin-top: 0; }
-    #room-count { width: 1fr; }
+    #room-count { width: auto; }
+    #room-exits { width: 1fr; text-align: center; }
     #room-distance { width: auto; text-align: right; }
+    #room-marker-bar { height: auto; }
+    #room-marker-bar Button { width: 14; min-width: 0; margin-right: 1; }
+    #room-total { height: 1; margin-top: 0; }
     Footer FooterLabel { margin: 0; }
     """
 
@@ -2286,12 +2842,21 @@ class RoomBrowserScreen(Screen["bool | None"]):
         self._session_key = session_key
         self._current_room_file = current_room_file
         self._fasttravel_file = fasttravel_file
-        self._all_rooms: list[tuple[str, str, str, int, bool, str]] = []
+        self._all_rooms: list[
+            tuple[str, str, str, int, bool, str, bool, bool, bool]
+        ] = []
         self._current_area: str = ""
         self._graph: "RoomStore | None" = None
         self._mounted = False
         self._sort_mode: str = "name"
         self._distances: dict[str, int] = {}
+        self._last_visited: dict[str, str] = {}
+
+    def _heading_text(self) -> str:
+        """Return the column heading string for the tree."""
+        info_label = "[Last]" if self._sort_mode == "last_visited" else "[Dist]"
+        # 4 chars icon+arrow prefix, then name col, count, info, id
+        return f"      {'Name'.ljust(_NAME_COL)} {'(N)'.rjust(4)} {info_label.rjust(8)}  #ID"
 
     def compose(self) -> ComposeResult:
         """Build the room browser layout."""
@@ -2306,19 +2871,41 @@ class RoomBrowserScreen(Screen["bool | None"]):
                     slow_btn = Button("Slow", variant="primary", id="room-slow-travel")
                     slow_btn.tooltip = "Slow travel: wait for autoreplies to finish in each room"
                     yield slow_btn
-                    yield Button("Bookmark", variant="warning", id="room-bookmark")
+                    yield Button("Help", variant="success", id="room-help")
                     yield Button("Close", id="room-close")
                     with Vertical(id="room-area-frame"):
                         yield Static("Area:")
                         yield Select[str](
                             [], id="room-area-select", allow_blank=True, prompt="All Areas"
                         )
+                        yield Static("", id="room-total")
                 with Vertical(id="room-right"):
                     yield Input(placeholder="Search rooms\u2026", id="room-search")
+                    yield Static(
+                        self._heading_text(), id="room-heading"
+                    )
                     yield _RoomTree("Rooms", id="room-tree")
                     with Horizontal(id="room-status"):
                         yield Static("", id="room-count")
+                        yield Static("", id="room-exits")
                         yield Static("", id="room-distance")
+                    with Horizontal(id="room-marker-bar"):
+                        yield Button(
+                            "Bookmark \u257e", variant="warning",
+                            id="room-bookmark",
+                        )
+                        yield Button(
+                            "Block \u2300", variant="error",
+                            id="room-block",
+                        )
+                        yield Button(
+                            "Home \u2302", variant="primary",
+                            id="room-home",
+                        )
+                        yield Button(
+                            "Mark \u27bd", variant="default",
+                            id="room-mark",
+                        )
         yield Footer()
 
     def on_mount(self) -> None:
@@ -2371,6 +2958,9 @@ class RoomBrowserScreen(Screen["bool | None"]):
         graph = RoomStore(self._rooms_path, read_only=True)
         self._graph = graph
         self._all_rooms = graph.room_summaries()
+        self._last_visited = {
+            num: lv for num, _, _, _, _, lv, _, _, _ in self._all_rooms if lv
+        }
         if self._current_room_file:
             current = read_current_room(self._current_room_file)
             if current:
@@ -2379,7 +2969,7 @@ class RoomBrowserScreen(Screen["bool | None"]):
     def _populate_area_dropdown(self) -> None:
         """Populate the area dropdown from loaded rooms."""
         areas: set[str] = set()
-        for _, _, area, _, _, _ in self._all_rooms:
+        for _, _, area, _, _, _, _, _, _ in self._all_rooms:
             if area:
                 areas.add(area)
         sorted_areas = sorted(areas, key=str.lower)
@@ -2400,25 +2990,35 @@ class RoomBrowserScreen(Screen["bool | None"]):
         if current:
             self._distances = self._graph.bfs_distances(current)
 
+    @staticmethod
+    def _priority(
+        r: tuple[str, str, str, int, bool, str, bool, bool, bool],
+    ) -> tuple[bool, bool, bool, bool]:
+        """Return sort priority: home, blocked, bookmarked, marked first."""
+        # r[7]=home, r[6]=blocked, r[4]=bookmarked, r[8]=marked
+        return (not r[7], not r[6], not r[4], not r[8])
+
     def _sort_rooms(self) -> None:
         """Sort ``_all_rooms`` according to ``_sort_mode``."""
         if self._sort_mode == "distance":
             self._all_rooms.sort(
                 key=lambda r: (
-                    not r[4],
+                    *self._priority(r),
                     self._distances.get(r[0], float("inf")),
                     r[2].lower(),
                     r[1].lower(),
                 )
             )
         elif self._sort_mode == "last_visited":
-            def _lv_key(r: tuple[str, str, str, int, bool, str]) -> tuple[bool, str, str]:
-                return (not r[4], _invert_ts(r[5]), r[1].lower())
-            self._all_rooms.sort(key=_lv_key)
+            self._all_rooms.sort(
+                key=lambda r: (*self._priority(r), _invert_ts(r[5]), r[1].lower())
+            )
         elif self._sort_mode == "id":
-            self._all_rooms.sort(key=lambda r: (not r[4], r[0].lower()))
+            self._all_rooms.sort(key=lambda r: (*self._priority(r), r[0].lower()))
         else:
-            self._all_rooms.sort(key=lambda r: (not r[4], r[2].lower(), r[1].lower()))
+            self._all_rooms.sort(
+                key=lambda r: (*self._priority(r), r[2].lower(), r[1].lower())
+            )
 
     @staticmethod
     def _short_id(num: str, width: int = 10) -> str:
@@ -2427,71 +3027,108 @@ class RoomBrowserScreen(Screen["bool | None"]):
             return num
         return num[: width - 1] + "\u2026"
 
-    def _room_label(self, num: str) -> str:
-        """Format a child leaf label (blank name, aligned dist + id)."""
-        dist = self._distances.get(num)
-        dist_part = f"[{dist}]".rjust(5) if dist is not None else "     "
+    def _room_label(self, num: str) -> "RichText":
+        """Format a child leaf label (blank name, aligned dist/time + id)."""
+        from rich.text import Text as RichText
+
+        if self._sort_mode == "last_visited":
+            lv = self._last_visited.get(num, "")
+            info_part = _relative_time(lv).rjust(8) if lv else "".rjust(8)
+        else:
+            dist = self._distances.get(num)
+            info_part = f"[{dist}]".rjust(5) if dist is not None else "     "
         id_part = f" #{self._short_id(num)}"
-        return f"{''.ljust(_NAME_COL)} {''.rjust(4)} {dist_part}{id_part}"
+        return RichText(f"{''.ljust(_NAME_COL)} {''.rjust(4)} {info_part}{id_part}")
 
     def _refresh_tree(self, query: str = "") -> None:
         """Rebuild tree nodes, grouping rooms with the same name."""
+        from rich.text import Text as RichText
+        from telnetlib3.rooms import strip_exit_dirs
+
         tree = self.query_one("#room-tree", Tree)
         tree.clear()
         q = query.lower()
         select = self.query_one("#room-area-select", Select)
         area_filter = select.value if isinstance(select.value, str) else None
 
-        groups: dict[str, list[tuple[str, str, int, bool]]] = {}
+        groups: dict[str, list[tuple[str, str, int, bool, str]]] = {}
         group_order: list[str] = []
-        for num, name, area, exits, bookmarked, _lv in self._all_rooms:
+        for num, name, area, exits, bookmarked, lv, bl, hm, mk in self._all_rooms:
             if area_filter and area != area_filter:
                 continue
-            if q and q not in name.lower() and q not in area.lower():
+            display_name = strip_exit_dirs(name)
+            if q and q not in display_name.lower() and q not in area.lower():
                 continue
-            if name not in groups:
-                groups[name] = []
-                group_order.append(name)
-            groups[name].append((num, area, exits, bookmarked))
+            if display_name not in groups:
+                groups[display_name] = []
+                group_order.append(display_name)
+            groups[display_name].append((num, area, exits, bookmarked, lv))
 
-        # Populate bookmarked set for the _RoomTree prefix renderer.
+        # Populate icon sets for the _RoomTree prefix renderer.
         if isinstance(tree, _RoomTree):
-            tree._bookmarked = {num for num, _, _, _, bm, _ in self._all_rooms if bm}
+            tree._bookmarked = {
+                num for num, _, _, _, bm, _, _, _, _ in self._all_rooms if bm
+            }
+            tree._blocked = {
+                num for num, _, _, _, _, _, bl, _, _ in self._all_rooms if bl
+            }
+            tree._home = {
+                num for num, _, _, _, _, _, _, hm, _ in self._all_rooms if hm
+            }
+            tree._marked = {
+                num for num, _, _, _, _, _, _, _, mk in self._all_rooms if mk
+            }
 
         n_shown = 0
         with self.app.batch_update():
             for name in group_order:
                 members = groups[name]
                 n_shown += len(members)
+                show_time = self._sort_mode == "last_visited"
                 if len(members) == 1:
-                    num, _area, _exits, bookmarked = members[0]
+                    num, _area, _exits, bookmarked, lv = members[0]
                     name_part = name.ljust(_NAME_COL)[:_NAME_COL]
                     count_part = "(1)".rjust(4)
-                    dist = self._distances.get(num)
-                    dist_part = f"[{dist}]".rjust(5) if dist is not None else "     "
+                    if show_time:
+                        info_part = _relative_time(lv).rjust(8) if lv else "".rjust(8)
+                    else:
+                        dist = self._distances.get(num)
+                        info_part = f"[{dist}]".rjust(5) if dist is not None else "     "
                     id_part = f" #{self._short_id(num)}"
-                    label = f"{name_part} {count_part} {dist_part}{id_part}"
-                    tree.root.add_leaf(label, data=num)
+                    label = f"{name_part} {count_part} {info_part}{id_part}"
+                    tree.root.add_leaf(RichText(label), data=num)
                 else:
-                    nearest = min(
-                        (self._distances.get(m[0], float("inf")) for m in members),
-                        default=float("inf"),
-                    )
                     name_part = name.ljust(_NAME_COL)[:_NAME_COL]
                     count_part = f"({len(members)})".rjust(4)
-                    dist_part = f"[{int(nearest)}]".rjust(5) if nearest != float("inf") else "     "
-                    label = f"{name_part} {count_part} {dist_part}"
-                    parent = tree.root.add(label, data=None)
-                    members.sort(key=lambda m: self._distances.get(m[0], float("inf")))
-                    for num, _area, _exits, bookmarked in members:
+                    if show_time:
+                        newest = max(
+                            (m[4] for m in members if m[4]), default=""
+                        )
+                        info_part = _relative_time(newest).rjust(8) if newest else "".rjust(8)
+                    else:
+                        nearest = min(
+                            (self._distances.get(m[0], float("inf")) for m in members),
+                            default=float("inf"),
+                        )
+                        info_part = (
+                            f"[{int(nearest)}]".rjust(5)
+                            if nearest != float("inf")
+                            else "     "
+                        )
+                    label = f"{name_part} {count_part} {info_part}"
+                    parent = tree.root.add(RichText(label), data=None)
+                    if show_time:
+                        members.sort(key=lambda m: m[4] or "", reverse=True)
+                    else:
+                        members.sort(key=lambda m: self._distances.get(m[0], float("inf")))
+                    for num, _area, _exits, bookmarked, _lv in members:
                         parent.add_leaf(self._room_label(num), data=num)
 
         count_label = self.query_one("#room-count", Static)
         n_total = len(self._all_rooms)
-        if query or area_filter:
-            count_label.update(f"{n_shown}/{n_total} rooms")
-        else:
-            count_label.update(f"{n_total} rooms")
+        count_label.update(f"{n_shown:,} Rooms")
+        total_label = self.query_one("#room-total", Static)
+        total_label.update(f"{n_total:,} Rooms Total")
 
     def _get_selected_room_num(self) -> "str | None":
         """Return the room number of the currently highlighted tree node."""
@@ -2518,9 +3155,24 @@ class RoomBrowserScreen(Screen["bool | None"]):
         if event.input.id == "room-search":
             self._refresh_tree(event.value)
 
+    def _exits_text(self, room_num: str) -> str:
+        """Build an exits summary like ``Exits: north[Town Square], east[Shop]``."""
+        if self._graph is None:
+            return ""
+        adj = self._graph._adj.get(room_num, {})
+        if not adj:
+            return ""
+        parts: list[str] = []
+        for direction, dst_num in adj.items():
+            room = self._graph.get_room(dst_num)
+            name = room.name if room else dst_num[:8]
+            parts.append(f"{direction}[{name}]")
+        return "Exits: " + ", ".join(parts)
+
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted[str]) -> None:
-        """Update distance label when tree cursor moves."""
+        """Update distance and exits labels when tree cursor moves."""
         dist_label = self.query_one("#room-distance", Static)
+        exits_label = self.query_one("#room-exits", Static)
         node = event.node
         room_num = node.data if node.data is not None else None
         if room_num is None and node.children:
@@ -2529,7 +3181,9 @@ class RoomBrowserScreen(Screen["bool | None"]):
                 room_num = first.data
         if room_num is None:
             dist_label.update("")
+            exits_label.update("")
             return
+        exits_label.update(self._exits_text(room_num))
         if not self._current_room_file or self._graph is None:
             dist_label.update("")
             return
@@ -2559,6 +3213,18 @@ class RoomBrowserScreen(Screen["bool | None"]):
             self._do_fast_travel(slow=True)
         elif event.button.id == "room-bookmark":
             self._do_toggle_bookmark()
+        elif event.button.id == "room-block":
+            self._do_toggle_block()
+        elif event.button.id == "room-home":
+            self._do_toggle_home()
+        elif event.button.id == "room-mark":
+            self._do_toggle_mark()
+        elif event.button.id == "room-help":
+            self.app.push_screen(_CommandHelpScreen(topic="room"))
+
+    def action_show_help(self) -> None:
+        """Open the room browser help screen."""
+        self.app.push_screen(_CommandHelpScreen(topic="room"))
 
     def on_key(self, event: events.Key) -> None:
         """Arrow keys navigate between search, buttons, and the room tree."""
@@ -2651,6 +3317,11 @@ class RoomBrowserScreen(Screen["bool | None"]):
         if select_num is None:
             select_num = self._get_selected_room_num()
         self._sort_rooms()
+        try:
+            heading = self.query_one("#room-heading", Static)
+            heading.update(self._heading_text())
+        except Exception:
+            pass
         search_val = self.query_one("#room-search", Input).value
         self._refresh_tree(search_val)
         if select_num:
@@ -2660,8 +3331,20 @@ class RoomBrowserScreen(Screen["bool | None"]):
         """Toggle bookmark on the selected room."""
         self._do_toggle_bookmark()
 
-    def _do_toggle_bookmark(self) -> None:
-        """Toggle bookmark flag on the currently selected room."""
+    def action_toggle_block(self) -> None:
+        """Toggle block on the selected room."""
+        self._do_toggle_block()
+
+    def action_toggle_home(self) -> None:
+        """Toggle home on the selected room."""
+        self._do_toggle_home()
+
+    def action_toggle_mark(self) -> None:
+        """Toggle mark on the selected room."""
+        self._do_toggle_mark()
+
+    def _do_toggle_marker(self, marker: str) -> None:
+        """Toggle an exclusive marker on the currently selected room."""
         num = self._get_selected_room_num()
         if num is None:
             return
@@ -2669,14 +3352,26 @@ class RoomBrowserScreen(Screen["bool | None"]):
         from telnetlib3.rooms import RoomStore
 
         store = RoomStore(self._rooms_path)
-        store.toggle_bookmark(num)
+        store.set_marker(num, marker)
+        self._all_rooms = store.room_summaries()
         store.close()
-
-        for i, (rnum, name, area, exits, bm, lv) in enumerate(self._all_rooms):
-            if rnum == num:
-                self._all_rooms[i] = (rnum, name, area, exits, not bm, lv)
-                break
         self._apply_sort(select_num=num)
+
+    def _do_toggle_bookmark(self) -> None:
+        """Toggle bookmark on the currently selected room."""
+        self._do_toggle_marker("bookmarked")
+
+    def _do_toggle_block(self) -> None:
+        """Toggle blocked on the currently selected room."""
+        self._do_toggle_marker("blocked")
+
+    def _do_toggle_home(self) -> None:
+        """Toggle home on the currently selected room."""
+        self._do_toggle_marker("home")
+
+    def _do_toggle_mark(self) -> None:
+        """Toggle mark on the currently selected room."""
+        self._do_toggle_marker("marked")
 
     def _do_fast_travel(self, slow: bool = False) -> None:
         """Calculate path and write fast travel file."""
@@ -2743,6 +3438,7 @@ class RoomPickerScreen(RoomBrowserScreen):
                     yield _RoomTree("Rooms", id="room-tree")
                     with Horizontal(id="room-status"):
                         yield Static("", id="room-count")
+                        yield Static("", id="room-exits")
                         yield Static("", id="room-distance")
         yield Footer()
 
@@ -2768,10 +3464,13 @@ class RoomPickerScreen(RoomBrowserScreen):
 class _EditorApp(App[None]):
     """Minimal Textual app for standalone macro/autoreply editing."""
 
-    def __init__(self, screen: Screen["bool | None"]) -> None:
+    def __init__(
+        self, screen: Screen["bool | None"], session_key: str = ""
+    ) -> None:
         """Initialize with the editor screen to push."""
         super().__init__()
         self._editor_screen = screen
+        self._session_key = session_key
 
     def _set_pointer_shape(self, shape: str) -> None:
         """
@@ -2798,7 +3497,23 @@ class _EditorApp(App[None]):
             getattr(driver, "_mouse_pixels", "?"),
             getattr(driver, "_in_band_window_resize", "?"),
         )
+        if self._session_key:
+            from .rooms import load_prefs
+
+            prefs = load_prefs(self._session_key)
+            saved_theme = prefs.get("tui_theme")
+            if isinstance(saved_theme, str) and saved_theme:
+                self.theme = saved_theme
         self.push_screen(self._editor_screen, callback=lambda _: self.exit())
+
+    def watch_theme(self, old: str, new: str) -> None:
+        """Persist theme choice to per-session preferences."""
+        if self._session_key and new:
+            from .rooms import load_prefs, save_prefs
+
+            prefs = load_prefs(self._session_key)
+            prefs["tui_theme"] = new
+            save_prefs(self._session_key, prefs)
 
 
 def _patch_writer_thread_queue() -> None:
@@ -2908,7 +3623,8 @@ def edit_macros_main(
             session_key=session_key,
             rooms_file=rooms_file,
             current_room_file=current_room_file,
-        )
+        ),
+        session_key=session_key,
     )
     app.run()
 
@@ -2921,7 +3637,24 @@ def edit_autoreplies_main(
     _log_child_diagnostics()
     _patch_writer_thread_queue()
     app = _EditorApp(
-        AutoreplyEditScreen(path=path, session_key=session_key, select_pattern=select_pattern)
+        AutoreplyEditScreen(
+            path=path, session_key=session_key, select_pattern=select_pattern
+        ),
+        session_key=session_key,
+    )
+    app.run()
+
+
+def edit_highlights_main(
+    path: str, session_key: str = "", logfile: str = ""
+) -> None:
+    """Launch standalone highlight editor TUI."""
+    _restore_blocking_fds(logfile)
+    _log_child_diagnostics()
+    _patch_writer_thread_queue()
+    app = _EditorApp(
+        HighlightEditScreen(path=path, session_key=session_key),
+        session_key=session_key,
     )
     app.run()
 
@@ -2943,13 +3676,220 @@ def edit_rooms_main(
             session_key=session_key,
             current_room_file=current_room_file,
             fasttravel_file=fasttravel_file,
-        )
+        ),
+        session_key=session_key,
     )
     app.run()
 
 
+def show_help_main(topic: str = "keybindings", logfile: str = "") -> None:
+    """Launch standalone help viewer TUI."""
+    _restore_blocking_fds(logfile)
+    _log_child_diagnostics()
+    _patch_writer_thread_queue()
+    app = _EditorApp(_CommandHelpScreen(topic=topic))
+    app.run()
+
+
+class _ChatViewerScreen(Screen[None]):
+    """Read-only GMCP chat history viewer."""
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("escape", "close", "Close", show=True),
+        Binding("f10", "close", "Close", show=False),
+        Binding("q", "close", "Close", show=False),
+        Binding("f1", "toggle_keys", "Keys", show=True),
+        Binding("tab", "next_channel", "Next Channel", show=True),
+        Binding("shift+tab", "prev_channel", "Prev Channel", show=True, priority=True),
+    ]
+
+    DEFAULT_CSS = """
+    _ChatViewerScreen {
+        layout: vertical;
+    }
+    #chat-header {
+        height: 1;
+        background: $surface;
+        padding: 0 1;
+    }
+    #chat-channel-bar {
+        height: 1;
+    }
+    #chat-log {
+        height: 1fr;
+        background: $surface;
+        padding: 0 1;
+    }
+    Footer FooterLabel { margin: 0; }
+    """
+
+    def __init__(
+        self, chat_file: str, session_key: str = "", initial_channel: str = ""
+    ) -> None:
+        """Initialize with path to chat history file.
+
+        :param chat_file: Path to the chat JSON file.
+        :param session_key: Session identifier.
+        :param initial_channel: Channel to select on open (most recent activity).
+        """
+        super().__init__()
+        self._chat_file = chat_file
+        self._session_key = session_key
+        self._initial_channel = initial_channel
+        self._messages: list[dict[str, Any]] = []
+        self._channels: list[str] = []
+        self._filter_idx: int = 0
+
+    def compose(self) -> ComposeResult:
+        """Build the chat viewer layout."""
+        from textual.widgets import RichLog
+
+        with Vertical(id="chat-header"):
+            yield Static("", id="chat-channel-bar")
+        yield RichLog(highlight=False, markup=False, wrap=True, id="chat-log")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        """Load chat file, select initial channel, and populate the log."""
+        self._load_messages()
+        if self._initial_channel and self._initial_channel in self._channels:
+            self._filter_idx = self._channels.index(self._initial_channel) + 1
+        self._update_channel_bar()
+        self._populate_log()
+
+    def _load_messages(self) -> None:
+        """Read messages from the chat JSON file."""
+        if not self._chat_file or not os.path.exists(self._chat_file):
+            return
+        with open(self._chat_file, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        if isinstance(data, list):
+            self._messages = data
+        channels: set[str] = set()
+        for msg in self._messages:
+            ch = msg.get("channel", "")
+            if ch:
+                channels.add(ch)
+        self._channels = sorted(channels)
+
+    def _channel_labels(self) -> list[str]:
+        """Return ``["all", ...channels]`` list used for cycling."""
+        return ["all"] + self._channels
+
+    def _active_filter(self) -> str:
+        """Return the current channel filter string, or ``""`` for all."""
+        labels = self._channel_labels()
+        if self._filter_idx == 0 or self._filter_idx >= len(labels):
+            return ""
+        return labels[self._filter_idx]
+
+    def _update_channel_bar(self) -> None:
+        """Rebuild the horizontal channel bar with the active channel highlighted."""
+        from rich.text import Text as RichText
+
+        labels = self._channel_labels()
+        bar = RichText("Channel (TAB changes): ")
+        for i, name in enumerate(labels):
+            if i > 0:
+                bar.append("  ")
+            if i == self._filter_idx:
+                bar.append(f" {name} ", style="reverse bold")
+            else:
+                bar.append(name, style="dim")
+        self.query_one("#chat-channel-bar", Static).update(bar)
+
+    def _populate_log(self, channel_filter: str = "") -> None:
+        """Fill the RichLog with chat messages, optionally filtered by channel."""
+        from textual.widgets import RichLog
+        from rich.text import Text as RichText
+
+        if not channel_filter:
+            channel_filter = self._active_filter()
+        log_widget: RichLog = self.query_one("#chat-log", RichLog)
+        log_widget.clear()
+        for msg in self._messages:
+            ch = msg.get("channel", "")
+            if channel_filter and ch != channel_filter:
+                continue
+            ts = msg.get("ts", "")
+            talker = msg.get("talker", "")
+            text_raw = msg.get("text", "").rstrip("\n")
+            body = text_raw
+            if talker:
+                for prefix in (f"{talker} : ", f"{talker}: ", f"{talker} "):
+                    if body.startswith(prefix):
+                        body = body[len(prefix):]
+                        break
+            line = RichText()
+            if ts:
+                short_ts = ts[11:16] if len(ts) >= 16 else ts
+                line.append(f"{short_ts} ", style="dim")
+            if not channel_filter:
+                channel_ansi = msg.get("channel_ansi", "")
+                if channel_ansi:
+                    line.append_text(RichText.from_ansi(channel_ansi.rstrip()))
+                    line.append(" ")
+                else:
+                    line.append(f"[{ch}] ", style="bold cyan")
+            if talker:
+                line.append(f"{talker}: ", style="bold")
+            line.append_text(RichText.from_ansi(body))
+            log_widget.write(line)
+        log_widget.scroll_end(animate=False)
+
+    def action_close(self) -> None:
+        """Dismiss the chat viewer."""
+        self.app.exit()
+
+    def action_toggle_keys(self) -> None:
+        """Toggle the Textual keys help panel."""
+        if self.app.help_panel:
+            self.app.action_hide_help_panel()
+        else:
+            self.app.action_show_help_panel()
+
+    def action_next_channel(self) -> None:
+        """Cycle forward through channel filters."""
+        if not self._channels:
+            return
+        labels = self._channel_labels()
+        self._filter_idx = (self._filter_idx + 1) % len(labels)
+        self._update_channel_bar()
+        self._populate_log()
+
+    def action_prev_channel(self) -> None:
+        """Cycle backward through channel filters."""
+        if not self._channels:
+            return
+        labels = self._channel_labels()
+        self._filter_idx = (self._filter_idx - 1) % len(labels)
+        self._update_channel_bar()
+        self._populate_log()
+
+
+def chat_viewer_main(
+    chat_file: str,
+    session_key: str = "",
+    initial_channel: str = "",
+    logfile: str = "",
+) -> None:
+    """Launch standalone chat viewer TUI."""
+    _restore_blocking_fds(logfile)
+    _log_child_diagnostics()
+    _patch_writer_thread_queue()
+    app = _EditorApp(
+        _ChatViewerScreen(
+            chat_file=chat_file,
+            session_key=session_key,
+            initial_channel=initial_channel,
+        ),
+        session_key=session_key,
+    )
+    app.run(mouse=False)
+
+
 class _ConfirmDialogScreen(Screen[bool]):
-    """Confirmation dialog with optional warning and 'don't ask again' checkbox."""
+    """Confirmation dialog with optional warning."""
 
     BINDINGS = [Binding("escape", "cancel", "Cancel", show=False)]
 
@@ -2977,14 +3917,6 @@ class _ConfirmDialogScreen(Screen[bool]):
         color: $error;
         margin-bottom: 1;
     }
-    #confirm-checkbox-row {
-        height: 3;
-        margin-bottom: 1;
-    }
-    #confirm-checkbox-row Label {
-        padding-top: 1;
-        margin-left: 1;
-    }
     #confirm-buttons {
         height: 3;
         align-horizontal: right;
@@ -3002,7 +3934,6 @@ class _ConfirmDialogScreen(Screen[bool]):
         body: str,
         warning: str = "",
         result_file: str = "",
-        show_dont_ask: bool = True,
     ) -> None:
         """Initialize confirm dialog with title, body, and optional warning."""
         super().__init__()
@@ -3010,7 +3941,6 @@ class _ConfirmDialogScreen(Screen[bool]):
         self._body = body
         self._warning = warning
         self._result_file = result_file
-        self._show_dont_ask = show_dont_ask
 
     def compose(self) -> ComposeResult:
         """Build the confirm dialog layout."""
@@ -3019,10 +3949,6 @@ class _ConfirmDialogScreen(Screen[bool]):
             yield Static(self._body, id="confirm-body")
             if self._warning:
                 yield Static(self._warning, id="confirm-warning")
-            if self._show_dont_ask:
-                with Horizontal(id="confirm-checkbox-row"):
-                    yield Switch(value=False, id="confirm-dont-ask")
-                    yield Label("Don't ask me again")
             with Horizontal(id="confirm-buttons"):
                 yield Button("Cancel", variant="default", id="confirm-cancel")
                 yield Button("OK", variant="success", id="confirm-ok")
@@ -3049,9 +3975,7 @@ class _ConfirmDialogScreen(Screen[bool]):
         """Write result to file for the parent process to read."""
         if not self._result_file:
             return
-        nodes = self.query("#confirm-dont-ask")
-        dont_ask = nodes.first(Switch).value if nodes else False
-        result = json.dumps({"confirmed": confirmed, "dont_ask": dont_ask})
+        result = json.dumps({"confirmed": confirmed})
         with open(self._result_file, "w", encoding="utf-8") as f:
             f.write(result)
 
@@ -3064,6 +3988,150 @@ def confirm_dialog_main(
     _log_child_diagnostics()
     _patch_writer_thread_queue()
     screen = _ConfirmDialogScreen(title=title, body=body, warning=warning, result_file=result_file)
+    app = _EditorApp(screen)
+    app.run()
+
+
+class _RandomwalkDialogScreen(Screen[bool]):
+    """Random walk confirmation dialog with visit-level parameter."""
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel", show=False)]
+
+    DEFAULT_CSS = """
+    _RandomwalkDialogScreen {
+        align: center middle;
+    }
+    #rw-dialog {
+        width: 79;
+        height: auto;
+        max-height: 80%;
+        border: round $surface-lighten-2;
+        background: $surface;
+        padding: 1 2;
+    }
+    #rw-title {
+        text-style: bold;
+        text-align: center;
+    }
+    #rw-body {
+        margin-bottom: 1;
+    }
+    #rw-field-row {
+        height: 3;
+    }
+    #rw-field-row Label {
+        padding-top: 1;
+        width: auto;
+        margin-right: 1;
+    }
+    #rw-field-row Input {
+        width: 8;
+    }
+    #rw-error {
+        color: $error;
+        height: 1;
+    }
+    #rw-buttons {
+        height: 3;
+        align-horizontal: right;
+    }
+    #rw-buttons Button {
+        width: auto;
+        min-width: 12;
+        margin-left: 1;
+    }
+    """
+
+    def __init__(
+        self,
+        result_file: str = "",
+        default_visit_level: int = 2,
+    ) -> None:
+        super().__init__()
+        self._result_file = result_file
+        self._default_visit_level = default_visit_level
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="rw-dialog"):
+            yield Static("Random Walk", id="rw-title")
+            yield Static(
+                "Random walk explores rooms by picking random exits, "
+                "preferring unvisited rooms. It never returns through "
+                "the entrance you came from. Autoreplies fire in each "
+                "room. Stops when all reachable rooms are visited the "
+                "required number of times.",
+                id="rw-body",
+            )
+            with Horizontal(id="rw-field-row"):
+                lbl = Label("Visit level:")
+                lbl.tooltip = (
+                    "Minimum number of times each reachable room must be "
+                    "visited before the walk stops."
+                )
+                yield lbl
+                yield Input(
+                    value=str(self._default_visit_level),
+                    id="rw-visit-level",
+                    type="integer",
+                )
+            yield Static("", id="rw-error")
+            with Horizontal(id="rw-buttons"):
+                yield Button("Cancel", variant="default", id="rw-cancel")
+                yield Button("OK", variant="success", id="rw-ok")
+
+    def on_mount(self) -> None:
+        self.query_one("#rw-ok", Button).focus()
+
+    def _validate_and_dismiss(self) -> None:
+        raw = self.query_one("#rw-visit-level", Input).value.strip()
+        try:
+            level = int(raw)
+        except ValueError:
+            self.query_one("#rw-error", Static).update("Visit level must be a number.")
+            return
+        if level < 1:
+            self.query_one("#rw-error", Static).update(
+                "Visit level must be at least 1."
+            )
+            return
+        self._write_result(True, level)
+        self.dismiss(True)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "rw-ok":
+            self._validate_and_dismiss()
+        elif event.button.id == "rw-cancel":
+            self._write_result(False, self._default_visit_level)
+            self.dismiss(False)
+
+    def action_cancel(self) -> None:
+        self._write_result(False, self._default_visit_level)
+        self.dismiss(False)
+
+    def _write_result(self, confirmed: bool, visit_level: int) -> None:
+        if not self._result_file:
+            return
+        result = json.dumps({
+            "confirmed": confirmed,
+            "visit_level": visit_level,
+        })
+        with open(self._result_file, "w", encoding="utf-8") as f:
+            f.write(result)
+
+
+def randomwalk_dialog_main(
+    result_file: str = "",
+    default_visit_level: str = "2",
+    logfile: str = "",
+) -> None:
+    """Launch standalone random walk dialog TUI."""
+    _restore_blocking_fds(logfile)
+    _log_child_diagnostics()
+    _patch_writer_thread_queue()
+    screen = _RandomwalkDialogScreen(
+        result_file=result_file,
+        default_visit_level=int(default_visit_level),
+    )
     app = _EditorApp(screen)
     app.run()
 

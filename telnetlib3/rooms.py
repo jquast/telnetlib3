@@ -10,6 +10,7 @@ from __future__ import annotations
 
 # std imports
 import os
+import re
 import json
 import random
 import sqlite3
@@ -20,6 +21,22 @@ from dataclasses import field, dataclass
 
 # local
 from ._paths import _atomic_write
+
+_EXIT_DIR_RE = re.compile(
+    r"\s*"
+    r"(?:\{[^}]*\}\s*)?"
+    r"\[(?:[nswe]|n[ew]|s[ew]|[a-z]+)"
+    r"(?:,(?:[nswe]|n[ew]|s[ew]|[a-z]+))*\]"
+    r"\s*$"
+)
+
+
+def strip_exit_dirs(name: str) -> str:
+    """Strip trailing exit-direction lists like ``[n,s,w,e]`` from a room name.
+
+    Also handles optional ``{SPICE}``-style tags before the bracket list.
+    """
+    return _EXIT_DIR_RE.sub("", name)
 
 
 @dataclass
@@ -34,17 +51,23 @@ class Room:
     bookmarked: bool = False
     visit_count: int = 0
     last_visited: str = ""
+    blocked: bool = False
+    home: bool = False
+    marked: bool = False
 
 
 class RoomStore:
     """SQLite-backed room graph with in-memory adjacency cache."""
 
-    def __init__(self, db_path: str, read_only: bool = False) -> None:
+    def __init__(
+        self, db_path: str, read_only: bool = False, session_key: str = ""
+    ) -> None:
         """
         Open or create an SQLite room database.
 
         :param db_path: Path to the ``.db`` file.
         :param read_only: Open in read-only mode (no table creation).
+        :param session_key: ``host:port`` identifier stored as metadata.
         """
         dir_path = os.path.dirname(db_path)
         if dir_path:
@@ -54,8 +77,17 @@ class RoomStore:
         self._conn = sqlite3.connect(uri, uri=True)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn.execute("PRAGMA temp_store=MEMORY")
+        self._conn.execute("PRAGMA cache_size=-4000")  # 4 MB
+        self._conn.execute("PRAGMA mmap_size=8388608")  # 8 MB
         if not read_only:
             self._create_tables()
+            if session_key:
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO meta VALUES ('session_key', ?)",
+                    (session_key,),
+                )
+                self._conn.commit()
         self._adj: dict[str, dict[str, str]] = {}
         self._load_adjacency()
 
@@ -82,6 +114,13 @@ class RoomStore:
                 value TEXT NOT NULL
             );
         """)
+        for col in ("blocked", "home", "marked"):
+            try:
+                self._conn.execute(
+                    f"ALTER TABLE room ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0"
+                )
+            except sqlite3.OperationalError:
+                pass
         self._conn.execute("INSERT OR IGNORE INTO meta VALUES ('version', '1')")
         self._conn.commit()
 
@@ -113,9 +152,15 @@ class RoomStore:
             bookmarked=bool(row[4]),
             visit_count=row[5],
             last_visited=row[6],
+            blocked=bool(row[7]),
+            home=bool(row[8]),
+            marked=bool(row[9]),
         )
 
-    _ROOM_COLS = "num, name, area, environment, bookmarked, visit_count, last_visited"
+    _ROOM_COLS = (
+        "num, name, area, environment, bookmarked, visit_count, last_visited,"
+        " blocked, home, marked"
+    )
 
     @property
     def rooms(self) -> dict[str, Room]:
@@ -130,9 +175,14 @@ class RoomStore:
             result[room.num] = room
         return result
 
-    def room_summaries(self) -> list[tuple[str, str, str, int, bool, str]]:
+    def room_summaries(
+        self,
+    ) -> list[tuple[str, str, str, int, bool, str, bool, bool, bool]]:
         """
-        Return lightweight ``(num, name, area, exit_count, bookmarked, last_visited)`` tuples.
+        Return lightweight room summary tuples.
+
+        Each tuple is ``(num, name, area, exit_count, bookmarked,
+        last_visited, blocked, home, marked)``.
 
         Counts exits via SQL aggregation instead of materialising
         :class:`Room` objects, which avoids copying exit dicts for every
@@ -140,11 +190,15 @@ class RoomStore:
         """
         rows = self._conn.execute(
             "SELECT r.num, r.name, r.area, COUNT(e.direction),"
-            " r.bookmarked, r.last_visited"
+            " r.bookmarked, r.last_visited, r.blocked, r.home, r.marked"
             " FROM room r LEFT JOIN exit e ON r.num = e.src_num"
             " GROUP BY r.num"
         ).fetchall()
-        return [(r[0], r[1], r[2], r[3], bool(r[4]), r[5]) for r in rows]
+        return [
+            (r[0], r[1], r[2], r[3], bool(r[4]), r[5],
+             bool(r[6]), bool(r[7]), bool(r[8]))
+            for r in rows
+        ]
 
     def room_area(self, num: str) -> str:
         """Return the area of a single room, or ``""`` if not found."""
@@ -183,7 +237,7 @@ class RoomStore:
         else:
             exits = {}
 
-        name = str(info.get("name", ""))
+        name = strip_exit_dirs(str(info.get("name", "")))
         area = str(info.get("area", ""))
         environment = str(info.get("environment", ""))
         now = datetime.now(timezone.utc).isoformat()
@@ -200,38 +254,106 @@ class RoomStore:
             (num, name, area, environment, now),
         )
         self._conn.execute("DELETE FROM exit WHERE src_num = ?", (num,))
-        for direction, dst in exits.items():
-            self._conn.execute(
+        if exits:
+            self._conn.executemany(
                 "INSERT INTO exit (src_num, direction, dst_num) VALUES (?, ?, ?)",
-                (num, direction, dst),
+                [(num, d, dst) for d, dst in exits.items()],
             )
         self._conn.commit()
         self._adj[num] = exits
 
-    def toggle_bookmark(self, num: str) -> bool:
+    _MARKER_COLS = ("bookmarked", "blocked", "home", "marked")
+
+    def set_marker(self, num: str, marker: str) -> bool:
         """
-        Toggle bookmark on a room.
+        Toggle a marker on a room, clearing all other markers.
+
+        Markers are mutually exclusive: only one of ``bookmarked``,
+        ``blocked``, ``home``, ``marked`` can be set at a time.  If the
+        requested marker is already set, all markers are cleared.
+
+        For ``home``, the one-per-area constraint is also enforced.
 
         :param num: Room number.
-        :returns: New bookmark state, or ``False`` if room not found.
+        :param marker: One of ``"bookmarked"``, ``"blocked"``, ``"home"``,
+            ``"marked"``.
+        :returns: New state of *marker*, or ``False`` if room not found.
         """
-        row = self._conn.execute("SELECT bookmarked FROM room WHERE num = ?", (num,)).fetchone()
+        if marker not in self._MARKER_COLS:
+            raise ValueError(f"unknown marker: {marker!r}")
+        row = self._conn.execute(
+            f"SELECT {marker}, area FROM room WHERE num = ?", (num,)
+        ).fetchone()
         if row is None:
             return False
         new_state = not bool(row[0])
-        self._conn.execute("UPDATE room SET bookmarked = ? WHERE num = ?", (int(new_state), num))
+        self._conn.execute(
+            "UPDATE room SET bookmarked=0, blocked=0, home=0, marked=0"
+            " WHERE num = ?",
+            (num,),
+        )
+        if new_state:
+            self._conn.execute(
+                f"UPDATE room SET {marker} = 1 WHERE num = ?", (num,)
+            )
+            if marker == "home":
+                area = row[1]
+                self._conn.execute(
+                    "UPDATE room SET home = 0 WHERE area = ? AND num != ?",
+                    (area, num),
+                )
         self._conn.commit()
         return new_state
+
+    def toggle_bookmark(self, num: str) -> bool:
+        """Toggle bookmark on a room (exclusive with other markers)."""
+        return self.set_marker(num, "bookmarked")
+
+    def toggle_blocked(self, num: str) -> bool:
+        """Toggle blocked state on a room (exclusive with other markers)."""
+        return self.set_marker(num, "blocked")
+
+    def toggle_home(self, num: str) -> bool:
+        """Toggle home state on a room (exclusive with other markers)."""
+        return self.set_marker(num, "home")
+
+    def toggle_marked(self, num: str) -> bool:
+        """Toggle mark on a room (exclusive with other markers)."""
+        return self.set_marker(num, "marked")
+
+    def get_home_for_area(self, area: str) -> str | None:
+        """
+        Return the home room number for the given area.
+
+        :param area: Area name.
+        :returns: Room number string, or ``None`` if no home is set.
+        """
+        row = self._conn.execute(
+            "SELECT num FROM room WHERE area = ? AND home = 1", (area,)
+        ).fetchone()
+        return row[0] if row else None
+
+    def blocked_rooms(self) -> frozenset[str]:
+        """Return frozenset of all blocked room numbers."""
+        return frozenset(
+            row[0]
+            for row in self._conn.execute(
+                "SELECT num FROM room WHERE blocked = 1"
+            )
+        )
 
     def _room_nums(self) -> frozenset[str]:
         """Return the set of all room numbers in the database."""
         return frozenset(row[0] for row in self._conn.execute("SELECT num FROM room"))
 
-    def bfs_distances(self, src: str) -> dict[str, int]:
+    def bfs_distances(
+        self, src: str, blocked: frozenset[str] = frozenset()
+    ) -> dict[str, int]:
         """
         BFS from *src* returning distance to every reachable room.
 
         :param src: Source room number.
+        :param blocked: Room numbers to treat as impassable.
         :returns: ``{room_num: distance}`` for all reachable rooms.
         """
         known = self._room_nums()
@@ -243,15 +365,18 @@ class RoomStore:
             current = queue.popleft()
             d = distances[current]
             for target in self._adj.get(current, {}).values():
-                if target not in distances and target in known:
+                if target not in distances and target in known and target not in blocked:
                     distances[target] = d + 1
                     queue.append(target)
         return distances
 
-    def find_path(self, src: str, dst: str) -> list[str] | None:
+    def find_path(
+        self, src: str, dst: str, blocked: frozenset[str] = frozenset()
+    ) -> list[str] | None:
         """
         BFS shortest path from *src* to *dst*.
 
+        :param blocked: Room numbers to treat as impassable.
         :returns: List of direction names, or ``None`` if unreachable.
         """
         if src == dst:
@@ -267,16 +392,23 @@ class RoomStore:
             for direction, target in self._adj.get(current, {}).items():
                 if target == dst:
                     return path + [direction]
-                if target not in visited and self._has_room(target):
+                if (
+                    target not in visited
+                    and self._has_room(target)
+                    and target not in blocked
+                ):
                     visited.add(target)
                     queue.append((target, path + [direction]))
 
         return None
 
-    def find_path_with_rooms(self, src: str, dst: str) -> list[tuple[str, str]] | None:
+    def find_path_with_rooms(
+        self, src: str, dst: str, blocked: frozenset[str] = frozenset()
+    ) -> list[tuple[str, str]] | None:
         """
         BFS shortest path returning ``[(direction, target_room_num), ...]``.
 
+        :param blocked: Room numbers to treat as impassable.
         :returns: List of (direction, expected_room_num) pairs, or ``None``.
         """
         if src == dst:
@@ -292,7 +424,11 @@ class RoomStore:
             for direction, target in self._adj.get(current, {}).items():
                 if target == dst:
                     return path + [(direction, target)]
-                if target not in visited and self._has_room(target):
+                if (
+                    target not in visited
+                    and self._has_room(target)
+                    and target not in blocked
+                ):
                     visited.add(target)
                     queue.append((target, path + [(direction, target)]))
 
@@ -318,12 +454,15 @@ class RoomStore:
         ).fetchall()
         return [self._row_to_room(r) for r in rows]
 
-    def find_branches(self, src: str, limit: int = 99) -> list[tuple[str, str, str]]:
+    def find_branches(
+        self, src: str, limit: int = 99, blocked: frozenset[str] = frozenset()
+    ) -> list[tuple[str, str, str]]:
         """
         Find exits from known rooms leading to unvisited or unknown rooms.
 
         :param src: Source room number to search from.
         :param limit: Maximum number of branches to return.
+        :param blocked: Room numbers to treat as impassable.
         :returns: ``[(gateway_room_num, direction, target_num), ...]``
             sorted by BFS distance from *src*.
         """
@@ -337,6 +476,8 @@ class RoomStore:
         while queue:
             current, dist = queue.popleft()
             for direction, target in self._adj.get(current, {}).items():
+                if target in blocked:
+                    continue
                 target_vc = self._conn.execute(
                     "SELECT visit_count FROM room WHERE num = ?", (target,)
                 ).fetchone()
@@ -418,30 +559,36 @@ def prefs_path(session_key: str) -> str:
     return _session_file_path("prefs-", session_key, ".json")
 
 
-def load_prefs(session_key: str) -> dict[str, bool]:
+def load_prefs(session_key: str) -> dict[str, bool | str]:
     """
     Load per-session preferences from disk.
 
     :param session_key: Session identifier (``host:port``).
-    :returns: Dict of preference flags (missing keys default to ``False``).
+    :returns: Dict of preference values (booleans and strings).
     """
     path = prefs_path(session_key)
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
-            return {str(k): bool(v) for k, v in data.items()}
+            result: dict[str, bool | str] = {}
+            for k, v in data.items():
+                if isinstance(v, str):
+                    result[str(k)] = v
+                else:
+                    result[str(k)] = bool(v)
+            return result
     except (OSError, ValueError):
         pass
     return {}
 
 
-def save_prefs(session_key: str, prefs: dict[str, bool]) -> None:
+def save_prefs(session_key: str, prefs: dict[str, bool | str]) -> None:
     """
     Atomically save per-session preferences to disk.
 
     :param session_key: Session identifier (``host:port``).
-    :param prefs: Dict of preference flags.
+    :param prefs: Dict of preference values (booleans and strings).
     """
     path = prefs_path(session_key)
     _atomic_write(path, json.dumps(prefs, separators=(",", ":")))

@@ -62,6 +62,7 @@ class SessionContext:
         self.randomwalk_total: int = 0
         self.randomwalk_task: Optional[asyncio.Task[None]] = None
         self.active_command: Optional[str] = None
+        self.active_command_time: float = 0.0
         self.blocked_exits: set[tuple[str, str]] = set()  # (room_num, direction)
 
         # walk resume state
@@ -80,6 +81,11 @@ class SessionContext:
         self.autoreplies_file: str = ""
         self.autoreply_engine: Optional[Any] = None
 
+        # highlighters
+        self.highlight_rules: list[Any] = []
+        self.highlights_file: str = ""
+        self.highlight_engine: Optional[Any] = None
+
         # prompt / GA pacing
         self.wait_for_prompt: Optional[Callable[..., Awaitable[None]]] = None
         self.echo_command: Optional[Callable[[str], None]] = None
@@ -88,6 +94,12 @@ class SessionContext:
         # GMCP
         self.gmcp_data: dict[str, Any] = {}
         self.on_gmcp_ready: Optional[Callable[[], None]] = None
+
+        # chat (GMCP Comm.Channel)
+        self.chat_messages: list[dict[str, Any]] = []
+        self.chat_unread: int = 0
+        self.chat_channels: list[dict[str, Any]] = []
+        self.chat_file: str = ""
 
         # rendering / input config
         self.color_filter: Optional[Any] = None

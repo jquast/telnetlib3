@@ -41,7 +41,7 @@ def _safe_terminal_size() -> str:
 
 def _confirm_dialog(
     title: str, body: str, warning: str = "", replay_buf: Optional[Any] = None
-) -> tuple[bool, bool]:
+) -> bool:
     """
     Show a Textual confirmation dialog in a subprocess.
 
@@ -53,7 +53,7 @@ def _confirm_dialog(
     :param body: Body text.
     :param warning: Optional warning text displayed in red.
     :param replay_buf: Optional replay buffer for screen repaint.
-    :returns: ``(confirmed, dont_ask_again)`` tuple.
+    :returns: Whether the user confirmed.
     """
     import json as _json
     import tempfile
@@ -111,12 +111,10 @@ def _confirm_dialog(
         _restore_after_subprocess(replay_buf)
 
     confirmed = False
-    dont_ask = False
     try:
         with open(result_path, "r", encoding="utf-8") as f:
             data = _json.load(f)
         confirmed = bool(data.get("confirmed", False))
-        dont_ask = bool(data.get("dont_ask", False))
     except (OSError, ValueError):
         pass
     finally:
@@ -125,90 +123,169 @@ def _confirm_dialog(
         except OSError:
             pass
 
-    return confirmed, dont_ask
+    return confirmed
+
+
+def _randomwalk_dialog(
+    replay_buf: Optional[Any] = None,
+    default_visit_level: int = 2,
+) -> tuple[bool, int]:
+    """
+    Show the random walk dialog with visit-level parameter.
+
+    :param replay_buf: Optional replay buffer for screen repaint.
+    :param default_visit_level: Default value for the visit-level field.
+    :returns: ``(confirmed, visit_level)`` tuple.
+    """
+    import json as _json
+    import tempfile
+    import subprocess
+
+    from .client_repl import _get_term, _blocking_fds, _terminal_cleanup, _restore_after_subprocess
+
+    fd, result_path = tempfile.mkstemp(suffix=".json", prefix="randomwalk-")
+    os.close(fd)
+
+    logfile = _get_logfile_path()
+    cmd = [
+        sys.executable,
+        "-c",
+        "import sys; from telnetlib3.client_tui import randomwalk_dialog_main; "
+        "randomwalk_dialog_main(result_file=sys.argv[1],"
+        " default_visit_level=sys.argv[2], logfile=sys.argv[3])",
+        result_path,
+        str(default_visit_level),
+        logfile,
+    ]
+
+    global _editor_active  # noqa: PLW0603
+    log = logging.getLogger(__name__)
+    log.debug("randomwalk_dialog: launching subprocess")
+    blessed_term = _get_term()
+    sys.stdout.write(_terminal_cleanup())
+    sys.stdout.write(blessed_term.change_scroll_region(0, blessed_term.height - 1))
+    sys.stdout.flush()
+    sys.stderr.flush()
+    sys.__stderr__.flush()
+    _editor_active = True
+    try:
+        with _blocking_fds():
+            subprocess.run(cmd, check=False)
+    except FileNotFoundError:
+        pass
+    finally:
+        _editor_active = False
+        _restore_after_subprocess(replay_buf)
+
+    confirmed = False
+    visit_level = default_visit_level
+    try:
+        with open(result_path, "r", encoding="utf-8") as f:
+            data = _json.load(f)
+        confirmed = bool(data.get("confirmed", False))
+        visit_level = int(data.get("visit_level", default_visit_level))
+    except (OSError, ValueError):
+        pass
+    finally:
+        try:
+            os.unlink(result_path)
+        except OSError:
+            pass
+
+    return confirmed, visit_level
+
+
+def _strip_md(text: str) -> str:
+    """Strip markdown bold/code markers from text."""
+    import re
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = re.sub(r"`(.+?)`", r"\1", text)
+    return text.strip()
+
+
+def _render_help_md(has_gmcp: bool = False) -> list[str]:
+    """Render keybindings help markdown into plain-text lines.
+
+    :param has_gmcp: Whether GMCP room data is available.
+    :rtype: list[str]
+    """
+    from .help import get_help
+
+    md = get_help("keybindings")
+    lines: list[str] = []
+    in_header_row = False
+    skip_section = False
+    for raw in md.splitlines():
+        stripped = raw.strip()
+        if stripped.startswith("##"):
+            heading = stripped.lstrip("# ").strip()
+            if not has_gmcp and "GMCP" in heading:
+                skip_section = True
+                continue
+            skip_section = False
+            lines.append("")
+            lines.append("  " + heading)
+            lines.append("")
+            in_header_row = True
+        elif skip_section:
+            continue
+        elif stripped.startswith("|") and "---" in stripped:
+            continue
+        elif stripped.startswith("|"):
+            cells = [_strip_md(c) for c in stripped.split("|")[1:-1]]
+            if in_header_row:
+                in_header_row = False
+                continue
+            if len(cells) >= 2 and cells[0]:
+                lines.append(f"  {cells[0]:<16}{cells[1]}")
+        elif stripped and not stripped.startswith("|"):
+            lines.append("  " + _strip_md(stripped))
+        else:
+            if lines and lines[-1] != "":
+                lines.append("")
+    return lines
 
 
 def _show_help(
     macro_defs: "Any" = None, replay_buf: Optional[Any] = None, has_gmcp: bool = False
 ) -> None:
-    """
-    Display keybinding help on the alternate screen buffer.
+    """Launch the keybindings help viewer as a Textual TUI subprocess.
 
-    :param macro_defs: Optional list of macro definitions to display.
+    :param macro_defs: Unused (kept for API compatibility).
     :param replay_buf: Optional replay buffer for screen repaint on return.
-    :param has_gmcp: Whether GMCP room data is available.
+    :param has_gmcp: Unused (kept for API compatibility).
     """
-    from .client_repl import _get_term, _restore_after_subprocess
+    import subprocess
 
+    from .client_repl import _get_term, _blocking_fds, _terminal_cleanup, _restore_after_subprocess
+
+    logfile = _get_logfile_path()
+    cmd = [
+        sys.executable,
+        "-c",
+        "import sys; from telnetlib3.client_tui import show_help_main; "
+        "show_help_main(topic=sys.argv[1], logfile=sys.argv[2])",
+        "keybindings",
+        logfile,
+    ]
+
+    log = logging.getLogger(__name__)
     global _editor_active  # noqa: PLW0603
     blessed_term = _get_term()
-    sys.stdout.write(CURSOR_HIDE)
-    sys.stdout.write(blessed_term.enter_fullscreen)
-    sys.stdout.write(blessed_term.home + blessed_term.clear)
-    lines = ["", "  telnetlib3 \u2014 Keybindings", "", "  F1          This help screen"]
-    if has_gmcp:
-        lines += [
-            "  F3          Random walk (explore random exits)",
-            "  F4          Autodiscover (explore unvisited exits)",
-            "  F5          Wander mode (visit same-named rooms)",
-            "  F7          Browse rooms / fast travel",
-        ]
-    lines += [
-        "  F8          Edit macros (TUI editor)",
-        "  F9          Edit autoreplies (TUI editor)",
-        "  Shift+F9    Toggle autoreplies on/off",
-        "  Ctrl+L      Repaint screen",
-        "  Ctrl+]      Disconnect",
-        "",
-        "  Line editing:",
-        "  Left/Right     Move cursor",
-        "  Home/Ctrl+A    Beginning of line",
-        "  End/Ctrl+E     End of line",
-        "  Ctrl+Left      Move word left",
-        "  Ctrl+Right     Move word right",
-        "  Backspace      Delete before cursor",
-        "  Delete         Delete at cursor",
-        "  Ctrl+K         Kill to end of line",
-        "  Ctrl+U         Kill entire line",
-        "  Ctrl+W         Kill word back",
-        "  Ctrl+Y         Yank (paste killed text)",
-        "  Ctrl+Z         Undo",
-        "  Up/Down        History navigation",
-        "",
-        "  Command processing:",
-        "  ;              Separator (e.g. get all;drop sword)",
-        "  3n;2e          Repeat prefix (expands to n;n;n;e;e)",
-        "",
-    ]
-    if macro_defs:
-        lines.append("  User macros:")
-        for m in macro_defs:
-            key = m.key
-            text = getattr(m, "text", "")
-            display = text.replace("\r\n", "<CR>").replace("\r", "<CR>")
-            if len(display) > 40:
-                display = display[:37] + "..."
-            lines.append(f"  {key:<12}{display}")
-        lines.append("")
-    lines.append("  Press any key to return.")
-    lines.append("")
-    sys.stdout.write("\r\n".join(lines))
+    sys.stdout.write(_terminal_cleanup())
+    sys.stdout.write(blessed_term.change_scroll_region(0, blessed_term.height - 1))
     sys.stdout.flush()
-
-    import select
-
+    sys.stderr.flush()
+    sys.__stderr__.flush()
     _editor_active = True
     try:
-        with blessed_term.raw():
-            os.set_blocking(sys.stdin.fileno(), True)
-            select.select([sys.stdin.fileno()], [], [])
-            os.read(sys.stdin.fileno(), 1)
+        with _blocking_fds():
+            subprocess.run(cmd, check=False)
+    except FileNotFoundError:
+        log.warning("could not launch help viewer subprocess")
     finally:
         _editor_active = False
-
-    sys.stdout.write(blessed_term.exit_fullscreen)
-    sys.stdout.flush()
-    _restore_after_subprocess(replay_buf)
+        _restore_after_subprocess(replay_buf)
 
 
 def _launch_tui_editor(
@@ -217,7 +294,7 @@ def _launch_tui_editor(
     """
     Launch a TUI editor for macros or autoreplies in a subprocess.
 
-    :param editor_type: ``"macros"`` or ``"autoreplies"``.
+    :param editor_type: ``"macros"``, ``"autoreplies"``, or ``"highlights"``.
     :param ctx: Session context with file path and definition attributes.
     :param replay_buf: Optional replay buffer for screen repaint on return.
     """
@@ -248,6 +325,17 @@ def _launch_tui_editor(
             session_key,
             rp,
             crp,
+            logfile,
+        ]
+    elif editor_type == "highlights":
+        path = ctx.highlights_file or os.path.join(_config_dir, "highlights.json")
+        cmd = [
+            sys.executable,
+            "-c",
+            "import sys; from telnetlib3.client_tui import edit_highlights_main; "
+            "edit_highlights_main(sys.argv[1], sys.argv[2], logfile=sys.argv[3])",
+            path,
+            session_key,
             logfile,
         ]
     else:
@@ -301,6 +389,8 @@ def _launch_tui_editor(
 
     if editor_type == "macros":
         _reload_macros(ctx, path, session_key, log)
+    elif editor_type == "highlights":
+        _reload_highlights(ctx, path, session_key, log)
     else:
         _reload_autoreplies(ctx, path, session_key, log)
 
@@ -338,6 +428,86 @@ def _reload_autoreplies(
         log.info("reloaded %d autoreplies from %s", n_rules, path)
     except ValueError as exc:
         log.warning("failed to reload autoreplies: %s", exc)
+
+
+def _reload_highlights(
+    ctx: "SessionContext", path: str, session_key: str, log: logging.Logger
+) -> None:
+    """Reload highlight rules from disk after editing."""
+    if not os.path.exists(path):
+        return
+    from .highlighter import load_highlights
+
+    try:
+        ctx.highlight_rules = load_highlights(path, session_key)
+        ctx.highlights_file = path
+        n_rules = len(ctx.highlight_rules)
+        log.info("reloaded %d highlights from %s", n_rules, path)
+    except ValueError as exc:
+        log.warning("failed to reload highlights: %s", exc)
+
+
+def _launch_chat_viewer(ctx: "SessionContext", replay_buf: Optional[Any] = None) -> None:
+    """
+    Launch the chat viewer TUI in a subprocess.
+
+    :param ctx: Session context with chat state.
+    :param replay_buf: Optional replay buffer for screen repaint on return.
+    """
+    import subprocess
+
+    from .client_repl import (
+        _get_term, _blocking_fds, _terminal_cleanup, _restore_after_subprocess,
+    )
+
+    session_key = ctx.session_key
+    if not session_key:
+        return
+
+    chat_file = ctx.chat_file
+    if not chat_file:
+        return
+
+    ctx.chat_unread = 0
+
+    # Find the channel with the most recent message for initial focus.
+    initial_channel = ""
+    if ctx.chat_messages:
+        last_msg = ctx.chat_messages[-1]
+        initial_channel = last_msg.get("channel", "")
+
+    logfile = _get_logfile_path()
+    cmd = [
+        sys.executable,
+        "-c",
+        "import sys; from telnetlib3.client_tui import chat_viewer_main; "
+        "chat_viewer_main(sys.argv[1], sys.argv[2],"
+        " initial_channel=sys.argv[3], logfile=sys.argv[4])",
+        chat_file,
+        session_key,
+        initial_channel,
+        logfile,
+    ]
+
+    log = logging.getLogger(__name__)
+
+    global _editor_active  # noqa: PLW0603
+    log.debug("chat_viewer: launching subprocess")
+    blessed_term = _get_term()
+    sys.stdout.write(_terminal_cleanup())
+    sys.stdout.write(blessed_term.change_scroll_region(0, blessed_term.height - 1))
+    sys.stdout.flush()
+    sys.stderr.flush()
+    sys.__stderr__.flush()
+    _editor_active = True
+    try:
+        with _blocking_fds():
+            subprocess.run(cmd, check=False)
+    except FileNotFoundError:
+        log.warning("could not launch chat viewer subprocess")
+    finally:
+        _editor_active = False
+        _restore_after_subprocess(replay_buf)
 
 
 def _launch_room_browser(ctx: "SessionContext", replay_buf: Optional[Any] = None) -> None:

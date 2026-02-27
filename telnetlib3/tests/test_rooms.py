@@ -17,6 +17,7 @@ from telnetlib3.rooms import (
     prefs_path,
     rooms_path,
     save_prefs,
+    strip_exit_dirs,
     _xdg_data_dir,
     fasttravel_path,
     read_fasttravel,
@@ -527,6 +528,15 @@ def test_save_overwrites(tmp_path: Any, monkeypatch: Any) -> None:
     assert loaded["skip_randomwalk_confirm"] is True
 
 
+def test_prefs_string_value(tmp_path: Any, monkeypatch: Any) -> None:
+    """String preference values round-trip correctly."""
+    monkeypatch.setattr("telnetlib3.rooms._xdg_data_dir", lambda: str(tmp_path))
+    save_prefs("h:1", {"skip_randomwalk_confirm": True, "tui_theme": "nord"})
+    loaded = load_prefs("h:1")
+    assert loaded["skip_randomwalk_confirm"] is True
+    assert loaded["tui_theme"] == "nord"
+
+
 def test_find_branches_shuffles_equal_distance(tmp_path: Any) -> None:
     db_path = str(tmp_path / "rooms.db")
     store = RoomStore(db_path)
@@ -553,9 +563,179 @@ def test_room_summaries_includes_last_visited(store: RoomStore) -> None:
     store.update_room({"num": "2", "name": "Room B", "area": "zone", "exits": {}})
     summaries = store.room_summaries()
     assert len(summaries) == 2
-    for num, name, area, exit_count, bookmarked, last_visited in summaries:
-        assert isinstance(last_visited, str)
-        assert last_visited != ""
+    for s in summaries:
+        assert isinstance(s[5], str)
+        assert s[5] != ""
     by_num = {s[0]: s for s in summaries}
     assert by_num["1"][3] == 1
     assert by_num["2"][3] == 0
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("A Large Ridge. [n,s,w,e,nw,ne,sw,se]", "A Large Ridge."),
+    ("A Large Ridge. [n,e,ne]", "A Large Ridge."),
+    ("A Large Ridge. [s,w,sw]", "A Large Ridge."),
+    ("A Large Ridge", "A Large Ridge"),
+    ("A Small Ridge {SPICE} [n,s,w,e,nw,ne,sw,se]", "A Small Ridge"),
+    ("Rocky Ridge.   [n,w,e]", "Rocky Ridge."),
+    ("Rocky Ridge.   [rocks,s,w]", "Rocky Ridge."),
+    ("A Musty Passage", "A Musty Passage"),
+    ("A Large Ridge. [w,e]", "A Large Ridge."),
+    ("", ""),
+])
+def test_strip_exit_dirs(name: str, expected: str) -> None:
+    assert strip_exit_dirs(name) == expected
+
+
+def test_update_room_strips_exit_dirs(store: RoomStore) -> None:
+    store.update_room({
+        "num": "1",
+        "name": "A Large Ridge. [n,s,w,e]",
+        "area": "arrakis",
+    })
+    r = store.get_room("1")
+    assert r is not None
+    assert r.name == "A Large Ridge."
+
+
+def test_room_summaries_names_stripped(store: RoomStore) -> None:
+    store.update_room({"num": "1", "name": "Ridge. [n,s]", "area": "zone"})
+    store.update_room({"num": "2", "name": "Ridge. [w,e]", "area": "zone"})
+    summaries = store.room_summaries()
+    names = {s[0]: s[1] for s in summaries}
+    assert names["1"] == "Ridge."
+    assert names["2"] == "Ridge."
+
+
+def test_toggle_blocked(store: RoomStore) -> None:
+    store.update_room({"num": "1", "name": "Hall"})
+    assert store.toggle_blocked("1") is True
+    r = store.get_room("1")
+    assert r is not None
+    assert r.blocked
+    assert store.toggle_blocked("1") is False
+    r = store.get_room("1")
+    assert r is not None
+    assert not r.blocked
+
+
+def test_toggle_blocked_missing(store: RoomStore) -> None:
+    assert store.toggle_blocked("999") is False
+
+
+def test_toggle_home_one_per_area(store: RoomStore) -> None:
+    store.update_room({"num": "1", "name": "A", "area": "town"})
+    store.update_room({"num": "2", "name": "B", "area": "town"})
+    store.update_room({"num": "3", "name": "C", "area": "wild"})
+    assert store.toggle_home("1") is True
+    assert store.get_room("1").home  # type: ignore[union-attr]
+    assert store.toggle_home("2") is True
+    assert store.get_room("2").home  # type: ignore[union-attr]
+    assert not store.get_room("1").home  # type: ignore[union-attr]
+    assert store.get_home_for_area("town") == "2"
+    assert store.get_home_for_area("wild") is None
+    assert store.toggle_home("3") is True
+    assert store.get_home_for_area("wild") == "3"
+    assert store.toggle_home("2") is False
+    assert store.get_home_for_area("town") is None
+
+
+def test_toggle_marked(store: RoomStore) -> None:
+    store.update_room({"num": "1", "name": "Room"})
+    assert store.toggle_marked("1") is True
+    r = store.get_room("1")
+    assert r is not None
+    assert r.marked
+    assert store.toggle_marked("1") is False
+    r = store.get_room("1")
+    assert r is not None
+    assert not r.marked
+
+
+def test_toggle_marked_missing(store: RoomStore) -> None:
+    assert store.toggle_marked("999") is False
+
+
+def test_markers_are_exclusive(store: RoomStore) -> None:
+    """Setting one marker clears all others on the same room."""
+    store.update_room({"num": "1", "name": "Room"})
+    store.toggle_bookmark("1")
+    r = store.get_room("1")
+    assert r is not None
+    assert r.bookmarked and not r.blocked and not r.home and not r.marked
+
+    store.toggle_blocked("1")
+    r = store.get_room("1")
+    assert r is not None
+    assert r.blocked and not r.bookmarked and not r.home and not r.marked
+
+    store.toggle_home("1")
+    r = store.get_room("1")
+    assert r is not None
+    assert r.home and not r.bookmarked and not r.blocked and not r.marked
+
+    store.toggle_marked("1")
+    r = store.get_room("1")
+    assert r is not None
+    assert r.marked and not r.bookmarked and not r.blocked and not r.home
+
+    store.toggle_marked("1")
+    r = store.get_room("1")
+    assert r is not None
+    assert not r.marked and not r.bookmarked and not r.blocked and not r.home
+
+
+def test_blocked_rooms_set(store: RoomStore) -> None:
+    store.update_room({"num": "1", "name": "A"})
+    store.update_room({"num": "2", "name": "B"})
+    store.update_room({"num": "3", "name": "C"})
+    store.toggle_blocked("2")
+    store.toggle_blocked("3")
+    assert store.blocked_rooms() == frozenset({"2", "3"})
+
+
+def test_bfs_skips_blocked_rooms(store: RoomStore) -> None:
+    store.update_room({"num": "A", "exits": {"east": "B"}})
+    store.update_room({"num": "B", "exits": {"east": "C", "west": "A"}})
+    store.update_room({"num": "C", "exits": {"west": "B"}})
+    d = store.bfs_distances("A", blocked=frozenset({"B"}))
+    assert "B" not in d
+    assert "C" not in d
+    assert d == {"A": 0}
+
+
+def test_find_path_skips_blocked(store: RoomStore) -> None:
+    store.update_room({"num": "A", "exits": {"east": "B", "north": "D"}})
+    store.update_room({"num": "B", "exits": {"east": "C"}})
+    store.update_room({"num": "C", "exits": {}})
+    store.update_room({"num": "D", "exits": {"east": "C"}})
+    path = store.find_path("A", "C", blocked=frozenset({"B"}))
+    assert path == ["north", "east"]
+
+
+def test_find_path_with_rooms_skips_blocked(store: RoomStore) -> None:
+    store.update_room({"num": "A", "exits": {"east": "B", "north": "D"}})
+    store.update_room({"num": "B", "exits": {"east": "C"}})
+    store.update_room({"num": "C", "exits": {}})
+    store.update_room({"num": "D", "exits": {"east": "C"}})
+    path = store.find_path_with_rooms("A", "C", blocked=frozenset({"B"}))
+    assert path == [("north", "D"), ("east", "C")]
+
+
+def test_find_branches_skips_blocked(store: RoomStore) -> None:
+    store.update_room({"num": "A", "exits": {"east": "B"}})
+    store.update_room({"num": "B", "exits": {"east": "C", "west": "A"}})
+    branches = store.find_branches("A", blocked=frozenset({"B"}))
+    assert not any(t == "B" for _, _, t in branches)
+
+
+def test_room_summaries_includes_new_fields(store: RoomStore) -> None:
+    store.update_room({"num": "1", "name": "Room", "area": "zone"})
+    store.toggle_marked("1")
+    summaries = store.room_summaries()
+    assert len(summaries) == 1
+    s = summaries[0]
+    assert len(s) == 9
+    assert s[6] is False
+    assert s[7] is False
+    assert s[8] is True

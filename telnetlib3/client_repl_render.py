@@ -52,6 +52,68 @@ PHASES = ((0, 1), (1, 2), (0, 2))
 STOPLIGHT_WIDTH = 1
 
 
+def _activity_hint(engine: Any) -> str:
+    """Build a short autoreply status hint from *engine*.
+
+    :returns: Hint string like ``"#3 | until /pat/  [return to cancel]"``,
+        or ``""`` when there is nothing to display.
+    """
+    if engine is None:
+        return ""
+    parts: list[str] = []
+    idx = getattr(engine, "exclusive_rule_index", None)
+    if idx is not None and idx != 0:
+        parts.append(f"#{idx}")
+    st = getattr(engine, "status_text", "")
+    if st:
+        parts.append(st)
+    if parts:
+        return " | ".join(parts) + "  [return to cancel]"
+    return ""
+
+
+def _until_progress(engine: Any) -> Optional[float]:
+    """Return the until timer progress fraction, or ``None``.
+
+    :returns: Float in ``0.0..1.0`` when an until/untils timer is active.
+    """
+    if engine is None:
+        return None
+    return getattr(engine, "until_progress", None)
+
+
+def _write_hint(
+    hint: str,
+    out: "asyncio.StreamWriter",
+    bt: "blessed.Terminal",
+    progress: Optional[float] = None,
+    bg_sgr: str = "",
+) -> None:
+    """Write *hint* at the current cursor position with optional progress bar.
+
+    When *progress* is not ``None``, the hint is split into a reverse-video
+    left portion (elapsed) and a normal dim right portion (remaining).
+
+    :param hint: Plain hint text.
+    :param out: Stream to write SGR-encoded bytes to.
+    :param bt: blessed Terminal instance.
+    :param progress: ``0.0..1.0`` fraction, or ``None`` for plain dim text.
+    :param bg_sgr: Optional background SGR prefix (e.g. autoreply bg color).
+    """
+    if not hint:
+        return
+    dim = str(bt.color_rgb(60, 40, 40))
+    normal = bt.normal
+    if progress is not None:
+        split = int(len(hint) * progress + 0.5)
+        left = hint[:split]
+        right = hint[split:]
+        rev = str(bt.reverse)
+        out.write(f"{bg_sgr}{dim}{rev}{left}{normal}{bg_sgr}{dim}{right}{normal}".encode())
+    else:
+        out.write(f"{bg_sgr}{dim}{hint}{normal}".encode())
+
+
 def lerp_rgb(c1: Tuple[int, int, int], c2: Tuple[int, int, int], t: float) -> Tuple[int, int, int]:
     """Linearly interpolate between two RGB colors."""
     return (
@@ -222,9 +284,13 @@ _CURSOR_STYLES: dict[str, str] = {
 _DEFAULT_CURSOR_STYLE = "steady_block"
 
 # Cursor color: medium red-brown foreground on the input-line background.
-# Set at the cursor position before DECTCEM show so the block cursor
-# inherits this color rather than the text color.
-CURSOR_COLOR_RGB = (140, 60, 30)
+# Cursor color via OSC 12 (xterm/kitty/foot/iTerm2).  Uses X11 rgb: format.
+CURSOR_COLOR_RGB = (50, 32, 14)
+CURSOR_COLOR_OSC: str = (
+    f"\x1b]12;rgb:{CURSOR_COLOR_RGB[0]:02x}/{CURSOR_COLOR_RGB[1]:02x}"
+    f"/{CURSOR_COLOR_RGB[2]:02x}\x07"
+)
+CURSOR_COLOR_RESET_OSC: str = "\x1b]112\x07"  # OSC 112 -- reset to default
 
 # Default ellipsis for overflow indicator (used as fallback).
 _ELLIPSIS = "\u2026"
@@ -330,6 +396,30 @@ def _flash_color(base_hex: str, elapsed: float) -> str:
     return f"#{cr:02x}{cg:02x}{cb:02x}"
 
 
+def _flash_bg_rgb(base_hex: str, elapsed: float) -> tuple[int, int, int] | None:
+    """Return the inverse-RGB background ``(r, g, b)`` for a flash frame.
+
+    During the ramp-up / hold / ramp-down window the background interpolates
+    from black ``(0, 0, 0)`` toward the inverse of *base_hex*
+    ``(255-R, 255-G, 255-B)`` and back.
+
+    :returns: ``(r, g, b)`` tuple or ``None`` when outside the flash window.
+    """
+    if elapsed < 0.0 or elapsed >= _FLASH_DURATION:
+        return None
+    r = int(base_hex[1:3], 16)
+    g = int(base_hex[3:5], 16)
+    b = int(base_hex[5:7], 16)
+    inv_r, inv_g, inv_b = 255 - r, 255 - g, 255 - b
+    if elapsed < _FLASH_RAMP_UP:
+        t = elapsed / _FLASH_RAMP_UP
+    elif elapsed < _FLASH_RAMP_UP + _FLASH_HOLD:
+        t = 1.0
+    else:
+        t = (_FLASH_DURATION - elapsed) / _FLASH_RAMP_DOWN
+    return (int(inv_r * t), int(inv_g * t), int(inv_b * t))
+
+
 def _fmt_value(n: int) -> str:
     """
     Format a numeric value with k/m suffixes for compact display.
@@ -393,7 +483,7 @@ _Stoplight = Stoplight
 _MODEM_WIDTH = STOPLIGHT_WIDTH
 
 
-_BAR_CAP_LEFT = "\U0001fb2b"  # 🬫 Block Sextant-2346
+_BAR_CAP_LEFT = "\U0001fb38"  # 🬸 Block Sextant-2345
 _BAR_CAP_RIGHT = "\U0001fb1b"  # 🬛 Block Sextant-1345
 _DMZ_CHAR = "\u2581"  # ▁ Lower One Eighth Block
 
@@ -476,9 +566,14 @@ def _vital_bar(
         filled_sgr = _sgr_fg("#101010") + _sgr_bg(bar_color)
         empty_sgr = _sgr_fg("#666666") + _sgr_bg("#2a2a2a")
 
-    suffix = {"hp": " hp", "mp": " mp", "xp": " xp", "wander": " AW", "randomwalk": " rndwlk"}.get(
-        kind, ""
-    )
+    suffix = {
+        "hp": " hp",
+        "mp": " mp",
+        "xp": " xp",
+        "wander": " AW",
+        "randomwalk": " random walk",
+        "discover": " discover",
+    }.get(kind, "")
     if mx > 0:
         left_part = _segmented(f"{_fmt_value(cur)}/{_fmt_value(mx)}")
         right_part = _segmented(f"{pct}%") + suffix
@@ -536,19 +631,21 @@ class _ToolbarSlot(NamedTuple):
     side: str
     min_width: int
     label: str
+    growable: bool = False
+    grow_params: Optional[Tuple[Any, ...]] = None
 
 
 _SEPARATOR_WIDTH = 3
+_BAR_GAP_WIDTH = 1
 
 
 def _layout_toolbar(
     slots: List["_ToolbarSlot"], cols: int
-) -> Tuple[List[List[Tuple[str, str]]], List[List[Tuple[str, str]]]]:
+) -> Tuple[List["_ToolbarSlot"], List["_ToolbarSlot"]]:
     """
     Fit toolbar slots into *cols* columns by priority.
 
-    :returns: ``(left_items, right_items)`` — each a list of fragment
-        lists, ordered by ``display_order``.
+    :returns: ``(left_slots, right_slots)`` ordered by ``display_order``.
     """
     left: List[_ToolbarSlot] = []
     right: List[_ToolbarSlot] = []
@@ -593,7 +690,89 @@ def _layout_toolbar(
 
     left.sort(key=lambda s: s.display_order)
     right.sort(key=lambda s: s.display_order)
-    return ([s.fragments for s in left], [s.fragments for s in right])
+    return (left, right)
+
+
+def _left_sep_widths(left: List["_ToolbarSlot"]) -> List[int]:
+    """Return per-gap separator widths for left slots.
+
+    Adjacent growable (vital-bar) slots use ``_BAR_GAP_WIDTH``; all other
+    gaps use ``_SEPARATOR_WIDTH``.
+    """
+    gaps: List[int] = []
+    for i in range(1, len(left)):
+        if left[i - 1].growable and left[i].growable:
+            gaps.append(_BAR_GAP_WIDTH)
+        else:
+            gaps.append(_SEPARATOR_WIDTH)
+    return gaps
+
+
+def _fill_toolbar(
+    left: List["_ToolbarSlot"],
+    right: List["_ToolbarSlot"],
+    cols: int,
+) -> Tuple[List["_ToolbarSlot"], List["_ToolbarSlot"], int]:
+    """
+    Distribute extra horizontal space across growable slots and separators.
+
+    :returns: ``(left_slots, right_slots, sep_width)`` with expanded bars.
+    """
+    left_gaps = _left_sep_widths(left)
+    n_right_seps = max(0, len(right) - 1)
+    used = sum(s.width for s in left) + sum(s.width for s in right)
+    used += sum(left_gaps) + n_right_seps * _SEPARATOR_WIDTH
+    min_pad = 1 if left and right else 0
+    extra = cols - used - min_pad
+
+    growable = [s for s in left + right if s.growable and s.grow_params is not None]
+    if not growable or extra <= 0:
+        return (left, right, _SEPARATOR_WIDTH)
+
+    n_expandable_seps = n_right_seps
+    if n_expandable_seps > 0:
+        sep_bonus = extra // 4
+        per_sep = sep_bonus // n_expandable_seps
+        sep_width = _SEPARATOR_WIDTH + per_sep
+        remaining = extra - per_sep * n_expandable_seps
+    else:
+        sep_width = _SEPARATOR_WIDTH
+        remaining = extra
+
+    per_bar = remaining // len(growable)
+    leftover = remaining - per_bar * len(growable)
+
+    grow_set = set(id(s) for s in growable)
+    grow_idx = 0
+
+    def _expand(slot: _ToolbarSlot) -> _ToolbarSlot:
+        nonlocal grow_idx, leftover
+        if id(slot) not in grow_set:
+            return slot
+        bonus = per_bar
+        if grow_idx < leftover:
+            bonus += 1
+        grow_idx += 1
+        params = slot.grow_params
+        assert params is not None
+        if len(params) == 4:
+            raw, maxval, kind, flash_elapsed = params
+            inner = slot.width - 2 + bonus
+            frags = _vital_bar(raw, maxval, inner, kind, flash_elapsed=flash_elapsed)
+            new_w = sum(_wcswidth(t) for _, t in frags)
+            return slot._replace(width=new_w, fragments=frags)
+        elif len(params) == 1:
+            full_text = params[0]
+            new_w = slot.width + bonus
+            trimmed = _center_truncate(full_text, new_w)
+            trimmed_w = _wcswidth(trimmed)
+            sgr = slot.fragments[0][0] if slot.fragments else ""
+            return slot._replace(width=trimmed_w, fragments=[(sgr, trimmed)])
+        return slot
+
+    new_left = [_expand(s) for s in left]
+    new_right = [_expand(s) for s in right]
+    return (new_left, new_right, sep_width)
 
 
 class VitalTracker:
@@ -706,7 +885,10 @@ class ToolbarRenderer:
         self.flash_active: bool = False
         self._has_gmcp: bool = False
         self._eta_refresh_active: bool = False
+        self._until_progress_active: bool = False
+        self._last_progress_col: int = -1
         self._last_eta_text: str = ""
+        self._cached_eta_frags: Optional[List[Tuple[str, str]]] = None
         self.hp = VitalTracker()
         self.mp = VitalTracker()
         self.xp = XPTracker()
@@ -807,6 +989,18 @@ class ToolbarRenderer:
             if room_name:
                 self.rprompt_text = room_name
 
+        if self.ctx.chat_unread > 0:
+            badge = f"F10-Chat:{self.ctx.chat_unread}"
+            slots.append(_ToolbarSlot(
+                priority=3,
+                display_order=8,
+                width=_wcswidth(badge),
+                fragments=[(_sgr_fg("#ffff00"), badge)],
+                side="left",
+                min_width=0,
+                label="",
+            ))
+
         self._right_slot(engine, ar_active, discover_active, randomwalk_active, slots)
         return slots, needs_reflash
 
@@ -875,13 +1069,21 @@ class ToolbarRenderer:
                 side="left",
                 min_width=0,
                 label="",
+                growable=True,
+                grow_params=(raw, maxval, kind, flash_elapsed),
             )
         )
         return needs_reflash
 
     def _xp_eta_slot(self, maxxp: Any, now: float, slots: List[_ToolbarSlot]) -> None:
-        """Append an ETA slot if XP history is sufficient."""
-        eta_frags = self.xp.eta_fragments(maxxp, now)
+        """Append an ETA slot from cached fragments.
+
+        ETA is recomputed only by the 1-second ``schedule_eta_refresh`` timer
+        to avoid jittery numbers on every line of server output.
+        """
+        if self._cached_eta_frags is None:
+            self._cached_eta_frags = self.xp.eta_fragments(maxxp, now)
+        eta_frags = self._cached_eta_frags
         if eta_frags is not None:
             eta_text = eta_frags[0][1]
             slots.append(
@@ -907,11 +1109,11 @@ class ToolbarRenderer:
         """Append the right-side slot (walk mode, autoreply, or room name)."""
         if randomwalk_active:
             self._mode_bar_slot(
-                self.ctx.randomwalk_current, self.ctx.randomwalk_total, 16, "randomwalk", slots
+                self.ctx.randomwalk_current, self.ctx.randomwalk_total, 24, "randomwalk", slots
             )
         elif discover_active:
             self._mode_bar_slot(
-                self.ctx.discover_current, self.ctx.discover_total, 12, "discover", slots
+                self.ctx.discover_current, self.ctx.discover_total, 20, "discover", slots
             )
         elif ar_active:
             idx = getattr(engine, "exclusive_rule_index", None)
@@ -942,6 +1144,8 @@ class ToolbarRenderer:
                         side="right",
                         min_width=5,
                         label=full_text,
+                        growable=True,
+                        grow_params=(full_text,),
                     )
                 )
 
@@ -961,6 +1165,8 @@ class ToolbarRenderer:
                 side="right",
                 min_width=0,
                 label="",
+                growable=True,
+                grow_params=(cur, tot, kind, -1.0),
             )
         )
 
@@ -968,7 +1174,9 @@ class ToolbarRenderer:
         """Write ANSI sequences for the toolbar row."""
         blessed_term = _get_term()
         cols = blessed_term.width
-        left_items, right_items = _layout_toolbar(slots, cols)
+        left_slots, right_slots = _layout_toolbar(slots, cols)
+        left_slots, right_slots, sep_width = _fill_toolbar(left_slots, right_slots, cols)
+        sep_str = " " * sep_width
 
         toolbar_row = self.scroll.input_row + 1
         self.out.write(blessed_term.move_yx(toolbar_row, 0).encode())
@@ -980,39 +1188,40 @@ class ToolbarRenderer:
         self.out.write(bg_sgr.encode())
 
         left_total = 0
-        for i, frags in enumerate(left_items):
+        for i, slot in enumerate(left_slots):
             if i > 0:
-                self.out.write("   ".encode())
-                left_total += _SEPARATOR_WIDTH
-            for sgr, text in frags:
+                prev_growable = left_slots[i - 1].growable
+                gap = _BAR_GAP_WIDTH if prev_growable and slot.growable else sep_width
+                self.out.write((" " * gap).encode())
+                left_total += gap
+            for sgr, text in slot.fragments:
                 self.out.write(f"{sgr}{text}".encode())
                 self.out.write(bg_sgr.encode())
                 left_total += _wcswidth(text)
 
         right_total = 0
-        for i, frags in enumerate(right_items):
+        for i, slot in enumerate(right_slots):
             if i > 0:
-                right_total += _SEPARATOR_WIDTH
-            right_total += sum(_wcswidth(t) for _, t in frags)
+                right_total += sep_width
+            right_total += sum(_wcswidth(t) for _, t in slot.fragments)
 
-        modem_w = _MODEM_WIDTH if self.stoplight is not None else 0
-
-        pad = max(1, cols - left_total - right_total - modem_w)
+        pad = max(1, cols - left_total - right_total)
         self.out.write((" " * pad).encode())
 
         right_sgr = _sgr_fg("#dddddd") if not is_autoreply_bg else ""
-        for i, frags in enumerate(right_items):
+        for i, slot in enumerate(right_slots):
             if i > 0:
-                self.out.write("   ".encode())
-            for sgr, text in frags:
+                self.out.write(sep_str.encode())
+            for sgr, text in slot.fragments:
                 effective_sgr = sgr if sgr else right_sgr
                 self.out.write(f"{effective_sgr}{text}".encode())
                 self.out.write(bg_sgr.encode())
 
+        # Drive stoplight animation via frame() so cursor_light stays in
+        # sync, but don't render the glyph here — it only appears at the
+        # cursor position.
         if self.stoplight is not None:
-            ch, (r, g, b) = self.stoplight.frame(autoreply_bg=is_autoreply_bg)
-            self.out.write(f"{blessed_term.color_rgb(r, g, b)}{ch}".encode())
-            self.out.write(bg_sgr.encode())
+            self.stoplight.frame(autoreply_bg=is_autoreply_bg)
             if self.stoplight.is_animating():
                 needs_reflash = True
 
@@ -1057,31 +1266,77 @@ class ToolbarRenderer:
         def _tick() -> None:
             self.out.write(CURSOR_HIDE.encode())
             still = self.render(autoreply_engine)
-            cursor_col = editor.display.cursor
             input_row = self.scroll.input_row
             engine = autoreply_engine
             ar = engine is not None and (engine.exclusive_active or engine.reply_pending)
             is_ar_bg = self.ctx.discover_active or self.ctx.randomwalk_active or ar
-            drew = self.cursor_light(bt, input_row, cursor_col, is_ar_bg)
-            if not drew:
-                style = _STYLE_AUTOREPLY if is_ar_bg else _STYLE_NORMAL
-                self.out.write(bt.move_yx(input_row, cursor_col).encode())
-                self.out.write(style["cursor_sgr"].encode())
-                self.out.write(CURSOR_SHOW.encode())
+
+            cq = self.ctx.command_queue
+            ac = self.ctx.active_command
+            from time import monotonic as _mono
+
+            ac_elapsed = _mono() - self.ctx.active_command_time
+            show_cmd = cq is not None or (ac is not None and ac_elapsed < _FLASH_DURATION)
+            if show_cmd:
+                from .client_repl_commands import (
+                    _render_active_command,
+                    _render_command_queue,
+                )
+
+                hint = _activity_hint(engine)
+                prog = _until_progress(engine)
+                if cq is not None:
+                    cursor_col = _render_command_queue(
+                        cq, self.scroll, self.out,
+                        flash_elapsed=ac_elapsed, hint=hint,
+                        progress=prog,
+                    )
+                else:
+                    cursor_col = _render_active_command(
+                        ac, self.scroll, self.out,
+                        flash_elapsed=ac_elapsed, hint=hint,
+                        progress=prog,
+                    )
+                if prog is not None:
+                    still = True
+                if ac_elapsed < _FLASH_DURATION:
+                    still = True
+                drew = self.cursor_light(bt, input_row, cursor_col, is_ar_bg)
+                if not drew:
+                    self.out.write(bt.move_yx(input_row, cursor_col).encode())
+                    self.out.write(CURSOR_SHOW.encode())
+            else:
+                hint = _activity_hint(engine)
+                hint_w = len(hint) if hint else 0
+                edit_w = max(2, bt.width - hint_w)
+                if not still:
+                    self.out.write(editor.render(bt, input_row, edit_w).encode())
+                if hint:
+                    prog = _until_progress(engine)
+                    col = bt.width - hint_w
+                    bg = _STYLE_AUTOREPLY["bg_sgr"] if is_ar_bg else _STYLE_NORMAL["bg_sgr"]
+                    self.out.write(bt.move_yx(input_row, col).encode())
+                    _write_hint(hint, self.out, bt, progress=prog, bg_sgr=bg)
+                    if prog is not None:
+                        still = True
+                cursor_col = editor.display.cursor
+                drew = self.cursor_light(bt, input_row, cursor_col, is_ar_bg)
+                if not drew:
+                    style = _STYLE_AUTOREPLY if is_ar_bg else _STYLE_NORMAL
+                    self.out.write(bt.move_yx(input_row, cursor_col).encode())
+                    self.out.write(CURSOR_COLOR_OSC.encode())
+                    self.out.write(style["cursor_sgr"].encode())
+                    self.out.write(CURSOR_SHOW.encode())
+                    self.out.write(bt.normal.encode())
+
             if still:
                 loop.call_later(_FLASH_INTERVAL, _tick)
             else:
-                self.out.write(editor.render(bt, input_row, bt.width).encode())
-                cursor_col = editor.display.cursor
-                style = _STYLE_AUTOREPLY if is_ar_bg else _STYLE_NORMAL
-                self.out.write(bt.move_yx(input_row, cursor_col).encode())
-                self.out.write(style["cursor_sgr"].encode())
-                self.out.write(CURSOR_SHOW.encode())
                 self.flash_active = False
 
         loop.call_later(_FLASH_INTERVAL, _tick)
 
-    _ETA_REFRESH_INTERVAL = 0.25
+    _ETA_REFRESH_INTERVAL = 1.0
 
     def schedule_eta_refresh(
         self,
@@ -1091,7 +1346,7 @@ class ToolbarRenderer:
         bt: "blessed.Terminal",
     ) -> None:
         """
-        Schedule a periodic ETA refresh at 250 ms intervals.
+        Schedule a periodic ETA refresh at 1-second intervals.
 
         Only redraws the toolbar when the ETA text has changed since the last render, to avoid
         unnecessary flicker.
@@ -1105,25 +1360,112 @@ class ToolbarRenderer:
                 self._eta_refresh_active = False
                 return
             gmcp_data = self.ctx.gmcp_data or {}
-            maxxp = gmcp_data.get("maxxp")
+            status = gmcp_data.get("Char.Vitals", gmcp_data.get("Char.Status", {}))
+            if isinstance(status, dict):
+                maxxp = status.get(
+                    "maxxp", status.get("maxXP", status.get("max_xp", status.get("maxexp")))
+                )
+            else:
+                maxxp = None
             now = time.monotonic()
             frags = self.xp.eta_fragments(maxxp, now)
+            self._cached_eta_frags = frags
             eta_text = frags[0][1] if frags else ""
             if eta_text != self._last_eta_text:
                 self._last_eta_text = eta_text
                 self.out.write(CURSOR_HIDE.encode())
                 self.render(autoreply_engine)
+                has_command = (
+                    self.ctx.command_queue is not None
+                    or self.ctx.active_command is not None
+                )
+                if not has_command:
+                    cursor_col = editor.display.cursor
+                    input_row = self.scroll.input_row
+                    engine = autoreply_engine
+                    ar = engine is not None and (
+                        engine.exclusive_active or engine.reply_pending
+                    )
+                    is_ar_bg = (
+                        self.ctx.discover_active
+                        or self.ctx.randomwalk_active
+                        or ar
+                    )
+                    drew = self.cursor_light(bt, input_row, cursor_col, is_ar_bg)
+                    if not drew:
+                        style = _STYLE_AUTOREPLY if is_ar_bg else _STYLE_NORMAL
+                        self.out.write(bt.move_yx(input_row, cursor_col).encode())
+                        self.out.write(CURSOR_COLOR_OSC.encode())
+                        self.out.write(style["cursor_sgr"].encode())
+                        self.out.write(CURSOR_SHOW.encode())
+                        self.out.write(bt.normal.encode())
+            loop.call_later(self._ETA_REFRESH_INTERVAL, _eta_tick)
+
+        loop.call_later(self._ETA_REFRESH_INTERVAL, _eta_tick)
+
+    _PROGRESS_REFRESH_INTERVAL = 0.1
+
+    def schedule_until_progress(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        autoreply_engine: Any,
+        editor: "blessed.line_editor.LiveLineEditor",
+        bt: "blessed.Terminal",
+    ) -> None:
+        """Schedule a 100 ms ticker to redraw the until progress bar.
+
+        Only redraws when the integer progress-bar split column changes,
+        to avoid unnecessary flicker.
+        """
+        if self._until_progress_active:
+            return
+        self._until_progress_active = True
+        self._last_progress_col = -1
+
+        def _progress_tick() -> None:
+            engine = autoreply_engine
+            prog = _until_progress(engine)
+            if prog is None:
+                self._until_progress_active = False
+                self._last_progress_col = -1
+                return
+            hint = _activity_hint(engine)
+            if not hint:
+                self._until_progress_active = False
+                return
+            split = int(len(hint) * prog + 0.5)
+            if split == self._last_progress_col:
+                loop.call_later(self._PROGRESS_REFRESH_INTERVAL, _progress_tick)
+                return
+            self._last_progress_col = split
+            hint_w = len(hint)
+            col = bt.width - hint_w
+            if col < 2:
+                loop.call_later(self._PROGRESS_REFRESH_INTERVAL, _progress_tick)
+                return
+            ar = engine is not None and (
+                engine.exclusive_active or engine.reply_pending
+            )
+            is_ar_bg = self.ctx.discover_active or self.ctx.randomwalk_active or ar
+            bg = _STYLE_AUTOREPLY["bg_sgr"] if is_ar_bg else _STYLE_NORMAL["bg_sgr"]
+            self.out.write(CURSOR_HIDE.encode())
+            self.out.write(bt.move_yx(self.scroll.input_row, col).encode())
+            _write_hint(hint, self.out, bt, progress=prog, bg_sgr=bg)
+            has_command = (
+                self.ctx.command_queue is not None
+                or self.ctx.active_command is not None
+            )
+            if not has_command:
                 cursor_col = editor.display.cursor
                 input_row = self.scroll.input_row
-                engine = autoreply_engine
-                ar = engine is not None and (engine.exclusive_active or engine.reply_pending)
-                is_ar_bg = self.ctx.discover_active or self.ctx.randomwalk_active or ar
                 drew = self.cursor_light(bt, input_row, cursor_col, is_ar_bg)
                 if not drew:
                     style = _STYLE_AUTOREPLY if is_ar_bg else _STYLE_NORMAL
                     self.out.write(bt.move_yx(input_row, cursor_col).encode())
+                    self.out.write(CURSOR_COLOR_OSC.encode())
                     self.out.write(style["cursor_sgr"].encode())
                     self.out.write(CURSOR_SHOW.encode())
-            loop.call_later(self._ETA_REFRESH_INTERVAL, _eta_tick)
+                    self.out.write(bt.normal.encode())
+            loop.call_later(self._PROGRESS_REFRESH_INTERVAL, _progress_tick)
 
-        loop.call_later(self._ETA_REFRESH_INTERVAL, _eta_tick)
+        loop.call_later(self._PROGRESS_REFRESH_INTERVAL, _progress_tick)

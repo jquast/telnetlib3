@@ -50,6 +50,16 @@ def history_path(session_key: str) -> str:
     return os.path.join(DATA_DIR, f"history-{safe_session_slug(session_key)}")
 
 
+def chat_path(session_key: str) -> str:
+    """
+    Return per-session chat history file path.
+
+    :param session_key: Session identifier, typically ``host:port``.
+    :returns: Absolute path under :data:`DATA_DIR`.
+    """
+    return os.path.join(DATA_DIR, f"chat-{safe_session_slug(session_key)}.json")
+
+
 def xdg_config_dir() -> pathlib.Path:
     """Return the XDG config directory for telnetlib3."""
     return pathlib.Path(CONFIG_DIR)

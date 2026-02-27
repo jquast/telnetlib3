@@ -5,6 +5,7 @@ import random
 import asyncio
 import logging
 import collections
+from time import monotonic as _monotonic
 from typing import TYPE_CHECKING, Optional
 
 # local
@@ -214,6 +215,7 @@ async def _fast_travel(
                     prompt_ready.clear()
 
                 ctx.active_command = direction
+                ctx.active_command_time = _monotonic()
                 if ctx.cx_dot is not None:
                     ctx.cx_dot.trigger()
                 if ctx.tx_dot is not None:
@@ -363,7 +365,10 @@ async def _fast_travel(
                     and reroute_count < max_reroutes
                     and graph is not None
                 ):
-                    new_steps = graph.find_path_with_rooms(actual, destination)
+                    blocked = graph.blocked_rooms()
+                    new_steps = graph.find_path_with_rooms(
+                        actual, destination, blocked=blocked
+                    )
                     if new_steps is not None:
                         reroute_count += 1
                         msg = (
@@ -432,6 +437,7 @@ async def _autodiscover(
     current = ctx.current_room_num
     graph = ctx.room_graph
     echo_fn = ctx.echo_command
+    wait_fn = ctx.wait_for_prompt
     if not current or graph is None:
         if echo_fn is not None:
             echo_fn("AUTODISCOVER: no room data")
@@ -442,8 +448,9 @@ async def _autodiscover(
         tried |= ctx.last_walk_tried
     inaccessible: set[str] = set()
     blocked_edges: dict[tuple[str, str], str] = {}
+    blocked_rooms = graph.blocked_rooms()
 
-    branches = graph.find_branches(current)
+    branches = graph.find_branches(current, blocked=blocked_rooms)
     if not branches:
         if echo_fn is not None:
             echo_fn("AUTODISCOVER: no unvisited exits nearby")
@@ -462,7 +469,7 @@ async def _autodiscover(
             # newly revealed exits from rooms we just visited, nearest-first.
             branches = [
                 (gw, d, t)
-                for gw, d, t in graph.find_branches(pos)
+                for gw, d, t in graph.find_branches(pos, blocked=blocked_rooms)
                 if (gw, d) not in tried and t not in inaccessible
             ]
             if not branches:
@@ -475,7 +482,9 @@ async def _autodiscover(
 
             # Travel to the gateway room (nearest-first, so usually short).
             if pos != gw_room:
-                steps = graph.find_path_with_rooms(pos, gw_room)
+                steps = graph.find_path_with_rooms(
+                    pos, gw_room, blocked=blocked_rooms
+                )
                 if steps is None:
                     tried.add((gw_room, direction))
                     if target_num:
@@ -537,6 +546,7 @@ async def _autodiscover(
                 )
             await asyncio.sleep(_COMMAND_DELAY)
             ctx.active_command = direction
+            ctx.active_command_time = _monotonic()
             send = ctx.send_line
             if ctx.cx_dot is not None:
                 ctx.cx_dot.trigger()
@@ -587,9 +597,14 @@ async def _autodiscover(
 
             # Wait for any autoreply to settle.
             ar = ctx.autoreply_engine
+            ar_fired = ar is not None and (
+                ar.exclusive_active or ar.reply_pending
+            )
             if ar is not None:
                 settle = 0
                 while settle < 60:
+                    if ar.exclusive_active or ar.reply_pending:
+                        ar_fired = True
                     if ar.exclusive_active:
                         while ar.exclusive_active:
                             ar.check_timeout()
@@ -600,6 +615,9 @@ async def _autodiscover(
                     if not ar.exclusive_active and not ar.reply_pending:
                         break
                     settle += 1
+
+            if ar_fired and wait_fn is not None:
+                await wait_fn()
 
             # Stay where we are — next iteration re-discovers branches
             # from current position, so nearby clusters get swept without
@@ -626,6 +644,7 @@ async def _randomwalk(
     log: logging.Logger,
     limit: int = _DEFAULT_WALK_LIMIT,
     resume: bool = False,
+    visit_level: int = 2,
 ) -> None:
     """
     Random walk up to *limit* rooms, preferring unvisited exits.
@@ -639,11 +658,12 @@ async def _randomwalk(
     came from.
 
     Stops early when every reachable room (excluding the entrance)
-    has been visited at least once.
+    has been visited at least *visit_level* times.
 
     :param ctx: Session context with room graph and session attributes.
     :param log: Logger.
     :param limit: Maximum number of steps.
+    :param visit_level: Minimum visits per reachable room before stopping.
     """
     if ctx.randomwalk_active:
         return
@@ -676,14 +696,20 @@ async def _randomwalk(
     # seeding walk_counts globally — a blocked exit (A, east) should
     # only penalize that specific exit, not the destination room from
     # every other direction.
+    # Clear stale blocked exits from previous walks so dead-end rooms
+    # with a single exit aren't permanently stuck.  Resume keeps them.
+    if not resume:
+        ctx.blocked_exits.clear()
+    db_blocked = graph.blocked_rooms()
 
     def _flood_reachable() -> set[str]:
-        """BFS flood from current room, excluding the entrance."""
+        """BFS flood from current room, excluding entrance and blocked rooms."""
         result: set[str] = set()
         q: collections.deque[str] = collections.deque([current])
         seen: set[str] = {current}
         if entrance_room:
             seen.add(entrance_room)
+        seen |= db_blocked
         while q:
             node = q.popleft()
             for dst in adj.get(node, {}).values():
@@ -717,12 +743,15 @@ async def _randomwalk(
                     )
                 break
 
-            # Check if all reachable rooms have been visited.
-            if reachable and reachable.issubset(visited):
+            # Check if all reachable rooms have been visited enough times.
+            if reachable and all(
+                walk_counts.get(r, 0) >= visit_level for r in reachable
+            ):
                 if echo_fn is not None:
                     echo_fn(
                         f"RANDOMWALK [{step + 1}/{ctx.randomwalk_total}]: "
-                        f"all {len(visited)} reachable rooms visited"
+                        f"all {len(reachable)} reachable rooms visited"
+                        f" {visit_level}x"
                     )
                 break
 
@@ -733,6 +762,8 @@ async def _randomwalk(
             scored: list[tuple[float, str, str]] = []
             for d, dst in exits.items():
                 if (current, d) in ctx.blocked_exits:
+                    continue
+                if dst in db_blocked:
                     continue
                 penalty = 0.0 if d in _STANDARD_DIRS else 0.1
                 scored.append((walk_counts.get(dst, 0) + penalty, d, dst))
@@ -758,6 +789,7 @@ async def _randomwalk(
                 )
 
             ctx.active_command = direction
+            ctx.active_command_time = _monotonic()
             if wait_fn is not None:
                 await wait_fn()
             if ctx.cx_dot is not None:
@@ -813,27 +845,40 @@ async def _randomwalk(
             visited.add(actual)
 
             # Bounce detection: if we returned to the room we were in
-            # 2 steps ago, we are ping-ponging.
+            # 2 steps ago, we are ping-ponging between two rooms.
+            # Only block the direction if the intermediate room
+            # (``current``) is a dead-end corridor — i.e. it has no
+            # unblocked exits other than the one leading back here.
             if prev_room is not None and actual == prev_room:
                 bounce_count += 1
                 if bounce_count >= _BOUNCE_THRESHOLD:
-                    ctx.blocked_exits.add((current, direction))
-                    if echo_fn is not None:
-                        echo_fn(
-                            f"RANDOMWALK [{step + 1}/{ctx.randomwalk_total}]: "
-                            f"bounce detected on {direction}, blocking"
-                        )
-                    bounce_count = 0
-                    # Check if all exits from actual (where we are now)
-                    # are blocked after adding the bounce block.
-                    all_blocked = all((actual, d) in ctx.blocked_exits for d in adj.get(actual, {}))
-                    if all_blocked:
+                    other_exits = [
+                        d
+                        for d, dst in adj.get(current, {}).items()
+                        if dst != actual and (current, d) not in ctx.blocked_exits
+                    ]
+                    if not other_exits:
+                        ctx.blocked_exits.add((current, direction))
+                        for rev_d, rev_dst in adj.get(actual, {}).items():
+                            if rev_dst == current:
+                                ctx.blocked_exits.add((actual, rev_d))
                         if echo_fn is not None:
                             echo_fn(
                                 f"RANDOMWALK [{step + 1}/{ctx.randomwalk_total}]: "
-                                f"all exits blocked after bounce, stopping"
+                                f"bounce detected on {direction}, blocking"
                             )
-                        break
+                        all_blocked = all(
+                            (actual, d) in ctx.blocked_exits
+                            for d in adj.get(actual, {})
+                        )
+                        if all_blocked:
+                            if echo_fn is not None:
+                                echo_fn(
+                                    f"RANDOMWALK [{step + 1}/{ctx.randomwalk_total}]: "
+                                    f"all exits blocked after bounce, stopping"
+                                )
+                            break
+                    bounce_count = 0
             else:
                 bounce_count = 0
             prev_room = current
@@ -848,18 +893,31 @@ async def _randomwalk(
                 reachable = new_reachable
                 ctx.randomwalk_total = min(limit, len(reachable))
 
-            # Wait for autoreplies to settle.
+            # Yield so on_prompt() (driven by GA/EOR already received
+            # with the room output) can queue autoreplies.
+            await asyncio.sleep(0)
+
+            # Wait for autoreplies to settle.  Mirrors the slow-travel
+            # settle loop: after exclusive/reply_pending clear, wait for
+            # a fresh prompt so the server response to the last autoreply
+            # command is processed -- it may trigger cascading matches.
             ar = ctx.autoreply_engine
+            ar_fired = False
             if ar is not None:
                 settle = 0
-                while settle < 60:
+                max_settle = 60
+                while settle < max_settle:
+                    if ar.exclusive_active or ar.reply_pending:
+                        ar_fired = True
                     if ar.exclusive_active:
                         while ar.exclusive_active:
                             ar.check_timeout()
                             await asyncio.sleep(0.1)
                     while ar.reply_pending:
                         await asyncio.sleep(0.05)
-                    await asyncio.sleep(0.1)
+                    if ar_fired and wait_fn is not None:
+                        await wait_fn()
+                    await asyncio.sleep(0)
                     if not ar.exclusive_active and not ar.reply_pending:
                         break
                     settle += 1
@@ -910,13 +968,55 @@ async def _handle_travel_commands(
         verb = m.group(1).lower()
         arg = m.group(2).strip()
 
+        if verb == "home":
+            echo_fn = ctx.echo_command
+            current = ctx.current_room_num
+            graph = ctx.room_graph
+            if not current or graph is None:
+                if echo_fn is not None:
+                    echo_fn("HOME: no room data")
+                return parts[idx + 1 :]
+            area = graph.room_area(current)
+            if not area:
+                if echo_fn is not None:
+                    echo_fn("HOME: current room has no area")
+                return parts[idx + 1 :]
+            home_num = graph.get_home_for_area(area)
+            if home_num is None:
+                if echo_fn is not None:
+                    echo_fn(f"HOME: no home set in area '{area}'")
+                return parts[idx + 1 :]
+            if home_num == current:
+                if echo_fn is not None:
+                    echo_fn("HOME: already at home room")
+                return parts[idx + 1 :]
+            blocked = graph.blocked_rooms()
+            path = graph.find_path_with_rooms(
+                current, home_num, blocked=blocked
+            )
+            if path is None:
+                if echo_fn is not None:
+                    echo_fn(f"HOME: no path to home room {home_num}")
+                return parts[idx + 1 :]
+            await _fast_travel(
+                path, ctx, log, slow=False, destination=home_num
+            )
+            return parts[idx + 1 :]
+
         if verb in ("autodiscover", "randomwalk", "resume"):
             walk_limit = _DEFAULT_WALK_LIMIT
+            walk_visit_level = 2
             if arg:
+                arg_parts = arg.split()
                 try:
-                    walk_limit = int(arg)
-                except ValueError:
+                    walk_limit = int(arg_parts[0])
+                except (ValueError, IndexError):
                     pass
+                if len(arg_parts) >= 2:
+                    try:
+                        walk_visit_level = max(1, int(arg_parts[1]))
+                    except ValueError:
+                        pass
 
             echo_fn = ctx.echo_command
             if verb == "resume":
@@ -940,7 +1040,10 @@ async def _handle_travel_commands(
             if verb == "autodiscover":
                 await _autodiscover(ctx, log, limit=walk_limit, resume=do_resume)
             else:
-                await _randomwalk(ctx, log, limit=walk_limit, resume=do_resume)
+                await _randomwalk(
+                    ctx, log, limit=walk_limit, resume=do_resume,
+                    visit_level=walk_visit_level,
+                )
             return parts[idx + 1 :]
 
         slow = "slow" in verb
@@ -965,7 +1068,8 @@ async def _handle_travel_commands(
             log.warning("no room graph -- cannot travel")
             break
 
-        path = graph.find_path_with_rooms(current, room_id)
+        blocked = graph.blocked_rooms()
+        path = graph.find_path_with_rooms(current, room_id, blocked=blocked)
         if path is None:
             log.warning("no path from %s to %s", current, room_id)
             break

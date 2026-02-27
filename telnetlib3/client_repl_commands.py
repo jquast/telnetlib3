@@ -4,13 +4,22 @@
 import re
 import asyncio
 import logging
+from time import monotonic as _monotonic
 from typing import TYPE_CHECKING, Any, NamedTuple, Optional
 
 if TYPE_CHECKING:
     from .session_context import SessionContext, _CommandQueue
 
 # local
-from .client_repl_render import _ELLIPSIS, _get_term, _wcswidth
+from .client_repl_render import (
+    _ELLIPSIS,
+    _FLASH_DURATION,
+    _STYLE_NORMAL,
+    _flash_bg_rgb,
+    _get_term,
+    _wcswidth,
+    _write_hint,
+)
 
 _REPEAT_RE = re.compile(r"^(\d+)([A-Za-z].*)$")
 _BACKTICK_RE = re.compile(r"`[^`]*`")
@@ -27,20 +36,23 @@ class ExpandedCommands(NamedTuple):
 
     :param commands: Flat list of individual commands.
     :param immediate_set: Indices of commands whose preceding separator
-        was ``:`` (send immediately, no GA/EOR wait).
+        was ``|`` (send immediately, no GA/EOR wait).
     """
 
     commands: list[str]
     immediate_set: frozenset[int]
 
 
-def expand_commands(line: str) -> list[str]:
+def expand_commands_ex(line: str) -> ExpandedCommands:
     """
-    Split *line* on ``;`` (outside backticks) and expand repeat prefixes.
+    Split *line* on ``;`` and ``|`` (outside backticks) and expand repeat prefixes.
 
-    Backtick-enclosed tokens (e.g. ```fast travel 123```, ```delay 1s```)
-    are preserved verbatim -- they are not split on ``;`` and repeat
-    expansion is not applied.
+    Backtick-enclosed tokens (e.g. ```fast travel 123```, ```delay 1s```,
+    ```until 4 died\\.```) are preserved verbatim -- they are not split
+    on ``;`` or ``|`` and repeat expansion is not applied.
+
+    ``;`` means *wait for GA/EOR* before the next command (default).
+    ``|`` means *send immediately* without waiting.
 
     A segment like ``5e`` becomes ``['e', 'e', 'e', 'e', 'e']``.
     Only a leading integer followed immediately by an alphabetic
@@ -48,9 +60,8 @@ def expand_commands(line: str) -> list[str]:
     Segments without a leading digit are passed through unchanged.
 
     :param line: Raw user input line.
-    :returns: Flat list of individual commands.
+    :returns: :class:`ExpandedCommands` with commands and immediate indices.
     """
-    # Replace backtick tokens with placeholders to protect from ; splitting.
     placeholders: list[str] = []
 
     def _replace_bt(m: re.Match[str]) -> str:
@@ -58,32 +69,73 @@ def expand_commands(line: str) -> list[str]:
         return f"\x00BT{len(placeholders) - 1}\x00"
 
     protected = _BACKTICK_RE.sub(_replace_bt, line)
-    parts = protected.split(";") if ";" in protected else [protected]
+
+    # Split on ; and | while capturing the separator.
+    _SEP_RE = re.compile(r"([;|])")
+    tokens = _SEP_RE.split(protected)
+
+    # tokens is alternating [segment, sep, segment, sep, ...].
+    # Walk through tracking which separator precedes each segment.
     result: list[str] = []
-    for part in parts:
-        stripped = part.strip()
+    immediate_indices: set[int] = set()
+    prev_sep = ";"  # first command has no preceding separator
+    for tok_idx, tok in enumerate(tokens):
+        if tok_idx % 2 == 1:
+            # This is a separator.
+            prev_sep = tok
+            continue
+        # This is a segment.
+        stripped = tok.strip()
         if not stripped:
             continue
+
         # Restore backtick placeholders.
         while "\x00BT" in stripped:
             for i, orig in enumerate(placeholders):
                 stripped = stripped.replace(f"\x00BT{i}\x00", orig)
+
+        is_immediate = prev_sep == "|"
+
         if stripped.startswith("`") and stripped.endswith("`"):
+            cmd_idx = len(result)
             result.append(stripped)
+            if is_immediate:
+                immediate_indices.add(cmd_idx)
             continue
+
         m = _REPEAT_RE.match(stripped)
         if m:
             count = min(int(m.group(1)), 200)
             cmd = m.group(2)
+            first_idx = len(result)
             result.extend([cmd] * count)
+            if is_immediate:
+                immediate_indices.add(first_idx)
         else:
+            cmd_idx = len(result)
             result.append(stripped)
-    return result
+            if is_immediate:
+                immediate_indices.add(cmd_idx)
+
+    return ExpandedCommands(result, frozenset(immediate_indices))
+
+
+def expand_commands(line: str) -> list[str]:
+    """
+    Split *line* on ``;`` and ``|`` (outside backticks) and expand repeat prefixes.
+
+    Convenience wrapper around :func:`expand_commands_ex` that returns
+    only the command list (discarding separator metadata).
+
+    :param line: Raw user input line.
+    :returns: Flat list of individual commands.
+    """
+    return expand_commands_ex(line).commands
 
 
 _TRAVEL_RE = re.compile(
     r"^`(fast travel|slow travel|return fast|return slow"
-    r"|autodiscover|randomwalk|resume)\s*(.*?)`$",
+    r"|autodiscover|randomwalk|resume|home)\s*(.*?)`$",
     re.IGNORECASE,
 )
 
@@ -115,22 +167,49 @@ def _collapse_runs(commands: list[str], start: int = 0) -> list[tuple[str, int, 
     return runs
 
 
-def _render_active_command(command: str, scroll: "Any", out: "asyncio.StreamWriter") -> None:
-    """Render a single highlighted active command on the input row."""
+_ACTIVE_CMD_BASE_FG = "#786050"
+
+
+def _render_active_command(
+    command: str,
+    scroll: "Any",
+    out: "asyncio.StreamWriter",
+    flash_elapsed: float = -1.0,
+    hint: str = "",
+    progress: Optional[float] = None,
+) -> int:
+    """Render a single highlighted active command on the input row.
+
+    The text is drawn in the base foreground colour.  During the flash
+    window a background ramps from black toward the inverse RGB of the
+    base colour and back.
+
+    :param flash_elapsed: Seconds since the command was issued.
+    :param hint: Right-aligned dim hint text (e.g. autoreply status).
+    :param progress: Until timer progress ``0.0..1.0``, or ``None``.
+    :returns: Display width of the rendered command text.
+    """
     blessed_term = _get_term()
     cols = blessed_term.width
-    active_sgr = blessed_term.on_color_rgb(255, 255, 255) + blessed_term.color_rgb(0, 0, 0)
     normal = blessed_term.normal
+    fg_sgr = str(blessed_term.color_hex(_ACTIVE_CMD_BASE_FG))
 
-    text = command[: cols - 1] if _wcswidth(command) >= cols else command
+    bg_rgb = _flash_bg_rgb(_ACTIVE_CMD_BASE_FG, flash_elapsed)
+    bg_sgr = str(blessed_term.on_color_rgb(*bg_rgb)) if bg_rgb else ""
+
+    hint_w = len(hint) if hint else 0
+    avail = cols - hint_w
+    text = command[: avail - 1] if _wcswidth(command) >= avail else command
     w = _wcswidth(text)
 
     out.write(blessed_term.move_yx(scroll.input_row, 0).encode())
-    out.write(f"{active_sgr}{text}{normal}".encode())
-    pad = cols - w
+    out.write(f"{fg_sgr}{bg_sgr}{text}{normal}".encode())
+    pad = avail - w
     if pad > 0:
         out.write((" " * pad).encode())
+    _write_hint(hint, out, blessed_term, progress=progress)
     out.write(normal.encode())
+    return w
 
 
 def _clear_command_queue(ctx: "SessionContext") -> None:
@@ -141,32 +220,46 @@ def _clear_command_queue(ctx: "SessionContext") -> None:
 
 
 def _render_command_queue(
-    queue: "Optional[_CommandQueue]", scroll: "Any", out: "asyncio.StreamWriter"
-) -> None:
-    """
-    Render the command queue on the input row.
+    queue: "Optional[_CommandQueue]",
+    scroll: "Any",
+    out: "asyncio.StreamWriter",
+    flash_elapsed: float = -1.0,
+    hint: str = "",
+    progress: Optional[float] = None,
+) -> int:
+    """Render the command queue on the input row.
 
-    The active run is highlighted with paper-white background / black foreground.  Pending runs use
-    dim grey.  If the display is too wide it is truncated with an ellipsis.
+    The active run uses the suggestion (dull) colour with an optional
+    flash animation.  Pending runs use dim grey.  If the display is too
+    wide it is truncated with an ellipsis.
+
+    :param flash_elapsed: Seconds since last command change; drives flash.
+    :param hint: Right-aligned dim hint text (e.g. autoreply status).
+    :param progress: Until timer progress ``0.0..1.0``, or ``None``.
+    :returns: Total display width of all rendered fragments.
     """
     if queue is None:
-        return
+        return 0
     blessed_term = _get_term()
     cols = blessed_term.width
+    hint_w = len(hint) if hint else 0
+    avail = cols - hint_w
 
     runs = _collapse_runs(queue.commands, queue.current_idx)
     if not runs:
-        return
+        return 0
 
-    active_sgr = blessed_term.on_color_rgb(255, 255, 255) + blessed_term.color_rgb(0, 0, 0)
-    pending_sgr = blessed_term.color_rgb(120, 120, 120)
+    active_fg = str(blessed_term.color_hex(_ACTIVE_CMD_BASE_FG))
+    bg_rgb = _flash_bg_rgb(_ACTIVE_CMD_BASE_FG, flash_elapsed)
+    active_bg = str(blessed_term.on_color_rgb(*bg_rgb)) if bg_rgb else ""
+    pending_sgr = str(blessed_term.color_rgb(120, 120, 120))
     normal = blessed_term.normal
 
     # Build fragments: (sgr, text) for each run.
     frags: list[tuple[str, str]] = []
     for text, start_idx, _end_idx in runs:
         is_active = start_idx <= queue.current_idx <= _end_idx
-        sgr = active_sgr if is_active else pending_sgr
+        sgr = f"{active_fg}{active_bg}" if is_active else pending_sgr
         frags.append((sgr, text))
 
     sep = " "
@@ -174,7 +267,7 @@ def _render_command_queue(
     built: list[tuple[str, str]] = []
     for idx, (sgr, text) in enumerate(frags):
         w = _wcswidth(text) + (1 if idx > 0 else 0)
-        if total_w + w > cols - 1 and built:
+        if total_w + w > avail - 1 and built:
             built.append((pending_sgr, _ELLIPSIS))
             total_w += 1
             break
@@ -186,10 +279,12 @@ def _render_command_queue(
     out.write(blessed_term.move_yx(scroll.input_row, 0).encode())
     for sgr, text in built:
         out.write(f"{sgr}{text}{normal}".encode())
-    pad = cols - total_w
+    pad = avail - total_w
     if pad > 0:
         out.write((" " * pad).encode())
+    _write_hint(hint, out, blessed_term, progress=progress)
     out.write(normal.encode())
+    return total_w
 
 
 async def _send_chained(
@@ -197,6 +292,7 @@ async def _send_chained(
     ctx: "SessionContext",
     log: logging.Logger,
     queue: "Optional[_CommandQueue]" = None,
+    immediate_set: frozenset[int] = frozenset(),
 ) -> None:
     """
     Send multiple commands with GA/EOR pacing between each.
@@ -204,6 +300,9 @@ async def _send_chained(
     The first command is assumed to have already been sent by the caller.
     This coroutine sends commands 2..N, waiting for the server prompt
     signal before each one.
+
+    Commands whose index is in *immediate_set* (from a ``|`` separator)
+    skip the GA/EOR wait and are sent immediately.
 
     When all commands in the list are identical (e.g. ``9e`` expanded to
     nine ``e`` commands), movement retry logic is applied: if the room
@@ -214,6 +313,7 @@ async def _send_chained(
     :param ctx: Session context.
     :param log: Logger.
     :param queue: Optional command queue for display and cancellation.
+    :param immediate_set: Indices of commands that skip GA/EOR wait.
     """
     wait_fn = ctx.wait_for_prompt
     echo_fn = ctx.echo_command
@@ -248,14 +348,16 @@ async def _send_chained(
         prev_room = ctx.current_room_num if use_move_pacing else ""
 
         if not use_move_pacing:
-            # Mixed commands: GA/EOR pacing only.
-            if prompt_ready is not None:
-                prompt_ready.clear()
-            if wait_fn is not None:
-                await wait_fn()
+            # Mixed commands: GA/EOR pacing (unless immediate).
+            if _idx not in immediate_set:
+                if prompt_ready is not None:
+                    prompt_ready.clear()
+                if wait_fn is not None:
+                    await wait_fn()
             log.debug("chained command: %r", cmd)
             if echo_fn is not None:
                 echo_fn(cmd)
+            ctx.active_command_time = _monotonic()
             if ctx.cx_dot is not None:
                 ctx.cx_dot.trigger()
             if ctx.tx_dot is not None:
@@ -283,6 +385,7 @@ async def _send_chained(
                     echo_fn(cmd)
             else:
                 log.info("chained retry %d: %r", attempt, cmd)
+            ctx.active_command_time = _monotonic()
             if ctx.cx_dot is not None:
                 ctx.cx_dot.trigger()
             if ctx.tx_dot is not None:
@@ -319,21 +422,26 @@ async def _send_chained(
 
 async def execute_macro_commands(text: str, ctx: "SessionContext", log: logging.Logger) -> None:
     """
-    Execute a macro text string, handling travel and delay commands.
+    Execute a macro text string, handling travel, delay, when, and until commands.
 
-    Expands the text with :func:`expand_commands`, then processes each
+    Expands the text with :func:`expand_commands_ex`, then processes each
     part -- backtick-enclosed travel commands are routed through
     :func:`_handle_travel_commands`, delay commands pause execution,
-    and plain commands are sent to the server with GA/EOR pacing.
+    ``when`` commands gate on GMCP conditions, ``until``/``untils``
+    commands wait for server output patterns, and plain commands are
+    sent to the server with GA/EOR pacing (or immediately if ``|```
+    separated).
 
-    :param text: Raw macro text with ``;`` separators.
+    :param text: Raw macro text with ``;``/``|`` separators.
     :param ctx: Session context.
     :param log: Logger.
     """
-    from .autoreply import _DELAY_RE
+    from .autoreply import _DELAY_RE, check_condition
     from .client_repl_travel import _handle_travel_commands
 
-    parts = expand_commands(text)
+    expanded = expand_commands_ex(text)
+    parts = list(expanded.commands)
+    immediate_set = set(expanded.immediate_set)
     if not parts:
         return
 
@@ -343,6 +451,7 @@ async def execute_macro_commands(text: str, ctx: "SessionContext", log: logging.
     wait_fn = ctx.wait_for_prompt
     echo_fn = ctx.echo_command
     prompt_ready = ctx.prompt_ready
+    sent_count = 0
 
     idx = 0
     while idx < len(parts):
@@ -351,9 +460,10 @@ async def execute_macro_commands(text: str, ctx: "SessionContext", log: logging.
         # Travel command -- hand off the rest to _handle_travel_commands.
         if _TRAVEL_RE.match(cmd):
             remainder = await _handle_travel_commands(parts[idx:], ctx, log)
-            # remainder contains post-travel commands; continue processing.
             parts = remainder
+            immediate_set = set()
             idx = 0
+            sent_count = 0
             continue
 
         # Delay command.
@@ -367,8 +477,62 @@ async def execute_macro_commands(text: str, ctx: "SessionContext", log: logging.
             idx += 1
             continue
 
-        # Plain command -- send with pacing.
-        if idx > 0:
+        # When condition gate.
+        wm = _WHEN_RE.match(cmd)
+        if wm:
+            vital, op, val = wm.group(1), wm.group(2), wm.group(3)
+            ok, desc = check_condition({vital: f"{op}{val}"}, ctx)
+            if not ok:
+                log.info("macro: when condition failed: %s", desc)
+                break
+            idx += 1
+            continue
+
+        # Until (case-insensitive wait for pattern).
+        um = _UNTIL_RE.match(cmd)
+        if um:
+            timeout = float(um.group(1) or "4")
+            pattern_str = um.group(2)
+            engine = ctx.autoreply_engine
+            if engine is not None:
+                now = _monotonic()
+                engine._until_start = now
+                engine._until_deadline = now + timeout
+                compiled = re.compile(
+                    pattern_str, re.IGNORECASE | re.MULTILINE | re.DOTALL
+                )
+                match = await engine.buffer.wait_for_pattern(compiled, timeout)
+                engine._until_start = engine._until_deadline = 0.0
+                if match is None:
+                    log.info("macro: until timed out for %r", pattern_str)
+                    break
+            idx += 1
+            continue
+
+        # Untils (case-sensitive wait for pattern).
+        us = _UNTILS_RE.match(cmd)
+        if us:
+            timeout = float(us.group(1) or "4")
+            pattern_str = us.group(2)
+            engine = ctx.autoreply_engine
+            if engine is not None:
+                now = _monotonic()
+                engine._until_start = now
+                engine._until_deadline = now + timeout
+                # untils is case-SENSITIVE -- no IGNORECASE flag
+                compiled = re.compile(
+                    pattern_str, re.MULTILINE | re.DOTALL
+                )
+                match = await engine.buffer.wait_for_pattern(compiled, timeout)
+                engine._until_start = engine._until_deadline = 0.0
+                if match is None:
+                    log.info("macro: untils timed out for %r", pattern_str)
+                    break
+            idx += 1
+            continue
+
+        # Plain command -- send with pacing (or immediate if | separated).
+        if sent_count > 0 and idx not in immediate_set:
             if prompt_ready is not None:
                 prompt_ready.clear()
             if wait_fn is not None:
@@ -381,6 +545,7 @@ async def execute_macro_commands(text: str, ctx: "SessionContext", log: logging.
         if ctx.tx_dot is not None:
             ctx.tx_dot.trigger()
         ctx.writer.write(cmd + "\r\n")  # type: ignore[arg-type]
+        sent_count += 1
         idx += 1
 
     ctx.macro_start_room = ""

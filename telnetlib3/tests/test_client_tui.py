@@ -28,6 +28,9 @@ from telnetlib3.client_tui import (  # noqa: E402
     _relative_time,
     _AutoreplyTuple,
     _build_tooltips,
+    _CommandHelpScreen,
+    _RandomwalkDialogScreen,
+    _get_help_topic,
 )
 
 
@@ -281,7 +284,7 @@ def test_autoreply_screen_save(tmp_path) -> None:
 
 @pytest.mark.parametrize(
     "entry_extra,field_idx,expected",
-    [({"when": {"HP%": ">50"}}, 8, {"HP%": ">50"}), ({"immediate": True}, 9, True)],
+    [({"when": {"HP%": ">50"}}, 4, {"HP%": ">50"}), ({"immediate": True}, 5, True)],
 )
 def test_autoreply_screen_loads_field(tmp_path, entry_extra, field_idx, expected) -> None:
     import json
@@ -377,3 +380,66 @@ def test_tui_main(monkeypatch) -> None:
     monkeypatch.setattr(TelnetSessionApp, "run", lambda self: called.append(True))
     tui_main()
     assert called
+
+
+@pytest.mark.parametrize("topic", ["macro", "autoreply", "highlight"])
+def test_help_topics_exist(topic: str) -> None:
+    content = _get_help_topic(topic)
+    assert len(content) > 100
+
+
+@pytest.mark.parametrize("topic", ["macro", "autoreply", "highlight"])
+def test_help_screen_creates(topic: str) -> None:
+    screen = _CommandHelpScreen(topic=topic)
+    assert screen._topic == topic
+
+
+def test_help_topic_macro_contains_key_sections() -> None:
+    content = _get_help_topic("macro")
+    assert "## Macro Editor" in content
+    assert "## Command Syntax" in content
+    assert "## Backtick Commands" in content
+    assert "`autodiscover`" in content
+    assert "`randomwalk`" in content
+    assert "`resume`" in content
+
+
+def test_help_topic_autoreply_contains_key_sections() -> None:
+    content = _get_help_topic("autoreply")
+    assert "## Autoreply Editor" in content
+    assert "### Flags Explained" in content
+    assert "### Pattern Syntax" in content
+    assert "### Backreferences in Reply" in content
+    assert "### Condition Gate" in content
+    assert "\\1" in content
+
+
+def test_help_topic_highlight_contains_key_sections() -> None:
+    content = _get_help_topic("highlight")
+    assert "## Highlight Editor" in content
+    assert "### Flags Explained" in content
+    assert "### Style Names" in content
+    assert "bold_red" in content
+
+
+def test_randomwalk_dialog_writes_visit_level(tmp_path: Any) -> None:
+    """The randomwalk dialog writes visit_level to the result file."""
+    import json
+
+    result_file = str(tmp_path / "result.json")
+    screen = _RandomwalkDialogScreen(
+        result_file=result_file,
+        default_visit_level=3,
+    )
+    screen._write_result(True, 3)
+
+    with open(result_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["confirmed"] is True
+    assert data["visit_level"] == 3
+
+
+def test_randomwalk_dialog_default_visit_level() -> None:
+    """The dialog initialises with the given default visit level."""
+    screen = _RandomwalkDialogScreen(default_visit_level=5)
+    assert screen._default_visit_level == 5

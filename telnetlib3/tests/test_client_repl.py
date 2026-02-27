@@ -260,6 +260,37 @@ def test_expand_commands(line: str, expected: list[str]) -> None:
 
 
 @pytest.mark.parametrize(
+    "line,expected_cmds,expected_imm",
+    [
+        ("a;b", ["a", "b"], frozenset()),
+        ("a|b", ["a", "b"], frozenset({1})),
+        ("a|b;c", ["a", "b", "c"], frozenset({1})),
+        ("a;b|c|d;e", ["a", "b", "c", "d", "e"], frozenset({2, 3})),
+        ("`until 4 foo:bar`|attack", ["`until 4 foo:bar`", "attack"], frozenset({1})),
+        ("`delay 1s`|look", ["`delay 1s`", "look"], frozenset({1})),
+        ("3e|look", ["e", "e", "e", "look"], frozenset({3})),
+        ("a|b|c", ["a", "b", "c"], frozenset({1, 2})),
+        ("cast heal|`when HP%>=100`", ["cast heal", "`when HP%>=100`"], frozenset({1})),
+        ("", [], frozenset()),
+    ],
+)
+def test_expand_commands_ex(
+    line: str, expected_cmds: list[str], expected_imm: frozenset[int]
+) -> None:
+    from telnetlib3.client_repl_commands import expand_commands_ex
+
+    result = expand_commands_ex(line)
+    assert result.commands == expected_cmds
+    assert result.immediate_set == expected_imm
+
+
+def test_expand_commands_with_pipe_separator() -> None:
+    from telnetlib3.client_repl import expand_commands
+
+    assert expand_commands("a|b") == ["a", "b"]
+
+
+@pytest.mark.parametrize(
     "value,expected",
     [
         (0, "0"),
@@ -323,6 +354,8 @@ def test_split_incomplete_esc(data: bytes, flush: bytes, hold: bytes) -> None:
         ("`fast travel`", True),
         ("`randomwalk`", True),
         ("`RANDOMWALK`", True),
+        ("`home`", True),
+        ("`HOME`", True),
         ("fast travel 123", False),
         ("`fastravel 123`", False),
         ("north", False),
@@ -541,7 +574,8 @@ class _WalkWriter:
             _adj=adj or {},
             rooms={},
             get_room=lambda num: types.SimpleNamespace(name=num),
-            find_branches=lambda pos: [],
+            find_branches=lambda pos, **kw: [],
+            blocked_rooms=lambda: frozenset(),
         )
 
     def write(self, data: str) -> None:
@@ -620,11 +654,11 @@ async def test_autodiscover_stuck_gateway_stops(monkeypatch: pytest.MonkeyPatch)
     }
     writer = _WalkWriter(room_num="room1", adj=adj)
 
-    def fake_find_branches(pos: str) -> list[tuple[str, str, str]]:
+    def fake_find_branches(pos: str, **kw: object) -> list[tuple[str, str, str]]:
         return [("gw1", "east", "target1"), ("gw2", "west", "target2"), ("gw3", "south", "target3")]
 
     writer.ctx.room_graph.find_branches = fake_find_branches
-    writer.ctx.room_graph.find_path_with_rooms = lambda src, dst: [("north", dst)]
+    writer.ctx.room_graph.find_path_with_rooms = lambda src, dst, **kw: [("north", dst)]
 
     async def fake_fast_travel(*args: object, **kwargs: object) -> None:
         pass
@@ -659,7 +693,7 @@ async def test_autodiscover_blocked_edge_avoids_retrying(monkeypatch: pytest.Mon
 
     branch_idx = 0
 
-    def fake_find_branches(pos: str) -> list[tuple[str, str, str]]:
+    def fake_find_branches(pos: str, **kw: object) -> list[tuple[str, str, str]]:
         nonlocal branch_idx
         branch_idx += 1
         if branch_idx == 1:
@@ -668,7 +702,7 @@ async def test_autodiscover_blocked_edge_avoids_retrying(monkeypatch: pytest.Mon
 
     writer.ctx.room_graph.find_branches = fake_find_branches
 
-    def fake_find_path(src: str, dst: str) -> list[tuple[str, str]] | None:
+    def fake_find_path(src: str, dst: str, **kw: object) -> list[tuple[str, str]] | None:
         if src == "start" and "portal" not in adj.get("start", {}):
             return None
         return [("portal", "island"), ("east", dst)]
@@ -831,9 +865,10 @@ def test_render_command_queue_truncation(monkeypatch: pytest.MonkeyPatch) -> Non
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 def test_render_command_queue_highlight_active() -> None:
-    """Active run uses paper-white bg SGR, pending runs use dim grey."""
+    """Active run uses subdued foreground, pending runs use dim grey."""
     pytest.importorskip("blessed")
     from telnetlib3.client_repl import _get_term, _CommandQueue, _render_command_queue
+    from telnetlib3.client_repl_commands import _ACTIVE_CMD_BASE_FG
 
     stdout, transport = _mock_stdout()
 
@@ -846,13 +881,14 @@ def test_render_command_queue_highlight_active() -> None:
     queue = _CommandQueue(cmds, render=lambda: None)
     queue.current_idx = 0
 
-    _render_command_queue(queue, FakeScroll(), stdout)
+    total_w = _render_command_queue(queue, FakeScroll(), stdout)
 
     output = transport.data.decode("utf-8", errors="replace")
-    active_sgr = blessed_term.on_color_rgb(255, 255, 255) + blessed_term.color_rgb(0, 0, 0)
+    active_sgr = str(blessed_term.color_hex(_ACTIVE_CMD_BASE_FG))
     pending_sgr = blessed_term.color_rgb(120, 120, 120)
     assert active_sgr in output
     assert pending_sgr in output
+    assert total_w > 0
 
 
 # local
@@ -992,7 +1028,8 @@ class _TrackingWalkWriter(_WalkWriter):
             _adj=adj,
             rooms={},
             get_room=lambda num: types.SimpleNamespace(name=num),
-            find_branches=lambda pos: [],
+            find_branches=lambda pos, **kw: [],
+            blocked_rooms=lambda: frozenset(),
         )
 
     def write(self, data: str) -> None:
@@ -1045,7 +1082,7 @@ async def test_autodiscover_skips_persistently_blocked_exits(
 
     explored_dirs: list[str] = []
 
-    def fake_find_branches(pos: str) -> list[tuple[str, str, str]]:
+    def fake_find_branches(pos: str, **kw: object) -> list[tuple[str, str, str]]:
         return [("room1", "east", "room2"), ("room1", "west", "room3")]
 
     writer.ctx.room_graph.find_branches = fake_find_branches
@@ -1160,6 +1197,65 @@ async def test_randomwalk_bounce_detection(monkeypatch: pytest.MonkeyPatch) -> N
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
+async def test_randomwalk_bounce_blocks_reverse(monkeypatch: pytest.MonkeyPatch) -> None:
+    """After bounce-blocking dead-end south, also block the reverse (north into dead-end)."""
+    import logging
+
+    from telnetlib3.client_repl import _randomwalk
+
+    _real_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
+
+    # dead_end has only south → junction; junction has north → dead_end and south → room3.
+    # The walker should not get stuck re-entering dead_end after blocking its south exit.
+    adj: dict[str, dict[str, str]] = {
+        "junction": {"north": "dead_end", "south": "room3"},
+        "dead_end": {"south": "junction"},
+        "room3": {"north": "junction", "east": "room4"},
+        "room4": {"west": "room3"},
+    }
+    writer = _TrackingWalkWriter(
+        room_num="junction", adj=adj, blocked_directions=set()
+    )
+
+    await _randomwalk(writer.ctx, logging.getLogger("test"), limit=30)
+
+    assert "room3" in writer.ctx.last_walk_visited
+    stop_msgs = [m for m in writer._echo_log if "all exits blocked, stopping" in m]
+    assert not stop_msgs
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.asyncio
+async def test_randomwalk_corridor_no_false_bounce(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Corridor with exits on both ends must not trigger bounce-blocking."""
+    import logging
+
+    from telnetlib3.client_repl import _randomwalk
+
+    _real_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
+
+    adj: dict[str, dict[str, str]] = {
+        "hub": {"southeast": "corridor_a", "east": "market"},
+        "corridor_a": {"northwest": "hub", "southeast": "corridor_b"},
+        "corridor_b": {"northwest": "corridor_a", "east": "plaza"},
+        "plaza": {"west": "corridor_b", "south": "dock"},
+        "market": {"west": "hub", "south": "dock"},
+        "dock": {"north": "plaza", "west": "market"},
+    }
+    writer = _TrackingWalkWriter(
+        room_num="corridor_a", adj=adj, blocked_directions=set()
+    )
+
+    await _randomwalk(writer.ctx, logging.getLogger("test"), limit=40)
+
+    bounce_msgs = [m for m in writer._echo_log if "bounce" in m]
+    assert not bounce_msgs
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.asyncio
 async def test_randomwalk_blocked_exit_not_global(monkeypatch: pytest.MonkeyPatch) -> None:
     """A blocked exit (A->east->B) must not prevent reaching B from C->north->B."""
     import logging
@@ -1211,6 +1307,68 @@ async def test_randomwalk_noncardinal_deprioritized(monkeypatch: pytest.MonkeyPa
     assert first_move == "north"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.asyncio
+async def test_randomwalk_visit_level(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With visit_level=2 the walk continues until every room is visited twice."""
+    import logging
+
+    from telnetlib3.client_repl import _randomwalk
+
+    _real_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
+
+    adj: dict[str, dict[str, str]] = {
+        "room1": {"north": "room2"},
+        "room2": {"south": "room1", "east": "room3"},
+        "room3": {"west": "room2"},
+    }
+    writer = _TrackingWalkWriter(room_num="room1", adj=adj, blocked_directions=set())
+
+    await _randomwalk(writer.ctx, logging.getLogger("test"), limit=50, visit_level=2)
+
+    visited_msgs = [m for m in writer._echo_log if "reachable rooms visited" in m]
+    assert len(visited_msgs) == 1
+    assert "2x" in visited_msgs[0]
+
+    sent_dirs = [
+        s.decode("utf-8").strip() if isinstance(s, bytes) else s.strip()
+        for s in writer._sent
+    ]
+    assert len(sent_dirs) >= 4
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.asyncio
+async def test_randomwalk_visit_level_1(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With visit_level=1 the walk stops after visiting each room once."""
+    import logging
+
+    from telnetlib3.client_repl import _randomwalk
+
+    _real_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
+
+    adj: dict[str, dict[str, str]] = {
+        "room1": {"north": "room2"},
+        "room2": {"south": "room1", "east": "room3"},
+        "room3": {"west": "room2"},
+    }
+    writer = _TrackingWalkWriter(room_num="room1", adj=adj, blocked_directions=set())
+
+    await _randomwalk(writer.ctx, logging.getLogger("test"), limit=50, visit_level=1)
+
+    visited_msgs = [m for m in writer._echo_log if "reachable rooms visited" in m]
+    assert len(visited_msgs) == 1
+    assert "1x" in visited_msgs[0]
+
+    sent_dirs = [
+        s.decode("utf-8").strip() if isinstance(s, bytes) else s.strip()
+        for s in writer._sent
+    ]
+    assert len(sent_dirs) >= 2
+
+
 def test_macro_last_used_round_trip(tmp_path: Any) -> None:
     from telnetlib3.macros import Macro, load_macros, save_macros
 
@@ -1223,3 +1381,190 @@ def test_macro_last_used_round_trip(tmp_path: Any) -> None:
     loaded = load_macros(path, "localhost:23")
     assert loaded[0].last_used == "2025-06-01T12:00:00+00:00"
     assert loaded[1].last_used == ""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.asyncio
+async def test_randomwalk_skips_blocked_rooms(monkeypatch: pytest.MonkeyPatch) -> None:
+    import logging
+
+    from telnetlib3.client_repl import _randomwalk
+
+    _real_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
+
+    adj: dict[str, dict[str, str]] = {
+        "room1": {"north": "room2", "south": "room3"},
+        "room2": {"south": "room1"},
+        "room3": {"north": "room1"},
+    }
+    writer = _WalkWriter(room_num="room1", adj=adj)
+    writer.ctx.room_graph.blocked_rooms = lambda: frozenset({"room2"})
+
+    await _randomwalk(writer.ctx, logging.getLogger("test"), limit=5)
+
+    assert "room2" not in writer.ctx.last_walk_visited
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.asyncio
+async def test_home_travel_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    import logging
+
+    from telnetlib3.client_repl import _handle_travel_commands
+
+    _real_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
+
+    adj: dict[str, dict[str, str]] = {
+        "room1": {"north": "room2"},
+        "room2": {"south": "room1"},
+    }
+    writer = _WalkWriter(room_num="room1", adj=adj)
+    writer.ctx.room_graph.room_area = lambda num: "town"
+    writer.ctx.room_graph.get_home_for_area = lambda area: "room2"
+    writer.ctx.room_graph.find_path_with_rooms = (
+        lambda src, dst, **kw: [("north", "room2")] if dst == "room2" else None
+    )
+
+    fast_travel_args: list[object] = []
+    original_ft = __import__(
+        "telnetlib3.client_repl_travel", fromlist=["_fast_travel"]
+    )._fast_travel
+
+    async def mock_fast_travel(*args: object, **kwargs: object) -> None:
+        fast_travel_args.append((args, kwargs))
+
+    monkeypatch.setattr(
+        "telnetlib3.client_repl_travel._fast_travel", mock_fast_travel
+    )
+
+    parts = ["`home`"]
+    remainder = await _handle_travel_commands(
+        parts, writer.ctx, logging.getLogger("test")
+    )
+    assert remainder == []
+    assert len(fast_travel_args) == 1
+
+
+def test_travel_re_matches_home() -> None:
+    from telnetlib3.client_repl import _TRAVEL_RE
+
+    assert _TRAVEL_RE.match("`home`") is not None
+    assert _TRAVEL_RE.match("`HOME`") is not None
+
+
+class _MockHighlightEngine:
+    def __init__(self, enabled: bool = True) -> None:
+        self.enabled = enabled
+        self.calls: list[str] = []
+
+    def process_line(self, line: str) -> tuple[str, bool]:
+        self.calls.append(line)
+        return f"[{line}]", True
+
+
+class TestLineHoldBuffer:
+    def _make_buf(
+        self, engine: Any = None
+    ) -> "telnetlib3.client_repl._LineHoldBuffer":
+        from telnetlib3.client_repl import _LineHoldBuffer
+
+        return _LineHoldBuffer(lambda: engine)
+
+    def test_complete_line_passes_through(self) -> None:
+        buf = self._make_buf()
+        emit, held = buf.add("hello world\n")
+        assert emit == "hello world\n"
+        assert held == ""
+
+    def test_incomplete_line_held_back(self) -> None:
+        buf = self._make_buf()
+        emit, held = buf.add("partial")
+        assert emit == ""
+        assert held == "partial"
+
+    def test_mixed_complete_and_incomplete(self) -> None:
+        buf = self._make_buf()
+        emit, held = buf.add("line1\nline2\npartial")
+        assert emit == "line1\nline2\n"
+        assert held == "partial"
+
+    def test_accumulates_partials(self) -> None:
+        buf = self._make_buf()
+        buf.add("hel")
+        emit, held = buf.add("lo\n")
+        assert emit == "hello\n"
+        assert held == ""
+
+    def test_flush_raw(self) -> None:
+        buf = self._make_buf()
+        buf.add("pending")
+        text = buf.flush_raw()
+        assert text == "pending"
+        assert buf.pending == ""
+
+    def test_flush_raw_empty(self) -> None:
+        buf = self._make_buf()
+        assert buf.flush_raw() == ""
+
+    def test_flush_for_prompt(self) -> None:
+        engine = _MockHighlightEngine()
+        buf = self._make_buf(engine)
+        buf.add("prompt>")
+        text = buf.flush_for_prompt()
+        assert text == "[prompt>]"
+        assert buf.pending == ""
+
+    def test_flush_for_prompt_empty(self) -> None:
+        buf = self._make_buf()
+        assert buf.flush_for_prompt() == ""
+
+    def test_highlights_complete_lines(self) -> None:
+        engine = _MockHighlightEngine()
+        buf = self._make_buf(engine)
+        emit, held = buf.add("line1\nline2\npartial")
+        assert "[line1]" in emit
+        assert "[line2]" in emit
+        assert held == "partial"
+
+    def test_no_highlights_when_disabled(self) -> None:
+        engine = _MockHighlightEngine(enabled=False)
+        buf = self._make_buf(engine)
+        emit, _held = buf.add("hello\n")
+        assert emit == "hello\n"
+        assert engine.calls == []
+
+    def test_no_highlights_when_engine_none(self) -> None:
+        buf = self._make_buf(None)
+        emit, _held = buf.add("hello\n")
+        assert emit == "hello\n"
+
+    def test_flush_for_prompt_no_highlight_when_disabled(self) -> None:
+        engine = _MockHighlightEngine(enabled=False)
+        buf = self._make_buf(engine)
+        buf.add("prompt>")
+        text = buf.flush_for_prompt()
+        assert text == "prompt>"
+        assert engine.calls == []
+
+    def test_partial_then_newline_highlights_full_line(self) -> None:
+        engine = _MockHighlightEngine()
+        buf = self._make_buf(engine)
+        buf.add("hello ")
+        emit, _held = buf.add("world\n")
+        assert "[hello world]" in emit
+
+    def test_multiple_lines_in_one_chunk(self) -> None:
+        engine = _MockHighlightEngine()
+        buf = self._make_buf(engine)
+        emit, held = buf.add("a\nb\nc\n")
+        assert emit == "[a]\n[b]\n[c]\n"
+        assert held == ""
+
+    def test_pending_property(self) -> None:
+        buf = self._make_buf()
+        buf.add("hello")
+        assert buf.pending == "hello"
+        buf.flush_raw()
+        assert buf.pending == ""

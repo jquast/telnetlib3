@@ -35,6 +35,60 @@ _DEFAULT_GMCP_MODULES = [
 ]
 
 
+#: Maximum number of chat messages persisted to disk.
+_CHAT_FILE_CAP = 1000
+
+
+def _load_chat(path: str) -> List[Dict[str, Any]]:
+    """Load chat messages from a JSON file, returning an empty list on error."""
+    import json as _json
+
+    if not os.path.exists(path):
+        return []
+    with open(path, "r", encoding="utf-8") as fh:
+        data = _json.load(fh)
+    if isinstance(data, list):
+        return data[-_CHAT_FILE_CAP:]
+    return []
+
+
+def _persist_chat(path: str, msg: Dict[str, Any]) -> None:
+    """Append a single chat message to the JSON file on disk, capping at 1000."""
+    import json as _json
+
+    from ._paths import _atomic_write
+
+    msgs = _load_chat(path)
+    msgs.append(msg)
+    if len(msgs) > _CHAT_FILE_CAP:
+        msgs = msgs[-_CHAT_FILE_CAP:]
+    _atomic_write(path, _json.dumps(msgs, ensure_ascii=False) + "\n")
+
+
+def _append_chat_msg(ctx: "SessionContext", data: Dict[str, Any]) -> None:
+    """
+    Append a GMCP ``Comm.Channel.Text`` message to chat state and disk.
+
+    :param ctx: Session context with chat state.
+    :param data: GMCP message dict with ``channel``, ``talker``, ``text``, etc.
+    """
+    import datetime as _dt
+
+    msg: Dict[str, Any] = {
+        "ts": _dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        "channel": data.get("channel", ""),
+        "channel_ansi": data.get("channel_ansi", ""),
+        "talker": data.get("talker", ""),
+        "text": data.get("text", ""),
+    }
+    ctx.chat_messages.append(msg)
+    ctx.chat_unread += 1
+    if len(ctx.chat_messages) > 500:
+        ctx.chat_messages[:] = ctx.chat_messages[-500:]
+    if ctx.chat_file:
+        _persist_chat(ctx.chat_file, msg)
+
+
 class TelnetClient(client_base.BaseClient):
     """
     Telnet client that supports all common options.
@@ -200,12 +254,22 @@ class TelnetClient(client_base.BaseClient):
             self.log.debug("GMCP: %s %r", package, data)
         if package == "Room.Info" and isinstance(data, dict) and "num" in data:
             self._update_room_graph(data)
+        elif package == "Comm.Channel.Text" and isinstance(data, dict):
+            self._append_chat(data)
+        elif package == "Comm.Channel.List" and isinstance(data, list):
+            ctx: Optional[SessionContext] = getattr(self.writer, "_ctx", None)
+            if ctx is not None:
+                ctx.chat_channels = data
 
     def _update_room_graph(self, data: Dict[str, Any]) -> None:
         """Update room graph and persist on Room.Info GMCP message."""
         ctx: Optional[SessionContext] = getattr(self.writer, "_ctx", None)
-        if ctx is None or ctx.room_graph is None:
+        if ctx is None or not ctx.rooms_file:
             return
+        if ctx.room_graph is None:
+            from .rooms import RoomStore
+
+            ctx.room_graph = RoomStore(ctx.rooms_file, session_key=ctx.session_key)
         from .rooms import write_current_room
 
         ctx.room_graph.update_room(data)
@@ -216,6 +280,13 @@ class TelnetClient(client_base.BaseClient):
         ctx.room_changed.set()
         if ctx.current_room_file:
             write_current_room(ctx.current_room_file, new_num)
+
+    def _append_chat(self, data: Dict[str, Any]) -> None:
+        """Append a GMCP ``Comm.Channel.Text`` message to chat state and disk."""
+        ctx: Optional[SessionContext] = getattr(self.writer, "_ctx", None)
+        if ctx is None:
+            return
+        _append_chat_msg(ctx, data)
 
     def send_ttype(self) -> str:
         """Callback for responding to TTYPE requests."""
@@ -788,14 +859,24 @@ async def run_client() -> None:
         except ValueError:
             macro_defs = []
 
-    # Room graph for GMCP Room.Info automapper
-    from .rooms import RoomStore
+    hl_path = os.path.join(_cfg_dir, "highlights.json")
+    highlight_rules: list[Any] = []
+    if os.path.exists(hl_path):
+        from .highlighter import load_highlights
+
+        try:
+            highlight_rules = load_highlights(hl_path, session_key)
+        except ValueError:
+            highlight_rules = []
+
+    # Room graph for GMCP Room.Info automapper (created lazily on first use)
     from .rooms import rooms_path as _rooms_path_fn
     from .rooms import current_room_path as _current_room_path_fn
+    from ._paths import chat_path as _chat_path_fn
 
     rooms_path = _rooms_path_fn(session_key)
     current_room_file = _current_room_path_fn(session_key)
-    room_graph = RoomStore(rooms_path)
+    chat_file = _chat_path_fn(session_key)
 
     _inner_session = shell_callback
 
@@ -809,9 +890,12 @@ async def run_client() -> None:
         ctx.autoreplies_file = ar_path
         ctx.macro_defs = macro_defs
         ctx.macros_file = macro_path
-        ctx.room_graph = room_graph
+        ctx.highlight_rules = highlight_rules
+        ctx.highlights_file = hl_path
         ctx.rooms_file = rooms_path
         ctx.current_room_file = current_room_file
+        ctx.chat_file = chat_file
+        ctx.chat_messages = _load_chat(chat_file)
         ctx.gmcp_data = writer_arg.protocol._gmcp_data
         writer_arg._ctx = ctx
         await _inner_session(reader, writer_arg)
