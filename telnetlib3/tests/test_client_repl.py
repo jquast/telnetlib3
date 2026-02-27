@@ -589,6 +589,7 @@ async def test_randomwalk_stuck_room_stops(monkeypatch: pytest.MonkeyPatch) -> N
     import logging
 
     from telnetlib3.client_repl import _randomwalk
+    from telnetlib3.client_repl_travel import _MAX_STUCK_RETRIES
 
     _real_sleep = asyncio.sleep
     monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
@@ -596,11 +597,46 @@ async def test_randomwalk_stuck_room_stops(monkeypatch: pytest.MonkeyPatch) -> N
     adj: dict[str, dict[str, str]] = {"room1": {"north": "room2"}}
     writer = _WalkWriter(room_num="room1", adj=adj)
 
+    await _randomwalk(writer.ctx, logging.getLogger("test"), limit=50)
+
+    retry_msgs = [m for m in writer._echo_log if "temporarily blocked" in m]
+    assert len(retry_msgs) == _MAX_STUCK_RETRIES
+    stop_msgs = [m for m in writer._echo_log if "all exits blocked, stopping" in m]
+    assert len(stop_msgs) == 1
+    assert not writer.ctx.randomwalk_active
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.asyncio
+async def test_randomwalk_retries_when_temporarily_stuck(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Walker retries after temporary block and continues when exit clears."""
+    import logging
+
+    from telnetlib3.client_repl import _randomwalk
+
+    _real_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
+
+    adj: dict[str, dict[str, str]] = {
+        "room1": {"north": "room2"},
+        "room2": {"south": "room1"},
+    }
+    seq = (
+        ["room1", "room1"]  # step 1: read current=room1, check=room1 (fail)
+        + ["room1", "room2"]  # step 2 (after retry): read current=room1, check=room2 (success!)
+        + ["room2", "room1"]  # step 3: south back to room1
+        + ["room1"] * 50  # padding
+    )
+    writer = _WalkWriter(room_num="room1", adj=adj, room_sequence=seq)
+
     await _randomwalk(writer.ctx, logging.getLogger("test"), limit=10)
 
-    stuck_msgs = [m for m in writer._echo_log if "all exits blocked" in m]
-    assert len(stuck_msgs) == 1
-    assert not writer.ctx.randomwalk_active
+    retry_msgs = [m for m in writer._echo_log if "temporarily blocked" in m]
+    assert len(retry_msgs) >= 1
+    stop_msgs = [m for m in writer._echo_log if "all exits blocked, stopping" in m]
+    assert len(stop_msgs) == 0
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")

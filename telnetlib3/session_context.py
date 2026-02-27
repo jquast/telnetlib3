@@ -165,3 +165,15 @@ class SessionContext:
                 self.autoreplies_file, self.autoreply_rules, self.session_key
             )
             self._autoreplies_dirty = False
+
+    def close(self) -> None:
+        """Cancel pending tasks and flush dirty timestamps."""
+        for task in (self.discover_task, self.randomwalk_task):
+            if task is not None and not task.done():
+                task.cancel()
+        self.discover_task = None
+        self.randomwalk_task = None
+        if self._save_timer is not None:
+            self._save_timer.cancel()
+            self._save_timer = None
+        self.flush_timestamps()

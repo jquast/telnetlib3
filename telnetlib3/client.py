@@ -253,9 +253,15 @@ class TelnetClient(client_base.BaseClient):
         else:
             self.log.debug("GMCP: %s %r", package, data)
         if package == "Room.Info" and isinstance(data, dict) and "num" in data:
-            self._update_room_graph(data)
+            try:
+                self._update_room_graph(data)
+            except Exception:
+                self.log.warning("GMCP Room.Info handler failed", exc_info=True)
         elif package == "Comm.Channel.Text" and isinstance(data, dict):
-            self._append_chat(data)
+            try:
+                self._append_chat(data)
+            except Exception:
+                self.log.warning("GMCP Comm.Channel.Text handler failed", exc_info=True)
         elif package == "Comm.Channel.List" and isinstance(data, list):
             ctx: Optional[SessionContext] = getattr(self.writer, "_ctx", None)
             if ctx is not None:

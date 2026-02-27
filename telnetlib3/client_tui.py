@@ -49,6 +49,7 @@ from textual.widgets import (
     ContentSwitcher,
 )
 from textual.containers import Vertical, Horizontal, VerticalScroll
+from textual.css.query import NoMatches
 from textual.widgets._tree import TreeNode
 
 # Reset SGR, cursor, alt-screen, mouse, and bracketed paste.
@@ -129,7 +130,7 @@ def _handle_arrow_navigation(
     if form_selector:
         try:
             form = screen.query_one(form_selector)
-        except Exception:
+        except NoMatches:
             form = None
         if form is not None and form.display:
             form_fields: list[Input | Switch | Button] = [
@@ -946,7 +947,7 @@ class SessionEditScreen(Screen[SessionConfig | None]):  # type: ignore[misc]
             try:
                 widget = self.query_one(f"#{widget_id}")
                 widget.tooltip = help_text
-            except Exception:
+            except NoMatches:
                 pass
         self._update_palette_preview()
 
@@ -1294,7 +1295,7 @@ class _EditListScreen(Screen["bool | None"]):
         self.query_one(f"#{pfx}-table").display = True
         try:
             self.query_one(f"#{pfx}-search", Input).display = True
-        except Exception:
+        except NoMatches:
             pass
         self._editing_idx = None
         self._set_action_buttons_disabled(False)
@@ -1391,7 +1392,7 @@ class _EditListScreen(Screen["bool | None"]):
         search_id = f"#{pfx}-search"
         try:
             search_input = self.query_one(search_id, Input)
-        except Exception:
+        except NoMatches:
             search_input = None
 
         if search_input is not None and event.key in ("up", "down"):
@@ -2656,7 +2657,7 @@ class HighlightEditScreen(_EditListScreen):
 
             try:
                 term = _get_term()
-            except Exception:
+            except ImportError:
                 term = None
             if term is not None and not validate_highlight(term, highlight_val):
                 self.notify(
@@ -3320,7 +3321,7 @@ class RoomBrowserScreen(Screen["bool | None"]):
         try:
             heading = self.query_one("#room-heading", Static)
             heading.update(self._heading_text())
-        except Exception:
+        except NoMatches:
             pass
         search_val = self.query_one("#room-search", Input).value
         self._refresh_tree(search_val)
@@ -3393,8 +3394,10 @@ class RoomBrowserScreen(Screen["bool | None"]):
             return
 
         graph = RoomStore(self._rooms_path, read_only=True)
-        path = graph.find_path_with_rooms(current, dst_num)
-        graph.close()
+        try:
+            path = graph.find_path_with_rooms(current, dst_num)
+        finally:
+            graph.close()
         if path is None:
             dst_name = ""
             for rnum, name, *_ in self._all_rooms:

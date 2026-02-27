@@ -1687,7 +1687,7 @@ if sys.platform != "win32":
             """Cancel autoreply engine, restore cursor, clear kludge DMZ."""
             if self.autoreply_engine is not None:
                 self.autoreply_engine.cancel()
-            self.ctx.flush_timestamps()
+            self.ctx.close()
             self.stdout.write(CURSOR_DEFAULT.encode())
             self.stdout.write(CURSOR_COLOR_RESET_OSC.encode())
             if self.mode_switched:

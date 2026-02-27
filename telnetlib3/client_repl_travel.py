@@ -34,6 +34,8 @@ _STANDARD_DIRS = frozenset(
     }
 )
 _BOUNCE_THRESHOLD = 3
+_MAX_STUCK_RETRIES = 3
+_STUCK_RETRY_DELAY = 5.0
 
 
 async def _fast_travel(
@@ -730,6 +732,7 @@ async def _randomwalk(
 
     try:
         stuck_count = 0
+        retry_count = 0
         bounce_count = 0
         prev_room: Optional[str] = None
         for step in range(limit):
@@ -830,16 +833,29 @@ async def _randomwalk(
                 # Check if ALL exits from current room are now blocked.
                 all_blocked = all((current, d) in ctx.blocked_exits for d in adj.get(current, {}))
                 if all_blocked:
+                    retry_count += 1
+                    if retry_count > _MAX_STUCK_RETRIES:
+                        if echo_fn is not None:
+                            echo_fn(
+                                f"RANDOMWALK [{step + 1}/{ctx.randomwalk_total}]: "
+                                f"all exits blocked, stopping"
+                            )
+                        break
+                    for d in list(adj.get(current, {})):
+                        ctx.blocked_exits.discard((current, d))
                     if echo_fn is not None:
                         echo_fn(
                             f"RANDOMWALK [{step + 1}/{ctx.randomwalk_total}]: "
-                            f"all exits blocked, stopping"
+                            f"all exits temporarily blocked, retrying "
+                            f"({retry_count}/{_MAX_STUCK_RETRIES})"
                         )
-                    break
+                    await asyncio.sleep(_STUCK_RETRY_DELAY)
+                    continue
                 continue
 
             ctx.active_command = None
             stuck_count = 0
+            retry_count = 0
             actual = ctx.current_room_num
             walk_counts[actual] = walk_counts.get(actual, 0) + 1
             visited.add(actual)

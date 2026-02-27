@@ -140,7 +140,13 @@ def build_macro_dispatch(macros: list[Macro], ctx: Any, log: logging.Logger) -> 
             _m.last_used = datetime.now(timezone.utc).isoformat()
             if hasattr(ctx, "mark_macros_dirty"):
                 ctx.mark_macros_dirty()
-            asyncio.ensure_future(execute_macro_commands(_text, ctx, log))
+            task = asyncio.ensure_future(execute_macro_commands(_text, ctx, log))
+
+            def _on_done(t: "asyncio.Task[None]") -> None:
+                if not t.cancelled() and t.exception() is not None:
+                    log.warning("macro execution failed: %s", t.exception())
+
+            task.add_done_callback(_on_done)
 
         result[macro.key] = _handler
     return result

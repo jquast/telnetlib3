@@ -590,4 +590,10 @@ def _launch_room_browser(ctx: "SessionContext", replay_buf: Optional[Any] = None
     steps, slow = read_fasttravel(ftp)
     if steps:
         log.debug("fast travel: scheduling %d steps (slow=%s)", len(steps), slow)
-        asyncio.ensure_future(_fast_travel(steps, ctx, log, slow=slow))
+        task = asyncio.ensure_future(_fast_travel(steps, ctx, log, slow=slow))
+
+        def _on_done(t: "asyncio.Task[None]") -> None:
+            if not t.cancelled() and t.exception() is not None:
+                log.warning("fast travel failed: %s", t.exception())
+
+        task.add_done_callback(_on_done)
