@@ -624,14 +624,16 @@ async def test_randomwalk_retries_when_temporarily_stuck(
         "room2": {"south": "room1"},
     }
     seq = (
-        ["room1", "room1"]  # step 1: read current=room1, check=room1 (fail)
-        + ["room1", "room2"]  # step 2 (after retry): read current=room1, check=room2 (success!)
-        + ["room2", "room1"]  # step 3: south back to room1
-        + ["room1"] * 50  # padding
+        ["room1"] * 3  # initial + step 1 fail (current, check)
+        + ["room1", "room2", "room2"]  # step 2 after retry: current=room1, check=room2, actual
+        + ["room2", "room1", "room1"]  # step 3: south -> room1, actual
+        + ["room1", "room2", "room2"]  # step 4: north -> room2, actual
+        + ["room2", "room1", "room1"]  # step 5: south -> room1
+        + ["room1"] * 30  # padding
     )
     writer = _WalkWriter(room_num="room1", adj=adj, room_sequence=seq)
 
-    await _randomwalk(writer.ctx, logging.getLogger("test"), limit=10)
+    await _randomwalk(writer.ctx, logging.getLogger("test"), limit=5)
 
     retry_msgs = [m for m in writer._echo_log if "temporarily blocked" in m]
     assert len(retry_msgs) >= 1

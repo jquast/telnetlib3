@@ -1231,8 +1231,6 @@ if sys.platform != "win32":
 
         def _hint_text(self) -> str:
             """Return the current hint string (activity or help)."""
-            if self.editor._buf:
-                return ""
             ar = self._is_autoreply_bg
             hint = self._activity_hint() if ar else self._HELP_HINT
             return hint if hint else self._HELP_HINT
@@ -1242,8 +1240,11 @@ if sys.platform != "win32":
             bt = self.blessed_term
             hint = self._hint_text()
             if hint:
-                return max(2, bt.width - len(hint))
-            return bt.width
+                w = max(2, bt.width - len(hint))
+            else:
+                w = bt.width
+            self.editor.max_width = w
+            return w
 
         def _render_input_hint(self, row: int) -> None:
             """Draw a dim right-aligned hint on the input row."""
@@ -1314,7 +1315,7 @@ if sys.platform != "win32":
             self.stdout.write(CURSOR_COLOR_OSC.encode())
             self.stdout.write(style["cursor_sgr"].encode())
             self.stdout.write(CURSOR_SHOW.encode())
-            self.editor.max_width = _cols
+
 
         def _fire_resize(self) -> None:
             """Handle resize: update scroll region, NAWS, re-render UI."""

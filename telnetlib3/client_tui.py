@@ -38,6 +38,7 @@ from textual.widgets import (
     Input,
     Label,
     Button,
+    Checkbox,
     Footer,
     Select,
     Static,
@@ -621,6 +622,7 @@ class SessionListScreen(Screen[None]):
             _tsize = os.get_terminal_size()
             sys.stdout.write(f"\x1b[{_tsize.lines};{_tsize.columns}H\r\n")
             sys.stdout.flush()
+            proc = None
             try:
                 # stderr must NOT be piped -- the child may launch
                 # Textual subprocesses (F8/F9 editors) that write all
@@ -630,8 +632,12 @@ class SessionListScreen(Screen[None]):
                 proc = subprocess.Popen(cmd)
                 proc.wait()
             except KeyboardInterrupt:
-                proc.terminate()
-                proc.wait(timeout=3)
+                if proc is not None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
             finally:
                 # The child process shares the kernel file description
                 # for stdin/stdout.  asyncio's connect_read_pipe sets
@@ -4029,6 +4035,10 @@ class _RandomwalkDialogScreen(Screen[bool]):
     }
     #rw-field-row Input {
         width: 8;
+    }
+    #rw-checkboxes {
+        height: auto;
+        margin-bottom: 1;
     }
     #rw-error {
         color: $error;
