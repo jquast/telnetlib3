@@ -55,8 +55,8 @@ docs = [
     "myst-parser",
 ]
 with_tui = [
-    "blessed>=1.20",
-    "ucs-detect>=2",
+    "blessed>=1.31",
+    "ucs-detect>=2,<3",
     "prettytable",
     "textual>=0.44",
 ]
