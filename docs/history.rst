@@ -10,6 +10,9 @@ History
   * change: ``--reverse-video`` CLI option from 2.4.0 was removed.
   * change: CGA, EGA, and Amiga palettes removed from ``--colormatch``;
     only ``vga`` is available at this time.  ``ice_colors`` are now True by default.
+  * bugfix: ``read_some()`` in synchronous API (``TelnetConnection`` and
+    ``ServerConnection``) blocked until EOF instead of returning available
+    data.  Now returns as soon as any data is available.
   * new: ``TelnetSessionContext`` base class
     and ``writer.ctx`` attribute for
     per-connection session state.  Subclass to add application-specific
@@ -26,9 +29,6 @@ History
     now sends ``DO NEW_ENVIRON`` but excludes ``USER`` variable instead of
     skipping the option entirely, :ghissue:`24`.
   * enhancement: comprehensive pylint and mypy cleanup across the codebase.
-  * bugfix: ``read_some()`` in synchronous API (``TelnetConnection`` and
-    ``ServerConnection``) blocked until EOF instead of returning available
-    data.  Now returns as soon as any data is available.
 
 2.6.1
   * bugfix: dependency of ``wcwidth`` version.
