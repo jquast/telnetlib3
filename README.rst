@@ -45,8 +45,8 @@ The CLI utility ``telnetlib3-client`` is provided for connecting to servers and
 ``telnetlib3-server`` for hosting a server.
 
 Both tools accept the argument ``--shell=my_module.fn_shell`` describing a python module path to a
-function of signature ``async def shell(reader, writer)``.  The server also provides ``--pty-exec``
-argument to host stand-alone programs.
+function of signature ``async def shell(reader, writer)``.  The server also provides a
+``--pty-exec`` argument allowing it to act as a telnet server for any CLI/TUI programs.
 
 ::
 
@@ -59,7 +59,7 @@ argument to host stand-alone programs.
     # automatic script communicates with a server
     telnetlib3-client --shell bin.client_wargame.shell 1984.ws 666
 
-    # run a server bound with the default shell bound to 127.0.0.1 6023
+    # run a default shell server bound to 127.0.0.1 6023
     telnetlib3-server
 
     # or custom ip, port and shell
@@ -112,6 +112,22 @@ connected to a TCP socket without any telnet negotiation may require "raw" mode 
 
     telnetlib3-client --raw-mode area52.tk 5200 --encoding=atascii
 
+Go-Ahead (GA)
+~~~~~~~~~~~~~
+
+When a client does not negotiate Suppress Go-Ahead (SGA), the server sends
+``IAC GA`` after output to signal that the client may transmit. This is
+correct behavior for MUD clients like Mudlet that expect prompt detection
+via GA.
+
+If GA causes unwanted output for your use case, disable it::
+
+    telnetlib3-server --never-send-ga
+
+For PTY shells, GA is sent after 500ms of output idle time to avoid
+injecting GA in the middle of streaming output.
+
+
 Asyncio Protocol
 ----------------
 
@@ -139,8 +155,10 @@ To migrate code, change import statements:
     # NEW imports:
     import telnetlib3
 
-This library *also* provides an additional client (and server) API through a similar interface but
-offering more advanced negotiation features and options.  See `sync API documentation`_ for more.
+``telnetlib3`` did not provide server support, while this library also provides
+both client and server support through a similar Blocking API interface.
+
+See `sync API documentation`_ for details.
 
 Quick Example
 =============
