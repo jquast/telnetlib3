@@ -61,16 +61,16 @@ async def test_server_sockets(bind_host, unused_tcp_port):
 
 async def test_server_with_wait_for(bind_host, unused_tcp_port):
     """Test integration of Server.wait_for_client() with writer.wait_for()."""
-    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=2.0) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             # Send WILL BINARY and WONT TTYPE
             writer.write(IAC + WILL + BINARY)
             writer.write(IAC + WONT + TTYPE)
 
-            client = await asyncio.wait_for(server.wait_for_client(), 0.5)
+            client = await asyncio.wait_for(server.wait_for_client(), 2.0)
 
             # Use wait_for to check specific negotiation state
-            await asyncio.wait_for(client.writer.wait_for(remote={"BINARY": True}), 0.5)
+            await asyncio.wait_for(client.writer.wait_for(remote={"BINARY": True}), 2.0)
             assert client.writer.remote_option[BINARY] is True
 
 

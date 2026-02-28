@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # std imports
 import asyncio
 import functools

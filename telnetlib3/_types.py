@@ -8,7 +8,6 @@ from typing import Any, Dict, Tuple, Union, Literal, Callable, Coroutine
 # local
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
-from ._session_context import TelnetSessionContext  # noqa: F401
 
 # Encoding parameter: str for Unicode mode, False for binary mode.
 Encoding = Union[str, Literal[False]]

@@ -9,7 +9,7 @@ __all__ = ("TelnetSessionContext",)
 
 
 class TelnetSessionContext:
-    """
+    r"""
     Base session context for telnet client connections.
 
     Holds per-connection state that the shell layer needs.  Subclass this to
@@ -23,10 +23,11 @@ class TelnetSessionContext:
         from server negotiation, ``True`` = force raw, ``False`` = force
         line mode.
     :param ascii_eol: When ``True``, translate ATASCII CR/LF glyphs to
-        ASCII ``\\r`` / ``\\n``.
+        ASCII ``\r`` / ``\n``.
     """
 
     def __init__(self) -> None:
+        """Initialize session context with default attribute values."""
         self.raw_mode: Optional[bool] = None
         self.ascii_eol: bool = False
         self.input_filter: Optional[Any] = None

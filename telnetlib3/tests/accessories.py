@@ -1,4 +1,5 @@
 """Test accessories for telnetlib3 project."""
+from __future__ import annotations
 
 # std imports
 import os

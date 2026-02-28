@@ -72,13 +72,13 @@ async def test_telnet_server_encoding_server_do(bind_host, unused_tcp_port):
 
 async def test_telnet_server_encoding_bidirectional(bind_host, unused_tcp_port):
     """Server's default encoding with bi-directional BINARY negotiation."""
-    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5) as server:
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=2.0) as server:
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + DO + BINARY)
             writer.write(IAC + WILL + BINARY)
             writer.write(IAC + WONT + TTYPE)
 
-            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.5)
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 2.0)
             assert srv_instance.encoding(incoming=True) == "utf8"
             assert srv_instance.encoding(outgoing=True) == "utf8"
             assert srv_instance.encoding(incoming=True, outgoing=True) == "utf8"

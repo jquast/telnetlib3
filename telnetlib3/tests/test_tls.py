@@ -1,4 +1,5 @@
 """Tests for TLS (TELNETS) support."""
+from __future__ import annotations
 
 # std imports
 import os
