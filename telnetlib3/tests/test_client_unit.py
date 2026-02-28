@@ -355,7 +355,7 @@ def _fake_open_connection_factory(loop):
     """Build a mock open_connection that captures the shell callback."""
     captured_kwargs: dict = {}
     writer_obj = types.SimpleNamespace(
-        protocol=types.SimpleNamespace(waiter_closed=loop.create_future(), _gmcp_data={}),
+        protocol=types.SimpleNamespace(waiter_closed=loop.create_future()),
         ctx=TelnetSessionContext(),
     )
     writer_obj.protocol.waiter_closed.set_result(None)
@@ -531,6 +531,46 @@ async def test_process_rx_resumes_reading_on_drain():
     client._rx_bytes = 10
     await client._process_rx()
     assert len(resumed) >= 1
+
+
+class _MockTransport:
+    def __init__(self):
+        self.data = bytearray()
+        self._closing = False
+
+    def write(self, data):
+        self.data.extend(data)
+
+    def is_closing(self):
+        return self._closing
+
+    def close(self):
+        self._closing = True
+
+    def get_extra_info(self, name, default=None):
+        return default
+
+
+def _make_connected_client(**kwargs):
+    client = _make_client(**kwargs)
+    transport = _MockTransport()
+    client.connection_made(transport)
+    return client, transport
+
+
+@pytest.mark.asyncio
+async def test_on_gmcp_stores_on_writer_ctx():
+    client, _ = _make_connected_client()
+    client._on_gmcp("Room.Info", {"name": "Town Square"})
+    assert client.writer.ctx.gmcp_data["Room.Info"] == {"name": "Town Square"}
+
+
+@pytest.mark.asyncio
+async def test_on_gmcp_merges_dicts_on_writer_ctx():
+    client, _ = _make_connected_client()
+    client._on_gmcp("Char.Vitals", {"hp": 100, "maxhp": 100})
+    client._on_gmcp("Char.Vitals", {"hp": 63})
+    assert client.writer.ctx.gmcp_data["Char.Vitals"] == {"hp": 63, "maxhp": 100}
 
 
 def test_fingerprint_main_oserror(monkeypatch):

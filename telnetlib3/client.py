@@ -84,7 +84,6 @@ class TelnetClient(client_base.BaseClient):
         )
         self._gmcp_modules = gmcp_modules or list(_DEFAULT_GMCP_MODULES)
         self._gmcp_log = gmcp_log
-        self._gmcp_data: Dict[str, Any] = {}
         self._gmcp_hello_sent = False
         self._send_environ = set(send_environ or self.DEFAULT_SEND_ENVIRON)
         self._extra.update(
@@ -187,11 +186,12 @@ class TelnetClient(client_base.BaseClient):
         self.log.info("GMCP handshake: Core.Hello + Core.Supports.Set %s", self._gmcp_modules)
 
     def _on_gmcp(self, package: str, data: Any) -> None:
-        """Store incoming GMCP data, merging dict updates incrementally."""
-        if isinstance(data, dict) and isinstance(self._gmcp_data.get(package), dict):
-            self._gmcp_data[package].update(data)
+        """Store incoming GMCP data on ``writer.ctx``, merging dict updates."""
+        gmcp = self.writer.ctx.gmcp_data
+        if isinstance(data, dict) and isinstance(gmcp.get(package), dict):
+            gmcp[package].update(data)
         else:
-            self._gmcp_data[package] = data
+            gmcp[package] = data
         if self._gmcp_log:
             self.log.info("GMCP: %s %r", package, data)
         else:

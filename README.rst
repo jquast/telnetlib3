@@ -110,7 +110,7 @@ Raw Mode
 Some telnet servers, especially BBS systems or those designed for serial transmission but are
 connected to a TCP socket without any telnet negotiation may require "raw" mode argument::
 
-    telnetlib3-client --raw-mode area52.tk 5200
+    telnetlib3-client --raw-mode area52.tk 5200 --encoding=atascii
 
 Asyncio Protocol
 ----------------
