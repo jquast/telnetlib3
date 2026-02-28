@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 # std imports
-import sys
-import types
 import asyncio
 import logging
 import weakref
 import datetime
-import traceback
 import collections
-from typing import Any, Type, Union, Callable, Optional, cast
+from typing import Any, Union, Optional, cast
 
 # local
+from ._base import TelnetProtocolBase, _log_exception, _process_data_chunk
 from ._types import ShellCallback
 from .telopt import DO, WILL, theNULL, name_commands
 from .accessories import TRACE, hexdump
@@ -22,15 +20,10 @@ from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
 __all__ = ("BaseClient",)
 
-# Pre-allocated single-byte cache to avoid per-byte bytes() allocations
-_ONE_BYTE = [bytes([i]) for i in range(256)]
 
-
-class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
+class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.Protocol):
     """Base Telnet Client Protocol."""
 
-    _when_connected: Optional[datetime.datetime] = None
-    _last_received: Optional[datetime.datetime] = None
     _transport: Optional[asyncio.Transport] = None
     _closing = False
     _reader_factory = TelnetReader
@@ -39,7 +32,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
     _writer_factory_encoding = TelnetWriterUnicode
     _check_later: Optional[asyncio.Handle] = None
 
-    def __init__(  # pylint: disable=too-many-positional-arguments
+    def __init__(
         self,
         shell: Optional[ShellCallback] = None,
         encoding: Union[str, bool] = "utf8",
@@ -170,7 +163,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         # Attach transport so TelnetReader can apply pause_reading/resume_reading
         try:
             self.reader.set_transport(_transport)
-        except Exception:  # pylint: disable=broad-exception-caught
+        except Exception:
             # Reader may not support transport coupling; ignore.
             pass
 
@@ -189,6 +182,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         if future.cancelled() or future.exception() is not None:
             return
         if self.shell is not None:
+            assert self.reader is not None and self.writer is not None
             coro = self.shell(self.reader, self.writer)
             if asyncio.iscoroutine(coro):
                 # When a shell is defined as a coroutine, we must ensure
@@ -239,7 +233,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 try:
                     self._transport.pause_reading()
                     self._reading_paused = True
-                except Exception:  # pylint: disable=broad-exception-caught
+                except Exception:
                     # Some transports may not support pause_reading; ignore.
                     pass
 
@@ -253,10 +247,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         """
         if self.writer is None:
             return
-        from .server_fingerprinting import (  # pylint: disable=import-outside-toplevel
-            _SYNCTERM_BINARY_ENCODINGS,
-            detect_syncterm_font,
-        )
+        from .server_fingerprinting import detect_syncterm_font
 
         encoding = detect_syncterm_font(data)
         if encoding is not None:
@@ -267,32 +258,9 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                 )
             else:
                 self.writer.environ_encoding = encoding
-            if encoding in _SYNCTERM_BINARY_ENCODINGS:
-                self.force_binary = True
+            self.force_binary = True
 
     # public properties
-
-    @property
-    def duration(self) -> float:
-        """Time elapsed since client connected, in seconds as float."""
-        return (datetime.datetime.now() - self._when_connected).total_seconds()
-
-    @property
-    def idle(self) -> float:
-        """Time elapsed since data last received, in seconds as float."""
-        return (datetime.datetime.now() - self._last_received).total_seconds()
-
-    # public protocol methods
-
-    def __repr__(self) -> str:
-        hostport = self.get_extra_info("peername", ["-", "closing"])[:2]
-        return f"<Peer {hostport[0]} {hostport[1]}>"
-
-    def get_extra_info(self, name: str, default: Any = None) -> Any:
-        """Get optional client protocol or transport information."""
-        if self._transport:
-            default = self._transport.get_extra_info(name, default)
-        return self._extra.get(name, default)
 
     def begin_negotiation(self) -> None:
         """
@@ -322,7 +290,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         The base implementation **always** returns ``encoding`` argument
         given to class initializer or, when unset (``None``), ``US-ASCII``.
         """
-        # pylint: disable=unused-argument
         return self.default_encoding or "US-ASCII"  # pragma: no cover
 
     def check_negotiation(self, final: bool = False) -> bool:
@@ -346,7 +313,6 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
         Ensure ``super().check_negotiation()`` is called and conditionally
         combined when derived.
         """
-        # pylint: disable=import-outside-toplevel
         from .telopt import TTYPE, CHARSET, NEW_ENVIRON
 
         # First check if there are any pending options
@@ -373,80 +339,23 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
 
     # private methods
 
-    def _process_chunk(self, data: bytes) -> bool:  # pylint: disable=too-many-branches,too-complex
+    def _process_chunk(self, data: bytes) -> bool:
         """Process a chunk of received bytes; return True if any IAC/SB cmd observed."""
-        # This mirrors the previous optimized logic, but is called from an async task.
         self._last_received = datetime.datetime.now()
 
-        writer = self.writer
-        reader = self.reader
-
-        # Snapshot whether SLC snooping is required for this chunk
         try:
-            mode = writer.mode  # property
-        except Exception:  # pylint: disable=broad-exception-caught
+            mode = self.writer.mode
+        except Exception:
             mode = "local"
-        slc_needed = (mode == "remote") or (mode == "kludge" and writer.slc_simulated)
+        slc_needed = (mode == "remote") or (mode == "kludge" and self.writer.slc_simulated)
 
-        cmd_received = False
-
-        # Precompute SLC trigger set if needed
-        slc_vals = None
         if slc_needed:
-            slc_vals = {defn.val[0] for defn in writer.slctab.values() if defn.val != theNULL}
+            slc_vals = {defn.val[0] for defn in self.writer.slctab.values() if defn.val != theNULL}
+            slc_special: frozenset[int] | None = frozenset({255} | slc_vals)
+        else:
+            slc_special = None
 
-        n = len(data)
-        i = 0
-        out_start = 0
-        feeding_oob = bool(writer.is_oob)
-
-        # Build set of special bytes for fast lookup
-        special_bytes = frozenset({255} | (slc_vals or set()))
-
-        while i < n:
-            if not feeding_oob:
-                # Scan forward until next special byte (IAC or SLC trigger)
-                if not slc_vals:
-                    # Fast path: only IAC (255) is special - use C-level find
-                    next_iac = data.find(255, i)
-                    if next_iac == -1:
-                        # No IAC found, consume rest of chunk
-                        if n > out_start:
-                            reader.feed_data(data[out_start:])
-                        return cmd_received
-                    i = next_iac
-                else:
-                    # Slow path: SLC bytes also special - scan byte by byte
-                    while i < n and data[i] not in special_bytes:
-                        i += 1
-                # Flush non-special run
-                if i > out_start:
-                    reader.feed_data(data[out_start:i])
-                if i >= n:
-                    out_start = i
-                    break
-            # At a special byte or in the middle of an IAC sequence
-            b = data[i]
-            try:
-                recv_inband = writer.feed_byte(_ONE_BYTE[b])
-            except Exception:  # pylint: disable=broad-exception-caught
-                self._log_exception(self.log.warning, *sys.exc_info())
-            else:
-                if recv_inband:
-                    # Only forward the single-byte SLC or in-band special
-                    reader.feed_data(data[i : i + 1])
-                else:
-                    cmd_received = True
-            i += 1
-            out_start = i
-            # Continue per-byte feeding while writer indicates out-of-band processing
-            feeding_oob = bool(writer.is_oob)
-
-        # Any trailing non-special bytes
-        if out_start < n:
-            reader.feed_data(data[out_start:])
-
-        return cmd_received
+        return _process_data_chunk(data, self.writer, self.reader, slc_special, self.log.warning)
 
     async def _process_rx(self) -> None:
         """Async processor for receive queue that yields control and applies backpressure."""
@@ -473,7 +382,7 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
                         try:
                             self._transport.resume_reading()
                             self._reading_paused = False
-                        except Exception:  # pylint: disable=broad-exception-caught
+                        except Exception:
                             pass
 
                 # Yield periodically to keep loop responsive without excessive context switching
@@ -517,15 +426,4 @@ class BaseClient(asyncio.streams.FlowControlMixin, asyncio.Protocol):
             )
             self._tasks.append(self._check_later)
 
-    @staticmethod
-    def _log_exception(
-        logger: Callable[..., Any],
-        e_type: Optional[Type[BaseException]],
-        e_value: Optional[BaseException],
-        e_tb: Optional[types.TracebackType],
-    ) -> None:
-        rows_tbk = [line for line in "\n".join(traceback.format_tb(e_tb)).split("\n") if line]
-        rows_exc = [line.rstrip() for line in traceback.format_exception_only(e_type, e_value)]
-
-        for line in rows_tbk + rows_exc:
-            logger(line)
+    _log_exception = staticmethod(_log_exception)

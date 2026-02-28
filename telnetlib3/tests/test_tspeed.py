@@ -7,13 +7,7 @@ import asyncio
 import telnetlib3
 import telnetlib3.stream_writer
 from telnetlib3.telopt import DO, IS, SB, SE, IAC, WILL, TSPEED
-from telnetlib3.tests.accessories import (
-    bind_host,
-    create_server,
-    open_connection,
-    unused_tcp_port,
-    asyncio_connection,
-)
+from telnetlib3.tests.accessories import create_server, open_connection, asyncio_connection
 
 
 async def test_telnet_server_on_tspeed(bind_host, unused_tcp_port):
@@ -54,7 +48,7 @@ async def test_telnet_client_send_tspeed(bind_host, unused_tcp_port):
         protocol_factory=ServerTestTspeed, host=bind_host, port=unused_tcp_port
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, tspeed=(given_rx, given_tx), connect_minwait=0.05
+            host=bind_host, port=unused_tcp_port, tspeed=(given_rx, given_tx)
         ) as (reader, writer):
             recv_rx, recv_tx = await asyncio.wait_for(_waiter, 3.0)
             assert recv_rx == given_rx

@@ -10,13 +10,7 @@ import pytest
 # local
 from telnetlib3.client import _transform_args, _get_argument_parser
 from telnetlib3.telopt import DO, IAC, WONT, TTYPE
-from telnetlib3.tests.accessories import (
-    bind_host,
-    create_server,
-    open_connection,
-    unused_tcp_port,
-    asyncio_connection,
-)
+from telnetlib3.tests.accessories import create_server, open_connection, asyncio_connection
 
 
 async def test_telnet_server_default_timeout(bind_host, unused_tcp_port):
@@ -49,33 +43,26 @@ async def test_telnet_server_set_timeout(bind_host, unused_tcp_port):
             assert srv_instance.get_extra_info("timeout") == 0
 
 
-async def test_telnet_server_waitfor_timeout(bind_host, unused_tcp_port):
+@pytest.mark.parametrize(
+    "timeout,encoding,elapsed_min,elapsed_max",
+    [(0.050, "utf-8", 0.035, 0.150), (0.150, False, 0.050, 0.200)],
+)
+async def test_telnet_server_waitfor_timeout(
+    bind_host, unused_tcp_port, timeout, encoding, elapsed_min, elapsed_max
+):
     """Test callback on_timeout() as coroutine of create_server()."""
     expected_output = IAC + DO + TTYPE + b"\r\nTimeout.\r\n"
 
-    async with create_server(host=bind_host, port=unused_tcp_port, timeout=0.050):
+    async with create_server(
+        host=bind_host, port=unused_tcp_port, timeout=timeout, encoding=encoding
+    ):
         async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
             writer.write(IAC + WONT + TTYPE)
 
             stime = time.time()
             output = await asyncio.wait_for(reader.read(), 0.5)
             elapsed = time.time() - stime
-            assert 0.035 <= round(elapsed, 3) <= 0.150
-            assert output == expected_output
-
-
-async def test_telnet_server_binary_mode(bind_host, unused_tcp_port):
-    """Test callback on_timeout() in BINARY mode when encoding=False is used."""
-    expected_output = IAC + DO + TTYPE + b"\r\nTimeout.\r\n"
-
-    async with create_server(host=bind_host, port=unused_tcp_port, timeout=0.150, encoding=False):
-        async with asyncio_connection(bind_host, unused_tcp_port) as (reader, writer):
-            writer.write(IAC + WONT + TTYPE)
-
-            stime = time.time()
-            output = await asyncio.wait_for(reader.read(), 0.5)
-            elapsed = time.time() - stime
-            assert 0.050 <= round(elapsed, 3) <= 0.200
+            assert elapsed_min <= round(elapsed, 3) <= elapsed_max
             assert output == expected_output
 
 
@@ -90,12 +77,7 @@ async def test_open_connection_connect_timeout_success(bind_host, unused_tcp_por
     """Test connect_timeout does not interfere with successful connection."""
     async with create_server(host=bind_host, port=unused_tcp_port):
         async with open_connection(
-            bind_host,
-            unused_tcp_port,
-            connect_timeout=5.0,
-            encoding=False,
-            connect_minwait=0.05,
-            connect_maxwait=0.5,
+            bind_host, unused_tcp_port, connect_timeout=5.0, encoding=False, connect_maxwait=0.5
         ):
             pass
 
@@ -104,13 +86,10 @@ def test_cli_connect_timeout_arg():
     """Test --connect-timeout CLI argument is parsed."""
     parser = _get_argument_parser()
     args = parser.parse_args(["example.com", "--connect-timeout", "2.5"])
-    result = _transform_args(args)
-    assert result["connect_timeout"] == 2.5
+    assert _transform_args(args)["connect_timeout"] == 2.5
 
 
 def test_cli_connect_timeout_default():
-    """Test --connect-timeout defaults to None."""
+    """Test --connect-timeout defaults to 10."""
     parser = _get_argument_parser()
-    args = parser.parse_args(["example.com"])
-    result = _transform_args(args)
-    assert result["connect_timeout"] is None
+    assert _transform_args(parser.parse_args(["example.com"]))["connect_timeout"] == 10

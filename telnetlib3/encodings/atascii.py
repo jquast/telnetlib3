@@ -311,29 +311,25 @@ def _normalize_eol(text: str) -> str:
 class Codec(codecs.Codec):
     """ATASCII character map codec."""
 
-    def encode(  # pylint: disable=redefined-builtin
-        self, input: str, errors: str = "strict"
-    ) -> Tuple[bytes, int]:
+    def encode(self, input: str, errors: str = "strict") -> Tuple[bytes, int]:
         """Encode input string using ATASCII character map."""
         input = _normalize_eol(input)
         return codecs.charmap_encode(input, errors, ENCODING_TABLE)
 
-    def decode(  # pylint: disable=redefined-builtin
-        self, input: bytes, errors: str = "strict"
-    ) -> Tuple[str, int]:
+    def decode(self, input: bytes, errors: str = "strict") -> Tuple[str, int]:
         """Decode input bytes using ATASCII character map."""
         return codecs.charmap_decode(input, errors, DECODING_TABLE)  # type: ignore[arg-type]
 
 
 class IncrementalEncoder(codecs.IncrementalEncoder):
-    """ATASCII incremental encoder with CR/CRLF → LF normalization."""
+    """ATASCII incremental encoder with CR/CRLF -> LF normalization."""
 
     def __init__(self, errors: str = "strict") -> None:
         """Initialize encoder with pending CR state."""
         super().__init__(errors)
         self._pending_cr = False
 
-    def encode(self, input: str, final: bool = False) -> bytes:  # pylint: disable=redefined-builtin
+    def encode(self, input: str, final: bool = False) -> bytes:
         """Encode input string incrementally."""
         if self._pending_cr:
             input = "\r" + input
@@ -360,9 +356,7 @@ class IncrementalEncoder(codecs.IncrementalEncoder):
 class IncrementalDecoder(codecs.IncrementalDecoder):
     """ATASCII incremental decoder."""
 
-    def decode(  # type: ignore[override]  # pylint: disable=redefined-builtin
-        self, input: bytes, final: bool = False
-    ) -> str:
+    def decode(self, input: bytes, final: bool = False) -> str:  # type: ignore[override]
         """Decode input bytes incrementally."""
         return codecs.charmap_decode(input, self.errors, DECODING_TABLE)[  # type: ignore[arg-type]
             0

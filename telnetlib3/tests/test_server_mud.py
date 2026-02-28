@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "bin"))
 # 3rd party
-import server_mud as mud  # pylint: disable=import-error,wrong-import-position
+import server_mud as mud
 
 # local
 from telnetlib3.telopt import GMCP, MSDP, MSSP, WILL

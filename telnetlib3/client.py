@@ -22,6 +22,17 @@ from telnetlib3.stream_writer import TelnetWriter, TelnetWriterUnicode
 
 __all__ = ("TelnetClient", "TelnetTerminalClient", "open_connection")
 
+#: Default GMCP modules requested via ``Core.Supports.Set``.
+_DEFAULT_GMCP_MODULES = [
+    "Char 1",
+    "Char.Vitals 1",
+    "Char.Items 1",
+    "Room 1",
+    "Room.Info 1",
+    "Comm 1",
+    "Comm.Channel 1",
+]
+
 
 class TelnetClient(client_base.BaseClient):
     """
@@ -40,7 +51,7 @@ class TelnetClient(client_base.BaseClient):
     #: Default environment variables to send via NEW_ENVIRON
     DEFAULT_SEND_ENVIRON = ("TERM", "LANG", "COLUMNS", "LINES", "COLORTERM")
 
-    def __init__(  # pylint: disable=too-many-positional-arguments
+    def __init__(
         self,
         term: str = "unknown",
         cols: int = 80,
@@ -52,11 +63,13 @@ class TelnetClient(client_base.BaseClient):
         encoding: Union[str, bool] = "utf8",
         encoding_errors: str = "strict",
         force_binary: bool = False,
-        connect_minwait: float = 1.0,
+        connect_minwait: float = 0,
         connect_maxwait: float = 4.0,
         limit: Optional[int] = None,
         waiter_closed: Optional[asyncio.Future[None]] = None,
         _waiter_connected: Optional[asyncio.Future[None]] = None,
+        gmcp_modules: Optional[List[str]] = None,
+        gmcp_log: bool = False,
     ) -> None:
         """Initialize TelnetClient with terminal parameters."""
         super().__init__(
@@ -70,6 +83,9 @@ class TelnetClient(client_base.BaseClient):
             waiter_closed=waiter_closed,
             _waiter_connected=_waiter_connected,
         )
+        self._gmcp_modules = gmcp_modules or list(_DEFAULT_GMCP_MODULES)
+        self._gmcp_log = gmcp_log
+        self._gmcp_hello_sent = False
         self._send_environ = set(send_environ or self.DEFAULT_SEND_ENVIRON)
         self._extra.update(
             {
@@ -98,7 +114,6 @@ class TelnetClient(client_base.BaseClient):
         Wire up telnet option callbacks for terminal type, speed, display, environment, window size,
         and character set negotiation.
         """
-        # pylint: disable=import-outside-toplevel
         from telnetlib3.telopt import NAWS, TTYPE, TSPEED, CHARSET, XDISPLOC, NEW_ENVIRON
 
         super().connection_made(transport)
@@ -116,11 +131,18 @@ class TelnetClient(client_base.BaseClient):
             self.writer.set_ext_send_callback(opt, func)
 
         # Override the default handle_will method to detect when both sides support CHARSET
+        # Store the original only on first connection to prevent chain growth on reconnect.
+        if not hasattr(self.writer, "_original_handle_will"):
+            self.writer._original_handle_will = self.writer.handle_will
+        else:
+            self.writer.handle_will = (  # type: ignore[method-assign]
+                self.writer._original_handle_will
+            )
         original_handle_will = self.writer.handle_will
         writer = self.writer
 
         def enhanced_handle_will(opt: bytes) -> None:
-            result = original_handle_will(opt)
+            original_handle_will(opt)
 
             # If this was a WILL CHARSET from the server, and we also have WILL CHARSET enabled,
             # log that both sides support CHARSET. The server should initiate the actual REQUEST.
@@ -131,9 +153,50 @@ class TelnetClient(client_base.BaseClient):
             ):
                 self.log.debug("Both sides support CHARSET, ready for server to initiate REQUEST")
 
-            return result
-
         self.writer.handle_will = enhanced_handle_will  # type: ignore[method-assign]
+
+        self._setup_gmcp()
+
+    def _setup_gmcp(self) -> None:
+        """Wire GMCP callback and WILL-detection for Core.Hello handshake."""
+        from telnetlib3.telopt import GMCP
+
+        self.writer.set_ext_callback(GMCP, self._on_gmcp)
+
+        # Capture current handle_will (already includes CHARSET wrapper).
+        # On reconnect, _original_handle_will was already restored in connection_made,
+        # so this always wraps exactly once.
+        original_handle_will_gmcp = self.writer.handle_will
+
+        def _detect_gmcp_will(opt: bytes) -> None:
+            original_handle_will_gmcp(opt)
+            if opt == GMCP and self.writer.remote_option.enabled(GMCP):
+                self._send_gmcp_hello()
+
+        self.writer.handle_will = _detect_gmcp_will  # type: ignore[method-assign]
+
+    def _send_gmcp_hello(self) -> None:
+        """Send ``Core.Hello`` and ``Core.Supports.Set`` after GMCP negotiation."""
+        if self._gmcp_hello_sent:
+            return
+        self._gmcp_hello_sent = True
+        from telnetlib3.accessories import get_version
+
+        self.writer.send_gmcp("Core.Hello", {"client": "telnetlib3", "version": get_version()})
+        self.writer.send_gmcp("Core.Supports.Set", self._gmcp_modules)
+        self.log.info("GMCP handshake: Core.Hello + Core.Supports.Set %s", self._gmcp_modules)
+
+    def _on_gmcp(self, package: str, data: Any) -> None:
+        """Store incoming GMCP data on ``writer.ctx``, merging dict updates."""
+        gmcp = self.writer.ctx.gmcp_data
+        if isinstance(data, dict) and isinstance(gmcp.get(package), dict):
+            gmcp[package].update(data)
+        else:
+            gmcp[package] = data
+        if self._gmcp_log:
+            self.log.info("GMCP: %s %r", package, data)
+        else:
+            self.log.debug("GMCP: %s %r", package, data)
 
     def send_ttype(self) -> str:
         """Callback for responding to TTYPE requests."""
@@ -189,20 +252,20 @@ class TelnetClient(client_base.BaseClient):
         codec registry does not recognise.  This tries progressively simpler
         variations until one resolves:
 
-        1. Original name (spaces → hyphens)
-        2. Leading zeros stripped from numeric parts (``iso-8859-02`` → ``iso-8859-2``)
-        3. Hyphens removed entirely (``cp-1250`` → ``cp1250``)
+        1. Original name (spaces -> hyphens)
+        2. Leading zeros stripped from numeric parts (``iso-8859-02`` -> ``iso-8859-2``)
+        3. Hyphens removed entirely (``cp-1250`` -> ``cp1250``)
         4. Hyphens removed from all but the first segment (``iso-8859-2`` kept)
 
         :param name: Raw charset name from the server.
         :returns: Normalized name suitable for :func:`codecs.lookup`.
         """
-        import re  # pylint: disable=import-outside-toplevel
+        import re
 
         base = name.strip().replace(" ", "-")
-        # Strip leading zeros from numeric segments: iso-8859-02 → iso-8859-2
+        # Strip leading zeros from numeric segments: iso-8859-02 -> iso-8859-2
         no_leading_zeros = re.sub(r"-0+(\d)", r"-\1", base)
-        # All hyphens removed: cp-1250 → cp1250
+        # All hyphens removed: cp-1250 -> cp1250
         no_hyphens = base.replace("-", "")
         # Keep first hyphen-segment, collapse the rest: iso-8859-2 stays
         parts = no_leading_zeros.split("-")
@@ -241,7 +304,7 @@ class TelnetClient(client_base.BaseClient):
         """
         # Get client's desired encoding canonical name
         desired_name = None
-        if self.default_encoding:
+        if self.default_encoding and isinstance(self.default_encoding, str):
             try:
                 desired_name = codecs.lookup(self.default_encoding).name
             except LookupError:
@@ -334,13 +397,13 @@ class TelnetClient(client_base.BaseClient):
             )
 
         # may we encode in the direction indicated?
-        _outgoing_only = outgoing and not incoming
-        _incoming_only = not outgoing and incoming
-        _bidirectional = outgoing and incoming
+        outgoing_only = outgoing and not incoming
+        incoming_only = not outgoing and incoming
+        bidirectional = outgoing and incoming
         may_encode = (
-            (_outgoing_only and self.writer.outbinary)
-            or (_incoming_only and self.writer.inbinary)
-            or (_bidirectional and self.writer.outbinary and self.writer.inbinary)
+            (outgoing_only and self.writer.outbinary)
+            or (incoming_only and self.writer.inbinary)
+            or (bidirectional and self.writer.outbinary and self.writer.inbinary)
         )
 
         if self.force_binary or may_encode:
@@ -377,8 +440,8 @@ class TelnetTerminalClient(TelnetClient):
     @staticmethod
     def _winsize() -> Tuple[int, int]:
         try:
-            import fcntl  # pylint: disable=import-outside-toplevel
-            import termios  # pylint: disable=import-outside-toplevel
+            import fcntl
+            import termios
 
             fmt = "hhhh"
             buf = b"\x00" * struct.calcsize(fmt)
@@ -386,11 +449,10 @@ class TelnetTerminalClient(TelnetClient):
             rows, cols, _, _ = struct.unpack(fmt, val)
             return rows, cols
         except (ImportError, IOError):
-            # TODO: mock import error, or test on windows or other non-posix.
             return (int(os.environ.get("LINES", 25)), int(os.environ.get("COLUMNS", 80)))
 
 
-async def open_connection(  # pylint: disable=too-many-locals
+async def open_connection(
     host: Optional[str] = None,
     port: int = 23,
     *,
@@ -533,12 +595,13 @@ async def open_connection(  # pylint: disable=too-many-locals
             f"TCP connection to {host or 'localhost'}:{port}" f" timed out after {connect_timeout}s"
         ) from exc
 
-    await protocol._waiter_connected  # pylint: disable=protected-access
+    await protocol._waiter_connected
 
+    assert protocol.reader is not None and protocol.writer is not None
     return protocol.reader, protocol.writer
 
 
-async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-statements,too-complex
+async def run_client() -> None:
     """Command-line 'telnetlib3-client' entry point, via setuptools."""
     args = _transform_args(_get_argument_parser().parse_args())
     config_msg = f"Client configuration: {accessories.repr_mapping(args)}"
@@ -554,9 +617,13 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
     # Wrap client factory to inject always_will/always_do and encoding
     # flags before negotiation starts.
     encoding_explicit = args["encoding"] not in ("utf8", "utf-8", False)
+    gmcp_modules: Optional[List[str]] = args.get("gmcp_modules")
+    gmcp_log: bool = args.get("gmcp_log", False)
 
     def _client_factory(**kwargs: Any) -> client_base.BaseClient:
         client: TelnetClient
+        kwargs["gmcp_modules"] = gmcp_modules
+        kwargs["gmcp_log"] = gmcp_log
         if sys.platform != "win32" and sys.stdin.isatty():
             client = TelnetTerminalClient(**kwargs)
         else:
@@ -567,9 +634,11 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             orig_connection_made(transport)
             if always_will:
                 client.writer.always_will = always_will
-            if always_do:
-                client.writer.always_do = always_do
-            client.writer._encoding_explicit = encoding_explicit  # pylint: disable=protected-access
+            client.writer.always_do = always_do
+            from .telopt import GMCP as _GMCP
+
+            client.writer.passive_do = {_GMCP}
+            client.writer._encoding_explicit = encoding_explicit
 
         client.connection_made = _patched_connection_made  # type: ignore[method-assign]
         return client
@@ -580,7 +649,7 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
     colormatch: str = args["colormatch"]
     shell_callback = args["shell"]
     if colormatch.lower() != "none":
-        from .color_filter import (  # pylint: disable=import-outside-toplevel
+        from .color_filter import (
             PALETTES,
             ColorConfig,
             ColorFilter,
@@ -608,7 +677,7 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             brightness=args["color_brightness"],
             contrast=args["color_contrast"],
             background_color=args["background_color"],
-            reverse_video=args["reverse_video"],
+            ice_colors=args["ice_colors"],
         )
         if is_petscii or colormatch == "c64":
             color_filter_obj: object = PetsciiColorFilter(color_config)
@@ -622,8 +691,7 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             reader: Union[TelnetReader, TelnetReaderUnicode],
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
-            # pylint: disable-next=protected-access
-            writer_arg._color_filter = color_filter_obj  # type: ignore[union-attr]
+            writer_arg.ctx.color_filter = color_filter_obj
             await original_shell(reader, writer_arg)
 
         shell_callback = _color_shell
@@ -631,16 +699,11 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
     # Wrap shell to inject raw_mode flag and input translation for retro encodings
     raw_mode_val: Optional[bool] = args.get("raw_mode", False)
     if raw_mode_val is not False:
-        from .client_shell import (  # pylint: disable=import-outside-toplevel
-            _INPUT_XLAT,
-            _INPUT_SEQ_XLAT,
-            InputFilter,
-        )
+        from .client_shell import _INPUT_XLAT, _INPUT_SEQ_XLAT, InputFilter
 
         enc_key = (args.get("encoding", "") or "").lower()
         byte_xlat = dict(_INPUT_XLAT.get(enc_key, {}))
         if args.get("ascii_eol"):
-            # --ascii-eol: don't translate CR/LF to encoding-native EOL
             byte_xlat.pop(0x0D, None)
             byte_xlat.pop(0x0A, None)
         seq_xlat = {} if args.get("ansi_keys") else _INPUT_SEQ_XLAT.get(enc_key, {})
@@ -654,17 +717,35 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
             reader: Union[TelnetReader, TelnetReaderUnicode],
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
-            # pylint: disable-next=protected-access
-            writer_arg._raw_mode = raw_mode_val  # type: ignore[union-attr]
+            ctx = writer_arg.ctx
+            ctx.raw_mode = raw_mode_val
             if ascii_eol:
-                # pylint: disable-next=protected-access
-                writer_arg._ascii_eol = True  # type: ignore[union-attr]
+                ctx.ascii_eol = True
             if input_filter is not None:
-                # pylint: disable-next=protected-access
-                writer_arg._input_filter = input_filter  # type: ignore[union-attr]
+                ctx.input_filter = input_filter
             await _inner_shell(reader, writer_arg)
 
         shell_callback = _raw_shell
+
+    # Wrap shell to inject typescript recording file handle
+    typescript_path: Optional[str] = args.get("typescript")
+    if typescript_path:
+        _ts_inner = shell_callback
+
+        async def _typescript_shell(
+            reader: Union[TelnetReader, TelnetReaderUnicode],
+            writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
+        ) -> None:
+            ctx = writer_arg.ctx
+            assert typescript_path is not None
+            ts_file = open(typescript_path, "a", encoding="utf-8")  # noqa: SIM115
+            ctx.typescript_file = ts_file
+            try:
+                await _ts_inner(reader, writer_arg)
+            finally:
+                ts_file.close()
+
+        shell_callback = _typescript_shell
 
     # Build connection kwargs explicitly to avoid pylint false positive
     connection_kwargs: Dict[str, Any] = {
@@ -692,13 +773,14 @@ async def run_client() -> None:  # pylint: disable=too-many-locals,too-many-stat
 
 def _get_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Telnet protocol client", formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        prog="telnetlib3-client",
+        description="Telnet protocol client",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("host", action="store", help="hostname")
     parser.add_argument("port", nargs="?", default=23, type=int, help="port number")
     parser.add_argument("--term", default=os.environ.get("TERM", "unknown"), help="terminal type")
     parser.add_argument("--loglevel", default="warn", help="log level")
-    # pylint: disable=protected-access
     parser.add_argument("--logfmt", default=accessories._DEFAULT_LOGFMT, help="log format")
     parser.add_argument("--logfile", help="filepath")
     parser.add_argument(
@@ -738,9 +820,9 @@ def _get_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--connect-timeout",
-        default=None,
+        default=10,
         type=float,
-        help="timeout for TCP connection (seconds, default: no timeout)",
+        help="timeout for TCP connection in seconds (default: 10)",
     )
     parser.add_argument(
         "--send-environ",
@@ -769,34 +851,35 @@ def _get_argument_parser() -> argparse.ArgumentParser:
             "translate basic 16-color ANSI codes to exact 24-bit RGB values"
             " from a named hardware palette, bypassing the terminal's custom"
             " palette to preserve intended MUD/BBS artwork colors"
-            " (ega, cga, vga, amiga, xterm, none)"
+            " (vga, xterm, none)"
         ),
     )
     parser.add_argument(
         "--color-brightness",
-        default=0.9,
+        default=1.0,
         type=float,
         metavar="FLOAT",
         help="color brightness scale [0.0..1.0], where 1.0 is original",
     )
     parser.add_argument(
         "--color-contrast",
-        default=0.8,
+        default=1.0,
         type=float,
         metavar="FLOAT",
         help="color contrast scale [0.0..1.0], where 1.0 is original",
     )
     parser.add_argument(
         "--background-color",
-        default="#101010",
+        default="#000000",
         metavar="#RRGGBB",
         help="forced background color as hex RGB (near-black by default)",
     )
     parser.add_argument(
-        "--reverse-video",
-        action="store_true",
-        default=False,
-        help="swap foreground/background for light-background terminals",
+        "--ice-colors",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="treat SGR 5 (blink) as bright background (iCE colors)"
+        " for BBS/ANSI art (default: enabled)",
     )
     parser.add_argument(
         "--ascii-eol",
@@ -832,6 +915,26 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         "the server identity is not verified, allowing "
         "man-in-the-middle attacks",
     )
+    parser.add_argument(
+        "--gmcp-modules",
+        default=None,
+        metavar="MODULES",
+        help="comma-separated GMCP module specs to request "
+        '(e.g. "Char 1,Room 1,IRE.Rift 1"). '
+        "When provided, replaces the built-in defaults.",
+    )
+    parser.add_argument(
+        "--gmcp-log",
+        action="store_true",
+        default=False,
+        help="log all incoming GMCP messages at INFO level " "(default: DEBUG only)",
+    )
+    parser.add_argument(
+        "--typescript",
+        default=None,
+        metavar="FILE",
+        help="record session to FILE (like Unix script(1))",
+    )
     return parser
 
 
@@ -843,7 +946,7 @@ def _parse_option_arg(value: str) -> bytes:
     :returns: Single-byte option value.
     :raises ValueError: When *value* is not a known name or valid integer.
     """
-    from .telopt import option_from_name  # pylint: disable=import-outside-toplevel
+    from .telopt import option_from_name
 
     try:
         return option_from_name(value)
@@ -866,8 +969,8 @@ def _parse_background_color(value: str) -> Tuple[int, int, int]:
 
 
 def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
-    # Auto-enable force_binary for retro BBS encodings that use high-bit bytes.
-    from .encodings import FORCE_BINARY_ENCODINGS  # pylint: disable=import-outside-toplevel
+    # Auto-enable force_binary for any non-ASCII encoding that uses high-bit bytes.
+    from .encodings import FORCE_BINARY_ENCODINGS
 
     force_binary = args.force_binary
     # Three-state: True (forced raw), False (forced line), None (auto-detect)
@@ -877,8 +980,10 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         raw_mode = False
     else:
         raw_mode = None
-    if args.encoding.lower().replace("-", "_") in FORCE_BINARY_ENCODINGS:
+    enc_key = args.encoding.lower().replace("-", "_")
+    if enc_key not in ("us_ascii", "ascii"):
         force_binary = True
+    if enc_key in FORCE_BINARY_ENCODINGS:
         raw_mode = True
 
     # Build TLS context from --ssl / --ssl-cafile / --ssl-no-verify
@@ -906,7 +1011,7 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "force_binary": force_binary,
         "encoding_errors": args.encoding_errors,
         "connect_minwait": args.connect_minwait,
-        "connect_timeout": args.connect_timeout,
+        "connect_timeout": args.connect_timeout or None,
         "send_environ": tuple(v.strip() for v in args.send_environ.split(",") if v.strip()),
         "always_will": {_parse_option_arg(v) for v in args.always_will},
         "always_do": {_parse_option_arg(v) for v in args.always_do},
@@ -914,11 +1019,18 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "color_brightness": args.color_brightness,
         "color_contrast": args.color_contrast,
         "background_color": _parse_background_color(args.background_color),
-        "reverse_video": args.reverse_video,
+        "ice_colors": args.ice_colors,
         "raw_mode": raw_mode,
         "ascii_eol": args.ascii_eol,
         "ansi_keys": args.ansi_keys,
         "ssl": ssl_ctx,
+        "gmcp_modules": (
+            [m.strip() for m in args.gmcp_modules.split(",") if m.strip()]
+            if args.gmcp_modules
+            else None
+        ),
+        "gmcp_log": args.gmcp_log,
+        "typescript": args.typescript,
     }
 
 
@@ -926,6 +1038,8 @@ def main() -> None:
     """Entry point for telnetlib3-client command."""
     try:
         asyncio.run(run_client())
+    except KeyboardInterrupt:
+        pass
     except OSError as err:
         print(f"Error: {err}", file=sys.stderr)
         sys.exit(1)
@@ -951,7 +1065,6 @@ def _get_fingerprint_argument_parser() -> argparse.ArgumentParser:
         "--connect-timeout", default=10, type=float, help="TCP connection timeout in seconds"
     )
     parser.add_argument("--loglevel", default="warn", help="log level")
-    # pylint: disable=protected-access
     parser.add_argument("--logfmt", default=accessories._DEFAULT_LOGFMT, help="log format")
     parser.add_argument("--logfile", default=None, help="filepath")
     parser.add_argument(
@@ -1047,7 +1160,6 @@ async def run_fingerprint_client() -> None:
     :func:`~telnetlib3.server_fingerprinting.fingerprinting_client_shell`
     via :func:`functools.partial`, and runs the connection.
     """
-    # pylint: disable=import-outside-toplevel
     from . import fingerprinting, server_fingerprinting
 
     args = _get_fingerprint_argument_parser().parse_args()
@@ -1106,8 +1218,8 @@ async def run_fingerprint_client() -> None:
 
         def patched_connection_made(transport: asyncio.BaseTransport) -> None:
             orig_connection_made(transport)
+            assert client.writer is not None
             client.writer.environ_encoding = environ_encoding
-            # pylint: disable-next=protected-access
             client.writer._encoding_explicit = environ_encoding != "ascii"
             mud_opts = {opt for opt, _, _ in fingerprinting.EXTENDED_OPTIONS}
             client.writer.always_will = fp_always_will | mud_opts
@@ -1146,7 +1258,7 @@ async def run_fingerprint_client() -> None:
         "term": ttype,
         "connect_minwait": 0,
         "connect_maxwait": 4.0,
-        "connect_timeout": args.connect_timeout,
+        "connect_timeout": args.connect_timeout or None,
         "waiter_closed": waiter_closed,
     }
     if fp_ssl is not None:

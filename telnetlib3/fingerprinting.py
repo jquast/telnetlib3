@@ -1,9 +1,13 @@
 """
 Fingerprint shell for telnet client identification.
 
-This module probes telnet protocol capabilities, collects session data,
-and saves fingerprint files.  Display, REPL, and post-script code live
-in ``telnetlib3.fingerprinting_display``.
+This module runs **server-side**: it is the shell callback for a telnetlib3
+server that probes connecting *clients* for protocol capabilities, collects
+session data, and saves fingerprint files.  Despite the generic name, it
+fingerprints the remote *client*, not the server.
+
+Display, REPL, and post-script code live in
+``telnetlib3.fingerprinting_display``.
 """
 
 from __future__ import annotations
@@ -22,7 +26,8 @@ from typing import Any, Union, Optional, TypedDict, cast
 
 # local
 from . import slc
-from .server import TelnetServer  # pylint: disable=cyclic-import
+from ._paths import _atomic_json_write
+from .server import TelnetServer
 from .telopt import (
     BM,
     DO,
@@ -178,7 +183,7 @@ ENVIRON_EXTENDED: list[str] = [
 logger = logging.getLogger("telnetlib3.fingerprint")
 
 
-class FingerprintingTelnetServer:  # pylint: disable=too-few-public-methods
+class FingerprintingTelnetServer:
     """
     Mixin that extends ``on_request_environ`` with :data:`ENVIRON_EXTENDED`.
 
@@ -197,10 +202,10 @@ class FingerprintingTelnetServer:  # pylint: disable=too-few-public-methods
         """Return base environ keys plus :data:`ENVIRON_EXTENDED`."""
         if not isinstance(self, TelnetServer):
             raise TypeError("FingerprintingTelnetServer must be combined with TelnetServer")
-        # pylint: disable-next=no-member
+        # pylint: disable=no-member
         base: list[Union[str, bytes]] = super().on_request_environ()  # type: ignore[misc]
         # Insert extended keys before the trailing VAR/USERVAR sentinels
-        from .telopt import VAR, USERVAR  # pylint: disable=import-outside-toplevel
+        from .telopt import VAR, USERVAR
 
         extra = [k for k in ENVIRON_EXTENDED if k not in base]
         # Find where VAR/USERVAR sentinels start and insert before them
@@ -496,7 +501,7 @@ def _collect_extra_info(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> dic
 
     protocol = _get_protocol(writer)
     if protocol and hasattr(protocol, "_extra"):
-        for key, value in protocol._extra.items():  # pylint: disable=protected-access
+        for key, value in protocol._extra.items():
             if isinstance(value, tuple):
                 extra[key] = list(value)
             elif isinstance(value, bytes):
@@ -550,7 +555,7 @@ def _collect_protocol_timing(writer: Union[TelnetWriter, TelnetWriterUnicode]) -
         if hasattr(protocol, "idle"):
             timing["idle"] = protocol.idle
         if hasattr(protocol, "_connect_time"):
-            timing["connect_time"] = protocol._connect_time  # pylint: disable=protected-access
+            timing["connect_time"] = protocol._connect_time
     return timing
 
 
@@ -848,7 +853,7 @@ def _validate_suggestion(text: str) -> Optional[str]:
 
 def _cooked_input(prompt: str) -> str:
     """Call :func:`input` with echo and canonical mode temporarily enabled."""
-    import termios  # pylint: disable=import-outside-toplevel
+    import termios
 
     fd = sys.stdin.fileno()
     old_attrs = termios.tcgetattr(fd)
@@ -861,26 +866,6 @@ def _cooked_input(prompt: str) -> str:
         return ""
     finally:
         termios.tcsetattr(fd, termios.TCSANOW, old_attrs)
-
-
-class _BytesSafeEncoder(json.JSONEncoder):
-    """JSON encoder that converts bytes to str (UTF-8) or hex."""
-
-    def default(self, o: Any) -> Any:
-        if isinstance(o, bytes):
-            try:
-                return o.decode("utf-8")
-            except UnicodeDecodeError:
-                return o.hex()
-        return super().default(o)
-
-
-def _atomic_json_write(filepath: str, data: dict[str, Any]) -> None:
-    """Atomically write JSON data to file via write-to-new + rename."""
-    tmp_path = os.path.splitext(filepath)[0] + ".json.new"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, sort_keys=True, cls=_BytesSafeEncoder)
-    os.replace(tmp_path, filepath)
 
 
 def _build_session_fingerprint(
@@ -1041,7 +1026,6 @@ async def fingerprinting_server_shell(
     :param reader: TelnetReader instance.
     :param writer: TelnetWriter instance.
     """
-    # pylint: disable=import-outside-toplevel
     from .server_pty_shell import pty_shell
 
     writer = cast(TelnetWriterUnicode, writer)
@@ -1093,7 +1077,6 @@ def fingerprinting_post_script(filepath: str) -> None:
 
     :param filepath: Path to the saved fingerprint JSON file.
     """
-    # pylint: disable-next=import-outside-toplevel,cyclic-import
     from .fingerprinting_display import fingerprinting_post_script as _fps
 
     _fps(filepath)
@@ -1111,7 +1094,6 @@ def fingerprint_server_main() -> None:
     Accepts ``--data-dir`` to set the fingerprint data directory.
     Falls back to the ``TELNETLIB3_DATA_DIR`` environment variable.
     """
-    # pylint: disable=import-outside-toplevel,global-statement
     # local import is required to prevent circular imports
     from .server import _config, run_server, parse_server_args  # noqa: PLC0415
 

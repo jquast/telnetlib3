@@ -18,6 +18,7 @@ def test_codec_lookup():
 
 @pytest.mark.parametrize("alias", ["cbm", "commodore", "c64", "c128"])
 def test_codec_aliases(alias):
+    codecs.lookup("petscii")
     info = codecs.lookup(alias)
     assert info.name == "petscii"
 

@@ -177,7 +177,6 @@ async def _setup_server_client_pair():
         host="127.0.0.1",
         port=port,
         encoding=False,
-        connect_minwait=0.05,
         connect_maxwait=0.1,
         client_factory=telnetlib3.TelnetClient,
     )

@@ -637,6 +637,20 @@ property::
     print(f"Mode: {writer.mode}")  # 'local', 'remote', or 'kludge'
     print(f"ECHO enabled: {writer.remote_option.enabled(ECHO)}")
 
+Go-Ahead (GA)
+--------------
+
+When a client does not negotiate Suppress Go-Ahead (SGA), the server sends
+``IAC GA`` after output to signal that the client may transmit. This is
+correct behavior for MUD clients like Mudlet that expect prompt detection
+via GA.
+
+If GA causes unwanted output for your use case, disable it::
+
+    telnetlib3-server --never-send-ga
+
+For PTY shells, GA is sent after 500ms of output idle time -- Go ahead (GA) isn't typically used
+with interactive programs, it is probably best to disable it.
 
 Fingerprinting Server
 =====================
@@ -760,15 +774,14 @@ Running
 
 The repository includes a "mini-MUD" example at `bin/server_mud.py
 <https://github.com/jquast/telnetlib3/blob/master/bin/server_mud.py>`_ with
-rooms, combat, weapons, GMCP/MSDP/MSSP support, and basic persistence.
+rooms, combat, weapons, GMCP/MSDP/MSSP support, and basic persistence.  MUD
+servers usually run in "line mode"::
 
-::
+    telnetlib3-server --line-mode --shell bin.server_mud.shell
 
-    telnetlib3-server --shell bin.server_mud.shell
+Connect with any telnet or MUD client::
 
-Then, connect with any telnet or MUD client::
-
-    telnet localhost 6023
+    telnetlib3-client localhost 6023
 
 Legacy telnetlib Compatibility
 ==============================

@@ -122,17 +122,18 @@ class TelnetConnection:
 
     def _run_loop(self) -> None:
         """Run event loop in background thread."""
+        assert self._loop is not None
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
 
     async def _async_connect(self) -> None:
         """Async connection coroutine."""
         kwargs = dict(self._kwargs)
-        # Default to TelnetClient (not TelnetTerminalClient) — the blocking API
+        # Default to TelnetClient (not TelnetTerminalClient) -- the blocking API
         # is programmatic, not a terminal app, so it should use the cols/rows
         # parameters rather than reading the real terminal size.
         if "client_factory" not in kwargs:
-            from .client import TelnetClient  # pylint: disable=import-outside-toplevel
+            from .client import TelnetClient
 
             kwargs["client_factory"] = TelnetClient
         self._reader, self._writer = await _open_connection(
@@ -160,10 +161,12 @@ class TelnetConnection:
         :raises EOFError: If connection closed.
         """
         self._ensure_connected()
+        assert self._reader is not None
+        assert self._loop is not None
         timeout = timeout if timeout is not None else self._timeout
         future = asyncio.run_coroutine_threadsafe(self._reader.read(n), self._loop)
         try:
-            result = future.result(timeout=timeout)
+            result: Union[str, bytes] = future.result(timeout=timeout)
             if not result:
                 raise EOFError("Connection closed")
             return result
@@ -173,14 +176,15 @@ class TelnetConnection:
 
     def read_some(self, timeout: Optional[float] = None) -> Union[str, bytes]:
         """
-        Read some data from the connection.
+        Read some available data from the connection.
 
-        Alias for :meth:`read` for compatibility with old telnetlib.
+        Unlike :meth:`read` with ``n=-1``, this returns as soon as any data is
+        available rather than waiting for EOF.
 
-        :param timeout: Timeout in seconds.
+        :param timeout: Timeout in seconds (uses default if None).
         :returns: Data read from connection.
         """
-        return self.read(-1, timeout=timeout)
+        return self.read(self._reader._limit, timeout=timeout)
 
     def readline(self, timeout: Optional[float] = None) -> Union[str, bytes]:
         """
@@ -194,10 +198,12 @@ class TelnetConnection:
         :raises EOFError: If connection closed before line complete.
         """
         self._ensure_connected()
+        assert self._reader is not None
+        assert self._loop is not None
         timeout = timeout if timeout is not None else self._timeout
         future = asyncio.run_coroutine_threadsafe(self._reader.readline(), self._loop)
         try:
-            result = future.result(timeout=timeout)
+            result: Union[str, bytes] = future.result(timeout=timeout)
             if not result:
                 raise EOFError("Connection closed")
             return result
@@ -220,13 +226,16 @@ class TelnetConnection:
         :raises EOFError: If connection closed before match found.
         """
         self._ensure_connected()
+        assert self._reader is not None
+        assert self._loop is not None
         timeout = timeout if timeout is not None else self._timeout
         # readuntil expects bytes, encode if string
         if isinstance(match, str):
             match = match.encode(self._encoding or "utf-8")
         future = asyncio.run_coroutine_threadsafe(self._reader.readuntil(match), self._loop)
         try:
-            return future.result(timeout=timeout)
+            result: Union[str, bytes] = future.result(timeout=timeout)
+            return result
         except concurrent.futures.TimeoutError as exc:
             future.cancel()
             raise TimeoutError("Read until timed out") from exc
@@ -243,6 +252,8 @@ class TelnetConnection:
         :param data: String or bytes to write.
         """
         self._ensure_connected()
+        assert self._writer is not None
+        assert self._loop is not None
         # writer may be TelnetWriter (bytes) or TelnetWriterUnicode (str)
         self._loop.call_soon_threadsafe(self._writer.write, data)  # type: ignore[arg-type]
 
@@ -256,6 +267,8 @@ class TelnetConnection:
         :raises TimeoutError: If timeout expires.
         """
         self._ensure_connected()
+        assert self._writer is not None
+        assert self._loop is not None
         timeout = timeout if timeout is not None else self._timeout
         coro = self._writer.drain()
         try:
@@ -283,7 +296,7 @@ class TelnetConnection:
             future = asyncio.run_coroutine_threadsafe(self._async_cleanup(), self._loop)
             try:
                 future.result(timeout=2.0)
-            except Exception:  # pylint: disable=broad-exception-caught
+            except Exception:
                 pass  # Cleanup should not raise
         if self._loop and self._loop.is_running():
             self._loop.call_soon_threadsafe(self._loop.stop)
@@ -299,7 +312,7 @@ class TelnetConnection:
             self._writer.close()
             try:
                 await self._writer.wait_closed()
-            except Exception:  # pylint: disable=broad-exception-caught
+            except Exception:
                 pass  # Cleanup should not raise
 
     def get_extra_info(self, name: str, default: Any = None) -> Any:
@@ -319,6 +332,7 @@ class TelnetConnection:
         :returns: Information value or default.
         """
         self._ensure_connected()
+        assert self._writer is not None
         return self._writer.get_extra_info(name, default)
 
     def wait_for(
@@ -359,6 +373,8 @@ class TelnetConnection:
             print(f"Terminal: {term} ({cols}x{rows})")
         """
         self._ensure_connected()
+        assert self._writer is not None
+        assert self._loop is not None
         timeout = timeout if timeout is not None else self._timeout
         future = asyncio.run_coroutine_threadsafe(
             self._writer.wait_for(remote=remote, local=local, pending=pending), self._loop
@@ -384,6 +400,7 @@ class TelnetConnection:
         :returns: The underlying TelnetWriter instance.
         """
         self._ensure_connected()
+        assert self._writer is not None
         return self._writer
 
     def __enter__(self) -> "TelnetConnection":
@@ -466,6 +483,7 @@ class BlockingTelnetServer:
 
     def _run_loop(self) -> None:
         """Run event loop in background thread."""
+        assert self._loop is not None
         asyncio.set_event_loop(self._loop)
         self._loop.run_until_complete(self._start_server())
         self._started.set()
@@ -473,6 +491,7 @@ class BlockingTelnetServer:
 
     async def _start_server(self) -> None:
         """Start the async server."""
+        assert self._loop is not None
         loop = self._loop  # Capture for closure
 
         async def shell(reader: TelnetReader, writer: TelnetWriter) -> None:
@@ -480,7 +499,6 @@ class BlockingTelnetServer:
             conn = ServerConnection(reader, writer, loop)
             self._client_queue.put(conn)
             # Wait until the sync handler closes the connection
-            # pylint: disable=protected-access
             await conn._wait_closed()
 
         self._server = await _create_server(self._host, self._port, shell=shell, **self._kwargs)
@@ -529,10 +547,11 @@ class BlockingTelnetServer:
 
     def _handle_client(self, conn: "ServerConnection") -> None:
         """Handle a client in the handler function."""
+        assert self._handler is not None
         try:
             self._handler(conn)
         finally:
-            if not conn._closed:  # pylint: disable=protected-access
+            if not conn._closed:
                 conn.close()
 
     def shutdown(self) -> None:
@@ -547,7 +566,7 @@ class BlockingTelnetServer:
             future = asyncio.run_coroutine_threadsafe(self._async_shutdown(), self._loop)
             try:
                 future.result(timeout=2.0)
-            except Exception:  # pylint: disable=broad-exception-caught
+            except Exception:
                 pass  # Cleanup should not raise
         if self._loop and self._loop.is_running():
             self._loop.call_soon_threadsafe(self._loop.stop)
@@ -563,7 +582,7 @@ class BlockingTelnetServer:
             self._server.close()
             try:
                 await self._server.wait_closed()
-            except Exception:  # pylint: disable=broad-exception-caught
+            except Exception:
                 pass  # Cleanup should not raise
         # Cancel all pending tasks to avoid "Task was destroyed but pending" warnings
         for task in asyncio.all_tasks(self._loop):
@@ -631,14 +650,15 @@ class ServerConnection:
 
     def read_some(self, timeout: Optional[float] = None) -> Union[str, bytes]:
         """
-        Read some data from the connection.
+        Read some available data from the connection.
 
-        Alias for :meth:`read` for compatibility with old telnetlib.
+        Unlike :meth:`read` with ``n=-1``, this returns as soon as any data is
+        available rather than waiting for EOF.
 
         :param timeout: Timeout in seconds.
         :returns: Data read from connection.
         """
-        return self.read(-1, timeout=timeout)
+        return self.read(self._reader._limit, timeout=timeout)
 
     def readline(self, timeout: Optional[float] = None) -> Union[str, bytes]:
         """

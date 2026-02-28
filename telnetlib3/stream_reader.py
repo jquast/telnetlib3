@@ -98,7 +98,7 @@ class TelnetReader:
     def _maybe_resume_transport(self) -> None:
         if self._paused and len(self._buffer) <= self._limit:
             self._paused = False
-            self._transport.resume_reading()  # type: ignore[attr-defined]
+            self._transport.resume_reading()
 
     def feed_eof(self) -> None:
         """
@@ -161,7 +161,7 @@ class TelnetReader:
         # This is essential for readexactly(n) for case when n > self._limit.
         if self._paused:
             self._paused = False
-            self._transport.resume_reading()  # type: ignore[attr-defined]
+            self._transport.resume_reading()
 
         self._waiter = asyncio.get_running_loop().create_future()
         try:

@@ -1,5 +1,7 @@
 """Tests for TLS (TELNETS) support."""
 
+from __future__ import annotations
+
 # std imports
 import os
 import ssl
@@ -17,13 +19,7 @@ import pytest
 import trustme
 
 # local
-from telnetlib3.tests.accessories import (
-    bind_host,
-    create_server,
-    open_connection,
-    unused_tcp_port,
-    init_subproc_coverage,
-)
+from telnetlib3.tests.accessories import create_server, open_connection, init_subproc_coverage
 
 
 @pytest.fixture()
@@ -59,7 +55,7 @@ def _echo_shell(send, reply):
     return shell, waiter
 
 
-_FAST_CLIENT = dict(encoding="ascii", connect_minwait=0.05, connect_maxwait=0.5)
+_FAST_CLIENT = {"encoding": "ascii", "connect_maxwait": 0.5}
 
 
 async def _ping_pong(bind_host, port, server_kw, client_kw):
@@ -156,7 +152,7 @@ async def test_tls_auto_both_clients(bind_host, unused_tcp_port, server_ssl_ctx,
 @pytest.mark.parametrize(
     "client_ssl",
     [
-        pytest.param(lambda: ssl.create_default_context(), id="untrusted-ctx"),
+        pytest.param(ssl.create_default_context, id="untrusted-ctx"),
         pytest.param(lambda: True, id="ssl-true"),
     ],
 )
@@ -191,7 +187,7 @@ async def test_plain_client_rejected_by_tls_server(bind_host, unused_tcp_port, s
             await writer.drain()
             data = await asyncio.wait_for(reader.read(1024), 2.0)
             assert data == b""
-        except (ConnectionResetError, OSError):
+        except OSError:
             pass
         finally:
             writer.close()
@@ -235,7 +231,6 @@ async def test_tls_fingerprint_end_to_end(
             ssl=client_ssl_ctx,
             server_hostname="localhost",
             encoding=False,
-            connect_minwait=0.05,
             connect_maxwait=0.5,
         ) as (reader, writer):
             await asyncio.wait_for(waiter, 2.0)
@@ -433,7 +428,7 @@ def _run_in_pty(child_func, timeout: float = _MAX_SUBPROC_SECONDS) -> str:
     if sys.platform == "win32":
         pytest.skip("POSIX-only test")
 
-    import pty  # pylint: disable=import-outside-toplevel
+    import pty
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -447,7 +442,7 @@ def _run_in_pty(child_func, timeout: float = _MAX_SUBPROC_SECONDS) -> str:
         except SystemExit:
             pass
         except BaseException:
-            import traceback  # pylint: disable=import-outside-toplevel
+            import traceback
 
             traceback.print_exc()
             exit_code = 1
@@ -488,7 +483,7 @@ class _EchoClose(asyncio.Protocol):
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         self._transport = transport
         transport.write(self._msg)
-        asyncio.get_event_loop().call_later(0.3, transport.close)
+        asyncio.get_event_loop().call_later(1.0, transport.close)
 
 
 @contextlib.contextmanager
@@ -546,11 +541,10 @@ def _pty_run_client(bind_host, port, extra_argv, server_ssl_ctx=None):
             "telnetlib3-client",
             bind_host,
             str(port),
-            "--connect-minwait=0.05",
             "--connect-maxwait=0.5",
             "--colormatch=none",
         ] + extra_argv
-        from telnetlib3.client import run_client  # pylint: disable=import-outside-toplevel
+        from telnetlib3.client import run_client
 
         asyncio.run(run_client())
 
@@ -564,7 +558,7 @@ def _pty_run_client(bind_host, port, extra_argv, server_ssl_ctx=None):
 @pytest.mark.parametrize(
     "extra_argv, use_ssl",
     [
-        pytest.param(["--ssl-no-verify"], True, id="ssl-no-verify"),
+        pytest.param(["--ssl-no-verify", "--raw-mode"], True, id="ssl-no-verify"),
         pytest.param(["--raw-mode"], False, id="raw-mode"),
         pytest.param(["--raw-mode", "--ascii-eol", "--ansi-keys"], False, id="ascii-eol-ansi-keys"),
         pytest.param(["--raw-mode", "--encoding=atascii"], False, id="atascii"),
@@ -579,7 +573,7 @@ def test_cli_run_client(bind_host, unused_tcp_port, server_ssl_ctx, extra_argv, 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only tests")
 def test_cli_run_server_ssl(bind_host, unused_tcp_port, ca, tmp_path, client_ssl_ctx):
     """run_server() with --ssl-certfile exercises the ssl pass-through."""
-    import pty  # pylint: disable=import-outside-toplevel
+    import pty
 
     port = unused_tcp_port
     cert_pem, key_pem = _write_cert_files(ca, tmp_path)
@@ -603,13 +597,13 @@ def test_cli_run_server_ssl(bind_host, unused_tcp_port, ca, tmp_path, client_ssl
                 "--connect-maxwait=0.05",
                 "--loglevel=warning",
             ]
-            from telnetlib3.server import main  # pylint: disable=import-outside-toplevel
+            from telnetlib3.server import main
 
             main()
         except SystemExit:
             pass
         except BaseException:
-            import traceback  # pylint: disable=import-outside-toplevel
+            import traceback
 
             traceback.print_exc()
             exit_code = 1

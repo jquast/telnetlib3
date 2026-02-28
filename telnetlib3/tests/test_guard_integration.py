@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # std imports
 import asyncio
 import functools
@@ -161,7 +163,7 @@ async def test_guarded_shell_pattern_busy_shell():
     assert counter.count == 0
 
 
-async def test_guarded_shell_pattern_robot_check():  # pylint: disable=too-complex
+async def test_guarded_shell_pattern_robot_check():
     counter = ConnectionCounter(5)
     shell_calls = []
     robot_shell_calls = []
@@ -240,7 +242,7 @@ async def test_guarded_shell_pattern_robot_check():  # pylint: disable=too-compl
     assert counter.count == 0
 
 
-async def test_full_guarded_shell_flow():  # pylint: disable=too-complex
+async def test_full_guarded_shell_flow():
     counter = ConnectionCounter(2)
     shell_calls = []
     busy_calls = []
@@ -409,7 +411,7 @@ async def test_without_latin1_reading_strict_crashes():
 async def test_fingerprint_scanner_defeats_robot_check(unused_tcp_port):
     """Fingerprint scanner's virtual cursor defeats the server's robot_check."""
     from telnetlib3.guard_shells import _TEST_CHAR, _measure_width  # noqa: PLC0415
-    from telnetlib3.tests.accessories import create_server  # noqa: PLC0415
+    from telnetlib3.tests.accessories import create_server
 
     measured_width: list[int | None] = []
 
@@ -437,9 +439,9 @@ async def test_fingerprint_scanner_defeats_robot_check(unused_tcp_port):
             banner_max_wait=5.0,
         )
         reader, writer = await telnetlib3.open_connection(
-            host="127.0.0.1", port=unused_tcp_port, encoding=False, shell=shell, connect_minwait=0.5
+            host="127.0.0.1", port=unused_tcp_port, encoding=False, shell=shell
         )
-        # Shell runs as a background task — wait for it to finish.
+        # Shell runs as a background task -- wait for it to finish.
         await asyncio.wait_for(writer.protocol.waiter_closed, timeout=10.0)
 
     assert measured_width, "server shell never ran"

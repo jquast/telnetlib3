@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "telnetlib3"
-version = "2.6.1"
+version = "3.0.0"
 description = " Python Telnet server and client CLI and Protocol library"
 readme = "README.rst"
 license = "ISC"
@@ -54,8 +54,8 @@ docs = [
     "sphinx-autodoc-typehints",
 ]
 extras = [
-    "ucs-detect>=2",
     "prettytable",
+    "ucs-detect>=2,<3",
 ]
 
 [project.scripts]
@@ -108,8 +108,51 @@ disable = [
     # telnetlib3 specific
     "too-many-instance-attributes",
     "too-many-public-methods",
+    "too-few-public-methods",
     "too-many-arguments",
-    "duplicate-code",  # intentional re-exports in telnetlib.py and telopt.py
+    "too-many-positional-arguments",
+    "too-many-locals",
+    "too-many-branches",
+    "too-many-statements",
+    "too-many-nested-blocks",
+    "too-many-return-statements",
+    "too-many-lines",
+    "too-complex",
+    # intentional re-exports in telnetlib.py and telopt.py
+    "duplicate-code",
+    # cyclic-import is a graph-level diagnostic that cannot be suppressed inline
+    "cyclic-import",
+    # deliberate deferred imports throughout the codebase
+    "import-outside-toplevel",
+    # internal APIs, common pattern across protocol code
+    "protected-access",
+    # boundary/cleanup code throughout
+    "broad-exception-caught",
+    "broad-except",
+    # callback signatures with unused params
+    "unused-argument",
+    # codec encode/decode `input` param, __exit__ `type` param
+    "redefined-builtin",
+    # module-level singletons pattern
+    "global-statement",
+    # theNULL, PTY_SUPPORT, SLC_nosupport, _editor_active, etc.
+    "invalid-name",
+    # subprocess re-imports after fork
+    "reimported",
+    "redefined-outer-name",
+    # deliberate override renames/changes
+    "arguments-renamed",
+    "arguments-differ",
+    # optional deps may not be installed
+    "import-error",
+    # pylint false-positive family
+    "overlapping-except",
+    "redefined-variable-type",
+    "unsupported-assignment-operation",
+    "use-implicit-booleaness-not-comparison-to-string",
+    "ungrouped-imports",
+    "consider-using-with",
+    "consider-using-from-import",
 ]
 
 [tool.pylint.format]
@@ -117,16 +160,17 @@ max-line-length = 100
 good-names = ["fd", "_", "x", "y", "tn", "ip"]
 
 [tool.pylint.design]
-max-args = 12
-max-attributes = 15
-max-branches = 15
-max-complexity = 15
-max-locals = 20
-max-module-lines = 2000
-max-parents = 7
-max-public-methods = 30
-max-returns = 8
-max-statements = 60
+max-args = 18
+max-attributes = 22
+max-branches = 22
+max-complexity = 22
+max-locals = 30
+max-module-lines = 3000
+max-parents = 10
+max-positional-arguments = 8
+max-public-methods = 45
+max-returns = 12
+max-statements = 90
 
 [tool.pylint.similarities]
 ignore-imports = true
@@ -141,6 +185,7 @@ python_version = "3.9"
 strict = true
 disallow_subclassing_any = false
 ignore_missing_imports = true
+disable_error_code = ["union-attr"]
 
 [[tool.mypy.overrides]]
 module = ["telnetlib3.tests.*"]

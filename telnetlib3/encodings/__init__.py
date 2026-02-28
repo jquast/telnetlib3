@@ -47,8 +47,8 @@ def _search_function(encoding: str) -> Optional[codecs.CodecInfo]:
     return info
 
 
-#: Encoding names (and aliases) that require BINARY mode for high-bit bytes.
-#: Used by CLI entry points to auto-enable ``--force-binary``.
+#: Retro BBS encoding names (and aliases) that additionally require raw mode.
+#: Used by the client CLI entry point to auto-enable ``--raw-mode``.
 FORCE_BINARY_ENCODINGS = frozenset(
     {
         "atascii",

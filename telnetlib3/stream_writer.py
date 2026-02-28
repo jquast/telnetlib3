@@ -9,10 +9,6 @@ import logging
 import collections
 from typing import TYPE_CHECKING, Any, Dict, Callable, Optional, Sequence
 
-# pylint: disable=too-many-lines
-# pylint: disable=duplicate-code
-
-
 if TYPE_CHECKING:  # pragma: no cover
     from .stream_reader import TelnetReader
 
@@ -100,6 +96,7 @@ from .telopt import (
     option_from_name,
 )
 from .accessories import TRACE, hexdump
+from ._session_context import TelnetSessionContext
 
 __all__ = ("TelnetWriter", "TelnetWriterUnicode")
 
@@ -235,10 +232,19 @@ class TelnetWriter:
         #: DONT rejection in :meth:`handle_will`.
         self.always_do: set[bytes] = set()
 
+        #: Set of option byte(s) for which the client sends DO only
+        #: in response to a server WILL (passive negotiation).
+        self.passive_do: set[bytes] = set()
+
         #: Whether the encoding was explicitly set (not just the default
         #: ``"ascii"``).  Used by fingerprinting and client connection logic
         #: to decide whether to negotiate CHARSET.
         self._encoding_explicit: bool = False
+
+        #: Per-connection session context.  Applications may replace this
+        #: with a subclass of :class:`~telnetlib3._session_context.TelnetSessionContext` to carry
+        #: additional state (e.g. MUD client macros, room graphs).
+        self.ctx: TelnetSessionContext = TelnetSessionContext()
 
         #: Set of option byte(s) for WILL received from remote end
         #: that were rejected with DONT (unhandled options).
@@ -394,7 +400,7 @@ class TelnetWriter:
         if self._protocol is not None:
             try:
                 self._protocol.connection_lost(None)
-            except Exception:  # pylint: disable=broad-exception-caught
+            except Exception:
                 pass
         if self._transport is not None:
             self._transport.close()
@@ -626,11 +632,10 @@ class TelnetWriter:
             # would not see an error when the socket is closed.
             await asyncio.sleep(0)
         if self._protocol is not None:
-            await self._protocol._drain_helper()  # pylint: disable=protected-access
+            await self._protocol._drain_helper()
 
     # proprietary write helper
 
-    # pylint: disable=too-many-branches,too-many-statements,too-complex
     def feed_byte(self, byte: bytes) -> bool:
         """
         Feed a single byte into Telnet option state machine.
@@ -709,7 +714,7 @@ class TelnetWriter:
 
         elif self.cmd_received:
             # parse 3rd and final byte of IAC DO, DONT, WILL, WONT.
-            cmd, opt = self.cmd_received, byte
+            cmd, opt = self.cmd_received, byte  # type: ignore[assignment]
             self.log.debug("recv IAC %s %s", name_command(cmd), name_option(opt))
             try:
                 if cmd == DO:
@@ -748,7 +753,7 @@ class TelnetWriter:
             finally:
                 # toggle iac_received on any ValueErrors/AssertionErrors raised
                 self.iac_received = False
-                self.cmd_received = (opt, byte)  # pylint: disable=redefined-variable-type
+                self.cmd_received = (opt, byte)
 
         elif self.mode == "remote" or self.mode == "kludge" and self.slc_simulated:
             # 'byte' is tested for SLC characters
@@ -760,7 +765,7 @@ class TelnetWriter:
                 self.log.debug(
                     "slc.snoop(%r): %s, callback is %s.",
                     byte,
-                    slc.name_slc_command(slc_name),
+                    slc.name_slc_command(slc_name),  # type: ignore[arg-type]
                     callback.__name__,
                 )
                 callback(slc_name)
@@ -788,6 +793,16 @@ class TelnetWriter:
     def protocol(self) -> Any:
         """The (Telnet) protocol attached to this stream."""
         return self._protocol
+
+    def _force_binary_on_protocol(self) -> None:
+        """
+        Enable ``force_binary`` on the attached protocol.
+
+        Called when CHARSET is negotiated or LANG is received via NEW_ENVIRON, implying that the
+        peer can handle non-ASCII bytes regardless of whether BINARY mode was explicitly negotiated.
+        """
+        if self._protocol is not None and hasattr(self._protocol, "force_binary"):
+            self._protocol.force_binary = True
 
     @property
     def server(self) -> bool:
@@ -1292,15 +1307,15 @@ class TelnetWriter:
         """
         self._iac_callback[cmd] = func
 
-    def handle_nop(self, cmd: bytes) -> None:  # pylint:disable=unused-argument
+    def handle_nop(self, cmd: bytes) -> None:
         """Handle IAC No-Operation (NOP)."""
         self.log.debug("IAC NOP: Null Operation (unhandled).")
 
-    def handle_ga(self, cmd: bytes) -> None:  # pylint:disable=unused-argument
+    def handle_ga(self, cmd: bytes) -> None:
         """Handle IAC Go-Ahead (GA)."""
         self.log.debug("IAC GA: Go-Ahead (unhandled).")
 
-    def handle_dm(self, cmd: bytes) -> None:  # pylint:disable=unused-argument
+    def handle_dm(self, cmd: bytes) -> None:
         """Handle IAC Data-Mark (DM)."""
         self.log.debug("IAC DM: Data-Mark (unhandled).")
 
@@ -1826,7 +1841,6 @@ class TelnetWriter:
         # Correctly, a DONT can not be declined, so there is no need to
         # affirm in the negative.
 
-    # pylint: disable=too-many-branches,too-complex
     def handle_will(self, opt: bytes) -> None:
         """
         Process byte 3 of series (IAC, WILL, opt) received by remote end.
@@ -1882,7 +1896,7 @@ class TelnetWriter:
                 return
             # Client declines MUD protocols unless explicitly opted in.
             if self.client and opt in _MUD_PROTOCOL_OPTIONS:
-                if opt in self.always_do:
+                if opt in self.always_do or opt in self.passive_do:
                     if not self.remote_option.enabled(opt):
                         self.iac(DO, opt)
                         self.remote_option[opt] = True
@@ -2111,10 +2125,12 @@ class TelnetWriter:
                 self.log.debug("send IAC SB CHARSET ACCEPTED %s IAC SE", selected)
                 self.send_iac(b"".join(response))
                 self.environ_encoding = selected
+                self._force_binary_on_protocol()
         elif opt == ACCEPTED:
             charset = b"".join(buf).decode("ascii")
             self.log.debug("recv IAC SB CHARSET ACCEPTED %s IAC SE", charset)
             self.environ_encoding = charset
+            self._force_binary_on_protocol()
             self._ext_callback[CHARSET](charset)
         elif opt == REJECTED:
             self.log.warning("recv IAC SB CHARSET REJECTED IAC SE")
@@ -3027,9 +3043,7 @@ class TelnetWriterUnicode(TelnetWriter):
         encoding = self.fn_encoding(outgoing=True)
         return bytes(string, encoding, errors or self.encoding_errors)
 
-    def write(  # type: ignore[override]  # pylint: disable=arguments-renamed
-        self, string: str, errors: Optional[str] = None
-    ) -> None:
+    def write(self, string: str, errors: Optional[str] = None) -> None:  # type: ignore[override]
         """
         Write unicode string to transport, using protocol-preferred encoding.
 
@@ -3059,9 +3073,7 @@ class TelnetWriterUnicode(TelnetWriter):
         """
         self.write(string="".join(lines), errors=errors)
 
-    def echo(  # type: ignore[override]  # pylint: disable=arguments-renamed
-        self, string: str, errors: Optional[str] = None
-    ) -> None:
+    def echo(self, string: str, errors: Optional[str] = None) -> None:  # type: ignore[override]
         """
         Conditionally write ``string`` to transport when "remote echo" enabled.
 

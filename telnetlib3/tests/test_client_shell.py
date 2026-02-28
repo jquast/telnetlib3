@@ -1,4 +1,4 @@
-"""Tests for telnetlib3.client_shell — Terminal mode handling."""
+"""Tests for telnetlib3.client_shell -- Terminal mode handling."""
 
 # std imports
 import sys
@@ -9,6 +9,9 @@ from unittest import mock
 # 3rd party
 import pytest
 import pexpect
+
+# local
+from telnetlib3._session_context import TelnetSessionContext
 
 if sys.platform == "win32":
     pytest.skip("POSIX-only tests", allow_module_level=True)
@@ -41,16 +44,19 @@ def _make_writer(
     will_echo: bool = False, raw_mode: "bool | None" = False, will_sga: bool = False
 ) -> object:
     """Build a minimal mock writer with the attributes Terminal needs."""
-    from telnetlib3.telopt import SGA  # pylint: disable=import-outside-toplevel
+    from telnetlib3.telopt import SGA
 
+    ctx = TelnetSessionContext()
+    ctx.raw_mode = False
     writer = types.SimpleNamespace(
         will_echo=will_echo,
         client=True,
         remote_option=_MockOption({SGA: will_sga}),
         log=types.SimpleNamespace(debug=lambda *a, **kw: None),
+        ctx=ctx,
     )
     if raw_mode is not False:
-        writer._raw_mode = raw_mode
+        writer.ctx.raw_mode = raw_mode
     return writer
 
 
@@ -94,13 +100,7 @@ def test_determine_mode_unchanged(will_echo: bool, raw_mode: "bool | None", will
 
 @pytest.mark.parametrize(
     "will_echo,raw_mode,will_sga",
-    [
-        (True, None, False),
-        (False, None, True),
-        (True, None, True),
-        (False, True, False),
-        (True, True, False),
-    ],
+    [(False, None, True), (True, None, True), (False, True, False), (True, True, False)],
 )
 def test_determine_mode_goes_raw(will_echo: bool, raw_mode: "bool | None", will_sga: bool) -> None:
     term = _make_term(_make_writer(will_echo=will_echo, raw_mode=raw_mode, will_sga=will_sga))
@@ -108,6 +108,16 @@ def test_determine_mode_goes_raw(will_echo: bool, raw_mode: "bool | None", will_
     result = term.determine_mode(mode)
     assert result is not mode
     assert not result.lflag & termios.ICANON
+    assert not result.lflag & termios.ECHO
+
+
+def test_determine_mode_echo_only_stays_linemode() -> None:
+    """WILL ECHO without WILL SGA keeps ICANON (line mode) but suppresses local ECHO."""
+    term = _make_term(_make_writer(will_echo=True, raw_mode=None, will_sga=False))
+    mode = _cooked_mode()
+    result = term.determine_mode(mode)
+    assert result is not mode
+    assert result.lflag & termios.ICANON
     assert not result.lflag & termios.ECHO
 
 
@@ -146,7 +156,7 @@ def test_echo_toggle_password_flow() -> None:
     writer.will_echo = True
     r2 = term.determine_mode(mode)
     assert not r2.lflag & termios.ECHO
-    assert not r2.lflag & termios.ICANON
+    assert r2.lflag & termios.ICANON
 
     writer.will_echo = False
     r3 = term.determine_mode(mode)
@@ -318,12 +328,13 @@ def test_filter_without_eol_xlat(data: bytes, expected: bytes) -> None:
 import os  # noqa: E402
 import time as _time  # noqa: E402
 import select  # noqa: E402
+import signal  # noqa: E402
 import tempfile  # noqa: E402
 import contextlib  # noqa: E402
 import subprocess  # noqa: E402
 
 # local
-from telnetlib3.tests.accessories import bind_host, asyncio_server, unused_tcp_port  # noqa: E402
+from telnetlib3.tests.accessories import asyncio_server
 
 _IAC = b"\xff"
 _WILL = b"\xfb"
@@ -348,14 +359,7 @@ def _strip_iac(data: bytes) -> bytes:
 def _client_cmd(host: str, port: int, extra: "list[str] | None" = None) -> "list[str]":
     prog = pexpect.which("telnetlib3-client")
     assert prog is not None
-    args = [
-        prog,
-        host,
-        str(port),
-        "--connect-minwait=0.05",
-        "--connect-maxwait=0.5",
-        "--colormatch=none",
-    ]
+    args = [prog, host, str(port), "--connect-maxwait=0.5", "--colormatch=none"]
     if extra:
         args.extend(extra)
     return args
@@ -454,7 +458,7 @@ def _pty_client(cmd: "list[str]"):
         (
             b"hello from server\r\n",
             0.5,
-            None,
+            [],
             [b"Escape character", b"hello from server", b"Connection closed by foreign host."],
         ),
         (b"raw server\r\n", 0.1, ["--raw-mode"], [b"raw server"]),
@@ -485,8 +489,8 @@ async def test_simple_server_output(
 @pytest.mark.parametrize(
     "prompt,response,extra_args,send,expected",
     [
-        (b"login: ", b"\r\nwelcome!\r\n", None, b"user\r", [b"login:", b"welcome!"]),
-        (b"prompt> ", b"\r\ngot it\r\n", ["--line-mode"], b"hello\r", [b"got it", b"hello"]),
+        (b"login: ", b"\r\nwelcome!\r\n", [], b"user\r", [b"login:", b"welcome!"]),
+        (b"prompt> ", b"\r\ngot it\r\n", ["--line-mode"], b"hello\r", [b"got it"]),
     ],
 )
 async def test_echo_sga_interaction(
@@ -551,7 +555,7 @@ async def test_password_hidden_then_echo_restored(bind_host: str, unused_tcp_por
                 asyncio.get_event_loop().call_later(0.2, self._transport.close)
 
     async with asyncio_server(Proto, bind_host, unused_tcp_port):
-        cmd = _client_cmd(bind_host, unused_tcp_port)
+        cmd = _client_cmd(bind_host, unused_tcp_port, [])
 
         def _interact(master_fd, proc):
             buf = _pty_read(master_fd, marker=b"Name:", timeout=10.0)
@@ -596,7 +600,7 @@ async def test_backspace_visual_erase(bind_host: str, unused_tcp_port: int) -> N
                 asyncio.get_event_loop().call_later(0.2, self._transport.close)
 
     async with asyncio_server(Proto, bind_host, unused_tcp_port):
-        cmd = _client_cmd(bind_host, unused_tcp_port)
+        cmd = _client_cmd(bind_host, unused_tcp_port, [])
 
         def _interact(master_fd, proc):
             buf = _pty_read(master_fd, marker=b"login:", timeout=10.0)
@@ -621,6 +625,41 @@ def test_check_auto_mode_not_istty() -> None:
     assert term.check_auto_mode(switched_to_raw=False, last_will_echo=False) is None
 
 
+def test_check_auto_mode_echo_only_stays_linemode() -> None:
+    """WILL ECHO without SGA suppresses local echo but does not switch to raw."""
+    writer = _make_writer(will_echo=True, will_sga=False, raw_mode=None)
+    term = _make_term(writer)
+    term._istty = True
+    term._save_mode = _cooked_mode()
+    _set_modes: list[Terminal.ModeDef] = []
+    term.set_mode = _set_modes.append  # type: ignore[method-assign]
+    result = term.check_auto_mode(switched_to_raw=False, last_will_echo=False)
+    assert result is not None
+    switched_to_raw, last_will_echo, local_echo = result
+    assert switched_to_raw is False
+    assert last_will_echo is True
+    assert local_echo is False
+    assert len(_set_modes) == 1
+    assert _set_modes[0].lflag & termios.ICANON
+    assert not _set_modes[0].lflag & termios.ECHO
+
+
+def test_check_auto_mode_sga_goes_raw() -> None:
+    """WILL SGA switches to raw mode."""
+    writer = _make_writer(will_echo=False, will_sga=True, raw_mode=None)
+    term = _make_term(writer)
+    term._istty = True
+    term._save_mode = _cooked_mode()
+    _set_modes: list[Terminal.ModeDef] = []
+    term.set_mode = _set_modes.append  # type: ignore[method-assign]
+    result = term.check_auto_mode(switched_to_raw=False, last_will_echo=False)
+    assert result is not None
+    switched_to_raw, _, _ = result
+    assert switched_to_raw is True
+    assert len(_set_modes) == 1
+    assert not _set_modes[0].lflag & termios.ICANON
+
+
 async def test_setup_winch_registers_handler() -> None:
     """setup_winch registers SIGWINCH handler when istty is True."""
     writer = _make_writer()
@@ -628,11 +667,169 @@ async def test_setup_winch_registers_handler() -> None:
     writer.is_closing = lambda: False
     term = _make_term(writer)
     term._istty = True
-    term._winch_handle = None
+    term._resize_pending = __import__("threading").Event()
     term.setup_winch()
     assert term._remove_winch is True
     term.cleanup_winch()
     assert term._remove_winch is False
+
+
+async def test_winch_handler_sets_resize_pending() -> None:
+    """SIGWINCH handler sets _resize_pending flag."""
+    writer = _make_writer()
+    writer.local_option = _MockOption({})
+    writer.is_closing = lambda: False
+
+    term = _make_term(writer)
+    term._istty = True
+    term._resize_pending = __import__("threading").Event()
+
+    term.setup_winch()
+    assert term._remove_winch is True
+
+    os.kill(os.getpid(), signal.SIGWINCH)
+    await asyncio.sleep(0.05)
+
+    assert term._resize_pending.is_set()
+    term.cleanup_winch()
+
+
+@pytest.mark.asyncio
+async def test_raw_event_loop_reactivates_repl() -> None:
+    """_raw_event_loop breaks when want_repl() returns True."""
+    from telnetlib3.client_shell import _RawLoopState, _raw_event_loop
+
+    class _StrReader:
+        def __init__(self) -> None:
+            self._data = ["server data"]
+            self._eof = False
+
+        async def read(self, n: int) -> str:
+            if self._data:
+                return self._data.pop(0)
+            self._eof = True
+            return ""
+
+        def at_eof(self) -> bool:
+            return self._eof
+
+    reader = _StrReader()
+    stdin = asyncio.StreamReader()
+
+    writer = _make_writer()
+    writer.log = types.SimpleNamespace(debug=lambda *a, **kw: None, log=lambda *a, **kw: None)
+    writer.ctx.raw_mode = None
+    writer.ctx.color_filter = None
+    writer.ctx.ascii_eol = False
+    writer.ctx.autoreply_engine = None
+    writer.ctx.autoreply_rules = []
+    writer.ctx.input_filter = None
+    writer.is_closing = lambda: False
+
+    term = _make_term(writer)
+    term.check_auto_mode = lambda switched_to_raw, last_will_echo: None
+
+    stdout = mock.Mock()
+    stdout.write = mock.Mock()
+
+    close_calls: list[str] = []
+
+    state = _RawLoopState(
+        switched_to_raw=True, last_will_echo=False, local_echo=False, linesep="\r\n"
+    )
+    await _raw_event_loop(
+        telnet_reader=reader,
+        telnet_writer=writer,
+        tty_shell=term,
+        stdin=stdin,
+        stdout=stdout,
+        keyboard_escape="\x1d",
+        state=state,
+        handle_close=close_calls.append,
+        want_repl=lambda: True,
+    )
+    assert state.reactivate_repl is True
+    assert state.switched_to_raw is False
+
+
+@pytest.mark.asyncio
+async def test_raw_event_loop_typescript_recording() -> None:
+    """_raw_event_loop writes server output to ctx.typescript_file when set."""
+    import io
+
+    from telnetlib3.client_shell import _RawLoopState, _raw_event_loop
+
+    class _StrReader:
+        def __init__(self) -> None:
+            self._data = ["hello world"]
+            self._eof = False
+
+        async def read(self, n: int) -> str:
+            if self._data:
+                return self._data.pop(0)
+            self._eof = True
+            return ""
+
+        def at_eof(self) -> bool:
+            return self._eof
+
+    reader = _StrReader()
+    stdin = asyncio.StreamReader()
+
+    writer = _make_writer()
+    writer.log = types.SimpleNamespace(debug=lambda *a, **kw: None, log=lambda *a, **kw: None)
+    writer.ctx.raw_mode = True
+    writer.ctx.color_filter = None
+    writer.ctx.ascii_eol = False
+    writer.ctx.autoreply_engine = None
+    writer.ctx.input_filter = None
+    writer.is_closing = lambda: False
+
+    ts_buf = io.StringIO()
+    writer.ctx.typescript_file = ts_buf
+
+    term = _make_term(writer)
+    term.check_auto_mode = lambda switched_to_raw, last_will_echo: None
+
+    stdout = mock.Mock()
+    stdout.write = mock.Mock()
+
+    state = _RawLoopState(
+        switched_to_raw=True, last_will_echo=False, local_echo=False, linesep="\r\n"
+    )
+    await _raw_event_loop(
+        telnet_reader=reader,
+        telnet_writer=writer,
+        tty_shell=term,
+        stdin=stdin,
+        stdout=stdout,
+        keyboard_escape="\x1d",
+        state=state,
+        handle_close=lambda msg: None,
+        want_repl=lambda: False,
+    )
+    assert "hello world" in ts_buf.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_winch_resize_pending_cleared_after_consumption() -> None:
+    """_resize_pending flag can be set and cleared."""
+    writer = _make_writer()
+    writer.local_option = _MockOption({})
+    writer.is_closing = lambda: False
+
+    term = _make_term(writer)
+    term._istty = True
+    term._resize_pending = __import__("threading").Event()
+
+    term.setup_winch()
+    os.kill(os.getpid(), signal.SIGWINCH)
+    await asyncio.sleep(0.05)
+
+    assert term._resize_pending.is_set()
+    term._resize_pending.clear()
+    assert not term._resize_pending.is_set()
+    term.cleanup_winch()
 
 
 async def test_send_stdin_with_input_filter() -> None:
@@ -640,7 +837,7 @@ async def test_send_stdin_with_input_filter() -> None:
     inf = InputFilter(_INPUT_SEQ_XLAT["atascii"], _INPUT_XLAT["atascii"])
 
     writer = _make_writer()
-    writer._input_filter = inf
+    writer.ctx.input_filter = inf
     writer._write = mock.Mock()
     stdout = mock.Mock()
 
@@ -655,7 +852,7 @@ async def test_send_stdin_with_pending_sequence() -> None:
     inf = InputFilter(_INPUT_SEQ_XLAT["atascii"], _INPUT_XLAT["atascii"])
 
     writer = _make_writer()
-    writer._input_filter = inf
+    writer.ctx.input_filter = inf
     writer._write = mock.Mock()
     stdout = mock.Mock()
 
@@ -679,7 +876,7 @@ async def test_send_stdin_no_filter() -> None:
 
 def _make_transform_writer(**kwargs: object) -> object:
     """Build a minimal writer for _transform_output tests."""
-    return types.SimpleNamespace(**kwargs)
+    return types.SimpleNamespace(ctx=TelnetSessionContext(), **kwargs)
 
 
 @pytest.mark.parametrize(
@@ -709,3 +906,46 @@ def test_transform_output_bare_cr_preserved_raw() -> None:
     out = _transform_output("\x1b[34;1H\x1b[K\r\x1b[38;2;17;17;17mX\x1b[6n", writer, True)
     assert "\r\n" not in out
     assert "\r" in out
+
+
+def test_transform_output_empty_string() -> None:
+    writer = _make_transform_writer()
+    assert not _transform_output("", writer, True)
+
+
+@pytest.mark.parametrize("raw_mode,expected", [(False, False), (None, None), (True, True)])
+def test_get_raw_mode(raw_mode: "bool | None", expected: "bool | None") -> None:
+    from telnetlib3.client_shell import _get_raw_mode
+
+    ctx = TelnetSessionContext()
+    ctx.raw_mode = raw_mode
+    writer = types.SimpleNamespace(ctx=ctx)
+    assert _get_raw_mode(writer) is expected
+
+
+async def test_cooked_to_raw_transition_preserves_crlf(
+    bind_host: str, unused_tcp_port: int
+) -> None:
+    """First data chunk during cooked->raw transition must keep \\r\\n line endings."""
+
+    class Proto(asyncio.Protocol):
+        def connection_made(self, transport):
+            super().connection_made(transport)
+            transport.write(
+                _IAC + _WILL + _SGA + _IAC + _WILL + _ECHO + b"line1\r\nline2\r\nline3\r\n"
+            )
+            asyncio.get_event_loop().call_later(0.5, transport.close)
+
+    async with asyncio_server(Proto, bind_host, unused_tcp_port):
+        cmd = _client_cmd(bind_host, unused_tcp_port, [])
+        with _pty_client(cmd) as (proc, master_fd):
+            output = await asyncio.to_thread(_pty_read, master_fd, proc=proc)
+            assert b"line1" in output
+            assert b"line2" in output
+            assert b"line3" in output
+            text = output.decode("utf-8", errors="replace")
+            for line in ("line1", "line2", "line3"):
+                idx = text.find(line)
+                assert idx != -1
+                after = text[idx + len(line) :]
+                assert after.startswith("\r\n")

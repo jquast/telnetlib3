@@ -4,8 +4,6 @@ Atari ST codec.
 Generated from ftp://ftp.unicode.org/Public/MAPPINGS/VENDORS/MISC/ATARIST.TXT
 """
 
-# pylint: disable=redefined-builtin
-
 # std imports
 import codecs
 

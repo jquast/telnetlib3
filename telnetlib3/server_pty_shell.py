@@ -104,7 +104,6 @@ class PTYSession:
 
         :raises PTYSpawnError: If the child process fails to exec.
         """
-        # pylint: disable=import-outside-toplevel
         import pty
         import fcntl
 
@@ -130,7 +129,7 @@ class PTYSession:
             if self.preexec_fn is not None:
                 try:
                     child_cov = self.preexec_fn()
-                except Exception as e:  # pylint: disable=broad-exception-caught
+                except Exception as e:
                     self._write_exec_error(exec_err_pipe_write, e)
                     os._exit(1)
             self._setup_child(env, rows, cols, exec_err_pipe_write, child_cov=child_cov)
@@ -220,7 +219,6 @@ class PTYSession:
     ) -> None:
         """Child process setup before exec."""
         # Note: pty.fork() already calls setsid() for the child, so we don't need to
-        # pylint: disable=import-outside-toplevel
         import fcntl
         import termios
 
@@ -260,9 +258,9 @@ class PTYSession:
 
     def _setup_parent(self) -> None:
         """Parent process setup after fork."""
-        # pylint: disable=import-outside-toplevel
         import fcntl
 
+        assert self.master_fd is not None
         flags = fcntl.fcntl(self.master_fd, fcntl.F_GETFL)
         fcntl.fcntl(self.master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
         self.writer.set_ext_callback(NAWS, self._on_naws)
@@ -290,7 +288,6 @@ class PTYSession:
 
     def _set_window_size(self, rows: int, cols: int) -> None:
         """Set PTY window size and send SIGWINCH to child."""
-        # pylint: disable=import-outside-toplevel
         import fcntl
         import signal
         import termios
@@ -306,13 +303,14 @@ class PTYSession:
 
     async def run(self) -> None:
         """Bridge loop between telnet and PTY."""
-        # pylint: disable=import-outside-toplevel
         import errno
 
         loop = asyncio.get_event_loop()
         pty_read_event = asyncio.Event()
         pty_data_queue: asyncio.Queue[bytes] = asyncio.Queue()
 
+        assert self.child_pid is not None
+        assert self.master_fd is not None
         pid, _ = os.waitpid(self.child_pid, os.WNOHANG)
         if pid:
             return
@@ -396,7 +394,7 @@ class PTYSession:
                     # EAGAIN was hit - flush any remaining partial line
                     self._flush_remaining()
                     pty_read_event.clear()
-            except Exception as e:  # pylint: disable=broad-exception-caught
+            except Exception as e:
                 logger.debug("bridge loop error: %s", e)
                 self._closing = True
                 break
@@ -523,12 +521,12 @@ class PTYSession:
         :param force: If True, use SIGKILL as last resort.
         :returns: True if child was terminated, False otherwise.
         """
-        # pylint: disable=import-outside-toplevel
         import signal
 
         if not self._isalive():
             return True
 
+        assert self.child_pid is not None
         signals = [signal.SIGHUP, signal.SIGCONT, signal.SIGINT]
         if force:
             signals.append(signal.SIGKILL)
@@ -596,7 +594,7 @@ async def _wait_for_terminal_info(
         await asyncio.sleep(_TERMINAL_INFO_POLL)
 
 
-async def pty_shell(  # pylint: disable=too-many-positional-arguments
+async def pty_shell(
     reader: Union[TelnetReader, TelnetReaderUnicode],
     writer: Union[TelnetWriter, TelnetWriterUnicode],
     program: str,
@@ -621,7 +619,7 @@ async def pty_shell(  # pylint: disable=too-many-positional-arguments
 
     # Echo handling depends on raw_mode:
     # - Normal mode: Send WONT ECHO so client does local echo, PTY handles
-    #   echo with proper ONLCR translation (\n → \r\n) for input() display.
+    #   echo with proper ONLCR translation (\n -> \r\n) for input() display.
     # - Raw mode: Keep WILL ECHO so client doesn't local-echo, but PTY echo
     #   is disabled. This prevents terminal responses (CPR, etc.) from being
     #   echoed back. The program handles its own output.

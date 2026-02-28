@@ -69,7 +69,7 @@ async def filter_ansi(reader: TelnetReaderUnicode, _writer: TelnetWriterUnicode)
                 buf += seq_char
                 match = _ZERO_WIDTH_PATTERN.match(buf)
                 # Skip spurious 2-byte Fe matches on the
-                # ESC+starter prefix — the real sequence is
+                # ESC+starter prefix -- the real sequence is
                 # longer (CSI 3+, charset 3, OSC/DCS/APC/PM 4+)
                 if match and match.end() > 2:
                     if match.end() < len(buf):
@@ -99,7 +99,7 @@ def _visible_width(text: str) -> int:
     return max(0, result)
 
 
-class _LineEditor:  # pylint: disable=too-few-public-methods
+class _LineEditor:
     """Shared line-editing state machine for readline and readline_async."""
 
     def __init__(self, max_visible_width: int = 0) -> None:
@@ -140,7 +140,7 @@ class _LineEditor:  # pylint: disable=too-few-public-methods
 __all__ = ("telnet_server_shell", "readline_async", "readline")
 
 
-async def telnet_server_shell(  # pylint: disable=too-complex,too-many-branches,too-many-statements
+async def telnet_server_shell(
     reader: Union[TelnetReader, TelnetReaderUnicode],
     writer: Union[TelnetWriter, TelnetWriterUnicode],
 ) -> None:

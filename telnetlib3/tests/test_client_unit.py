@@ -1,18 +1,22 @@
 # std imports
 import sys
+import types
+import asyncio
 
 # 3rd party
 import pytest
 
 # local
 from telnetlib3 import client as cl
-from telnetlib3.tests.accessories import bind_host, create_server  # noqa: F401
+from telnetlib3 import accessories
+from telnetlib3.client_base import BaseClient
+from telnetlib3._session_context import TelnetSessionContext
+from telnetlib3.tests.accessories import create_server
 
 _CLIENT_DEFAULTS = {
     "encoding": "utf8",
     "encoding_errors": "strict",
     "force_binary": False,
-    "connect_minwait": 0.01,
     "connect_maxwait": 0.02,
 }
 
@@ -180,6 +184,27 @@ def test_argument_parser():
     assert defaults.port == 23 and defaults.force_binary is True and defaults.speed == 38400
 
 
+def test_argument_parser_prog_name():
+    parser = cl._get_argument_parser()
+    assert parser.prog == "telnetlib3-client"
+
+
+def test_argument_parser_typescript():
+    parser = cl._get_argument_parser()
+    args = parser.parse_args(["myhost", "--typescript", "/tmp/session.log"])
+    assert args.typescript == "/tmp/session.log"
+
+    defaults = parser.parse_args(["myhost"])
+    assert defaults.typescript is None
+
+
+def test_argument_parser_ice_colors():
+    parser = cl._get_argument_parser()
+    args = parser.parse_args(["host", "--typescript", "out.log", "--no-ice-colors"])
+    assert args.typescript == "out.log"
+    assert args.ice_colors is False
+
+
 def test_transform_args():
     parser = cl._get_argument_parser()
     result = cl._transform_args(
@@ -193,17 +218,22 @@ def test_transform_args():
     assert result2["send_environ"] == ("TERM", "LANG")
 
 
+def test_transform_args_typescript():
+    parser = cl._get_argument_parser()
+    result = cl._transform_args(parser.parse_args(["myhost", "--typescript", "/tmp/sess.log"]))
+    assert result["typescript"] == "/tmp/sess.log"
+
+    defaults = cl._transform_args(parser.parse_args(["myhost"]))
+    assert defaults["typescript"] is None
+
+
 @pytest.mark.asyncio
 async def test_open_connection_default_factory(bind_host, unused_tcp_port, monkeypatch):
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
 
-    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05):
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5):
         reader, writer = await cl.open_connection(
-            host=bind_host,
-            port=unused_tcp_port,
-            connect_minwait=0.05,
-            connect_maxwait=0.1,
-            encoding=False,
+            host=bind_host, port=unused_tcp_port, connect_maxwait=0.1, encoding=False
         )
         assert isinstance(writer.protocol, cl.TelnetClient)
         assert not isinstance(writer.protocol, cl.TelnetTerminalClient)
@@ -215,13 +245,335 @@ async def test_open_connection_default_factory(bind_host, unused_tcp_port, monke
 async def test_open_connection_tty_factory(bind_host, unused_tcp_port, monkeypatch):
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
 
-    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.05):
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5):
         reader, writer = await cl.open_connection(
-            host=bind_host,
-            port=unused_tcp_port,
-            connect_minwait=0.05,
-            connect_maxwait=0.1,
-            encoding=False,
+            host=bind_host, port=unused_tcp_port, connect_maxwait=0.1, encoding=False
         )
         assert isinstance(writer.protocol, cl.TelnetTerminalClient)
         writer.close()
+
+
+def test_detect_syncterm_font_sets_force_binary():
+    client = BaseClient.__new__(BaseClient)
+    client.log = types.SimpleNamespace(debug=lambda *a, **kw: None, isEnabledFor=lambda _: False)
+    client.force_binary = False
+    client.writer = types.SimpleNamespace(environ_encoding="utf-8")
+    client._detect_syncterm_font(b"\x1b[0;0 D")
+    assert client.force_binary is True
+
+
+@pytest.mark.parametrize("extra_args,expected", [([], "vga"), (["--colormatch", "xterm"], "xterm")])
+def test_transform_args_colormatch(extra_args, expected):
+    parser = cl._get_argument_parser()
+    assert cl._transform_args(parser.parse_args(["myhost"] + extra_args))["colormatch"] == expected
+
+
+def test_guard_shells_connection_counter():
+    from telnetlib3.guard_shells import ConnectionCounter
+
+    counter = ConnectionCounter(2)
+    assert counter.try_acquire() is True
+    assert counter.try_acquire() is True
+    assert counter.try_acquire() is False
+    assert counter.count == 2
+    counter.release()
+    assert counter.count == 1
+    assert counter.try_acquire() is True
+    counter.release()
+    counter.release()
+    counter.release()
+    assert counter.count == 0
+
+
+@pytest.mark.asyncio
+async def test_guard_shells_busy_shell():
+    from telnetlib3.guard_shells import busy_shell
+
+    class MockWriter:
+        def __init__(self):
+            self.output = []
+            self._extra = {"peername": ("127.0.0.1", 12345)}
+
+        def write(self, data):
+            self.output.append(data)
+
+        async def drain(self):
+            pass
+
+        def get_extra_info(self, key, default=None):
+            return self._extra.get(key, default)
+
+    class MockReader:
+        async def read(self, n):
+            return ""
+
+    reader = MockReader()
+    writer = MockWriter()
+    await busy_shell(reader, writer)
+
+    output = "".join(writer.output)
+    assert "Machine is busy" in output
+
+
+@pytest.mark.asyncio
+async def test_guard_shells_robot_check_timeout():
+    from telnetlib3.guard_shells import robot_check
+
+    class MockWriter:
+        def __init__(self):
+            self.output = []
+            self._extra = {"peername": ("127.0.0.1", 12345)}
+
+        def write(self, data):
+            self.output.append(data)
+
+        async def drain(self):
+            pass
+
+        def get_extra_info(self, key, default=None):
+            return self._extra.get(key, default)
+
+    class MockReader:
+        def fn_encoding(self, **kw):
+            return "utf-8"
+
+        _decoder = None
+
+        async def read(self, n):
+            return ""
+
+    assert await robot_check(MockReader(), MockWriter(), timeout=0.1) is False
+
+
+async def _noop_shell(reader, writer):
+    pass
+
+
+def _fake_open_connection_factory(loop):
+    """Build a mock open_connection that captures the shell callback."""
+    captured_kwargs: dict = {}
+    writer_obj = types.SimpleNamespace(
+        protocol=types.SimpleNamespace(waiter_closed=loop.create_future()),
+        ctx=TelnetSessionContext(),
+    )
+    writer_obj.protocol.waiter_closed.set_result(None)
+    reader_obj = types.SimpleNamespace()
+
+    async def _fake_open_connection(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        shell = kwargs["shell"]
+        await shell(reader_obj, writer_obj)
+        return reader_obj, writer_obj
+
+    return _fake_open_connection, captured_kwargs, writer_obj
+
+
+@pytest.mark.asyncio
+async def test_run_client_unknown_palette(monkeypatch):
+    """run_client exits with error on unknown palette."""
+    monkeypatch.setattr(sys, "argv", ["telnetlib3-client", "localhost", "--colormatch", "bogus"])
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+
+    with pytest.raises(SystemExit) as exc_info:
+        await cl.run_client()
+    assert exc_info.value.code == 1
+
+
+@pytest.mark.parametrize(
+    "argv_extra,filter_cls_name",
+    [
+        pytest.param(
+            ["--encoding", "petscii", "--colormatch", "vga"],
+            "PetsciiColorFilter",
+            id="petscii_selects_c64",
+        ),
+        pytest.param(
+            ["--encoding", "atascii", "--colormatch", "vga"],
+            "AtasciiControlFilter",
+            id="atascii_filter",
+        ),
+        pytest.param(["--colormatch", "vga"], "ColorFilter", id="colormatch_vga"),
+        pytest.param(
+            ["--colormatch", "petscii"], "PetsciiColorFilter", id="colormatch_petscii_alias"
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_run_client_color_filter(monkeypatch, argv_extra, filter_cls_name):
+    monkeypatch.setattr(sys, "argv", ["telnetlib3-client", "localhost"] + argv_extra)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(accessories, "function_lookup", lambda _: _noop_shell)
+
+    loop = asyncio.get_event_loop()
+    fake_oc, captured, writer_obj = _fake_open_connection_factory(loop)
+    monkeypatch.setattr(cl, "open_connection", fake_oc)
+    await cl.run_client()
+
+    assert type(writer_obj.ctx.color_filter).__name__ == filter_cls_name
+
+
+@pytest.mark.asyncio
+async def test_connection_made_reader_set_transport_exception():
+    client = _make_client(encoding=False)
+
+    class BadReader:
+        def set_transport(self, t):
+            raise RuntimeError("no transport support")
+
+        def exception(self):
+            return None
+
+    client._reader_factory = lambda **kw: BadReader()
+    transport = types.SimpleNamespace(
+        get_extra_info=lambda name, default=None: default,
+        write=lambda data: None,
+        is_closing=lambda: False,
+        close=lambda: None,
+    )
+    client.connection_made(transport)
+    assert isinstance(client.reader, BadReader)
+
+
+def test_detect_syncterm_font_returns_early_when_writer_none():
+    client = BaseClient.__new__(BaseClient)
+    client.log = types.SimpleNamespace(debug=lambda *a, **kw: None, isEnabledFor=lambda _: False)
+    client.writer = None
+    client._detect_syncterm_font(b"\x1b[0;0 D")
+
+
+@pytest.mark.asyncio
+async def test_begin_shell_cancelled_future():
+    client = BaseClient.__new__(BaseClient)
+    client.log = types.SimpleNamespace(debug=lambda *a, **kw: None, isEnabledFor=lambda _: False)
+    client.shell = lambda r, w: None
+    fut = asyncio.get_event_loop().create_future()
+    fut.cancel()
+    client.begin_shell(fut)
+
+
+@pytest.mark.asyncio
+async def test_data_received_trace_log(caplog):
+    import logging
+
+    client = _make_client(encoding=False)
+    transport = types.SimpleNamespace(
+        get_extra_info=lambda name, default=None: default,
+        write=lambda data: None,
+        is_closing=lambda: False,
+        close=lambda: None,
+        pause_reading=lambda: None,
+    )
+    client.connection_made(transport)
+    with caplog.at_level(5):
+        client.data_received(b"\xff\xfb\x01")
+    await asyncio.sleep(0.05)
+
+
+@pytest.mark.asyncio
+async def test_data_received_pauses_at_high_watermark():
+    client = _make_client(encoding=False)
+    paused = []
+    transport = types.SimpleNamespace(
+        get_extra_info=lambda name, default=None: default,
+        write=lambda data: None,
+        is_closing=lambda: False,
+        close=lambda: None,
+        pause_reading=lambda: paused.append(True),
+        resume_reading=lambda: paused.append(False),
+    )
+    client.connection_made(transport)
+    big_data = b"\x00" * (client._read_high + 100)
+    client.data_received(big_data)
+    assert client._reading_paused is True
+    await asyncio.sleep(0.05)
+
+
+@pytest.mark.asyncio
+async def test_data_received_pause_reading_exception():
+    client = _make_client(encoding=False)
+
+    def bad_pause():
+        raise RuntimeError("pause not supported")
+
+    transport = types.SimpleNamespace(
+        get_extra_info=lambda name, default=None: default,
+        write=lambda data: None,
+        is_closing=lambda: False,
+        close=lambda: None,
+        pause_reading=bad_pause,
+    )
+    client.connection_made(transport)
+    big_data = b"\x00" * (client._read_high + 100)
+    client.data_received(big_data)
+    assert client._reading_paused is False
+    await asyncio.sleep(0.05)
+
+
+@pytest.mark.asyncio
+async def test_process_rx_resumes_reading_on_drain():
+    client = _make_client(encoding=False)
+    resumed = []
+    transport = types.SimpleNamespace(
+        get_extra_info=lambda name, default=None: default,
+        write=lambda data: None,
+        is_closing=lambda: False,
+        close=lambda: None,
+        pause_reading=lambda: None,
+        resume_reading=lambda: resumed.append(True),
+    )
+    client.connection_made(transport)
+    client._reading_paused = True
+    client._rx_queue.append(b"\x00" * 10)
+    client._rx_bytes = 10
+    await client._process_rx()
+    assert len(resumed) >= 1
+
+
+class _MockTransport:
+    def __init__(self):
+        self.data = bytearray()
+        self._closing = False
+
+    def write(self, data):
+        self.data.extend(data)
+
+    def is_closing(self):
+        return self._closing
+
+    def close(self):
+        self._closing = True
+
+    def get_extra_info(self, name, default=None):
+        return default
+
+
+def _make_connected_client(**kwargs):
+    client = _make_client(**kwargs)
+    transport = _MockTransport()
+    client.connection_made(transport)
+    return client, transport
+
+
+@pytest.mark.asyncio
+async def test_on_gmcp_stores_on_writer_ctx():
+    client, _ = _make_connected_client()
+    client._on_gmcp("Room.Info", {"name": "Town Square"})
+    assert client.writer.ctx.gmcp_data["Room.Info"] == {"name": "Town Square"}
+
+
+@pytest.mark.asyncio
+async def test_on_gmcp_merges_dicts_on_writer_ctx():
+    client, _ = _make_connected_client()
+    client._on_gmcp("Char.Vitals", {"hp": 100, "maxhp": 100})
+    client._on_gmcp("Char.Vitals", {"hp": 63})
+    assert client.writer.ctx.gmcp_data["Char.Vitals"] == {"hp": 63, "maxhp": 100}
+
+
+def test_fingerprint_main_oserror(monkeypatch):
+    async def _bad_fp():
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(cl, "run_fingerprint_client", _bad_fp)
+    with pytest.raises(SystemExit) as exc_info:
+        cl.fingerprint_main()
+    assert exc_info.value.code == 1

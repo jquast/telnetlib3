@@ -7,13 +7,7 @@ import asyncio
 import telnetlib3
 import telnetlib3.stream_writer
 from telnetlib3.telopt import DO, IS, SB, SE, IAC, WILL, XDISPLOC
-from telnetlib3.tests.accessories import (
-    bind_host,
-    create_server,
-    open_connection,
-    unused_tcp_port,
-    asyncio_connection,
-)
+from telnetlib3.tests.accessories import create_server, open_connection, asyncio_connection
 
 
 async def test_telnet_server_on_xdisploc(bind_host, unused_tcp_port):
@@ -55,7 +49,7 @@ async def test_telnet_client_send_xdisploc(bind_host, unused_tcp_port):
         protocol_factory=ServerTestXdisploc, host=bind_host, port=unused_tcp_port
     ):
         async with open_connection(
-            host=bind_host, port=unused_tcp_port, xdisploc=given_xdisploc, connect_minwait=0.05
+            host=bind_host, port=unused_tcp_port, xdisploc=given_xdisploc
         ) as (reader, writer):
             recv_xdisploc = await asyncio.wait_for(_waiter, 0.5)
             assert recv_xdisploc == given_xdisploc
