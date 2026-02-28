@@ -16,7 +16,7 @@ class TelnetSessionContext:
     add application-specific attributes (e.g. MUD client state, macros, room
     graphs).
 
-    A default instance is created for every :class:`~telnetlib3.TelnetWriter`;
+    A default instance is created for every :class:`~telnetlib3.stream_writer.TelnetWriter`;
     applications may replace it with a subclass via ``writer.ctx = MyCtx()``.
 
     :param raw_mode: Terminal raw mode override.  ``None`` = auto-detect

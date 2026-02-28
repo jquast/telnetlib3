@@ -242,7 +242,7 @@ class TelnetWriter:
         self._encoding_explicit: bool = False
 
         #: Per-connection session context.  Applications may replace this
-        #: with a subclass of :class:`TelnetSessionContext` to carry
+        #: with a subclass of :class:`~telnetlib3._session_context.TelnetSessionContext` to carry
         #: additional state (e.g. MUD client macros, room graphs).
         self.ctx: TelnetSessionContext = TelnetSessionContext()
 
