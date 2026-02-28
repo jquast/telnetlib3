@@ -27,6 +27,9 @@ History
     skipping the option entirely, :ghissue:`24`.
   * enhancement: comprehensive pylint and mypy cleanup across the codebase.
 
+2.6.1
+  * bugfix: dependency of ``wcwidth`` version.
+
 2.6.0
   * new: TLS support (TELNETS).  :func:`~telnetlib3.client.open_connection`
     accepts an *ssl* parameter (``True``, or an :class:`ssl.SSLContext`).
