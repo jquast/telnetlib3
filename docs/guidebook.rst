@@ -684,7 +684,7 @@ Install with optional dependencies for full fingerprinting support
 (`prettytable <https://pypi.org/project/prettytable/>`_ and
 `ucs-detect <https://pypi.org/project/ucs-detect/>`_)::
 
-    pip install telnetlib3[with_tui]
+    pip install telnetlib3[extras]
 
 A dedicated CLI entry point is provided::
 

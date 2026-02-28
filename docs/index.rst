@@ -12,7 +12,6 @@ Contents:
 
    intro
    guidebook
-   tui-help
    api
    rfcs
    contributing

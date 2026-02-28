@@ -8,6 +8,7 @@ import pytest
 
 # local
 from telnetlib3 import slc as slc_mod
+from telnetlib3._session_context import TelnetSessionContext
 from telnetlib3 import client_shell as cs
 from telnetlib3 import guard_shells as gs
 from telnetlib3 import server_shell as ss
@@ -137,7 +138,7 @@ async def test_terminal_determine_mode(monkeypatch):
         client=True,
         remote_option=_mock_opt,
         log=types.SimpleNamespace(debug=lambda *a, **k: None),
-        _ctx=types.SimpleNamespace(raw_mode=None),
+        ctx=TelnetSessionContext(),
     )
     term = cs.Terminal(tw)
     mode = cs.Terminal.ModeDef(0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 38400, 38400, [0] * 32)

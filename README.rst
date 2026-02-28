@@ -104,30 +104,6 @@ For this reason, it is often required to specify the encoding, eg.!
 
     telnetlib3-client --encoding=cp437 20forbeers.com 1337
 
-
-REPL Input Mode
-~~~~~~~~~~~~~~~
-
-When connecting in line mode, ``telnetlib3-client`` will use an enhanced REPL
-powered by `blessed`_ when installed::
-
-    pip install telnetlib3[with_tui]
-
-Features include:
-
-- Persistent command history saved to ``~/.local/share/telnetlib3/history``
-- History-based auto-suggest (grey ghost text, press right arrow to accept)
-- Password masking when the server negotiates ECHO (passwords are never saved)
-- Split-screen display: server output scrolls above, input stays on the bottom line
-
-Line mode is the default telnet protocol behavior -- and the preferred default for MUD servers.
-This input mode is provided automatically. Disable with ``--no-repl``::
-
-    telnetlib3-client --no-repl --ssl dunemud.net 6788
-
-Use ``--history-file`` to set a custom path, or ``--history-file ""`` to disable
-persistence.
-
 Raw Mode
 ~~~~~~~~
 
@@ -276,8 +252,6 @@ The following RFC specifications are implemented:
 .. _sync API documentation: https://telnetlib3.readthedocs.io/en/latest/api/sync.html
 .. _miniboa: https://github.com/shmup/miniboa
 .. _asyncio: https://docs.python.org/3/library/asyncio.html
-.. _blessed: https://blessed.readthedocs.io/
-
 Further Reading
 ---------------
 

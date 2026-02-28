@@ -19,8 +19,6 @@ from telnetlib3 import accessories, client_base
 from telnetlib3._types import ShellCallback
 from telnetlib3.stream_reader import TelnetReader, TelnetReaderUnicode
 from telnetlib3.stream_writer import TelnetWriter, TelnetWriterUnicode
-from telnetlib3.session_context import SessionContext
-
 __all__ = ("TelnetClient", "TelnetTerminalClient", "open_connection")
 
 #: Default GMCP modules requested via ``Core.Supports.Set``.
@@ -33,60 +31,6 @@ _DEFAULT_GMCP_MODULES = [
     "Comm 1",
     "Comm.Channel 1",
 ]
-
-
-#: Maximum number of chat messages persisted to disk.
-_CHAT_FILE_CAP = 1000
-
-
-def _load_chat(path: str) -> List[Dict[str, Any]]:
-    """Load chat messages from a JSON file, returning an empty list on error."""
-    import json as _json
-
-    if not os.path.exists(path):
-        return []
-    with open(path, "r", encoding="utf-8") as fh:
-        data = _json.load(fh)
-    if isinstance(data, list):
-        return data[-_CHAT_FILE_CAP:]
-    return []
-
-
-def _persist_chat(path: str, msg: Dict[str, Any]) -> None:
-    """Append a single chat message to the JSON file on disk, capping at 1000."""
-    import json as _json
-
-    from ._paths import _atomic_write
-
-    msgs = _load_chat(path)
-    msgs.append(msg)
-    if len(msgs) > _CHAT_FILE_CAP:
-        msgs = msgs[-_CHAT_FILE_CAP:]
-    _atomic_write(path, _json.dumps(msgs, ensure_ascii=False) + "\n")
-
-
-def _append_chat_msg(ctx: "SessionContext", data: Dict[str, Any]) -> None:
-    """
-    Append a GMCP ``Comm.Channel.Text`` message to chat state and disk.
-
-    :param ctx: Session context with chat state.
-    :param data: GMCP message dict with ``channel``, ``talker``, ``text``, etc.
-    """
-    import datetime as _dt
-
-    msg: Dict[str, Any] = {
-        "ts": _dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-        "channel": data.get("channel", ""),
-        "channel_ansi": data.get("channel_ansi", ""),
-        "talker": data.get("talker", ""),
-        "text": data.get("text", ""),
-    }
-    ctx.chat_messages.append(msg)
-    ctx.chat_unread += 1
-    if len(ctx.chat_messages) > 500:
-        ctx.chat_messages[:] = ctx.chat_messages[-500:]
-    if ctx.chat_file:
-        _persist_chat(ctx.chat_file, msg)
 
 
 class TelnetClient(client_base.BaseClient):
@@ -252,48 +196,6 @@ class TelnetClient(client_base.BaseClient):
             self.log.info("GMCP: %s %r", package, data)
         else:
             self.log.debug("GMCP: %s %r", package, data)
-        if package == "Room.Info" and isinstance(data, dict) and "num" in data:
-            try:
-                self._update_room_graph(data)
-            except Exception:
-                self.log.warning("GMCP Room.Info handler failed", exc_info=True)
-        elif package == "Comm.Channel.Text" and isinstance(data, dict):
-            try:
-                self._append_chat(data)
-            except Exception:
-                self.log.warning("GMCP Comm.Channel.Text handler failed", exc_info=True)
-        elif package == "Comm.Channel.List" and isinstance(data, list):
-            ctx: Optional[SessionContext] = getattr(self.writer, "_ctx", None)
-            if ctx is not None:
-                ctx.chat_channels = data
-
-    def _update_room_graph(self, data: Dict[str, Any]) -> None:
-        """Update room graph and persist on Room.Info GMCP message."""
-        ctx: Optional[SessionContext] = getattr(self.writer, "_ctx", None)
-        if ctx is None or not ctx.rooms_file:
-            return
-        if ctx.room_graph is None:
-            from .rooms import RoomStore
-
-            ctx.room_graph = RoomStore(ctx.rooms_file, session_key=ctx.session_key)
-        from .rooms import write_current_room
-
-        ctx.room_graph.update_room(data)
-        new_num = str(data["num"])
-        if ctx.current_room_num and ctx.current_room_num != new_num:
-            ctx.previous_room_num = ctx.current_room_num
-        ctx.current_room_num = new_num
-        ctx.room_changed.set()
-        if ctx.current_room_file:
-            write_current_room(ctx.current_room_file, new_num)
-
-    def _append_chat(self, data: Dict[str, Any]) -> None:
-        """Append a GMCP ``Comm.Channel.Text`` message to chat state and disk."""
-        ctx: Optional[SessionContext] = getattr(self.writer, "_ctx", None)
-        if ctx is None:
-            return
-        _append_chat_msg(ctx, data)
-
     def send_ttype(self) -> str:
         """Callback for responding to TTYPE requests."""
         result: str = self._extra["term"]
@@ -787,8 +689,7 @@ async def run_client() -> None:
             reader: Union[TelnetReader, TelnetReaderUnicode],
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
-            ctx: SessionContext = writer_arg._ctx
-            ctx.color_filter = color_filter_obj
+            writer_arg.ctx.color_filter = color_filter_obj
             await original_shell(reader, writer_arg)
 
         shell_callback = _color_shell
@@ -801,7 +702,6 @@ async def run_client() -> None:
         enc_key = (args.get("encoding", "") or "").lower()
         byte_xlat = dict(_INPUT_XLAT.get(enc_key, {}))
         if args.get("ascii_eol"):
-            # --ascii-eol: don't translate CR/LF to encoding-native EOL
             byte_xlat.pop(0x0D, None)
             byte_xlat.pop(0x0A, None)
         seq_xlat = {} if args.get("ansi_keys") else _INPUT_SEQ_XLAT.get(enc_key, {})
@@ -815,7 +715,7 @@ async def run_client() -> None:
             reader: Union[TelnetReader, TelnetReaderUnicode],
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
-            ctx: SessionContext = writer_arg._ctx
+            ctx = writer_arg.ctx
             ctx.raw_mode = raw_mode_val
             if ascii_eol:
                 ctx.ascii_eol = True
@@ -825,98 +725,25 @@ async def run_client() -> None:
 
         shell_callback = _raw_shell
 
-    # Wrap shell to inject _repl_enabled flag for linemode REPL
-    if not args.get("no_repl", False):
-        _inner_repl = shell_callback
+    # Wrap shell to inject typescript recording file handle
+    typescript_path: Optional[str] = args.get("typescript")
+    if typescript_path:
+        _ts_inner = shell_callback
 
-        async def _repl_shell(
+        async def _typescript_shell(
             reader: Union[TelnetReader, TelnetReaderUnicode],
             writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
         ) -> None:
-            ctx: SessionContext = writer_arg._ctx
-            ctx.repl_enabled = True
-            ctx.history_file = args.get("history_file")
-            ts_path = args.get("typescript", "")
-            if ts_path:
-                ctx.typescript_file = open(  # noqa: SIM115
-                    ts_path, "a", encoding="utf-8"
-                )
+            ctx = writer_arg.ctx
+            assert typescript_path is not None
+            ts_file = open(typescript_path, "a", encoding="utf-8")  # noqa: SIM115
+            ctx.typescript_file = ts_file
             try:
-                await _inner_repl(reader, writer_arg)
+                await _ts_inner(reader, writer_arg)
             finally:
-                if ctx.typescript_file is not None:
-                    ctx.typescript_file.close()
-                    ctx.typescript_file = None
+                ts_file.close()
 
-        shell_callback = _repl_shell
-
-    # Auto-load autoreplies and macros from default config path
-    from ._paths import CONFIG_DIR as _cfg_dir
-
-    session_key = f"{args['host']}:{args['port']}"
-
-    ar_path = os.path.join(_cfg_dir, "autoreplies.json")
-    autoreply_rules: list[Any] = []
-    if os.path.exists(ar_path):
-        from .autoreply import load_autoreplies
-
-        try:
-            autoreply_rules = load_autoreplies(ar_path, session_key)
-        except ValueError:
-            autoreply_rules = []
-
-    macro_path = os.path.join(_cfg_dir, "macros.json")
-    macro_defs: list[Any] = []
-    if os.path.exists(macro_path):
-        from .macros import load_macros
-
-        try:
-            macro_defs = load_macros(macro_path, session_key)
-        except ValueError:
-            macro_defs = []
-
-    hl_path = os.path.join(_cfg_dir, "highlights.json")
-    highlight_rules: list[Any] = []
-    if os.path.exists(hl_path):
-        from .highlighter import load_highlights
-
-        try:
-            highlight_rules = load_highlights(hl_path, session_key)
-        except ValueError:
-            highlight_rules = []
-
-    # Room graph for GMCP Room.Info automapper (created lazily on first use)
-    from .rooms import rooms_path as _rooms_path_fn
-    from .rooms import current_room_path as _current_room_path_fn
-    from ._paths import chat_path as _chat_path_fn
-
-    rooms_path = _rooms_path_fn(session_key)
-    current_room_file = _current_room_path_fn(session_key)
-    chat_file = _chat_path_fn(session_key)
-
-    _inner_session = shell_callback
-
-    async def _session_shell(
-        reader: Union[TelnetReader, TelnetReaderUnicode],
-        writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
-    ) -> None:
-        ctx = SessionContext(session_key=session_key)
-        ctx.writer = writer_arg
-        ctx.autoreply_rules = autoreply_rules
-        ctx.autoreplies_file = ar_path
-        ctx.macro_defs = macro_defs
-        ctx.macros_file = macro_path
-        ctx.highlight_rules = highlight_rules
-        ctx.highlights_file = hl_path
-        ctx.rooms_file = rooms_path
-        ctx.current_room_file = current_room_file
-        ctx.chat_file = chat_file
-        ctx.chat_messages = _load_chat(chat_file)
-        ctx.gmcp_data = writer_arg.protocol._gmcp_data
-        writer_arg._ctx = ctx
-        await _inner_session(reader, writer_arg)
-
-    shell_callback = _session_shell
+        shell_callback = _typescript_shell
 
     # Build connection kwargs explicitly to avoid pylint false positive
     connection_kwargs: Dict[str, Any] = {
@@ -944,7 +771,9 @@ async def run_client() -> None:
 
 def _get_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Telnet protocol client", formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        prog="telnetlib3-client",
+        description="Telnet protocol client",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("host", action="store", help="hostname")
     parser.add_argument("port", nargs="?", default=23, type=int, help="port number")
@@ -1099,26 +928,10 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         help="log all incoming GMCP messages at INFO level " "(default: DEBUG only)",
     )
     parser.add_argument(
-        "--no-repl",
-        action="store_true",
-        default=False,
-        help="disable linemode REPL input line in linemode "
-        "(use standard line-buffered input instead)",
-    )
-    parser.add_argument(
-        "--history-file",
-        default=None,
-        help="path for persistent REPL command history "
-        "(default: ~/.local/share/telnetlib3/history, "
-        "empty string to disable)",
-    )
-    parser.add_argument(
         "--typescript",
-        default="",
-        metavar="PATH",
-        help="record all unicode I/O to a typescript file "
-        "(interleaved input and output, telnet protocol "
-        "bytes are omitted)",
+        default=None,
+        metavar="FILE",
+        help="record session to FILE (like Unix script(1))",
     )
     return parser
 
@@ -1151,24 +964,6 @@ def _parse_background_color(value: str) -> Tuple[int, int, int]:
     if len(h) != 6:
         raise ValueError(f"invalid hex color: {value!r}")
     return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
-
-
-def _resolve_history_file(value: Optional[str], session_key: str = "") -> Optional[str]:
-    """
-    Resolve ``--history-file`` to an absolute path or ``None``.
-
-    :param value: Explicit path from CLI args, or ``None`` for auto.
-    :param session_key: Session identifier (``host:port``) for per-session default.
-    """
-    if value is not None:
-        return str(value) if value else None
-    if session_key:
-        from ._paths import history_path
-
-        return history_path(session_key)
-    from ._paths import HISTORY_FILE
-
-    return HISTORY_FILE
 
 
 def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
@@ -1227,37 +1022,18 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "ascii_eol": args.ascii_eol,
         "ansi_keys": args.ansi_keys,
         "ssl": ssl_ctx,
-        "no_repl": args.no_repl,
-        "history_file": _resolve_history_file(args.history_file, f"{args.host}:{args.port}"),
         "gmcp_modules": (
             [m.strip() for m in args.gmcp_modules.split(",") if m.strip()]
             if args.gmcp_modules
             else None
         ),
         "gmcp_log": args.gmcp_log,
-        "typescript": args.typescript or "",
+        "typescript": args.typescript,
     }
 
 
 def main() -> None:
-    """
-    Entry point for telnetlib3-client command.
-
-    When invoked without a positional host argument and ``textual`` is
-    installed, launches the TUI session manager instead.
-    """
-    has_host = any(not arg.startswith("-") for arg in sys.argv[1:])
-    wants_help = "-h" in sys.argv[1:] or "--help" in sys.argv[1:]
-    if not has_host and not wants_help:
-        try:
-            import importlib
-
-            tui = importlib.import_module("telnetlib3.client_tui")
-            tui.tui_main()
-            return
-        except ImportError:
-            pass  # textual not installed, fall through to argparse error
-
+    """Entry point for telnetlib3-client command."""
     try:
         asyncio.run(run_client())
     except KeyboardInterrupt:

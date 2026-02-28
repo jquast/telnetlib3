@@ -9,6 +9,7 @@ import pytest
 # local
 from telnetlib3 import client as cl
 from telnetlib3 import accessories
+from telnetlib3._session_context import TelnetSessionContext
 from telnetlib3.client_base import BaseClient
 from telnetlib3.tests.accessories import create_server
 
@@ -183,6 +184,27 @@ def test_argument_parser():
     assert defaults.port == 23 and defaults.force_binary is True and defaults.speed == 38400
 
 
+def test_argument_parser_prog_name():
+    parser = cl._get_argument_parser()
+    assert parser.prog == "telnetlib3-client"
+
+
+def test_argument_parser_typescript():
+    parser = cl._get_argument_parser()
+    args = parser.parse_args(["myhost", "--typescript", "/tmp/session.log"])
+    assert args.typescript == "/tmp/session.log"
+
+    defaults = parser.parse_args(["myhost"])
+    assert defaults.typescript is None
+
+
+def test_argument_parser_ice_colors():
+    parser = cl._get_argument_parser()
+    args = parser.parse_args(["host", "--typescript", "out.log", "--no-ice-colors"])
+    assert args.typescript == "out.log"
+    assert args.ice_colors is False
+
+
 def test_transform_args():
     parser = cl._get_argument_parser()
     result = cl._transform_args(
@@ -196,20 +218,15 @@ def test_transform_args():
     assert result2["send_environ"] == ("TERM", "LANG")
 
 
-def test_transform_args_history_file():
+def test_transform_args_typescript():
     parser = cl._get_argument_parser()
-    result = cl._transform_args(parser.parse_args(["myhost"]))
-    assert result["history_file"] is not None
-    assert "telnetlib3" in result["history_file"]
-    assert "history-" in result["history_file"]
-
-    result_custom = cl._transform_args(
-        parser.parse_args(["myhost", "--history-file", "/tmp/my-history"])
+    result = cl._transform_args(
+        parser.parse_args(["myhost", "--typescript", "/tmp/sess.log"])
     )
-    assert result_custom["history_file"] == "/tmp/my-history"
+    assert result["typescript"] == "/tmp/sess.log"
 
-    result_disabled = cl._transform_args(parser.parse_args(["myhost", "--history-file", ""]))
-    assert result_disabled["history_file"] is None
+    defaults = cl._transform_args(parser.parse_args(["myhost"]))
+    assert defaults["typescript"] is None
 
 
 @pytest.mark.asyncio
@@ -338,7 +355,8 @@ def _fake_open_connection_factory(loop):
     """Build a mock open_connection that captures the shell callback."""
     captured_kwargs: dict = {}
     writer_obj = types.SimpleNamespace(
-        protocol=types.SimpleNamespace(waiter_closed=loop.create_future(), _gmcp_data={})
+        protocol=types.SimpleNamespace(waiter_closed=loop.create_future(), _gmcp_data={}),
+        ctx=TelnetSessionContext(),
     )
     writer_obj.protocol.waiter_closed.set_result(None)
     reader_obj = types.SimpleNamespace()
@@ -385,7 +403,7 @@ async def test_run_client_unknown_palette(monkeypatch):
 @pytest.mark.asyncio
 async def test_run_client_color_filter(monkeypatch, argv_extra, filter_cls_name):
     monkeypatch.setattr(
-        sys, "argv", ["telnetlib3-client", "localhost"] + argv_extra + ["--no-repl"]
+        sys, "argv", ["telnetlib3-client", "localhost"] + argv_extra
     )
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     monkeypatch.setattr(accessories, "function_lookup", lambda _: _noop_shell)
@@ -395,7 +413,7 @@ async def test_run_client_color_filter(monkeypatch, argv_extra, filter_cls_name)
     monkeypatch.setattr(cl, "open_connection", fake_oc)
     await cl.run_client()
 
-    assert type(writer_obj._ctx.color_filter).__name__ == filter_cls_name
+    assert type(writer_obj.ctx.color_filter).__name__ == filter_cls_name
 
 
 @pytest.mark.asyncio

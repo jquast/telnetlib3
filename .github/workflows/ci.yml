@@ -117,31 +117,6 @@ jobs:
           include-hidden-files: true
           if-no-files-found: ignore
 
-  tests-tui:
-    name: Python 3.13 with TUI (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-
-      - name: Install tox
-        run: python -Im pip install tox
-
-      - name: Run tests with TUI extras
-        run: python -Im tox -e py_tui
-
   coverage:
     name: Combine & check coverage
     runs-on: ubuntu-latest

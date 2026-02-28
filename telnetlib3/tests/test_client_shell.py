@@ -10,6 +10,8 @@ from unittest import mock
 import pytest
 import pexpect
 
+from telnetlib3._session_context import TelnetSessionContext
+
 if sys.platform == "win32":
     pytest.skip("POSIX-only tests", allow_module_level=True)
 
@@ -43,17 +45,17 @@ def _make_writer(
     """Build a minimal mock writer with the attributes Terminal needs."""
     from telnetlib3.telopt import SGA
 
+    ctx = TelnetSessionContext()
+    ctx.raw_mode = False
     writer = types.SimpleNamespace(
         will_echo=will_echo,
         client=True,
         remote_option=_MockOption({SGA: will_sga}),
         log=types.SimpleNamespace(debug=lambda *a, **kw: None),
-        _ctx=types.SimpleNamespace(
-            raw_mode=False, input_filter=None, color_filter=None, ascii_eol=False
-        ),
+        ctx=ctx,
     )
     if raw_mode is not False:
-        writer._ctx.raw_mode = raw_mode
+        writer.ctx.raw_mode = raw_mode
     return writer
 
 
@@ -455,7 +457,7 @@ def _pty_client(cmd: "list[str]"):
         (
             b"hello from server\r\n",
             0.5,
-            ["--no-repl"],
+            [],
             [b"Escape character", b"hello from server", b"Connection closed by foreign host."],
         ),
         (b"raw server\r\n", 0.1, ["--raw-mode"], [b"raw server"]),
@@ -486,8 +488,8 @@ async def test_simple_server_output(
 @pytest.mark.parametrize(
     "prompt,response,extra_args,send,expected",
     [
-        (b"login: ", b"\r\nwelcome!\r\n", ["--no-repl"], b"user\r", [b"login:", b"welcome!"]),
-        (b"prompt> ", b"\r\ngot it\r\n", ["--line-mode", "--no-repl"], b"hello\r", [b"got it"]),
+        (b"login: ", b"\r\nwelcome!\r\n", [], b"user\r", [b"login:", b"welcome!"]),
+        (b"prompt> ", b"\r\ngot it\r\n", ["--line-mode"], b"hello\r", [b"got it"]),
     ],
 )
 async def test_echo_sga_interaction(
@@ -552,7 +554,7 @@ async def test_password_hidden_then_echo_restored(bind_host: str, unused_tcp_por
                 asyncio.get_event_loop().call_later(0.2, self._transport.close)
 
     async with asyncio_server(Proto, bind_host, unused_tcp_port):
-        cmd = _client_cmd(bind_host, unused_tcp_port, ["--no-repl"])
+        cmd = _client_cmd(bind_host, unused_tcp_port, [])
 
         def _interact(master_fd, proc):
             buf = _pty_read(master_fd, marker=b"Name:", timeout=10.0)
@@ -597,7 +599,7 @@ async def test_backspace_visual_erase(bind_host: str, unused_tcp_port: int) -> N
                 asyncio.get_event_loop().call_later(0.2, self._transport.close)
 
     async with asyncio_server(Proto, bind_host, unused_tcp_port):
-        cmd = _client_cmd(bind_host, unused_tcp_port, ["--no-repl"])
+        cmd = _client_cmd(bind_host, unused_tcp_port, [])
 
         def _interact(master_fd, proc):
             buf = _pty_read(master_fd, marker=b"login:", timeout=10.0)
@@ -715,12 +717,12 @@ async def test_raw_event_loop_reactivates_repl() -> None:
 
     writer = _make_writer()
     writer.log = types.SimpleNamespace(debug=lambda *a, **kw: None, log=lambda *a, **kw: None)
-    writer._ctx.raw_mode = None
-    writer._ctx.color_filter = None
-    writer._ctx.ascii_eol = False
-    writer._ctx.autoreply_engine = None
-    writer._ctx.autoreply_rules = []
-    writer._ctx.input_filter = None
+    writer.ctx.raw_mode = None
+    writer.ctx.color_filter = None
+    writer.ctx.ascii_eol = False
+    writer.ctx.autoreply_engine = None
+    writer.ctx.autoreply_rules = []
+    writer.ctx.input_filter = None
     writer.is_closing = lambda: False
 
     term = _make_term(writer)
@@ -750,6 +752,64 @@ async def test_raw_event_loop_reactivates_repl() -> None:
 
 
 @pytest.mark.asyncio
+async def test_raw_event_loop_typescript_recording() -> None:
+    """_raw_event_loop writes server output to ctx.typescript_file when set."""
+    from telnetlib3.client_shell import _RawLoopState, _raw_event_loop
+    import io
+
+    class _StrReader:
+        def __init__(self) -> None:
+            self._data = ["hello world"]
+            self._eof = False
+
+        async def read(self, n: int) -> str:
+            if self._data:
+                return self._data.pop(0)
+            self._eof = True
+            return ""
+
+        def at_eof(self) -> bool:
+            return self._eof
+
+    reader = _StrReader()
+    stdin = asyncio.StreamReader()
+
+    writer = _make_writer()
+    writer.log = types.SimpleNamespace(debug=lambda *a, **kw: None, log=lambda *a, **kw: None)
+    writer.ctx.raw_mode = True
+    writer.ctx.color_filter = None
+    writer.ctx.ascii_eol = False
+    writer.ctx.autoreply_engine = None
+    writer.ctx.input_filter = None
+    writer.is_closing = lambda: False
+
+    ts_buf = io.StringIO()
+    writer.ctx.typescript_file = ts_buf
+
+    term = _make_term(writer)
+    term.check_auto_mode = lambda switched_to_raw, last_will_echo: None
+
+    stdout = mock.Mock()
+    stdout.write = mock.Mock()
+
+    state = _RawLoopState(
+        switched_to_raw=True, last_will_echo=False, local_echo=False, linesep="\r\n"
+    )
+    await _raw_event_loop(
+        telnet_reader=reader,
+        telnet_writer=writer,
+        tty_shell=term,
+        stdin=stdin,
+        stdout=stdout,
+        keyboard_escape="\x1d",
+        state=state,
+        handle_close=lambda msg: None,
+        want_repl=lambda: False,
+    )
+    assert "hello world" in ts_buf.getvalue()
+
+
+@pytest.mark.asyncio
 async def test_winch_resize_pending_cleared_after_consumption() -> None:
     """_resize_pending flag can be set and cleared."""
     writer = _make_writer()
@@ -775,7 +835,7 @@ async def test_send_stdin_with_input_filter() -> None:
     inf = InputFilter(_INPUT_SEQ_XLAT["atascii"], _INPUT_XLAT["atascii"])
 
     writer = _make_writer()
-    writer._ctx.input_filter = inf
+    writer.ctx.input_filter = inf
     writer._write = mock.Mock()
     stdout = mock.Mock()
 
@@ -790,7 +850,7 @@ async def test_send_stdin_with_pending_sequence() -> None:
     inf = InputFilter(_INPUT_SEQ_XLAT["atascii"], _INPUT_XLAT["atascii"])
 
     writer = _make_writer()
-    writer._ctx.input_filter = inf
+    writer.ctx.input_filter = inf
     writer._write = mock.Mock()
     stdout = mock.Mock()
 
@@ -814,7 +874,7 @@ async def test_send_stdin_no_filter() -> None:
 
 def _make_transform_writer(**kwargs: object) -> object:
     """Build a minimal writer for _transform_output tests."""
-    return types.SimpleNamespace(**kwargs)
+    return types.SimpleNamespace(ctx=TelnetSessionContext(), **kwargs)
 
 
 @pytest.mark.parametrize(
@@ -855,7 +915,9 @@ def test_transform_output_empty_string() -> None:
 def test_get_raw_mode(raw_mode: "bool | None", expected: "bool | None") -> None:
     from telnetlib3.client_shell import _get_raw_mode
 
-    writer = types.SimpleNamespace(_ctx=types.SimpleNamespace(raw_mode=raw_mode))
+    ctx = TelnetSessionContext()
+    ctx.raw_mode = raw_mode
+    writer = types.SimpleNamespace(ctx=ctx)
     assert _get_raw_mode(writer) is expected
 
 
@@ -873,7 +935,7 @@ async def test_cooked_to_raw_transition_preserves_crlf(
             asyncio.get_event_loop().call_later(0.5, transport.close)
 
     async with asyncio_server(Proto, bind_host, unused_tcp_port):
-        cmd = _client_cmd(bind_host, unused_tcp_port, ["--no-repl"])
+        cmd = _client_cmd(bind_host, unused_tcp_port, [])
         with _pty_client(cmd) as (proc, master_fd):
             output = await asyncio.to_thread(_pty_read, master_fd, proc=proc)
             assert b"line1" in output

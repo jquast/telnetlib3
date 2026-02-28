@@ -52,13 +52,10 @@ docs = [
     "Sphinx>3",
     "sphinx_rtd_theme",
     "sphinx-autodoc-typehints",
-    "myst-parser",
 ]
-with_tui = [
-    "blessed>=1.31",
-    "ucs-detect>=2,<3",
+extras = [
     "prettytable",
-    "textual>=0.44",
+    "ucs-detect>=2,<3",
 ]
 
 [project.scripts]
@@ -88,7 +85,6 @@ include = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["telnetlib3"]
-artifacts = ["telnetlib3/help/*.md"]
 
 [tool.pylint.main]
 load-plugins = [
@@ -147,7 +143,7 @@ disable = [
     # deliberate override renames/changes
     "arguments-renamed",
     "arguments-differ",
-    # optional deps may not be installed (blessed, textual)
+    # optional deps may not be installed
     "import-error",
     # pylint false-positive family
     "overlapping-except",

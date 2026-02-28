@@ -1,13 +1,17 @@
 History
 =======
 3.0.0
-  * new: REPL line editor for ``telnetlib3-client`` with command history,
-    autosuggestion, and password masking.  Powered by ``blessed``
-    (``pip install telnetlib3[with_tui]``).  Use ``--no-repl`` to disable.
-  * new: TUI session manager — ``telnetlib3-client`` without a host argument
-    launches a multi-session TUI (requires ``textual``, included in with_tui).
+  * new: ``TelnetSessionContext`` base class and ``writer.ctx`` attribute for
+    per-connection session state.  Subclass to add application-specific
+    attributes (e.g. MUD client state).
   * new: ``--ice-colors`` (default on) treats SGR 5 (blink) as bright
     background for proper 16-color BBS/ANSI art display.
+  * new: ``--typescript FILE`` records session output to a file, similar to
+    the Unix ``script(1)`` command.
+  * new: shared ``TelnetProtocolBase`` mixin extracted from duplicated
+    server and client protocol code.
+  * new: ``_atomic_json_write()`` and ``_BytesSafeEncoder`` helpers in
+    ``_paths`` module for fingerprinting subsystem.
   * change: ``--connect-timeout`` default changed from no limit to 10 seconds.
   * change: ``force_binary`` auto-enabled when CHARSET is negotiated
     (:rfc:`2066`) or ``LANG``/``CHARSET`` received via NEW_ENVIRON
@@ -15,17 +19,17 @@ History
   * enhancement: Microsoft Telnet (``telnet.exe``) compatibility refined — server
     now sends ``DO NEW_ENVIRON`` but excludes ``USER`` variable instead of
     skipping the option entirely, :ghissue:`24`.
+  * enhancement: comprehensive pylint and mypy cleanup across the codebase.
   * **Breaking changes**:
     - ``connect_minwait`` default now 0 (was 1.0 in library API, already 0 in
       CLI since 2.5.0).
     - ``force_binary`` auto-enabled for non-ASCII encodings (UTF-8, etc.).
     - ``--connect-timeout`` default now 10 seconds (was unlimited).
     - ``--reverse-video`` CLI option removed (replaced by ``--ice-colors``).
-    - CGA and EGA palettes removed from ``--colormatch``; use ``vga`` instead.
-    - GMCP: client no longer proactively sends ``DO GMCP``; passively accepts
-      server's ``WILL GMCP``.
-    - Room storage migrated from JSON to SQLite.
-    - ``ColorConfig`` defaults changed (palette now ``vga``).
+    - CGA, EGA, and Amiga palettes removed from ``--colormatch``; use ``vga``
+      instead.
+    - ``ColorConfig`` defaults changed (palette now ``vga``,
+      ``ice_colors`` now ``True``).
 
 2.6.0
   * new: TLS support (TELNETS).  :func:`~telnetlib3.client.open_connection`

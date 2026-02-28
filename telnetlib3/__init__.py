@@ -29,6 +29,7 @@ if sys.platform != "win32":
     from . import fingerprinting_display  # noqa: F401
 from . import encodings  # noqa: F401 - registers custom codecs (petscii, atarist)
 from . import sync
+from ._session_context import TelnetSessionContext  # noqa: F401
 from .server_base import *  # noqa
 from .server import *  # noqa
 from .stream_writer import *  # noqa

@@ -13,6 +13,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from .stream_reader import TelnetReader
 
 # local
+from ._session_context import TelnetSessionContext
 from . import slc
 from .mud import (
     zmp_decode,
@@ -239,6 +240,11 @@ class TelnetWriter:
         #: ``"ascii"``).  Used by fingerprinting and client connection logic
         #: to decide whether to negotiate CHARSET.
         self._encoding_explicit: bool = False
+
+        #: Per-connection session context.  Applications may replace this
+        #: with a subclass of :class:`TelnetSessionContext` to carry
+        #: additional state (e.g. MUD client macros, room graphs).
+        self.ctx: TelnetSessionContext = TelnetSessionContext()
 
         #: Set of option byte(s) for WILL received from remote end
         #: that were rejected with DONT (unhandled options).

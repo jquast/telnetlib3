@@ -43,7 +43,6 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx.ext.viewcode",
     "sphinx_autodoc_typehints",
-    "myst_parser",
     "github",
 ]
 
@@ -51,10 +50,7 @@ extensions = [
 templates_path = ["_templates"]
 
 # The suffix of source filenames.
-source_suffix = {
-    ".rst": "restructuredtext",
-    ".md": "markdown",
-}
+source_suffix = ".rst"
 
 # The encoding of source files.
 # source_encoding = 'utf-8-sig'
@@ -72,7 +68,7 @@ copyright = f"2013-{datetime.datetime.now().year} Jeff Quast"
 # built documents.
 #
 # The short X.Y version.
-version = "2.6"
+version = "3.0"
 
 # The full version, including alpha/beta/rc tags.
 release = "3.0.0"  # keep in sync with pyproject.toml and telnetlib3/accessories.py !!
