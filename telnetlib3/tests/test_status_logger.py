@@ -5,8 +5,6 @@ import asyncio
 # local
 from telnetlib3.server import StatusLogger, parse_server_args
 from telnetlib3.telopt import IAC, WONT, TTYPE
-from telnetlib3.tests.accessories import bind_host  # pytest fixture
-from telnetlib3.tests.accessories import unused_tcp_port  # pytest fixture
 from telnetlib3.tests.accessories import create_server, asyncio_connection
 
 

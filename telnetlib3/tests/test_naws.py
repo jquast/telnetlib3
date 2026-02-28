@@ -17,13 +17,7 @@ import pexpect
 # local
 import telnetlib3
 from telnetlib3.telopt import SB, SE, IAC, NAWS, WILL
-from telnetlib3.tests.accessories import (
-    bind_host,
-    create_server,
-    open_connection,
-    unused_tcp_port,
-    asyncio_connection,
-)
+from telnetlib3.tests.accessories import create_server, open_connection, asyncio_connection
 
 
 async def test_telnet_server_on_naws(bind_host, unused_tcp_port):

@@ -1,13 +1,15 @@
 """System clipboard helpers (OSC 52 for copy, subprocess for paste)."""
 
+# std imports
+import sys
 import base64
 import subprocess
-import sys
 from typing import Optional
 
 
 def copy_to_clipboard(text: str, file: Optional[object] = None) -> None:
-    """Write *text* to the system clipboard via an OSC 52 escape sequence.
+    """
+    Write *text* to the system clipboard via an OSC 52 escape sequence.
 
     :param text: The text to copy.
     :param file: Writable binary stream (default ``sys.stdout.buffer``).
@@ -30,19 +32,15 @@ _PASTE_COMMANDS = (
 
 
 def paste_from_clipboard() -> str:
-    """Read text from the system clipboard via an external helper.
+    """
+    Read text from the system clipboard via an external helper.
 
     Tries, in order: ``xclip``, ``xsel``, ``wl-paste``, ``pbpaste``.
     Returns ``""`` when no clipboard tool is available.
     """
     for cmd in _PASTE_COMMANDS:
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                timeout=2,
-                check=False,
-            )
+            result = subprocess.run(cmd, capture_output=True, timeout=2, check=False)
             if result.returncode == 0:
                 return result.stdout.decode("utf-8", errors="replace")
         except FileNotFoundError:

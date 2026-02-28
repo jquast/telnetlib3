@@ -836,7 +836,17 @@ async def run_client() -> None:
             ctx: SessionContext = writer_arg._ctx
             ctx.repl_enabled = True
             ctx.history_file = args.get("history_file")
-            await _inner_repl(reader, writer_arg)
+            ts_path = args.get("typescript", "")
+            if ts_path:
+                ctx.typescript_file = open(  # noqa: SIM115
+                    ts_path, "a", encoding="utf-8"
+                )
+            try:
+                await _inner_repl(reader, writer_arg)
+            finally:
+                if ctx.typescript_file is not None:
+                    ctx.typescript_file.close()
+                    ctx.typescript_file = None
 
         shell_callback = _repl_shell
 
@@ -1102,6 +1112,14 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         "(default: ~/.local/share/telnetlib3/history, "
         "empty string to disable)",
     )
+    parser.add_argument(
+        "--typescript",
+        default="",
+        metavar="PATH",
+        help="record all unicode I/O to a typescript file "
+        "(interleaved input and output, telnet protocol "
+        "bytes are omitted)",
+    )
     return parser
 
 
@@ -1217,6 +1235,7 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
             else None
         ),
         "gmcp_log": args.gmcp_log,
+        "typescript": args.typescript or "",
     }
 
 

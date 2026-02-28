@@ -409,7 +409,7 @@ async def test_without_latin1_reading_strict_crashes():
 async def test_fingerprint_scanner_defeats_robot_check(unused_tcp_port):
     """Fingerprint scanner's virtual cursor defeats the server's robot_check."""
     from telnetlib3.guard_shells import _TEST_CHAR, _measure_width  # noqa: PLC0415
-    from telnetlib3.tests.accessories import create_server  # noqa: PLC0415
+    from telnetlib3.tests.accessories import create_server
 
     measured_width: list[int | None] = []
 

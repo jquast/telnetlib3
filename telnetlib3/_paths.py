@@ -11,9 +11,11 @@ from __future__ import annotations
 
 # std imports
 import os
+import json
 import hashlib
 import pathlib
 import tempfile
+from typing import Any
 
 _XDG_CONFIG = os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config"))
 _XDG_DATA = os.environ.get(
@@ -68,6 +70,35 @@ def xdg_config_dir() -> pathlib.Path:
 def xdg_data_dir() -> pathlib.Path:
     """Return the XDG data directory for telnetlib3."""
     return pathlib.Path(DATA_DIR)
+
+
+def _safe_terminal_size() -> str:
+    """Return ``os.get_terminal_size()`` as a string, or ``"?"`` on error."""
+    try:
+        sz = os.get_terminal_size()
+        return f"{sz.columns}x{sz.lines}"
+    except OSError:
+        return "?"
+
+
+class _BytesSafeEncoder(json.JSONEncoder):
+    """JSON encoder that converts bytes to str (UTF-8) or hex."""
+
+    def default(self, o: Any) -> Any:
+        if isinstance(o, bytes):
+            try:
+                return o.decode("utf-8")
+            except UnicodeDecodeError:
+                return o.hex()
+        return super().default(o)
+
+
+def _atomic_json_write(filepath: str, data: dict[str, Any]) -> None:
+    """Atomically write JSON data to file via write-to-new + rename."""
+    tmp_path = os.path.splitext(filepath)[0] + ".json.new"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, sort_keys=True, cls=_BytesSafeEncoder)
+    os.replace(tmp_path, filepath)
 
 
 def _atomic_write(path: str, content: str) -> None:

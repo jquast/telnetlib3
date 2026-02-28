@@ -17,13 +17,7 @@ import pytest
 import trustme
 
 # local
-from telnetlib3.tests.accessories import (
-    bind_host,
-    create_server,
-    open_connection,
-    unused_tcp_port,
-    init_subproc_coverage,
-)
+from telnetlib3.tests.accessories import create_server, open_connection, init_subproc_coverage
 
 
 @pytest.fixture()

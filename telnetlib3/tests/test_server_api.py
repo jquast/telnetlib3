@@ -3,8 +3,6 @@ import asyncio
 
 # local
 from telnetlib3.telopt import IAC, WILL, WONT, TTYPE, BINARY
-from telnetlib3.tests.accessories import bind_host  # pytest fixture
-from telnetlib3.tests.accessories import unused_tcp_port  # pytest fixture
 from telnetlib3.tests.accessories import create_server, asyncio_connection
 
 

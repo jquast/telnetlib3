@@ -1,6 +1,9 @@
 """Tests for telnetlib3.help topic loader."""
+
+# 3rd party
 import pytest
 
+# local
 from telnetlib3.help import get_help
 
 

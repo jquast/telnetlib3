@@ -1,30 +1,25 @@
 """Tests for toolbar fill algorithm and layout helpers."""
 
+# 3rd party
 import pytest
 
 pytest.importorskip("blessed")
 
+# local
 from telnetlib3.client_repl_render import (
-    _ToolbarSlot,
     _BAR_GAP_WIDTH,
     _SEPARATOR_WIDTH,
+    _wcswidth,
+    _vital_bar,
+    _ToolbarSlot,
     _fill_toolbar,
     _layout_toolbar,
     _left_sep_widths,
-    _vital_bar,
-    _wcswidth,
 )
 
 
 def _text_slot(
-    text,
-    priority=1,
-    order=0,
-    side="left",
-    min_width=0,
-    label="",
-    growable=False,
-    grow_params=None,
+    text, priority=1, order=0, side="left", min_width=0, label="", growable=False, grow_params=None
 ):
     return _ToolbarSlot(
         priority=priority,

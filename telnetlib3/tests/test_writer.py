@@ -27,37 +27,12 @@ from telnetlib3.telopt import (
     option_from_name,
 )
 from telnetlib3.tests.accessories import (
-    bind_host,
+    MockProtocol,
+    MockTransport,
     create_server,
     open_connection,
-    unused_tcp_port,
     asyncio_connection,
 )
-
-
-class _MockTransport:
-    def __init__(self):
-        self._closing = False
-
-    def close(self):
-        self._closing = True
-
-    def is_closing(self):
-        return self._closing
-
-    def write(self, data):
-        pass
-
-    def get_extra_info(self, name, default=None):
-        return default
-
-
-class _MockProtocol:
-    def get_extra_info(self, name, default=None):
-        return default
-
-    async def _drain_helper(self):
-        pass
 
 
 class SimulSLCServer(telnetlib3.BaseServer):
@@ -422,8 +397,8 @@ async def test_send_eor(bind_host, unused_tcp_port):
 
 async def test_wait_closed():
     """Test TelnetWriter.wait_closed() method waits for connection to close."""
-    transport = _MockTransport()
-    protocol = _MockProtocol()
+    transport = MockTransport()
+    protocol = MockProtocol()
     writer = telnetlib3.TelnetWriter(transport, protocol, server=True)
 
     wait_task = asyncio.create_task(writer.wait_closed())

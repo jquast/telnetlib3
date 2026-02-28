@@ -104,9 +104,7 @@ class TestGmcpCallbackGuards:
         ctx = SessionContext(session_key="test:23")
         ctx.rooms_file = "/nonexistent/rooms.db"
         client.writer._ctx = ctx
-        with mock.patch.object(
-            client, "_update_room_graph", side_effect=OSError("disk full")
-        ):
+        with mock.patch.object(client, "_update_room_graph", side_effect=OSError("disk full")):
             client._on_gmcp("Room.Info", {"num": 1, "name": "Test"})
 
     @pytest.mark.asyncio
@@ -114,9 +112,7 @@ class TestGmcpCallbackGuards:
         client = self._make_connected_client()
         ctx = SessionContext(session_key="test:23")
         client.writer._ctx = ctx
-        with mock.patch.object(
-            client, "_append_chat", side_effect=OSError("disk full")
-        ):
+        with mock.patch.object(client, "_append_chat", side_effect=OSError("disk full")):
             client._on_gmcp("Comm.Channel.Text", {"chan": "gossip", "msg": "hi"})
 
 
@@ -130,9 +126,7 @@ class TestFireAndForgetLogging:
         async def _failing_command(text, ctx, log):
             raise RuntimeError("macro boom")
 
-        with mock.patch(
-            "telnetlib3.client_repl.execute_macro_commands", _failing_command
-        ):
+        with mock.patch("telnetlib3.client_repl.execute_macro_commands", _failing_command):
             from telnetlib3.macros import Macro, build_macro_dispatch
 
             macros = [Macro(key="KEY_F1", text="/test")]
@@ -164,10 +158,9 @@ class TestRoomStoreResourceLeak:
         screen.query_one = mock.MagicMock()
         screen._get_selected_room_num = mock.MagicMock(return_value="42")
 
-        with mock.patch(
-            "telnetlib3.rooms.RoomStore", return_value=mock_graph
-        ), mock.patch(
-            "telnetlib3.rooms.read_current_room", return_value="1"
+        with (
+            mock.patch("telnetlib3.rooms.RoomStore", return_value=mock_graph),
+            mock.patch("telnetlib3.rooms.read_current_room", return_value="1"),
         ):
             with pytest.raises(RuntimeError, match="graph error"):
                 RoomBrowserScreen._do_fast_travel(screen)

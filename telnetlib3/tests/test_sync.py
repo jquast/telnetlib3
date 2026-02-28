@@ -10,7 +10,6 @@ import pytest
 
 # local
 from telnetlib3.sync import ServerConnection, TelnetConnection, BlockingTelnetServer
-from telnetlib3.tests.accessories import bind_host, unused_tcp_port  # pytest fixtures
 
 
 @pytest.fixture

@@ -38,7 +38,6 @@ from textual.widgets import (
     Input,
     Label,
     Button,
-    Checkbox,
     Footer,
     Select,
     Static,
@@ -49,8 +48,8 @@ from textual.widgets import (
     RadioButton,
     ContentSwitcher,
 )
-from textual.containers import Vertical, Horizontal, VerticalScroll
 from textual.css.query import NoMatches
+from textual.containers import Vertical, Horizontal, VerticalScroll
 from textual.widgets._tree import TreeNode
 
 # Reset SGR, cursor, alt-screen, mouse, and bracketed paste.
@@ -104,6 +103,7 @@ _FLAG_TO_WIDGET: dict[str, str] = {
     "no-repl": "use-repl",
     "loglevel": "loglevel",
     "logfile": "logfile",
+    "typescript": "typescript",
 }
 
 
@@ -256,6 +256,7 @@ class SessionConfig:
     always_do: str = ""
     loglevel: str = "warn"
     logfile: str = ""
+    typescript: str = ""
     no_repl: bool = False
 
 
@@ -303,6 +304,7 @@ _CMD_STR_FLAGS: list[tuple[str, str, object]] = [
     ("send_environ", "--send-environ", "TERM,LANG,COLUMNS,LINES,COLORTERM"),
     ("loglevel", "--loglevel", "warn"),
     ("logfile", "--logfile", ""),
+    ("typescript", "--typescript", ""),
     ("ssl_cafile", "--ssl-cafile", ""),
 ]
 
@@ -562,8 +564,7 @@ class SessionListScreen(Screen[None]):
                 self.notify(f"Deleted {key}")
 
         self.app.push_screen(
-            _ConfirmDialogScreen(
-                title="Delete Session", body=f"Delete session '{key}'?",             ),
+            _ConfirmDialogScreen(title="Delete Session", body=f"Delete session '{key}'?"),
             callback=_on_confirm,
         )
 
@@ -723,6 +724,12 @@ class SessionEditScreen(Screen[SessionConfig | None]):  # type: ignore[misc]
     .field-label {
         width: 14;
         padding-top: 1;
+    }
+    .field-label-short {
+        width: auto;
+        padding-top: 1;
+        margin-left: 1;
+        margin-right: 1;
     }
     .field-input {
         width: 1fr;
@@ -911,14 +918,20 @@ class SessionEditScreen(Screen[SessionConfig | None]):  # type: ignore[misc]
             "Send Environ", Input(value=cfg.send_environ, id="send-environ", classes="field-input")
         )
         yield Horizontal(
-            Label("Log Level, File", classes="field-label"),
+            Label("Log Level:", classes="field-label"),
             Select(
                 [(v, v) for v in ("trace", "debug", "info", "warn", "error", "critical")],
                 value=cfg.loglevel,
                 id="loglevel",
             ),
+            Label("file:", classes="field-label-short"),
             Input(value=cfg.logfile, placeholder="path", id="logfile", classes="field-input"),
             classes="field-row",
+        )
+        yield self._field_row(
+            "Typescript",
+            Input(value=cfg.typescript, placeholder="path", id="typescript",
+                  classes="field-input"),
         )
 
     def compose(self) -> ComposeResult:
@@ -1138,6 +1151,7 @@ class SessionEditScreen(Screen[SessionConfig | None]):  # type: ignore[misc]
         cfg.always_do = self._config.always_do
         cfg.loglevel = self.query_one("#loglevel", Select).value
         cfg.logfile = self.query_one("#logfile", Input).value.strip()
+        cfg.typescript = self.query_one("#typescript", Input).value.strip()
         cfg.no_repl = not self.query_one("#use-repl", Switch).value
 
         return cfg
@@ -1160,6 +1174,7 @@ def _float_val(text: str, default: float) -> float:
 def _get_help_topic(topic: str) -> str:
     """Load help text for a TUI dialog topic from bundled markdown files."""
     from telnetlib3.help import get_help  # noqa: E501  # deferred to avoid import cost
+
     return get_help(topic)
 
 
@@ -1167,34 +1182,25 @@ class _CommandHelpScreen(Screen[None]):
     """Scrollable help screen with context-specific documentation."""
 
     BINDINGS: ClassVar[list[Binding]] = [
-        Binding("escape", "close", "Close", show=False),
-        Binding("q", "close", "Close", show=False),
+        Binding("escape", "close", "Exit"),
+        Binding("q", "close", "Exit", show=False),
     ]
 
     DEFAULT_CSS = """
     _CommandHelpScreen {
-        align: center middle;
+        layout: vertical;
     }
     #help-dialog {
-        width: 88;
-        height: 90%;
-        border: round $surface-lighten-2;
+        width: 100%;
+        height: 100%;
         background: $surface;
-        padding: 1 2;
+        padding: 0 1;
     }
     #help-scroll {
         height: 1fr;
     }
     #help-scroll Markdown {
         margin: 0 1;
-    }
-    #help-close-row {
-        height: 3;
-        align-horizontal: right;
-    }
-    #help-close-row Button {
-        width: auto;
-        min-width: 12;
     }
     """
 
@@ -1207,22 +1213,51 @@ class _CommandHelpScreen(Screen[None]):
         with Vertical(id="help-dialog"):
             with VerticalScroll(id="help-scroll"):
                 yield Markdown(content, id="help-content")
-            with Horizontal(id="help-close-row"):
-                yield Button("Close", variant="primary", id="help-close")
-
-    def on_mount(self) -> None:
-        self.query_one("#help-close", Button).focus()
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "help-close":
-            self.dismiss(None)
+        yield Footer()
 
     def action_close(self) -> None:
+        """Dismiss the help screen."""
         self.dismiss(None)
 
 
 class _EditListScreen(Screen["bool | None"]):
     """Base class for list-editor screens (macros, autoreplies)."""
+
+    DEFAULT_CSS = """
+    _EditListScreen { align: center middle; }
+    .edit-panel {
+        width: 100%; height: 100%;
+        border: round $surface-lighten-2; background: $surface; padding: 1 1;
+    }
+    .edit-body { height: 1fr; }
+    .edit-button-col {
+        width: 11; height: auto; padding-right: 1;
+    }
+    .edit-button-col Button {
+        width: 100%; min-width: 0; margin-bottom: 0;
+    }
+    .edit-copy { background: #6670a0; color: #e8ecf8; }
+    .edit-copy:hover { background: #8088b8; }
+    .edit-right { width: 1fr; height: 100%; }
+    .edit-search { height: auto; }
+    .edit-table { height: 1fr; min-height: 4; overflow-x: hidden; }
+    .edit-form { height: 1fr; }
+    .edit-form .field-row { height: 3; margin: 0; }
+    .edit-form Input { width: 1fr; border: tall grey; }
+    .edit-form Input:focus { border: tall $accent; }
+    .edit-form-buttons { height: 3; align-horizontal: right; }
+    .edit-form-buttons Button { width: auto; min-width: 10; margin-left: 1; }
+    .insert-btn { width: auto; min-width: 0; margin-left: 1; }
+    .form-label { width: 8; padding-top: 1; }
+    .form-label-short { width: 9; padding-top: 1; }
+    .form-label-mid { width: 5; padding-top: 1; }
+    .form-label-pct { width: 12; padding-top: 1; }
+    .toggle-label { width: auto; padding-top: 1; content-align-horizontal: right; }
+    .toggle-gap { width: 1fr; max-width: 6; }
+    .form-gap { width: 2; }
+    .form-gap-wide { width: 5; }
+    .form-btn-spacer { width: 1; }
+    """
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("escape", "cancel_or_close", "Cancel", priority=True),
@@ -1554,50 +1589,18 @@ class MacroEditScreen(_EditListScreen):
     ]
 
     CSS = """
-    MacroEditScreen { align: center middle; }
-    #macro-panel {
-        width: 100%; height: 100%;
-        border: round $surface-lighten-2; background: $surface; padding: 1 1;
-    }
-    #macro-body { height: 1fr; }
-    #macro-button-col {
-        width: 11; height: auto; padding-right: 1;
-    }
-    #macro-button-col Button {
-        width: 100%; min-width: 0; margin-bottom: 0;
-    }
-    .insert-btn { width: auto; min-width: 0; margin-left: 1; }
-    #macro-copy { background: #6670a0; color: #e8ecf8; }
-    #macro-copy:hover { background: #8088b8; }
-    #macro-right { width: 1fr; height: 100%; }
-    #macro-search { height: auto; }
-    #macro-table { height: 1fr; min-height: 4; overflow-x: hidden; }
-    #macro-form { height: 1fr; padding: 0; }
-    #macro-form .field-row { height: 3; margin: 0; }
+    #macro-form { padding: 0; }
     #macro-text-row { margin: 1 0; }
     #macro-form .switch-row { height: 3; margin: 0; }
-    #macro-form Input { width: 1fr; border: tall grey; }
-    #macro-form Input:focus { border: tall $accent; }
-    #macro-form-buttons { height: 3; align-horizontal: right; }
-    #macro-form-buttons Button { width: auto; min-width: 10; margin-left: 1; }
     #macro-key-label {
         width: 16; height: 1; padding: 0 1;
         margin: 1 0 0 1;
         background: $surface-darken-1; color: $text;
     }
-    #macro-key-label.capturing {
-        color: $warning;
-    }
+    #macro-key-label.capturing { color: $warning; }
     #macro-capture { width: auto; min-width: 13; margin-left: 1; }
     #macro-capture-status { width: 1fr; height: 1; color: $error; padding: 0 1; }
-    .form-label { width: 8; padding-top: 1; }
-    .form-label-short { width: 9; padding-top: 1; }
-    .form-label-mid { width: 5; padding-top: 1; }
-    .toggle-label { width: auto; padding-top: 1; content-align-horizontal: right; }
-    .toggle-gap { width: 1fr; max-width: 6; }
     #macro-form .form-gap { width: 10; }
-    .form-gap { width: 2; }
-    .form-btn-spacer { width: 1; }
     """
 
     def __init__(
@@ -1629,20 +1632,22 @@ class MacroEditScreen(_EditListScreen):
 
     def compose(self) -> ComposeResult:
         """Build the macro editor layout."""
-        with Vertical(id="macro-panel"):
-            with Horizontal(id="macro-body"):
-                with Vertical(id="macro-button-col"):
+        with Vertical(id="macro-panel", classes="edit-panel"):
+            with Horizontal(id="macro-body", classes="edit-body"):
+                with Vertical(id="macro-button-col", classes="edit-button-col"):
                     yield Button("Add", variant="success", id="macro-add")
                     yield Button("Edit", variant="warning", id="macro-edit")
-                    yield Button("Copy", id="macro-copy")
+                    yield Button("Copy", id="macro-copy", classes="edit-copy")
                     yield Button("Delete", variant="error", id="macro-delete")
                     yield Button("Help", variant="success", id="macro-help")
                     yield Button("Save", variant="primary", id="macro-save")
                     yield Button("Cancel", id="macro-close")
-                with Vertical(id="macro-right"):
-                    yield Input(placeholder="Search macros\u2026", id="macro-search")
-                    yield DataTable(id="macro-table")
-                    with Vertical(id="macro-form"):
+                with Vertical(id="macro-right", classes="edit-right"):
+                    yield Input(
+                        placeholder="Search macros\u2026", id="macro-search", classes="edit-search"
+                    )
+                    yield DataTable(id="macro-table", classes="edit-table")
+                    with Vertical(id="macro-form", classes="edit-form"):
                         with Horizontal(classes="field-row"):
                             yield Label("Enabled:", classes="toggle-label")
                             yield Switch(value=True, id="macro-enabled")
@@ -1675,13 +1680,9 @@ class MacroEditScreen(_EditListScreen):
                                 "Random Walk", id="macro-btn-randomwalk", classes="insert-btn"
                             )
                             yield Button("Delay", id="macro-delay", classes="insert-btn")
-                            yield Button(
-                                "When", id="macro-btn-when", classes="insert-btn"
-                            )
-                            yield Button(
-                                "Until", id="macro-btn-until", classes="insert-btn"
-                            )
-                        with Horizontal(id="macro-form-buttons"):
+                            yield Button("When", id="macro-btn-when", classes="insert-btn")
+                            yield Button("Until", id="macro-btn-until", classes="insert-btn")
+                        with Horizontal(id="macro-form-buttons", classes="edit-form-buttons"):
                             yield Label(" ", classes="form-btn-spacer")
                             yield Button("Cancel", variant="default", id="macro-cancel-form")
                             yield Button("OK", variant="success", id="macro-ok")
@@ -1731,10 +1732,7 @@ class MacroEditScreen(_EditListScreen):
             status = "" if enabled else " (off)"
             lu = _relative_time(last_used) if last_used else ""
             self._filtered_indices.append(i)
-            table.add_row(
-                key, text + status, lu,
-                key=str(len(self._filtered_indices) - 1),
-            )
+            table.add_row(key, text + status, lu, key=str(len(self._filtered_indices) - 1))
         n_total = len(self._macros)
         n_shown = len(self._filtered_indices)
         label = self.query_one("#macro-count", Static)
@@ -1930,10 +1928,7 @@ class MacroEditScreen(_EditListScreen):
         from .macros import Macro, save_macros
 
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
-        macros = [
-            Macro(key=k, text=t, enabled=ena, last_used=lu)
-            for k, t, ena, lu in self._macros
-        ]
+        macros = [Macro(key=k, text=t, enabled=ena, last_used=lu) for k, t, ena, lu in self._macros]
         save_macros(self._path, macros, self._session_key)
 
 
@@ -1964,41 +1959,14 @@ class AutoreplyEditScreen(_EditListScreen):
     ]
 
     CSS = """
-    AutoreplyEditScreen { align: center middle; }
-    #autoreply-panel {
-        width: 100%; height: 100%;
-        border: round $surface-lighten-2; background: $surface; padding: 1 1;
-    }
-    #autoreply-body { height: 1fr; }
-    #autoreply-button-col {
-        width: 11; height: auto; padding-right: 1;
-    }
-    #autoreply-button-col Button {
-        width: 100%; min-width: 0; margin-bottom: 0;
-    }
-    #autoreply-copy { background: #6670a0; color: #e8ecf8; }
-    #autoreply-copy:hover { background: #8088b8; }
-    #autoreply-right { width: 1fr; height: 100%; }
-    #autoreply-search { height: auto; }
-    #autoreply-table { height: 1fr; min-height: 4; overflow-x: hidden; }
-    #autoreply-form { height: 1fr; padding: 0 0 0 4; }
-    #autoreply-form .field-row { height: 3; margin: 0; }
-    #autoreply-form Input { width: 1fr; border: tall grey; }
-    #autoreply-form Input:focus { border: tall $accent; }
-    #autoreply-form-buttons { height: 3; align-horizontal: right; }
-    #autoreply-form-buttons Button { width: auto; min-width: 10; margin-left: 1; }
-    #autoreply-form .form-label { width: 12; padding-top: 1; }
-    #autoreply-form .form-label-short { width: 9; padding-top: 1; }
-    #autoreply-form .form-label-mid { width: 9; padding-top: 1; }
-    #autoreply-form .form-gap { width: 2; }
-    #autoreply-form .form-btn-spacer { width: 1; }
-    #autoreply-form .insert-btn { width: auto; min-width: 0; margin: 0; padding: 0 1; }
-    .form-gap-wide { width: 5; }
+    #autoreply-form { padding: 0 0 0 4; }
+    #autoreply-form .form-label { width: 12; }
+    #autoreply-form .form-label-mid { width: 9; }
+    #autoreply-form .insert-btn { margin: 0; padding: 0 1; }
     #autoreply-cond-vital { width: 14; }
     #autoreply-cond-op { width: 8; }
-    #autoreply-cond-val { width: 4; border: tall grey; }
+    #autoreply-cond-val { width: 9; border: tall grey; }
     #autoreply-cond-val:focus { border: tall $accent; }
-    .form-label-pct { width: 12; padding-top: 1; }
     """
 
     def __init__(self, path: str, session_key: str = "", select_pattern: str = "") -> None:
@@ -2028,35 +1996,35 @@ class AutoreplyEditScreen(_EditListScreen):
 
     def compose(self) -> ComposeResult:
         """Build the autoreply editor layout."""
-        with Vertical(id="autoreply-panel"):
-            with Horizontal(id="autoreply-body"):
-                with Vertical(id="autoreply-button-col"):
+        with Vertical(id="autoreply-panel", classes="edit-panel"):
+            with Horizontal(id="autoreply-body", classes="edit-body"):
+                with Vertical(id="autoreply-button-col", classes="edit-button-col"):
                     yield Button("Add", variant="success", id="autoreply-add")
                     yield Button("Edit", variant="warning", id="autoreply-edit")
-                    yield Button("Copy", id="autoreply-copy")
+                    yield Button("Copy", id="autoreply-copy", classes="edit-copy")
                     yield Button("Delete", variant="error", id="autoreply-delete")
                     yield Button("Help", variant="success", id="autoreply-help")
                     yield Button("Save", variant="primary", id="autoreply-save")
                     yield Button("Cancel", id="autoreply-close")
-                with Vertical(id="autoreply-right"):
-                    yield Input(placeholder="Search autoreplies\u2026", id="autoreply-search")
-                    yield DataTable(id="autoreply-table")
-                    with Vertical(id="autoreply-form"):
+                with Vertical(id="autoreply-right", classes="edit-right"):
+                    yield Input(
+                        placeholder="Search autoreplies\u2026",
+                        id="autoreply-search",
+                        classes="edit-search",
+                    )
+                    yield DataTable(id="autoreply-table", classes="edit-table")
+                    with Vertical(id="autoreply-form", classes="edit-form"):
                         with Horizontal(classes="field-row"):
                             yield Label("Enabled:", classes="toggle-label")
                             yield Switch(value=True, id="autoreply-enabled")
                             yield Label("", classes="toggle-gap")
                             alw = Switch(value=False, id="autoreply-always")
-                            alw.tooltip = (
-                                "Match even while another rule's chain is active"
-                            )
+                            alw.tooltip = "Match even while another rule's chain is active"
                             yield Label("Always:", classes="toggle-label")
                             yield alw
                             yield Label("", classes="toggle-gap")
                             imm = Switch(value=False, id="autoreply-immediate")
-                            imm.tooltip = (
-                                "Reply immediately without waiting for prompt"
-                            )
+                            imm.tooltip = "Reply immediately without waiting for prompt"
                             yield Label("Immediate:", classes="toggle-label")
                             yield imm
                             yield Label("", classes="toggle-gap")
@@ -2066,91 +2034,52 @@ class AutoreplyEditScreen(_EditListScreen):
                             yield cs
                         with Horizontal(classes="field-row"):
                             yield Label("Pattern", classes="form-label-short")
-                            yield Input(
-                                placeholder="regex pattern",
-                                id="autoreply-pattern",
-                            )
+                            yield Input(placeholder="regex pattern", id="autoreply-pattern")
                         with Horizontal(classes="field-row"):
                             yield Label("Reply", classes="form-label-short")
                             yield Input(
-                                placeholder=r"reply with \1 refs, ;/: seps",
-                                id="autoreply-reply",
+                                placeholder=r"reply with \1 refs, ;/: seps", id="autoreply-reply"
                             )
                         with Horizontal(classes="field-row"):
                             yield Label("Condition", classes="form-label-short")
                             yield Select(
-                                [
-                                    ("(none)", ""),
-                                    ("HP%", "HP%"),
-                                    ("MP%", "MP%"),
-                                ],
+                                [("(none)", ""), ("HP%", "HP%"), ("MP%", "MP%")],
                                 value="",
                                 allow_blank=False,
                                 id="autoreply-cond-vital",
                             )
                             yield Select(
-                                [
-                                    (">", ">"),
-                                    ("<", "<"),
-                                    (">=", ">="),
-                                    ("<=", "<="),
-                                    ("=", "="),
-                                ],
+                                [(">", ">"), ("<", "<"), (">=", ">="), ("<=", "<="), ("=", "=")],
                                 value=">",
                                 allow_blank=False,
                                 id="autoreply-cond-op",
                             )
-                            yield Input(
-                                value="99",
-                                placeholder="99",
-                                id="autoreply-cond-val",
-                            )
+                            yield Input(value="99", placeholder="99", id="autoreply-cond-val")
                             yield Label("(as percent)", classes="form-label-pct")
                         with Horizontal(classes="field-row"):
+                            yield Button("When", id="autoreply-btn-when", classes="insert-btn")
+                            yield Button("Until", id="autoreply-btn-until", classes="insert-btn")
+                            yield Button("Delay", id="autoreply-btn-delay", classes="insert-btn")
                             yield Button(
-                                "When", id="autoreply-btn-when",
-                                classes="insert-btn",
+                                "Fast Travel", id="autoreply-fast-travel", classes="insert-btn"
                             )
                             yield Button(
-                                "Until", id="autoreply-btn-until",
-                                classes="insert-btn",
-                            )
-                            yield Button(
-                                "Delay", id="autoreply-btn-delay",
-                                classes="insert-btn",
-                            )
-                            yield Button(
-                                "Fast Travel",
-                                id="autoreply-fast-travel",
-                                classes="insert-btn",
-                            )
-                            yield Button(
-                                "Slow Travel",
-                                id="autoreply-slow-travel",
-                                classes="insert-btn",
+                                "Slow Travel", id="autoreply-slow-travel", classes="insert-btn"
                             )
                         with Horizontal(classes="field-row"):
                             yield Button(
-                                "Return Fast",
-                                id="autoreply-return-fast",
-                                classes="insert-btn",
+                                "Return Fast", id="autoreply-return-fast", classes="insert-btn"
                             )
                             yield Button(
-                                "Return Slow",
-                                id="autoreply-return-slow",
-                                classes="insert-btn",
+                                "Return Slow", id="autoreply-return-slow", classes="insert-btn"
                             )
                             yield Button(
-                                "Autodiscover",
-                                id="autoreply-autodiscover",
-                                classes="insert-btn",
+                                "Autodiscover", id="autoreply-autodiscover", classes="insert-btn"
                             )
                             yield Button(
-                                "Random Walk",
-                                id="autoreply-btn-randomwalk",
-                                classes="insert-btn",
+                                "Random Walk", id="autoreply-btn-randomwalk", classes="insert-btn"
                             )
-                        with Horizontal(id="autoreply-form-buttons"):
+                        with Horizontal(id="autoreply-form-buttons", classes="edit-form-buttons"):
                             yield Label(" ", classes="form-btn-spacer")
                             yield Button("Cancel", variant="default", id="autoreply-cancel-form")
                             yield Button("OK", variant="success", id="autoreply-ok")
@@ -2161,9 +2090,11 @@ class AutoreplyEditScreen(_EditListScreen):
         """Load autoreplies from file and populate table."""
         table = self.query_one("#autoreply-table", DataTable)
         table.cursor_type = "row"
+        term_w = self.app.size.width
+        col_w = max(15, 15 + (term_w - 80) // 2) if term_w > 80 else 15
         table.add_column("#", width=4, key="num")
-        table.add_column("Pattern", key="pattern")
-        table.add_column("Reply", key="reply")
+        table.add_column("Pattern", width=col_w, key="pattern")
+        table.add_column("Reply", width=col_w, key="reply")
         table.add_column("Flags", width=8, key="flags")
         table.add_column("Last", width=8, key="last")
         self._load_from_file()
@@ -2230,9 +2161,7 @@ class AutoreplyEditScreen(_EditListScreen):
                 flags = (flags + " W") if flags else "W"
             lf = _relative_time(rule.last_fired) if rule.last_fired else ""
             row_pos = len(self._filtered_indices) - 1
-            table.add_row(
-                str(i + 1), rule.pattern, rule.reply, flags.strip(), lf, key=str(row_pos)
-            )
+            table.add_row(str(i + 1), rule.pattern, rule.reply, flags.strip(), lf, key=str(row_pos))
         n_total = len(self._rules)
         n_shown = len(self._filtered_indices)
         label = self.query_one("#autoreply-count", Static)
@@ -2319,14 +2248,7 @@ class AutoreplyEditScreen(_EditListScreen):
                 return
         lf = self._rules[self._editing_idx].last_fired if self._editing_idx is not None else ""
         entry = _AutoreplyTuple(
-            pattern_val,
-            reply_val,
-            always,
-            enabled,
-            when,
-            immediate,
-            lf,
-            case_sensitive,
+            pattern_val, reply_val, always, enabled, when, immediate, lf, case_sensitive
         )
         self._finalize_edit(entry, bool(pattern_val))
 
@@ -2365,10 +2287,7 @@ class AutoreplyEditScreen(_EditListScreen):
             self._insert_command(cmd)
 
         self.app.push_screen(
-            RoomPickerScreen(
-                rooms_path=rooms_file,
-                session_key=self._session_key,
-            ),
+            RoomPickerScreen(rooms_path=rooms_file, session_key=self._session_key),
             callback=_on_pick,
         )
 
@@ -2415,34 +2334,12 @@ class HighlightEditScreen(_EditListScreen):
     _growable_keys: list[str] = ["pattern"]
 
     CSS = """
-    HighlightEditScreen { align: center middle; }
-    #highlight-panel {
-        width: 100%; height: 100%;
-        border: round $surface-lighten-2; background: $surface; padding: 1 1;
-    }
-    #highlight-body { height: 1fr; }
-    #highlight-button-col {
-        width: 11; height: auto; padding-right: 1;
-    }
-    #highlight-button-col Button {
-        width: 100%; min-width: 0; margin-bottom: 0;
-    }
-    #highlight-copy { background: #6670a0; color: #e8ecf8; }
-    #highlight-copy:hover { background: #8088b8; }
-    #highlight-right { width: 1fr; height: 100%; }
-    #highlight-search { height: auto; }
-    #highlight-table { height: 1fr; min-height: 4; overflow-x: hidden; }
-    #highlight-form { height: 1fr; padding: 0 0 0 4; }
-    #highlight-form .field-row { height: 3; margin: 0; }
-    #highlight-form Input { width: 1fr; border: tall grey; }
-    #highlight-form Input:focus { border: tall $accent; }
-    #highlight-form-buttons { height: 3; align-horizontal: right; }
-    #highlight-form-buttons Button { width: auto; min-width: 10; margin-left: 1; }
-    #highlight-form .form-label { width: 12; padding-top: 1; }
-    #highlight-form .form-label-short { width: 9; padding-top: 1; }
+    #highlight-form { padding: 0 0 0 4; }
+    #highlight-form .form-label { width: 12; }
     """
 
     def __init__(self, path: str, session_key: str = "") -> None:
+        """Initialize highlight editor for *path*."""
         super().__init__()
         self._path = path
         self._session_key = session_key
@@ -2466,30 +2363,31 @@ class HighlightEditScreen(_EditListScreen):
         return ""
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="highlight-panel"):
-            with Horizontal(id="highlight-body"):
-                with Vertical(id="highlight-button-col"):
+        """Build the highlight editor widget tree."""
+        with Vertical(id="highlight-panel", classes="edit-panel"):
+            with Horizontal(id="highlight-body", classes="edit-body"):
+                with Vertical(id="highlight-button-col", classes="edit-button-col"):
                     yield Button("Add", variant="success", id="highlight-add")
                     yield Button("Edit", variant="warning", id="highlight-edit")
-                    yield Button("Copy", id="highlight-copy")
+                    yield Button("Copy", id="highlight-copy", classes="edit-copy")
                     yield Button("Delete", variant="error", id="highlight-delete")
                     yield Button("Help", variant="success", id="highlight-help")
                     yield Button("Save", variant="primary", id="highlight-save")
                     yield Button("Cancel", id="highlight-close")
-                with Vertical(id="highlight-right"):
+                with Vertical(id="highlight-right", classes="edit-right"):
                     yield Input(
-                        placeholder="Search highlights\u2026", id="highlight-search"
+                        placeholder="Search highlights\u2026",
+                        id="highlight-search",
+                        classes="edit-search",
                     )
-                    yield DataTable(id="highlight-table")
-                    with Vertical(id="highlight-form"):
+                    yield DataTable(id="highlight-table", classes="edit-table")
+                    with Vertical(id="highlight-form", classes="edit-form"):
                         with Horizontal(classes="field-row"):
                             yield Label("Enabled:", classes="toggle-label")
                             yield Switch(value=True, id="highlight-enabled")
                             yield Label("", classes="toggle-gap")
                             sm = Switch(value=False, id="highlight-stop-movement")
-                            sm.tooltip = (
-                                "Cancel autodiscover/randomwalk when matched"
-                            )
+                            sm.tooltip = "Cancel autodiscover/randomwalk when matched"
                             yield Label("Stop:", classes="toggle-label")
                             yield sm
                             yield Label("", classes="toggle-gap")
@@ -2499,30 +2397,27 @@ class HighlightEditScreen(_EditListScreen):
                             yield cs
                         with Horizontal(classes="field-row"):
                             yield Label("Pattern", classes="form-label-short")
-                            yield Input(
-                                placeholder="regex pattern",
-                                id="highlight-pattern",
-                            )
+                            yield Input(placeholder="regex pattern", id="highlight-pattern")
                         with Horizontal(classes="field-row"):
                             yield Label("Highlight", classes="form-label-short")
                             yield Input(
-                                placeholder="eg. blink_black_on_yellow",
-                                id="highlight-style",
+                                placeholder="eg. blink_black_on_yellow", id="highlight-style"
                             )
-                        with Horizontal(id="highlight-form-buttons"):
+                        with Horizontal(id="highlight-form-buttons", classes="edit-form-buttons"):
                             yield Label(" ", classes="form-btn-spacer")
-                            yield Button(
-                                "Cancel", variant="default", id="highlight-cancel-form"
-                            )
+                            yield Button("Cancel", variant="default", id="highlight-cancel-form")
                             yield Button("OK", variant="success", id="highlight-ok")
                     yield Static("", id="highlight-count")
         yield Footer()
 
     def on_mount(self) -> None:
+        """Configure highlight table columns and load rules from file."""
         table = self.query_one("#highlight-table", DataTable)
         table.cursor_type = "row"
+        term_w = os.get_terminal_size(fallback=(80, 24)).columns
+        pat_w = max(15, 15 + (term_w - 80))
         table.add_column("#", width=4, key="num")
-        table.add_column("Pattern", key="pattern")
+        table.add_column("Pattern", width=pat_w, key="pattern")
         table.add_column("Highlight", width=24, key="highlight")
         table.add_column("Flags", width=6, key="flags")
         self._load_from_file()
@@ -2592,9 +2487,7 @@ class HighlightEditScreen(_EditListScreen):
             if rule.case_sensitive:
                 flags = (flags + " CS") if flags else "CS"
             row_pos = len(self._filtered_indices) - 1
-            table.add_row(
-                str(i + 1), rule.pattern, rule.highlight, flags.strip(), key=str(row_pos)
-            )
+            table.add_row(str(i + 1), rule.pattern, rule.highlight, flags.strip(), key=str(row_pos))
         n_total = len(self._rules)
         n_shown = len(self._filtered_indices)
         label = self.query_one("#highlight-count", Static)
@@ -2653,33 +2546,29 @@ class HighlightEditScreen(_EditListScreen):
                     and not existing.builtin
                     and existing.pattern == pattern_val
                 ):
-                    self.notify(
-                        f"Duplicate pattern: {pattern_val!r}", severity="error",
-                    )
+                    self.notify(f"Duplicate pattern: {pattern_val!r}", severity="error")
                     return
         if highlight_val:
-            from .highlighter import validate_highlight
             from .client_repl import _get_term
+            from .highlighter import validate_highlight
 
             try:
                 term = _get_term()
             except ImportError:
                 term = None
             if term is not None and not validate_highlight(term, highlight_val):
-                self.notify(
-                    f"Invalid highlight style: {highlight_val!r}", severity="error"
-                )
+                self.notify(f"Invalid highlight style: {highlight_val!r}", severity="error")
                 return
         builtin = False
         if self._editing_idx is not None:
             builtin = self._rules[self._editing_idx].builtin
         entry = _HighlightTuple(
-            pattern_val, highlight_val, enabled, stop_movement, builtin,
-            case_sensitive,
+            pattern_val, highlight_val, enabled, stop_movement, builtin, case_sensitive
         )
         self._finalize_edit(entry, bool(pattern_val and highlight_val))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button presses for add, edit, delete, save, and cancel."""
         btn = event.button.id or ""
         if btn == "highlight-delete":
             idx = self._selected_idx()
@@ -2712,7 +2601,8 @@ class HighlightEditScreen(_EditListScreen):
         save_highlights(self._path, rules, self._session_key)
 
 
-_NAME_COL = 35
+_NAME_COL_BASE = 35
+_ID_COL_BASE = 10
 
 # Colors for room tree decorations.
 _BOOKMARK_STYLE = "#ffffff"
@@ -2771,7 +2661,8 @@ class _RoomTree(Tree[str]):
 
 
 def _invert_ts(iso_str: str) -> str:
-    """Return a sort key that orders ISO timestamps most-recent-first.
+    """
+    Return a sort key that orders ISO timestamps most-recent-first.
 
     Empty strings sort last (after any real timestamp).
     """
@@ -2849,21 +2740,21 @@ class RoomBrowserScreen(Screen["bool | None"]):
         self._session_key = session_key
         self._current_room_file = current_room_file
         self._fasttravel_file = fasttravel_file
-        self._all_rooms: list[
-            tuple[str, str, str, int, bool, str, bool, bool, bool]
-        ] = []
+        self._all_rooms: list[tuple[str, str, str, int, bool, str, bool, bool, bool]] = []
         self._current_area: str = ""
         self._graph: "RoomStore | None" = None
         self._mounted = False
         self._sort_mode: str = "name"
         self._distances: dict[str, int] = {}
         self._last_visited: dict[str, str] = {}
+        self._name_col: int = _NAME_COL_BASE
+        self._id_width: int = _ID_COL_BASE + 20
 
     def _heading_text(self) -> str:
         """Return the column heading string for the tree."""
         info_label = "[Last]" if self._sort_mode == "last_visited" else "[Dist]"
-        # 4 chars icon+arrow prefix, then name col, count, info, id
-        return f"      {'Name'.ljust(_NAME_COL)} {'(N)'.rjust(4)} {info_label.rjust(8)}  #ID"
+        nc = self._name_col
+        return f"      {'Name'.ljust(nc)} {'(N)'.rjust(4)} {info_label.rjust(8)}  #ID"
 
     def compose(self) -> ComposeResult:
         """Build the room browser layout."""
@@ -2888,35 +2779,25 @@ class RoomBrowserScreen(Screen["bool | None"]):
                         yield Static("", id="room-total")
                 with Vertical(id="room-right"):
                     yield Input(placeholder="Search rooms\u2026", id="room-search")
-                    yield Static(
-                        self._heading_text(), id="room-heading"
-                    )
+                    yield Static(self._heading_text(), id="room-heading")
                     yield _RoomTree("Rooms", id="room-tree")
                     with Horizontal(id="room-status"):
                         yield Static("", id="room-count")
                         yield Static("", id="room-exits")
                         yield Static("", id="room-distance")
                     with Horizontal(id="room-marker-bar"):
-                        yield Button(
-                            "Bookmark \u257e", variant="warning",
-                            id="room-bookmark",
-                        )
-                        yield Button(
-                            "Block \u2300", variant="error",
-                            id="room-block",
-                        )
-                        yield Button(
-                            "Home \u2302", variant="primary",
-                            id="room-home",
-                        )
-                        yield Button(
-                            "Mark \u27bd", variant="default",
-                            id="room-mark",
-                        )
+                        yield Button("Bookmark \u257e", variant="warning", id="room-bookmark")
+                        yield Button("Block \u2300", variant="error", id="room-block")
+                        yield Button("Home \u2302", variant="primary", id="room-home")
+                        yield Button("Mark \u27bd", variant="default", id="room-mark")
         yield Footer()
 
     def on_mount(self) -> None:
         """Load rooms from file and populate tree."""
+        term_w = self.app.size.width
+        extra = max(0, term_w - 80)
+        self._name_col = _NAME_COL_BASE + extra
+        self._id_width = _ID_COL_BASE + 20
         tree = self.query_one("#room-tree", Tree)
         tree.show_root = False
         tree.guide_depth = 3
@@ -2965,9 +2846,7 @@ class RoomBrowserScreen(Screen["bool | None"]):
         graph = RoomStore(self._rooms_path, read_only=True)
         self._graph = graph
         self._all_rooms = graph.room_summaries()
-        self._last_visited = {
-            num: lv for num, _, _, _, _, lv, _, _, _ in self._all_rooms if lv
-        }
+        self._last_visited = {num: lv for num, _, _, _, _, lv, _, _, _ in self._all_rooms if lv}
         if self._current_room_file:
             current = read_current_room(self._current_room_file)
             if current:
@@ -3017,19 +2896,15 @@ class RoomBrowserScreen(Screen["bool | None"]):
                 )
             )
         elif self._sort_mode == "last_visited":
-            self._all_rooms.sort(
-                key=lambda r: (*self._priority(r), _invert_ts(r[5]), r[1].lower())
-            )
+            self._all_rooms.sort(key=lambda r: (*self._priority(r), _invert_ts(r[5]), r[1].lower()))
         elif self._sort_mode == "id":
             self._all_rooms.sort(key=lambda r: (*self._priority(r), r[0].lower()))
         else:
-            self._all_rooms.sort(
-                key=lambda r: (*self._priority(r), r[2].lower(), r[1].lower())
-            )
+            self._all_rooms.sort(key=lambda r: (*self._priority(r), r[2].lower(), r[1].lower()))
 
-    @staticmethod
-    def _short_id(num: str, width: int = 10) -> str:
-        """Truncate room ID to *width* characters with ellipsis."""
+    def _short_id(self, num: str) -> str:
+        """Truncate room ID to the configured width with ellipsis."""
+        width = self._id_width
         if len(num) <= width:
             return num
         return num[: width - 1] + "\u2026"
@@ -3045,11 +2920,12 @@ class RoomBrowserScreen(Screen["bool | None"]):
             dist = self._distances.get(num)
             info_part = f"[{dist}]".rjust(5) if dist is not None else "     "
         id_part = f" #{self._short_id(num)}"
-        return RichText(f"{''.ljust(_NAME_COL)} {''.rjust(4)} {info_part}{id_part}")
+        return RichText(f"{''.ljust(self._name_col)} {''.rjust(4)} {info_part}{id_part}")
 
     def _refresh_tree(self, query: str = "") -> None:
         """Rebuild tree nodes, grouping rooms with the same name."""
         from rich.text import Text as RichText
+
         from telnetlib3.rooms import strip_exit_dirs
 
         tree = self.query_one("#room-tree", Tree)
@@ -3073,18 +2949,10 @@ class RoomBrowserScreen(Screen["bool | None"]):
 
         # Populate icon sets for the _RoomTree prefix renderer.
         if isinstance(tree, _RoomTree):
-            tree._bookmarked = {
-                num for num, _, _, _, bm, _, _, _, _ in self._all_rooms if bm
-            }
-            tree._blocked = {
-                num for num, _, _, _, _, _, bl, _, _ in self._all_rooms if bl
-            }
-            tree._home = {
-                num for num, _, _, _, _, _, _, hm, _ in self._all_rooms if hm
-            }
-            tree._marked = {
-                num for num, _, _, _, _, _, _, _, mk in self._all_rooms if mk
-            }
+            tree._bookmarked = {num for num, _, _, _, bm, _, _, _, _ in self._all_rooms if bm}
+            tree._blocked = {num for num, _, _, _, _, _, bl, _, _ in self._all_rooms if bl}
+            tree._home = {num for num, _, _, _, _, _, _, hm, _ in self._all_rooms if hm}
+            tree._marked = {num for num, _, _, _, _, _, _, _, mk in self._all_rooms if mk}
 
         n_shown = 0
         with self.app.batch_update():
@@ -3094,7 +2962,7 @@ class RoomBrowserScreen(Screen["bool | None"]):
                 show_time = self._sort_mode == "last_visited"
                 if len(members) == 1:
                     num, _area, _exits, bookmarked, lv = members[0]
-                    name_part = name.ljust(_NAME_COL)[:_NAME_COL]
+                    name_part = name.ljust(self._name_col)[:self._name_col]
                     count_part = "(1)".rjust(4)
                     if show_time:
                         info_part = _relative_time(lv).rjust(8) if lv else "".rjust(8)
@@ -3105,12 +2973,10 @@ class RoomBrowserScreen(Screen["bool | None"]):
                     label = f"{name_part} {count_part} {info_part}{id_part}"
                     tree.root.add_leaf(RichText(label), data=num)
                 else:
-                    name_part = name.ljust(_NAME_COL)[:_NAME_COL]
+                    name_part = name.ljust(self._name_col)[:self._name_col]
                     count_part = f"({len(members)})".rjust(4)
                     if show_time:
-                        newest = max(
-                            (m[4] for m in members if m[4]), default=""
-                        )
+                        newest = max((m[4] for m in members if m[4]), default="")
                         info_part = _relative_time(newest).rjust(8) if newest else "".rjust(8)
                     else:
                         nearest = min(
@@ -3118,9 +2984,7 @@ class RoomBrowserScreen(Screen["bool | None"]):
                             default=float("inf"),
                         )
                         info_part = (
-                            f"[{int(nearest)}]".rjust(5)
-                            if nearest != float("inf")
-                            else "     "
+                            f"[{int(nearest)}]".rjust(5) if nearest != float("inf") else "     "
                         )
                     label = f"{name_part} {count_part} {info_part}"
                     parent = tree.root.add(RichText(label), data=None)
@@ -3176,6 +3040,14 @@ class RoomBrowserScreen(Screen["bool | None"]):
             parts.append(f"{direction}[{name}]")
         return "Exits: " + ", ".join(parts)
 
+    def _set_travel_buttons_disabled(self, disabled: bool) -> None:
+        """Enable or disable the Travel and Slow travel buttons."""
+        try:
+            self.query_one("#room-travel", Button).disabled = disabled
+            self.query_one("#room-slow-travel", Button).disabled = disabled
+        except NoMatches:
+            pass
+
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted[str]) -> None:
         """Update distance and exits labels when tree cursor moves."""
         dist_label = self.query_one("#room-distance", Static)
@@ -3189,26 +3061,32 @@ class RoomBrowserScreen(Screen["bool | None"]):
         if room_num is None:
             dist_label.update("")
             exits_label.update("")
+            self._set_travel_buttons_disabled(True)
             return
         exits_label.update(self._exits_text(room_num))
         if not self._current_room_file or self._graph is None:
             dist_label.update("")
+            self._set_travel_buttons_disabled(True)
             return
         from telnetlib3.rooms import read_current_room
 
         current = read_current_room(self._current_room_file)
         if not current:
             dist_label.update("")
+            self._set_travel_buttons_disabled(True)
             return
         if current == room_num:
             dist_label.update("Distance: 0 turns")
+            self._set_travel_buttons_disabled(False)
             return
         path = self._graph.find_path(current, room_num)
         if path is None:
             dist_label.update("Distance: \u2014")
+            self._set_travel_buttons_disabled(True)
         else:
             n = len(path)
             dist_label.update(f"Distance: {n} turn{'s' if n != 1 else ''}")
+            self._set_travel_buttons_disabled(False)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
@@ -3473,9 +3351,7 @@ class RoomPickerScreen(RoomBrowserScreen):
 class _EditorApp(App[None]):
     """Minimal Textual app for standalone macro/autoreply editing."""
 
-    def __init__(
-        self, screen: Screen["bool | None"], session_key: str = ""
-    ) -> None:
+    def __init__(self, screen: Screen["bool | None"], session_key: str = "") -> None:
         """Initialize with the editor screen to push."""
         super().__init__()
         self._editor_screen = screen
@@ -3506,23 +3382,28 @@ class _EditorApp(App[None]):
             getattr(driver, "_mouse_pixels", "?"),
             getattr(driver, "_in_band_window_resize", "?"),
         )
-        if self._session_key:
-            from .rooms import load_prefs
+        from .rooms import load_prefs
 
+        saved_theme = ""
+        if self._session_key:
             prefs = load_prefs(self._session_key)
-            saved_theme = prefs.get("tui_theme")
-            if isinstance(saved_theme, str) and saved_theme:
-                self.theme = saved_theme
+            saved_theme = prefs.get("tui_theme", "")
+        if not saved_theme:
+            saved_theme = load_prefs(DEFAULTS_KEY).get("tui_theme", "")
+        if isinstance(saved_theme, str) and saved_theme:
+            self.theme = saved_theme
         self.push_screen(self._editor_screen, callback=lambda _: self.exit())
 
     def watch_theme(self, old: str, new: str) -> None:
-        """Persist theme choice to per-session preferences."""
-        if self._session_key and new:
-            from .rooms import load_prefs, save_prefs
+        """Persist theme choice to per-session and global preferences."""
+        if not new:
+            return
+        from .rooms import load_prefs, save_prefs
 
-            prefs = load_prefs(self._session_key)
-            prefs["tui_theme"] = new
-            save_prefs(self._session_key, prefs)
+        save_key = self._session_key or DEFAULTS_KEY
+        prefs = load_prefs(save_key)
+        prefs["tui_theme"] = new
+        save_prefs(save_key, prefs)
 
 
 def _patch_writer_thread_queue() -> None:
@@ -3646,24 +3527,19 @@ def edit_autoreplies_main(
     _log_child_diagnostics()
     _patch_writer_thread_queue()
     app = _EditorApp(
-        AutoreplyEditScreen(
-            path=path, session_key=session_key, select_pattern=select_pattern
-        ),
+        AutoreplyEditScreen(path=path, session_key=session_key, select_pattern=select_pattern),
         session_key=session_key,
     )
     app.run()
 
 
-def edit_highlights_main(
-    path: str, session_key: str = "", logfile: str = ""
-) -> None:
+def edit_highlights_main(path: str, session_key: str = "", logfile: str = "") -> None:
     """Launch standalone highlight editor TUI."""
     _restore_blocking_fds(logfile)
     _log_child_diagnostics()
     _patch_writer_thread_queue()
     app = _EditorApp(
-        HighlightEditScreen(path=path, session_key=session_key),
-        session_key=session_key,
+        HighlightEditScreen(path=path, session_key=session_key), session_key=session_key
     )
     app.run()
 
@@ -3732,10 +3608,9 @@ class _ChatViewerScreen(Screen[None]):
     Footer FooterLabel { margin: 0; }
     """
 
-    def __init__(
-        self, chat_file: str, session_key: str = "", initial_channel: str = ""
-    ) -> None:
-        """Initialize with path to chat history file.
+    def __init__(self, chat_file: str, session_key: str = "", initial_channel: str = "") -> None:
+        """
+        Initialize with path to chat history file.
 
         :param chat_file: Path to the chat JSON file.
         :param session_key: Session identifier.
@@ -3797,20 +3672,20 @@ class _ChatViewerScreen(Screen[None]):
         from rich.text import Text as RichText
 
         labels = self._channel_labels()
-        bar = RichText("Channel (TAB changes): ")
+        channel_bar = RichText("Channel (TAB changes): ")
         for i, name in enumerate(labels):
             if i > 0:
-                bar.append("  ")
+                channel_bar.append("  ")
             if i == self._filter_idx:
-                bar.append(f" {name} ", style="reverse bold")
+                channel_bar.append(f" {name} ", style="reverse bold")
             else:
-                bar.append(name, style="dim")
-        self.query_one("#chat-channel-bar", Static).update(bar)
+                channel_bar.append(name, style="dim")
+        self.query_one("#chat-channel-bar", Static).update(channel_bar)
 
     def _populate_log(self, channel_filter: str = "") -> None:
         """Fill the RichLog with chat messages, optionally filtered by channel."""
-        from textual.widgets import RichLog
         from rich.text import Text as RichText
+        from textual.widgets import RichLog
 
         if not channel_filter:
             channel_filter = self._active_filter()
@@ -3827,7 +3702,7 @@ class _ChatViewerScreen(Screen[None]):
             if talker:
                 for prefix in (f"{talker} : ", f"{talker}: ", f"{talker} "):
                     if body.startswith(prefix):
-                        body = body[len(prefix):]
+                        body = body[len(prefix) :]
                         break
             line = RichText()
             if ts:
@@ -3877,10 +3752,7 @@ class _ChatViewerScreen(Screen[None]):
 
 
 def chat_viewer_main(
-    chat_file: str,
-    session_key: str = "",
-    initial_channel: str = "",
-    logfile: str = "",
+    chat_file: str, session_key: str = "", initial_channel: str = "", logfile: str = ""
 ) -> None:
     """Launch standalone chat viewer TUI."""
     _restore_blocking_fds(logfile)
@@ -3888,9 +3760,7 @@ def chat_viewer_main(
     _patch_writer_thread_queue()
     app = _EditorApp(
         _ChatViewerScreen(
-            chat_file=chat_file,
-            session_key=session_key,
-            initial_channel=initial_channel,
+            chat_file=chat_file, session_key=session_key, initial_channel=initial_channel
         ),
         session_key=session_key,
     )
@@ -3943,6 +3813,7 @@ class _ConfirmDialogScreen(Screen[bool]):
         body: str,
         warning: str = "",
         result_file: str = "",
+        show_dont_ask: bool = True,
     ) -> None:
         """Initialize confirm dialog with title, body, and optional warning."""
         super().__init__()
@@ -3950,6 +3821,7 @@ class _ConfirmDialogScreen(Screen[bool]):
         self._body = body
         self._warning = warning
         self._result_file = result_file
+        self._show_dont_ask = show_dont_ask
 
     def compose(self) -> ComposeResult:
         """Build the confirm dialog layout."""
@@ -4025,20 +3897,24 @@ class _RandomwalkDialogScreen(Screen[bool]):
     #rw-body {
         margin-bottom: 1;
     }
-    #rw-field-row {
+    #rw-options-row {
+        height: 3;
+        margin-bottom: 1;
+    }
+    .rw-option {
+        width: 1fr;
         height: 3;
     }
-    #rw-field-row Label {
+    .rw-option Label {
         padding-top: 1;
         width: auto;
         margin-right: 1;
     }
-    #rw-field-row Input {
+    .rw-option Input {
         width: 8;
     }
-    #rw-checkboxes {
-        height: auto;
-        margin-bottom: 1;
+    .rw-option Switch {
+        width: auto;
     }
     #rw-error {
         color: $error;
@@ -4059,10 +3935,14 @@ class _RandomwalkDialogScreen(Screen[bool]):
         self,
         result_file: str = "",
         default_visit_level: int = 2,
+        default_auto_search: bool = False,
+        default_auto_evaluate: bool = False,
     ) -> None:
         super().__init__()
         self._result_file = result_file
         self._default_visit_level = default_visit_level
+        self._default_auto_search = default_auto_search
+        self._default_auto_evaluate = default_auto_evaluate
 
     def compose(self) -> ComposeResult:
         with Vertical(id="rw-dialog"):
@@ -4075,24 +3955,34 @@ class _RandomwalkDialogScreen(Screen[bool]):
                 "required number of times.",
                 id="rw-body",
             )
-            with Horizontal(id="rw-field-row"):
-                lbl = Label("Visit level:")
-                lbl.tooltip = (
-                    "Minimum number of times each reachable room must be "
-                    "visited before the walk stops."
-                )
-                yield lbl
-                yield Input(
-                    value=str(self._default_visit_level),
-                    id="rw-visit-level",
-                    type="integer",
-                )
+            with Horizontal(id="rw-options-row"):
+                with Horizontal(classes="rw-option"):
+                    lbl = Label("Visit level:")
+                    lbl.tooltip = (
+                        "Minimum number of times each reachable room must be "
+                        "visited before the walk stops."
+                    )
+                    yield lbl
+                    yield Input(
+                        value=str(self._default_visit_level),
+                        id="rw-visit-level",
+                        type="integer",
+                    )
+                with Horizontal(classes="rw-option"):
+                    yield Label("Auto search:")
+                    yield Switch(value=self._default_auto_search, id="rw-auto-search")
+                with Horizontal(classes="rw-option"):
+                    yield Label("Auto evaluate:")
+                    yield Switch(
+                        value=self._default_auto_evaluate, id="rw-auto-evaluate"
+                    )
             yield Static("", id="rw-error")
             with Horizontal(id="rw-buttons"):
                 yield Button("Cancel", variant="default", id="rw-cancel")
                 yield Button("OK", variant="success", id="rw-ok")
 
     def on_mount(self) -> None:
+        """Focus the OK button on mount."""
         self.query_one("#rw-ok", Button).focus()
 
     def _validate_and_dismiss(self) -> None:
@@ -4103,31 +3993,57 @@ class _RandomwalkDialogScreen(Screen[bool]):
             self.query_one("#rw-error", Static).update("Visit level must be a number.")
             return
         if level < 1:
-            self.query_one("#rw-error", Static).update(
-                "Visit level must be at least 1."
-            )
+            self.query_one("#rw-error", Static).update("Visit level must be at least 1.")
             return
-        self._write_result(True, level)
+        auto_search = self.query_one("#rw-auto-search", Switch).value
+        auto_evaluate = self.query_one("#rw-auto-evaluate", Switch).value
+        self._write_result(True, level, auto_search, auto_evaluate)
         self.dismiss(True)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle OK and Cancel button presses."""
         if event.button.id == "rw-ok":
             self._validate_and_dismiss()
         elif event.button.id == "rw-cancel":
-            self._write_result(False, self._default_visit_level)
+            self._write_result(
+                False,
+                self._default_visit_level,
+                self._default_auto_search,
+                self._default_auto_evaluate,
+            )
             self.dismiss(False)
 
     def action_cancel(self) -> None:
-        self._write_result(False, self._default_visit_level)
+        """Cancel the dialog and write default values."""
+        self._write_result(
+            False, self._default_visit_level, self._default_auto_search, self._default_auto_evaluate
+        )
         self.dismiss(False)
 
-    def _write_result(self, confirmed: bool, visit_level: int) -> None:
+    def _write_result(
+        self,
+        confirmed: bool,
+        visit_level: int,
+        auto_search: bool = False,
+        auto_evaluate: bool = False,
+    ) -> None:
         if not self._result_file:
             return
-        result = json.dumps({
-            "confirmed": confirmed,
-            "visit_level": visit_level,
-        })
+        cmd = f"`randomwalk 999 {visit_level}"
+        if auto_search:
+            cmd += " autosearch"
+        if auto_evaluate:
+            cmd += " autoevaluate"
+        cmd += "`"
+        result = json.dumps(
+            {
+                "confirmed": confirmed,
+                "visit_level": visit_level,
+                "auto_search": auto_search,
+                "auto_evaluate": auto_evaluate,
+                "command": cmd,
+            }
+        )
         with open(self._result_file, "w", encoding="utf-8") as f:
             f.write(result)
 
@@ -4135,6 +4051,8 @@ class _RandomwalkDialogScreen(Screen[bool]):
 def randomwalk_dialog_main(
     result_file: str = "",
     default_visit_level: str = "2",
+    default_auto_search: str = "0",
+    default_auto_evaluate: str = "0",
     logfile: str = "",
 ) -> None:
     """Launch standalone random walk dialog TUI."""
@@ -4144,6 +4062,8 @@ def randomwalk_dialog_main(
     screen = _RandomwalkDialogScreen(
         result_file=result_file,
         default_visit_level=int(default_visit_level),
+        default_auto_search=default_auto_search == "1",
+        default_auto_evaluate=default_auto_evaluate == "1",
     )
     app = _EditorApp(screen)
     app.run()
@@ -4153,14 +4073,28 @@ class TelnetSessionApp(App[None]):
     """Textual TUI for managing telnetlib3 client sessions."""
 
     TITLE = "telnetlib3 Session Manager"
-    ENABLE_COMMAND_PALETTE = False
 
     def _set_pointer_shape(self, shape: str) -> None:
         """Disable pointer shape changes to prevent WriterThread deadlock."""
 
     def on_mount(self) -> None:
         """Push the session list screen on startup."""
+        from .rooms import load_prefs
+
+        prefs = load_prefs(DEFAULTS_KEY)
+        saved_theme = prefs.get("tui_theme")
+        if isinstance(saved_theme, str) and saved_theme:
+            self.theme = saved_theme
         self.push_screen(SessionListScreen())
+
+    def watch_theme(self, old: str, new: str) -> None:
+        """Persist theme choice to global preferences."""
+        if new:
+            from .rooms import load_prefs, save_prefs
+
+            prefs = load_prefs(DEFAULTS_KEY)
+            prefs["tui_theme"] = new
+            save_prefs(DEFAULTS_KEY, prefs)
 
 
 def tui_main() -> None:

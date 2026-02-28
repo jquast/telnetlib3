@@ -1,10 +1,13 @@
 """
 Fingerprint shell for telnet server identification.
 
-This module probes remote telnet servers for protocol capabilities,
-collects banner data and session information, and saves fingerprint
-files.  It mirrors :mod:`telnetlib3.fingerprinting` but operates as
-a client connecting *to* a server.
+This module runs **client-side**: it connects *to* a remote telnet server and
+probes it for protocol capabilities, collects banner data and session
+information, and saves fingerprint files.  Despite the ``server_`` prefix in
+the module name, it fingerprints the remote *server*, not the local client.
+
+It mirrors :mod:`telnetlib3.fingerprinting` (which fingerprints clients from
+the server side).
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ from wcwidth.escape_sequences import ZERO_WIDTH_PATTERN as _ZERO_WIDTH_STR_PATTE
 
 # local
 from . import fingerprinting as _fps
+from ._paths import _atomic_json_write
 from .telopt import (
     VAR,
     MSSP,
@@ -50,7 +54,6 @@ from .fingerprinting import (
     QUICK_PROBE_OPTIONS,
     _hash_fingerprint,
     _opt_byte_to_name,
-    _atomic_json_write,
     _save_fingerprint_name,
     _save_fingerprint_to_dir,
     probe_client_capabilities,
@@ -600,7 +603,7 @@ async def _fingerprint_session(
             _save_fingerprint_name(protocol_hash, set_name)
             logger.info("set name %r for %s", set_name, protocol_hash)
         except ValueError:
-            logger.warning("--set-name requires --data-dir" " or $TELNETLIB3_DATA_DIR")
+            logger.warning("--set-name requires --data-dir or $TELNETLIB3_DATA_DIR")
 
     # 10. Display
     if not silent:

@@ -10,12 +10,7 @@ import pytest
 import telnetlib3
 import telnetlib3.stream_writer
 from telnetlib3.telopt import IS, SB, SE, IAC, WILL, TTYPE
-from telnetlib3.tests.accessories import (
-    bind_host,
-    create_server,
-    unused_tcp_port,
-    asyncio_connection,
-)
+from telnetlib3.tests.accessories import create_server, asyncio_connection
 
 
 async def test_telnet_server_on_ttype(bind_host, unused_tcp_port):

@@ -158,7 +158,66 @@ async def asyncio_server(protocol_factory, host, port):
         await server.wait_closed()
 
 
+class MockTransport:
+    """Mock transport for unit tests that records written bytes."""
+
+    def __init__(self) -> None:
+        """Initialize mock transport with empty write buffer."""
+        self._closing = False
+        self.writes: list[bytes] = []
+        self.extra: dict[str, object] = {}
+
+    def write(self, data: bytes) -> None:
+        """Record *data* to the write buffer."""
+        self.writes.append(bytes(data))
+
+    def is_closing(self) -> bool:
+        """Return whether :meth:`close` has been called."""
+        return self._closing
+
+    def get_extra_info(self, name: str, default: object = None) -> object:
+        """Return extra info by *name*, or *default*."""
+        return self.extra.get(name, default)
+
+    def get_write_buffer_size(self) -> int:
+        """Return 0 (no buffering)."""
+        return 0
+
+    def pause_reading(self) -> None:
+        """No-op."""
+
+    def resume_reading(self) -> None:
+        """No-op."""
+
+    def close(self) -> None:
+        """Mark transport as closing."""
+        self._closing = True
+
+
+class MockProtocol:
+    """Mock protocol for unit tests with drain helper and extra info."""
+
+    def __init__(self, info: dict[str, object] | None = None) -> None:
+        """Initialize mock protocol with optional extra *info*."""
+        self.info: dict[str, object] = info or {}
+        self.drain_called = False
+        self.conn_lost_called = False
+
+    def get_extra_info(self, name: str, default: object = None) -> object:
+        """Return extra info by *name*, or *default*."""
+        return self.info.get(name, default)
+
+    async def _drain_helper(self) -> None:
+        self.drain_called = True
+
+    def connection_lost(self, exc: BaseException | None) -> None:
+        """Record that connection_lost was called."""
+        self.conn_lost_called = True
+
+
 __all__ = (
+    "MockProtocol",
+    "MockTransport",
     "asyncio_connection",
     "asyncio_server",
     "bind_host",

@@ -13,31 +13,12 @@ import telnetlib3.stream_writer
 from telnetlib3.telopt import DO, SB, SE, IAC, WILL, WONT, TTYPE, CHARSET, REQUEST, ACCEPTED
 from telnetlib3.stream_writer import TelnetWriter
 from telnetlib3.tests.accessories import (
-    bind_host,
+    MockTransport,
     create_server,
     asyncio_server,
     open_connection,
-    unused_tcp_port,
     asyncio_connection,
 )
-
-
-class MockTransport:
-    def __init__(self):
-        self.writes = []
-        self._closing = False
-
-    def write(self, data):
-        self.writes.append(bytes(data))
-
-    def is_closing(self):
-        return self._closing
-
-    def close(self):
-        self._closing = True
-
-    def get_extra_info(self, name, default=None):
-        return default
 
 
 class MockProtocol:

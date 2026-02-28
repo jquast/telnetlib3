@@ -8,7 +8,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Optional
 
 # local
-from .client_repl_render import CURSOR_HIDE
+from ._paths import _safe_terminal_size
 
 if TYPE_CHECKING:
     from .session_context import SessionContext
@@ -28,15 +28,6 @@ def _get_logfile_path() -> str:
         if isinstance(handler, logging.FileHandler) and handler.baseFilename:
             return handler.baseFilename
     return ""
-
-
-def _safe_terminal_size() -> str:
-    """Return ``os.get_terminal_size()`` as a string, or ``"?"`` on error."""
-    try:
-        sz = os.get_terminal_size()
-        return f"{sz.columns}x{sz.lines}"
-    except OSError:
-        return "?"
 
 
 def _confirm_dialog(
@@ -126,22 +117,34 @@ def _confirm_dialog(
     return confirmed
 
 
-def _randomwalk_dialog(
-    replay_buf: Optional[Any] = None,
-    default_visit_level: int = 2,
-) -> tuple[bool, int]:
+def _randomwalk_dialog(replay_buf: Optional[Any] = None, session_key: str = "") -> Optional[str]:
     """
     Show the random walk dialog with visit-level parameter.
 
+    Loads saved preferences from *session_key* (if provided) as defaults,
+    and saves the user's choices back on confirmation.
+
     :param replay_buf: Optional replay buffer for screen repaint.
-    :param default_visit_level: Default value for the visit-level field.
-    :returns: ``(confirmed, visit_level)`` tuple.
+    :param session_key: Session key for loading/saving preferences.
+    :returns: Command string (e.g. ``"`randomwalk 2 autosearch`"``) on
+        confirm, or ``None`` on cancel.
     """
     import json as _json
     import tempfile
     import subprocess
 
     from .client_repl import _get_term, _blocking_fds, _terminal_cleanup, _restore_after_subprocess
+
+    default_visit_level = 2
+    default_auto_search = False
+    default_auto_evaluate = False
+    if session_key:
+        from .rooms import load_prefs
+
+        prefs = load_prefs(session_key)
+        default_visit_level = int(prefs.get("randomwalk_visit_level", 2))
+        default_auto_search = bool(prefs.get("randomwalk_auto_search", False))
+        default_auto_evaluate = bool(prefs.get("randomwalk_auto_evaluate", False))
 
     fd, result_path = tempfile.mkstemp(suffix=".json", prefix="randomwalk-")
     os.close(fd)
@@ -152,9 +155,14 @@ def _randomwalk_dialog(
         "-c",
         "import sys; from telnetlib3.client_tui import randomwalk_dialog_main; "
         "randomwalk_dialog_main(result_file=sys.argv[1],"
-        " default_visit_level=sys.argv[2], logfile=sys.argv[3])",
+        " default_visit_level=sys.argv[2],"
+        " default_auto_search=sys.argv[3],"
+        " default_auto_evaluate=sys.argv[4],"
+        " logfile=sys.argv[5])",
         result_path,
         str(default_visit_level),
+        "1" if default_auto_search else "0",
+        "1" if default_auto_evaluate else "0",
         logfile,
     ]
 
@@ -177,34 +185,44 @@ def _randomwalk_dialog(
         _editor_active = False
         _restore_after_subprocess(replay_buf)
 
-    confirmed = False
-    visit_level = default_visit_level
     try:
         with open(result_path, "r", encoding="utf-8") as f:
             data = _json.load(f)
-        confirmed = bool(data.get("confirmed", False))
-        visit_level = int(data.get("visit_level", default_visit_level))
+        if not data.get("confirmed", False):
+            return None
+        if session_key:
+            from .rooms import load_prefs as _load_prefs
+            from .rooms import save_prefs
+
+            save_data = _load_prefs(session_key)
+            save_data["randomwalk_visit_level"] = int(data.get("visit_level", default_visit_level))
+            save_data["randomwalk_auto_search"] = bool(data.get("auto_search", default_auto_search))
+            save_data["randomwalk_auto_evaluate"] = bool(
+                data.get("auto_evaluate", default_auto_evaluate)
+            )
+            save_prefs(session_key, save_data)
+        return str(data.get("command", f"`randomwalk 999 {default_visit_level}`"))
     except (OSError, ValueError):
-        pass
+        return None
     finally:
         try:
             os.unlink(result_path)
         except OSError:
             pass
 
-    return confirmed, visit_level
-
 
 def _strip_md(text: str) -> str:
     """Strip markdown bold/code markers from text."""
     import re
+
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
     text = re.sub(r"`(.+?)`", r"\1", text)
     return text.strip()
 
 
 def _render_help_md(has_gmcp: bool = False) -> list[str]:
-    """Render keybindings help markdown into plain-text lines.
+    """
+    Render keybindings help markdown into plain-text lines.
 
     :param has_gmcp: Whether GMCP room data is available.
     :rtype: list[str]
@@ -240,16 +258,16 @@ def _render_help_md(has_gmcp: bool = False) -> list[str]:
                 lines.append(f"  {cells[0]:<16}{cells[1]}")
         elif stripped and not stripped.startswith("|"):
             lines.append("  " + _strip_md(stripped))
-        else:
-            if lines and lines[-1] != "":
-                lines.append("")
+        elif lines and lines[-1] != "":
+            lines.append("")
     return lines
 
 
 def _show_help(
     macro_defs: "Any" = None, replay_buf: Optional[Any] = None, has_gmcp: bool = False
 ) -> None:
-    """Launch the keybindings help viewer as a Textual TUI subprocess.
+    """
+    Launch the keybindings help viewer as a Textual TUI subprocess.
 
     :param macro_defs: Unused (kept for API compatibility).
     :param replay_buf: Optional replay buffer for screen repaint on return.
@@ -456,9 +474,7 @@ def _launch_chat_viewer(ctx: "SessionContext", replay_buf: Optional[Any] = None)
     """
     import subprocess
 
-    from .client_repl import (
-        _get_term, _blocking_fds, _terminal_cleanup, _restore_after_subprocess,
-    )
+    from .client_repl import _get_term, _blocking_fds, _terminal_cleanup, _restore_after_subprocess
 
     session_key = ctx.session_key
     if not session_key:
@@ -591,8 +607,11 @@ def _launch_room_browser(ctx: "SessionContext", replay_buf: Optional[Any] = None
     if steps:
         log.debug("fast travel: scheduling %d steps (slow=%s)", len(steps), slow)
         task = asyncio.ensure_future(_fast_travel(steps, ctx, log, slow=slow))
+        ctx.travel_task = task
 
         def _on_done(t: "asyncio.Task[None]") -> None:
+            if ctx.travel_task is t:
+                ctx.travel_task = None
             if not t.cancelled() and t.exception() is not None:
                 log.warning("fast travel failed: %s", t.exception())
 

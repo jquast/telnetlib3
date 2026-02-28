@@ -1,9 +1,13 @@
 """
 Fingerprint shell for telnet client identification.
 
-This module probes telnet protocol capabilities, collects session data,
-and saves fingerprint files.  Display, REPL, and post-script code live
-in ``telnetlib3.fingerprinting_display``.
+This module runs **server-side**: it is the shell callback for a telnetlib3
+server that probes connecting *clients* for protocol capabilities, collects
+session data, and saves fingerprint files.  Despite the generic name, it
+fingerprints the remote *client*, not the server.
+
+Display, REPL, and post-script code live in
+``telnetlib3.fingerprinting_display``.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from typing import Any, Union, Optional, TypedDict, cast
 
 # local
 from . import slc
+from ._paths import _atomic_json_write
 from .server import TelnetServer
 from .telopt import (
     BM,
@@ -861,26 +866,6 @@ def _cooked_input(prompt: str) -> str:
         return ""
     finally:
         termios.tcsetattr(fd, termios.TCSANOW, old_attrs)
-
-
-class _BytesSafeEncoder(json.JSONEncoder):
-    """JSON encoder that converts bytes to str (UTF-8) or hex."""
-
-    def default(self, o: Any) -> Any:
-        if isinstance(o, bytes):
-            try:
-                return o.decode("utf-8")
-            except UnicodeDecodeError:
-                return o.hex()
-        return super().default(o)
-
-
-def _atomic_json_write(filepath: str, data: dict[str, Any]) -> None:
-    """Atomically write JSON data to file via write-to-new + rename."""
-    tmp_path = os.path.splitext(filepath)[0] + ".json.new"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, sort_keys=True, cls=_BytesSafeEncoder)
-    os.replace(tmp_path, filepath)
 
 
 def _build_session_fingerprint(

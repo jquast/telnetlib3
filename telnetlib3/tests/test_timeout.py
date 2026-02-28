@@ -10,13 +10,7 @@ import pytest
 # local
 from telnetlib3.client import _transform_args, _get_argument_parser
 from telnetlib3.telopt import DO, IAC, WONT, TTYPE
-from telnetlib3.tests.accessories import (
-    bind_host,
-    create_server,
-    open_connection,
-    unused_tcp_port,
-    asyncio_connection,
-)
+from telnetlib3.tests.accessories import create_server, open_connection, asyncio_connection
 
 
 async def test_telnet_server_default_timeout(bind_host, unused_tcp_port):

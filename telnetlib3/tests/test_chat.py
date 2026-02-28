@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-import json
+# std imports
 import os
+import json
 from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
+# 3rd party
 import pytest
 
-from telnetlib3.client import _append_chat_msg, _load_chat, _persist_chat, _CHAT_FILE_CAP
+# local
+from telnetlib3.client import _CHAT_FILE_CAP, _load_chat, _persist_chat, _append_chat_msg
 from telnetlib3.session_context import SessionContext
 
 
@@ -19,7 +22,9 @@ def _make_ctx(tmp_path: Any, session_key: str = "test:4000") -> SessionContext:
     return ctx
 
 
-def _sample_gmcp_msg(channel: str = "chat", talker: str = "Bob", text: str = "hello") -> Dict[str, Any]:
+def _sample_gmcp_msg(
+    channel: str = "chat", talker: str = "Bob", text: str = "hello"
+) -> Dict[str, Any]:
     return {
         "channel": channel,
         "channel_ansi": f"\x1b[0m[{channel}]\x1b[0m",
@@ -102,7 +107,7 @@ class TestPersistChat:
 
 class TestChatBadge:
     def test_badge_present_when_unread(self) -> None:
-        from telnetlib3.client_repl_render import _ToolbarSlot, _wcswidth, _sgr_fg
+        from telnetlib3.client_repl_render import _sgr_fg, _wcswidth, _ToolbarSlot
 
         ctx = SessionContext(session_key="test:4000")
         ctx.chat_unread = 5

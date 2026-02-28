@@ -7,13 +7,7 @@ import asyncio
 import telnetlib3
 import telnetlib3.stream_writer
 from telnetlib3.telopt import DO, IS, SB, SE, IAC, WILL, XDISPLOC
-from telnetlib3.tests.accessories import (
-    bind_host,
-    create_server,
-    open_connection,
-    unused_tcp_port,
-    asyncio_connection,
-)
+from telnetlib3.tests.accessories import create_server, open_connection, asyncio_connection
 
 
 async def test_telnet_server_on_xdisploc(bind_host, unused_tcp_port):

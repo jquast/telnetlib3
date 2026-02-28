@@ -25,13 +25,7 @@ from telnetlib3.server_pty_shell import (
     _platform_check,
     _wait_for_terminal_info,
 )
-from telnetlib3.tests.accessories import (
-    bind_host,
-    create_server,
-    open_connection,
-    unused_tcp_port,
-    make_preexec_coverage,
-)
+from telnetlib3.tests.accessories import create_server, open_connection, make_preexec_coverage
 
 pytestmark = [pytest.mark.skipif(sys.platform == "win32", reason="PTY not supported on Windows")]
 

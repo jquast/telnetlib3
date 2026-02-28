@@ -584,15 +584,12 @@ class _WalkWriter:
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
-async def test_randomwalk_stuck_room_stops(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_randomwalk_stuck_room_stops(monkeypatch: pytest.MonkeyPatch, fast_sleep) -> None:
     """After 3 consecutive failed moves, randomwalk marks exits exhausted and stops."""
     import logging
 
     from telnetlib3.client_repl import _randomwalk
     from telnetlib3.client_repl_travel import _MAX_STUCK_RETRIES
-
-    _real_sleep = asyncio.sleep
-    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
 
     adj: dict[str, dict[str, str]] = {"room1": {"north": "room2"}}
     writer = _WalkWriter(room_num="room1", adj=adj)
@@ -609,20 +606,14 @@ async def test_randomwalk_stuck_room_stops(monkeypatch: pytest.MonkeyPatch) -> N
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
 async def test_randomwalk_retries_when_temporarily_stuck(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, fast_sleep
 ) -> None:
     """Walker retries after temporary block and continues when exit clears."""
     import logging
 
     from telnetlib3.client_repl import _randomwalk
 
-    _real_sleep = asyncio.sleep
-    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
-
-    adj: dict[str, dict[str, str]] = {
-        "room1": {"north": "room2"},
-        "room2": {"south": "room1"},
-    }
+    adj: dict[str, dict[str, str]] = {"room1": {"north": "room2"}, "room2": {"south": "room1"}}
     seq = (
         ["room1"] * 3  # initial + step 1 fail (current, check)
         + ["room1", "room2", "room2"]  # step 2 after retry: current=room1, check=room2, actual
@@ -643,14 +634,13 @@ async def test_randomwalk_retries_when_temporarily_stuck(
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
-async def test_randomwalk_resets_stuck_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_randomwalk_resets_stuck_on_success(
+    monkeypatch: pytest.MonkeyPatch, fast_sleep
+) -> None:
     """A successful move after a blocked exit continues walking."""
     import logging
 
     from telnetlib3.client_repl import _randomwalk
-
-    _real_sleep = asyncio.sleep
-    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
 
     adj: dict[str, dict[str, str]] = {
         "room1": {"north": "room2", "south": "room3"},
@@ -675,14 +665,13 @@ async def test_randomwalk_resets_stuck_on_success(monkeypatch: pytest.MonkeyPatc
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
-async def test_autodiscover_stuck_gateway_stops(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_autodiscover_stuck_gateway_stops(
+    monkeypatch: pytest.MonkeyPatch, fast_sleep
+) -> None:
     """After 3 failures from the same room, autodiscover stops."""
     import logging
 
     from telnetlib3.client_repl import _autodiscover
-
-    _real_sleep = asyncio.sleep
-    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
 
     adj: dict[str, dict[str, str]] = {
         "room1": {"north": "gw1"},
@@ -712,14 +701,13 @@ async def test_autodiscover_stuck_gateway_stops(monkeypatch: pytest.MonkeyPatch)
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
-async def test_autodiscover_blocked_edge_avoids_retrying(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_autodiscover_blocked_edge_avoids_retrying(
+    monkeypatch: pytest.MonkeyPatch, fast_sleep
+) -> None:
     """When a path edge is impassable, subsequent gateways behind it are skipped."""
     import logging
 
     from telnetlib3.client_repl import _autodiscover
-
-    _real_sleep = asyncio.sleep
-    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
 
     adj: dict[str, dict[str, str]] = {
         "start": {"portal": "island"},
@@ -875,6 +863,37 @@ async def test_send_chained_queue_cancellation(monkeypatch: pytest.MonkeyPatch) 
     assert len(writer._sent) <= 2
     assert queue.cancelled
     assert len(render_calls) >= 1
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.asyncio
+async def test_send_chained_delay_pauses(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Backtick delay commands in a chained sequence pause without sending."""
+    import logging
+
+    from telnetlib3.client_repl import _send_chained
+
+    sleep_args: list[float] = []
+    _real_sleep = asyncio.sleep
+
+    async def _tracking_sleep(duration: float) -> None:
+        sleep_args.append(duration)
+        await _real_sleep(0)
+
+    monkeypatch.setattr(asyncio, "sleep", _tracking_sleep)
+
+    writer = _WalkWriter(room_num="room1")
+    writer.ctx.wait_for_prompt = None
+    writer.ctx.prompt_ready = None
+    writer.ctx.room_changed = None
+
+    commands = ["look", "`delay 2s`", "north"]
+
+    await _send_chained(commands, writer.ctx, logging.getLogger("test"))
+
+    assert len(writer._sent) == 1
+    assert writer._sent[0] == "north\r\n"
+    assert 2.0 in sleep_args
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
@@ -1078,15 +1097,12 @@ class _TrackingWalkWriter(_WalkWriter):
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
 async def test_randomwalk_blocked_exit_tries_other_direction(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, fast_sleep
 ) -> None:
     """When one exit is blocked, randomwalk marks it and uses the other."""
     import logging
 
     from telnetlib3.client_repl import _randomwalk
-
-    _real_sleep = asyncio.sleep
-    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
 
     adj: dict[str, dict[str, str]] = {
         "room1": {"north": "room2", "south": "room3"},
@@ -1105,15 +1121,12 @@ async def test_randomwalk_blocked_exit_tries_other_direction(
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
 async def test_autodiscover_skips_persistently_blocked_exits(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, fast_sleep
 ) -> None:
     """Pre-seeded blocked_exits are never attempted by autodiscover."""
     import logging
 
     from telnetlib3.client_repl import _autodiscover
-
-    _real_sleep = asyncio.sleep
-    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
 
     adj: dict[str, dict[str, str]] = {"room1": {"east": "room2", "west": "room3"}}
     writer = _WalkWriter(room_num="room1", adj=adj)
@@ -1142,14 +1155,13 @@ async def test_autodiscover_skips_persistently_blocked_exits(
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
-async def test_resume_randomwalk_from_same_room(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resume_randomwalk_from_same_room(
+    monkeypatch: pytest.MonkeyPatch, fast_sleep
+) -> None:
     """Resume carries over visited set from the previous randomwalk."""
     import logging
 
     from telnetlib3.client_repl import _randomwalk
-
-    _real_sleep = asyncio.sleep
-    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
 
     adj: dict[str, dict[str, str]] = {"room1": {"north": "room2"}, "room2": {"south": "room1"}}
     writer = _WalkWriter(room_num="room1", adj=adj)
@@ -1170,14 +1182,11 @@ async def test_resume_randomwalk_from_same_room(monkeypatch: pytest.MonkeyPatch)
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
-async def test_resume_not_used_on_room_change(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resume_not_used_on_room_change(monkeypatch: pytest.MonkeyPatch, fast_sleep) -> None:
     """Resume state is NOT used when the room changed since last walk."""
     import logging
 
     from telnetlib3.client_repl import _handle_travel_commands
-
-    _real_sleep = asyncio.sleep
-    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
 
     adj: dict[str, dict[str, str]] = {"room1": {"north": "room2"}}
     writer = _WalkWriter(room_num="room1", adj=adj)
@@ -1204,14 +1213,11 @@ def test_travel_re_matches_resume() -> None:
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
-async def test_randomwalk_bounce_detection(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_randomwalk_bounce_detection(monkeypatch: pytest.MonkeyPatch, fast_sleep) -> None:
     """Walker detects 2-room bounce and blocks the bouncing direction."""
     import logging
 
     from telnetlib3.client_repl import _randomwalk
-
-    _real_sleep = asyncio.sleep
-    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
 
     # Need enough rooms that reachable.issubset(visited) doesn't
     # trigger before the bounce is detected.  room3/room4 are
@@ -1235,14 +1241,13 @@ async def test_randomwalk_bounce_detection(monkeypatch: pytest.MonkeyPatch) -> N
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
-async def test_randomwalk_bounce_blocks_reverse(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_randomwalk_bounce_blocks_reverse(
+    monkeypatch: pytest.MonkeyPatch, fast_sleep
+) -> None:
     """After bounce-blocking dead-end south, also block the reverse (north into dead-end)."""
     import logging
 
     from telnetlib3.client_repl import _randomwalk
-
-    _real_sleep = asyncio.sleep
-    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
 
     # dead_end has only south → junction; junction has north → dead_end and south → room3.
     # The walker should not get stuck re-entering dead_end after blocking its south exit.
@@ -1252,9 +1257,7 @@ async def test_randomwalk_bounce_blocks_reverse(monkeypatch: pytest.MonkeyPatch)
         "room3": {"north": "junction", "east": "room4"},
         "room4": {"west": "room3"},
     }
-    writer = _TrackingWalkWriter(
-        room_num="junction", adj=adj, blocked_directions=set()
-    )
+    writer = _TrackingWalkWriter(room_num="junction", adj=adj, blocked_directions=set())
 
     await _randomwalk(writer.ctx, logging.getLogger("test"), limit=30)
 
@@ -1265,14 +1268,13 @@ async def test_randomwalk_bounce_blocks_reverse(monkeypatch: pytest.MonkeyPatch)
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
-async def test_randomwalk_corridor_no_false_bounce(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_randomwalk_corridor_no_false_bounce(
+    monkeypatch: pytest.MonkeyPatch, fast_sleep
+) -> None:
     """Corridor with exits on both ends must not trigger bounce-blocking."""
     import logging
 
     from telnetlib3.client_repl import _randomwalk
-
-    _real_sleep = asyncio.sleep
-    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
 
     adj: dict[str, dict[str, str]] = {
         "hub": {"southeast": "corridor_a", "east": "market"},
@@ -1282,9 +1284,7 @@ async def test_randomwalk_corridor_no_false_bounce(monkeypatch: pytest.MonkeyPat
         "market": {"west": "hub", "south": "dock"},
         "dock": {"north": "plaza", "west": "market"},
     }
-    writer = _TrackingWalkWriter(
-        room_num="corridor_a", adj=adj, blocked_directions=set()
-    )
+    writer = _TrackingWalkWriter(room_num="corridor_a", adj=adj, blocked_directions=set())
 
     await _randomwalk(writer.ctx, logging.getLogger("test"), limit=40)
 
@@ -1294,14 +1294,13 @@ async def test_randomwalk_corridor_no_false_bounce(monkeypatch: pytest.MonkeyPat
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
-async def test_randomwalk_blocked_exit_not_global(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_randomwalk_blocked_exit_not_global(
+    monkeypatch: pytest.MonkeyPatch, fast_sleep
+) -> None:
     """A blocked exit (A->east->B) must not prevent reaching B from C->north->B."""
     import logging
 
     from telnetlib3.client_repl import _randomwalk
-
-    _real_sleep = asyncio.sleep
-    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
 
     adj: dict[str, dict[str, str]] = {
         "room1": {"east": "room2", "south": "room3"},
@@ -1320,14 +1319,13 @@ async def test_randomwalk_blocked_exit_not_global(monkeypatch: pytest.MonkeyPatc
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
-async def test_randomwalk_noncardinal_deprioritized(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_randomwalk_noncardinal_deprioritized(
+    monkeypatch: pytest.MonkeyPatch, fast_sleep
+) -> None:
     """Non-cardinal exits (up, enter, etc.) are tried after cardinal ones."""
     import logging
 
     from telnetlib3.client_repl import _randomwalk
-
-    _real_sleep = asyncio.sleep
-    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
 
     adj: dict[str, dict[str, str]] = {
         "room1": {"north": "room2", "up": "room3"},
@@ -1347,14 +1345,11 @@ async def test_randomwalk_noncardinal_deprioritized(monkeypatch: pytest.MonkeyPa
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
-async def test_randomwalk_visit_level(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_randomwalk_visit_level(monkeypatch: pytest.MonkeyPatch, fast_sleep) -> None:
     """With visit_level=2 the walk continues until every room is visited twice."""
     import logging
 
     from telnetlib3.client_repl import _randomwalk
-
-    _real_sleep = asyncio.sleep
-    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
 
     adj: dict[str, dict[str, str]] = {
         "room1": {"north": "room2"},
@@ -1370,22 +1365,18 @@ async def test_randomwalk_visit_level(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "2x" in visited_msgs[0]
 
     sent_dirs = [
-        s.decode("utf-8").strip() if isinstance(s, bytes) else s.strip()
-        for s in writer._sent
+        s.decode("utf-8").strip() if isinstance(s, bytes) else s.strip() for s in writer._sent
     ]
     assert len(sent_dirs) >= 4
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
-async def test_randomwalk_visit_level_1(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_randomwalk_visit_level_1(monkeypatch: pytest.MonkeyPatch, fast_sleep) -> None:
     """With visit_level=1 the walk stops after visiting each room once."""
     import logging
 
     from telnetlib3.client_repl import _randomwalk
-
-    _real_sleep = asyncio.sleep
-    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
 
     adj: dict[str, dict[str, str]] = {
         "room1": {"north": "room2"},
@@ -1401,8 +1392,7 @@ async def test_randomwalk_visit_level_1(monkeypatch: pytest.MonkeyPatch) -> None
     assert "1x" in visited_msgs[0]
 
     sent_dirs = [
-        s.decode("utf-8").strip() if isinstance(s, bytes) else s.strip()
-        for s in writer._sent
+        s.decode("utf-8").strip() if isinstance(s, bytes) else s.strip() for s in writer._sent
     ]
     assert len(sent_dirs) >= 2
 
@@ -1423,13 +1413,10 @@ def test_macro_last_used_round_trip(tmp_path: Any) -> None:
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
-async def test_randomwalk_skips_blocked_rooms(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_randomwalk_skips_blocked_rooms(monkeypatch: pytest.MonkeyPatch, fast_sleep) -> None:
     import logging
 
     from telnetlib3.client_repl import _randomwalk
-
-    _real_sleep = asyncio.sleep
-    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
 
     adj: dict[str, dict[str, str]] = {
         "room1": {"north": "room2", "south": "room3"},
@@ -1446,23 +1433,17 @@ async def test_randomwalk_skips_blocked_rooms(monkeypatch: pytest.MonkeyPatch) -
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
 @pytest.mark.asyncio
-async def test_home_travel_command(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_home_travel_command(monkeypatch: pytest.MonkeyPatch, fast_sleep) -> None:
     import logging
 
     from telnetlib3.client_repl import _handle_travel_commands
 
-    _real_sleep = asyncio.sleep
-    monkeypatch.setattr(asyncio, "sleep", lambda _: _real_sleep(0))
-
-    adj: dict[str, dict[str, str]] = {
-        "room1": {"north": "room2"},
-        "room2": {"south": "room1"},
-    }
+    adj: dict[str, dict[str, str]] = {"room1": {"north": "room2"}, "room2": {"south": "room1"}}
     writer = _WalkWriter(room_num="room1", adj=adj)
     writer.ctx.room_graph.room_area = lambda num: "town"
     writer.ctx.room_graph.get_home_for_area = lambda area: "room2"
-    writer.ctx.room_graph.find_path_with_rooms = (
-        lambda src, dst, **kw: [("north", "room2")] if dst == "room2" else None
+    writer.ctx.room_graph.find_path_with_rooms = lambda src, dst, **kw: (
+        [("north", "room2")] if dst == "room2" else None
     )
 
     fast_travel_args: list[object] = []
@@ -1473,14 +1454,10 @@ async def test_home_travel_command(monkeypatch: pytest.MonkeyPatch) -> None:
     async def mock_fast_travel(*args: object, **kwargs: object) -> None:
         fast_travel_args.append((args, kwargs))
 
-    monkeypatch.setattr(
-        "telnetlib3.client_repl_travel._fast_travel", mock_fast_travel
-    )
+    monkeypatch.setattr("telnetlib3.client_repl_travel._fast_travel", mock_fast_travel)
 
     parts = ["`home`"]
-    remainder = await _handle_travel_commands(
-        parts, writer.ctx, logging.getLogger("test")
-    )
+    remainder = await _handle_travel_commands(parts, writer.ctx, logging.getLogger("test"))
     assert remainder == []
     assert len(fast_travel_args) == 1
 
@@ -1503,9 +1480,7 @@ class _MockHighlightEngine:
 
 
 class TestLineHoldBuffer:
-    def _make_buf(
-        self, engine: Any = None
-    ) -> "telnetlib3.client_repl._LineHoldBuffer":
+    def _make_buf(self, engine: Any = None):  # -> _LineHoldBuffer
         from telnetlib3.client_repl import _LineHoldBuffer
 
         return _LineHoldBuffer(lambda: engine)
@@ -1606,3 +1581,83 @@ class TestLineHoldBuffer:
         assert buf.pending == "hello"
         buf.flush_raw()
         assert buf.pending == ""
+
+
+def test_typescript_file_default_none() -> None:
+    """SessionContext.typescript_file defaults to None."""
+    from telnetlib3.session_context import SessionContext
+
+    ctx = SessionContext()
+    assert ctx.typescript_file is None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.asyncio
+async def test_send_chained_typescript_no_echo(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When echo is off, _send_chained records commands to typescript."""
+    import logging
+
+    from telnetlib3.client_repl import _send_chained
+
+    _real_sleep = asyncio.sleep
+
+    async def _fast_sleep(duration: float) -> None:
+        await _real_sleep(0)
+
+    monkeypatch.setattr(asyncio, "sleep", _fast_sleep)
+
+    writer = _WalkWriter(room_num="room1")
+    writer.will_echo = False
+    writer.ctx.wait_for_prompt = None
+    writer.ctx.prompt_ready = None
+    writer.ctx.room_changed = None
+
+    ts_path = tmp_path / "typescript"
+    ts_file = open(ts_path, "w", encoding="utf-8")
+    writer.ctx.typescript_file = ts_file
+
+    commands = ["look", "north", "east"]
+    await _send_chained(commands, writer.ctx, logging.getLogger("test"))
+    ts_file.close()
+
+    content = ts_path.read_text(encoding="utf-8")
+    assert "north\n" in content
+    assert "east\n" in content
+    assert "look" not in content
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only")
+@pytest.mark.asyncio
+async def test_send_chained_typescript_echo_on(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When echo is on, _send_chained does not record to typescript."""
+    import logging
+
+    from telnetlib3.client_repl import _send_chained
+
+    _real_sleep = asyncio.sleep
+
+    async def _fast_sleep(duration: float) -> None:
+        await _real_sleep(0)
+
+    monkeypatch.setattr(asyncio, "sleep", _fast_sleep)
+
+    writer = _WalkWriter(room_num="room1")
+    writer.will_echo = True
+    writer.ctx.wait_for_prompt = None
+    writer.ctx.prompt_ready = None
+    writer.ctx.room_changed = None
+
+    ts_path = tmp_path / "typescript"
+    ts_file = open(ts_path, "w", encoding="utf-8")
+    writer.ctx.typescript_file = ts_file
+
+    commands = ["look", "north", "east"]
+    await _send_chained(commands, writer.ctx, logging.getLogger("test"))
+    ts_file.close()
+
+    content = ts_path.read_text(encoding="utf-8")
+    assert content == ""

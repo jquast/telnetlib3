@@ -15,20 +15,20 @@ import re
 import json
 import logging
 from typing import TYPE_CHECKING, Any, Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 # 3rd party
-from wcwidth import iter_sequences, strip_sequences, iter_graphemes, width
+from wcwidth import iter_graphemes, iter_sequences, strip_sequences
 from wcwidth.sgr_state import (
     _SGR_PATTERN,
     _SGR_STATE_DEFAULT,
     _sgr_state_update,
-    _sgr_state_is_active,
     _sgr_state_to_sequence,
 )
 
 if TYPE_CHECKING:
     import blessed
+
     from .autoreply import AutoreplyRule
     from .session_context import SessionContext
 
@@ -67,7 +67,8 @@ class HighlightRule:
 
 
 def validate_highlight(term: blessed.Terminal, name: str) -> bool:
-    """Return ``True`` if *name* is a valid blessed compoundable.
+    """
+    Return ``True`` if *name* is a valid blessed compoundable.
 
     :param term: Blessed terminal instance.
     :param name: Compoundable attribute name, e.g. ``"bold_red_on_white"``.
@@ -97,9 +98,7 @@ def _parse_entries(entries: list[dict[str, Any]]) -> list[HighlightRule]:
         try:
             compiled = re.compile(pattern_str, flags)
         except re.error as exc:
-            raise ValueError(
-                f"Invalid highlight pattern {pattern_str!r}: {exc}"
-            ) from exc
+            raise ValueError(f"Invalid highlight pattern {pattern_str!r}: {exc}") from exc
         rules.append(
             HighlightRule(
                 pattern=compiled,
@@ -130,9 +129,7 @@ def load_highlights(path: str, session_key: str) -> list[HighlightRule]:
     return _parse_entries(entries)
 
 
-def save_highlights(
-    path: str, rules: list[HighlightRule], session_key: str
-) -> None:
+def save_highlights(path: str, rules: list[HighlightRule], session_key: str) -> None:
     """
     Save highlight rules for a session to a JSON file.
 
@@ -165,7 +162,8 @@ def save_highlights(
 
 
 class _CompiledRuleSet:
-    """A single combined regex built from all highlight + autoreply patterns.
+    """
+    A single combined regex built from all highlight + autoreply patterns.
 
     Each source pattern becomes a named group ``_hl0``, ``_hl1``, etc.
     A single :meth:`finditer` call replaces N separate passes.
@@ -209,9 +207,7 @@ class _CompiledRuleSet:
             except re.error:
                 self._combined = None
 
-    def finditer(
-        self, text: str
-    ) -> list[tuple[int, int, str, bool]]:
+    def finditer(self, text: str) -> list[tuple[int, int, str, bool]]:
         """Return non-overlapping ``(start, end, highlight, stop_movement)`` spans."""
         if self._combined is None:
             return []
@@ -254,11 +250,12 @@ class HighlightEngine:
         autoreply_highlight: str = _DEFAULT_AUTOREPLY_HIGHLIGHT,
         autoreply_enabled: bool = True,
     ) -> None:
+        """Initialize engine with highlight and autoreply *rules*."""
         self._term = term
         self._ctx = ctx
         self._rules = list(rules)
         self._ruleset = _CompiledRuleSet(
-            rules, autoreply_rules, autoreply_highlight, autoreply_enabled,
+            rules, autoreply_rules, autoreply_highlight, autoreply_enabled
         )
         self.enabled = True
         self._highlight_cache: dict[str, str] = {}
@@ -274,11 +271,12 @@ class HighlightEngine:
         return self._highlight_cache[name]
 
     def process_line(self, line: str) -> tuple[str, bool]:
-        """Apply highlight rules to a single line of output.
+        """
+        Apply highlight rules to a single line of output.
 
         :param line: A single line of terminal output (may contain SGR sequences).
-        :returns: ``(highlighted_line, had_matches)`` — the original line is
-            returned unchanged when no rules match.
+        :returns:``(highlighted_line, had_matches)`` — the original line is returned unchanged when
+            no rules match.
         """
         if not self.enabled:
             return line, False
@@ -297,10 +295,9 @@ class HighlightEngine:
             rebuilt = rebuilt.rstrip("\r\n") + stop_notice + "\r\n"
         return rebuilt, True
 
-    def _collect_spans(
-        self, plain: str
-    ) -> list[tuple[int, int, str, bool]]:
-        """Collect all highlight match spans from enabled rules.
+    def _collect_spans(self, plain: str) -> list[tuple[int, int, str, bool]]:
+        """
+        Collect all highlight match spans from enabled rules.
 
         Delegates to the combined :class:`_CompiledRuleSet` for a single-pass
         :meth:`finditer` over all patterns.
@@ -310,10 +307,9 @@ class HighlightEngine:
         """
         return self._ruleset.finditer(plain)
 
-    def _handle_stop_movement(
-        self, spans: list[tuple[int, int, str, bool]]
-    ) -> Optional[str]:
-        """Cancel discover/randomwalk tasks if any span has stop_movement.
+    def _handle_stop_movement(self, spans: list[tuple[int, int, str, bool]]) -> Optional[str]:
+        """
+        Cancel discover/randomwalk tasks if any span has stop_movement.
 
         :returns: Cyan-colored notice string to append, or ``None``.
         """
@@ -346,13 +342,9 @@ class HighlightEngine:
         modes = ", ".join(cancelled)
         return f" {cyan}[stop: {modes} cancelled]{normal}"
 
-    def _rebuild_line(
-        self,
-        line: str,
-        plain: str,
-        spans: list[tuple[int, int, str, bool]],
-    ) -> str:
-        """Rebuild *line* injecting highlight SGR at matched spans.
+    def _rebuild_line(self, line: str, plain: str, spans: list[tuple[int, int, str, bool]]) -> str:
+        """
+        Rebuild *line* injecting highlight SGR at matched spans.
 
         Iterates through the original line using :func:`iter_sequences` to
         separate text from escape sequences. Tracks position in the stripped

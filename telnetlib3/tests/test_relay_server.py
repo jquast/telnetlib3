@@ -80,17 +80,11 @@ class DummyServerWriter:
 
 
 @pytest.mark.asyncio
-async def test_relay_shell_wrong_passcode_closes(monkeypatch):
+async def test_relay_shell_wrong_passcode_closes(monkeypatch, fast_sleep):
     """Relay shell should prompt for passcode 3 times and close on failure."""
     # Prepare fake client I/O
     client_reader = SeqReader("bad1\rbad2\rbad3\r")
     client_writer = FakeWriter()
-
-    # Avoid 1-second sleeps in loop
-    async def _no_sleep(_):
-        return None
-
-    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
 
     await relay_shell(client_reader, client_writer)
 
@@ -105,7 +99,7 @@ async def test_relay_shell_wrong_passcode_closes(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_relay_shell_success_relays_and_closes(monkeypatch):
+async def test_relay_shell_success_relays_and_closes(monkeypatch, fast_sleep):
     """Relay shell should connect on correct passcode and relay server output."""
     # Client enters correct passcode then EOF from client
     client_reader = PayloadReader(
@@ -114,12 +108,6 @@ async def test_relay_shell_success_relays_and_closes(monkeypatch):
         + [""]  # then EOF from client stdin after connection
     )
     client_writer = FakeWriter()
-
-    # Avoid 1-second sleeps in loop
-    async def _no_sleep(_):
-        return None
-
-    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
 
     # Mock open_connection to a dummy server that sends "hello" then EOF
     server_reader = PayloadReader(["hello", ""])
@@ -147,15 +135,10 @@ async def test_relay_shell_success_relays_and_closes(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_relay_shell_client_eof_during_passcode(monkeypatch):
+async def test_relay_shell_client_eof_during_passcode(monkeypatch, fast_sleep):
     """Client disconnects (EOF) while entering passcode."""
     client_reader = SeqReader("")  # immediate EOF
     client_writer = FakeWriter()
-
-    async def _no_sleep(_):
-        return None
-
-    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
 
     await relay_shell(client_reader, client_writer)
 
@@ -165,15 +148,10 @@ async def test_relay_shell_client_eof_during_passcode(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_relay_shell_client_eof_during_relay(monkeypatch):
+async def test_relay_shell_client_eof_during_relay(monkeypatch, fast_sleep):
     """Client sends EOF during active relay; server writer should close."""
     client_reader = PayloadReader(list("867-5309\r") + [""])  # EOF from client during relay
     client_writer = FakeWriter()
-
-    async def _no_sleep(_):
-        return None
-
-    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
 
     server_reader = PayloadReader([])  # server also yields nothing initially
     server_writer = DummyServerWriter()
@@ -202,11 +180,6 @@ async def test_relay_shell_server_eof_closes_client(monkeypatch):
     """Server sends EOF during relay; client writer should close."""
     # Client reader that sends passcode then blocks forever
     passcode_reader = PayloadReader(list("867-5309\r"))
-
-    async def _no_sleep(_):
-        return None
-
-    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
 
     server_reader = PayloadReader(["server data", ""])  # server sends data then EOF
     server_writer = DummyServerWriter()
@@ -241,11 +214,6 @@ async def test_relay_shell_client_data_forwarded_to_server(monkeypatch):
     """Client input during relay is forwarded to server writer."""
     client_reader = PayloadReader(list("867-5309\r") + ["client typing", ""])
     client_writer = FakeWriter()
-
-    async def _no_sleep(_):
-        return None
-
-    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
 
     server_reader = PayloadReader(["welcome", ""])
     server_writer = DummyServerWriter()

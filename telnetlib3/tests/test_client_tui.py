@@ -5,6 +5,7 @@ from __future__ import annotations
 # std imports
 import sys
 import datetime
+from typing import Any
 from dataclasses import asdict
 
 # 3rd party
@@ -28,9 +29,9 @@ from telnetlib3.client_tui import (  # noqa: E402
     _relative_time,
     _AutoreplyTuple,
     _build_tooltips,
+    _get_help_topic,
     _CommandHelpScreen,
     _RandomwalkDialogScreen,
-    _get_help_topic,
 )
 
 
@@ -427,10 +428,7 @@ def test_randomwalk_dialog_writes_visit_level(tmp_path: Any) -> None:
     import json
 
     result_file = str(tmp_path / "result.json")
-    screen = _RandomwalkDialogScreen(
-        result_file=result_file,
-        default_visit_level=3,
-    )
+    screen = _RandomwalkDialogScreen(result_file=result_file, default_visit_level=3)
     screen._write_result(True, 3)
 
     with open(result_file, "r", encoding="utf-8") as f:
@@ -443,3 +441,42 @@ def test_randomwalk_dialog_default_visit_level() -> None:
     """The dialog initialises with the given default visit level."""
     screen = _RandomwalkDialogScreen(default_visit_level=5)
     assert screen._default_visit_level == 5
+
+
+def test_randomwalk_dialog_command_field(tmp_path: Any) -> None:
+    """The randomwalk dialog result includes a command string."""
+    import json
+
+    result_file = str(tmp_path / "result.json")
+    screen = _RandomwalkDialogScreen(result_file=result_file, default_visit_level=2)
+    screen._write_result(True, 3, auto_search=True, auto_evaluate=False)
+
+    with open(result_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["command"] == "`randomwalk 999 3 autosearch`"
+
+
+def test_randomwalk_dialog_command_all_flags(tmp_path: Any) -> None:
+    """The command string includes both autosearch and autoevaluate."""
+    import json
+
+    result_file = str(tmp_path / "result.json")
+    screen = _RandomwalkDialogScreen(result_file=result_file, default_visit_level=2)
+    screen._write_result(True, 5, auto_search=True, auto_evaluate=True)
+
+    with open(result_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["command"] == "`randomwalk 999 5 autosearch autoevaluate`"
+
+
+def test_randomwalk_dialog_command_no_flags(tmp_path: Any) -> None:
+    """The command string omits flags when both are off."""
+    import json
+
+    result_file = str(tmp_path / "result.json")
+    screen = _RandomwalkDialogScreen(result_file=result_file, default_visit_level=2)
+    screen._write_result(True, 2, auto_search=False, auto_evaluate=False)
+
+    with open(result_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["command"] == "`randomwalk 999 2`"

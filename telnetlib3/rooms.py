@@ -32,7 +32,8 @@ _EXIT_DIR_RE = re.compile(
 
 
 def strip_exit_dirs(name: str) -> str:
-    """Strip trailing exit-direction lists like ``[n,s,w,e]`` from a room name.
+    """
+    Strip trailing exit-direction lists like ``[n,s,w,e]`` from a room name.
 
     Also handles optional ``{SPICE}``-style tags before the bracket list.
     """
@@ -59,9 +60,7 @@ class Room:
 class RoomStore:
     """SQLite-backed room graph with in-memory adjacency cache."""
 
-    def __init__(
-        self, db_path: str, read_only: bool = False, session_key: str = ""
-    ) -> None:
+    def __init__(self, db_path: str, read_only: bool = False, session_key: str = "") -> None:
         """
         Open or create an SQLite room database.
 
@@ -84,8 +83,7 @@ class RoomStore:
             self._create_tables()
             if session_key:
                 self._conn.execute(
-                    "INSERT OR REPLACE INTO meta VALUES ('session_key', ?)",
-                    (session_key,),
+                    "INSERT OR REPLACE INTO meta VALUES ('session_key', ?)", (session_key,)
                 )
                 self._conn.commit()
         self._adj: dict[str, dict[str, str]] = {}
@@ -116,9 +114,7 @@ class RoomStore:
         """)
         for col in ("blocked", "home", "marked"):
             try:
-                self._conn.execute(
-                    f"ALTER TABLE room ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0"
-                )
+                self._conn.execute(f"ALTER TABLE room ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
             except sqlite3.OperationalError:
                 pass
         self._conn.execute("INSERT OR IGNORE INTO meta VALUES ('version', '1')")
@@ -175,9 +171,7 @@ class RoomStore:
             result[room.num] = room
         return result
 
-    def room_summaries(
-        self,
-    ) -> list[tuple[str, str, str, int, bool, str, bool, bool, bool]]:
+    def room_summaries(self) -> list[tuple[str, str, str, int, bool, str, bool, bool, bool]]:
         """
         Return lightweight room summary tuples.
 
@@ -195,8 +189,7 @@ class RoomStore:
             " GROUP BY r.num"
         ).fetchall()
         return [
-            (r[0], r[1], r[2], r[3], bool(r[4]), r[5],
-             bool(r[6]), bool(r[7]), bool(r[8]))
+            (r[0], r[1], r[2], r[3], bool(r[4]), r[5], bool(r[6]), bool(r[7]), bool(r[8]))
             for r in rows
         ]
 
@@ -288,19 +281,14 @@ class RoomStore:
             return False
         new_state = not bool(row[0])
         self._conn.execute(
-            "UPDATE room SET bookmarked=0, blocked=0, home=0, marked=0"
-            " WHERE num = ?",
-            (num,),
+            "UPDATE room SET bookmarked=0, blocked=0, home=0, marked=0 WHERE num = ?", (num,)
         )
         if new_state:
-            self._conn.execute(
-                f"UPDATE room SET {marker} = 1 WHERE num = ?", (num,)
-            )
+            self._conn.execute(f"UPDATE room SET {marker} = 1 WHERE num = ?", (num,))
             if marker == "home":
                 area = row[1]
                 self._conn.execute(
-                    "UPDATE room SET home = 0 WHERE area = ? AND num != ?",
-                    (area, num),
+                    "UPDATE room SET home = 0 WHERE area = ? AND num != ?", (area, num)
                 )
         self._conn.commit()
         return new_state
@@ -336,19 +324,14 @@ class RoomStore:
     def blocked_rooms(self) -> frozenset[str]:
         """Return frozenset of all blocked room numbers."""
         return frozenset(
-            row[0]
-            for row in self._conn.execute(
-                "SELECT num FROM room WHERE blocked = 1"
-            )
+            row[0] for row in self._conn.execute("SELECT num FROM room WHERE blocked = 1")
         )
 
     def _room_nums(self) -> frozenset[str]:
         """Return the set of all room numbers in the database."""
         return frozenset(row[0] for row in self._conn.execute("SELECT num FROM room"))
 
-    def bfs_distances(
-        self, src: str, blocked: frozenset[str] = frozenset()
-    ) -> dict[str, int]:
+    def bfs_distances(self, src: str, blocked: frozenset[str] = frozenset()) -> dict[str, int]:
         """
         BFS from *src* returning distance to every reachable room.
 
@@ -392,11 +375,7 @@ class RoomStore:
             for direction, target in self._adj.get(current, {}).items():
                 if target == dst:
                     return path + [direction]
-                if (
-                    target not in visited
-                    and self._has_room(target)
-                    and target not in blocked
-                ):
+                if target not in visited and self._has_room(target) and target not in blocked:
                     visited.add(target)
                     queue.append((target, path + [direction]))
 
@@ -424,11 +403,7 @@ class RoomStore:
             for direction, target in self._adj.get(current, {}).items():
                 if target == dst:
                     return path + [(direction, target)]
-                if (
-                    target not in visited
-                    and self._has_room(target)
-                    and target not in blocked
-                ):
+                if target not in visited and self._has_room(target) and target not in blocked:
                     visited.add(target)
                     queue.append((target, path + [(direction, target)]))
 

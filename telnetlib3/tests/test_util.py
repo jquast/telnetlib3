@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+# std imports
 import datetime
 
+# local
 from telnetlib3._util import relative_time
 
 

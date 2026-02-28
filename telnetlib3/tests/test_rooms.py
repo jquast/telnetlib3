@@ -17,10 +17,10 @@ from telnetlib3.rooms import (
     prefs_path,
     rooms_path,
     save_prefs,
-    strip_exit_dirs,
     _xdg_data_dir,
     fasttravel_path,
     read_fasttravel,
+    strip_exit_dirs,
     write_fasttravel,
     current_room_path,
     read_current_room,
@@ -571,28 +571,27 @@ def test_room_summaries_includes_last_visited(store: RoomStore) -> None:
     assert by_num["2"][3] == 0
 
 
-@pytest.mark.parametrize("name,expected", [
-    ("A Large Ridge. [n,s,w,e,nw,ne,sw,se]", "A Large Ridge."),
-    ("A Large Ridge. [n,e,ne]", "A Large Ridge."),
-    ("A Large Ridge. [s,w,sw]", "A Large Ridge."),
-    ("A Large Ridge", "A Large Ridge"),
-    ("A Small Ridge {SPICE} [n,s,w,e,nw,ne,sw,se]", "A Small Ridge"),
-    ("Rocky Ridge.   [n,w,e]", "Rocky Ridge."),
-    ("Rocky Ridge.   [rocks,s,w]", "Rocky Ridge."),
-    ("A Musty Passage", "A Musty Passage"),
-    ("A Large Ridge. [w,e]", "A Large Ridge."),
-    ("", ""),
-])
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("A Large Ridge. [n,s,w,e,nw,ne,sw,se]", "A Large Ridge."),
+        ("A Large Ridge. [n,e,ne]", "A Large Ridge."),
+        ("A Large Ridge. [s,w,sw]", "A Large Ridge."),
+        ("A Large Ridge", "A Large Ridge"),
+        ("A Small Ridge {SPICE} [n,s,w,e,nw,ne,sw,se]", "A Small Ridge"),
+        ("Rocky Ridge.   [n,w,e]", "Rocky Ridge."),
+        ("Rocky Ridge.   [rocks,s,w]", "Rocky Ridge."),
+        ("A Musty Passage", "A Musty Passage"),
+        ("A Large Ridge. [w,e]", "A Large Ridge."),
+        ("", ""),
+    ],
+)
 def test_strip_exit_dirs(name: str, expected: str) -> None:
     assert strip_exit_dirs(name) == expected
 
 
 def test_update_room_strips_exit_dirs(store: RoomStore) -> None:
-    store.update_room({
-        "num": "1",
-        "name": "A Large Ridge. [n,s,w,e]",
-        "area": "arrakis",
-    })
+    store.update_room({"num": "1", "name": "A Large Ridge. [n,s,w,e]", "area": "arrakis"})
     r = store.get_room("1")
     assert r is not None
     assert r.name == "A Large Ridge."

@@ -2,22 +2,25 @@
 
 from __future__ import annotations
 
-import json
-import re
-import tempfile
+# std imports
 import os
+import re
+import json
+import tempfile
 from unittest.mock import MagicMock, patch
 
+# 3rd party
 import pytest
 
+# local
 from telnetlib3.highlighter import (
+    _RE_FLAGS,
     HighlightRule,
     HighlightEngine,
-    _CompiledRuleSet,
     load_highlights,
     save_highlights,
+    _CompiledRuleSet,
     validate_highlight,
-    _RE_FLAGS,
 )
 
 
@@ -90,9 +93,7 @@ class TestHighlightRuleLoadSave:
 
     def test_invalid_regex(self, tmp_path):
         path = str(tmp_path / "highlights.json")
-        data = {"test:23": {"highlights": [
-            {"pattern": "[invalid", "highlight": "bold_red"}
-        ]}}
+        data = {"test:23": {"highlights": [{"pattern": "[invalid", "highlight": "bold_red"}]}}
         with open(path, "w") as fh:
             json.dump(data, fh)
         with pytest.raises(ValueError, match="Invalid highlight pattern"):
@@ -100,9 +101,7 @@ class TestHighlightRuleLoadSave:
 
     def test_preserves_other_sessions(self, tmp_path):
         path = str(tmp_path / "highlights.json")
-        data = {"other:99": {"highlights": [
-            {"pattern": "foo", "highlight": "bold_red"}
-        ]}}
+        data = {"other:99": {"highlights": [{"pattern": "foo", "highlight": "bold_red"}]}}
         with open(path, "w") as fh:
             json.dump(data, fh)
         save_highlights(path, [_make_rule("bar")], "test:23")
@@ -136,15 +135,9 @@ class TestCompiledRuleSet:
         from telnetlib3.autoreply import AutoreplyRule
 
         ar_rules = [
-            AutoreplyRule(
-                pattern=re.compile("foo", _RE_FLAGS), reply="bar", enabled=True
-            ),
-            AutoreplyRule(
-                pattern=re.compile("baz", _RE_FLAGS), reply="qux", enabled=False
-            ),
-            AutoreplyRule(
-                pattern=re.compile("quux", _RE_FLAGS), reply="x", enabled=True
-            ),
+            AutoreplyRule(pattern=re.compile("foo", _RE_FLAGS), reply="bar", enabled=True),
+            AutoreplyRule(pattern=re.compile("baz", _RE_FLAGS), reply="qux", enabled=False),
+            AutoreplyRule(pattern=re.compile("quux", _RE_FLAGS), reply="x", enabled=True),
         ]
         rs = _CompiledRuleSet([], ar_rules, "black_on_beige", True)
         spans = rs.finditer("foo and quux but not baz")
@@ -165,11 +158,7 @@ class TestCompiledRuleSet:
     def test_all_disabled(self):
         from telnetlib3.autoreply import AutoreplyRule
 
-        ar_rules = [
-            AutoreplyRule(
-                pattern=re.compile("foo", _RE_FLAGS), reply="bar", enabled=False
-            ),
-        ]
+        ar_rules = [AutoreplyRule(pattern=re.compile("foo", _RE_FLAGS), reply="bar", enabled=False)]
         rs = _CompiledRuleSet([], ar_rules, "black_on_beige", True)
         assert rs.finditer("foo") == []
 
@@ -177,9 +166,7 @@ class TestCompiledRuleSet:
         from telnetlib3.autoreply import AutoreplyRule
 
         ar_rules = [
-            AutoreplyRule(
-                pattern=re.compile("monster", _RE_FLAGS), reply="flee", enabled=True
-            ),
+            AutoreplyRule(pattern=re.compile("monster", _RE_FLAGS), reply="flee", enabled=True)
         ]
         hl_rules = [_make_rule("dynamite", "bold_red")]
         rs = _CompiledRuleSet(hl_rules, ar_rules, "black_on_beige", True)
@@ -189,10 +176,7 @@ class TestCompiledRuleSet:
         assert spans[1][2] == "bold_red"
 
     def test_overlap_first_wins(self):
-        hl_rules = [
-            _make_rule("abc", "bold_red"),
-            _make_rule("bc", "black_on_beige"),
-        ]
+        hl_rules = [_make_rule("abc", "bold_red"), _make_rule("bc", "black_on_beige")]
         rs = _CompiledRuleSet(hl_rules, [], "black_on_beige", True)
         spans = rs.finditer("xabcx")
         assert len(spans) == 1
@@ -202,18 +186,14 @@ class TestCompiledRuleSet:
 class TestHighlightEngineProcessLine:
 
     def test_no_match_passthrough(self):
-        engine = HighlightEngine(
-            [_make_rule("dynamite")], [], _mock_term()
-        )
+        engine = HighlightEngine([_make_rule("dynamite")], [], _mock_term())
         line = "nothing interesting here"
         result, matched = engine.process_line(line)
         assert result == line
         assert matched is False
 
     def test_simple_match(self):
-        engine = HighlightEngine(
-            [_make_rule("danger", "bold_red")], [], _mock_term()
-        )
+        engine = HighlightEngine([_make_rule("danger", "bold_red")], [], _mock_term())
         line = "there is danger ahead"
         result, matched = engine.process_line(line)
         assert matched is True
@@ -222,18 +202,14 @@ class TestHighlightEngineProcessLine:
         assert "\x1b[0m" in result
 
     def test_case_insensitive(self):
-        engine = HighlightEngine(
-            [_make_rule("DANGER", "bold_red")], [], _mock_term()
-        )
+        engine = HighlightEngine([_make_rule("DANGER", "bold_red")], [], _mock_term())
         line = "there is danger ahead"
         result, matched = engine.process_line(line)
         assert matched is True
         assert "\x1b[1;31m" in result
 
     def test_preserves_existing_sgr(self):
-        engine = HighlightEngine(
-            [_make_rule("def", "bold_red")], [], _mock_term()
-        )
+        engine = HighlightEngine([_make_rule("def", "bold_red")], [], _mock_term())
         line = "\x1b[36mabc def ghi\x1b[0m"
         result, matched = engine.process_line(line)
         assert matched is True
@@ -241,18 +217,14 @@ class TestHighlightEngineProcessLine:
         assert "\x1b[1;31m" in result
 
     def test_multiple_matches(self):
-        engine = HighlightEngine(
-            [_make_rule("cat", "bold_red")], [], _mock_term()
-        )
+        engine = HighlightEngine([_make_rule("cat", "bold_red")], [], _mock_term())
         line = "the cat sat on the cat"
         result, matched = engine.process_line(line)
         assert matched is True
         assert result.count("\x1b[1;31m") == 2
 
     def test_disabled_engine(self):
-        engine = HighlightEngine(
-            [_make_rule("danger")], [], _mock_term()
-        )
+        engine = HighlightEngine([_make_rule("danger")], [], _mock_term())
         engine.enabled = False
         line = "there is danger ahead"
         result, matched = engine.process_line(line)
@@ -260,26 +232,20 @@ class TestHighlightEngineProcessLine:
         assert matched is False
 
     def test_disabled_rule(self):
-        engine = HighlightEngine(
-            [_make_rule("danger", enabled=False)], [], _mock_term()
-        )
+        engine = HighlightEngine([_make_rule("danger", enabled=False)], [], _mock_term())
         line = "there is danger ahead"
         result, matched = engine.process_line(line)
         assert result == line
         assert matched is False
 
     def test_empty_line(self):
-        engine = HighlightEngine(
-            [_make_rule("danger")], [], _mock_term()
-        )
+        engine = HighlightEngine([_make_rule("danger")], [], _mock_term())
         result, matched = engine.process_line("")
         assert result == ""
         assert matched is False
 
     def test_sequence_only_line(self):
-        engine = HighlightEngine(
-            [_make_rule("danger")], [], _mock_term()
-        )
+        engine = HighlightEngine([_make_rule("danger")], [], _mock_term())
         result, matched = engine.process_line("\x1b[0m")
         assert matched is False
 
@@ -329,13 +295,9 @@ class TestHighlightEngineAutoreplyBuiltin:
         from telnetlib3.autoreply import AutoreplyRule
 
         ar_rules = [
-            AutoreplyRule(
-                pattern=re.compile("monster", _RE_FLAGS), reply="flee", enabled=True
-            ),
+            AutoreplyRule(pattern=re.compile("monster", _RE_FLAGS), reply="flee", enabled=True)
         ]
-        engine = HighlightEngine(
-            [], ar_rules, _mock_term(), autoreply_highlight="black_on_beige"
-        )
+        engine = HighlightEngine([], ar_rules, _mock_term(), autoreply_highlight="black_on_beige")
         line = "A monster appears!"
         result, matched = engine.process_line(line)
         assert matched is True
@@ -345,13 +307,9 @@ class TestHighlightEngineAutoreplyBuiltin:
         from telnetlib3.autoreply import AutoreplyRule
 
         ar_rules = [
-            AutoreplyRule(
-                pattern=re.compile("monster", _RE_FLAGS), reply="flee", enabled=True
-            ),
+            AutoreplyRule(pattern=re.compile("monster", _RE_FLAGS), reply="flee", enabled=True)
         ]
-        engine = HighlightEngine(
-            [], ar_rules, _mock_term(), autoreply_enabled=False
-        )
+        engine = HighlightEngine([], ar_rules, _mock_term(), autoreply_enabled=False)
         line = "A monster appears!"
         result, matched = engine.process_line(line)
         assert matched is False

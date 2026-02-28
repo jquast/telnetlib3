@@ -16,11 +16,9 @@ import pexpect
 import telnetlib3
 from telnetlib3.telopt import DO, SB, IAC, SGA, ECHO, NAWS, WILL, WONT, TTYPE, BINARY, CHARSET
 from telnetlib3.tests.accessories import (
-    bind_host,
     create_server,
     asyncio_server,
     open_connection,
-    unused_tcp_port,
     asyncio_connection,
 )
 

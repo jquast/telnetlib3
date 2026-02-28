@@ -25,46 +25,12 @@ from telnetlib3.telopt import (
     AARDWOLF,
 )
 from telnetlib3.stream_writer import TelnetWriter
-
-
-class MockTransport:
-    def __init__(self):
-        self._closing = False
-        self.writes = []
-        self.extra = {}
-
-    def write(self, data):
-        self.writes.append(bytes(data))
-
-    def is_closing(self):
-        return self._closing
-
-    def get_extra_info(self, name, default=None):
-        return self.extra.get(name, default)
-
-    def close(self):
-        self._closing = True
-
-
-class ProtocolBase:
-    def __init__(self, info=None):
-        self.info = info or {}
-        self.drain_called = False
-        self.conn_lost_called = False
-
-    def get_extra_info(self, name, default=None):
-        return self.info.get(name, default)
-
-    async def _drain_helper(self):
-        self.drain_called = True
-
-    def connection_lost(self, exc):
-        self.conn_lost_called = True
+from telnetlib3.tests.accessories import MockProtocol, MockTransport
 
 
 def new_writer(server=True, client=False, reader=None):
     t = MockTransport()
-    p = ProtocolBase()
+    p = MockProtocol()
     w = TelnetWriter(t, p, server=server, client=client, reader=reader)
     return w, t, p
 

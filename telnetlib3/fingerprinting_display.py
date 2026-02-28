@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     import prettytable
 
 # local
+from ._paths import _atomic_json_write
 from .accessories import PATIENCE_MESSAGES
 from .fingerprinting import (
     DATA_DIR,
@@ -34,7 +35,6 @@ from .fingerprinting import (
     AMBIGUOUS_WIDTH_UNKNOWN,
     _cooked_input,
     _hash_fingerprint,
-    _atomic_json_write,
     _resolve_hash_name,
     _validate_suggestion,
     _load_fingerprint_names,

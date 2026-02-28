@@ -1,4 +1,6 @@
 """Help topic loader for telnetlib3 TUI."""
+
+# std imports
 import importlib.resources
 
 
@@ -9,7 +11,8 @@ def _read_topic(name: str) -> str:
 
 
 def get_help(topic: str) -> str:
-    """Return combined help text for a TUI help topic.
+    """
+    Return combined help text for a TUI help topic.
 
     :param str topic: One of ``"macro"``, ``"autoreply"``, ``"highlight"``,
         ``"room"``, or ``"keybindings"``.

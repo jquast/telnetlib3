@@ -21,12 +21,7 @@ else:
     server_pty_shell = None  # type: ignore[assignment]
 
 # local
-from telnetlib3.tests.accessories import (  # noqa: F401
-    bind_host,
-    create_server,
-    open_connection,
-    unused_tcp_port,
-)
+from telnetlib3.tests.accessories import create_server, open_connection
 
 
 @pytest.fixture(autouse=True)
@@ -1097,7 +1092,9 @@ def test_fingerprint_server_main_env_fallback(monkeypatch):
 
 def test_bytes_safe_encoder_non_serializable():
     with pytest.raises(TypeError):
-        json.dumps({"x": object()}, cls=fps._BytesSafeEncoder)
+        from telnetlib3._paths import _BytesSafeEncoder
+
+        json.dumps({"x": object()}, cls=_BytesSafeEncoder)
 
 
 def test_fingerprinting_mixin_without_telnet_server():

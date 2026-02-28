@@ -8,11 +8,9 @@ import logging
 from telnetlib3 import accessories, telnet_server_shell
 from telnetlib3.telopt import DO, IAC, SGA, ECHO, WILL, WONT, TTYPE, BINARY
 from telnetlib3.tests.accessories import (
-    bind_host,
     create_server,
     asyncio_server,
     open_connection,
-    unused_tcp_port,
     asyncio_connection,
 )
 

@@ -8,7 +8,7 @@ import pytest
 
 # local
 import telnetlib3
-from telnetlib3.tests.accessories import bind_host, create_server, open_connection, unused_tcp_port
+from telnetlib3.tests.accessories import create_server, open_connection
 
 
 def _fn_encoding(incoming):

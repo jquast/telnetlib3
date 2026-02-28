@@ -1,16 +1,15 @@
 """Tests for telnetlib3._clipboard and REPL clipboard handlers."""
 
+# std imports
 import io
 import subprocess
 from unittest import mock
 
+# 3rd party
 import pytest
 
-from telnetlib3._clipboard import (
-    _PASTE_COMMANDS,
-    copy_to_clipboard,
-    paste_from_clipboard,
-)
+# local
+from telnetlib3._clipboard import _PASTE_COMMANDS, copy_to_clipboard, paste_from_clipboard
 
 
 class TestCopyToClipboard:
@@ -45,26 +44,19 @@ class TestPasteFromClipboard:
     """Tests for paste_from_clipboard (subprocess)."""
 
     def test_xclip(self):
-        fake = subprocess.CompletedProcess(
-            args=["xclip"], returncode=0, stdout=b"pasted"
-        )
+        fake = subprocess.CompletedProcess(args=["xclip"], returncode=0, stdout=b"pasted")
         with mock.patch("subprocess.run", return_value=fake) as m:
             result = paste_from_clipboard()
         assert result == "pasted"
         m.assert_called_once_with(
-            ("xclip", "-selection", "clipboard", "-o"),
-            capture_output=True,
-            timeout=2,
-            check=False,
+            ("xclip", "-selection", "clipboard", "-o"), capture_output=True, timeout=2, check=False
         )
 
     def test_fallback_to_xsel(self):
         def side_effect(cmd, **_kwargs):
             if cmd[0] == "xclip":
                 raise FileNotFoundError
-            return subprocess.CompletedProcess(
-                args=list(cmd), returncode=0, stdout=b"from-xsel"
-            )
+            return subprocess.CompletedProcess(args=list(cmd), returncode=0, stdout=b"from-xsel")
 
         with mock.patch("subprocess.run", side_effect=side_effect):
             assert paste_from_clipboard() == "from-xsel"
@@ -73,9 +65,7 @@ class TestPasteFromClipboard:
         def side_effect(cmd, **_kwargs):
             if cmd[0] in ("xclip", "xsel", "wl-paste"):
                 raise FileNotFoundError
-            return subprocess.CompletedProcess(
-                args=list(cmd), returncode=0, stdout=b"mac-paste"
-            )
+            return subprocess.CompletedProcess(args=list(cmd), returncode=0, stdout=b"mac-paste")
 
         with mock.patch("subprocess.run", side_effect=side_effect):
             assert paste_from_clipboard() == "mac-paste"
@@ -91,12 +81,8 @@ class TestPasteFromClipboard:
             nonlocal call_count
             call_count += 1
             if cmd[0] == "xclip":
-                return subprocess.CompletedProcess(
-                    args=list(cmd), returncode=1, stdout=b""
-                )
-            return subprocess.CompletedProcess(
-                args=list(cmd), returncode=0, stdout=b"ok"
-            )
+                return subprocess.CompletedProcess(args=list(cmd), returncode=1, stdout=b"")
+            return subprocess.CompletedProcess(args=list(cmd), returncode=0, stdout=b"ok")
 
         with mock.patch("subprocess.run", side_effect=side_effect):
             assert paste_from_clipboard() == "ok"
@@ -138,9 +124,7 @@ class TestReplClipboardHandlers:
 
         editor = mock.MagicMock()
         editor.insert_text.return_value = LineEditResult(changed=True)
-        with mock.patch(
-            "telnetlib3._clipboard.paste_from_clipboard", return_value="pasted"
-        ):
+        with mock.patch("telnetlib3._clipboard.paste_from_clipboard", return_value="pasted"):
             result = _clipboard_paste(editor)
         editor.insert_text.assert_called_once_with("pasted")
         assert result.changed
@@ -149,9 +133,7 @@ class TestReplClipboardHandlers:
         from telnetlib3.client_repl import _clipboard_paste
 
         editor = mock.MagicMock()
-        with mock.patch(
-            "telnetlib3._clipboard.paste_from_clipboard", return_value=""
-        ):
+        with mock.patch("telnetlib3._clipboard.paste_from_clipboard", return_value=""):
             result = _clipboard_paste(editor)
         editor.insert_text.assert_not_called()
         assert not result.changed

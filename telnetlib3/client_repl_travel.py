@@ -368,9 +368,7 @@ async def _fast_travel(
                     and graph is not None
                 ):
                     blocked = graph.blocked_rooms()
-                    new_steps = graph.find_path_with_rooms(
-                        actual, destination, blocked=blocked
-                    )
+                    new_steps = graph.find_path_with_rooms(actual, destination, blocked=blocked)
                     if new_steps is not None:
                         reroute_count += 1
                         msg = (
@@ -484,9 +482,7 @@ async def _autodiscover(
 
             # Travel to the gateway room (nearest-first, so usually short).
             if pos != gw_room:
-                steps = graph.find_path_with_rooms(
-                    pos, gw_room, blocked=blocked_rooms
-                )
+                steps = graph.find_path_with_rooms(pos, gw_room, blocked=blocked_rooms)
                 if steps is None:
                     tried.add((gw_room, direction))
                     if target_num:
@@ -599,9 +595,7 @@ async def _autodiscover(
 
             # Wait for any autoreply to settle.
             ar = ctx.autoreply_engine
-            ar_fired = ar is not None and (
-                ar.exclusive_active or ar.reply_pending
-            )
+            ar_fired = ar is not None and (ar.exclusive_active or ar.reply_pending)
             if ar is not None:
                 settle = 0
                 while settle < 60:
@@ -724,11 +718,16 @@ async def _randomwalk(
     reachable = _flood_reachable()
 
     ctx.randomwalk_active = True
-    ctx.randomwalk_total = min(limit, len(reachable)) if reachable else limit
+    expected_total = visit_level * len(reachable) if reachable else limit
+    ctx.randomwalk_total = min(limit, expected_total)
     ctx.randomwalk_current = 0
     visited: set[str] = {current}
     if resume and ctx.last_walk_mode == "randomwalk" and ctx.last_walk_visited:
         visited |= ctx.last_walk_visited
+
+    def _count_filled() -> int:
+        """Count reachable rooms that have reached visit_level."""
+        return sum(1 for r in reachable if walk_counts.get(r, 0) >= visit_level)
 
     try:
         stuck_count = 0
@@ -736,23 +735,21 @@ async def _randomwalk(
         bounce_count = 0
         prev_room: Optional[str] = None
         for step in range(limit):
-            ctx.randomwalk_current = step + 1
             current = ctx.current_room_num
             exits = dict(adj.get(current, {}))
             if not exits:
                 if echo_fn is not None:
                     echo_fn(
-                        f"RANDOMWALK [{step + 1}/{ctx.randomwalk_total}]: " f"dead end, stopping"
+                        f"RANDOMWALK [{ctx.randomwalk_current}/{ctx.randomwalk_total}]: "
+                        f"dead end, stopping"
                     )
                 break
 
             # Check if all reachable rooms have been visited enough times.
-            if reachable and all(
-                walk_counts.get(r, 0) >= visit_level for r in reachable
-            ):
+            if reachable and all(walk_counts.get(r, 0) >= visit_level for r in reachable):
                 if echo_fn is not None:
                     echo_fn(
-                        f"RANDOMWALK [{step + 1}/{ctx.randomwalk_total}]: "
+                        f"RANDOMWALK [{ctx.randomwalk_current}/{ctx.randomwalk_total}]: "
                         f"all {len(reachable)} reachable rooms visited"
                         f" {visit_level}x"
                     )
@@ -774,7 +771,7 @@ async def _randomwalk(
             if not scored:
                 if echo_fn is not None:
                     echo_fn(
-                        f"RANDOMWALK [{step + 1}/{ctx.randomwalk_total}]: "
+                        f"RANDOMWALK [{ctx.randomwalk_current}/{ctx.randomwalk_total}]: "
                         f"all exits blocked, stopping"
                     )
                 break
@@ -787,7 +784,7 @@ async def _randomwalk(
             dst_label = room.name if room else dst_num[:8]
             if echo_fn is not None:
                 echo_fn(
-                    f"RANDOMWALK [{step + 1}/{ctx.randomwalk_total}]: "
+                    f"RANDOMWALK [{ctx.randomwalk_current}/{ctx.randomwalk_total}]: "
                     f"{direction} -> {dst_label}"
                 )
 
@@ -825,7 +822,7 @@ async def _randomwalk(
                 stuck_count += 1
                 if echo_fn is not None:
                     echo_fn(
-                        f"RANDOMWALK [{step + 1}/{ctx.randomwalk_total}]: "
+                        f"RANDOMWALK [{ctx.randomwalk_current}/{ctx.randomwalk_total}]: "
                         f"no room change after {direction}"
                     )
                 # Mark only this specific exit as blocked.
@@ -837,7 +834,7 @@ async def _randomwalk(
                     if retry_count > _MAX_STUCK_RETRIES:
                         if echo_fn is not None:
                             echo_fn(
-                                f"RANDOMWALK [{step + 1}/{ctx.randomwalk_total}]: "
+                                f"RANDOMWALK [{ctx.randomwalk_current}/{ctx.randomwalk_total}]: "
                                 f"all exits blocked, stopping"
                             )
                         break
@@ -845,7 +842,7 @@ async def _randomwalk(
                         ctx.blocked_exits.discard((current, d))
                     if echo_fn is not None:
                         echo_fn(
-                            f"RANDOMWALK [{step + 1}/{ctx.randomwalk_total}]: "
+                            f"RANDOMWALK [{ctx.randomwalk_current}/{ctx.randomwalk_total}]: "
                             f"all exits temporarily blocked, retrying "
                             f"({retry_count}/{_MAX_STUCK_RETRIES})"
                         )
@@ -859,6 +856,22 @@ async def _randomwalk(
             actual = ctx.current_room_num
             walk_counts[actual] = walk_counts.get(actual, 0) + 1
             visited.add(actual)
+            ctx.randomwalk_current = _count_filled()
+
+            if ctx.randomwalk_auto_search:
+                if echo_fn is not None:
+                    echo_fn("search")
+                ctx.active_command = "search"
+                ctx.active_command_time = _monotonic()
+                if ctx.tx_dot is not None:
+                    ctx.tx_dot.trigger()
+                if isinstance(ctx.writer, TelnetWriterUnicode):
+                    ctx.writer.write("search\r\n")
+                else:
+                    ctx.writer.write(b"search\r\n")
+                if wait_fn is not None:
+                    await wait_fn()
+                ctx.active_command = None
 
             # Bounce detection: if we returned to the room we were in
             # 2 steps ago, we are ping-ponging between two rooms.
@@ -880,17 +893,18 @@ async def _randomwalk(
                                 ctx.blocked_exits.add((actual, rev_d))
                         if echo_fn is not None:
                             echo_fn(
-                                f"RANDOMWALK [{step + 1}/{ctx.randomwalk_total}]: "
+                                f"RANDOMWALK [{ctx.randomwalk_current}/{ctx.randomwalk_total}]: "
                                 f"bounce detected on {direction}, blocking"
                             )
                         all_blocked = all(
-                            (actual, d) in ctx.blocked_exits
-                            for d in adj.get(actual, {})
+                            (actual, d) in ctx.blocked_exits for d in adj.get(actual, {})
                         )
                         if all_blocked:
                             if echo_fn is not None:
+                                step = ctx.randomwalk_current
+                                total = ctx.randomwalk_total
                                 echo_fn(
-                                    f"RANDOMWALK [{step + 1}/{ctx.randomwalk_total}]: "
+                                    f"RANDOMWALK [{step}/{total}]: "
                                     f"all exits blocked after bounce, stopping"
                                 )
                             break
@@ -907,7 +921,8 @@ async def _randomwalk(
             new_reachable = _flood_reachable()
             if len(new_reachable) > len(reachable):
                 reachable = new_reachable
-                ctx.randomwalk_total = min(limit, len(reachable))
+                expected_total = visit_level * len(reachable)
+                ctx.randomwalk_total = min(limit, expected_total)
 
             # Yield so on_prompt() (driven by GA/EOR already received
             # with the room output) can queue autoreplies.
@@ -944,6 +959,8 @@ async def _randomwalk(
         ctx.last_walk_room = ctx.current_room_num
         ctx.last_walk_visited = visited
         ctx.randomwalk_active = False
+        ctx.randomwalk_auto_search = False
+        ctx.randomwalk_auto_evaluate = False
         ctx.randomwalk_current = 0
         ctx.randomwalk_total = 0
         ctx.randomwalk_task = None
@@ -1007,32 +1024,40 @@ async def _handle_travel_commands(
                     echo_fn("HOME: already at home room")
                 return parts[idx + 1 :]
             blocked = graph.blocked_rooms()
-            path = graph.find_path_with_rooms(
-                current, home_num, blocked=blocked
-            )
+            path = graph.find_path_with_rooms(current, home_num, blocked=blocked)
             if path is None:
                 if echo_fn is not None:
                     echo_fn(f"HOME: no path to home room {home_num}")
                 return parts[idx + 1 :]
-            await _fast_travel(
-                path, ctx, log, slow=False, destination=home_num
-            )
+            await _fast_travel(path, ctx, log, slow=False, destination=home_num)
             return parts[idx + 1 :]
 
         if verb in ("autodiscover", "randomwalk", "resume"):
             walk_limit = _DEFAULT_WALK_LIMIT
             walk_visit_level = 2
+            auto_search = False
+            auto_evaluate = False
             if arg:
                 arg_parts = arg.split()
-                try:
-                    walk_limit = int(arg_parts[0])
-                except (ValueError, IndexError):
-                    pass
-                if len(arg_parts) >= 2:
-                    try:
-                        walk_visit_level = max(1, int(arg_parts[1]))
-                    except ValueError:
-                        pass
+                numeric_idx = 0
+                for ap in arg_parts:
+                    low = ap.lower()
+                    if low == "autosearch":
+                        auto_search = True
+                    elif low == "autoevaluate":
+                        auto_evaluate = True
+                    elif numeric_idx == 0:
+                        try:
+                            walk_limit = int(ap)
+                            numeric_idx += 1
+                        except ValueError:
+                            pass
+                    elif numeric_idx == 1:
+                        try:
+                            walk_visit_level = max(1, int(ap))
+                            numeric_idx += 1
+                        except ValueError:
+                            pass
 
             echo_fn = ctx.echo_command
             if verb == "resume":
@@ -1042,7 +1067,7 @@ async def _handle_travel_commands(
                     return parts[idx + 1 :]
                 if ctx.last_walk_room != ctx.current_room_num:
                     if echo_fn is not None:
-                        echo_fn("RESUME: room changed since last walk, " "cannot resume")
+                        echo_fn("RESUME: room changed since last walk, cannot resume")
                     return parts[idx + 1 :]
                 verb = ctx.last_walk_mode
                 do_resume = True
@@ -1056,9 +1081,10 @@ async def _handle_travel_commands(
             if verb == "autodiscover":
                 await _autodiscover(ctx, log, limit=walk_limit, resume=do_resume)
             else:
+                ctx.randomwalk_auto_search = auto_search
+                ctx.randomwalk_auto_evaluate = auto_evaluate
                 await _randomwalk(
-                    ctx, log, limit=walk_limit, resume=do_resume,
-                    visit_level=walk_visit_level,
+                    ctx, log, limit=walk_limit, resume=do_resume, visit_level=walk_visit_level
                 )
             return parts[idx + 1 :]
 

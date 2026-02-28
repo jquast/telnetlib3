@@ -14,10 +14,10 @@ import re
 import json
 import time
 import asyncio
-from time import monotonic as _monotonic
 import logging
-from datetime import datetime, timezone
+from time import monotonic as _monotonic
 from typing import TYPE_CHECKING, Any, Callable, Optional, Awaitable
+from datetime import datetime, timezone
 from dataclasses import field, dataclass
 
 # 3rd party
@@ -38,6 +38,7 @@ __all__ = (
 _DELAY_RE = re.compile(r"^`delay\s+(\d+(?:\.\d+)?)(ms|s)`$")
 _GROUP_RE = re.compile(r"\\(\d+)")
 _COND_RE = re.compile(r"^(>=|<=|>|<|=)(\d+)$")
+_KILL_RE = re.compile(r"^kill\s+(\S+)", re.IGNORECASE)
 
 # Maps condition key to (current_keys, max_keys) for GMCP Char.Vitals lookup.
 _VITAL_KEYS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
@@ -255,20 +256,24 @@ def _extract_group_source(pattern_src: str, group_num: int) -> Optional[str]:
     :param group_num: 1-based group number.
     :returns: Group source text or ``None``.
     """
-    depth = 0
     cap_count = 0
     i = 0
     n = len(pattern_src)
     while i < n:
         ch = pattern_src[i]
-        if ch == '\\':
+        if ch == "\\":
             i += 2
             continue
-        if ch == '(':
-            if i + 1 < n and pattern_src[i + 1] == '?':
+        if ch == "(":
+            if i + 1 < n and pattern_src[i + 1] == "?":
                 # (?:...) (?=...) (?!...) (?<=...) (?<!...) are non-capturing
                 # (?P<name>...) is capturing
-                if i + 2 < n and pattern_src[i + 2] == 'P' and i + 3 < n and pattern_src[i + 3] == '<':
+                if (
+                    i + 2 < n
+                    and pattern_src[i + 2] == "P"
+                    and i + 3 < n
+                    and pattern_src[i + 3] == "<"
+                ):
                     cap_count += 1
                 # else non-capturing, don't increment
             else:
@@ -277,21 +282,19 @@ def _extract_group_source(pattern_src: str, group_num: int) -> Optional[str]:
                 # Find matching close paren
                 start = i + 1
                 # Skip past the '(?P<name>' prefix if present
-                if (i + 1 < n and pattern_src[i + 1] == '?'
-                        and i + 2 < n and pattern_src[i + 2] == 'P'
-                        and i + 3 < n and pattern_src[i + 3] == '<'):
-                    close_angle = pattern_src.index('>', i + 4)
+                if i + 3 < n and pattern_src[i + 1 : i + 4] == "?P<":
+                    close_angle = pattern_src.index(">", i + 4)
                     start = close_angle + 1
                 inner_depth = 1
                 j = start
                 while j < n and inner_depth > 0:
                     c = pattern_src[j]
-                    if c == '\\':
+                    if c == "\\":
                         j += 2
                         continue
-                    if c == '(':
+                    if c == "(":
                         inner_depth += 1
-                    elif c == ')':
+                    elif c == ")":
                         inner_depth -= 1
                     if inner_depth > 0:
                         j += 1
@@ -302,9 +305,7 @@ def _extract_group_source(pattern_src: str, group_num: int) -> Optional[str]:
     return None
 
 
-def _resolve_group_value(
-    captured: str, pattern_src: str, group_num: int, flags: int
-) -> str:
+def _resolve_group_value(captured: str, pattern_src: str, group_num: int, flags: int) -> str:
     r"""
     Resolve the substitution value for a captured group.
 
@@ -323,7 +324,7 @@ def _resolve_group_value(
     :param flags: Compiled pattern flags.
     :returns: Resolved substitution value.
     """
-    if not (flags & re.IGNORECASE):
+    if not flags & re.IGNORECASE:
         return captured
     group_src = _extract_group_source(pattern_src, group_num)
     if group_src is None:
@@ -333,22 +334,21 @@ def _resolve_group_value(
     depth = 0
     start = 0
     for i, ch in enumerate(group_src):
-        if ch == '\\' and i + 1 < len(group_src):
+        if ch == "\\" and i + 1 < len(group_src):
             continue
-        if ch == '(':
+        if ch == "(":
             depth += 1
-        elif ch == ')':
+        elif ch == ")":
             depth -= 1
-        elif ch == '|' and depth == 0:
+        elif ch == "|" and depth == 0:
             alternatives.append(group_src[start:i])
             start = i + 1
     alternatives.append(group_src[start:])
     # Check each alternative is a pure literal (no regex metacharacters)
-    _META = set(r'\.^$*+?{}[]|()')
+    _META = set(r"\.^$*+?{}[]|()")
     lowered = captured.lower()
     for alt in alternatives:
-        if any(c in _META and (j == 0 or alt[j - 1] != '\\')
-               for j, c in enumerate(alt)):
+        if any(c in _META and (j == 0 or alt[j - 1] != "\\") for j, c in enumerate(alt)):
             return captured
         if alt.lower() == lowered:
             return alt
@@ -359,8 +359,8 @@ def _substitute_groups(template: str, match: re.Match[str]) -> str:
     r"""
     Replace ``\1``, ``\2``, etc. with match group values.
 
-    When the pattern is case-insensitive and a group is a pure alternation
-    of literals, the pattern's literal is used instead of the input text.
+    When the pattern is case-insensitive and a group is a pure alternation of literals, the
+    pattern's literal is used instead of the input text.
 
     :param template: Reply template string.
     :param match: Regex match object.
@@ -565,7 +565,8 @@ class SearchBuffer:
 
 @dataclass
 class _ExclusiveState:
-    """Mutable bundle of exclusive-mode state variables.
+    """
+    Mutable bundle of exclusive-mode state variables.
 
     All rules are exclusive by default: when any rule fires, ``active``
     is set and cleared when the reply chain task completes.
@@ -707,9 +708,8 @@ class AutoreplyEngine:
         """
         Feed server output text and check for matches.
 
-        Called from the server output handler in both REPL and raw modes.
-        Searches after every chunk, including partial lines, so that MUD
-        prompts without trailing newlines are matched.
+        Called from the server output handler in both REPL and raw modes. Searches after every
+        chunk, including partial lines, so that MUD prompts without trailing newlines are matched.
 
         :param text: Server output text.
         """
@@ -780,8 +780,7 @@ class AutoreplyEngine:
                         ok, desc = check_condition(rule.when, self._ctx)
                         if not ok:
                             self._log.info(
-                                "autoreply: %s #%d skipped,"
-                                " condition failed: %s",
+                                "autoreply: %s #%d skipped, condition failed: %s",
                                 log_prefix,
                                 rule_idx + 1,
                                 desc,
@@ -858,12 +857,7 @@ class AutoreplyEngine:
 
         :param reply_text: Fully substituted reply string.
         """
-        from .client_repl_commands import (
-            expand_commands_ex,
-            _WHEN_RE,
-            _UNTIL_RE,
-            _UNTILS_RE,
-        )
+        from .client_repl_commands import _WHEN_RE, _UNTIL_RE, _UNTILS_RE, expand_commands_ex
 
         expanded = expand_commands_ex(reply_text)
         sent_count = 0
@@ -897,15 +891,11 @@ class AutoreplyEngine:
                 now = time.monotonic()
                 self._until_start = now
                 self._until_deadline = now + timeout
-                compiled = re.compile(
-                    pattern_str, re.IGNORECASE | re.MULTILINE | re.DOTALL
-                )
+                compiled = re.compile(pattern_str, re.IGNORECASE | re.MULTILINE | re.DOTALL)
                 match = await self._buffer.wait_for_pattern(compiled, timeout)
                 self._until_start = self._until_deadline = 0.0
                 if match is None:
-                    self._log.info(
-                        "autoreply: until timed out for %r", pattern_str
-                    )
+                    self._log.info("autoreply: until timed out for %r", pattern_str)
                     self._status = ""
                     return
                 continue
@@ -919,17 +909,11 @@ class AutoreplyEngine:
                 self._until_start = now
                 self._until_deadline = now + timeout
                 # untils is case-SENSITIVE -- no IGNORECASE flag
-                compiled_cs = re.compile(
-                    pattern_str, re.MULTILINE | re.DOTALL
-                )
-                match = await self._buffer.wait_for_pattern(
-                    compiled_cs, timeout
-                )
+                compiled_cs = re.compile(pattern_str, re.MULTILINE | re.DOTALL)
+                match = await self._buffer.wait_for_pattern(compiled_cs, timeout)
                 self._until_start = self._until_deadline = 0.0
                 if match is None:
-                    self._log.info(
-                        "autoreply: untils timed out for %r", pattern_str
-                    )
+                    self._log.info("autoreply: untils timed out for %r", pattern_str)
                     self._status = ""
                     return
                 continue
@@ -955,6 +939,15 @@ class AutoreplyEngine:
         """
         if not cmd or not cmd.strip():
             return
+        if self._ctx.randomwalk_auto_evaluate and self._ctx.randomwalk_active:
+            m = _KILL_RE.match(cmd)
+            if m:
+                consider_cmd = f"consider {m.group(1)}"
+                self._log.info("autoreply: injecting %r before %r", consider_cmd, cmd)
+                if self._echo_fn is not None:
+                    self._echo_fn(consider_cmd)
+                assert self._ctx.writer is not None
+                self._ctx.writer.write(consider_cmd + "\r\n")  # type: ignore[arg-type]
         self._log.info("autoreply: sending %r", cmd)
         self._sent_commands.add(cmd.strip())
         if len(self._sent_commands) > self._sent_commands_max:
@@ -1024,6 +1017,7 @@ class AutoreplyEngine:
             self._reply_chain = None
         self._excl.clear()
         self._status = ""
+        self._until_start = self._until_deadline = 0.0
         self._condition_blocked.clear()
         self._condition_retried = False
         self._sent_commands.clear()

@@ -5,38 +5,29 @@ import re
 import asyncio
 import logging
 from time import monotonic as _monotonic
-from typing import TYPE_CHECKING, Any, NamedTuple, Optional
+from typing import TYPE_CHECKING, Any, Optional, NamedTuple
 
 if TYPE_CHECKING:
     from .session_context import SessionContext, _CommandQueue
 
 # local
-from .client_repl_render import (
-    _ELLIPSIS,
-    _FLASH_DURATION,
-    _STYLE_NORMAL,
-    _flash_bg_rgb,
-    _get_term,
-    _wcswidth,
-    _write_hint,
-)
+from .client_repl_render import _ELLIPSIS, _get_term, _wcswidth, _write_hint, _flash_bg_rgb
 
 _REPEAT_RE = re.compile(r"^(\d+)([A-Za-z].*)$")
 _BACKTICK_RE = re.compile(r"`[^`]*`")
 
-_WHEN_RE = re.compile(
-    r"^`when\s+(HP%|MP%)\s*(>=|<=|>|<|=)\s*(\d+)`$", re.IGNORECASE
-)
+_WHEN_RE = re.compile(r"^`when\s+(HP%|MP%)\s*(>=|<=|>|<|=)\s*(\d+)`$", re.IGNORECASE)
 _UNTIL_RE = re.compile(r"^`until(?:\s+(\d+(?:\.\d+)?))?\s+(.+)`$")
 _UNTILS_RE = re.compile(r"^`untils(?:\s+(\d+(?:\.\d+)?))?\s+(.+)`$")
 
 
 class ExpandedCommands(NamedTuple):
-    """Result of :func:`expand_commands_ex`.
+    """
+    Result of :func:`expand_commands_ex`.
 
     :param commands: Flat list of individual commands.
-    :param immediate_set: Indices of commands whose preceding separator
-        was ``|`` (send immediately, no GA/EOR wait).
+    :param immediate_set: Indices of commands whose preceding separator was ``|`` (send immediately,
+        no GA/EOR wait).
     """
 
     commands: list[str]
@@ -44,7 +35,7 @@ class ExpandedCommands(NamedTuple):
 
 
 def expand_commands_ex(line: str) -> ExpandedCommands:
-    """
+    r"""
     Split *line* on ``;`` and ``|`` (outside backticks) and expand repeat prefixes.
 
     Backtick-enclosed tokens (e.g. ```fast travel 123```, ```delay 1s```,
@@ -178,7 +169,8 @@ def _render_active_command(
     hint: str = "",
     progress: Optional[float] = None,
 ) -> int:
-    """Render a single highlighted active command on the input row.
+    """
+    Render a single highlighted active command on the input row.
 
     The text is drawn in the base foreground colour.  During the flash
     window a background ramps from black toward the inverse RGB of the
@@ -227,7 +219,8 @@ def _render_command_queue(
     hint: str = "",
     progress: Optional[float] = None,
 ) -> int:
-    """Render the command queue on the input row.
+    """
+    Render the command queue on the input row.
 
     The active run uses the suggestion (dull) colour with an optional
     flash animation.  Pending runs use dim grey.  If the display is too
@@ -333,12 +326,24 @@ async def _send_chained(
         except asyncio.TimeoutError:
             return False
 
+    from .autoreply import _DELAY_RE
+
     for _idx, cmd in enumerate(commands[1:], 1):
         if queue is not None:
             if queue.cancelled:
                 return
             queue.current_idx = _idx
             queue.render()
+
+        dm = _DELAY_RE.match(cmd)
+        if dm:
+            value = float(dm.group(1))
+            unit = dm.group(2)
+            delay = value / 1000.0 if unit == "ms" else value
+            if delay > 0:
+                if await _cancellable_sleep(delay):
+                    return
+            continue
 
         # Detect runs of identical commands (e.g. "9e;6n" expands to
         # e,e,...,n,n,...) — these need movement pacing even in mixed
@@ -363,6 +368,10 @@ async def _send_chained(
             if ctx.tx_dot is not None:
                 ctx.tx_dot.trigger()
             ctx.writer.write(cmd + "\r\n")  # type: ignore[arg-type]
+            ts = ctx.typescript_file
+            if ts is not None and ctx.writer is not None and not ctx.writer.will_echo:
+                ts.write(cmd + "\r\n")
+                ts.flush()
             continue
 
         # Repeated commands: delay + room-change pacing with retry.
@@ -391,6 +400,10 @@ async def _send_chained(
             if ctx.tx_dot is not None:
                 ctx.tx_dot.trigger()
             ctx.writer.write(cmd + "\r\n")  # type: ignore[arg-type]
+            ts = ctx.typescript_file
+            if ts is not None and ctx.writer is not None and not ctx.writer.will_echo:
+                ts.write(cmd + "\r\n")
+                ts.flush()
 
             if not prev_room:
                 break
@@ -498,9 +511,7 @@ async def execute_macro_commands(text: str, ctx: "SessionContext", log: logging.
                 now = _monotonic()
                 engine._until_start = now
                 engine._until_deadline = now + timeout
-                compiled = re.compile(
-                    pattern_str, re.IGNORECASE | re.MULTILINE | re.DOTALL
-                )
+                compiled = re.compile(pattern_str, re.IGNORECASE | re.MULTILINE | re.DOTALL)
                 match = await engine.buffer.wait_for_pattern(compiled, timeout)
                 engine._until_start = engine._until_deadline = 0.0
                 if match is None:
@@ -520,9 +531,7 @@ async def execute_macro_commands(text: str, ctx: "SessionContext", log: logging.
                 engine._until_start = now
                 engine._until_deadline = now + timeout
                 # untils is case-SENSITIVE -- no IGNORECASE flag
-                compiled = re.compile(
-                    pattern_str, re.MULTILINE | re.DOTALL
-                )
+                compiled = re.compile(pattern_str, re.MULTILINE | re.DOTALL)
                 match = await engine.buffer.wait_for_pattern(compiled, timeout)
                 engine._until_start = engine._until_deadline = 0.0
                 if match is None:

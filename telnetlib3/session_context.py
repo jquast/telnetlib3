@@ -4,7 +4,7 @@ from __future__ import annotations
 
 # std imports
 import asyncio
-from typing import Any, Union, Callable, Optional, Awaitable
+from typing import IO, Any, Union, Callable, Optional, Awaitable
 
 # local
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
@@ -61,6 +61,9 @@ class SessionContext:
         self.randomwalk_current: int = 0
         self.randomwalk_total: int = 0
         self.randomwalk_task: Optional[asyncio.Task[None]] = None
+        self.randomwalk_auto_search: bool = False
+        self.randomwalk_auto_evaluate: bool = False
+        self.travel_task: Optional[asyncio.Task[None]] = None
         self.active_command: Optional[str] = None
         self.active_command_time: float = 0.0
         self.blocked_exits: set[tuple[str, str]] = set()  # (room_num, direction)
@@ -108,6 +111,7 @@ class SessionContext:
         self.input_filter: Optional[Any] = None
         self.repl_enabled: bool = False
         self.history_file: Optional[str] = None
+        self.typescript_file: Optional[IO[str]] = None
 
         # modem activity dots (set by REPL, used by _send_chained et al.)
         self.rx_dot: Optional[Any] = None
@@ -161,9 +165,7 @@ class SessionContext:
         if self._autoreplies_dirty and self.autoreplies_file and self.autoreply_rules:
             from .autoreply import save_autoreplies
 
-            save_autoreplies(
-                self.autoreplies_file, self.autoreply_rules, self.session_key
-            )
+            save_autoreplies(self.autoreplies_file, self.autoreply_rules, self.session_key)
             self._autoreplies_dirty = False
 
     def close(self) -> None:
