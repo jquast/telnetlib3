@@ -638,7 +638,7 @@ def test_server_connection_read_some(serve_with_handler):
     with TelnetConnection(host, port, timeout=10, encoding=False) as conn:
         conn.write(b"hello")
         conn.flush(timeout=10)
-        done.wait(timeout=10)
+        assert done.wait(timeout=10)
 
     assert len(result) == 1
 

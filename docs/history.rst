@@ -26,6 +26,9 @@ History
     now sends ``DO NEW_ENVIRON`` but excludes ``USER`` variable instead of
     skipping the option entirely, :ghissue:`24`.
   * enhancement: comprehensive pylint and mypy cleanup across the codebase.
+  * bugfix: ``read_some()`` in synchronous API (``TelnetConnection`` and
+    ``ServerConnection``) blocked until EOF instead of returning available
+    data.  Now returns as soon as any data is available.
 
 2.6.1
   * bugfix: dependency of ``wcwidth`` version.

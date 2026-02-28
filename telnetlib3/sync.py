@@ -176,14 +176,15 @@ class TelnetConnection:
 
     def read_some(self, timeout: Optional[float] = None) -> Union[str, bytes]:
         """
-        Read some data from the connection.
+        Read some available data from the connection.
 
-        Alias for :meth:`read` for compatibility with old telnetlib.
+        Unlike :meth:`read` with ``n=-1``, this returns as soon as any data is
+        available rather than waiting for EOF.
 
-        :param timeout: Timeout in seconds.
+        :param timeout: Timeout in seconds (uses default if None).
         :returns: Data read from connection.
         """
-        return self.read(-1, timeout=timeout)
+        return self.read(self._reader._limit, timeout=timeout)
 
     def readline(self, timeout: Optional[float] = None) -> Union[str, bytes]:
         """
@@ -649,14 +650,15 @@ class ServerConnection:
 
     def read_some(self, timeout: Optional[float] = None) -> Union[str, bytes]:
         """
-        Read some data from the connection.
+        Read some available data from the connection.
 
-        Alias for :meth:`read` for compatibility with old telnetlib.
+        Unlike :meth:`read` with ``n=-1``, this returns as soon as any data is
+        available rather than waiting for EOF.
 
         :param timeout: Timeout in seconds.
         :returns: Data read from connection.
         """
-        return self.read(-1, timeout=timeout)
+        return self.read(self._reader._limit, timeout=timeout)
 
     def readline(self, timeout: Optional[float] = None) -> Union[str, bytes]:
         """

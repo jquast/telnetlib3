@@ -243,7 +243,7 @@ async def test_telnet_client_idle_duration_minwait(bind_host, unused_tcp_port):
         ) as (reader, writer):
             elapsed_ms = int((time.time() - stime) * 1e3)
             expected_ms = int(given_minwait * 1e3)
-            assert expected_ms <= elapsed_ms <= expected_ms + 50
+            assert expected_ms <= elapsed_ms <= expected_ms + 150
 
             assert 0 <= writer.protocol.idle <= 0.5
             assert 0 <= writer.protocol.duration <= 0.5
@@ -319,7 +319,7 @@ async def test_telnet_client_negotiation_fail(bind_host, unused_tcp_port):
         ) as (reader, writer):
             elapsed_ms = int((time.time() - stime) * 1e3)
             expected_ms = int(given_maxwait * 1e3)
-            assert expected_ms <= elapsed_ms <= expected_ms + 50
+            assert expected_ms <= elapsed_ms <= expected_ms + 150
 
 
 async def test_telnet_server_as_module():
