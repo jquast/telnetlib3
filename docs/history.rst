@@ -1,6 +1,7 @@
 History
 =======
 2.6.0
+  * bugfix: dependency of wcwidth version.
   * new: TLS support (TELNETS).  :func:`~telnetlib3.client.open_connection`
     accepts an ``ssl`` parameter (``True``, or an :class:`ssl.SSLContext`).
     :func:`~telnetlib3.server.create_server` accepts an ``ssl`` parameter
