@@ -8,10 +8,10 @@ import pytest
 
 # local
 from telnetlib3 import slc as slc_mod
-from telnetlib3._session_context import TelnetSessionContext
 from telnetlib3 import client_shell as cs
 from telnetlib3 import guard_shells as gs
 from telnetlib3 import server_shell as ss
+from telnetlib3._session_context import TelnetSessionContext
 
 
 class DummyWriter:

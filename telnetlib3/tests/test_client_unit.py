@@ -9,8 +9,8 @@ import pytest
 # local
 from telnetlib3 import client as cl
 from telnetlib3 import accessories
-from telnetlib3._session_context import TelnetSessionContext
 from telnetlib3.client_base import BaseClient
+from telnetlib3._session_context import TelnetSessionContext
 from telnetlib3.tests.accessories import create_server
 
 _CLIENT_DEFAULTS = {
@@ -220,9 +220,7 @@ def test_transform_args():
 
 def test_transform_args_typescript():
     parser = cl._get_argument_parser()
-    result = cl._transform_args(
-        parser.parse_args(["myhost", "--typescript", "/tmp/sess.log"])
-    )
+    result = cl._transform_args(parser.parse_args(["myhost", "--typescript", "/tmp/sess.log"]))
     assert result["typescript"] == "/tmp/sess.log"
 
     defaults = cl._transform_args(parser.parse_args(["myhost"]))
@@ -402,9 +400,7 @@ async def test_run_client_unknown_palette(monkeypatch):
 )
 @pytest.mark.asyncio
 async def test_run_client_color_filter(monkeypatch, argv_extra, filter_cls_name):
-    monkeypatch.setattr(
-        sys, "argv", ["telnetlib3-client", "localhost"] + argv_extra
-    )
+    monkeypatch.setattr(sys, "argv", ["telnetlib3-client", "localhost"] + argv_extra)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     monkeypatch.setattr(accessories, "function_lookup", lambda _: _noop_shell)
 

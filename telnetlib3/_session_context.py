@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import IO, Any, Optional, Callable, Awaitable
+# std imports
+from typing import IO, Any, Callable, Optional, Awaitable
 
 __all__ = ("TelnetSessionContext",)
 

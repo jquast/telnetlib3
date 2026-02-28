@@ -10,6 +10,7 @@ from unittest import mock
 import pytest
 import pexpect
 
+# local
 from telnetlib3._session_context import TelnetSessionContext
 
 if sys.platform == "win32":
@@ -754,8 +755,9 @@ async def test_raw_event_loop_reactivates_repl() -> None:
 @pytest.mark.asyncio
 async def test_raw_event_loop_typescript_recording() -> None:
     """_raw_event_loop writes server output to ctx.typescript_file when set."""
-    from telnetlib3.client_shell import _RawLoopState, _raw_event_loop
     import io
+
+    from telnetlib3.client_shell import _RawLoopState, _raw_event_loop
 
     class _StrReader:
         def __init__(self) -> None:

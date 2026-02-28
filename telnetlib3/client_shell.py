@@ -703,9 +703,7 @@ else:
 
             escape_name = accessories.name_unicode(keyboard_escape)
             banner_sep = "\r\n" if tty_shell._istty else linesep
-            stdout.write(
-                f"Escape character is '{escape_name}'.{banner_sep}".encode()
-            )
+            stdout.write(f"Escape character is '{escape_name}'.{banner_sep}".encode())
 
             def _handle_close(msg: str) -> None:
                 _flush_color_filter(telnet_writer, stdout)
@@ -717,9 +715,7 @@ else:
 
             # Standard event loop (byte-at-a-time).
             if not switched_to_raw and tty_shell._istty and tty_shell._save_mode is not None:
-                tty_shell.set_mode(
-                    tty_shell._make_raw(tty_shell._save_mode, suppress_echo=True)
-                )
+                tty_shell.set_mode(tty_shell._make_raw(tty_shell._save_mode, suppress_echo=True))
                 switched_to_raw = True
                 local_echo = not telnet_writer.will_echo
                 linesep = "\r\n"

@@ -19,6 +19,7 @@ from telnetlib3 import accessories, client_base
 from telnetlib3._types import ShellCallback
 from telnetlib3.stream_reader import TelnetReader, TelnetReaderUnicode
 from telnetlib3.stream_writer import TelnetWriter, TelnetWriterUnicode
+
 __all__ = ("TelnetClient", "TelnetTerminalClient", "open_connection")
 
 #: Default GMCP modules requested via ``Core.Supports.Set``.
@@ -196,6 +197,7 @@ class TelnetClient(client_base.BaseClient):
             self.log.info("GMCP: %s %r", package, data)
         else:
             self.log.debug("GMCP: %s %r", package, data)
+
     def send_ttype(self) -> str:
         """Callback for responding to TTYPE requests."""
         result: str = self._extra["term"]

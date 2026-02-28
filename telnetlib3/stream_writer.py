@@ -13,7 +13,6 @@ if TYPE_CHECKING:  # pragma: no cover
     from .stream_reader import TelnetReader
 
 # local
-from ._session_context import TelnetSessionContext
 from . import slc
 from .mud import (
     zmp_decode,
@@ -97,6 +96,7 @@ from .telopt import (
     option_from_name,
 )
 from .accessories import TRACE, hexdump
+from ._session_context import TelnetSessionContext
 
 __all__ = ("TelnetWriter", "TelnetWriterUnicode")
 
