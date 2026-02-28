@@ -8,7 +8,6 @@ import asyncio
 import pytest
 from pytest_asyncio.plugin import unused_tcp_port  # noqa: F401
 
-
 try:
     import xdist  # noqa: F401
 
