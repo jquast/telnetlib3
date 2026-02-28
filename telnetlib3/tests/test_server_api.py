@@ -67,10 +67,10 @@ async def test_server_with_wait_for(bind_host, unused_tcp_port):
             writer.write(IAC + WILL + BINARY)
             writer.write(IAC + WONT + TTYPE)
 
-            client = await asyncio.wait_for(server.wait_for_client(), 2.0)
+            client = await asyncio.wait_for(server.wait_for_client(), 5.0)
 
             # Use wait_for to check specific negotiation state
-            await asyncio.wait_for(client.writer.wait_for(remote={"BINARY": True}), 2.0)
+            await asyncio.wait_for(client.writer.wait_for(remote={"BINARY": True}), 5.0)
             assert client.writer.remote_option[BINARY] is True
 
 

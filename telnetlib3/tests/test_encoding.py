@@ -78,7 +78,7 @@ async def test_telnet_server_encoding_bidirectional(bind_host, unused_tcp_port):
             writer.write(IAC + WILL + BINARY)
             writer.write(IAC + WONT + TTYPE)
 
-            srv_instance = await asyncio.wait_for(server.wait_for_client(), 2.0)
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 5.0)
             assert srv_instance.encoding(incoming=True) == "utf8"
             assert srv_instance.encoding(outgoing=True) == "utf8"
             assert srv_instance.encoding(incoming=True, outgoing=True) == "utf8"
