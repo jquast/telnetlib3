@@ -1,5 +1,9 @@
 History
 =======
+3.0.1 (unreleased)
+  * new: MCCP2 and MCCP3. Both client and server ends passively support if requested, and request
+    support by --compression or deny support by --no-compression.
+
 3.0.0
   * change: :attr:`~telnetlib3.client_base.BaseClient.connect_minwait` default
     now 0 (was 1.0 seconds in library API).
