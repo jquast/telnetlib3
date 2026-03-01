@@ -23,6 +23,8 @@ from telnetlib3.stream_writer import TelnetWriter, TelnetWriterUnicode
 __all__ = ("TelnetClient", "TelnetTerminalClient", "open_connection")
 
 #: Default GMCP modules requested via ``Core.Supports.Set``.
+#: Sub-modules are listed explicitly because not all servers treat
+#: top-level subscriptions as wildcards.
 _DEFAULT_GMCP_MODULES = [
     "Char 1",
     "Char.Vitals 1",
@@ -31,6 +33,7 @@ _DEFAULT_GMCP_MODULES = [
     "Room.Info 1",
     "Comm 1",
     "Comm.Channel 1",
+    "Group 1",
 ]
 
 
@@ -70,7 +73,6 @@ class TelnetClient(client_base.BaseClient):
         waiter_closed: Optional[asyncio.Future[None]] = None,
         _waiter_connected: Optional[asyncio.Future[None]] = None,
         gmcp_modules: Optional[List[str]] = None,
-        gmcp_log: bool = False,
     ) -> None:
         """Initialize TelnetClient with terminal parameters."""
         self._compression = compression
@@ -86,7 +88,6 @@ class TelnetClient(client_base.BaseClient):
             _waiter_connected=_waiter_connected,
         )
         self._gmcp_modules = gmcp_modules or list(_DEFAULT_GMCP_MODULES)
-        self._gmcp_log = gmcp_log
         self._gmcp_hello_sent = False
         self._send_environ = set(send_environ or self.DEFAULT_SEND_ENVIRON)
         self._extra.update(
@@ -166,7 +167,7 @@ class TelnetClient(client_base.BaseClient):
         """Wire GMCP callback and WILL-detection for Core.Hello handshake."""
         from telnetlib3.telopt import GMCP
 
-        self.writer.set_ext_callback(GMCP, self._on_gmcp)
+        self.writer.set_ext_callback(GMCP, self.on_gmcp)
 
         # Capture current handle_will (already includes CHARSET wrapper).
         # On reconnect, _original_handle_will was already restored in connection_made,
@@ -191,17 +192,14 @@ class TelnetClient(client_base.BaseClient):
         self.writer.send_gmcp("Core.Supports.Set", self._gmcp_modules)
         self.log.info("GMCP handshake: Core.Hello + Core.Supports.Set %s", self._gmcp_modules)
 
-    def _on_gmcp(self, package: str, data: Any) -> None:
+    def on_gmcp(self, package: str, data: Any) -> None:
         """Store incoming GMCP data on ``writer.ctx``, merging dict updates."""
         gmcp = self.writer.ctx.gmcp_data
         if isinstance(data, dict) and isinstance(gmcp.get(package), dict):
             gmcp[package].update(data)
         else:
             gmcp[package] = data
-        if self._gmcp_log:
-            self.log.info("GMCP: %s %r", package, data)
-        else:
-            self.log.debug("GMCP: %s %r", package, data)
+        self.log.debug("GMCP: %s %r", package, data)
 
     def send_ttype(self) -> str:
         """Callback for responding to TTYPE requests."""
@@ -628,12 +626,10 @@ async def run_client() -> None:
     # flags before negotiation starts.
     encoding_explicit = args["encoding"] not in ("utf8", "utf-8", False)
     gmcp_modules: Optional[List[str]] = args.get("gmcp_modules")
-    gmcp_log: bool = args.get("gmcp_log", False)
 
     def _client_factory(**kwargs: Any) -> client_base.BaseClient:
         client: TelnetClient
         kwargs["gmcp_modules"] = gmcp_modules
-        kwargs["gmcp_log"] = gmcp_log
         if sys.platform != "win32" and sys.stdin.isatty():
             client = TelnetTerminalClient(**kwargs)
         else:
@@ -941,12 +937,6 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         "When provided, replaces the built-in defaults.",
     )
     parser.add_argument(
-        "--gmcp-log",
-        action="store_true",
-        default=False,
-        help="log all incoming GMCP messages at INFO level " "(default: DEBUG only)",
-    )
-    parser.add_argument(
         "--typescript",
         default=None,
         metavar="FILE",
@@ -1047,7 +1037,6 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
             else None
         ),
         "compression": args.compression,
-        "gmcp_log": args.gmcp_log,
         "typescript": args.typescript,
     }
 
