@@ -557,15 +557,15 @@ def _make_connected_client(**kwargs):
 @pytest.mark.asyncio
 async def test_on_gmcp_stores_on_writer_ctx():
     client, _ = _make_connected_client()
-    client._on_gmcp("Room.Info", {"name": "Town Square"})
+    client.on_gmcp("Room.Info", {"name": "Town Square"})
     assert client.writer.ctx.gmcp_data["Room.Info"] == {"name": "Town Square"}
 
 
 @pytest.mark.asyncio
 async def test_on_gmcp_merges_dicts_on_writer_ctx():
     client, _ = _make_connected_client()
-    client._on_gmcp("Char.Vitals", {"hp": 100, "maxhp": 100})
-    client._on_gmcp("Char.Vitals", {"hp": 63})
+    client.on_gmcp("Char.Vitals", {"hp": 100, "maxhp": 100})
+    client.on_gmcp("Char.Vitals", {"hp": 63})
     assert client.writer.ctx.gmcp_data["Char.Vitals"] == {"hp": 63, "maxhp": 100}
 
 
