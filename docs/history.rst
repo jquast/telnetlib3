@@ -1,8 +1,7 @@
 History
 =======
-3.0.1 (unreleased)
-  * new: MCCP2 and MCCP3. Both client and server ends passively support if requested, and request
-    support by --compression or deny support by --no-compression.
+3.0.1
+  * change: Unused client argument ``gmcp_log`` removed.
   * new: MCCP2 and MCCP3. Both client and server ends passively support if requested, and request
     support by --compression or deny support by --no-compression.
 
