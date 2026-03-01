@@ -85,6 +85,8 @@ from .telopt import (
     TTABLE_ACK,
     TTABLE_NAK,
     NEW_ENVIRON,
+    MCCP2_COMPRESS,
+    MCCP3_COMPRESS,
     COM_PORT_OPTION,
     TTABLE_REJECTED,
     LFLOW_RESTART_ANY,
@@ -101,7 +103,7 @@ from ._session_context import TelnetSessionContext
 __all__ = ("TelnetWriter", "TelnetWriterUnicode")
 
 #: MUD options that allow empty SB payloads (e.g. ``IAC SB MXP IAC SE``).
-_EMPTY_SB_OK = frozenset({MXP, MSP, ZMP, AARDWOLF, ATCP})
+_EMPTY_SB_OK = frozenset({MXP, MSP, ZMP, AARDWOLF, ATCP, MCCP2_COMPRESS, MCCP3_COMPRESS})
 
 #: MUD protocol options that a plain telnet client should decline by default.
 _MUD_PROTOCOL_OPTIONS = frozenset({GMCP, MSDP, MSSP, MSP, MXP, ZMP, AARDWOLF, ATCP})
@@ -283,6 +285,26 @@ class TelnetWriter:
         #: ``None`` until an ``SB COM-PORT-OPTION`` payload is received.
         self.comport_data: Optional[dict[str, Any]] = None
 
+        #: Compression policy: ``None`` = passively accept (default),
+        #: ``True`` = actively request, ``False`` = reject.
+        self.compression: Optional[bool] = None
+
+        #: One-shot flag: set True by ``_handle_sb_mccp2()`` when
+        #: ``IAC SB MCCP2 IAC SE`` is received.  Consumed by
+        #: ``_process_data_chunk()`` to detect mid-chunk compression start.
+        self._mccp2_activated: bool = False
+
+        #: Compressed remainder bytes after MCCP2 activation mid-chunk.
+        #: Set by ``_process_data_chunk()`` when ``_mccp2_activated`` fires,
+        #: consumed and cleared by the caller.
+        self._compressed_remainder: Optional[bytes] = None
+
+        #: Whether MCCP2 compression is currently active (server→client).
+        self.mccp2_active: bool = False
+
+        #: Whether MCCP3 compression is currently active (client→server).
+        self.mccp3_active: bool = False
+
         #: Sub-negotiation buffer
         self._sb_buffer: collections.deque[bytes] = collections.deque()
 
@@ -359,6 +381,7 @@ class TelnetWriter:
             (ZMP, "zmp"),
             (AARDWOLF, "aardwolf"),
             (ATCP, "atcp"),
+            (MCCP2_COMPRESS, "mccp2"),
         ):
             self.set_ext_callback(cmd=ext_cmd, func=getattr(self, f"handle_{key}"))
 
@@ -1778,6 +1801,7 @@ class TelnetWriter:
             CHARSET,
             NAWS,
             STATUS,
+            MCCP2_COMPRESS,
             GMCP,
             MSDP,
             MSSP,
@@ -1797,6 +1821,12 @@ class TelnetWriter:
                 if not self.local_option.enabled(opt):
                     self.iac(WONT, opt)
                 return False
+            # Reject MCCP when compression is disabled or TLS is active
+            # (compress-then-encrypt is vulnerable to CRIME/BREACH attacks).
+            if opt in (MCCP2_COMPRESS, MCCP3_COMPRESS):
+                if self.compression is False or self.get_extra_info("ssl_object") is not None:
+                    self.iac(WONT, opt)
+                    return False
 
             # first time we've agreed, respond accordingly.
             if not self.local_option.enabled(opt):
@@ -1879,6 +1909,8 @@ class TelnetWriter:
             EOR,
             SNDLOC,
             COM_PORT_OPTION,
+            MCCP2_COMPRESS,
+            MCCP3_COMPRESS,
             GMCP,
             MSDP,
             MSSP,
@@ -1903,6 +1935,12 @@ class TelnetWriter:
                     return
                 self.iac(DONT, opt)
                 return
+            # Reject MCCP when compression is disabled or TLS is active
+            # (compress-then-encrypt is vulnerable to CRIME/BREACH attacks).
+            if opt in (MCCP2_COMPRESS, MCCP3_COMPRESS):
+                if self.compression is False or self.get_extra_info("ssl_object") is not None:
+                    self.iac(DONT, opt)
+                    return
             if not self.remote_option.enabled(opt):
                 self.iac(DO, opt)
                 self.remote_option[opt] = True
@@ -1914,6 +1952,12 @@ class TelnetWriter:
                     self.send_linemode(self.default_linemode)
             if opt == COM_PORT_OPTION and self.client:
                 self.request_comport_signature()
+            if opt == MCCP3_COMPRESS and self.client:
+                # MCCP3: client sends SB 87 SE to signal compression start;
+                # all bytes after SE are compressed by client.
+                self.send_iac(IAC + SB + MCCP3_COMPRESS + IAC + SE)
+                self.mccp3_active = True
+                self.log.debug("MCCP3: client compression activated")
 
         elif opt == TM:
             if opt == TM and not self.pending_option.enabled(DO + TM):
@@ -2063,6 +2107,8 @@ class TelnetWriter:
             ZMP: self._handle_sb_zmp,
             AARDWOLF: self._handle_sb_aardwolf,
             ATCP: self._handle_sb_atcp,
+            MCCP2_COMPRESS: self._handle_sb_mccp2,
+            MCCP3_COMPRESS: self._handle_sb_mccp3,
         }.get(cmd)
         if fn_call is None:
             raise ValueError(f"SB unhandled: cmd={name_command(cmd)}, buf={buf!r}")
@@ -2983,6 +3029,36 @@ class TelnetWriter:
         encoding = self.environ_encoding or "utf-8"
         package, value = atcp_decode(payload, encoding=encoding)
         self._ext_callback[ATCP](package, value)
+
+    def _handle_sb_mccp2(self, buf: collections.deque[bytes]) -> None:
+        """
+        Handle MCCP2 subnegotiation (``IAC SB MCCP2 IAC SE``).
+
+        Sets :attr:`_mccp2_activated` so ``_process_data_chunk()`` can detect
+        that remaining bytes in the current TCP chunk are zlib-compressed.
+
+        :param buf: bytes following IAC SB MCCP2_COMPRESS.
+        """
+        buf.popleft()
+        self._mccp2_activated = True
+        self._ext_callback[MCCP2_COMPRESS](True)
+
+    def _handle_sb_mccp3(self, buf: collections.deque[bytes]) -> None:
+        """
+        Handle MCCP3 subnegotiation (``IAC SB MCCP3 IAC SE``).
+
+        On server side, this signals that subsequent client→server data is
+        zlib-compressed.
+
+        :param buf: bytes following IAC SB MCCP3_COMPRESS.
+        """
+        buf.popleft()
+        self.mccp3_active = True
+        self.log.debug("MCCP3: server received SB, client→server compression active")
+
+    def handle_mccp2(self, activated: bool) -> None:
+        """Default ext_callback for MCCP2 activation."""
+        self.log.debug("MCCP2 %s", "activated" if activated else "deactivated")
 
     def _handle_do_forwardmask(self, buf: collections.deque[bytes]) -> None:
         """

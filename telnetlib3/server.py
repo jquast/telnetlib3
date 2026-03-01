@@ -16,6 +16,7 @@ from __future__ import annotations
 # std imports
 import ssl as ssl_module
 import sys
+import zlib
 import codecs
 import signal
 import socket
@@ -27,7 +28,7 @@ from typing import Any, Dict, List, Type, Tuple, Union, Callable, Optional, Sequ
 # local
 from . import accessories, server_base
 from ._types import ShellCallback
-from .telopt import name_commands
+from .telopt import SB, SE, IAC, MCCP2_COMPRESS, name_commands
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
@@ -97,6 +98,7 @@ class TelnetServer(server_base.BaseServer):
         never_send_ga: bool = False,
         line_mode: bool = False,
         connect_maxwait: float = 4.0,
+        compression: Optional[bool] = None,
         limit: Optional[int] = None,
         reader_factory: type = TelnetReader,
         reader_factory_encoding: type = TelnetReaderUnicode,
@@ -121,6 +123,11 @@ class TelnetServer(server_base.BaseServer):
         )
         self._environ_requested = False
         self._echo_negotiated = False
+        self._mccp2_compressor: Optional[Any] = None
+        self._mccp2_pending: bool = False
+        self._compression: Optional[bool] = compression
+        self._mccp2_enabled: bool = compression is True
+        self._mccp2_orig_write: Optional[Any] = None
         self.waiter_encoding: asyncio.Future[bool] = asyncio.Future()
         self._tasks.append(self.waiter_encoding)
         self._ttype_count = 1
@@ -140,6 +147,9 @@ class TelnetServer(server_base.BaseServer):
         from .telopt import NAWS, TTYPE, TSPEED, CHARSET, XDISPLOC, NEW_ENVIRON
 
         super().connection_made(transport)
+
+        # Set compression policy on writer
+        self.writer.compression = self._compression
 
         # begin timeout timer
         self.set_timeout()
@@ -168,6 +178,55 @@ class TelnetServer(server_base.BaseServer):
         """Process received data and reset timeout timer."""
         self.set_timeout()
         super().data_received(data)
+        # MCCP2: start compression once client confirms DO MCCP2
+        if (
+            self._mccp2_enabled
+            and not self._mccp2_pending
+            and self._mccp2_compressor is None
+            and self.writer.local_option.enabled(MCCP2_COMPRESS)
+        ):
+            self._mccp2_start()
+
+    def _mccp2_start(self) -> None:
+        """Send SB MCCP2 SE and start compressing server→client output."""
+        self._mccp2_pending = True
+        # All bytes after this SE are compressed.
+        self.writer.send_iac(IAC + SB + MCCP2_COMPRESS + IAC + SE)
+
+        self._mccp2_compressor = zlib.compressobj(
+            zlib.Z_BEST_COMPRESSION, zlib.DEFLATED, 12, 5, zlib.Z_DEFAULT_STRATEGY
+        )
+        # Wrap transport.write so all subsequent output is compressed
+        transport = self.writer._transport
+        orig_write = transport.write
+
+        def compressed_write(data: bytes) -> None:
+            if self._mccp2_compressor is not None:
+                compressed = self._mccp2_compressor.compress(data)
+                compressed += self._mccp2_compressor.flush(zlib.Z_SYNC_FLUSH)
+                orig_write(compressed)
+            else:
+                orig_write(data)
+
+        transport.write = compressed_write  # type: ignore[assignment]
+        self._mccp2_orig_write = orig_write
+        self.writer.mccp2_active = True
+        logger.debug("MCCP2 compression started (server→client)")
+
+    def _mccp2_end(self) -> None:
+        """Stop MCCP2 compression, flush Z_FINISH."""
+        if self._mccp2_compressor is not None:
+            try:
+                self._mccp2_orig_write(
+                    self._mccp2_compressor.flush(zlib.Z_FINISH)
+                )
+            except zlib.error as exc:
+                logger.debug("MCCP2 Z_FINISH flush error: %s", exc)
+            self._mccp2_compressor = None
+            self.writer._transport.write = self._mccp2_orig_write  # type: ignore[method-assign]
+        self._mccp2_pending = False
+        self.writer.mccp2_active = False
+        logger.debug("MCCP2 compression ended (server→client)")
 
     def begin_negotiation(self) -> None:
         """Begin telnet negotiation by requesting terminal type."""
@@ -188,7 +247,7 @@ class TelnetServer(server_base.BaseServer):
         MUD clients (Mudlet, TinTin++, etc.) interpret ``WILL ECHO`` as
         "password mode" and mask input.  See ``_negotiate_echo()``.
         """
-        from .telopt import DO, SGA, NAWS, WILL, BINARY, CHARSET
+        from .telopt import DO, SGA, NAWS, WILL, BINARY, CHARSET, MCCP2_COMPRESS, MCCP3_COMPRESS
 
         super().begin_advanced_negotiation()
         if not self.line_mode:
@@ -199,6 +258,15 @@ class TelnetServer(server_base.BaseServer):
         self.writer.iac(DO, NAWS)
         if self.default_encoding:
             self.writer.iac(DO, CHARSET)
+        # MCCP2/MCCP3: opt-in via compression=True, disabled over TLS
+        # (compress-then-encrypt is vulnerable to CRIME/BREACH attacks).
+        if self._mccp2_enabled:
+            ssl_obj = self.writer.get_extra_info("ssl_object")
+            if ssl_obj is None:
+                self.writer.iac(WILL, MCCP2_COMPRESS)
+                self.writer.iac(WILL, MCCP3_COMPRESS)
+            else:
+                logger.debug("MCCP disabled: TLS active (CRIME/BREACH mitigation)")
 
     def check_negotiation(self, final: bool = False) -> bool:
         """Check if negotiation is complete including encoding."""
@@ -894,6 +962,7 @@ async def create_server(
     never_send_ga: bool = False,
     line_mode: bool = False,
     connect_maxwait: float = 4.0,
+    compression: Optional[bool] = None,
     limit: Optional[int] = None,
     term: str = "unknown",
     cols: int = 80,
@@ -961,6 +1030,10 @@ async def create_server(
         otherwise confused by our demands, the shell continues anyway after the
         greater of this value has elapsed.  A client that is not answering
         option negotiation will delay the start of the shell by this amount.
+    :param compression: MCCP compression policy.  ``None`` (default)
+        passively accepts compression if requested by the client.  ``True``
+        advertises MCCP2/MCCP3 during advanced negotiation.  ``False``
+        rejects all compression offers.
     :param limit: The buffer limit for the reader stream.
     :param ssl: An :class:`ssl.SSLContext` for TLS-encrypted connections
         (TELNETS, :rfc:`855` over TLS).  When provided, the server performs a
@@ -994,6 +1067,7 @@ async def create_server(
                 never_send_ga=never_send_ga,
                 line_mode=line_mode,
                 connect_maxwait=connect_maxwait,
+                compression=compression,
                 limit=limit,
                 term=term,
                 cols=cols,
@@ -1146,6 +1220,13 @@ def parse_server_args() -> Dict[str, Any]:
         default=False,
         help="accept both TLS and plain telnet on the same port (requires --ssl-certfile)",
     )
+    parser.add_argument(
+        "--compression",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="MCCP compression: --compression to advertise, --no-compression to reject, "
+        "omit to passively accept (default)",
+    )
     result = vars(parser.parse_args(argv))
     result["pty_args"] = pty_args if PTY_SUPPORT else None
     # --pty-raw is a hidden no-op (raw is now the default);
@@ -1196,6 +1277,7 @@ async def run_server(
     status_interval: int = _config.status_interval,
     never_send_ga: bool = _config.never_send_ga,
     line_mode: bool = _config.line_mode,
+    compression: Optional[bool] = None,
     protocol_factory: Optional[Type[asyncio.Protocol]] = None,
     ssl: Optional[ssl_module.SSLContext] = None,
     tls_auto: bool = False,
@@ -1280,8 +1362,9 @@ async def run_server(
         force_binary=force_binary,
         never_send_ga=never_send_ga,
         line_mode=line_mode,
-        timeout=timeout,
         connect_maxwait=connect_maxwait,
+        compression=compression,
+        timeout=timeout,
         ssl=ssl,
         tls_auto=tls_auto,
     )

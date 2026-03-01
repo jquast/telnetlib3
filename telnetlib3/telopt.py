@@ -116,6 +116,7 @@ __all__ = (
     "LINEMODE",
     "LOGOUT",
     "MCCP2_COMPRESS",
+    "MCCP3_COMPRESS",
     "MCCP_COMPRESS",
     "MSDP",
     "MSDP_ARRAY_CLOSE",
@@ -197,7 +198,7 @@ LFLOW_OFF, LFLOW_ON, LFLOW_RESTART_ANY, LFLOW_RESTART_XON = (bytes([const]) for 
 REQUEST, ACCEPTED, REJECTED, TTABLE_IS, TTABLE_REJECTED, TTABLE_ACK, TTABLE_NAK = (
     bytes([const]) for const in range(1, 8)
 )
-MCCP_COMPRESS, MCCP2_COMPRESS = (bytes([85]), bytes([86]))
+MCCP_COMPRESS, MCCP2_COMPRESS, MCCP3_COMPRESS = (bytes([85]), bytes([86]), bytes([87]))
 GMCP = bytes([201])
 MSDP = bytes([69])
 MSSP = bytes([70])
@@ -268,6 +269,7 @@ _DEBUG_OPTS: Dict[bytes, str] = {
         "SNDLOC",
         "MCCP_COMPRESS",
         "MCCP2_COMPRESS",
+        "MCCP3_COMPRESS",
         "GMCP",
         "MSDP",
         "MSSP",

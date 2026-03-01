@@ -83,6 +83,8 @@ from .telopt import (
     SUPDUPOUTPUT,
     VT3270REGIME,
     AUTHENTICATION,
+    MCCP2_COMPRESS,
+    MCCP3_COMPRESS,
     COM_PORT_OPTION,
     PRAGMA_HEARTBEAT,
     SUPPRESS_LOCAL_ECHO,
@@ -260,6 +262,8 @@ MUD_OPTIONS = [(COM_PORT_OPTION, "COM_PORT", "Serial port control (RFC 2217)")]
 # returning a hard error for anything else. GMCP-capable MUD clients
 # typically self-announce via IAC WILL GMCP, so probing is unnecessary.
 EXTENDED_OPTIONS = [
+    (MCCP2_COMPRESS, "MCCP2", "MUD Client Compression Protocol v2"),
+    (MCCP3_COMPRESS, "MCCP3", "MUD Client Compression Protocol v3"),
     (GMCP, "GMCP", "Generic MUD Communication Protocol"),
     (MSDP, "MSDP", "MUD Server Data Protocol"),
     (MSSP, "MSSP", "MUD Server Status Protocol"),

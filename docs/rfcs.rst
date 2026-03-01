@@ -81,16 +81,23 @@ Dungeon) servers and clients.
 * `MSSP`_ (MUD Server Status Protocol, option 70). Server metadata protocol
   for MUD crawlers and directories, providing server name, player count,
   codebase, and other listing information.
+* `MCCP2`_ (MUD Client Compression Protocol v2, option 86). Server-to-client
+  zlib compression, reducing bandwidth for output-heavy sessions. Activated
+  via ``IAC SB MCCP2 IAC SE``; all subsequent server output is compressed.
+* `MCCP3`_ (MUD Client Compression Protocol v3, option 87). Client-to-server
+  zlib compression, the reverse direction of MCCP2.
 
 .. _GMCP: https://www.gammon.com.au/gmcp
 .. _MSDP: https://tintin.mudhalla.net/protocols/msdp/
 .. _MSSP: https://tintin.mudhalla.net/protocols/mssp/
+.. _MCCP2: https://tintin.mudhalla.net/protocols/mccp/
+.. _MCCP3: https://tintin.mudhalla.net/protocols/mccp/
 
 MUDs Not Implemented
 --------------------
 
 Constants are also defined for the following MUD options, though their handlers
-are not implemented: MCCP/MCCP2 (85/86, compression), MXP (91, markup), ZMP
+are not implemented: MCCP (85, legacy compression), MXP (91, markup), ZMP
 (93, messaging), MSP (90, sound), and ATCP (200, Achaea-specific).
 
 Additional Resources

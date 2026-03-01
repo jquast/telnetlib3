@@ -65,6 +65,7 @@ class TelnetClient(client_base.BaseClient):
         force_binary: bool = False,
         connect_minwait: float = 0,
         connect_maxwait: float = 4.0,
+        compression: Optional[bool] = None,
         limit: Optional[int] = None,
         waiter_closed: Optional[asyncio.Future[None]] = None,
         _waiter_connected: Optional[asyncio.Future[None]] = None,
@@ -72,6 +73,7 @@ class TelnetClient(client_base.BaseClient):
         gmcp_log: bool = False,
     ) -> None:
         """Initialize TelnetClient with terminal parameters."""
+        self._compression = compression
         super().__init__(
             shell=shell,
             encoding=encoding,
@@ -117,6 +119,9 @@ class TelnetClient(client_base.BaseClient):
         from telnetlib3.telopt import NAWS, TTYPE, TSPEED, CHARSET, XDISPLOC, NEW_ENVIRON
 
         super().connection_made(transport)
+
+        # Set compression policy on writer
+        self.writer.compression = self._compression
 
         # Wire extended rfc callbacks for requests of
         # terminal attributes, environment values, etc.
@@ -472,6 +477,7 @@ async def open_connection(
     connect_minwait: float = 0,
     connect_maxwait: float = 3.0,
     connect_timeout: Optional[float] = None,
+    compression: Optional[bool] = None,
     waiter_closed: Optional[asyncio.Future[None]] = None,
     _waiter_connected: Optional[asyncio.Future[None]] = None,
     limit: Optional[int] = None,
@@ -531,6 +537,9 @@ async def open_connection(
         connection attempt may block indefinitely.  When specified, a
         :exc:`ConnectionError` is raised if the connection is not established
         within the given time.
+    :param compression: MCCP compression policy.  ``None`` (default) passively
+        accepts compression when offered by the server.  ``True`` actively
+        requests MCCP2/MCCP3.  ``False`` rejects all compression offers.
 
     :param force_binary: When ``True``, the encoding is used regardless
         of BINARY mode negotiation.
@@ -565,6 +574,7 @@ async def open_connection(
             shell=shell,
             connect_minwait=connect_minwait,
             connect_maxwait=connect_maxwait,
+            compression=compression,
             waiter_closed=waiter_closed,
             _waiter_connected=_waiter_connected,
             limit=limit,
@@ -898,6 +908,13 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         "BBSes that expect ANSI cursor sequences.",
     )
     parser.add_argument(
+        "--compression",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="MCCP compression: --compression to request, --no-compression to reject, "
+        "omit to passively accept (default)",
+    )
+    parser.add_argument(
         "--ssl", action="store_true", default=False, help="connect using TLS (TELNETS)"
     )
     parser.add_argument(
@@ -1029,6 +1046,7 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
             if args.gmcp_modules
             else None
         ),
+        "compression": args.compression,
         "gmcp_log": args.gmcp_log,
         "typescript": args.typescript,
     }

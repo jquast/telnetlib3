@@ -45,6 +45,9 @@ def _process_data_chunk(
         or ``None`` when only IAC (255) is special.
     :param log_fn: Callable for logging exceptions (e.g. ``logger.warning``).
     :returns: ``True`` if any IAC/SB command was observed.
+
+    When MCCP2 is activated mid-chunk, the remaining compressed bytes are
+    stored in ``writer._compressed_remainder`` for the caller to consume.
     """
     cmd_received = False
     n = len(data)
@@ -83,6 +86,12 @@ def _process_data_chunk(
         i += 1
         out_start = i
         feeding_oob = bool(writer.is_oob)
+
+        if writer._mccp2_activated:
+            writer._mccp2_activated = False
+            writer.mccp2_active = True
+            writer._compressed_remainder = data[i:] if i < n else b""
+            return True
 
     return cmd_received
 

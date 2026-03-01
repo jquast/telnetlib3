@@ -127,6 +127,32 @@ If GA causes unwanted output for your use case, disable it::
 For PTY shells, GA is sent after 500ms of output idle time to avoid
 injecting GA in the middle of streaming output.
 
+Compression (MCCP)
+~~~~~~~~~~~~~~~~~~
+
+MCCP2 (server-to-client) and MCCP3 (client-to-server) zlib compression are
+supported, widely used by MUD servers to reduce bandwidth::
+
+    # connect to a MUD that offers MCCP compression
+    telnetlib3-client dunemud.net 6789
+
+    # or with TLS (compression auto-disabled over TLS, CRIME/BREACH mitigation)
+    telnetlib3-client --ssl dunemud.net 6788
+
+    # actively request compression from a server
+    telnetlib3-client --compression dunemud.net 6789
+
+    # reject compression even if the server offers it
+    telnetlib3-client --no-compression dunemud.net 6789
+
+    # host a MUD server that advertises MCCP2/MCCP3
+    telnetlib3-server --compression --shell=my_mud.shell
+
+By default (without ``--compression`` or ``--no-compression``), the client
+passively accepts compression when offered by the server, and the server does
+not advertise compression. Compression is automatically disabled over TLS
+connections to avoid CRIME/BREACH attacks.
+
 
 Asyncio Protocol
 ----------------

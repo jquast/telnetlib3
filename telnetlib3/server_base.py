@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 # std imports
+import zlib
 import asyncio
 import logging
 import datetime
@@ -29,6 +30,7 @@ class BaseServer(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
     _check_later = None
     _rx_bytes = 0
     _tx_bytes = 0
+    _mccp3_decompressor: Optional[zlib.Decompress] = None
 
     def __init__(
         self,
@@ -196,6 +198,21 @@ class BaseServer(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
         self._last_received = datetime.datetime.now()
         self._rx_bytes += len(data)
 
+        # MCCP3: decompress client→server data when active
+        if self._mccp3_decompressor is not None:
+            try:
+                data = self._mccp3_decompressor.decompress(data)
+            except zlib.error:
+                logger.warning("MCCP3 decompression error, disabling")
+                self._mccp3_end()
+                return
+            if self._mccp3_decompressor.eof:
+                unused = self._mccp3_decompressor.unused_data
+                self._mccp3_end()
+                if unused:
+                    self.data_received(unused)
+                    return
+
         if self.writer.slc_simulated:
             slc_vals = {defn.val[0] for defn in self.writer.slctab.values() if defn.val != theNULL}
             slc_special: frozenset[int] | None = frozenset({255} | slc_vals)
@@ -205,6 +222,10 @@ class BaseServer(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
         cmd_received = _process_data_chunk(
             data, self.writer, self.reader, slc_special, logger.warning
         )
+
+        # Check if MCCP3 SB was just received (client→server compression start)
+        if self.writer.mccp3_active and self._mccp3_decompressor is None:
+            self._mccp3_start()
 
         if not self._waiter_connected.done() and cmd_received:
             self._check_negotiation_timer()
@@ -319,5 +340,16 @@ class BaseServer(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
                 later, self._check_negotiation_timer
             )
             self._tasks.append(self._check_later)
+
+    def _mccp3_start(self) -> None:
+        """Start MCCP3 decompression of client→server data."""
+        self._mccp3_decompressor = zlib.decompressobj()
+        logger.debug("MCCP3 decompression started (client→server)")
+
+    def _mccp3_end(self) -> None:
+        """Stop MCCP3 decompression."""
+        self._mccp3_decompressor = None
+        self.writer.mccp3_active = False
+        logger.debug("MCCP3 decompression ended (client→server)")
 
     _log_exception = staticmethod(_log_exception)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 # std imports
+import zlib
 import asyncio
 import logging
 import weakref
@@ -66,6 +67,12 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
         self.writer: Optional[Union[TelnetWriter, TelnetWriterUnicode]] = None
         self._limit = limit
 
+        # MCCP2: server→client decompression
+        self._mccp2_decompressor: Optional[zlib.Decompress] = None
+        # MCCP3: client→server compression
+        self._mccp3_compressor: Optional[zlib.Compress] = None
+        self._mccp3_orig_write: Any = None
+
         # High-throughput receive pipeline
         self._rx_queue: collections.deque[bytes] = collections.deque()
         self._rx_bytes = 0
@@ -92,6 +99,11 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
         if self._closing:
             return
         self._closing = True
+
+        # Clean up MCCP compressors/decompressors
+        self._mccp2_decompressor = None
+        self._mccp3_compressor = None
+        self._mccp3_orig_write = None
 
         # Drain any pending rx data before signalling EOF to prevent
         # _process_rx from calling feed_data() after feed_eof().
@@ -343,6 +355,26 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
         """Process a chunk of received bytes; return True if any IAC/SB cmd observed."""
         self._last_received = datetime.datetime.now()
 
+        # MCCP2: decompress server→client data when active
+        if self._mccp2_decompressor is not None:
+            try:
+                data = self._mccp2_decompressor.decompress(data)
+            except zlib.error:
+                self.log.warning("MCCP2 decompression error, disabling")
+                self._mccp2_end()
+                return False
+            if self._mccp2_decompressor.eof:
+                unused = self._mccp2_decompressor.unused_data
+                self._mccp2_end()
+                cmd = self._process_chunk_inner(data)
+                if unused:
+                    cmd = self._process_chunk(unused) or cmd
+                return cmd
+
+        return self._process_chunk_inner(data)
+
+    def _process_chunk_inner(self, data: bytes) -> bool:
+        """Inner chunk processing with IAC interpretation and mid-chunk MCCP2 detection."""
         try:
             mode = self.writer.mode
         except Exception:
@@ -355,7 +387,22 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
         else:
             slc_special = None
 
-        return _process_data_chunk(data, self.writer, self.reader, slc_special, self.log.warning)
+        cmd_received = _process_data_chunk(
+            data, self.writer, self.reader, slc_special, self.log.warning
+        )
+
+        if self.writer._compressed_remainder is not None:
+            remainder = self.writer._compressed_remainder
+            self.writer._compressed_remainder = None
+            self._mccp2_start()
+            if remainder:
+                cmd_received = self._process_chunk(remainder) or cmd_received
+
+        # MCCP3: start compressor when writer signals activation
+        if self.writer.mccp3_active and self._mccp3_compressor is None:
+            self._mccp3_start()
+
+        return cmd_received
 
     async def _process_rx(self) -> None:
         """Async processor for receive queue that yields control and applies backpressure."""
@@ -394,6 +441,51 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
             # Aggressively re-check negotiation if any command was seen and not yet connected
             if any_cmd and not self._waiter_connected.done():
                 self._check_negotiation_timer()
+
+    def _mccp2_start(self) -> None:
+        """Start MCCP2 decompression of server→client data."""
+        self._mccp2_decompressor = zlib.decompressobj()
+        self.log.debug("MCCP2 decompression started (server→client)")
+
+    def _mccp2_end(self) -> None:
+        """Stop MCCP2 decompression."""
+        self._mccp2_decompressor = None
+        self.writer.mccp2_active = False
+        self.log.debug("MCCP2 decompression ended (server→client)")
+
+    def _mccp3_start(self) -> None:
+        """Start MCCP3 compression of client→server data."""
+        self._mccp3_compressor = zlib.compressobj(
+            zlib.Z_BEST_COMPRESSION, zlib.DEFLATED, 12, 5, zlib.Z_DEFAULT_STRATEGY
+        )
+        # Wrap transport.write so all outbound bytes are compressed
+        transport = self.writer._transport
+        orig_write = transport.write
+
+        def compressed_write(data: bytes) -> None:
+            if self._mccp3_compressor is not None:
+                compressed = self._mccp3_compressor.compress(data)
+                compressed += self._mccp3_compressor.flush(zlib.Z_SYNC_FLUSH)
+                orig_write(compressed)
+            else:
+                orig_write(data)
+
+        transport.write = compressed_write  # type: ignore[assignment]
+        self._mccp3_orig_write = orig_write
+        self.log.debug("MCCP3 compression started (client→server)")
+
+    def _mccp3_end(self) -> None:
+        """Stop MCCP3 compression, flush Z_FINISH."""
+        if self._mccp3_compressor is not None:
+            if not self.writer.is_closing():
+                self._mccp3_orig_write(
+                    self._mccp3_compressor.flush(zlib.Z_FINISH)
+                )
+            self._mccp3_compressor = None
+            # Restore original transport.write
+            self.writer._transport.write = self._mccp3_orig_write  # type: ignore[method-assign]
+        self.writer.mccp3_active = False
+        self.log.debug("MCCP3 compression ended (client→server)")
 
     def _check_negotiation_timer(self) -> None:
         self._check_later.cancel()
