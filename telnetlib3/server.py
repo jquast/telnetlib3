@@ -217,9 +217,7 @@ class TelnetServer(server_base.BaseServer):
         """Stop MCCP2 compression, flush Z_FINISH."""
         if self._mccp2_compressor is not None:
             try:
-                self._mccp2_orig_write(
-                    self._mccp2_compressor.flush(zlib.Z_FINISH)
-                )
+                self._mccp2_orig_write(self._mccp2_compressor.flush(zlib.Z_FINISH))
             except zlib.error as exc:
                 logger.debug("MCCP2 Z_FINISH flush error: %s", exc)
             self._mccp2_compressor = None

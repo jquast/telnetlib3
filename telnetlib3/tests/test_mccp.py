@@ -9,17 +9,7 @@ import collections
 import pytest
 
 # local
-from telnetlib3.telopt import (
-    DO,
-    SB,
-    SE,
-    IAC,
-    DONT,
-    WILL,
-    WONT,
-    MCCP2_COMPRESS,
-    MCCP3_COMPRESS,
-)
+from telnetlib3.telopt import DO, SB, SE, IAC, DONT, WILL, WONT, MCCP2_COMPRESS, MCCP3_COMPRESS
 from telnetlib3.stream_writer import TelnetWriter
 from telnetlib3.tests.accessories import MockProtocol, MockTransport
 
@@ -184,9 +174,7 @@ class TestMCCP2MidChunk:
         compressed += compressor.flush(zlib.Z_SYNC_FLUSH)
 
         chunk = IAC + SB + MCCP2_COMPRESS + IAC + SE + compressed
-        cmd_received = _process_data_chunk(
-            chunk, w, reader, None, lambda *a: None
-        )
+        cmd_received = _process_data_chunk(chunk, w, reader, None, lambda *a: None)
         assert cmd_received is True
         assert w.mccp2_active is True
         assert w._compressed_remainder == compressed
@@ -200,9 +188,7 @@ class TestMCCP2MidChunk:
         w, _t, _p = new_writer(server=False, client=True, reader=reader)
 
         chunk = b"plain text data"
-        cmd_received = _process_data_chunk(
-            chunk, w, reader, None, lambda *a: None
-        )
+        cmd_received = _process_data_chunk(chunk, w, reader, None, lambda *a: None)
         assert cmd_received is False
         assert w._compressed_remainder is None
 
@@ -249,11 +235,7 @@ class TestMCCPAttributes:
         assert w.mccp2_active is False
         assert w.mccp3_active is False
 
-    @pytest.mark.parametrize(
-        "opt",
-        [MCCP2_COMPRESS, MCCP3_COMPRESS],
-        ids=["MCCP2", "MCCP3"],
-    )
+    @pytest.mark.parametrize("opt", [MCCP2_COMPRESS, MCCP3_COMPRESS], ids=["MCCP2", "MCCP3"])
     def test_empty_sb_allowed(self, opt):
         w, _t, _p = new_writer(server=False, client=True)
         w.pending_option[SB + opt] = True
@@ -275,7 +257,10 @@ _BOUNDARY_COMPRESSED = _make_compressed(_BOUNDARY_PLAINTEXT)
 _BOUNDARY_SB = IAC + SB + MCCP2_COMPRESS + IAC + SE
 _BOUNDARY_FULL = _BOUNDARY_SB + _BOUNDARY_COMPRESSED
 _BOUNDARY_SPLITS = [
-    1, 2, 3, 4,
+    1,
+    2,
+    3,
+    4,
     len(_BOUNDARY_SB) - 1,
     len(_BOUNDARY_SB),
     len(_BOUNDARY_SB) + 1,
@@ -317,11 +302,7 @@ class TestMCCP2PacketBoundary:
         joined = b"".join(received)
         assert joined == _BOUNDARY_PLAINTEXT
 
-    @pytest.mark.parametrize(
-        "n_chunks",
-        [3, 5, 10],
-        ids=["3_chunks", "5_chunks", "10_chunks"],
-    )
+    @pytest.mark.parametrize("n_chunks", [3, 5, 10], ids=["3_chunks", "5_chunks", "10_chunks"])
     async def test_multi_chunk_delivery(self, n_chunks):
         """Compressed data delivered in many small chunks."""
         client, received = _make_client_with_capture()
@@ -347,9 +328,7 @@ class TestMCCP2PacketBoundary:
         assert joined == plaintext + trailing
 
     @pytest.mark.parametrize(
-        "split_at",
-        [1, 4, 8, 16],
-        ids=["byte_1", "byte_4", "byte_8", "byte_16"],
+        "split_at", [1, 4, 8, 16], ids=["byte_1", "byte_4", "byte_8", "byte_16"]
     )
     async def test_compressed_only_boundary(self, split_at):
         """Split within compressed data only (SB already processed)."""

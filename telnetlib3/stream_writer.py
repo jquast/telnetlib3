@@ -3047,8 +3047,7 @@ class TelnetWriter:
         """
         Handle MCCP3 subnegotiation (``IAC SB MCCP3 IAC SE``).
 
-        On server side, this signals that subsequent client→server data is
-        zlib-compressed.
+        On server side, this signals that subsequent client→server data is zlib-compressed.
 
         :param buf: bytes following IAC SB MCCP3_COMPRESS.
         """

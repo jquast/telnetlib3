@@ -478,9 +478,7 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
         """Stop MCCP3 compression, flush Z_FINISH."""
         if self._mccp3_compressor is not None:
             if not self.writer.is_closing():
-                self._mccp3_orig_write(
-                    self._mccp3_compressor.flush(zlib.Z_FINISH)
-                )
+                self._mccp3_orig_write(self._mccp3_compressor.flush(zlib.Z_FINISH))
             self._mccp3_compressor = None
             # Restore original transport.write
             self.writer._transport.write = self._mccp3_orig_write  # type: ignore[method-assign]
