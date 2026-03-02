@@ -137,7 +137,14 @@ class _LineEditor:
         return char, None
 
 
-__all__ = ("telnet_server_shell", "readline_async", "readline", "get_linemode", "get_slcdata", "do_toggle")
+__all__ = (
+    "telnet_server_shell",
+    "readline_async",
+    "readline",
+    "get_linemode",
+    "get_slcdata",
+    "do_toggle",
+)
 
 
 async def telnet_server_shell(

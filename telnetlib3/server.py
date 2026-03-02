@@ -42,7 +42,14 @@ try:
 except ImportError:
     PTY_SUPPORT = False
 
-__all__ = ("TelnetServer", "LinemodeServer", "Server", "create_server", "run_server", "parse_server_args")
+__all__ = (
+    "TelnetServer",
+    "LinemodeServer",
+    "Server",
+    "create_server",
+    "run_server",
+    "parse_server_args",
+)
 
 
 class CONFIG(NamedTuple):

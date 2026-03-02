@@ -1346,8 +1346,8 @@ class TelnetWriter:
         """
         Request a LINEMODE mode change.
 
-        Server-side only. Each keyword arg, if not None, enables or
-        disables the corresponding bit in the LINEMODE MODE mask.
+        Server-side only. Each keyword arg, if not None, enables or disables the corresponding bit
+        in the LINEMODE MODE mask.
 
         :param edit: Set the EDIT (local line-editing) bit.
         :param trapsig: Set the TRAPSIG bit.

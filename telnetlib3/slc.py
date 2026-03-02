@@ -321,7 +321,11 @@ class Linemode:
 
     @property
     def edit(self) -> bool:
-        """True if EDIT bit set (client performs local line editing). RFC 1184 name."""
+        """
+        True if EDIT bit set (client performs local line editing).
+
+        RFC 1184 name.
+        """
         return self.local
 
     @property

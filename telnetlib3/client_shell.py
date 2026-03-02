@@ -10,17 +10,17 @@ from typing import Any, Dict, Tuple, Union, Callable, Optional
 from dataclasses import dataclass
 
 # local
-from . import accessories
 from . import slc as slc_module
+from . import accessories
 from ._session_context import TelnetSessionContext
 
 log = logging.getLogger(__name__)
 
 # local
+from .telopt import LINEMODE  # noqa: E402
 from .accessories import TRACE  # noqa: E402
 from .stream_reader import TelnetReader, TelnetReaderUnicode  # noqa: E402
 from .stream_writer import TelnetWriter, TelnetWriterUnicode  # noqa: E402
-from .telopt import LINEMODE  # noqa: E402
 
 __all__ = ("InputFilter", "telnet_client_shell")
 
@@ -183,12 +183,12 @@ class _RawLoopState:
 
 
 class LinemodeBuffer:
-    """Client-side line buffer for LINEMODE EDIT mode (RFC 1184 §3.1).
+    """
+    Client-side line buffer for LINEMODE EDIT mode (RFC 1184 §3.1).
 
-    Accumulates characters typed by the user, applying local SLC editing
-    functions (erase-char, erase-line, erase-word) and transmitting complete
-    lines to the server.  When TRAPSIG is enabled, signal characters (^C etc.)
-    are sent as IAC commands instead of buffered.
+    Accumulates characters typed by the user, applying local SLC editing functions (erase-char,
+    erase-line, erase-word) and transmitting complete lines to the server.  When TRAPSIG is enabled,
+    signal characters (^C etc.) are sent as IAC commands instead of buffered.
 
     :param slctab: The writer's current SLC character table.
     :param forwardmask: FORWARDMASK received from server, or None.
@@ -202,7 +202,7 @@ class LinemodeBuffer:
         trapsig: bool = False,
     ) -> None:
         """Initialize LinemodeBuffer."""
-        from .telopt import IAC, IP, AYT, EOF, SUSP, ABORT, BRK
+        from .telopt import IP, AYT, BRK, EOF, IAC, SUSP, ABORT
 
         self._buf: list[str] = []
         self.slctab = slctab
@@ -403,10 +403,7 @@ else:
             from .telopt import SGA
 
             w = self.telnet_writer
-            return bool(
-                w.client
-                and (w.remote_option.enabled(SGA) or w.local_option.enabled(SGA))
-            )
+            return bool(w.client and (w.remote_option.enabled(SGA) or w.local_option.enabled(SGA)))
 
         def check_auto_mode(
             self, switched_to_raw: bool, last_will_echo: bool
@@ -495,10 +492,8 @@ else:
                             "auto: LINEMODE EDIT, cooked mode (kernel line editing)"
                         )
                         self.software_echo = False
-                        return mode   # keep ICANON on; kernel handles EC/EL/EW and echo
-                    self.telnet_writer.log.debug(
-                        "auto: LINEMODE remote, raw input server echo"
-                    )
+                        return mode  # keep ICANON on; kernel handles EC/EL/EW and echo
+                    self.telnet_writer.log.debug("auto: LINEMODE remote, raw input server echo")
                     return self._make_raw(mode, suppress_echo=True)
                 if will_echo and will_sga:
                     self.telnet_writer.log.debug("auto: server echo + SGA, kludge mode")
@@ -655,9 +650,7 @@ else:
         """Return the autoreply engine from the writer's context, if set."""
         return telnet_writer.ctx.autoreply_engine
 
-    def _get_linemode_buffer(
-        writer: Union[TelnetWriter, TelnetWriterUnicode],
-    ) -> "LinemodeBuffer":
+    def _get_linemode_buffer(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> "LinemodeBuffer":
         """Return (or lazily create) the LinemodeBuffer attached to *writer*."""
         buf: Optional[LinemodeBuffer] = getattr(writer, "_linemode_buf", None)
         if buf is None:
@@ -728,8 +721,7 @@ else:
                     handle_close("Connection closed.")
                     break
                 linemode_edit = (
-                    telnet_writer.local_option.enabled(LINEMODE)
-                    and telnet_writer.linemode.edit
+                    telnet_writer.local_option.enabled(LINEMODE) and telnet_writer.linemode.edit
                 )
                 if linemode_edit and state.switched_to_raw:
                     # Raw PTY or non-TTY: kernel not doing line editing, use LinemodeBuffer

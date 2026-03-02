@@ -12,14 +12,14 @@ import pytest
 import telnetlib3
 import telnetlib3.stream_writer
 from telnetlib3 import slc
-from telnetlib3.slc import LMODE_MODE, LMODE_MODE_ACK, LMODE_MODE_LOCAL, LMODE_SLC
+from telnetlib3.slc import LMODE_SLC, LMODE_MODE, LMODE_MODE_ACK, LMODE_MODE_LOCAL
 from telnetlib3.telopt import DO, SB, SE, IAC, WILL, LINEMODE
 from telnetlib3.stream_writer import TelnetWriter
 from telnetlib3.tests.accessories import (
+    MockProtocol,
+    MockTransport,
     create_server,
     asyncio_connection,
-    MockTransport,
-    MockProtocol,
 )
 
 
@@ -244,8 +244,8 @@ def test_linemode_buffer_forwardmask_flush():
 
 def test_linemode_buffer_trapsig():
     """LinemodeBuffer returns IAC command bytes for signal chars when TRAPSIG is on."""
+    from telnetlib3.telopt import IP, IAC
     from telnetlib3.client_shell import LinemodeBuffer
-    from telnetlib3.telopt import IAC, IP
 
     slctab = slc.generate_slctab(slc.BSD_SLC_TAB)
     buf = LinemodeBuffer(slctab=slctab, trapsig=True)
@@ -418,9 +418,10 @@ if sys.platform != "win32":
     def test_determine_mode_linemode_edit():
         """determine_mode() keeps cooked mode with kernel echo when LINEMODE EDIT is set."""
         import types
-        from telnetlib3._session_context import TelnetSessionContext
-        from telnetlib3.client_shell import Terminal
+
         from telnetlib3.telopt import LINEMODE
+        from telnetlib3.client_shell import Terminal
+        from telnetlib3._session_context import TelnetSessionContext
 
         class _Opt:
             def __init__(self, active):
@@ -453,6 +454,6 @@ if sys.platform != "win32":
             cc=[b"\x00"] * termios.NCCS,
         )
         result = term.determine_mode(mode)
-        assert result.lflag & termios.ICANON   # cooked mode: kernel handles line editing
-        assert result.lflag & termios.ECHO     # kernel handles echo
+        assert result.lflag & termios.ICANON  # cooked mode: kernel handles line editing
+        assert result.lflag & termios.ECHO  # kernel handles echo
         assert term.software_echo is False

@@ -363,7 +363,7 @@ import contextlib  # noqa: E402
 import subprocess  # noqa: E402
 
 # local
-from telnetlib3.tests.accessories import asyncio_server, create_server
+from telnetlib3.tests.accessories import create_server, asyncio_server
 
 _IAC = b"\xff"
 _WILL = b"\xfb"
@@ -389,7 +389,15 @@ def _client_cmd(host: str, port: int, extra: "list[str] | None" = None) -> "list
     # Use sys.executable so the subprocess uses the same Python interpreter and
     # telnetlib3 package as the test process, not whatever pyenv shim happens to
     # be on PATH (which may point to a different Python version or install).
-    args = [sys.executable, "-m", "telnetlib3.client", host, str(port), "--connect-maxwait=0.5", "--colormatch=none"]
+    args = [
+        sys.executable,
+        "-m",
+        "telnetlib3.client",
+        host,
+        str(port),
+        "--connect-maxwait=0.5",
+        "--colormatch=none",
+    ]
     if extra:
         args.extend(extra)
     return args
@@ -982,10 +990,11 @@ async def test_cooked_to_raw_transition_preserves_crlf(
 
 
 async def test_linemode_edit_via_telsh(bind_host: str, unused_tcp_port: int) -> None:
-    """LinemodeBuffer is exercised end-to-end via LinemodeServer + telnet_server_shell.
+    """
+    LinemodeBuffer is exercised end-to-end via LinemodeServer + telnet_server_shell.
 
-    Covers _get_linemode_buffer, _raw_event_loop LINEMODE EDIT path, EC (erase-char),
-    EL (erase-line), and line transmission.
+    Covers _get_linemode_buffer, _raw_event_loop LINEMODE EDIT path, EC (erase-char), EL (erase-
+    line), and line transmission.
     """
     from telnetlib3.server import LinemodeServer
     from telnetlib3.server_shell import telnet_server_shell
