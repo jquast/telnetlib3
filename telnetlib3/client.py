@@ -136,6 +136,14 @@ class TelnetClient(client_base.BaseClient):
         ):
             self.writer.set_ext_send_callback(opt, func)
 
+        # Offer callbacks define what to include in outgoing requests
+        # (e.g. what charsets to offer in SB CHARSET REQUEST).
+        for opt, offer_func in (
+            (CHARSET, self.on_request_charset),
+            (NEW_ENVIRON, self.on_request_environ),
+        ):
+            self.writer.set_ext_offer_callback(opt, offer_func)
+
         # Override the default handle_will method to detect when both sides support CHARSET
         # Store the original only on first connection to prevent chain growth on reconnect.
         if not hasattr(self.writer, "_original_handle_will"):
@@ -371,6 +379,28 @@ class TelnetClient(client_base.BaseClient):
         # Case 4: No viable encodings found
         self.log.warning("No suitable encoding offered by server: %s", offered)
         return ""
+
+    def on_request_charset(self) -> List[str]:
+        """
+        Offer callback for client-initiated CHARSET REQUEST, :rfc:`2066`.
+
+        Called by :meth:`~.TelnetWriter.request_charset` to determine which
+        character sets the client offers to the server.
+
+        :returns: List of charset name strings to offer.
+        """
+        return ["UTF-8", "LATIN1", "US-ASCII"]
+
+    def on_request_environ(self) -> List[str]:
+        """
+        Offer callback for client-initiated NEW_ENVIRON SEND, :rfc:`1572`.
+
+        Called by :meth:`~.TelnetWriter.request_environ` to determine which
+        environment variable names the client requests from the server.
+
+        :returns: List of environment variable names to request.
+        """
+        return []
 
     def send_naws(self) -> Tuple[int, int]:
         """

@@ -395,9 +395,19 @@ class TelnetWriter:
         ):
             self.set_ext_send_callback(cmd=ext_cmd, func=getattr(self, f"handle_send_{key}"))
 
+        # Offer callbacks: used by request_charset() and request_environ()
+        # to get the list of items to offer/request.  Separate from
+        # _ext_send_callback which is used to *respond* to received requests.
+        self._ext_offer_callback: dict[bytes, Callable[..., Any]] = {}
+
         for ext_cmd, key in ((CHARSET, "charset"), (NEW_ENVIRON, "environ")):
-            _cbname = "handle_send_server_" if self.server else "handle_send_client_"
-            self.set_ext_send_callback(cmd=ext_cmd, func=getattr(self, _cbname + key))
+            # The "server" default handlers take no args and return lists
+            # (what to offer/request).  The "client" handlers take args
+            # (respond to received offers).
+            self.set_ext_offer_callback(
+                cmd=ext_cmd, func=getattr(self, f"handle_send_server_{key}")
+            )
+            self.set_ext_send_callback(cmd=ext_cmd, func=getattr(self, f"handle_send_client_{key}"))
 
     @property
     def connection_closed(self) -> bool:
@@ -430,6 +440,7 @@ class TelnetWriter:
         # break circular refs
         self._ext_callback.clear()
         self._ext_send_callback.clear()
+        self._ext_offer_callback.clear()
         self._slc_callback.clear()
         self._iac_callback.clear()
         self._protocol = None
@@ -1148,7 +1159,7 @@ class TelnetWriter:
             self.log.debug("cannot send SB CHARSET REQUEST, request pending.")
             return False
 
-        codepages = self._ext_send_callback[CHARSET]()
+        codepages = self._ext_offer_callback[CHARSET]()
 
         sep = " "
         response: collections.deque[bytes] = collections.deque()
@@ -1171,7 +1182,7 @@ class TelnetWriter:
             self.log.debug("cannot send SB NEW_ENVIRON SEND IS without receipt of WILL NEW_ENVIRON")
             return False
 
-        request_list = self._ext_send_callback[NEW_ENVIRON]()
+        request_list = self._ext_offer_callback[NEW_ENVIRON]()
 
         if not request_list:
             self.log.debug(
@@ -1511,6 +1522,26 @@ class TelnetWriter:
               strings given, :rfc:`2066`.
         """
         self._ext_send_callback[cmd] = func
+
+    def set_ext_offer_callback(self, cmd: bytes, func: Callable[..., Any]) -> None:
+        """
+        Register callback for building outgoing sub-negotiation requests.
+
+        Unlike :meth:`set_ext_send_callback` (which responds to *received*
+        requests), this callback is invoked with **no arguments** and must
+        return a list describing what to offer or request.
+
+        :param cmd: Telnet option byte.
+        :param func: Callable returning a list:
+
+            * ``CHARSET``: return a list of charset name strings to offer
+              in an outgoing ``SB CHARSET REQUEST``, :rfc:`2066`.
+
+            * ``NEW_ENVIRON``: return a list of environment variable name
+              strings (or the special ``VAR``/``USERVAR`` bytes) to request
+              in an outgoing ``SB NEW_ENVIRON SEND``, :rfc:`1572`.
+        """
+        self._ext_offer_callback[cmd] = func
 
     def set_ext_callback(self, cmd: bytes, func: Callable[..., Any]) -> None:
         """

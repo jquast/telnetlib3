@@ -561,7 +561,7 @@ def test_request_tspeed_and_charset_pending_branches():
     assert w.request_tspeed() is False
 
     w.local_option[CHARSET] = True
-    w.set_ext_send_callback(CHARSET, lambda: ["UTF-8"])
+    w.set_ext_offer_callback(CHARSET, lambda: ["UTF-8"])
     assert w.request_charset() is True
     assert w.request_charset() is False
 
@@ -569,7 +569,7 @@ def test_request_tspeed_and_charset_pending_branches():
 def test_request_environ_pending_branch():
     w, t, p = new_writer(server=True)
     w.remote_option[NEW_ENVIRON] = True
-    w.set_ext_send_callback(NEW_ENVIRON, lambda: ["USER"])
+    w.set_ext_offer_callback(NEW_ENVIRON, lambda: ["USER"])
     # mark request as pending
     w.pending_option[SB + NEW_ENVIRON] = True
     assert w.request_environ() is False
@@ -1326,21 +1326,33 @@ def test_request_environ_server_side_conditions():
     assert ws.request_environ() is False
 
     ws.remote_option[NEW_ENVIRON] = True
-    ws.set_ext_send_callback(NEW_ENVIRON, lambda: [])
+    ws.set_ext_offer_callback(NEW_ENVIRON, lambda: [])
     assert ws.request_environ() is False
 
-    ws.set_ext_send_callback(NEW_ENVIRON, lambda: ["USER", "LANG"])
+    ws.set_ext_offer_callback(NEW_ENVIRON, lambda: ["USER", "LANG"])
     assert ws.request_environ() is True
     frame = ts.writes[-1]
     assert frame.startswith(IAC + SB + NEW_ENVIRON + SEND)
     assert frame.endswith(IAC + SE)
 
 
+def test_request_environ_uses_offer_not_send_callback():
+    ws, ts, _ = new_writer(server=True)
+    ws.remote_option[NEW_ENVIRON] = True
+
+    send_called = []
+    ws.set_ext_offer_callback(NEW_ENVIRON, lambda: ["USER"])
+    ws.set_ext_send_callback(NEW_ENVIRON, lambda keys: send_called.append(keys) or {})
+
+    assert ws.request_environ() is True
+    assert not send_called
+
+
 def test_request_charset_and_xdisploc_and_ttype():
     ws, ts, _ = new_writer(server=True)
     assert ws.request_charset() is False
     ws.remote_option[CHARSET] = True
-    ws.set_ext_send_callback(CHARSET, lambda: ["UTF-8", "ASCII"])
+    ws.set_ext_offer_callback(CHARSET, lambda: ["UTF-8", "ASCII"])
     assert ws.request_charset() is True
     assert ts.writes[-1].startswith(IAC + SB + CHARSET + b"\x01")
 

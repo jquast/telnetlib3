@@ -1,9 +1,18 @@
 History
 =======
+3.0.2
+  * bugfix: :meth:`~telnetlib3.stream_writer.TelnetWriter.request_charset` raised :exc:`TypeError`,
+    :ghissue:`128`.  Offer callbacks (no-arg, returning a list of items to propose) are now
+    separated from send callbacks (which respond to received requests) via new
+    :meth:`~telnetlib3.stream_writer.TelnetWriter.set_ext_offer_callback` method.
+
 3.0.1
   * change: Unused client argument ``gmcp_log`` removed.
   * new: MCCP2 and MCCP3. Both client and server ends passively support if requested, and request
     support by --compression or deny support by --no-compression.
+  * new: :meth:`~telnetlib3.client.TelnetClient.on_request_charset` and
+    :meth:`~telnetlib3.client.TelnetClient.on_request_environ` offer callbacks
+    on the client, symmetric with the existing server-side callbacks.
 
 3.0.0
   * change: :attr:`~telnetlib3.client_base.BaseClient.connect_minwait` default

@@ -141,7 +141,7 @@ class TestMCCP2SBHandler:
     def test_sb_mccp2_calls_ext_callback(self):
         w, _t, _p = new_writer(server=False, client=True)
         received = []
-        w.set_ext_callback(MCCP2_COMPRESS, lambda val: received.append(val))
+        w.set_ext_callback(MCCP2_COMPRESS, received.append)
         w.pending_option[SB + MCCP2_COMPRESS] = True
         buf = collections.deque([MCCP2_COMPRESS])
         w.handle_subnegotiation(buf)
@@ -358,7 +358,7 @@ class TestMCCPDecompressionError:
 
         # Decompressor should be disabled, corrupt data not fed to reader
         assert client._mccp2_decompressor is None
-        assert received == []
+        assert not received
 
     async def test_server_corrupt_mccp3_drops_data(self):
         """Corrupt MCCP3 data is discarded, not fed to IAC parser."""
@@ -379,7 +379,7 @@ class TestMCCPDecompressionError:
         server.data_received(b"\x00\x01\x02\x03\xff\xfe\xfd")
 
         assert server._mccp3_decompressor is None
-        assert received == []
+        assert not received
 
 
 @pytest.mark.asyncio
@@ -500,7 +500,7 @@ class TestMCCP3ClientEnd:
 
         assert client._mccp3_compressor is None
         # No final flush written because transport is closing
-        assert transport.writes == []
+        assert not transport.writes
 
     async def test_mccp3_end_noop_when_inactive(self):
         """_mccp3_end is safe to call when compression is not active."""
