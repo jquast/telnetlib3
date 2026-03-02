@@ -41,7 +41,10 @@ class _MockOption:
 
 
 def _make_writer(
-    will_echo: bool = False, raw_mode: "bool | None" = False, will_sga: bool = False
+    will_echo: bool = False,
+    raw_mode: "bool | None" = False,
+    will_sga: bool = False,
+    local_sga: bool = False,
 ) -> object:
     """Build a minimal mock writer with the attributes Terminal needs."""
     from telnetlib3.telopt import SGA
@@ -52,6 +55,7 @@ def _make_writer(
         will_echo=will_echo,
         client=True,
         remote_option=_MockOption({SGA: will_sga}),
+        local_option=_MockOption({SGA: local_sga}),
         log=types.SimpleNamespace(debug=lambda *a, **kw: None),
         ctx=ctx,
     )
@@ -188,6 +192,32 @@ def test_make_raw_toggle_echo_flag() -> None:
     restored = term._make_raw(mode, suppress_echo=False)
     assert restored.lflag & termios.ECHO
     assert not restored.lflag & termios.ICANON
+
+
+def test_server_will_sga_local_option() -> None:
+    """DO SGA from server (client WILL SGA) is detected as SGA active."""
+    term = _make_term(_make_writer(local_sga=True, raw_mode=None))
+    assert term._server_will_sga() is True
+
+
+def test_determine_mode_local_sga_goes_raw() -> None:
+    """WILL ECHO + DO SGA (local_option) triggers kludge raw mode."""
+    term = _make_term(_make_writer(will_echo=True, raw_mode=None, local_sga=True))
+    mode = _cooked_mode()
+    result = term.determine_mode(mode)
+    assert result is not mode
+    assert not result.lflag & termios.ICANON
+    assert not result.lflag & termios.ECHO
+
+
+def test_determine_mode_local_sga_without_echo() -> None:
+    """DO SGA alone (no WILL ECHO) triggers character-at-a-time with software echo."""
+    term = _make_term(_make_writer(raw_mode=None, local_sga=True))
+    mode = _cooked_mode()
+    result = term.determine_mode(mode)
+    assert result is not mode
+    assert not result.lflag & termios.ICANON
+    assert term.software_echo is True
 
 
 @pytest.mark.parametrize(

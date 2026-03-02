@@ -310,10 +310,14 @@ else:
             )
 
         def _server_will_sga(self) -> bool:
-            """Whether server has negotiated WILL SGA."""
+            """Whether SGA has been negotiated (either direction)."""
             from .telopt import SGA
 
-            return bool(self.telnet_writer.client and self.telnet_writer.remote_option.enabled(SGA))
+            w = self.telnet_writer
+            return bool(
+                w.client
+                and (w.remote_option.enabled(SGA) or w.local_option.enabled(SGA))
+            )
 
         def check_auto_mode(
             self, switched_to_raw: bool, last_will_echo: bool

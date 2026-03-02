@@ -645,7 +645,11 @@ async def run_client() -> None:
     config_msg = f"Client configuration: {accessories.repr_mapping(args)}"
 
     log = accessories.make_logger(
-        name=__name__, loglevel=args["loglevel"], logfile=args["logfile"], logfmt=args["logfmt"]
+        name=__name__,
+        loglevel=args["loglevel"],
+        logfile=args["logfile"],
+        logfmt=args["logfmt"],
+        filemode="w" if args.get("logfile_mode") == "rewrite" else "a",
     )
     log.debug(config_msg)
 
@@ -774,7 +778,11 @@ async def run_client() -> None:
         ) -> None:
             ctx = writer_arg.ctx
             assert typescript_path is not None
-            ts_file = open(typescript_path, "a", encoding="utf-8")  # noqa: SIM115
+            ts_file = open(  # noqa: SIM115
+                typescript_path,
+                "w" if args.get("typescript_mode") == "rewrite" else "a",
+                encoding="utf-8",
+            )
             ctx.typescript_file = ts_file
             try:
                 await _ts_inner(reader, writer_arg)
@@ -819,6 +827,13 @@ def _get_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--loglevel", default="warn", help="log level")
     parser.add_argument("--logfmt", default=accessories._DEFAULT_LOGFMT, help="log format")
     parser.add_argument("--logfile", help="filepath")
+    parser.add_argument(
+        "--logfile-mode",
+        default="append",
+        choices=["append", "rewrite"],
+        dest="logfile_mode",
+        help="Log file write mode: append (default) or rewrite.",
+    )
     parser.add_argument(
         "--shell", default="telnetlib3.telnet_client_shell", help="module.function_name"
     )
@@ -972,6 +987,13 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         metavar="FILE",
         help="record session to FILE (like Unix script(1))",
     )
+    parser.add_argument(
+        "--typescript-mode",
+        default="append",
+        choices=["append", "rewrite"],
+        dest="typescript_mode",
+        help="Typescript write mode: append (default) or rewrite.",
+    )
     return parser
 
 
@@ -1040,6 +1062,7 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "port": args.port,
         "loglevel": args.loglevel,
         "logfile": args.logfile,
+        "logfile_mode": args.logfile_mode,
         "logfmt": args.logfmt,
         "encoding": args.encoding,
         "tspeed": (args.speed, args.speed),
@@ -1068,6 +1091,7 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         ),
         "compression": args.compression,
         "typescript": args.typescript,
+        "typescript_mode": args.typescript_mode,
     }
 
 
