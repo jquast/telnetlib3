@@ -1,5 +1,21 @@
 History
 =======
+3.0.3 (unreleased)
+  * new: :func:`~telnetlib3.accessories.make_logger` accepts a ``filemode``
+    parameter (``"a"`` append or ``"w"`` overwrite) so callers can control
+    whether log files are truncated on each run.  The default remains
+    ``"a"`` (append), matching historical behaviour.
+  * new: ``--logfile-mode {append,rewrite}`` CLI flag controls whether the
+    log file is appended to (default) or overwritten on each connection.
+  * new: ``--typescript-mode {append,rewrite}`` CLI flag controls whether the
+    typescript file is appended to (default) or overwritten on each connection.
+  * bugfix: kludge mode not detected when server negotiates WILL ECHO + DO SGA
+    (requesting client WILL SGA) instead of WILL ECHO + WILL SGA.
+    :attr:`~telnetlib3.stream_writer.TelnetWriter.mode` and
+    ``_server_will_sga()`` now check SGA in either direction
+    (``remote_option`` or ``local_option``), so clients correctly switch from
+    line mode to character-at-a-time mode with these servers.
+
 3.0.2
   * bugfix: :meth:`~telnetlib3.stream_writer.TelnetWriter.request_charset` raised :exc:`TypeError`,
     :ghissue:`128`.  Offer callbacks (no-arg, returning a list of items to propose) are now

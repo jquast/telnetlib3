@@ -137,6 +137,7 @@ async def test_terminal_determine_mode(monkeypatch):
         will_echo=False,
         client=True,
         remote_option=_mock_opt,
+        local_option=_mock_opt,
         log=types.SimpleNamespace(debug=lambda *a, **k: None),
         ctx=TelnetSessionContext(),
     )

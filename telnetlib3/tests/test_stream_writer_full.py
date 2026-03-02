@@ -820,6 +820,14 @@ def test_mode_client_kludge_and_server_kludge_and_remote_local():
     assert wc.mode == "remote"
 
 
+def test_mode_client_kludge_local_sga():
+    """Client mode is kludge when server WILL ECHO + client WILL SGA (DO SGA from server)."""
+    wc, _, _ = new_writer(server=False, client=True)
+    wc.remote_option[ECHO] = True
+    wc.local_option[SGA] = True
+    assert wc.mode == "kludge"
+
+
 def test_handle_send_server_and_client_charset_returns():
     ws, ts, ps = new_writer(server=True)
     assert ws.handle_send_server_charset() == ["UTF-8"]

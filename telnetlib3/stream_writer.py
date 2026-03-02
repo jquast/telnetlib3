@@ -911,7 +911,9 @@ class TelnetWriter:
             if self.local_option.enabled(ECHO) and self.local_option.enabled(SGA):
                 return "kludge"
             return "local"
-        if self.remote_option.enabled(ECHO) and self.remote_option.enabled(SGA):
+        if self.remote_option.enabled(ECHO) and (
+            self.remote_option.enabled(SGA) or self.local_option.enabled(SGA)
+        ):
             return "kludge"
         return "local"
 
