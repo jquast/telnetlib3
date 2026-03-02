@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 # local
 from . import accessories
+from . import slc as slc_module
 from ._session_context import TelnetSessionContext
 
 log = logging.getLogger(__name__)
@@ -19,6 +20,7 @@ log = logging.getLogger(__name__)
 from .accessories import TRACE  # noqa: E402
 from .stream_reader import TelnetReader, TelnetReaderUnicode  # noqa: E402
 from .stream_writer import TelnetWriter, TelnetWriterUnicode  # noqa: E402
+from .telopt import LINEMODE  # noqa: E402
 
 __all__ = ("InputFilter", "telnet_client_shell")
 
@@ -180,6 +182,93 @@ class _RawLoopState:
     reactivate_repl: bool = False
 
 
+class LinemodeBuffer:
+    """Client-side line buffer for LINEMODE EDIT mode (RFC 1184 §3.1).
+
+    Accumulates characters typed by the user, applying local SLC editing
+    functions (erase-char, erase-line, erase-word) and transmitting complete
+    lines to the server.  When TRAPSIG is enabled, signal characters (^C etc.)
+    are sent as IAC commands instead of buffered.
+
+    :param slctab: The writer's current SLC character table.
+    :param forwardmask: FORWARDMASK received from server, or None.
+    :param trapsig: When True, signal characters are sent as IAC commands.
+    """
+
+    def __init__(
+        self,
+        slctab: Dict[bytes, slc_module.SLC],
+        forwardmask: Optional[slc_module.Forwardmask] = None,
+        trapsig: bool = False,
+    ) -> None:
+        """Initialize LinemodeBuffer."""
+        from .telopt import IAC, IP, AYT, EOF, SUSP, ABORT, BRK
+
+        self._buf: list[str] = []
+        self.slctab = slctab
+        self.forwardmask = forwardmask
+        self.trapsig = trapsig
+        self._trapsig_map: Dict[bytes, bytes] = {
+            slc_module.SLC_IP: IAC + IP,
+            slc_module.SLC_ABORT: IAC + ABORT,
+            slc_module.SLC_SUSP: IAC + SUSP,
+            slc_module.SLC_EOF: IAC + EOF,
+            slc_module.SLC_BRK: IAC + BRK,
+            slc_module.SLC_AYT: IAC + AYT,
+        }
+
+    def _slc_val(self, func: bytes) -> Optional[int]:
+        """Return the active byte value for SLC function, or None if unsupported."""
+        defn = self.slctab.get(func)
+        if defn is None or defn.nosupport:
+            return None
+        v = defn.val
+        return ord(v) if v and v != slc_module.theNULL else None
+
+    def feed(self, char: str) -> Tuple[str, Optional[bytes]]:
+        """
+        Feed one character into the buffer.
+
+        :returns: ``(echo, data)`` where ``echo`` is text to display locally
+            (may be empty) and ``data`` is bytes to send to server, or None
+            if buffering.
+        """
+        b = ord(char)
+        if self.trapsig:
+            for func, cmd in self._trapsig_map.items():
+                if b == self._slc_val(func):
+                    return ("", cmd)
+        if b == self._slc_val(slc_module.SLC_EC):
+            if self._buf:
+                self._buf.pop()
+                return ("\b \b", None)
+            return ("", None)
+        if b == self._slc_val(slc_module.SLC_EL):
+            n = len(self._buf)
+            self._buf.clear()
+            return ("\b \b" * n, None)
+        if b == self._slc_val(slc_module.SLC_EW):
+            popped = 0
+            # skip trailing spaces (POSIX VWERASE behaviour)
+            while self._buf and self._buf[-1] == " ":
+                self._buf.pop()
+                popped += 1
+            while self._buf and self._buf[-1] != " ":
+                self._buf.pop()
+                popped += 1
+            return ("\b \b" * popped, None)
+        if char in ("\r", "\n"):
+            line = "".join(self._buf) + char
+            self._buf.clear()
+            return (char, line.encode())
+        if self.forwardmask is not None and b in self.forwardmask:
+            data = ("".join(self._buf) + char).encode()
+            self._buf.clear()
+            return (char, data)
+        self._buf.append(char)
+        return (char, None)
+
+
 if sys.platform == "win32":
 
     async def telnet_client_shell(
@@ -334,6 +423,20 @@ else:
                 return None
             wecho = self.telnet_writer.will_echo
             wsga = self._server_will_sga()
+            # LINEMODE EDIT: kernel must handle line editing; keep/restore cooked mode.
+            # This takes priority over the SGA/ECHO raw-mode heuristics below.
+            if (
+                self.telnet_writer.local_option.enabled(LINEMODE)
+                and self.telnet_writer.linemode.edit
+            ):
+                if switched_to_raw:
+                    assert self._save_mode is not None
+                    self.set_mode(self._save_mode)
+                    self.telnet_writer.log.debug(
+                        "auto: LINEMODE EDIT confirmed, restoring cooked mode"
+                    )
+                    return (False, wecho, False)
+                return None
             # WILL ECHO alone = line mode with server echo (suppress local echo)
             # WILL SGA (with or without ECHO) = raw/character-at-a-time
             should_go_raw = not switched_to_raw and wsga
@@ -366,20 +469,37 @@ else:
 
             Auto mode (``_raw_mode is None``): follows the server's negotiation.
 
-            =================  ========  ==========  ================================
+            =================  ========  ==========  ========================================
             Server negotiates  ICANON    ECHO        Behavior
-            =================  ========  ==========  ================================
+            =================  ========  ==========  ========================================
             Nothing            on        on          Line mode, local echo
+            LINEMODE EDIT      **on**    on          Cooked mode, kernel handles EC/EL/echo
+            LINEMODE remote    **off**   **off**     Raw, server echoes
             WILL SGA only      **off**   on          Character-at-a-time, local echo
             WILL ECHO only     on        **off**     Line mode, server echoes
             WILL SGA + ECHO    **off**   **off**     Full kludge mode (most common)
-            =================  ========  ==========  ================================
+            =================  ========  ==========  ========================================
             """
             raw_mode = _get_raw_mode(self.telnet_writer)
             will_echo = self.telnet_writer.will_echo
             will_sga = self._server_will_sga()
             # Auto mode (None): follow server negotiation
             if raw_mode is None:
+                if self.telnet_writer.local_option.enabled(LINEMODE):
+                    linemode_mode = self.telnet_writer.linemode
+                    if linemode_mode.edit:
+                        # RFC 1184 / NetBSD reference: LINEMODE EDIT means ICANON on.
+                        # The kernel line discipline handles EC (VERASE), EL (VKILL),
+                        # EW (VWERASE), and echo.  No software line editing needed.
+                        self.telnet_writer.log.debug(
+                            "auto: LINEMODE EDIT, cooked mode (kernel line editing)"
+                        )
+                        self.software_echo = False
+                        return mode   # keep ICANON on; kernel handles EC/EL/EW and echo
+                    self.telnet_writer.log.debug(
+                        "auto: LINEMODE remote, raw input server echo"
+                    )
+                    return self._make_raw(mode, suppress_echo=True)
                 if will_echo and will_sga:
                     self.telnet_writer.log.debug("auto: server echo + SGA, kludge mode")
                     return self._make_raw(mode)
@@ -535,6 +655,20 @@ else:
         """Return the autoreply engine from the writer's context, if set."""
         return telnet_writer.ctx.autoreply_engine
 
+    def _get_linemode_buffer(
+        writer: Union[TelnetWriter, TelnetWriterUnicode],
+    ) -> "LinemodeBuffer":
+        """Return (or lazily create) the LinemodeBuffer attached to *writer*."""
+        buf: Optional[LinemodeBuffer] = getattr(writer, "_linemode_buf", None)
+        if buf is None:
+            buf = LinemodeBuffer(
+                slctab=writer.slctab,
+                forwardmask=writer.forwardmask,
+                trapsig=writer.linemode.trapsig,
+            )
+            writer._linemode_buf = buf
+        return buf
+
     async def _raw_event_loop(
         telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
         telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
@@ -593,7 +727,27 @@ else:
                         wait_for.remove(telnet_task)
                     handle_close("Connection closed.")
                     break
-                new_timer, has_pending = _send_stdin(inp, telnet_writer, stdout, state.local_echo)
+                linemode_edit = (
+                    telnet_writer.local_option.enabled(LINEMODE)
+                    and telnet_writer.linemode.edit
+                )
+                if linemode_edit and state.switched_to_raw:
+                    # Raw PTY or non-TTY: kernel not doing line editing, use LinemodeBuffer
+                    lmbuf = _get_linemode_buffer(telnet_writer)
+                    for ch in inp.decode(errors="replace"):
+                        echo, data = lmbuf.feed(ch)
+                        if echo:
+                            stdout.write(echo.encode())
+                        if data:
+                            telnet_writer._write(data)
+                    new_timer, has_pending = None, False
+                elif linemode_edit:
+                    # Cooked PTY: kernel already handled EC/EL/echo; forward line directly
+                    new_timer, has_pending = _send_stdin(inp, telnet_writer, stdout, False)
+                else:
+                    new_timer, has_pending = _send_stdin(
+                        inp, telnet_writer, stdout, state.local_echo
+                    )
                 if has_pending and esc_timer_task not in wait_for:
                     esc_timer_task = new_timer
                     if esc_timer_task is not None:

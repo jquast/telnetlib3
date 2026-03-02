@@ -318,6 +318,12 @@ class TelnetWriter:
         #: attribute ``ack`` returns True if it is in use.
         self._linemode = slc.Linemode()
 
+        #: LINEMODE FORWARDMASK received from server, or None.
+        self._forwardmask: Optional[slc.Forwardmask] = None
+
+        #: True once the server has sent its SLC table after MODE ACK.
+        self._slc_sent: bool = False
+
         self._connection_closed = False
 
         # Set default callback handlers to local methods.  A base protocol
@@ -1330,6 +1336,38 @@ class TelnetWriter:
             self._transport.write(self._linemode.mask)
         self.send_iac(IAC + SE)
 
+    def request_linemode_change(
+        self,
+        edit: Optional[bool] = None,
+        trapsig: Optional[bool] = None,
+        soft_tab: Optional[bool] = None,
+        lit_echo: Optional[bool] = None,
+    ) -> None:
+        """
+        Request a LINEMODE mode change.
+
+        Server-side only. Each keyword arg, if not None, enables or
+        disables the corresponding bit in the LINEMODE MODE mask.
+
+        :param edit: Set the EDIT (local line-editing) bit.
+        :param trapsig: Set the TRAPSIG bit.
+        :param soft_tab: Set the SOFT_TAB bit.
+        :param lit_echo: Set the LIT_ECHO bit.
+        """
+        mask = ord(self._linemode.mask)
+        flag_map = (
+            (edit, ord(slc.LMODE_MODE_LOCAL)),
+            (trapsig, ord(slc.LMODE_MODE_TRAPSIG)),
+            (soft_tab, ord(slc.LMODE_MODE_SOFT_TAB)),
+            (lit_echo, ord(slc.LMODE_MODE_LIT_ECHO)),
+        )
+        for value, bit in flag_map:
+            if value is True:
+                mask |= bit
+            elif value is False:
+                mask &= ~bit
+        self.send_linemode(slc.Linemode(bytes([mask])))
+
     # Public is-a-command (IAC) callbacks
     #
     def set_iac_callback(self, cmd: bytes, func: Callable[..., Any]) -> None:
@@ -1876,6 +1914,13 @@ class TelnetWriter:
                 # Note that CHARSET is not included -- either side that has sent
                 # WILL and received DO may initiate SB at any time.
                 self.pending_option[SB + opt] = True
+                if opt == LINEMODE and self.client:
+                    # Client has agreed to LINEMODE; mark as locally active.
+                    self.local_option[LINEMODE] = True
+                    # RFC 1184: client initiates SLC exchange immediately after WILL LINEMODE
+                    self._slc_start()
+                    self._slc_add(theNULL, slc.SLC(slc.SLC_DEFAULT, theNULL))
+                    self._slc_end()
 
         elif opt in self.always_will:
             if not self.local_option.enabled(opt):
@@ -2607,6 +2652,12 @@ class TelnetWriter:
                     mask=bytes([ord(suggest_mode.mask) | ord(slc.LMODE_MODE_ACK)])
                 )
             )
+            # Record the agreed mode (with ACK bit) so that duplicate proposals
+            # are suppressed and the client-ACK path comparison succeeds.
+            # __eq__ masks out the ACK bit, so deduplication still works.
+            self._linemode = slc.Linemode(
+                mask=bytes([ord(suggest_mode.mask) | ord(slc.LMODE_MODE_ACK)])
+            )
             return
 
         # " In all cases, a response is never generated to a MODE
@@ -2645,23 +2696,31 @@ class TelnetWriter:
 
         self._linemode = suggest_mode
 
+        if self.server and not self._slc_sent:
+            self._slc_start()
+            self._slc_send()
+            self._slc_end()
+            self._slc_sent = True
+
     def _handle_sb_linemode_slc(self, buf: collections.deque[bytes]) -> None:
         """
         Callback handles IAC-SB-LINEMODE-SLC-<buf>.
 
         Processes SLC command function triplets found in ``buf`` and replies
-        accordingly.
+        with any changes.  An empty reply is never sent — that would trigger
+        an infinite echo loop between client and server.
         """
-        if not len(buf) - 2 % 3:
-            raise ValueError(f"SLC buffer wrong size: expect multiple of 3: {len(buf) - 2}")
-        self._slc_start()
+        if len(buf) % 3 != 0:
+            raise ValueError(f"SLC buffer wrong size: expect multiple of 3: {len(buf)}")
         while len(buf):
             func = buf.popleft()
             flag = buf.popleft()
             value = buf.popleft()
             slc_def = slc.SLC(flag, value)
             self._slc_process(func, slc_def)
-        self._slc_end()
+        if self._slc_buffer:
+            self._slc_start()
+            self._slc_end()
         if self.server:
             self.request_forwardmask()
 
@@ -2697,10 +2756,11 @@ class TelnetWriter:
                 continue
 
             _default = slc.SLC_nosupport()
-            if self.slctab.get(bytes([func]), _default).nosupport:
+            if slctab.get(bytes([func]), _default).nosupport:
                 continue
 
-            self._slc_add(bytes([func]))
+            slc_def = slctab.get(bytes([func]))
+            self._slc_add(bytes([func]), slc_def)
             send_count += 1
         self.log.debug("slc_send: %s functions queued.", send_count)
 
@@ -2740,9 +2800,13 @@ class TelnetWriter:
         # process special request
         if func == theNULL:
             if slc_def.level == slc.SLC_DEFAULT:
-                # client requests we send our default tab,
+                # client requests we send our default tab; reset current to defaults
+                # (analogous to NetBSD default_slc() before send_slc())
                 self.log.debug("_slc_process: client request SLC_DEFAULT")
+                self.slctab = dict(self.default_slc_tab)
                 self._slc_send(self.default_slc_tab)
+                if self.server:
+                    self._slc_sent = True
             elif slc_def.level == slc.SLC_VARIABLE:
                 # client requests we send our current tab,
                 self.log.debug("_slc_process: client request SLC_VARIABLE")
@@ -2799,8 +2863,8 @@ class TelnetWriter:
                 default_slc = self.default_slc_tab.get(func)
                 self.slctab[func].set_mask(default_slc.mask)
             # set current value to value indicated in default tab
-            self.default_slc_tab.get(func, slc.SLC_nosupport())
-            self.slctab[func].set_value(slc_def.val)
+            default_def = self.default_slc_tab.get(func, slc.SLC_nosupport())
+            self.slctab[func].set_value(default_def.val)
             self._slc_add(func)
             return
 
@@ -3099,7 +3163,16 @@ class TelnetWriter:
         :param buf: bytes following IAC SB LINEMODE DO FORWARDMASK.
         """
         mask = b"".join(buf)
-        self.log.debug("FORWARDMASK received (%d bytes), not applied", len(mask))
+        if 1 <= len(mask) <= 32:
+            self._forwardmask = slc.Forwardmask(mask)
+            self.log.debug("FORWARDMASK stored (%d bytes)", len(mask))
+        else:
+            self.log.warning("FORWARDMASK invalid length: %d", len(mask))
+
+    @property
+    def forwardmask(self) -> Optional[slc.Forwardmask]:
+        """Received LINEMODE FORWARDMASK, or None."""
+        return self._forwardmask
 
 
 class TelnetWriterUnicode(TelnetWriter):

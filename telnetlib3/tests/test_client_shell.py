@@ -8,7 +8,6 @@ from unittest import mock
 
 # 3rd party
 import pytest
-import pexpect
 
 # local
 from telnetlib3._session_context import TelnetSessionContext
@@ -364,7 +363,7 @@ import contextlib  # noqa: E402
 import subprocess  # noqa: E402
 
 # local
-from telnetlib3.tests.accessories import asyncio_server
+from telnetlib3.tests.accessories import asyncio_server, create_server
 
 _IAC = b"\xff"
 _WILL = b"\xfb"
@@ -387,9 +386,10 @@ def _strip_iac(data: bytes) -> bytes:
 
 
 def _client_cmd(host: str, port: int, extra: "list[str] | None" = None) -> "list[str]":
-    prog = pexpect.which("telnetlib3-client")
-    assert prog is not None
-    args = [prog, host, str(port), "--connect-maxwait=0.5", "--colormatch=none"]
+    # Use sys.executable so the subprocess uses the same Python interpreter and
+    # telnetlib3 package as the test process, not whatever pyenv shim happens to
+    # be on PATH (which may point to a different Python version or install).
+    args = [sys.executable, "-m", "telnetlib3.client", host, str(port), "--connect-maxwait=0.5", "--colormatch=none"]
     if extra:
         args.extend(extra)
     return args
@@ -979,3 +979,46 @@ async def test_cooked_to_raw_transition_preserves_crlf(
                 assert idx != -1
                 after = text[idx + len(line) :]
                 assert after.startswith("\r\n")
+
+
+async def test_linemode_edit_via_telsh(bind_host: str, unused_tcp_port: int) -> None:
+    """LinemodeBuffer is exercised end-to-end via LinemodeServer + telnet_server_shell.
+
+    Covers _get_linemode_buffer, _raw_event_loop LINEMODE EDIT path, EC (erase-char),
+    EL (erase-line), and line transmission.
+    """
+    from telnetlib3.server import LinemodeServer
+    from telnetlib3.server_shell import telnet_server_shell
+
+    async with create_server(
+        protocol_factory=LinemodeServer,
+        shell=telnet_server_shell,
+        host=bind_host,
+        port=unused_tcp_port,
+        connect_maxwait=0.5,
+    ):
+        cmd = _client_cmd(bind_host, unused_tcp_port)
+
+        def _interact(master_fd: int, proc: "subprocess.Popen[bytes]") -> bytes:
+            # Wait for the telsh prompt — LINEMODE negotiation has completed by then
+            buf = _pty_read(master_fd, marker=b"tel:sh>", timeout=12.0)
+            # EC test: type "helo" + 0x7F (EC = delete-char) + "lo" + CR
+            # LinemodeBuffer: "helo" → EC deletes 'o' → "hel" + "lo" → "hello", CR sends it
+            os.write(master_fd, b"helo\x7flo\r")
+            buf += _pty_read(master_fd, marker=b"no such", timeout=8.0)
+            # EL test: type "garbage" + 0x15 (EL = erase-line) + "slc" + CR
+            os.write(master_fd, b"garbage\x15slc\r")
+            buf += _pty_read(master_fd, marker=b"Special Line", timeout=8.0)
+            # Tidy up
+            os.write(master_fd, b"quit\r")
+            buf += _pty_read(master_fd, proc=proc, timeout=5.0)
+            return buf
+
+        with _pty_client(cmd) as (proc, master_fd):
+            output = await asyncio.to_thread(_interact, master_fd, proc)
+            # Local echo from LinemodeBuffer should include backspace sequence
+            assert b"\x08 \x08" in output
+            # "hello" was transmitted intact and shell replied
+            assert b"no such command" in output
+            # After EL, "slc" was sent clean and shell replied with SLC table
+            assert b"Special Line Characters" in output

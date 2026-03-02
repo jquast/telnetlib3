@@ -134,7 +134,7 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
                 (
                     (b"\bhel\blp\r"),
                     (
-                        b"\r\nquit, writer, slc, toggle [option|all], reader, proto, dump"
+                        b"\r\nquit, writer, slc, linemode, toggle [option|all], reader, proto, dump"
                         b"\r\ntel:sh> "
                     ),
                 ),
@@ -195,6 +195,9 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
                         b"\r\ngoahead ON"
                         b"\r\ninbinary off"
                         b"\r\nlflow ON"
+                        b"\r\nlinemode off"
+                        b"\r\nlinemode-edit off"
+                        b"\r\nlinemode-trapsig off"
                         b"\r\noutbinary off"
                         b"\r\nxon-any off"
                         b"\r\ntel:sh> "
@@ -240,6 +243,9 @@ async def test_telnet_server_given_shell(bind_host, unused_tcp_port):
                         b"\r\ngoahead ON"
                         b"\r\ninbinary off"
                         b"\r\nlflow off"  # flipped
+                        b"\r\nlinemode off"
+                        b"\r\nlinemode-edit off"
+                        b"\r\nlinemode-trapsig off"
                         b"\r\noutbinary off"
                         b"\r\nxon-any ON"  # flipped
                         b"\r\ntel:sh> "
