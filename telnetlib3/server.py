@@ -823,7 +823,7 @@ class LinemodeServer(TelnetServer):
     ``WILL ECHO`` so the client performs local echoing via its LINEMODE buffer.
 
     Use with :func:`create_server` to enable RFC 1184 LINEMODE EDIT on a
-    :func:`telnet_server_shell` session or any custom shell.
+    :func:`~.telnet_server_shell` session or any custom shell.
     """
 
     from . import slc as _slc_module
