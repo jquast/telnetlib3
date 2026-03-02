@@ -42,7 +42,14 @@ try:
 except ImportError:
     PTY_SUPPORT = False
 
-__all__ = ("TelnetServer", "Server", "create_server", "run_server", "parse_server_args")
+__all__ = (
+    "TelnetServer",
+    "LinemodeServer",
+    "Server",
+    "create_server",
+    "run_server",
+    "parse_server_args",
+)
 
 
 class CONFIG(NamedTuple):
@@ -804,6 +811,42 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
     def connection_lost(self, exc: Optional[Exception]) -> None:
         """Connection dropped before detection completed."""
         _ = exc
+
+
+class LinemodeServer(TelnetServer):
+    """
+    :class:`TelnetServer` subclass that negotiates LINEMODE EDIT.
+
+    In addition to the standard options negotiated by :class:`TelnetServer`,
+    this server sends ``DO LINEMODE`` during advanced negotiation, proposes
+    LINEMODE EDIT (local line editing by the client), and suppresses
+    ``WILL ECHO`` so the client performs local echoing via its LINEMODE buffer.
+
+    Use with :func:`create_server` to enable RFC 1184 LINEMODE EDIT on a
+    :func:`~.telnet_server_shell` session or any custom shell.
+    """
+
+    from . import slc as _slc_module
+
+    #: Propose LINEMODE EDIT (local line editing) instead of remote mode.
+    default_linemode = _slc_module.Linemode(_slc_module.LMODE_MODE_LOCAL)
+
+    def begin_advanced_negotiation(self) -> None:
+        """Negotiate standard options plus ``DO LINEMODE``."""
+        from .telopt import DO, LINEMODE
+
+        super().begin_advanced_negotiation()
+        # Propagate the protocol-level default_linemode to the writer so that
+        # TelnetWriter.handle_will(LINEMODE) proposes the correct mode (LOCAL/EDIT)
+        # rather than the TelnetWriter class default (REMOTE).
+        self.writer.default_linemode = self.default_linemode
+        self.writer.iac(DO, LINEMODE)
+
+    def _negotiate_echo(self) -> None:
+        """Skip ``WILL ECHO`` — LINEMODE EDIT client handles local echo."""
+        if self._echo_negotiated:
+            return
+        self._echo_negotiated = True
 
 
 class Server:

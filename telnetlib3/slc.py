@@ -17,6 +17,7 @@ __all__ = (
     "Linemode",
     "LMODE_FORWARDMASK",
     "LMODE_MODE",
+    "LMODE_MODE_EDIT",
     "LMODE_MODE_REMOTE",
     "LMODE_SLC",
     "name_slc_command",
@@ -88,6 +89,9 @@ NSLC = 30
 LMODE_MODE, LMODE_FORWARDMASK, LMODE_SLC = (bytes([const]) for const in range(1, 4))
 LMODE_MODE_REMOTE, LMODE_MODE_LOCAL, LMODE_MODE_TRAPSIG = (bytes([const]) for const in range(3))
 LMODE_MODE_ACK, LMODE_MODE_SOFT_TAB, LMODE_MODE_LIT_ECHO = (bytes([4]), bytes([8]), bytes([16]))
+
+#: RFC 1184's name for LMODE_MODE_LOCAL (EDIT bit)
+LMODE_MODE_EDIT = LMODE_MODE_LOCAL
 
 
 class SLC:
@@ -314,6 +318,15 @@ class Linemode:
     def local(self) -> bool:
         """True if linemode is local."""
         return bool(ord(self.mask) & ord(LMODE_MODE_LOCAL))
+
+    @property
+    def edit(self) -> bool:
+        """
+        True if EDIT bit set (client performs local line editing).
+
+        RFC 1184 name.
+        """
+        return self.local
 
     @property
     def remote(self) -> bool:

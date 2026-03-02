@@ -1,20 +1,14 @@
 History
 =======
-3.0.3 (unreleased)
-  * new: :func:`~telnetlib3.accessories.make_logger` accepts a ``filemode``
-    parameter (``"a"`` append or ``"w"`` overwrite) so callers can control
-    whether log files are truncated on each run.  The default remains
-    ``"a"`` (append), matching historical behaviour.
-  * new: ``--logfile-mode {append,rewrite}`` CLI flag controls whether the
-    log file is appended to (default) or overwritten on each connection.
-  * new: ``--typescript-mode {append,rewrite}`` CLI flag controls whether the
-    typescript file is appended to (default) or overwritten on each connection.
-  * bugfix: kludge mode not detected when server negotiates WILL ECHO + DO SGA
-    (requesting client WILL SGA) instead of WILL ECHO + WILL SGA.
-    :attr:`~telnetlib3.stream_writer.TelnetWriter.mode` and
-    ``_server_will_sga()`` now check SGA in either direction
-    (``remote_option`` or ``local_option``), so clients correctly switch from
-    line mode to character-at-a-time mode with these servers.
+3.0.3
+  * bugfix: server and client now correctly complete LINEMODE negotiation when prompted to.
+  * new: ``--logfile-mode {append,rewrite}`` and ``--typescript-mode`` CLI flags
+    and :func:`~telnetlib3.accessories.make_logger` ``filemode`` argument control whether the log
+    file is appended to (default) or overwritten on each connection.
+  * new: :class:`~telnetlib3.client_shell.LinemodeBuffer` used by ``telnetlib3-client``, a
+    client-side line buffer for LINEMODE EDIT mode with local erase-char, erase-line, erase-word
+    editing, forwardmask flushing, and TRAPSIG IAC command generation. The default 'telsh' server
+    was also updated to support linemode.
 
 3.0.2
   * bugfix: :meth:`~telnetlib3.stream_writer.TelnetWriter.request_charset` raised :exc:`TypeError`,

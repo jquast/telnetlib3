@@ -137,7 +137,14 @@ class _LineEditor:
         return char, None
 
 
-__all__ = ("telnet_server_shell", "readline_async", "readline")
+__all__ = (
+    "telnet_server_shell",
+    "readline_async",
+    "readline",
+    "get_linemode",
+    "get_slcdata",
+    "do_toggle",
+)
 
 
 async def telnet_server_shell(
@@ -179,7 +186,7 @@ async def telnet_server_shell(
             writer.write("Goodbye." + CR + LF)
             break
         if command == "help":
-            writer.write("quit, writer, slc, toggle [option|all], reader, proto, dump")
+            writer.write("quit, writer, slc, linemode, toggle [option|all], reader, proto, dump")
         elif command == "writer":
             # show 'writer' status
             writer.write(repr(writer))
@@ -194,6 +201,8 @@ async def telnet_server_shell(
         elif command == "slc":
             # show 'slc' support and data tables
             writer.write(get_slcdata(writer))
+        elif command == "linemode":
+            writer.write(get_linemode(writer))
         elif command.startswith("toggle"):
             # toggle specified options
             option = command[len("toggle ") :] or None
@@ -342,8 +351,25 @@ def get_slcdata(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> str:
     )
 
 
+def get_linemode(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> str:
+    """Display current LINEMODE negotiation state."""
+    active = writer.remote_option.enabled(telopt.LINEMODE)
+    if not active:
+        return "LINEMODE not negotiated."
+    lm = writer.linemode
+    bits = (
+        f"EDIT={'on' if lm.edit else 'off'}"
+        f" TRAPSIG={'on' if lm.trapsig else 'off'}"
+        f" SOFT_TAB={'on' if lm.soft_tab else 'off'}"
+        f" LIT_ECHO={'on' if lm.lit_echo else 'off'}"
+        f" ACK={'on' if lm.ack else 'off'}"
+    )
+    return f"LINEMODE active. Mode: {writer.mode}\r\n{bits}"
+
+
 def do_toggle(writer: Union[TelnetWriter, TelnetWriterUnicode], option: Optional[str]) -> str:
     """Display or toggle telnet session parameters."""
+    linemode_active = writer.remote_option.enabled(telopt.LINEMODE)
     tbl_opt = {
         "echo": writer.local_option.enabled(telopt.ECHO),
         "goahead": not writer.local_option.enabled(telopt.SGA),
@@ -352,6 +378,9 @@ def do_toggle(writer: Union[TelnetWriter, TelnetWriterUnicode], option: Optional
         "binary": writer.outbinary and writer.inbinary,
         "xon-any": writer.xon_any,
         "lflow": writer.lflow,
+        "linemode": linemode_active,
+        "linemode-edit": writer.linemode.edit if linemode_active else False,
+        "linemode-trapsig": writer.linemode.trapsig if linemode_active else False,
     }
 
     if not option:
@@ -389,6 +418,25 @@ def do_toggle(writer: Union[TelnetWriter, TelnetWriterUnicode], option: Optional
         writer.lflow = not tbl_opt["lflow"]
         writer.send_lineflow_mode()
         msgs.append(f"lineflow {'en' if writer.lflow else 'dis'}abled.")
+
+    if option in ("linemode",):
+        cmd = telopt.DONT if tbl_opt["linemode"] else telopt.DO
+        writer.iac(cmd, telopt.LINEMODE)
+        msgs.append(f"{telopt.name_command(cmd).lower()} linemode.")
+
+    if option in ("linemode-edit",):
+        if not tbl_opt["linemode"]:
+            msgs.append("linemode not active.")
+        else:
+            writer.request_linemode_change(edit=not tbl_opt["linemode-edit"])
+            msgs.append(f"linemode-edit {'dis' if tbl_opt['linemode-edit'] else 'en'}abled.")
+
+    if option in ("linemode-trapsig",):
+        if not tbl_opt["linemode"]:
+            msgs.append("linemode not active.")
+        else:
+            writer.request_linemode_change(trapsig=not tbl_opt["linemode-trapsig"])
+            msgs.append(f"linemode-trapsig {'dis' if tbl_opt['linemode-trapsig'] else 'en'}abled.")
 
     if option not in tbl_opt and option != "all":
         msgs.append("toggle: not an option.")
