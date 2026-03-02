@@ -167,12 +167,12 @@ class TelnetServer(server_base.BaseServer):
         for tel_opt, callback_fn in _ext_callbacks:
             self.writer.set_ext_callback(tel_opt, callback_fn)
 
-        # Wire up a callbacks that return definitions for requests.
+        # Wire up offer callbacks that return definitions for outgoing requests.
         for tel_opt, callback_fn in [
             (NEW_ENVIRON, self.on_request_environ),
             (CHARSET, self.on_request_charset),
         ]:
-            self.writer.set_ext_send_callback(tel_opt, callback_fn)
+            self.writer.set_ext_offer_callback(tel_opt, callback_fn)
 
     def data_received(self, data: bytes) -> None:
         """Process received data and reset timeout timer."""
@@ -208,7 +208,7 @@ class TelnetServer(server_base.BaseServer):
             else:
                 orig_write(data)
 
-        transport.write = compressed_write  # type: ignore[assignment]
+        transport.write = compressed_write  # type: ignore[method-assign]
         self._mccp2_orig_write = orig_write
         self.writer.mccp2_active = True
         logger.debug("MCCP2 compression started (server→client)")
@@ -217,6 +217,7 @@ class TelnetServer(server_base.BaseServer):
         """Stop MCCP2 compression, flush Z_FINISH."""
         if self._mccp2_compressor is not None:
             try:
+                assert self._mccp2_orig_write is not None
                 self._mccp2_orig_write(self._mccp2_compressor.flush(zlib.Z_FINISH))
             except zlib.error as exc:
                 logger.debug("MCCP2 Z_FINISH flush error: %s", exc)

@@ -30,7 +30,7 @@ class BaseServer(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
     _check_later = None
     _rx_bytes = 0
     _tx_bytes = 0
-    _mccp3_decompressor: Optional[zlib.Decompress] = None
+    _mccp3_decompressor: Optional[zlib._Decompress] = None
 
     def __init__(
         self,

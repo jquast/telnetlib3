@@ -68,9 +68,9 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
         self._limit = limit
 
         # MCCP2: server→client decompression
-        self._mccp2_decompressor: Optional[zlib.Decompress] = None
+        self._mccp2_decompressor: Optional[zlib._Decompress] = None
         # MCCP3: client→server compression
-        self._mccp3_compressor: Optional[zlib.Compress] = None
+        self._mccp3_compressor: Optional[zlib._Compress] = None
         self._mccp3_orig_write: Any = None
 
         # High-throughput receive pipeline
@@ -470,7 +470,7 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
             else:
                 orig_write(data)
 
-        transport.write = compressed_write  # type: ignore[assignment]
+        transport.write = compressed_write  # type: ignore[method-assign]
         self._mccp3_orig_write = orig_write
         self.log.debug("MCCP3 compression started (client→server)")
 

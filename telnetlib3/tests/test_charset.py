@@ -182,7 +182,7 @@ def test_server_sends_do_and_will_charset():
 def test_client_do_will_then_server_will_allows_client_request():
     """Test scenario from logfile: DO->WILL then server WILL allows client to send SB REQUEST."""
     wc, tc, _ = new_writer(server=False, client=True)
-    wc.set_ext_send_callback(CHARSET, lambda: ["UTF-8"])
+    wc.set_ext_offer_callback(CHARSET, lambda: ["UTF-8"])
 
     # Simulate server DO CHARSET
     # Note: handle_do() returns True but local_option[...] is set by the caller
@@ -208,11 +208,11 @@ def test_bidirectional_charset_both_sides_can_request():
     """Test that both server and client can initiate CHARSET REQUEST when both have WILL/DO."""
     # Server side
     ws, ts, _ = new_writer(server=True)
-    ws.set_ext_send_callback(CHARSET, lambda: ["UTF-8", "ASCII"])
+    ws.set_ext_offer_callback(CHARSET, lambda: ["UTF-8", "ASCII"])
 
     # Client side
     wc, tc, _ = new_writer(server=False, client=True)
-    wc.set_ext_send_callback(CHARSET, lambda: ["UTF-8"])
+    wc.set_ext_offer_callback(CHARSET, lambda: ["UTF-8"])
 
     # Simulate full negotiation: server DO, client WILL, server WILL, client DO
     ws.remote_option[CHARSET] = True  # client sent WILL
@@ -234,7 +234,7 @@ def test_charset_request_response_cycle():
     # Server initiates REQUEST
     ws, ts, _ = new_writer(server=True)
     ws.remote_option[CHARSET] = True
-    ws.set_ext_send_callback(CHARSET, lambda: ["UTF-8", "ASCII"])
+    ws.set_ext_offer_callback(CHARSET, lambda: ["UTF-8", "ASCII"])
 
     assert ws.request_charset() is True
     request_frame = ts.writes[-1]
@@ -265,7 +265,7 @@ def test_server_sends_will_charset_after_client_will():
     # Verify server also called request_charset as usual
     # (this is tested by checking if it would send a request,
     # but we need to set up the callback first)
-    ws.set_ext_send_callback(CHARSET, lambda: ["UTF-8"])
+    ws.set_ext_offer_callback(CHARSET, lambda: ["UTF-8"])
     # Clear previous writes to test just the request
     ts.writes.clear()
 
@@ -401,3 +401,67 @@ def test_charset_accepted_sets_force_binary_on_accepting_side():
 
     assert w.environ_encoding == "UTF-8"
     assert p.force_binary is True
+
+
+def test_client_request_charset_uses_offer_callback():
+    """Client request_charset() must use offer callback, not send callback."""
+    wc, tc, _ = new_writer(server=False, client=True)
+    wc.local_option[CHARSET] = True
+    wc.remote_option[CHARSET] = True
+
+    wc.set_ext_offer_callback(CHARSET, lambda: ["UTF-8", "CP437"])
+    wc.set_ext_send_callback(CHARSET, lambda offered: offered[0])
+
+    assert wc.request_charset() is True
+    frame = tc.writes[-1]
+    assert frame.startswith(IAC + SB + CHARSET + REQUEST)
+    assert b"UTF-8" in frame
+    assert b"CP437" in frame
+
+
+def test_server_request_charset_uses_offer_callback():
+    """Server request_charset() must use offer callback, not send callback."""
+    ws, ts, _ = new_writer(server=True)
+    ws.remote_option[CHARSET] = True
+
+    ws.set_ext_offer_callback(CHARSET, lambda: ["UTF-8", "ASCII"])
+    ws.set_ext_send_callback(CHARSET, lambda offered: offered[0])
+
+    assert ws.request_charset() is True
+    frame = ts.writes[-1]
+    assert frame.startswith(IAC + SB + CHARSET + REQUEST)
+    assert b"UTF-8" in frame
+
+
+def test_handle_sb_charset_request_uses_send_callback():
+    """Receiving SB CHARSET REQUEST must use send callback (not offer)."""
+    wc, tc, _ = new_writer(server=False, client=True)
+    wc.local_option[CHARSET] = True
+    wc.remote_option[CHARSET] = True
+
+    offer_called = []
+    wc.set_ext_offer_callback(CHARSET, lambda: offer_called.append(True) or ["NOPE"])
+    wc.set_ext_send_callback(CHARSET, lambda offered: "UTF-8")
+
+    sep = b" "
+    buf = collections.deque([CHARSET, REQUEST, sep, b"UTF-8"])
+    wc._handle_sb_charset(buf)
+
+    assert not offer_called
+    assert wc.environ_encoding == "UTF-8"
+
+
+def test_server_handle_sb_charset_request_uses_send_callback():
+    """Server receiving SB CHARSET REQUEST from client uses send callback."""
+    ws, ts, _ = new_writer(server=True)
+    ws.remote_option[CHARSET] = True
+    ws.local_option[CHARSET] = True
+
+    ws.set_ext_offer_callback(CHARSET, lambda: ["SHOULD-NOT-USE"])
+    ws.set_ext_send_callback(CHARSET, lambda offered: "CP437" if "CP437" in offered else "")
+
+    sep = b" "
+    buf = collections.deque([CHARSET, REQUEST, sep, b"CP437"])
+    ws._handle_sb_charset(buf)
+
+    assert ws.environ_encoding == "CP437"
