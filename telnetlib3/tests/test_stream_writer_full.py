@@ -1111,6 +1111,38 @@ def test_handle_will_always_do_sends_do():
     assert AUTHENTICATION not in w.rejected_will
 
 
+def test_handle_will_always_dont_refuses():
+    w, t, p = new_writer(server=True)
+    w.always_dont.add(SGA)
+    w.handle_will(SGA)
+    assert t.writes[-1] == IAC + DONT + SGA
+    assert not w.remote_option.enabled(SGA)
+
+
+def test_handle_do_always_wont_refuses():
+    w, t, p = new_writer(server=False, client=True)
+    w.always_wont.add(TTYPE)
+    result = w.handle_do(TTYPE)
+    assert result is False
+    assert t.writes[-1] == IAC + WONT + TTYPE
+
+
+def test_always_dont_overrides_native_support():
+    w, t, p = new_writer(server=True)
+    w.always_dont.add(BINARY)
+    w.handle_will(BINARY)
+    assert t.writes[-1] == IAC + DONT + BINARY
+    assert not w.remote_option.enabled(BINARY)
+
+
+def test_always_wont_overrides_native_support():
+    w, t, p = new_writer(server=False, client=True)
+    w.always_wont.add(NAWS)
+    result = w.handle_do(NAWS)
+    assert result is False
+    assert t.writes[-1] == IAC + WONT + NAWS
+
+
 def test_write_non_bytes_raises_type_error():
     w, t, p = new_writer(server=True)
     with pytest.raises(TypeError, match="buf expected bytes"):

@@ -234,6 +234,16 @@ class TelnetWriter:
         #: DONT rejection in :meth:`handle_will`.
         self.always_do: set[bytes] = set()
 
+        #: Set of option byte(s) for which the client always sends WONT
+        #: in response to DO, refusing the option even when natively
+        #: supported.  Overrides the default WILL in :meth:`handle_do`.
+        self.always_wont: set[bytes] = set()
+
+        #: Set of option byte(s) for which the client always sends DONT
+        #: in response to WILL, refusing the option even when natively
+        #: supported.  Overrides the default DO in :meth:`handle_will`.
+        self.always_dont: set[bytes] = set()
+
         #: Set of option byte(s) for which the client sends DO only
         #: in response to a server WILL (passive negotiation).
         self.passive_do: set[bytes] = set()
@@ -1824,6 +1834,11 @@ class TelnetWriter:
         # False for unsupported option, or an option invalid in that context,
         # such as LOGOUT.
         self.log.debug("handle_do(%s)", name_command(opt))
+        if opt in self.always_wont:
+            self.log.debug("DO %s: always-wont, declining.", name_command(opt))
+            if not self.local_option.enabled(opt):
+                self.iac(WONT, opt)
+            return False
         if opt == ECHO and self.client:
             # What do we have here? A Telnet Server attempting to
             # fingerprint us as a broken 4.4BSD Telnet Client, which
@@ -1977,6 +1992,12 @@ class TelnetWriter:
             when WILL TM is received without prior DO TM.
         """
         self.log.debug("handle_will(%s)", name_command(opt))
+
+        if opt in self.always_dont:
+            self.log.debug("WILL %s: always-dont, refusing.", name_command(opt))
+            self.iac(DONT, opt)
+            self.remote_option[opt] = False
+            return
 
         if opt in (
             BINARY,

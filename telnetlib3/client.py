@@ -655,9 +655,11 @@ async def run_client() -> None:
 
     always_will: set[bytes] = args["always_will"]
     always_do: set[bytes] = args["always_do"]
+    always_wont: set[bytes] = args["always_wont"]
+    always_dont: set[bytes] = args["always_dont"]
 
-    # Wrap client factory to inject always_will/always_do and encoding
-    # flags before negotiation starts.
+    # Wrap client factory to inject always_will/always_do/always_wont/always_dont
+    # and encoding flags before negotiation starts.
     encoding_explicit = args["encoding"] not in ("utf8", "utf-8", False)
     gmcp_modules: Optional[List[str]] = args.get("gmcp_modules")
 
@@ -675,6 +677,10 @@ async def run_client() -> None:
             if always_will:
                 client.writer.always_will = always_will
             client.writer.always_do = always_do
+            if always_wont:
+                client.writer.always_wont = always_wont
+            if always_dont:
+                client.writer.always_dont = always_dont
             from .telopt import GMCP as _GMCP
 
             client.writer.passive_do = {_GMCP}
@@ -779,14 +785,32 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="OPT",
-        help="always send DO for this option (name like GMCP or number, repeatable)",
+        help="always send DO for this option (comma-separated, named like GMCP"
+        " or numeric like 201, repeatable)",
+    )
+    parser.add_argument(
+        "--always-dont",
+        action="append",
+        default=[],
+        metavar="OPT",
+        help="always send DONT for this option, refusing even natively supported"
+        " options (comma-separated, named or numeric, repeatable)",
     )
     parser.add_argument(
         "--always-will",
         action="append",
         default=[],
         metavar="OPT",
-        help="always send WILL for this option (name like MXP or number, repeatable)",
+        help="always send WILL for this option (comma-separated, named like MXP"
+        " or numeric like 91, repeatable)",
+    )
+    parser.add_argument(
+        "--always-wont",
+        action="append",
+        default=[],
+        metavar="OPT",
+        help="always send WONT for this option, refusing even natively supported"
+        " options (comma-separated, named or numeric, repeatable)",
     )
     parser.add_argument(
         "--ansi-keys",
@@ -925,6 +949,22 @@ def _parse_option_arg(value: str) -> bytes:
         return bytes([int(value)])
 
 
+def _parse_option_list(values: List[str]) -> set[bytes]:
+    """
+    Parse a list of option arguments, splitting comma-separated values.
+
+    :param values: List of option strings, each may be comma-separated.
+    :returns: Set of parsed option bytes.
+    """
+    result: set[bytes] = set()
+    for v in values:
+        for item in v.split(","):
+            item = item.strip()
+            if item:
+                result.add(_parse_option_arg(item))
+    return result
+
+
 def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
     # Auto-enable force_binary for any non-ASCII encoding that uses high-bit bytes.
     from .encodings import FORCE_BINARY_ENCODINGS
@@ -971,8 +1011,10 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "connect_minwait": args.connect_minwait,
         "connect_timeout": args.connect_timeout or None,
         "send_environ": tuple(v.strip() for v in args.send_environ.split(",") if v.strip()),
-        "always_will": {_parse_option_arg(v) for v in args.always_will},
-        "always_do": {_parse_option_arg(v) for v in args.always_do},
+        "always_will": _parse_option_list(args.always_will),
+        "always_do": _parse_option_list(args.always_do),
+        "always_wont": _parse_option_list(args.always_wont),
+        "always_dont": _parse_option_list(args.always_dont),
         "raw_mode": raw_mode,
         "ascii_eol": args.ascii_eol,
         "ansi_keys": args.ansi_keys,
@@ -1012,14 +1054,32 @@ def _get_fingerprint_argument_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="OPT",
-        help="always send DO for this option (name like GMCP or number, repeatable)",
+        help="always send DO for this option (comma-separated, named like GMCP"
+        " or numeric like 201, repeatable)",
+    )
+    parser.add_argument(
+        "--always-dont",
+        action="append",
+        default=[],
+        metavar="OPT",
+        help="always send DONT for this option, refusing even natively supported"
+        " options (comma-separated, named or numeric, repeatable)",
     )
     parser.add_argument(
         "--always-will",
         action="append",
         default=[],
         metavar="OPT",
-        help="always send WILL for this option (name like MXP or number, repeatable)",
+        help="always send WILL for this option (comma-separated, named like MXP"
+        " or numeric like 91, repeatable)",
+    )
+    parser.add_argument(
+        "--always-wont",
+        action="append",
+        default=[],
+        metavar="OPT",
+        help="always send WONT for this option, refusing even natively supported"
+        " options (comma-separated, named or numeric, repeatable)",
     )
     parser.add_argument(
         "--banner-max-bytes", default=65536, type=int, help="max bytes per banner read call"
@@ -1141,9 +1201,11 @@ async def run_fingerprint_client() -> None:
         banner_max_bytes=args.banner_max_bytes,
     )
 
-    # Parse --always-will/--always-do option names/numbers
-    fp_always_will = {_parse_option_arg(v) for v in args.always_will}
-    fp_always_do = {_parse_option_arg(v) for v in args.always_do}
+    # Parse --always-will/--always-do/--always-wont/--always-dont option names/numbers
+    fp_always_will = _parse_option_list(args.always_will)
+    fp_always_do = _parse_option_list(args.always_do)
+    fp_always_wont = _parse_option_list(args.always_wont)
+    fp_always_dont = _parse_option_list(args.always_dont)
 
     # Parse --send-env KEY=VALUE pairs
     extra_env: Dict[str, str] = {}
@@ -1178,6 +1240,10 @@ async def run_fingerprint_client() -> None:
             mud_opts = {opt for opt, _, _ in fingerprinting.EXTENDED_OPTIONS}
             client.writer.always_will = fp_always_will | mud_opts
             client.writer.always_do = fp_always_do | mud_opts
+            if fp_always_wont:
+                client.writer.always_wont = fp_always_wont
+            if fp_always_dont:
+                client.writer.always_dont = fp_always_dont
 
         def patched_send_env(keys: Sequence[str]) -> Dict[str, Any]:
             result = orig_send_env(keys)
