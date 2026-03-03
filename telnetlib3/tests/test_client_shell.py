@@ -389,15 +389,7 @@ def _client_cmd(host: str, port: int, extra: "list[str] | None" = None) -> "list
     # Use sys.executable so the subprocess uses the same Python interpreter and
     # telnetlib3 package as the test process, not whatever pyenv shim happens to
     # be on PATH (which may point to a different Python version or install).
-    args = [
-        sys.executable,
-        "-m",
-        "telnetlib3.client",
-        host,
-        str(port),
-        "--connect-maxwait=0.5",
-        "--colormatch=none",
-    ]
+    args = [sys.executable, "-m", "telnetlib3.client", host, str(port), "--connect-maxwait=0.5"]
     if extra:
         args.extend(extra)
     return args
@@ -757,7 +749,6 @@ async def test_raw_event_loop_reactivates_repl() -> None:
     writer = _make_writer()
     writer.log = types.SimpleNamespace(debug=lambda *a, **kw: None, log=lambda *a, **kw: None)
     writer.ctx.raw_mode = None
-    writer.ctx.color_filter = None
     writer.ctx.ascii_eol = False
     writer.ctx.autoreply_engine = None
     writer.ctx.autoreply_rules = []
@@ -817,7 +808,6 @@ async def test_raw_event_loop_typescript_recording() -> None:
     writer = _make_writer()
     writer.log = types.SimpleNamespace(debug=lambda *a, **kw: None, log=lambda *a, **kw: None)
     writer.ctx.raw_mode = True
-    writer.ctx.color_filter = None
     writer.ctx.ascii_eol = False
     writer.ctx.autoreply_engine = None
     writer.ctx.input_filter = None

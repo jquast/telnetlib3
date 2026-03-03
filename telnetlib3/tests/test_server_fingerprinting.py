@@ -263,10 +263,10 @@ def test_server_fingerprint_hash_consistency():
         (b"\xff\xfe\xb1", None, [("not_in", "\ufffd"), ("eq", "\udcff\udcfe\udcb1")]),
         (b"Hello\xb1World", "x-no-such-codec", [("eq", "Hello\xb1World")]),
         (b"Hello\x9b", "atascii", [("eq", "Hello\n")]),
-        (b"\x1c\xc8\xc9", "petscii", [("in", "\x1b[38;2;"), ("in", "HI")]),
-        (b"\x12\xc8\xc9\x92", "petscii", [("in", "\x1b[7m"), ("in", "\x1b[27m")]),
+        (b"\x1c\xc8\xc9", "petscii", [("eq", "HI")]),
+        (b"\x12\xc8\xc9\x92", "petscii", [("eq", "HI")]),
         (b"\xc8\xc9\x0d\xca\xcb", "petscii", [("eq", "HI\nJK")]),
-        (b"\x13\xc8\xc9", "petscii", [("in", "\x1b[H"), ("in", "HI")]),
+        (b"\x13\xc8\xc9", "petscii", [("eq", "HI")]),
     ],
 )
 def test_format_banner(data, encoding, checks):

@@ -537,13 +537,7 @@ def _pty_run_client(bind_host, port, extra_argv, server_ssl_ctx=None):
     marker = b"pty-marker-ok"
 
     def _child():
-        sys.argv = [
-            "telnetlib3-client",
-            bind_host,
-            str(port),
-            "--connect-maxwait=0.5",
-            "--colormatch=none",
-        ] + extra_argv
+        sys.argv = ["telnetlib3-client", bind_host, str(port), "--connect-maxwait=0.5"] + extra_argv
         from telnetlib3.client import run_client
 
         asyncio.run(run_client())

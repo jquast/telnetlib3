@@ -31,7 +31,6 @@ class TelnetSessionContext:
         self.raw_mode: Optional[bool] = None
         self.ascii_eol: bool = False
         self.input_filter: Optional[Any] = None
-        self.color_filter: Optional[Any] = None
         self.autoreply_engine: Optional[Any] = None
         self.autoreply_wait_fn: Optional[Callable[..., Awaitable[None]]] = None
         self.typescript_file: Optional[IO[str]] = None

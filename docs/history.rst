@@ -1,5 +1,14 @@
 History
 =======
+4.0.0
+  * removed: :mod:`telnetlib3.color_filter`. ``ColorFilter``, ``ColorConfig``, ``PALETTES``,
+    ``PetsciiColorFilter``, and ``AtasciiControlFilter`` have all been moved to the downstream
+    `Telix <https://github.com/jquast/Telix>`_ project, recommended for connecting to legacy `BBSs
+    <https://bbs.modem.xyz/>`_ systems requiring color correction.
+
+    ``telnetlib3-client`` CLI args ``--colormatch``, ``--color-brightness``, ``--color-contrast``,
+    ``--background-color``, ``--ice-colors`` removed.
+
 3.0.3
   * bugfix: server and client now correctly complete LINEMODE negotiation when prompted to.
   * new: ``--logfile-mode {append,rewrite}`` and ``--typescript-mode`` CLI flags

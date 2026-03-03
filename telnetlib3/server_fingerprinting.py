@@ -875,9 +875,9 @@ def _format_banner(data: bytes, encoding: str = "utf-8") -> str:
     Falls back to ``latin-1`` when the requested encoding is unavailable
     (e.g. a server-advertised charset that Python does not recognise).
 
-    When *encoding* is ``petscii``, inline PETSCII color control codes
-    are translated to ANSI 24-bit RGB SGR sequences using the VIC-II
-    C64 palette so the saved banner is human-readable with colors.
+    When *encoding* is ``petscii``, non-printable PETSCII control
+    characters (color, cursor, RVS) are stripped so the saved banner
+    contains only readable text.
 
     :param data: Raw bytes from the server.
     :param encoding: Character encoding to use for decoding.
@@ -889,9 +889,7 @@ def _format_banner(data: bytes, encoding: str = "utf-8") -> str:
         text = data.decode("latin-1")
 
     if encoding.lower() in ("petscii", "cbm", "commodore", "c64", "c128"):
-        from .color_filter import PetsciiColorFilter
-
-        text = PetsciiColorFilter().filter(text)
+        text = re.sub(r"[\x05\x11-\x14\x1c-\x1f\x81\x90-\x9f]", "", text)
         # PETSCII uses CR (0x0D) as line terminator; normalize to LF.
         text = text.replace("\r\n", "\n").replace("\r", "\n")
 

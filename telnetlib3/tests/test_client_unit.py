@@ -198,13 +198,6 @@ def test_argument_parser_typescript():
     assert defaults.typescript is None
 
 
-def test_argument_parser_ice_colors():
-    parser = cl._get_argument_parser()
-    args = parser.parse_args(["host", "--typescript", "out.log", "--no-ice-colors"])
-    assert args.typescript == "out.log"
-    assert args.ice_colors is False
-
-
 def test_transform_args():
     parser = cl._get_argument_parser()
     result = cl._transform_args(
@@ -260,12 +253,6 @@ def test_detect_syncterm_font_sets_force_binary():
     client.writer = types.SimpleNamespace(environ_encoding="utf-8")
     client._detect_syncterm_font(b"\x1b[0;0 D")
     assert client.force_binary is True
-
-
-@pytest.mark.parametrize("extra_args,expected", [([], "vga"), (["--colormatch", "xterm"], "xterm")])
-def test_transform_args_colormatch(extra_args, expected):
-    parser = cl._get_argument_parser()
-    assert cl._transform_args(parser.parse_args(["myhost"] + extra_args))["colormatch"] == expected
 
 
 def test_guard_shells_connection_counter():
@@ -366,50 +353,6 @@ def _fake_open_connection_factory(loop):
         return reader_obj, writer_obj
 
     return _fake_open_connection, captured_kwargs, writer_obj
-
-
-@pytest.mark.asyncio
-async def test_run_client_unknown_palette(monkeypatch):
-    """run_client exits with error on unknown palette."""
-    monkeypatch.setattr(sys, "argv", ["telnetlib3-client", "localhost", "--colormatch", "bogus"])
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
-
-    with pytest.raises(SystemExit) as exc_info:
-        await cl.run_client()
-    assert exc_info.value.code == 1
-
-
-@pytest.mark.parametrize(
-    "argv_extra,filter_cls_name",
-    [
-        pytest.param(
-            ["--encoding", "petscii", "--colormatch", "vga"],
-            "PetsciiColorFilter",
-            id="petscii_selects_c64",
-        ),
-        pytest.param(
-            ["--encoding", "atascii", "--colormatch", "vga"],
-            "AtasciiControlFilter",
-            id="atascii_filter",
-        ),
-        pytest.param(["--colormatch", "vga"], "ColorFilter", id="colormatch_vga"),
-        pytest.param(
-            ["--colormatch", "petscii"], "PetsciiColorFilter", id="colormatch_petscii_alias"
-        ),
-    ],
-)
-@pytest.mark.asyncio
-async def test_run_client_color_filter(monkeypatch, argv_extra, filter_cls_name):
-    monkeypatch.setattr(sys, "argv", ["telnetlib3-client", "localhost"] + argv_extra)
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
-    monkeypatch.setattr(accessories, "function_lookup", lambda _: _noop_shell)
-
-    loop = asyncio.get_event_loop()
-    fake_oc, captured, writer_obj = _fake_open_connection_factory(loop)
-    monkeypatch.setattr(cl, "open_connection", fake_oc)
-    await cl.run_client()
-
-    assert type(writer_obj.ctx.color_filter).__name__ == filter_cls_name
 
 
 @pytest.mark.asyncio

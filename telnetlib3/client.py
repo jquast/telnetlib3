@@ -685,56 +685,7 @@ async def run_client() -> None:
 
     client_factory: Optional[Callable[..., client_base.BaseClient]] = _client_factory
 
-    # Wrap the shell callback to inject color filter when enabled
-    colormatch: str = args["colormatch"]
     shell_callback = args["shell"]
-    if colormatch.lower() != "none":
-        from .color_filter import (
-            PALETTES,
-            ColorConfig,
-            ColorFilter,
-            PetsciiColorFilter,
-            AtasciiControlFilter,
-        )
-
-        # Auto-select encoding-specific filters
-        encoding_name: str = args.get("encoding", "") or ""
-        is_petscii = encoding_name.lower() in ("petscii", "cbm", "commodore", "c64", "c128")
-        is_atascii = encoding_name.lower() in ("atascii", "atari8bit", "atari_8bit")
-        if colormatch == "petscii":
-            colormatch = "c64"
-        if is_petscii and colormatch != "c64":
-            colormatch = "c64"
-
-        if colormatch not in PALETTES:
-            print(
-                f"Unknown palette {colormatch!r}," f" available: {', '.join(sorted(PALETTES))}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        color_config = ColorConfig(
-            palette_name=colormatch,
-            brightness=args["color_brightness"],
-            contrast=args["color_contrast"],
-            background_color=args["background_color"],
-            ice_colors=args["ice_colors"],
-        )
-        if is_petscii or colormatch == "c64":
-            color_filter_obj: object = PetsciiColorFilter(color_config)
-        elif is_atascii:
-            color_filter_obj = AtasciiControlFilter()
-        else:
-            color_filter_obj = ColorFilter(color_config)
-        original_shell = shell_callback
-
-        async def _color_shell(
-            reader: Union[TelnetReader, TelnetReaderUnicode],
-            writer_arg: Union[TelnetWriter, TelnetWriterUnicode],
-        ) -> None:
-            writer_arg.ctx.color_filter = color_filter_obj
-            await original_shell(reader, writer_arg)
-
-        shell_callback = _color_shell
 
     # Wrap shell to inject raw_mode flag and input translation for retro encodings
     raw_mode_val: Optional[bool] = args.get("raw_mode", False)
@@ -895,44 +846,6 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         help="always send DO for this option (name like GMCP or number, repeatable)",
     )
     parser.add_argument(
-        "--colormatch",
-        default="vga",
-        metavar="PALETTE",
-        help=(
-            "translate basic 16-color ANSI codes to exact 24-bit RGB values"
-            " from a named hardware palette, bypassing the terminal's custom"
-            " palette to preserve intended MUD/BBS artwork colors"
-            " (vga, xterm, none)"
-        ),
-    )
-    parser.add_argument(
-        "--color-brightness",
-        default=1.0,
-        type=float,
-        metavar="FLOAT",
-        help="color brightness scale [0.0..1.0], where 1.0 is original",
-    )
-    parser.add_argument(
-        "--color-contrast",
-        default=1.0,
-        type=float,
-        metavar="FLOAT",
-        help="color contrast scale [0.0..1.0], where 1.0 is original",
-    )
-    parser.add_argument(
-        "--background-color",
-        default="#000000",
-        metavar="#RRGGBB",
-        help="forced background color as hex RGB (near-black by default)",
-    )
-    parser.add_argument(
-        "--ice-colors",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="treat SGR 5 (blink) as bright background (iCE colors)"
-        " for BBS/ANSI art (default: enabled)",
-    )
-    parser.add_argument(
         "--ascii-eol",
         action="store_true",
         default=False,
@@ -1013,20 +926,6 @@ def _parse_option_arg(value: str) -> bytes:
         return bytes([int(value)])
 
 
-def _parse_background_color(value: str) -> Tuple[int, int, int]:
-    """
-    Parse hex color string to RGB tuple.
-
-    :param value: Color string like ``"#RRGGBB"`` or ``"RRGGBB"``.
-    :returns: (R, G, B) tuple with values 0-255.
-    :raises ValueError: When *value* is not a valid hex color.
-    """
-    h = value.lstrip("#")
-    if len(h) != 6:
-        raise ValueError(f"invalid hex color: {value!r}")
-    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
-
-
 def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
     # Auto-enable force_binary for any non-ASCII encoding that uses high-bit bytes.
     from .encodings import FORCE_BINARY_ENCODINGS
@@ -1075,11 +974,6 @@ def _transform_args(args: argparse.Namespace) -> Dict[str, Any]:
         "send_environ": tuple(v.strip() for v in args.send_environ.split(",") if v.strip()),
         "always_will": {_parse_option_arg(v) for v in args.always_will},
         "always_do": {_parse_option_arg(v) for v in args.always_do},
-        "colormatch": args.colormatch,
-        "color_brightness": args.color_brightness,
-        "color_contrast": args.color_contrast,
-        "background_color": _parse_background_color(args.background_color),
-        "ice_colors": args.ice_colors,
         "raw_mode": raw_mode,
         "ascii_eol": args.ascii_eol,
         "ansi_keys": args.ansi_keys,

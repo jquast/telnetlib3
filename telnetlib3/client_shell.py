@@ -568,17 +568,14 @@ else:
         out: str, writer: Union[TelnetWriter, TelnetWriterUnicode], in_raw_mode: bool
     ) -> str:
         r"""
-        Apply color filter, ASCII EOL substitution, and CRLF normalization.
+        Apply ASCII EOL substitution and CRLF normalization.
 
         :param out: Server output text to transform.
-        :param writer: Telnet writer (``ctx`` provides color filter and ascii_eol).
+        :param writer: Telnet writer (``ctx`` provides ascii_eol).
         :param in_raw_mode: When ``True``, normalize line endings to ``\r\n``.
         :returns: Transformed output string.
         """
         ctx: TelnetSessionContext = writer.ctx
-        cf = ctx.color_filter
-        if cf is not None:
-            out = cf.filter(out)
         if ctx.ascii_eol:
             out = out.replace(_ATASCII_CR_CHAR, "\r").replace(_ATASCII_LF_CHAR, "\n")
         if in_raw_mode:
@@ -633,16 +630,6 @@ else:
     def _get_raw_mode(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> "bool | None":
         """Return the writer's ``ctx.raw_mode`` (``None``, ``True``, or ``False``)."""
         return writer.ctx.raw_mode
-
-    def _flush_color_filter(
-        writer: Union[TelnetWriter, TelnetWriterUnicode], stdout: asyncio.StreamWriter
-    ) -> None:
-        """Flush any pending color filter output to stdout."""
-        cf = writer.ctx.color_filter
-        if cf is not None:
-            flush = cf.flush()
-            if flush:
-                stdout.write(flush.encode())
 
     def _ensure_autoreply_engine(
         telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
@@ -856,7 +843,6 @@ else:
             stdout.write(f"Escape character is '{escape_name}'.{banner_sep}".encode())
 
             def _handle_close(msg: str) -> None:
-                _flush_color_filter(telnet_writer, stdout)
                 stdout.write(f"\033[m{linesep}{msg}{linesep}".encode())
                 tty_shell.cleanup_winch()
 
