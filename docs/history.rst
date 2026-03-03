@@ -1,7 +1,7 @@
 History
 =======
 4.0.0
-  * removed: :mod:`telnetlib3.color_filter`. ``ColorFilter``, ``ColorConfig``, ``PALETTES``,
+  * removed: ``telnetlib3.color_filter``. ``ColorFilter``, ``ColorConfig``, ``PALETTES``,
     ``PetsciiColorFilter``, and ``AtasciiControlFilter`` have all been moved to the downstream
     `Telix <https://github.com/jquast/Telix>`_ project, recommended for connecting to legacy `BBSs
     <https://bbs.modem.xyz/>`_ systems requiring color correction.
@@ -133,7 +133,7 @@ History
     art) as surrogates instead of replacing them with U+FFFD.
 
 2.4.0
-  * new: :mod:`telnetlib3.color_filter` module — translates 16-color ANSI SGR
+  * new: ``telnetlib3.color_filter`` module — translates 16-color ANSI SGR
     codes to 24-bit RGB from hardware palettes (EGA, CGA, VGA, xterm).
     Enabled by default.  New client CLI options: ``--colormatch``,
     ``--color-brightness``, ``--color-contrast``, ``--background-color``,
