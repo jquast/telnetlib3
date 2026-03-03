@@ -799,6 +799,9 @@ async def test_probe_skipped_when_closing(tmp_path):
             b"Press <Esc> twice for the BBS ... ", b"\x1b\x1b", None, id="esc_twice_angle_brackets"
         ),
         pytest.param(
+            b"Press (ESC) twice", b"\x1b\x1b", None, id="esc_twice_parens"
+        ),
+        pytest.param(
             b"\x1b[33mPress [.ESC.] twice within 10 seconds\x1b[0m",
             b"\x1b\x1b",
             None,
@@ -813,6 +816,7 @@ async def test_probe_skipped_when_closing(tmp_path):
         pytest.param(b"Please press [ESC] to continue", b"\x1b", None, id="esc_once_brackets"),
         pytest.param(b"Press ESC to continue", b"\x1b", None, id="esc_once_bare"),
         pytest.param(b"press <Esc> to continue", b"\x1b", None, id="esc_once_angle_brackets"),
+        pytest.param(b"Press (ESC) to continue", b"\x1b", None, id="esc_once_parens"),
         pytest.param(
             b"\x1b[33mPress [ESC] to continue\x1b[0m", b"\x1b", None, id="esc_once_ansi_wrapped"
         ),

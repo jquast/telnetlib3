@@ -108,10 +108,10 @@ _GB_BIG5_RE = re.compile(rb"(?i)(?:^|[^a-zA-Z0-9])gb\s*/\s*big\s*5(?:[^a-zA-Z0-9
 _ANSI_STRIP_RE = re.compile(_ZERO_WIDTH_STR_PATTERN.pattern.encode("ascii"))
 
 # Match "Press [.ESC.] twice" botcheck prompts (e.g. Mystic BBS).
-_ESC_TWICE_RE = re.compile(rb"(?i)press\s+[\[<]?\.?esc\.?[\]>]?\s+twice")
+_ESC_TWICE_RE = re.compile(rb"(?i)press\s+[\[<(]?\.?esc\.?[\]>)]?\s+twice")
 
 # Match single "Press [ESC]" prompts without "twice" (e.g. Herbie's BBS).
-_ESC_ONCE_RE = re.compile(rb"(?i)press\s+[\[<]?\.?esc\.?[\]>]?(?!\s+twice)")
+_ESC_ONCE_RE = re.compile(rb"(?i)press\s+[\[<(]?\.?esc\.?[\]>)]?(?!\s+twice)")
 
 # Match "HIT RETURN", "PRESS RETURN", "PRESS ENTER", "HIT ENTER", etc.
 # Common on Worldgroup/MajorBBS and other vintage BBS systems.
