@@ -774,70 +774,6 @@ def _get_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("host", action="store", help="hostname")
     parser.add_argument("port", nargs="?", default=23, type=int, help="port number")
-    parser.add_argument("--term", default=os.environ.get("TERM", "unknown"), help="terminal type")
-    parser.add_argument("--loglevel", default="warn", help="log level")
-    parser.add_argument("--logfmt", default=accessories._DEFAULT_LOGFMT, help="log format")
-    parser.add_argument("--logfile", help="filepath")
-    parser.add_argument(
-        "--logfile-mode",
-        default="append",
-        choices=["append", "rewrite"],
-        dest="logfile_mode",
-        help="Log file write mode: append (default) or rewrite.",
-    )
-    parser.add_argument(
-        "--shell", default="telnetlib3.telnet_client_shell", help="module.function_name"
-    )
-    parser.add_argument("--encoding", default="utf8", help="encoding name")
-    parser.add_argument("--speed", default=38400, type=int, help="connection speed")
-    parser.add_argument(
-        "--encoding-errors",
-        default="replace",
-        help="handler for encoding errors",
-        choices=("replace", "ignore", "strict"),
-    )
-
-    parser.add_argument("--force-binary", action="store_true", help="force encoding", default=True)
-    mode_group = parser.add_mutually_exclusive_group()
-    mode_group.add_argument(
-        "--raw-mode",
-        action="store_true",
-        default=False,
-        help="force raw terminal mode (no line buffering, no local echo). "
-        "Correct for BBS and retro systems. Default: auto-detect from "
-        "server negotiation.",
-    )
-    mode_group.add_argument(
-        "--line-mode",
-        action="store_true",
-        default=False,
-        help="force line-buffered input with local echo. Appropriate for "
-        "simple command-line services.",
-    )
-    parser.add_argument(
-        "--connect-minwait", default=0, type=float, help="shell delay for negotiation"
-    )
-    parser.add_argument(
-        "--connect-maxwait", default=4.0, type=float, help="timeout for pending negotiation"
-    )
-    parser.add_argument(
-        "--connect-timeout",
-        default=10,
-        type=float,
-        help="timeout for TCP connection in seconds (default: 10)",
-    )
-    parser.add_argument(
-        "--send-environ",
-        default="TERM,LANG,COLUMNS,LINES,COLORTERM",
-        help="comma-separated environment variables to send (NEW_ENVIRON)",
-    )
-    parser.add_argument(
-        "--always-will",
-        action="append",
-        default=[],
-        metavar="OPT",
-        help="always send WILL for this option (name like MXP or number, repeatable)",
-    )
     parser.add_argument(
         "--always-do",
         action="append",
@@ -846,12 +782,11 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         help="always send DO for this option (name like GMCP or number, repeatable)",
     )
     parser.add_argument(
-        "--ascii-eol",
-        action="store_true",
-        default=False,
-        help="use ASCII CR/LF for line endings instead of encoding-native "
-        "EOL (e.g. ATASCII 0x9B).  Use for BBSes that display retro "
-        "graphics but use standard CR/LF for line breaks.",
+        "--always-will",
+        action="append",
+        default=[],
+        metavar="OPT",
+        help="always send WILL for this option (name like MXP or number, repeatable)",
     )
     parser.add_argument(
         "--ansi-keys",
@@ -862,12 +797,83 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         "BBSes that expect ANSI cursor sequences.",
     )
     parser.add_argument(
+        "--ascii-eol",
+        action="store_true",
+        default=False,
+        help="use ASCII CR/LF for line endings instead of encoding-native "
+        "EOL (e.g. ATASCII 0x9B).  Use for BBSes that display retro "
+        "graphics but use standard CR/LF for line breaks.",
+    )
+    parser.add_argument(
         "--compression",
         action=argparse.BooleanOptionalAction,
         default=None,
         help="MCCP compression: --compression to request, --no-compression to reject, "
         "omit to passively accept (default)",
     )
+    parser.add_argument(
+        "--connect-maxwait", default=4.0, type=float, help="timeout for pending negotiation"
+    )
+    parser.add_argument(
+        "--connect-minwait", default=0, type=float, help="shell delay for negotiation"
+    )
+    parser.add_argument(
+        "--connect-timeout",
+        default=10,
+        type=float,
+        help="timeout for TCP connection in seconds (default: 10)",
+    )
+    parser.add_argument("--encoding", default="utf8", help="encoding name")
+    parser.add_argument(
+        "--encoding-errors",
+        default="replace",
+        help="handler for encoding errors",
+        choices=("replace", "ignore", "strict"),
+    )
+    parser.add_argument("--force-binary", action="store_true", help="force encoding", default=True)
+    parser.add_argument(
+        "--gmcp-modules",
+        default=None,
+        metavar="MODULES",
+        help="comma-separated GMCP module specs to request "
+        '(e.g. "Char 1,Room 1,IRE.Rift 1"). '
+        "When provided, replaces the built-in defaults.",
+    )
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--line-mode",
+        action="store_true",
+        default=False,
+        help="force line-buffered input with local echo. Appropriate for "
+        "simple command-line services.",
+    )
+    mode_group.add_argument(
+        "--raw-mode",
+        action="store_true",
+        default=False,
+        help="force raw terminal mode (no line buffering, no local echo). "
+        "Correct for BBS and retro systems. Default: auto-detect from "
+        "server negotiation.",
+    )
+    parser.add_argument("--logfile", help="filepath")
+    parser.add_argument(
+        "--logfile-mode",
+        default="append",
+        choices=["append", "rewrite"],
+        dest="logfile_mode",
+        help="Log file write mode: append (default) or rewrite.",
+    )
+    parser.add_argument("--logfmt", default=accessories._DEFAULT_LOGFMT, help="log format")
+    parser.add_argument("--loglevel", default="warn", help="log level")
+    parser.add_argument(
+        "--send-environ",
+        default="TERM,LANG,COLUMNS,LINES,COLORTERM",
+        help="comma-separated environment variables to send (NEW_ENVIRON)",
+    )
+    parser.add_argument(
+        "--shell", default="telnetlib3.telnet_client_shell", help="module.function_name"
+    )
+    parser.add_argument("--speed", default=38400, type=int, help="connection speed")
     parser.add_argument(
         "--ssl", action="store_true", default=False, help="connect using TLS (TELNETS)"
     )
@@ -886,14 +892,7 @@ def _get_argument_parser() -> argparse.ArgumentParser:
         "the server identity is not verified, allowing "
         "man-in-the-middle attacks",
     )
-    parser.add_argument(
-        "--gmcp-modules",
-        default=None,
-        metavar="MODULES",
-        help="comma-separated GMCP module specs to request "
-        '(e.g. "Char 1,Room 1,IRE.Rift 1"). '
-        "When provided, replaces the built-in defaults.",
-    )
+    parser.add_argument("--term", default=os.environ.get("TERM", "unknown"), help="terminal type")
     parser.add_argument(
         "--typescript",
         default=None,
@@ -1009,27 +1008,38 @@ def _get_fingerprint_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("host", help="remote hostname or IP")
     parser.add_argument("port", nargs="?", default=23, type=int, help="port number")
     parser.add_argument(
-        "--data-dir",
-        default=None,
-        help="directory for fingerprint data (default: $TELNETLIB3_DATA_DIR)",
+        "--always-do",
+        action="append",
+        default=[],
+        metavar="OPT",
+        help="always send DO for this option (name like GMCP or number, repeatable)",
     )
     parser.add_argument(
-        "--save-json", default=None, metavar="PATH", help="write fingerprint JSON to this path"
+        "--always-will",
+        action="append",
+        default=[],
+        metavar="OPT",
+        help="always send WILL for this option (name like MXP or number, repeatable)",
+    )
+    parser.add_argument(
+        "--banner-max-bytes", default=65536, type=int, help="max bytes per banner read call"
+    )
+    parser.add_argument(
+        "--banner-max-wait", default=8.0, type=float, help="max seconds to wait for banner data"
+    )
+    parser.add_argument(
+        "--banner-quiet-time",
+        default=2.0,
+        type=float,
+        help="seconds of silence before considering banner complete",
     )
     parser.add_argument(
         "--connect-timeout", default=10, type=float, help="TCP connection timeout in seconds"
     )
-    parser.add_argument("--loglevel", default="warn", help="log level")
-    parser.add_argument("--logfmt", default=accessories._DEFAULT_LOGFMT, help="log format")
-    parser.add_argument("--logfile", default=None, help="filepath")
     parser.add_argument(
-        "--silent", action="store_true", help="suppress fingerprint output to stdout"
-    )
-    parser.add_argument(
-        "--set-name",
+        "--data-dir",
         default=None,
-        metavar="NAME",
-        help="store this name for the fingerprint in fingerprint_names.json",
+        help="directory for fingerprint data (default: $TELNETLIB3_DATA_DIR)",
     )
     parser.add_argument(
         "--encoding",
@@ -1038,8 +1048,17 @@ def _get_fingerprint_argument_parser() -> argparse.ArgumentParser:
         dest="stream_encoding",
         help="character encoding of the remote server (e.g. cp037 for EBCDIC)",
     )
+    parser.add_argument("--logfile", default=None, help="filepath")
+    parser.add_argument("--logfmt", default=accessories._DEFAULT_LOGFMT, help="log format")
+    parser.add_argument("--loglevel", default="warn", help="log level")
     parser.add_argument(
-        "--ttype", default="VT100", help="terminal type sent in response to TTYPE requests"
+        "--mssp-wait",
+        default=5.0,
+        type=float,
+        help="max seconds since connect to wait for MSSP data",
+    )
+    parser.add_argument(
+        "--save-json", default=None, metavar="PATH", help="write fingerprint JSON to this path"
     )
     parser.add_argument(
         "--scan-type",
@@ -1055,36 +1074,13 @@ def _get_fingerprint_argument_parser() -> argparse.ArgumentParser:
         help="environment variable to send (repeatable)",
     )
     parser.add_argument(
-        "--always-will",
-        action="append",
-        default=[],
-        metavar="OPT",
-        help="always send WILL for this option (name like MXP or number, repeatable)",
+        "--set-name",
+        default=None,
+        metavar="NAME",
+        help="store this name for the fingerprint in fingerprint_names.json",
     )
     parser.add_argument(
-        "--always-do",
-        action="append",
-        default=[],
-        metavar="OPT",
-        help="always send DO for this option (name like GMCP or number, repeatable)",
-    )
-    parser.add_argument(
-        "--mssp-wait",
-        default=5.0,
-        type=float,
-        help="max seconds since connect to wait for MSSP data",
-    )
-    parser.add_argument(
-        "--banner-quiet-time",
-        default=2.0,
-        type=float,
-        help="seconds of silence before considering banner complete",
-    )
-    parser.add_argument(
-        "--banner-max-wait", default=8.0, type=float, help="max seconds to wait for banner data"
-    )
-    parser.add_argument(
-        "--banner-max-bytes", default=65536, type=int, help="max bytes per banner read call"
+        "--silent", action="store_true", help="suppress fingerprint output to stdout"
     )
     parser.add_argument(
         "--ssl", action="store_true", default=False, help="connect using TLS (TELNETS)"
@@ -1103,6 +1099,9 @@ def _get_fingerprint_argument_parser() -> argparse.ArgumentParser:
         "WARNING: this is insecure -- connections are encrypted but "
         "the server identity is not verified, allowing "
         "man-in-the-middle attacks",
+    )
+    parser.add_argument(
+        "--ttype", default="VT100", help="terminal type sent in response to TTYPE requests"
     )
     return parser
 

@@ -1174,14 +1174,18 @@ def parse_server_args() -> Dict[str, Any]:
     )
     parser.add_argument("host", nargs="?", default=_config.host, help="bind address")
     parser.add_argument("port", nargs="?", type=int, default=_config.port, help="bind port")
-    parser.add_argument("--loglevel", default=_config.loglevel, help="level name")
-    parser.add_argument("--logfile", default=_config.logfile, help="filepath")
-    parser.add_argument("--logfmt", default=_config.logfmt, help="log format")
     parser.add_argument(
-        "--shell",
-        default=_config.shell,
-        type=accessories.function_lookup,
-        help="module.function_name",
+        "--compression",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="MCCP compression: --compression to advertise, --no-compression to reject, "
+        "omit to passively accept (default)",
+    )
+    parser.add_argument(
+        "--connect-maxwait",
+        type=float,
+        default=_config.connect_maxwait,
+        help="timeout for pending negotiation",
     )
     parser.add_argument("--encoding", default=_config.encoding, help="encoding name")
     parser.add_argument(
@@ -1190,12 +1194,25 @@ def parse_server_args() -> Dict[str, Any]:
         default=_config.force_binary,
         help="force binary transmission",
     )
-    parser.add_argument("--timeout", default=_config.timeout, help="idle disconnect (0 disables)")
     parser.add_argument(
-        "--connect-maxwait",
-        type=float,
-        default=_config.connect_maxwait,
-        help="timeout for pending negotiation",
+        "--line-mode",
+        action="store_true",
+        default=_config.line_mode,
+        help="keep clients in NVT line mode by not sending WILL SGA or "
+        "WILL ECHO during negotiation.  Clients perform their own line "
+        "editing and send complete lines.  Also sets cooked PTY mode "
+        "when combined with --pty-exec.",
+    )
+    parser.add_argument("--logfile", default=_config.logfile, help="filepath")
+    parser.add_argument("--logfmt", default=_config.logfmt, help="log format")
+    parser.add_argument("--loglevel", default=_config.loglevel, help="level name")
+    parser.add_argument(
+        "--never-send-ga",
+        action="store_true",
+        default=_config.never_send_ga,
+        help="never send IAC GA (Go-Ahead). Default sends GA when SGA is "
+        "not negotiated, which is correct for MUD clients but may "
+        "confuse some other clients.",
     )
     if PTY_SUPPORT:
         parser.add_argument(
@@ -1215,37 +1232,16 @@ def parse_server_args() -> Dict[str, Any]:
         # keep it as a silent no-op so existing scripts don't break.
         parser.add_argument("--pty-raw", action="store_true", default=False, help=argparse.SUPPRESS)
     parser.add_argument(
-        "--line-mode",
-        action="store_true",
-        default=_config.line_mode,
-        help="keep clients in NVT line mode by not sending WILL SGA or "
-        "WILL ECHO during negotiation.  Clients perform their own line "
-        "editing and send complete lines.  Also sets cooked PTY mode "
-        "when combined with --pty-exec.",
-    )
-    parser.add_argument(
         "--robot-check",
         action="store_true",
         default=_config.robot_check,
         help="check if client can render wide unicode (rejects bots)",
     )
     parser.add_argument(
-        "--status-interval",
-        type=int,
-        metavar="SECONDS",
-        default=_config.status_interval,
-        help=(
-            "periodic status log interval in seconds (0 to disable). "
-            "status only logged when connected clients has changed."
-        ),
-    )
-    parser.add_argument(
-        "--never-send-ga",
-        action="store_true",
-        default=_config.never_send_ga,
-        help="never send IAC GA (Go-Ahead). Default sends GA when SGA is "
-        "not negotiated, which is correct for MUD clients but may "
-        "confuse some other clients.",
+        "--shell",
+        default=_config.shell,
+        type=accessories.function_lookup,
+        help="module.function_name",
     )
     parser.add_argument(
         "--ssl-certfile",
@@ -1257,17 +1253,21 @@ def parse_server_args() -> Dict[str, Any]:
         "--ssl-keyfile", default=None, metavar="PATH", help="path to PEM private key file for TLS"
     )
     parser.add_argument(
+        "--status-interval",
+        type=int,
+        metavar="SECONDS",
+        default=_config.status_interval,
+        help=(
+            "periodic status log interval in seconds (0 to disable). "
+            "status only logged when connected clients has changed."
+        ),
+    )
+    parser.add_argument("--timeout", default=_config.timeout, help="idle disconnect (0 disables)")
+    parser.add_argument(
         "--tls-auto",
         action="store_true",
         default=False,
         help="accept both TLS and plain telnet on the same port (requires --ssl-certfile)",
-    )
-    parser.add_argument(
-        "--compression",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="MCCP compression: --compression to advertise, --no-compression to reject, "
-        "omit to passively accept (default)",
     )
     result = vars(parser.parse_args(argv))
     result["pty_args"] = pty_args if PTY_SUPPORT else None
