@@ -406,6 +406,22 @@ async def test_parse_option_arg(input_val, expected):
     assert _parse_option_arg(input_val) == expected
 
 
+@pytest.mark.parametrize(
+    "values, expected",
+    [
+        pytest.param(["TTYPE,NAWS"], {bytes([24]), bytes([31])}, id="comma-separated"),
+        pytest.param(["91,TTYPE"], {bytes([91]), bytes([24])}, id="mixed-comma"),
+        pytest.param(["TTYPE", "91"], {bytes([24]), bytes([91])}, id="repeated"),
+        pytest.param(["TTYPE, 91"], {bytes([24]), bytes([91])}, id="comma-with-spaces"),
+        pytest.param([], set(), id="empty"),
+    ],
+)
+async def test_parse_option_list(values, expected):
+    from telnetlib3.client import _parse_option_list
+
+    assert _parse_option_list(values) == expected
+
+
 _MAX_SUBPROC_SECONDS = 8
 
 
