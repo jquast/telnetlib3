@@ -384,14 +384,7 @@ async def test_telnet_client_as_module():
 async def test_telnet_client_cmdline(bind_host, unused_tcp_port):
     """Test executing telnetlib3/client.py as client."""
     prog = pexpect.which("telnetlib3-client")
-    args = [
-        prog,
-        bind_host,
-        str(unused_tcp_port),
-        "--loglevel=info",
-        "--connect-maxwait=0.05",
-        "--colormatch=none",
-    ]
+    args = [prog, bind_host, str(unused_tcp_port), "--loglevel=info", "--connect-maxwait=0.05"]
 
     class HelloServer(asyncio.Protocol):
         def connection_made(self, transport):
@@ -432,7 +425,6 @@ async def test_telnet_client_tty_cmdline(bind_host, unused_tcp_port):
         str(unused_tcp_port),
         "--loglevel=warning",
         "--connect-maxwait=0.05",
-        "--colormatch=none",
     ]
 
     class HelloServer(asyncio.Protocol):
@@ -467,7 +459,6 @@ async def test_telnet_client_cmdline_stdin_pipe(bind_host, unused_tcp_port):
         "--loglevel=info",
         "--connect-maxwait=0.15",
         f"--logfile={logfile}",
-        "--colormatch=none",
     ]
 
     async def shell(reader, writer):
