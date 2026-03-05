@@ -3,6 +3,8 @@ History
 4.0.1
   * bugfix: ``telnetlib3-client`` could begin a shell in wrong ECHO mode, depending on order of
     options in a "connection burst".
+  * new: ``--encoding=big5bbs``, BBS 半形字 (half-width characters) encoding, matching PCMan/PttBBS
+    terminal clients, popular with Taiwanese BBS culture.
 
 4.0.0
   * removed: ``telnetlib3.color_filter``. ``ColorFilter``, ``ColorConfig``, ``PALETTES``,
