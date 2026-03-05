@@ -389,7 +389,7 @@ async def test_begin_shell_cancelled_future():
     client = BaseClient.__new__(BaseClient)
     client.log = types.SimpleNamespace(debug=lambda *a, **kw: None, isEnabledFor=lambda _: False)
     client.shell = lambda r, w: None
-    fut = asyncio.get_event_loop().create_future()
+    fut = asyncio.get_running_loop().create_future()
     fut.cancel()
     client.begin_shell(fut)
 
