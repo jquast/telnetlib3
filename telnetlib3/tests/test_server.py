@@ -302,16 +302,17 @@ async def test_run_server_guarded_shell_wrapping():
     loop = asyncio.get_running_loop()
     with patch("telnetlib3.server.create_server", side_effect=mock_create_server):
         with patch.object(loop, "add_signal_handler"):
-            try:
-                await run_server(
-                    host="127.0.0.1",
-                    port=0,
-                    shell=lambda r, w: None,
-                    robot_check=True,
-                    pty_fork_limit=2,
-                )
-            except (asyncio.CancelledError, OSError):
-                pass
+            with patch.object(loop, "remove_signal_handler"):
+                try:
+                    await run_server(
+                        host="127.0.0.1",
+                        port=0,
+                        shell=lambda r, w: None,
+                        robot_check=True,
+                        pty_fork_limit=2,
+                    )
+                except (asyncio.CancelledError, OSError):
+                    pass
 
     assert created_server.shell is not None
 
