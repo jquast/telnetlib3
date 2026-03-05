@@ -990,7 +990,7 @@ async def _read_banner_until_quiet(
     stripped_accum = bytearray()
     esc_responded = False
     menu_responded = False
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     deadline = loop.time() + max_wait
     while loop.time() < deadline:
         remaining = min(quiet_time, deadline - loop.time())

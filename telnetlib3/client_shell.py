@@ -537,7 +537,7 @@ else:
             write_fobj = sys.stdout
             if self._istty:
                 write_fobj = sys.stdin
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             writer_transport, writer_protocol = await loop.connect_write_pipe(
                 asyncio.streams.FlowControlMixin, write_fobj
             )
@@ -552,7 +552,7 @@ else:
             """
             reader = asyncio.StreamReader()
             reader_protocol = asyncio.StreamReaderProtocol(reader)
-            transport, _ = await asyncio.get_event_loop().connect_read_pipe(
+            transport, _ = await asyncio.get_running_loop().connect_read_pipe(
                 lambda: reader_protocol, sys.stdin
             )
             self._stdin_transport = transport

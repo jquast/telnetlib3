@@ -305,7 +305,7 @@ class PTYSession:
         """Bridge loop between telnet and PTY."""
         import errno
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         pty_read_event = asyncio.Event()
         pty_data_queue: asyncio.Queue[bytes] = asyncio.Queue()
 
@@ -583,7 +583,7 @@ async def _wait_for_terminal_info(
     :param writer: TelnetWriter instance.
     :param timeout: Maximum time to wait in seconds.
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     start = loop.time()
 
     while loop.time() - start < timeout:
