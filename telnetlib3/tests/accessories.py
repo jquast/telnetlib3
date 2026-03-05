@@ -145,7 +145,7 @@ async def asyncio_server(protocol_factory, host, port):
     class TrackingProtocol(_TrackingProtocol, protocol_factory):
         _transports = transports
 
-    server = await asyncio.get_event_loop().create_server(TrackingProtocol, host, port)
+    server = await asyncio.get_running_loop().create_server(TrackingProtocol, host, port)
     try:
         yield server
     finally:

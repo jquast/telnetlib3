@@ -112,9 +112,10 @@ async def test_pty_shell_integration(bind_host, unused_tcp_port, require_no_capt
             await writer.drain()
 
             result = ""
-            deadline = asyncio.get_event_loop().time() + 2.0
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 2.0
             while "hello world" not in result:
-                remaining = deadline - asyncio.get_event_loop().time()
+                remaining = deadline - loop.time()
                 if remaining <= 0:
                     break
                 chunk = await asyncio.wait_for(reader.read(50), remaining)
@@ -892,7 +893,7 @@ async def test_run_remove_reader_error(mock_session):
 
     with (
         patch("os.waitpid", return_value=(0, 0)),
-        patch("asyncio.get_event_loop", return_value=mock_loop),
+        patch("asyncio.get_running_loop", return_value=mock_loop),
         patch.object(session, "_bridge_loop", side_effect=noop_bridge),
     ):
         await session.run()

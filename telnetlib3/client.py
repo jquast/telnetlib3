@@ -623,7 +623,7 @@ async def open_connection(
 
     try:
         _, protocol = await asyncio.wait_for(
-            asyncio.get_event_loop().create_connection(
+            asyncio.get_running_loop().create_connection(
                 connection_factory, host or "localhost", port, **conn_kwargs
             ),
             timeout=connect_timeout,
@@ -1267,7 +1267,7 @@ async def run_fingerprint_client() -> None:
         else:
             fp_ssl = ssl_module.create_default_context()
 
-    waiter_closed: asyncio.Future[None] = asyncio.get_event_loop().create_future()
+    waiter_closed: asyncio.Future[None] = asyncio.get_running_loop().create_future()
 
     fp_conn_kwargs: Dict[str, Any] = {
         "host": args.host,

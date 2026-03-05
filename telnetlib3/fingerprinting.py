@@ -358,8 +358,9 @@ async def probe_client_capabilities(
 
     await writer.drain()
 
-    deadline = asyncio.get_event_loop().time() + timeout
-    while asyncio.get_event_loop().time() < deadline:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
         all_responded = all(
             writer.remote_option.get(opt) is not None
             for opt, name, desc in to_probe

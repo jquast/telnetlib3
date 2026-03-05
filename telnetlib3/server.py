@@ -780,7 +780,7 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
             (rewritten in 3.11).  See
             https://github.com/python/cpython/issues/79156
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         assert self._transport is not None
         protocol = self._real_factory()
         try:
@@ -1138,13 +1138,13 @@ async def create_server(
         def factory() -> asyncio.Protocol:
             return _TLSAutoDetectProtocol(ssl, _make_telnet_protocol)
 
-        telnet_server._server = await asyncio.get_event_loop().create_server(factory, host, port)
+        telnet_server._server = await asyncio.get_running_loop().create_server(factory, host, port)
     else:
 
         def factory() -> asyncio.Protocol:
             return _make_telnet_protocol()
 
-        telnet_server._server = await asyncio.get_event_loop().create_server(
+        telnet_server._server = await asyncio.get_running_loop().create_server(
             factory, host, port, ssl=ssl
         )
 
@@ -1392,7 +1392,7 @@ async def run_server(
     _cfg_mapping = ", ".join((f"{field}={{{field}}}" for field in CONFIG._fields)).format(**_locals)
     logger.debug("Server configuration: %s", _cfg_mapping)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     # bind
     server = await create_server(

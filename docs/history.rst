@@ -1,5 +1,9 @@
 History
 =======
+4.0.1
+  * bugfix: ``telnetlib3-client`` could begin a shell in wrong ECHO mode, depending on order of
+    options in a "connection burst".
+
 4.0.0
   * removed: ``telnetlib3.color_filter``. ``ColorFilter``, ``ColorConfig``, ``PALETTES``,
     ``PetsciiColorFilter``, and ``AtasciiControlFilter`` have all been moved to the downstream

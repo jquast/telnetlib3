@@ -18,7 +18,7 @@ async def test_connection_lost_closes_transport_despite_set_protocol_error():
     server = BaseServer.__new__(BaseServer)
     server.log = __import__("logging").getLogger("test_server")
     server._tasks = []
-    server._waiter_connected = asyncio.get_event_loop().create_future()
+    server._waiter_connected = asyncio.get_running_loop().create_future()
     server._extra = {}
     server.shell = None
 
@@ -54,7 +54,7 @@ async def test_connection_lost_remove_done_callback_raises():
     server.shell = None
     server._closing = False
 
-    waiter = asyncio.get_event_loop().create_future()
+    waiter = asyncio.get_running_loop().create_future()
 
     class _BadWaiter:
         done = waiter.done
@@ -246,7 +246,7 @@ async def test_tls_upgrade_handshake_failure():
     transport.is_closing.return_value = False
     proto._transport = transport
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     with patch.object(loop, "start_tls", side_effect=ssl_module.SSLError("handshake failed")):
         await proto._upgrade_to_tls()
 
@@ -299,19 +299,20 @@ async def test_run_server_guarded_shell_wrapping():
         created_server.shell = kwargs.get("shell")
         return created_server
 
+    loop = asyncio.get_running_loop()
     with patch("telnetlib3.server.create_server", side_effect=mock_create_server):
-        with patch("asyncio.get_event_loop") as mock_loop:
-            mock_loop.return_value = asyncio.get_event_loop()
-            try:
-                await run_server(
-                    host="127.0.0.1",
-                    port=0,
-                    shell=lambda r, w: None,
-                    robot_check=True,
-                    pty_fork_limit=2,
-                )
-            except (asyncio.CancelledError, OSError):
-                pass
+        with patch.object(loop, "add_signal_handler"):
+            with patch.object(loop, "remove_signal_handler"):
+                try:
+                    await run_server(
+                        host="127.0.0.1",
+                        port=0,
+                        shell=lambda r, w: None,
+                        robot_check=True,
+                        pty_fork_limit=2,
+                    )
+                except (asyncio.CancelledError, OSError):
+                    pass
 
     assert created_server.shell is not None
 
@@ -322,7 +323,8 @@ async def test_run_server_status_logger_lifecycle():
     from telnetlib3.server import run_server
 
     created_server = MagicMock()
-    wait_future = asyncio.get_event_loop().create_future()
+    loop = asyncio.get_running_loop()
+    wait_future = loop.create_future()
     wait_future.set_result(None)
     created_server.wait_closed = MagicMock(return_value=wait_future)
     created_server.sockets = []
@@ -331,7 +333,6 @@ async def test_run_server_status_logger_lifecycle():
         return created_server
 
     with patch("telnetlib3.server.create_server", side_effect=mock_create_server):
-        loop = asyncio.get_event_loop()
         with patch.object(loop, "add_signal_handler"):
             with patch.object(loop, "remove_signal_handler"):
                 await run_server(
