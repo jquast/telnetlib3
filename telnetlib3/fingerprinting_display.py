@@ -770,7 +770,7 @@ def _build_seen_counts(
     return ""
 
 
-def _color_match(term: "blessed.Terminal", name: str, score: float) -> str:
+def _color_match(term: Optional["blessed.Terminal"], name: str, score: float) -> str:
     """
     Color a nearest-match result by confidence threshold.
 
@@ -790,7 +790,7 @@ def _color_match(term: "blessed.Terminal", name: str, score: float) -> str:
 def _nearest_match_lines(
     data: Dict[str, Any],
     names: Dict[str, str],
-    term: "blessed.Terminal",
+    term: Optional["blessed.Terminal"],
     telnet_unknown: bool = False,
     terminal_unknown: bool = False,
 ) -> List[str]:
