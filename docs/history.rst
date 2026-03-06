@@ -1,5 +1,14 @@
 History
 =======
+4.0.2
+  * new: ``telnetlib3-client`` now works on Windows via ``blessed>=1.20`` (installed
+    automatically on Windows).
+  * bugfix: :class:`~telnetlib3._session_context.TelnetSessionContext` ``gmcp_data``
+    mutable default argument caused all instances to share a single dict, so GMCP data
+    from one connection contaminated subsequent connections.
+  * bugfix: keyboard escape detection raised :exc:`UnicodeDecodeError` on non-UTF-8
+    terminal input bytes; now uses ``errors="replace"``.
+
 4.0.1
   * bugfix: ``telnetlib3-client`` could begin a shell in wrong ECHO mode, depending on order of
     options in a "connection burst".

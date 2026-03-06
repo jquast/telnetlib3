@@ -442,11 +442,8 @@ async def _raw_event_loop(
             if not inp:
                 telnet_writer.log.debug("EOF from client stdin")
                 continue
-            if keyboard_escape in inp.decode():
-                try:
-                    telnet_writer.close()
-                except Exception:
-                    pass
+            if keyboard_escape in inp.decode("utf-8", errors="replace"):
+                telnet_writer.close()
                 if telnet_task in wait_for:
                     telnet_task.cancel()
                     wait_for.remove(telnet_task)

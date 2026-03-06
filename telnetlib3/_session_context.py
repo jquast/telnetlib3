@@ -33,7 +33,7 @@ class TelnetSessionContext:
             autoreply_engine: Optional[Any] = None,
             autoreply_wait_fn: Optional[Callable[..., Awaitable[None]]] = None,
             typescript_file: Optional[IO[str]] = None,
-            gmcp_data: dict[str, Any] = {}
+            gmcp_data: Optional[dict[str, Any]] = None
         ) -> None:
         """Initialize session context with default attribute values."""
         self.raw_mode = raw_mode
@@ -42,4 +42,4 @@ class TelnetSessionContext:
         self.autoreply_engine = autoreply_engine
         self.autoreply_wait_fn = autoreply_wait_fn
         self.typescript_file = typescript_file
-        self.gmcp_data = gmcp_data
+        self.gmcp_data: dict[str, Any] = gmcp_data if gmcp_data is not None else {}
