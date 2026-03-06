@@ -705,11 +705,16 @@ else:
             """Register SIGWINCH handler to set ``_resize_pending`` flag."""
             if not self._istty or not hasattr(signal, "SIGWINCH"):
                 return
+            from .telopt import NAWS
+
+            writer = self.telnet_writer
             try:
                 loop = asyncio.get_event_loop()
 
                 def _on_winch() -> None:
                     self._resize_pending.set()
+                    if writer.local_option.enabled(NAWS):
+                        writer._send_naws()
 
                 loop.add_signal_handler(signal.SIGWINCH, _on_winch)
                 self._remove_winch = True

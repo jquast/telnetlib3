@@ -146,6 +146,11 @@ class Terminal:
         except OSError:
             return
 
+        from .telopt import NAWS
+
+        writer = self.telnet_writer
+        loop = asyncio.get_running_loop()
+
         def _poll() -> None:
             nonlocal last_size
             while not self._stop_resize.wait(0.5):
@@ -154,6 +159,8 @@ class Terminal:
                     if new_size != last_size:
                         last_size = new_size
                         self._resize_pending.set()
+                        if writer.local_option.enabled(NAWS):
+                            loop.call_soon_threadsafe(writer._send_naws)
                 except OSError:
                     pass
 
