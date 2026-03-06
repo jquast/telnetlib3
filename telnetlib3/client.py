@@ -482,7 +482,11 @@ class TelnetTerminalClient(TelnetClient):
             rows, cols, _, _ = struct.unpack(fmt, val)
             return rows, cols
         except (ImportError, IOError):
-            return (int(os.environ.get("LINES", 25)), int(os.environ.get("COLUMNS", 80)))
+            try:
+                sz = os.get_terminal_size()
+                return sz.lines, sz.columns
+            except OSError:
+                return (int(os.environ.get("LINES", 25)), int(os.environ.get("COLUMNS", 80)))
 
 
 async def open_connection(
