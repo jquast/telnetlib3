@@ -180,9 +180,10 @@ class Terminal:
         class _WindowsWriter:
             def write(self, data: bytes) -> None:
                 sys.stdout.buffer.write(data)
+                sys.stdout.buffer.flush()
 
             async def drain(self) -> None:
-                sys.stdout.buffer.flush()
+                pass
 
         return _WindowsWriter()
 

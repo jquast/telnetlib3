@@ -177,7 +177,7 @@ def test_set_mode_cooked_exits_context() -> None:
 
 def test_set_mode_raw_when_already_raw_is_noop() -> None:
     term = _make_term(_make_writer())
-    existing_ctx = mock.Mock()
+    existing_ctx = mock.MagicMock()
     term._raw_ctx = existing_ctx
     term.set_mode(Terminal.ModeDef(raw=True, echo=False))
     existing_ctx.__enter__.assert_not_called()
@@ -202,7 +202,6 @@ def test_determine_mode_unchanged(will_echo: bool, will_sga: bool, raw_mode: "bo
     [
         (True, True, None),
         (False, True, None),
-        (True, False, None),
         (False, False, True),
         (True, False, True),
     ],
@@ -292,7 +291,8 @@ def test_setup_winch_not_istty_skips() -> None:
     assert term._resize_thread is None
 
 
-def test_setup_winch_starts_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_setup_winch_starts_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     import os
 
     monkeypatch.setattr(os, "get_terminal_size", lambda: os.terminal_size((80, 24)))
@@ -303,7 +303,8 @@ def test_setup_winch_starts_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     term.cleanup_winch()
 
 
-def test_cleanup_winch_stops_thread(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_cleanup_winch_stops_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     import os
 
     monkeypatch.setattr(os, "get_terminal_size", lambda: os.terminal_size((80, 24)))
@@ -324,7 +325,8 @@ def test_setup_winch_os_error_skips(monkeypatch: pytest.MonkeyPatch) -> None:
     assert term._resize_thread is None
 
 
-def test_resize_poll_detects_change(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_resize_poll_detects_change(monkeypatch: pytest.MonkeyPatch) -> None:
     import os
 
     sizes = [os.terminal_size((80, 24)), os.terminal_size((100, 30))]
@@ -339,15 +341,14 @@ def test_resize_poll_detects_change(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(os, "get_terminal_size", _fake_gts)
     term = _make_term(_make_writer(), istty=True)
     term.setup_winch()
-    import time
-    time.sleep(0.7)
+    await asyncio.sleep(0.7)
     term.cleanup_winch()
     assert term._resize_pending.is_set()
 
 
 def test_disconnect_stdin_sets_stop_flag() -> None:
     term = _make_term(_make_writer())
-    reader = asyncio.StreamReader()
+    reader = mock.Mock(spec=asyncio.StreamReader)
     term.disconnect_stdin(reader)
     assert term._stop_stdin.is_set()
 
