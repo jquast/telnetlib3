@@ -590,7 +590,7 @@ async def open_connection(
     """
     if client_factory is None:
         client_factory = TelnetClient
-        if sys.platform != "win32" and sys.stdin.isatty():
+        if sys.stdin.isatty():
             client_factory = TelnetTerminalClient
 
     def connection_factory() -> client_base.BaseClient:
@@ -670,7 +670,7 @@ async def run_client() -> None:
     def _client_factory(**kwargs: Any) -> client_base.BaseClient:
         client: TelnetClient
         kwargs["gmcp_modules"] = gmcp_modules
-        if sys.platform != "win32" and sys.stdin.isatty():
+        if sys.stdin.isatty():
             client = TelnetTerminalClient(**kwargs)
         else:
             client = TelnetClient(**kwargs)
