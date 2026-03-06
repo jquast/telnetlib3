@@ -1,6 +1,7 @@
 """Telnet client shell implementations for interactive terminal sessions."""
 
 # std imports
+import os
 import sys
 import asyncio
 import logging
@@ -48,6 +49,9 @@ _INPUT_XLAT: Dict[str, Dict[int, int]] = {
     },
 }
 
+# ESC key delay
+ESC_DELAY = float(os.getenv('ESC_DELAY', '0.35'))
+
 # Multi-byte escape sequence translation tables for retro encodings.
 # Maps common ANSI terminal escape sequences (arrow keys, delete, etc.)
 # to the raw bytes the BBS expects.  Inspired by blessed's
@@ -94,25 +98,28 @@ class InputFilter:
     becomes ``True``.  The caller should start an ``esc_delay`` timer and
     call :meth:`flush` if no further input arrives before the timer fires.
 
-    :param seq_xlat: Multi-byte escape sequence -> replacement bytes.
-    :param byte_xlat: Single input byte -> replacement byte.
+    :param map_mbs_esc: Multi-byte escape sequence -> replacement bytes.
+    :param map_singlebyte: Single input byte -> replacement byte.
     :param esc_delay: Seconds to wait before flushing a buffered prefix
         (default 0.35, matching blessed's ``DEFAULT_ESCDELAY``).
     """
 
     def __init__(
-        self, seq_xlat: Dict[bytes, bytes], byte_xlat: Dict[int, int], esc_delay: float = 0.35
+        self,
+        map_mbs_esc: Dict[bytes, bytes],
+        map_singlebyte: Dict[int, int],
+        esc_delay: float = ESC_DELAY
     ) -> None:
         """Initialize input filter with sequence and byte translation tables."""
-        self._byte_xlat = byte_xlat
+        self._map_singlebyte = map_singlebyte
         self.esc_delay = esc_delay
         # Sort sequences longest-first so \x1b[3~ matches before \x1b[3
         self._seq_sorted: Tuple[Tuple[bytes, bytes], ...] = tuple(
-            sorted(seq_xlat.items(), key=lambda kv: len(kv[0]), reverse=True)
+            sorted(map_mbs_esc.items(), key=lambda kv: len(kv[0]), reverse=True)
         )
         # Prefix set for partial-match buffering (blessed's get_leading_prefixes)
-        self._prefixes: frozenset[bytes] = frozenset(
-            seq[:i] for seq in seq_xlat for i in range(1, len(seq))
+        self._mbs_prefixes: frozenset[bytes] = frozenset(
+            seq[:i] for seq in map_mbs_esc for i in range(1, len(seq))
         )
         self._buf = b""
 
@@ -134,7 +141,7 @@ class InputFilter:
         while self._buf:
             b = self._buf[0]
             self._buf = self._buf[1:]
-            result.append(self._byte_xlat.get(b, b))
+            result.append(self._map_singlebyte.get(b, b))
         return bytes(result)
 
     def feed(self, data: bytes) -> bytes:
@@ -162,12 +169,12 @@ class InputFilter:
             if matched:
                 continue
             # Check if buffer is a prefix of any known sequence -- wait for more
-            if self._buf in self._prefixes:
+            if self._buf in self._mbs_prefixes:
                 break
             # No sequence match, emit single byte with translation
             b = self._buf[0]
             self._buf = self._buf[1:]
-            result.append(self._byte_xlat.get(b, b))
+            result.append(self._map_singlebyte.get(b, b))
         return bytes(result)
 
 
