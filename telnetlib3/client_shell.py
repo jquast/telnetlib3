@@ -284,17 +284,397 @@ class LinemodeBuffer:
         return (char, None)
 
 
-if sys.platform == "win32":
+def _transform_output(
+    out: str, writer: Union[TelnetWriter, TelnetWriterUnicode], in_raw_mode: bool
+) -> str:
+    r"""
+    Apply ASCII EOL substitution and CRLF normalization.
 
-    async def telnet_client_shell(
-        telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
-        telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
-    ) -> None:
-        """Win32 telnet client shell (not implemented)."""
-        raise NotImplementedError("win32 not yet supported as telnet client. Please contribute!")
+    :param out: Server output text to transform.
+    :param writer: Telnet writer (``ctx`` provides ascii_eol).
+    :param in_raw_mode: When ``True``, normalize line endings to ``\r\n``.
+    :returns: Transformed output string.
+    """
+    ctx: TelnetSessionContext = writer.ctx
+    if ctx.ascii_eol:
+        out = out.replace(_ATASCII_CR_CHAR, "\r").replace(_ATASCII_LF_CHAR, "\n")
+    if in_raw_mode:
+        out = out.replace("\r\n", "\n").replace("\n", "\r\n")
+    else:
+        # Cooked mode: PTY ONLCR converts \n -> \r\n, so strip \r before \n
+        # to avoid doubling (\r\n -> \r\r\n).
+        out = out.replace("\r\n", "\n")
+    return out
+
+
+def _send_stdin(
+    inp: bytes,
+    telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
+    stdout: asyncio.StreamWriter,
+    local_echo: bool,
+) -> "tuple[Optional[asyncio.Task[None]], bool]":
+    """
+    Send stdin input to server and optionally echo locally.
+
+    :param inp: Raw bytes from terminal stdin.
+    :param telnet_writer: Telnet writer for sending to server.
+    :param stdout: Local stdout writer for software echo.
+    :param local_echo: When ``True``, echo input bytes to stdout.
+    :returns: ``(esc_timer_task_or_None, has_pending)`` tuple.
+    """
+    ctx: TelnetSessionContext = telnet_writer.ctx
+    inf = ctx.input_filter
+    pending = False
+    new_timer: Optional[asyncio.Task[None]] = None
+    if inf is not None:
+        translated = inf.feed(inp)
+        if translated:
+            telnet_writer._write(translated)
+        if inf.has_pending:
+            pending = True
+            new_timer = asyncio.ensure_future(asyncio.sleep(inf.esc_delay))
+    else:
+        telnet_writer._write(inp)
+    if local_echo:
+        echo_buf = bytearray()
+        for b in inp:
+            if b in (0x7F, 0x08):
+                echo_buf.extend(b"\b \b")
+            elif b == 0x0D:
+                echo_buf.extend(b"\r\n")
+            elif b >= 0x20:
+                echo_buf.append(b)
+        if echo_buf:
+            stdout.write(bytes(echo_buf))
+    return new_timer, pending
+
+
+def _get_raw_mode(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> "bool | None":
+    """
+    Return the raw-mode override from the writer's session context.
+
+    ``None`` = auto-detect from server negotiation (default),
+    ``True`` = force raw / character-at-a-time,
+    ``False`` = force line mode.
+    """
+    return writer.ctx.raw_mode
+
+
+def _ensure_autoreply_engine(
+    telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> "Optional[Any]":
+    """
+    Return the autoreply engine from the writer's session context, or ``None``.
+
+    The autoreply engine is optional application-level machinery (e.g. a macro
+    engine in a MUD client) that watches server output and sends pre-configured
+    replies.  It is absent in standalone telnetlib3 and supplied by the host
+    application via ``writer.ctx.autoreply_engine``.
+    """
+    return telnet_writer.ctx.autoreply_engine
+
+
+def _get_linemode_buffer(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> "LinemodeBuffer":
+    """
+    Return (or lazily create) the :class:`LinemodeBuffer` attached to *writer*.
+
+    The buffer is stored as ``writer._linemode_buf`` so it persists across loop
+    iterations and accumulates characters between :meth:`LinemodeBuffer.feed`
+    calls.  Created on first use because LINEMODE negotiation may complete after
+    the shell has already started.
+    """
+    buf: Optional[LinemodeBuffer] = getattr(writer, "_linemode_buf", None)
+    if buf is None:
+        buf = LinemodeBuffer(
+            slctab=writer.slctab,
+            forwardmask=writer.forwardmask,
+            trapsig=writer.linemode.trapsig,
+        )
+        writer._linemode_buf = buf
+    return buf
+
+
+async def _raw_event_loop(
+    telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
+    telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
+    tty_shell,
+    stdin: asyncio.StreamReader,
+    stdout: asyncio.StreamWriter,
+    keyboard_escape: str,
+    state: _RawLoopState,
+    handle_close: Callable[[str], None],
+    want_repl: Callable[[], bool],
+) -> None:
+    """Standard byte-at-a-time event loop (mutates *state* in-place)."""
+    stdin_task = accessories.make_reader_task(stdin)
+    telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
+    esc_timer_task: Optional[asyncio.Task[None]] = None
+    wait_for: set[asyncio.Task[Any]] = {stdin_task, telnet_task}
+
+    while wait_for:
+        done, _ = await asyncio.wait(wait_for, return_when=asyncio.FIRST_COMPLETED)
+        if stdin_task in done:
+            task = stdin_task
+            done.discard(task)
+        else:
+            task = done.pop()
+        wait_for.discard(task)
+
+        telnet_writer.log.log(TRACE, "task=%s, wait_for=%s", task, wait_for)
+
+        # ESC_DELAY timer fired -- flush buffered partial sequence
+        if task is esc_timer_task:
+            esc_timer_task = None
+            inf = telnet_writer.ctx.input_filter
+            if inf is not None and inf.has_pending:
+                flushed = inf.flush()
+                if flushed:
+                    telnet_writer._write(flushed)
+            continue
+
+        # client input
+        if task == stdin_task:
+            if esc_timer_task is not None and esc_timer_task in wait_for:
+                esc_timer_task.cancel()
+                wait_for.discard(esc_timer_task)
+                esc_timer_task = None
+            inp = task.result()
+            if not inp:
+                telnet_writer.log.debug("EOF from client stdin")
+                continue
+            if keyboard_escape in inp.decode():
+                try:
+                    telnet_writer.close()
+                except Exception:
+                    pass
+                if telnet_task in wait_for:
+                    telnet_task.cancel()
+                    wait_for.remove(telnet_task)
+                handle_close("Connection closed.")
+                break
+            linemode_edit = (
+                telnet_writer.local_option.enabled(LINEMODE) and telnet_writer.linemode.edit
+            )
+            if linemode_edit and state.switched_to_raw:
+                # Raw PTY or non-TTY: kernel not doing line editing, use LinemodeBuffer
+                lmbuf = _get_linemode_buffer(telnet_writer)
+                for ch in inp.decode(errors="replace"):
+                    echo, data = lmbuf.feed(ch)
+                    if echo:
+                        stdout.write(echo.encode())
+                    if data:
+                        telnet_writer._write(data)
+                new_timer, has_pending = None, False
+            elif linemode_edit:
+                # Cooked PTY: kernel already handled EC/EL/echo; forward line directly
+                new_timer, has_pending = _send_stdin(inp, telnet_writer, stdout, False)
+            else:
+                new_timer, has_pending = _send_stdin(
+                    inp, telnet_writer, stdout, state.local_echo
+                )
+            if has_pending and esc_timer_task not in wait_for:
+                esc_timer_task = new_timer
+                if esc_timer_task is not None:
+                    wait_for.add(esc_timer_task)
+            stdin_task = accessories.make_reader_task(stdin)
+            wait_for.add(stdin_task)
+
+        # server output
+        elif task == telnet_task:
+            out = task.result()
+            if not out and telnet_reader.at_eof():
+                if stdin_task in wait_for:
+                    stdin_task.cancel()
+                    wait_for.remove(stdin_task)
+                handle_close("Connection closed by foreign host.")
+                continue
+            raw_mode = _get_raw_mode(telnet_writer)
+            in_raw = raw_mode is True or (raw_mode is None and state.switched_to_raw)
+            out = _transform_output(out, telnet_writer, in_raw)
+            ar_engine = _ensure_autoreply_engine(telnet_writer)
+            if ar_engine is not None:
+                ar_engine.feed(out)
+            if raw_mode is None or (raw_mode is True and state.switched_to_raw):
+                mode_result = tty_shell.check_auto_mode(
+                    state.switched_to_raw, state.last_will_echo
+                )
+                if mode_result is not None:
+                    if not state.switched_to_raw:
+                        state.linesep = "\r\n"
+                    state.switched_to_raw, state.last_will_echo, state.local_echo = mode_result
+                    # When transitioning cooked -> raw, the data was
+                    # processed for ONLCR (\r\n -> \n) but the terminal
+                    # now has ONLCR disabled.  Re-normalize so bare \n
+                    # becomes \r\n for correct display.
+                    if state.switched_to_raw and not in_raw:
+                        out = out.replace("\n", "\r\n")
+                if raw_mode is None and want_repl():
+                    state.reactivate_repl = True
+            stdout.write(out.encode())
+            _ts_file = telnet_writer.ctx.typescript_file
+            if _ts_file is not None:
+                _ts_file.write(out)
+                _ts_file.flush()
+            if state.reactivate_repl:
+                telnet_writer.log.debug("mode returned to local, reactivating REPL")
+                if stdin_task in wait_for:
+                    stdin_task.cancel()
+                    wait_for.discard(stdin_task)
+                state.switched_to_raw = False
+                break
+            telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
+            wait_for.add(telnet_task)
+
+
+async def _telnet_client_shell_impl(
+    telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
+    telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
+    tty_shell,
+) -> None:
+    """
+    Shared implementation body for :func:`telnet_client_shell` on all platforms.
+
+    Called with an already-entered terminal context manager (*tty_shell*).
+    Handles mode negotiation, GA/EOR pacing, and the raw event loop.
+    """
+    keyboard_escape = "\x1d"
+    linesep = "\n"
+    switched_to_raw = False
+    last_will_echo = False
+    local_echo = tty_shell.software_echo
+    if tty_shell._istty:
+        raw_mode = _get_raw_mode(telnet_writer)
+        if telnet_writer.will_echo or raw_mode is True:
+            linesep = "\r\n"
+    stdout = await tty_shell.make_stdout()
+    tty_shell.setup_winch()
+
+    # Prompt-pacing via IAC GA / IAC EOR.
+    #
+    # MUD servers emit IAC GA (Go-Ahead, RFC 854) or IAC EOR (End-of-Record, RFC 885) after
+    # each prompt to signal "output is complete, awaiting your input."  The autoreply engine
+    # uses this to pace its replies. It calls ctx.autoreply_wait_fn() before sending each
+    # reply, preventing races where a reply arrives before the server has finished rendering
+    # the prompt.
+    #
+    # 'server_uses_ga' becomes True on the first GA/EOR received.  _wait_for_prompt is does
+    # nothing until 'server_uses_ga', so servers that never send GA/EOR (Most everything but
+    # MUDs these days) are silently unaffected.
+    #
+    # prompt_event starts SET so the first autoreply fires immediately -- there is no prior
+    # GA to wait for.  _on_ga_or_eor re-sets it on each prompt signal; _wait_for_prompt
+    # clears it after consuming the signal so the next autoreply waits for the following
+    # prompt.
+    prompt_event = asyncio.Event()
+    prompt_event.set()
+    server_uses_ga = False
+
+    # The session context is the decoupling point between this shell and the
+    # autoreply engine (which may live in a separate module).  Storing
+    # _wait_for_prompt on it lets the engine call back into our local event state
+    # without a direct import or reference to this closure.
+    ctx: TelnetSessionContext = telnet_writer.ctx
+
+    def _on_ga_or_eor(_cmd: bytes) -> None:
+        nonlocal server_uses_ga
+        server_uses_ga = True
+        prompt_event.set()
+        ar = ctx.autoreply_engine
+        if ar is not None:
+            ar.on_prompt()
+
+    from .telopt import GA, CMD_EOR
+
+    telnet_writer.set_iac_callback(GA, _on_ga_or_eor)
+    telnet_writer.set_iac_callback(CMD_EOR, _on_ga_or_eor)
+
+    async def _wait_for_prompt() -> None:
+        """
+        Wait for the next prompt signal before the autoreply engine sends a reply.
+
+        No-op until the first GA/EOR confirms this server uses prompt signalling.
+        After that, blocks until :func:`_on_ga_or_eor` fires the event, then clears
+        it to arm the wait for the following prompt.  A 2-second safety timeout
+        prevents stalling if the server stops sending GA mid-session.
+        """
+        if not server_uses_ga:
+            return
+        try:
+            await asyncio.wait_for(prompt_event.wait(), timeout=2.0)
+        except asyncio.TimeoutError:
+            pass
+        prompt_event.clear()
+
+    ctx.autoreply_wait_fn = _wait_for_prompt
+
+    escape_name = accessories.name_unicode(keyboard_escape)
+    banner_sep = "\r\n" if tty_shell._istty else linesep
+    stdout.write(f"Escape character is '{escape_name}'.{banner_sep}".encode())
+
+    def _handle_close(msg: str) -> None:
+        # \033[m resets all SGR attributes so server-set colours do not
+        # bleed into the terminal after disconnect.
+        stdout.write(f"\033[m{linesep}{msg}{linesep}".encode())
+        tty_shell.cleanup_winch()
+
+    def _should_reactivate_repl() -> bool:
+        # Extension point for callers that embed a REPL (e.g. a MUD client).
+        # Return True to break _raw_event_loop and return to the REPL when
+        # the server puts the terminal back into local mode.  The base shell
+        # has no REPL, so this always returns False.
+        return False
+
+    # Wait up to 50 ms for subsequent WILL ECHO / WILL SGA packets to arrive before
+    # committing to a terminal mode.
+    #
+    # check_negotiation() declares the handshake complete as soon as TTYPE and NEW_ENVIRON /
+    # CHARSET are settled, without waiting for ECHO / SGA.  Those options typically travel
+    # in the same "initial negotiation burst" but may not have not yet have "arrived" at
+    # this point in our TCP read until a few milliseconds later. Servers that never send
+    # WILL ECHO (rlogin, basically) simply time out and proceed correctly.
+    raw_mode = _get_raw_mode(telnet_writer)
+    if raw_mode is not False and tty_shell._istty:
+        try:
+            await asyncio.wait_for(
+                telnet_writer.wait_for_condition(lambda w: w.mode != "local"), timeout=0.05
+            )
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            pass
+
+    # Commit the terminal to raw mode now that will_echo is stable.  suppress_echo=True
+    # disables the kernel's local ECHO because the server will echo (or we handle it in
+    # software).  local_echo is set to True only when the server will NOT echo, so we
+    # reproduce keystrokes ourselves.
+    if not switched_to_raw and tty_shell._istty and tty_shell._save_mode is not None:
+        tty_shell.set_mode(tty_shell._make_raw(tty_shell._save_mode, suppress_echo=True))
+        switched_to_raw = True
+        local_echo = not telnet_writer.will_echo
+        linesep = "\r\n"
+    stdin = await tty_shell.connect_stdin()
+    state = _RawLoopState(
+        switched_to_raw=switched_to_raw,
+        last_will_echo=last_will_echo,
+        local_echo=local_echo,
+        linesep=linesep,
+    )
+    await _raw_event_loop(
+        telnet_reader,
+        telnet_writer,
+        tty_shell,
+        stdin,
+        stdout,
+        keyboard_escape,
+        state,
+        _handle_close,
+        _should_reactivate_repl,
+    )
+    tty_shell.disconnect_stdin(stdin)
+
+
+if sys.platform == "win32":
+    from .client_shell_win32 import Terminal, telnet_client_shell  # noqa: F401
 
 else:
-    import os
     import signal
     import termios
 
@@ -579,242 +959,6 @@ else:
             stdin = await self.connect_stdin()
             return stdin, stdout
 
-    def _transform_output(
-        out: str, writer: Union[TelnetWriter, TelnetWriterUnicode], in_raw_mode: bool
-    ) -> str:
-        r"""
-        Apply ASCII EOL substitution and CRLF normalization.
-
-        :param out: Server output text to transform.
-        :param writer: Telnet writer (``ctx`` provides ascii_eol).
-        :param in_raw_mode: When ``True``, normalize line endings to ``\r\n``.
-        :returns: Transformed output string.
-        """
-        ctx: TelnetSessionContext = writer.ctx
-        if ctx.ascii_eol:
-            out = out.replace(_ATASCII_CR_CHAR, "\r").replace(_ATASCII_LF_CHAR, "\n")
-        if in_raw_mode:
-            out = out.replace("\r\n", "\n").replace("\n", "\r\n")
-        else:
-            # Cooked mode: PTY ONLCR converts \n -> \r\n, so strip \r before \n
-            # to avoid doubling (\r\n -> \r\r\n).
-            out = out.replace("\r\n", "\n")
-        return out
-
-    def _send_stdin(
-        inp: bytes,
-        telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
-        stdout: asyncio.StreamWriter,
-        local_echo: bool,
-    ) -> "tuple[Optional[asyncio.Task[None]], bool]":
-        """
-        Send stdin input to server and optionally echo locally.
-
-        :param inp: Raw bytes from terminal stdin.
-        :param telnet_writer: Telnet writer for sending to server.
-        :param stdout: Local stdout writer for software echo.
-        :param local_echo: When ``True``, echo input bytes to stdout.
-        :returns: ``(esc_timer_task_or_None, has_pending)`` tuple.
-        """
-        ctx: TelnetSessionContext = telnet_writer.ctx
-        inf = ctx.input_filter
-        pending = False
-        new_timer: Optional[asyncio.Task[None]] = None
-        if inf is not None:
-            translated = inf.feed(inp)
-            if translated:
-                telnet_writer._write(translated)
-            if inf.has_pending:
-                pending = True
-                new_timer = asyncio.ensure_future(asyncio.sleep(inf.esc_delay))
-        else:
-            telnet_writer._write(inp)
-        if local_echo:
-            echo_buf = bytearray()
-            for b in inp:
-                if b in (0x7F, 0x08):
-                    echo_buf.extend(b"\b \b")
-                elif b == 0x0D:
-                    echo_buf.extend(b"\r\n")
-                elif b >= 0x20:
-                    echo_buf.append(b)
-            if echo_buf:
-                stdout.write(bytes(echo_buf))
-        return new_timer, pending
-
-    def _get_raw_mode(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> "bool | None":
-        """
-        Return the raw-mode override from the writer's session context.
-
-        ``None`` = auto-detect from server negotiation (default),
-        ``True`` = force raw / character-at-a-time,
-        ``False`` = force line mode.
-        """
-        return writer.ctx.raw_mode
-
-    def _ensure_autoreply_engine(
-        telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
-    ) -> "Optional[Any]":
-        """
-        Return the autoreply engine from the writer's session context, or ``None``.
-
-        The autoreply engine is optional application-level machinery (e.g. a macro
-        engine in a MUD client) that watches server output and sends pre-configured
-        replies.  It is absent in standalone telnetlib3 and supplied by the host
-        application via ``writer.ctx.autoreply_engine``.
-        """
-        return telnet_writer.ctx.autoreply_engine
-
-    def _get_linemode_buffer(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> "LinemodeBuffer":
-        """
-        Return (or lazily create) the :class:`LinemodeBuffer` attached to *writer*.
-
-        The buffer is stored as ``writer._linemode_buf`` so it persists across loop
-        iterations and accumulates characters between :meth:`LinemodeBuffer.feed`
-        calls.  Created on first use because LINEMODE negotiation may complete after
-        the shell has already started.
-        """
-        buf: Optional[LinemodeBuffer] = getattr(writer, "_linemode_buf", None)
-        if buf is None:
-            buf = LinemodeBuffer(
-                slctab=writer.slctab,
-                forwardmask=writer.forwardmask,
-                trapsig=writer.linemode.trapsig,
-            )
-            writer._linemode_buf = buf
-        return buf
-
-    async def _raw_event_loop(
-        telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
-        telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
-        tty_shell: "Terminal",
-        stdin: asyncio.StreamReader,
-        stdout: asyncio.StreamWriter,
-        keyboard_escape: str,
-        state: _RawLoopState,
-        handle_close: Callable[[str], None],
-        want_repl: Callable[[], bool],
-    ) -> None:
-        """Standard byte-at-a-time event loop (mutates *state* in-place)."""
-        stdin_task = accessories.make_reader_task(stdin)
-        telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
-        esc_timer_task: Optional[asyncio.Task[None]] = None
-        wait_for: set[asyncio.Task[Any]] = {stdin_task, telnet_task}
-
-        while wait_for:
-            done, _ = await asyncio.wait(wait_for, return_when=asyncio.FIRST_COMPLETED)
-            if stdin_task in done:
-                task = stdin_task
-                done.discard(task)
-            else:
-                task = done.pop()
-            wait_for.discard(task)
-
-            telnet_writer.log.log(TRACE, "task=%s, wait_for=%s", task, wait_for)
-
-            # ESC_DELAY timer fired -- flush buffered partial sequence
-            if task is esc_timer_task:
-                esc_timer_task = None
-                inf = telnet_writer.ctx.input_filter
-                if inf is not None and inf.has_pending:
-                    flushed = inf.flush()
-                    if flushed:
-                        telnet_writer._write(flushed)
-                continue
-
-            # client input
-            if task == stdin_task:
-                if esc_timer_task is not None and esc_timer_task in wait_for:
-                    esc_timer_task.cancel()
-                    wait_for.discard(esc_timer_task)
-                    esc_timer_task = None
-                inp = task.result()
-                if not inp:
-                    telnet_writer.log.debug("EOF from client stdin")
-                    continue
-                if keyboard_escape in inp.decode():
-                    try:
-                        telnet_writer.close()
-                    except Exception:
-                        pass
-                    if telnet_task in wait_for:
-                        telnet_task.cancel()
-                        wait_for.remove(telnet_task)
-                    handle_close("Connection closed.")
-                    break
-                linemode_edit = (
-                    telnet_writer.local_option.enabled(LINEMODE) and telnet_writer.linemode.edit
-                )
-                if linemode_edit and state.switched_to_raw:
-                    # Raw PTY or non-TTY: kernel not doing line editing, use LinemodeBuffer
-                    lmbuf = _get_linemode_buffer(telnet_writer)
-                    for ch in inp.decode(errors="replace"):
-                        echo, data = lmbuf.feed(ch)
-                        if echo:
-                            stdout.write(echo.encode())
-                        if data:
-                            telnet_writer._write(data)
-                    new_timer, has_pending = None, False
-                elif linemode_edit:
-                    # Cooked PTY: kernel already handled EC/EL/echo; forward line directly
-                    new_timer, has_pending = _send_stdin(inp, telnet_writer, stdout, False)
-                else:
-                    new_timer, has_pending = _send_stdin(
-                        inp, telnet_writer, stdout, state.local_echo
-                    )
-                if has_pending and esc_timer_task not in wait_for:
-                    esc_timer_task = new_timer
-                    if esc_timer_task is not None:
-                        wait_for.add(esc_timer_task)
-                stdin_task = accessories.make_reader_task(stdin)
-                wait_for.add(stdin_task)
-
-            # server output
-            elif task == telnet_task:
-                out = task.result()
-                if not out and telnet_reader.at_eof():
-                    if stdin_task in wait_for:
-                        stdin_task.cancel()
-                        wait_for.remove(stdin_task)
-                    handle_close("Connection closed by foreign host.")
-                    continue
-                raw_mode = _get_raw_mode(telnet_writer)
-                in_raw = raw_mode is True or (raw_mode is None and state.switched_to_raw)
-                out = _transform_output(out, telnet_writer, in_raw)
-                ar_engine = _ensure_autoreply_engine(telnet_writer)
-                if ar_engine is not None:
-                    ar_engine.feed(out)
-                if raw_mode is None or (raw_mode is True and state.switched_to_raw):
-                    mode_result = tty_shell.check_auto_mode(
-                        state.switched_to_raw, state.last_will_echo
-                    )
-                    if mode_result is not None:
-                        if not state.switched_to_raw:
-                            state.linesep = "\r\n"
-                        state.switched_to_raw, state.last_will_echo, state.local_echo = mode_result
-                        # When transitioning cooked -> raw, the data was
-                        # processed for ONLCR (\r\n -> \n) but the terminal
-                        # now has ONLCR disabled.  Re-normalize so bare \n
-                        # becomes \r\n for correct display.
-                        if state.switched_to_raw and not in_raw:
-                            out = out.replace("\n", "\r\n")
-                    if raw_mode is None and want_repl():
-                        state.reactivate_repl = True
-                stdout.write(out.encode())
-                _ts_file = telnet_writer.ctx.typescript_file
-                if _ts_file is not None:
-                    _ts_file.write(out)
-                    _ts_file.flush()
-                if state.reactivate_repl:
-                    telnet_writer.log.debug("mode returned to local, reactivating REPL")
-                    if stdin_task in wait_for:
-                        stdin_task.cancel()
-                        wait_for.discard(stdin_task)
-                    state.switched_to_raw = False
-                    break
-                telnet_task = accessories.make_reader_task(telnet_reader, size=2**24)
-                wait_for.add(telnet_task)
-
     async def telnet_client_shell(
         telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
         telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
@@ -828,137 +972,5 @@ else:
 
         stdin or stdout may also be a pipe or file, behaving much like nc(1).
         """
-        keyboard_escape = "\x1d"
-
         with Terminal(telnet_writer=telnet_writer) as tty_shell:
-            linesep = "\n"
-            switched_to_raw = False
-            last_will_echo = False
-            local_echo = tty_shell.software_echo
-            if tty_shell._istty:
-                raw_mode = _get_raw_mode(telnet_writer)
-                if telnet_writer.will_echo or raw_mode is True:
-                    linesep = "\r\n"
-            stdout = await tty_shell.make_stdout()
-            tty_shell.setup_winch()
-
-            # Prompt-pacing via IAC GA / IAC EOR.
-            #
-            # MUD servers emit IAC GA (Go-Ahead, RFC 854) or IAC EOR (End-of-Record, RFC 885) after
-            # each prompt to signal "output is complete, awaiting your input."  The autoreply engine
-            # uses this to pace its replies. It calls ctx.autoreply_wait_fn() before sending each
-            # reply, preventing races where a reply arrives before the server has finished rendering
-            # the prompt.
-            #
-            # 'server_uses_ga' becomes True on the first GA/EOR received.  _wait_for_prompt is does
-            # nothing until 'server_uses_ga', so servers that never send GA/EOR (Most everything but
-            # MUDs these days) are silently unaffected.
-            #
-            # prompt_event starts SET so the first autoreply fires immediately — there is no prior
-            # GA to wait for.  _on_ga_or_eor re-sets it on each prompt signal; _wait_for_prompt
-            # clears it after consuming the signal so the next autoreply waits for the following
-            # prompt.
-            prompt_event = asyncio.Event()
-            prompt_event.set()
-            server_uses_ga = False
-
-            # The session context is the decoupling point between this shell and the
-            # autoreply engine (which may live in a separate module).  Storing
-            # _wait_for_prompt on it lets the engine call back into our local event state
-            # without a direct import or reference to this closure.
-            ctx: TelnetSessionContext = telnet_writer.ctx
-
-            def _on_ga_or_eor(_cmd: bytes) -> None:
-                nonlocal server_uses_ga
-                server_uses_ga = True
-                prompt_event.set()
-                ar = ctx.autoreply_engine
-                if ar is not None:
-                    ar.on_prompt()
-
-            from .telopt import GA, CMD_EOR
-
-            telnet_writer.set_iac_callback(GA, _on_ga_or_eor)
-            telnet_writer.set_iac_callback(CMD_EOR, _on_ga_or_eor)
-
-            async def _wait_for_prompt() -> None:
-                """
-                Wait for the next prompt signal before the autoreply engine sends a reply.
-
-                No-op until the first GA/EOR confirms this server uses prompt signalling.
-                After that, blocks until :func:`_on_ga_or_eor` fires the event, then clears
-                it to arm the wait for the following prompt.  A 2-second safety timeout
-                prevents stalling if the server stops sending GA mid-session.
-                """
-                if not server_uses_ga:
-                    return
-                try:
-                    await asyncio.wait_for(prompt_event.wait(), timeout=2.0)
-                except asyncio.TimeoutError:
-                    pass
-                prompt_event.clear()
-
-            ctx.autoreply_wait_fn = _wait_for_prompt
-
-            escape_name = accessories.name_unicode(keyboard_escape)
-            banner_sep = "\r\n" if tty_shell._istty else linesep
-            stdout.write(f"Escape character is '{escape_name}'.{banner_sep}".encode())
-
-            def _handle_close(msg: str) -> None:
-                # \033[m resets all SGR attributes so server-set colours do not
-                # bleed into the terminal after disconnect.
-                stdout.write(f"\033[m{linesep}{msg}{linesep}".encode())
-                tty_shell.cleanup_winch()
-
-            def _should_reactivate_repl() -> bool:
-                # Extension point for callers that embed a REPL (e.g. a MUD client).
-                # Return True to break _raw_event_loop and return to the REPL when
-                # the server puts the terminal back into local mode.  The base shell
-                # has no REPL, so this always returns False.
-                return False
-
-            # Wait up to 50 ms for subsequent WILL ECHO / WILL SGA packets to arrive before
-            # committing to a terminal mode.
-            #
-            # check_negotiation() declares the handshake complete as soon as TTYPE and NEW_ENVIRON /
-            # CHARSET are settled, without waiting for ECHO / SGA.  Those options typically travel
-            # in the same "initial negotiation burst" but may not have not yet have "arrived" at
-            # this point in our TCP read until a few milliseconds later. Servers that never send
-            # WILL ECHO (rlogin, basically) simply time out and proceed correctly.
-            raw_mode = _get_raw_mode(telnet_writer)
-            if raw_mode is not False and tty_shell._istty:
-                try:
-                    await asyncio.wait_for(
-                        telnet_writer.wait_for_condition(lambda w: w.mode != "local"), timeout=0.05
-                    )
-                except (asyncio.TimeoutError, asyncio.CancelledError):
-                    pass
-
-            # Commit the terminal to raw mode now that will_echo is stable.  suppress_echo=True
-            # disables the kernel's local ECHO because the server will echo (or we handle it in
-            # software).  local_echo is set to True only when the server will NOT echo, so we
-            # reproduce keystrokes ourselves.
-            if not switched_to_raw and tty_shell._istty and tty_shell._save_mode is not None:
-                tty_shell.set_mode(tty_shell._make_raw(tty_shell._save_mode, suppress_echo=True))
-                switched_to_raw = True
-                local_echo = not telnet_writer.will_echo
-                linesep = "\r\n"
-            stdin = await tty_shell.connect_stdin()
-            state = _RawLoopState(
-                switched_to_raw=switched_to_raw,
-                last_will_echo=last_will_echo,
-                local_echo=local_echo,
-                linesep=linesep,
-            )
-            await _raw_event_loop(
-                telnet_reader,
-                telnet_writer,
-                tty_shell,
-                stdin,
-                stdout,
-                keyboard_escape,
-                state,
-                _handle_close,
-                _should_reactivate_repl,
-            )
-            tty_shell.disconnect_stdin(stdin)
+            await _telnet_client_shell_impl(telnet_reader, telnet_writer, tty_shell)
