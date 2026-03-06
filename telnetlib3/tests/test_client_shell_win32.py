@@ -1,4 +1,5 @@
-"""Tests for telnetlib3.client_shell_win32 (Windows terminal mode handling).
+"""
+Tests for telnetlib3.client_shell_win32 (Windows terminal mode handling).
 
 Runs cross-platform by injecting a mock ``blessed`` module before import.
 """
@@ -32,8 +33,8 @@ if "blessed" not in sys.modules:
     sys.modules["blessed"] = _mock_blessed
 
 # local
-from telnetlib3.client_shell_win32 import Terminal  # noqa: E402
 from telnetlib3._session_context import TelnetSessionContext  # noqa: E402
+from telnetlib3.client_shell_win32 import Terminal  # noqa: E402
 
 
 class _MockOption:
@@ -185,11 +186,7 @@ def test_set_mode_raw_when_already_raw_is_noop() -> None:
 
 @pytest.mark.parametrize(
     "will_echo,will_sga,raw_mode",
-    [
-        (False, False, None),
-        (False, False, False),
-        (True, False, False),
-    ],
+    [(False, False, None), (False, False, False), (True, False, False)],
 )
 def test_determine_mode_unchanged(will_echo: bool, will_sga: bool, raw_mode: "bool | None") -> None:
     term = _make_term(_make_writer(will_echo=will_echo, will_sga=will_sga, raw_mode=raw_mode))
@@ -199,12 +196,7 @@ def test_determine_mode_unchanged(will_echo: bool, will_sga: bool, raw_mode: "bo
 
 @pytest.mark.parametrize(
     "will_echo,will_sga,raw_mode",
-    [
-        (True, True, None),
-        (False, True, None),
-        (False, False, True),
-        (True, False, True),
-    ],
+    [(True, True, None), (False, True, None), (False, False, True), (True, False, True)],
 )
 def test_determine_mode_goes_raw(will_echo: bool, will_sga: bool, raw_mode: "bool | None") -> None:
     term = _make_term(_make_writer(will_echo=will_echo, will_sga=will_sga, raw_mode=raw_mode))

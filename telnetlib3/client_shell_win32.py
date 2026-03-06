@@ -6,13 +6,15 @@ import sys
 import asyncio
 import threading
 import collections
-from typing import Union, Optional, Callable
+from typing import Union, Callable, Optional
 
+# 3rd party
 import blessed
 
+# local
+from .client_shell import _get_raw_mode, _telnet_client_shell_impl
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
-from .client_shell import _raw_event_loop, _get_raw_mode, _telnet_client_shell_impl
 
 
 class Terminal:
@@ -191,8 +193,8 @@ class Terminal:
         """
         Return an asyncio StreamReader fed by a blessed inkey() thread.
 
-        Uses blessed/jinxed to read one keypress at a time in raw mode.
-        Each keystroke is encoded as UTF-8 and fed to the reader.
+        Uses blessed/jinxed to read one keypress at a time in raw mode. Each keystroke is encoded as
+        UTF-8 and fed to the reader.
         """
         reader = asyncio.StreamReader()
         loop = asyncio.get_running_loop()
@@ -207,9 +209,7 @@ class Terminal:
                     loop.call_soon_threadsafe(reader.feed_data, data)
             loop.call_soon_threadsafe(reader.feed_eof)
 
-        t = threading.Thread(
-            target=_reader_thread, daemon=True, name="telnetlib3-stdin-reader"
-        )
+        t = threading.Thread(target=_reader_thread, daemon=True, name="telnetlib3-stdin-reader")
         t.start()
         return reader
 

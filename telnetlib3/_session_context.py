@@ -26,15 +26,16 @@ class TelnetSessionContext:
         ASCII ``\r`` / ``\n``.
     """
 
-    def __init__(self,
-            raw_mode: Optional[bool] = None,
-            ascii_eol: bool = False,
-            input_filter: Optional[Any] = None,
-            autoreply_engine: Optional[Any] = None,
-            autoreply_wait_fn: Optional[Callable[..., Awaitable[None]]] = None,
-            typescript_file: Optional[IO[str]] = None,
-            gmcp_data: Optional[dict[str, Any]] = None
-        ) -> None:
+    def __init__(
+        self,
+        raw_mode: Optional[bool] = None,
+        ascii_eol: bool = False,
+        input_filter: Optional[Any] = None,
+        autoreply_engine: Optional[Any] = None,
+        autoreply_wait_fn: Optional[Callable[..., Awaitable[None]]] = None,
+        typescript_file: Optional[IO[str]] = None,
+        gmcp_data: Optional[dict[str, Any]] = None,
+    ) -> None:
         """Initialize session context with default attribute values."""
         self.raw_mode = raw_mode
         self.ascii_eol = ascii_eol

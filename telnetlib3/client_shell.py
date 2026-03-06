@@ -50,7 +50,7 @@ _INPUT_XLAT: Dict[str, Dict[int, int]] = {
 }
 
 # ESC key delay
-ESC_DELAY = float(os.getenv('ESC_DELAY', '0.35'))
+ESC_DELAY = float(os.getenv("ESC_DELAY", "0.35"))
 
 # Multi-byte escape sequence translation tables for retro encodings.
 # Maps common ANSI terminal escape sequences (arrow keys, delete, etc.)
@@ -108,7 +108,7 @@ class InputFilter:
         self,
         map_mbs_esc: Dict[bytes, bytes],
         map_singlebyte: Dict[int, int],
-        esc_delay: float = ESC_DELAY
+        esc_delay: float = ESC_DELAY,
     ) -> None:
         """Initialize input filter with sequence and byte translation tables."""
         self._map_singlebyte = map_singlebyte
@@ -386,9 +386,7 @@ def _get_linemode_buffer(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> "L
     buf: Optional[LinemodeBuffer] = getattr(writer, "_linemode_buf", None)
     if buf is None:
         buf = LinemodeBuffer(
-            slctab=writer.slctab,
-            forwardmask=writer.forwardmask,
-            trapsig=writer.linemode.trapsig,
+            slctab=writer.slctab, forwardmask=writer.forwardmask, trapsig=writer.linemode.trapsig
         )
         writer._linemode_buf = buf
     return buf
@@ -466,9 +464,7 @@ async def _raw_event_loop(
                 # Cooked PTY: kernel already handled EC/EL/echo; forward line directly
                 new_timer, has_pending = _send_stdin(inp, telnet_writer, stdout, False)
             else:
-                new_timer, has_pending = _send_stdin(
-                    inp, telnet_writer, stdout, state.local_echo
-                )
+                new_timer, has_pending = _send_stdin(inp, telnet_writer, stdout, state.local_echo)
             if has_pending and esc_timer_task not in wait_for:
                 esc_timer_task = new_timer
                 if esc_timer_task is not None:
@@ -492,9 +488,7 @@ async def _raw_event_loop(
             if ar_engine is not None:
                 ar_engine.feed(out)
             if raw_mode is None or (raw_mode is True and state.switched_to_raw):
-                mode_result = tty_shell.check_auto_mode(
-                    state.switched_to_raw, state.last_will_echo
-                )
+                mode_result = tty_shell.check_auto_mode(state.switched_to_raw, state.last_will_echo)
                 if mode_result is not None:
                     if not state.switched_to_raw:
                         state.linesep = "\r\n"
@@ -531,8 +525,8 @@ async def _telnet_client_shell_impl(
     """
     Shared implementation body for :func:`telnet_client_shell` on all platforms.
 
-    Called with an already-entered terminal context manager (*tty_shell*).
-    Handles mode negotiation, GA/EOR pacing, and the raw event loop.
+    Called with an already-entered terminal context manager (*tty_shell*). Handles mode negotiation,
+    GA/EOR pacing, and the raw event loop.
     """
     keyboard_escape = "\x1d"
     linesep = "\n"
