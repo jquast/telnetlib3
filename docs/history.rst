@@ -1,8 +1,8 @@
 History
 =======
 4.0.2
-  * new: ``telnetlib3-client`` now works on Windows via ``blessed>=1.20`` (installed
-    automatically on Windows).
+  * enhancement: ``telnetlib3-client`` now works on Windows by using the optional
+    ``blessed>=1.20`` dependency, installed automatically for Windows platforms.
   * bugfix: :class:`~telnetlib3._session_context.TelnetSessionContext` ``gmcp_data``
     mutable default argument caused all instances to share a single dict, so GMCP data
     from one connection contaminated subsequent connections.
