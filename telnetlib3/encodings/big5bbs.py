@@ -99,7 +99,7 @@ class IncrementalDecoder(codecs.IncrementalDecoder):
                         try:
                             result.append(bytes([b, b2]).decode("big5", errors="strict"))
                             i += 2
-                        except (UnicodeDecodeError, LookupError):
+                        except UnicodeDecodeError:
                             # Structurally valid but undefined in Big5 — treat
                             # the lone lead byte as a CP437 half-width character.
                             result.append(bytes([b]).decode("cp437"))

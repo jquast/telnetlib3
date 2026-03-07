@@ -24,6 +24,15 @@ class TelnetSessionContext:
         line mode.
     :param ascii_eol: When ``True``, translate ATASCII CR/LF glyphs to
         ASCII ``\r`` / ``\n``.
+    :param input_filter: Optional :class:`~telnetlib3.client_shell.InputFilter` for
+        translating raw keyboard bytes (e.g. arrow keys for ATASCII/PETSCII).
+    :param autoreply_engine: Optional autoreply engine (e.g. a MUD macro engine)
+        that receives server output via ``engine.feed(text)`` and can send replies.
+    :param autoreply_wait_fn: Async callable installed by the shell to gate autoreply
+        sends on GA/EOR prompt signals; set automatically during shell startup.
+    :param typescript_file: When set, all server output is appended to this file
+        (like the POSIX ``typescript`` command).
+    :param gmcp_data: Initial GMCP module data mapping; defaults to an empty dict.
     """
 
     def __init__(

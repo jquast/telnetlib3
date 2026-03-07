@@ -7,7 +7,7 @@ import asyncio
 import threading
 import contextlib
 import collections
-from typing import Union, Callable, Optional
+from typing import Any, Union, Callable, Optional
 
 # local
 from .client_shell import _get_raw_mode, _telnet_client_shell_impl
@@ -37,7 +37,7 @@ class Terminal:
         self._istty = self._bt.is_a_tty
         self._save_mode: Optional[Terminal.ModeDef] = None
         self.software_echo = False
-        self._raw_ctx = None
+        self._raw_ctx: Optional[contextlib.ExitStack] = None
         self._resize_pending = threading.Event()
         self.on_resize: Optional[Callable[[int, int], None]] = None
         self._stop_resize = threading.Event()
@@ -51,7 +51,7 @@ class Terminal:
             self.set_mode(self.determine_mode(self._save_mode))
         return self
 
-    def __exit__(self, *_) -> None:
+    def __exit__(self, *_: Any) -> None:
         self.cleanup_winch()
         if self._istty and self._save_mode is not None:
             self.set_mode(self._save_mode)
@@ -183,7 +183,7 @@ class Terminal:
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=1.0)
 
-    async def make_stdout(self):
+    async def make_stdout(self) -> Any:
         """Return a StreamWriter-compatible wrapper for sys.stdout."""
 
         class _WindowsWriter:

@@ -403,7 +403,7 @@ def _get_linemode_buffer(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> "L
 async def _raw_event_loop(
     telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
     telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
-    tty_shell,
+    tty_shell: Any,
     stdin: asyncio.StreamReader,
     stdout: asyncio.StreamWriter,
     keyboard_escape: str,
@@ -528,7 +528,7 @@ async def _raw_event_loop(
 async def _telnet_client_shell_impl(
     telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
     telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
-    tty_shell,
+    tty_shell: Any,
 ) -> None:
     """
     Shared implementation body for :func:`telnet_client_shell` on all platforms.
@@ -556,7 +556,7 @@ async def _telnet_client_shell_impl(
     # reply, preventing races where a reply arrives before the server has finished rendering
     # the prompt.
     #
-    # 'server_uses_ga' becomes True on the first GA/EOR received.  _wait_for_prompt is does
+    # 'server_uses_ga' becomes True on the first GA/EOR received.  _wait_for_prompt does
     # nothing until 'server_uses_ga', so servers that never send GA/EOR (Most everything but
     # MUDs these days) are silently unaffected.
     #
