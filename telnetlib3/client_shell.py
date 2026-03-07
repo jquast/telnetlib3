@@ -49,8 +49,16 @@ _INPUT_XLAT: Dict[str, Dict[int, int]] = {
     },
 }
 
-# ESC key delay
-ESC_DELAY = float(os.getenv("ESC_DELAY", "0.35"))
+# ESC key delay in seconds; read from ESCDELAY env var (milliseconds, ncurses convention)
+_escdelay_env = os.getenv("ESCDELAY")
+if _escdelay_env is None:
+    ESC_DELAY = 0.35
+else:
+    try:
+        ESC_DELAY = int(_escdelay_env) / 1000.0
+    except ValueError:
+        log.warning("Invalid ESCDELAY value %r; using default 350ms", _escdelay_env)
+        ESC_DELAY = 0.35
 
 # Multi-byte escape sequence translation tables for retro encodings.
 # Maps common ANSI terminal escape sequences (arrow keys, delete, etc.)
@@ -98,28 +106,28 @@ class InputFilter:
     becomes ``True``.  The caller should start an ``esc_delay`` timer and
     call :meth:`flush` if no further input arrives before the timer fires.
 
-    :param map_mbs_esc: Multi-byte escape sequence -> replacement bytes.
-    :param map_singlebyte: Single input byte -> replacement byte.
+    :param seq_xlat: Multi-byte escape sequence -> replacement bytes.
+    :param byte_xlat: Single input byte -> replacement byte.
     :param esc_delay: Seconds to wait before flushing a buffered prefix
         (default 0.35, matching blessed's ``DEFAULT_ESCDELAY``).
     """
 
     def __init__(
         self,
-        map_mbs_esc: Dict[bytes, bytes],
-        map_singlebyte: Dict[int, int],
+        seq_xlat: Dict[bytes, bytes],
+        byte_xlat: Dict[int, int],
         esc_delay: float = ESC_DELAY,
     ) -> None:
         """Initialize input filter with sequence and byte translation tables."""
-        self._map_singlebyte = map_singlebyte
+        self._map_singlebyte = byte_xlat
         self.esc_delay = esc_delay
         # Sort sequences longest-first so \x1b[3~ matches before \x1b[3
         self._seq_sorted: Tuple[Tuple[bytes, bytes], ...] = tuple(
-            sorted(map_mbs_esc.items(), key=lambda kv: len(kv[0]), reverse=True)
+            sorted(seq_xlat.items(), key=lambda kv: len(kv[0]), reverse=True)
         )
         # Prefix set for partial-match buffering (blessed's get_leading_prefixes)
         self._mbs_prefixes: frozenset[bytes] = frozenset(
-            seq[:i] for seq in map_mbs_esc for i in range(1, len(seq))
+            seq[:i] for seq in seq_xlat for i in range(1, len(seq))
         )
         self._buf = b""
 

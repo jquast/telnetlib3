@@ -39,11 +39,11 @@ class Terminal:
         self.software_echo = False
         self._raw_ctx = None
         self._resize_pending = threading.Event()
-        self.on_resize: Optional[Callable] = None
+        self.on_resize: Optional[Callable[[int, int], None]] = None
         self._stop_resize = threading.Event()
         self._stop_stdin = threading.Event()
         self._resize_thread: Optional[threading.Thread] = None
-        self._stdin_transport = None
+        self._stdin_thread: Optional[threading.Thread] = None
 
     def __enter__(self) -> "Terminal":
         self._save_mode = self.get_mode()
@@ -62,7 +62,7 @@ class Terminal:
             return None
         return self.ModeDef(raw=False, echo=True)
 
-    def set_mode(self, mode: "Terminal.ModeDef") -> None:
+    def set_mode(self, mode: Optional["Terminal.ModeDef"]) -> None:
         """Switch terminal to raw or cooked mode using blessed context managers."""
         if mode is None:
             return
@@ -178,7 +178,10 @@ class Terminal:
     def cleanup_winch(self) -> None:
         """Stop the resize polling thread."""
         self._stop_resize.set()
+        thread = self._resize_thread
         self._resize_thread = None
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=1.0)
 
     async def make_stdout(self):
         """Return a StreamWriter-compatible wrapper for sys.stdout."""
@@ -215,14 +218,18 @@ class Terminal:
                     loop.call_soon_threadsafe(reader.feed_data, data)
             loop.call_soon_threadsafe(reader.feed_eof)
 
-        t = threading.Thread(target=_reader_thread, daemon=True, name="telnetlib3-stdin-reader")
-        t.start()
+        self._stdin_thread = threading.Thread(
+            target=_reader_thread, daemon=True, name="telnetlib3-stdin-reader"
+        )
+        self._stdin_thread.start()
         return reader
 
     def disconnect_stdin(self, reader: asyncio.StreamReader) -> None:
         """Stop the stdin reader thread and signal EOF."""
         self._stop_stdin.set()
         reader.feed_eof()
+        if self._stdin_thread is not None and self._stdin_thread is not threading.current_thread():
+            self._stdin_thread.join(timeout=1.0)
 
 
 async def telnet_client_shell(

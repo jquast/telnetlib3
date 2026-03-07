@@ -78,7 +78,7 @@ def _make_term(writer: object, istty: bool = False) -> Terminal:
     term._stop_resize = threading.Event()
     term._stop_stdin = threading.Event()
     term._resize_thread = None
-    term._stdin_transport = None
+    term._stdin_thread = None
     return term
 
 
