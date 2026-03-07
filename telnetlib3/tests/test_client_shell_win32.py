@@ -163,16 +163,16 @@ def test_set_mode_raw_enters_context() -> None:
 
 
 def test_set_mode_cooked_exits_context() -> None:
-    exited = []
+    closed = []
 
     class _TrackingCtx:
-        def __exit__(self, *_):
-            exited.append(True)
+        def close(self):
+            closed.append(True)
 
     term = _make_term(_make_writer())
     term._raw_ctx = _TrackingCtx()
     term.set_mode(Terminal.ModeDef(raw=False, echo=True))
-    assert len(exited) == 1
+    assert len(closed) == 1
     assert term._raw_ctx is None
 
 

@@ -93,8 +93,8 @@ class Terminal:
         """
         Return the appropriate mode for the current telnet negotiation state.
 
-        Mirrors :meth:`telnetlib3.client_shell.Terminal.determine_mode` using
-        Windows ``ModeDef`` (raw/echo flags instead of termios bitfields).
+        Windows equivalent of the POSIX ``Terminal.determine_mode``, using
+        ``ModeDef`` (raw/echo flags instead of termios bitfields).
         """
         raw_mode = _get_raw_mode(self.telnet_writer)
         will_echo = self.telnet_writer.will_echo
@@ -118,7 +118,7 @@ class Terminal:
         """
         Check if auto-mode switching is needed.
 
-        Mirrors :meth:`telnetlib3.client_shell.Terminal.check_auto_mode`.
+        Windows equivalent of the POSIX ``Terminal.check_auto_mode``.
 
         :param switched_to_raw: Whether terminal has already switched to raw mode.
         :param last_will_echo: Previous value of server's WILL ECHO state.
@@ -190,7 +190,7 @@ class Terminal:
 
             async def drain(self) -> None:
                 """No-op drain; stdout writes are synchronous."""
-                pass
+                pass  # pylint: disable=unnecessary-pass
 
         return _WindowsWriter()
 

@@ -88,8 +88,8 @@ transmission, all Telnet protocol text *should* be limited to ASCII text, by str
 Telnet.  Further, the encoding used *should* be negotiated by CHARSET.
 
 When these conditions are true, telnetlib3-server and telnetlib3-client allow connections of any
-encoding supporting by the python language, and additionally specially ``ATASCII`` and ``PETSCII``
-encodings.  Any server capable of negotiating CHARSET or LANG through NEW_ENVIRON is also presumed
+encoding supporting by the python language, in addition to custom ``ATASCII``, ``PETSCII``, and
+``big5bbs``.  Any server capable of negotiating CHARSET or LANG through NEW_ENVIRON is also presumed
 to support BINARY.
 
 From a February 2026 `census of MUDs <https://muds.modem.xyz>`_ and `BBSs servers
