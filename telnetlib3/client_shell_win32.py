@@ -27,8 +27,9 @@ class Terminal:
 
     def __init__(self, telnet_writer: Union[TelnetWriter, TelnetWriterUnicode]) -> None:
         """Class Initializer."""
-        # imported locally, so that this module may be safely imported by non-windows systems without
-        # blessed, mainly just so that documentation (sphinx builds) work, doesn't matter otherwise.
+        # imported locally, so that this module may be safely imported by non-windows systems
+        # without blessed, mainly just so that documentation (sphinx builds) work, doesn't matter
+        # otherwise.
         import blessed
 
         self.telnet_writer = telnet_writer
