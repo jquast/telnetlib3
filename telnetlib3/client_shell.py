@@ -8,7 +8,7 @@ import logging
 import threading
 import collections
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Generic, Protocol, Tuple, TypeVar, Union, Callable, Optional
+from typing import Any, Dict, Tuple, Union, Generic, TypeVar, Callable, Optional, Protocol
 from dataclasses import dataclass
 
 # local
@@ -114,10 +114,7 @@ class InputFilter:
     """
 
     def __init__(
-        self,
-        seq_xlat: Dict[bytes, bytes],
-        byte_xlat: Dict[int, int],
-        esc_delay: float = ESC_DELAY,
+        self, seq_xlat: Dict[bytes, bytes], byte_xlat: Dict[int, int], esc_delay: float = ESC_DELAY
     ) -> None:
         """Initialize input filter with sequence and byte translation tables."""
         self._map_singlebyte = byte_xlat
@@ -214,7 +211,6 @@ class _StdoutWriter(Protocol):
 
     def write(self, data: bytes) -> None:
         """Write bytes to the output pipe."""
-        ...
 
 
 class TelnetTerminalShell(ABC, Generic[_ModeT]):
@@ -239,37 +235,30 @@ class TelnetTerminalShell(ABC, Generic[_ModeT]):
     @abstractmethod
     async def make_stdout(self) -> _StdoutWriter:
         """Return a writer for local terminal output."""
-        ...
 
     @abstractmethod
     def setup_winch(self) -> None:
         """Register a terminal resize handler."""
-        ...
 
     @abstractmethod
     def cleanup_winch(self) -> None:
         """Deregister the terminal resize handler."""
-        ...
 
     @abstractmethod
     async def connect_stdin(self) -> asyncio.StreamReader:
         """Connect stdin to an asyncio :class:`~asyncio.StreamReader` and return it."""
-        ...
 
     @abstractmethod
     def disconnect_stdin(self, reader: asyncio.StreamReader) -> None:
         """Disconnect the stdin pipe and signal EOF to *reader*."""
-        ...
 
     @abstractmethod
     def set_mode(self, mode: Optional[_ModeT]) -> None:
         """Apply terminal mode settings; a ``None`` *mode* is a no-op."""
-        ...
 
     @abstractmethod
     def _make_raw(self, mode: _ModeT, suppress_echo: bool = True) -> _ModeT:
         """Return *mode* modified for raw character-at-a-time input."""
-        ...
 
     @abstractmethod
     def check_auto_mode(
@@ -283,7 +272,6 @@ class TelnetTerminalShell(ABC, Generic[_ModeT]):
         :returns: ``(switched_to_raw, last_will_echo, local_echo)`` if a mode
             change is warranted, or ``None`` if no change is needed.
         """
-        ...
 
 
 class LinemodeBuffer:
@@ -850,9 +838,7 @@ else:
                 cc=mode.cc,
             )
 
-        def _make_raw(
-            self, mode: _PosixMode, suppress_echo: bool = True
-        ) -> _PosixMode:
+        def _make_raw(self, mode: _PosixMode, suppress_echo: bool = True) -> _PosixMode:
             """
             Return copy of *mode* with raw terminal attributes set.
 

@@ -7,7 +7,7 @@ import asyncio
 import threading
 import contextlib
 import collections
-from typing import Any, Union, Callable, Optional, Tuple
+from typing import Any, Tuple, Union, Callable, Optional
 
 # local
 from .client_shell import TelnetTerminalShell, _get_raw_mode, _telnet_client_shell_impl
