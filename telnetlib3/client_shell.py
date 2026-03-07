@@ -217,14 +217,14 @@ class TelnetTerminalShell(ABC, Generic[_ModeT]):
     """
     Abstract base for telnet client terminal context managers.
 
-    Defines the interface used by :func:`_telnet_client_shell_impl` and
-    :func:`_raw_event_loop`.  Concrete implementations are
+    Defines the interface used by ``_telnet_client_shell_impl`` and
+    ``_raw_event_loop``.  Concrete implementations are
     :class:`~telnetlib3.client_shell.Terminal` (POSIX) and
     :class:`~telnetlib3.client_shell_win32.Terminal` (Windows).
 
     The type parameter ``_ModeT`` is the platform-specific terminal mode
     descriptor (a namedtuple).  Subclasses bind it to their own concrete mode
-    type so that :meth:`set_mode` and :meth:`_make_raw` are type-safe within
+    type so that :meth:`set_mode` and ``_make_raw`` are type-safe within
     each platform.
     """
 
