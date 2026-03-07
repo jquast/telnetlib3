@@ -482,7 +482,11 @@ class TelnetTerminalClient(TelnetClient):
             rows, cols, _, _ = struct.unpack(fmt, val)
             return rows, cols
         except (ImportError, IOError):
-            return (int(os.environ.get("LINES", 25)), int(os.environ.get("COLUMNS", 80)))
+            try:
+                sz = os.get_terminal_size()
+                return sz.lines, sz.columns
+            except OSError:
+                return (int(os.environ.get("LINES", 25)), int(os.environ.get("COLUMNS", 80)))
 
 
 async def open_connection(
@@ -586,7 +590,7 @@ async def open_connection(
     """
     if client_factory is None:
         client_factory = TelnetClient
-        if sys.platform != "win32" and sys.stdin.isatty():
+        if sys.stdin.isatty():
             client_factory = TelnetTerminalClient
 
     def connection_factory() -> client_base.BaseClient:
@@ -660,13 +664,14 @@ async def run_client() -> None:
 
     # Wrap client factory to inject always_will/always_do/always_wont/always_dont
     # and encoding flags before negotiation starts.
-    encoding_explicit = args["encoding"] not in ("utf8", "utf-8", False)
+    environ_encoding = args["encoding"] or "ascii"
+    encoding_explicit = environ_encoding not in ("utf8", "utf-8", "ascii")
     gmcp_modules: Optional[List[str]] = args.get("gmcp_modules")
 
     def _client_factory(**kwargs: Any) -> client_base.BaseClient:
         client: TelnetClient
         kwargs["gmcp_modules"] = gmcp_modules
-        if sys.platform != "win32" and sys.stdin.isatty():
+        if sys.stdin.isatty():
             client = TelnetTerminalClient(**kwargs)
         else:
             client = TelnetClient(**kwargs)
@@ -684,6 +689,7 @@ async def run_client() -> None:
             from .telopt import GMCP as _GMCP
 
             client.writer.passive_do = {_GMCP}
+            client.writer.environ_encoding = environ_encoding
             client.writer._encoding_explicit = encoding_explicit
 
         client.connection_made = _patched_connection_made  # type: ignore[method-assign]

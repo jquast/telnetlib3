@@ -11,7 +11,12 @@ byte (which must be 0x40-0x7E or 0xA1-0xFE).
 Decoding algorithm:
 
 - When a Big5 lead byte (0xA1-0xFE) is followed by a valid Big5 second byte
-  (0x40-0x7E or 0xA1-0xFE), the pair is decoded as Big5.
+  (0x40-0x7E or 0xA1-0xFE) AND the pair maps to a defined Big5 character,
+  the pair is decoded as Big5.
+- When a lead byte is followed by a structurally valid second byte but the
+  pair is undefined in Big5 (e.g. 0xF9 0xF9), the lone lead byte is decoded
+  via CP437 and the second byte is re-processed.  This handles BBS art that
+  uses repeated high bytes as decorative fills (e.g. ∙∙∙∙ from 0xF9 runs).
 - When a lead byte is followed by any other byte (e.g. ESC), the lone lead
   byte is decoded via CP437 and the following byte is re-processed.
 - Bytes below 0xA1 are decoded via latin-1 (identical to ASCII for 0x00-0x7F).
@@ -91,8 +96,14 @@ class IncrementalDecoder(codecs.IncrementalDecoder):
                 if i + 1 < len(data):
                     b2 = data[i + 1]
                     if (0x40 <= b2 <= 0x7E) or (0xA1 <= b2 <= 0xFE):
-                        result.append(bytes([b, b2]).decode("big5", errors=self.errors))
-                        i += 2
+                        try:
+                            result.append(bytes([b, b2]).decode("big5", errors="strict"))
+                            i += 2
+                        except UnicodeDecodeError:
+                            # Structurally valid but undefined in Big5 — treat
+                            # the lone lead byte as a CP437 half-width character.
+                            result.append(bytes([b]).decode("cp437"))
+                            i += 1
                     else:
                         result.append(bytes([b]).decode("cp437"))
                         i += 1

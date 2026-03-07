@@ -1,10 +1,17 @@
 History
 =======
 4.0.1
-  * bugfix: ``telnetlib3-client`` could begin a shell in wrong ECHO mode, depending on order of
-    options in a "connection burst".
   * new: ``--encoding=big5bbs``, BBS 半形字 (half-width characters) encoding, matching PCMan/PttBBS
     terminal clients, popular with Taiwanese BBS culture.
+  * enhancement: ``telnetlib3-client`` now works on Windows by using the optional
+    ``blessed>=1.20`` dependency, installed automatically for Windows platforms.
+  * bugfix: ``telnetlib3-client`` could begin a shell in wrong ECHO mode, depending on order of
+    options in a "connection burst".
+  * bugfix: :class:`~telnetlib3._session_context.TelnetSessionContext` ``gmcp_data``
+    mutable default argument caused all instances to share a single dict, so GMCP data
+    from one connection contaminated subsequent connections.
+  * bugfix: keyboard escape detection raised :exc:`UnicodeDecodeError` on non-UTF-8
+    terminal input bytes; now uses ``errors="replace"``.
 
 4.0.0
   * removed: ``telnetlib3.color_filter``. ``ColorFilter``, ``ColorConfig``, ``PALETTES``,
