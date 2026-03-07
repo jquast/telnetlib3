@@ -7,7 +7,8 @@ import asyncio
 import logging
 import threading
 import collections
-from typing import Any, Dict, Tuple, Union, Callable, Optional
+from abc import ABC, abstractmethod
+from typing import Any, Dict, Generic, Protocol, Tuple, TypeVar, Union, Callable, Optional
 from dataclasses import dataclass
 
 # local
@@ -23,7 +24,7 @@ from .accessories import TRACE  # noqa: E402
 from .stream_reader import TelnetReader, TelnetReaderUnicode  # noqa: E402
 from .stream_writer import TelnetWriter, TelnetWriterUnicode  # noqa: E402
 
-__all__ = ("InputFilter", "telnet_client_shell")
+__all__ = ("InputFilter", "TelnetTerminalShell", "telnet_client_shell")
 
 # ATASCII graphics characters that map to byte 0x0D and 0x0A respectively.
 # When --ascii-eol is active, these are replaced with \r and \n before
@@ -205,6 +206,86 @@ class _RawLoopState:
     reactivate_repl: bool = False
 
 
+_ModeT = TypeVar("_ModeT")
+
+
+class _StdoutWriter(Protocol):
+    """Minimal protocol for the local stdout pipe used by the telnet event loop."""
+
+    def write(self, data: bytes) -> None:
+        """Write bytes to the output pipe."""
+        ...
+
+
+class TelnetTerminalShell(ABC, Generic[_ModeT]):
+    """
+    Abstract base for telnet client terminal context managers.
+
+    Defines the interface used by :func:`_telnet_client_shell_impl` and
+    :func:`_raw_event_loop`.  Concrete implementations are
+    :class:`~telnetlib3.client_shell.Terminal` (POSIX) and
+    :class:`~telnetlib3.client_shell_win32.Terminal` (Windows).
+
+    The type parameter ``_ModeT`` is the platform-specific terminal mode
+    descriptor (a namedtuple).  Subclasses bind it to their own concrete mode
+    type so that :meth:`set_mode` and :meth:`_make_raw` are type-safe within
+    each platform.
+    """
+
+    software_echo: bool
+    _istty: bool
+    _save_mode: Optional[_ModeT]
+
+    @abstractmethod
+    async def make_stdout(self) -> _StdoutWriter:
+        """Return a writer for local terminal output."""
+        ...
+
+    @abstractmethod
+    def setup_winch(self) -> None:
+        """Register a terminal resize handler."""
+        ...
+
+    @abstractmethod
+    def cleanup_winch(self) -> None:
+        """Deregister the terminal resize handler."""
+        ...
+
+    @abstractmethod
+    async def connect_stdin(self) -> asyncio.StreamReader:
+        """Connect stdin to an asyncio :class:`~asyncio.StreamReader` and return it."""
+        ...
+
+    @abstractmethod
+    def disconnect_stdin(self, reader: asyncio.StreamReader) -> None:
+        """Disconnect the stdin pipe and signal EOF to *reader*."""
+        ...
+
+    @abstractmethod
+    def set_mode(self, mode: Optional[_ModeT]) -> None:
+        """Apply terminal mode settings; a ``None`` *mode* is a no-op."""
+        ...
+
+    @abstractmethod
+    def _make_raw(self, mode: _ModeT, suppress_echo: bool = True) -> _ModeT:
+        """Return *mode* modified for raw character-at-a-time input."""
+        ...
+
+    @abstractmethod
+    def check_auto_mode(
+        self, switched_to_raw: bool, last_will_echo: bool
+    ) -> Optional[Tuple[bool, bool, bool]]:
+        """
+        Check whether terminal mode should change mid-session.
+
+        :param switched_to_raw: Whether the terminal is already in raw mode.
+        :param last_will_echo: Previous value of the server's WILL ECHO state.
+        :returns: ``(switched_to_raw, last_will_echo, local_echo)`` if a mode
+            change is warranted, or ``None`` if no change is needed.
+        """
+        ...
+
+
 class LinemodeBuffer:
     """
     Client-side line buffer for LINEMODE EDIT mode (RFC 1184 §3.1).
@@ -318,7 +399,7 @@ def _transform_output(
 def _send_stdin(
     inp: bytes,
     telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
-    stdout: asyncio.StreamWriter,
+    stdout: _StdoutWriter,
     local_echo: bool,
 ) -> "tuple[Optional[asyncio.Task[None]], bool]":
     """
@@ -403,9 +484,9 @@ def _get_linemode_buffer(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> "L
 async def _raw_event_loop(
     telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
     telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
-    tty_shell: Any,
+    tty_shell: TelnetTerminalShell[Any],
     stdin: asyncio.StreamReader,
-    stdout: asyncio.StreamWriter,
+    stdout: _StdoutWriter,
     keyboard_escape: str,
     state: _RawLoopState,
     handle_close: Callable[[str], None],
@@ -528,7 +609,7 @@ async def _raw_event_loop(
 async def _telnet_client_shell_impl(
     telnet_reader: Union[TelnetReader, TelnetReaderUnicode],
     telnet_writer: Union[TelnetWriter, TelnetWriterUnicode],
-    tty_shell: Any,
+    tty_shell: TelnetTerminalShell[_ModeT],
 ) -> None:
     """
     Shared implementation body for :func:`telnet_client_shell` on all platforms.
@@ -677,7 +758,11 @@ else:
     import signal
     import termios
 
-    class Terminal:
+    _PosixMode = collections.namedtuple(
+        "_PosixMode", ["iflag", "oflag", "cflag", "lflag", "ispeed", "ospeed", "cc"]
+    )
+
+    class Terminal(TelnetTerminalShell[_PosixMode]):
         """
         Context manager for terminal mode handling on POSIX systems.
 
@@ -685,15 +770,13 @@ else:
         negotiated for the given telnet_writer.
         """
 
-        ModeDef = collections.namedtuple(
-            "ModeDef", ["iflag", "oflag", "cflag", "lflag", "ispeed", "ospeed", "cc"]
-        )
+        ModeDef = _PosixMode
 
         def __init__(self, telnet_writer: Union[TelnetWriter, TelnetWriterUnicode]) -> None:
             self.telnet_writer = telnet_writer
             self._fileno = sys.stdin.fileno()
             self._istty = os.path.sameopenfile(0, 1)
-            self._save_mode: Optional[Terminal.ModeDef] = None
+            self._save_mode: Optional[_PosixMode] = None
             self.software_echo = False
             self._remove_winch = False
             self._resize_pending = threading.Event()
@@ -742,18 +825,20 @@ else:
                 assert self._save_mode is not None
                 termios.tcsetattr(self._fileno, termios.TCSADRAIN, list(self._save_mode))
 
-        def get_mode(self) -> Optional["Terminal.ModeDef"]:
+        def get_mode(self) -> Optional[_PosixMode]:
             """Return current terminal mode if attached to a tty, otherwise None."""
             if self._istty:
                 return self.ModeDef(*termios.tcgetattr(self._fileno))
             return None
 
-        def set_mode(self, mode: "Terminal.ModeDef") -> None:
-            """Set terminal mode attributes."""
+        def set_mode(self, mode: Optional[_PosixMode]) -> None:
+            """Set terminal mode attributes; a ``None`` *mode* is a no-op."""
+            if mode is None:
+                return
             termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, list(mode))
 
         @staticmethod
-        def _suppress_echo(mode: "Terminal.ModeDef") -> "Terminal.ModeDef":
+        def _suppress_echo(mode: _PosixMode) -> _PosixMode:
             """Return copy of *mode* with local ECHO disabled, keeping ICANON."""
             return Terminal.ModeDef(
                 iflag=mode.iflag,
@@ -766,8 +851,8 @@ else:
             )
 
         def _make_raw(
-            self, mode: "Terminal.ModeDef", suppress_echo: bool = True
-        ) -> "Terminal.ModeDef":
+            self, mode: _PosixMode, suppress_echo: bool = True
+        ) -> _PosixMode:
             """
             Return copy of *mode* with raw terminal attributes set.
 
@@ -806,7 +891,7 @@ else:
 
         def check_auto_mode(
             self, switched_to_raw: bool, last_will_echo: bool
-        ) -> "tuple[bool, bool, bool] | None":
+        ) -> Optional[Tuple[bool, bool, bool]]:
             """
             Check if auto-mode switching is needed.
 
@@ -859,7 +944,7 @@ else:
             )
             return (True if should_go_raw else switched_to_raw, wecho, not wecho)
 
-        def determine_mode(self, mode: "Terminal.ModeDef") -> "Terminal.ModeDef":
+        def determine_mode(self, mode: _PosixMode) -> _PosixMode:
             """
             Return copy of 'mode' with changes suggested for telnet connection.
 

@@ -7,15 +7,17 @@ import asyncio
 import threading
 import contextlib
 import collections
-from typing import Any, Union, Callable, Optional
+from typing import Any, Union, Callable, Optional, Tuple
 
 # local
-from .client_shell import _get_raw_mode, _telnet_client_shell_impl
+from .client_shell import TelnetTerminalShell, _get_raw_mode, _telnet_client_shell_impl
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
+_WinMode = collections.namedtuple("_WinMode", ["raw", "echo"])
 
-class Terminal:
+
+class Terminal(TelnetTerminalShell[_WinMode]):
     """
     Context manager for terminal mode handling on Windows via blessed/jinxed.
 
@@ -23,7 +25,7 @@ class Terminal:
     Mirrors the interface of the POSIX ``Terminal`` class in :mod:`telnetlib3.client_shell`.
     """
 
-    ModeDef = collections.namedtuple("ModeDef", ["raw", "echo"])
+    ModeDef = _WinMode
 
     def __init__(self, telnet_writer: Union[TelnetWriter, TelnetWriterUnicode]) -> None:
         """Class Initializer."""
@@ -35,7 +37,7 @@ class Terminal:
         self.telnet_writer = telnet_writer
         self._bt = blessed.Terminal()
         self._istty = self._bt.is_a_tty
-        self._save_mode: Optional[Terminal.ModeDef] = None
+        self._save_mode: Optional[_WinMode] = None
         self.software_echo = False
         self._raw_ctx: Optional[contextlib.ExitStack] = None
         self._resize_pending = threading.Event()
@@ -56,13 +58,13 @@ class Terminal:
         if self._istty and self._save_mode is not None:
             self.set_mode(self._save_mode)
 
-    def get_mode(self) -> Optional["Terminal.ModeDef"]:
+    def get_mode(self) -> Optional[_WinMode]:
         """Return current terminal mode if attached to a tty, otherwise None."""
         if not self._istty:
             return None
         return self.ModeDef(raw=False, echo=True)
 
-    def set_mode(self, mode: Optional["Terminal.ModeDef"]) -> None:
+    def set_mode(self, mode: Optional[_WinMode]) -> None:
         """Switch terminal to raw or cooked mode using blessed context managers."""
         if mode is None:
             return
@@ -74,12 +76,12 @@ class Terminal:
             ctx.close()
             self._raw_ctx = None
 
-    def _make_raw(self, mode: "Terminal.ModeDef", suppress_echo: bool = True) -> "Terminal.ModeDef":
+    def _make_raw(self, mode: _WinMode, suppress_echo: bool = True) -> _WinMode:
         """Return a raw ModeDef (mirrors POSIX Terminal._make_raw interface)."""
         return self.ModeDef(raw=True, echo=not suppress_echo)
 
     @staticmethod
-    def _suppress_echo(mode: "Terminal.ModeDef") -> "Terminal.ModeDef":
+    def _suppress_echo(mode: _WinMode) -> _WinMode:
         """Return copy of *mode* with echo disabled."""
         return Terminal.ModeDef(raw=mode.raw, echo=False)
 
@@ -90,7 +92,7 @@ class Terminal:
         w = self.telnet_writer
         return bool(w.client and (w.remote_option.enabled(SGA) or w.local_option.enabled(SGA)))
 
-    def determine_mode(self, mode: "Terminal.ModeDef") -> "Terminal.ModeDef":
+    def determine_mode(self, mode: _WinMode) -> _WinMode:
         """
         Return the appropriate mode for the current telnet negotiation state.
 
@@ -115,7 +117,7 @@ class Terminal:
 
     def check_auto_mode(
         self, switched_to_raw: bool, last_will_echo: bool
-    ) -> "tuple[bool, bool, bool] | None":
+    ) -> Optional[Tuple[bool, bool, bool]]:
         """
         Check if auto-mode switching is needed.
 
