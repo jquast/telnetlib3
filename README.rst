@@ -91,10 +91,9 @@ text, by strict compliance of Telnet.  Further, the encoding used *should* be ne
 :rfc:`2066` or by ``LANG`` using ``NEW_ENVIRON`` :rfc:`1572`.  Otherwise, a compliant telnet client
 should be limited to ASCII.
 
-When these conditions are true, telnetlib3-server and telnetlib3-client allow connections of *any*
-encoding supporting by the python language, in addition to custom ``ATASCII``, ``PETSCII``, and
-``big5bbs``.  Any server capable of negotiating ``CHARSET`` or ``LANG`` through ``NEW_ENVIRON`` is
-also presumed to support BINARY.
+When these conditions are true, telnetlib3-server and telnetlib3-client allow *automatic
+negotiation* of any encoding in either direction supported by the python language, or any
+custom ``ATASCII``, ``PETSCII``, and ``big5bbs`` provided with telnetlib3.
 
 **However**, from a February 2026 `census of MUDs <https://muds.modem.xyz>`_ and `BBSs servers
 <https://bbs.modem.xyz>`_:
@@ -102,9 +101,8 @@ also presumed to support BINARY.
 - 2.8% of MUDs and 0.5% of BBSs support bi-directional CHARSET
 - 18.4% of BBSs and 3.2% of MUDs support BINARY.
 
-This means that connecting to *nearly all* BBSs or MUDs will require specifying an encoding, even if
-it happens to match your encoding.  For this reason, it is often required to specify the encoding,
-eg.::
+This means that connecting to *large majority* of BBSs or MUDs that transmit non-ascii, it will
+require *manually specifying an encoding*, eg.::
 
     telnetlib3-client --encoding=cp437 20forbeers.com 1337
 
@@ -113,8 +111,8 @@ eg.::
 Raw Mode
 ~~~~~~~~
 
-Some telnet servers, especially BBS systems or those designed for serial transmission but are
-connected to a TCP socket without any telnet negotiation may require "raw" mode argument::
+Some telnet servers, especially "retro" BBS systems or those designed for serial transmission but
+are connected to a TCP socket without any telnet negotiation may require the "raw" mode argument::
 
     telnetlib3-client --raw-mode area52.tk 5200 --encoding=atascii
 
