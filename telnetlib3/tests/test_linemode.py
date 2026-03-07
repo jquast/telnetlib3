@@ -42,7 +42,6 @@ async def test_server_demands_remote_linemode_client_agrees(bind_host, unused_tc
         def begin_negotiation(self):
             super().begin_negotiation()
             self.writer.iac(DO, LINEMODE)
-            asyncio.get_event_loop().call_later(0.1, self.connection_lost, None)
 
     async with create_server(
         protocol_factory=ServerTestLinemode, host=bind_host, port=unused_tcp_port
@@ -64,15 +63,16 @@ async def test_server_demands_remote_linemode_client_agrees(bind_host, unused_tc
             assert result == expect_stage2
             client_writer.write(reply_stage2)
 
-            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.1)
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 1.0)
             await asyncio.wait_for(
                 srv_instance.writer.wait_for(
                     remote={"LINEMODE": True}, pending={"LINEMODE": False}
                 ),
-                0.1,
+                1.0,
             )
 
-            # server sends SLC table after MODE ACK; drain remaining bytes to reach EOF
+            # server sends SLC table after MODE ACK; close server side to get EOF
+            asyncio.get_running_loop().call_soon(srv_instance.connection_lost, None)
             result = await client_reader.read()
             assert result.startswith(IAC + SB + LINEMODE + LMODE_SLC)
 
@@ -90,7 +90,6 @@ async def test_server_demands_remote_linemode_client_demands_local(bind_host, un
         def begin_negotiation(self):
             super().begin_negotiation()
             self.writer.iac(DO, LINEMODE)
-            asyncio.get_event_loop().call_later(0.1, self.connection_lost, None)
 
     async with create_server(
         protocol_factory=ServerTestLinemode, host=bind_host, port=unused_tcp_port
@@ -113,15 +112,16 @@ async def test_server_demands_remote_linemode_client_demands_local(bind_host, un
             assert result == expect_stage2
             client_writer.write(reply_stage2)
 
-            srv_instance = await asyncio.wait_for(server.wait_for_client(), 0.1)
+            srv_instance = await asyncio.wait_for(server.wait_for_client(), 1.0)
             await asyncio.wait_for(
                 srv_instance.writer.wait_for(
                     remote={"LINEMODE": True}, pending={"LINEMODE": False}
                 ),
-                0.1,
+                1.0,
             )
 
-            # server sends SLC table after MODE ACK; drain remaining bytes to reach EOF
+            # server sends SLC table after MODE ACK; close server side to get EOF
+            asyncio.get_running_loop().call_soon(srv_instance.connection_lost, None)
             result = await client_reader.read()
             assert result.startswith(IAC + SB + LINEMODE + LMODE_SLC)
 
