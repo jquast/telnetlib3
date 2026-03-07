@@ -83,26 +83,32 @@ There are also two fingerprinting CLIs, ``telnetlib3-fingerprint`` and
 Encoding
 ~~~~~~~~
 
-The default encoding is the system locale, usually UTF-8, and, without negotiation of BINARY
-transmission, all Telnet protocol text *should* be limited to ASCII text, by strict compliance of
-Telnet.  Further, the encoding used *should* be negotiated by CHARSET.
+The default encoding of telnetlib3-client and server is set by the `locale
+<https://man7.org/linux/man-pages/man1/locale.1.html>`_.
 
-When these conditions are true, telnetlib3-server and telnetlib3-client allow connections of any
+Without negotiation of BINARY transmission, all Telnet protocol text *should* be limited to ASCII
+text, by strict compliance of Telnet.  Further, the encoding used *should* be negotiated by CHARSET
+:rfc:`2066` or by ``LANG`` using ``NEW_ENVIRON`` :rfc:`1572`.  Otherwise, a compliant telnet client
+should be limited to ASCII.
+
+When these conditions are true, telnetlib3-server and telnetlib3-client allow connections of *any*
 encoding supporting by the python language, in addition to custom ``ATASCII``, ``PETSCII``, and
-``big5bbs``.  Any server capable of negotiating CHARSET or LANG through NEW_ENVIRON is also presumed
-to support BINARY.
+``big5bbs``.  Any server capable of negotiating ``CHARSET`` or ``LANG`` through ``NEW_ENVIRON`` is
+also presumed to support BINARY.
 
-From a February 2026 `census of MUDs <https://muds.modem.xyz>`_ and `BBSs servers
+**However**, from a February 2026 `census of MUDs <https://muds.modem.xyz>`_ and `BBSs servers
 <https://bbs.modem.xyz>`_:
 
-- 2.8% of MUDs support bi-directional CHARSET
-- 0.5% of BBSs support bi-directional CHARSET.
-- 18.4% of BBSs support BINARY.
-- 3.2% of MUDs support BINARY.
+- 2.8% of MUDs and 0.5% of BBSs support bi-directional CHARSET
+- 18.4% of BBSs and 3.2% of MUDs support BINARY.
 
-For this reason, it is often required to specify the encoding, eg.!
+This means that connecting to *nearly all* BBSs or MUDs will require specifying an encoding, even if
+it happens to match your encoding.  For this reason, it is often required to specify the encoding,
+eg.::
 
     telnetlib3-client --encoding=cp437 20forbeers.com 1337
+
+    telnetlib3-client --encoding=big5bbs bbs.ccns.ncku.edu.tw 3456
 
 Raw Mode
 ~~~~~~~~
