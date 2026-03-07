@@ -5,11 +5,9 @@ import os
 import sys
 import asyncio
 import threading
+import contextlib
 import collections
 from typing import Union, Callable, Optional
-
-# 3rd party
-import blessed
 
 # local
 from .client_shell import _get_raw_mode, _telnet_client_shell_impl
@@ -28,6 +26,11 @@ class Terminal:
     ModeDef = collections.namedtuple("ModeDef", ["raw", "echo"])
 
     def __init__(self, telnet_writer: Union[TelnetWriter, TelnetWriterUnicode]) -> None:
+        """Class Initializer."""
+        # imported locally, so that this module may be safely imported by non-windows sytems without
+        # blessed, mainly just so that documentation (sphinx builds) work, doesn't matter otherwise.
+        import blessed
+
         self.telnet_writer = telnet_writer
         self._bt = blessed.Terminal()
         self._istty = self._bt.is_a_tty
@@ -64,10 +67,10 @@ class Terminal:
             return
         ctx = self._raw_ctx
         if mode.raw and ctx is None:
-            self._raw_ctx = self._bt.raw()
-            self._raw_ctx.__enter__()
+            self._raw_ctx = contextlib.ExitStack()
+            self._raw_ctx.enter_context(self._bt.raw())
         elif not mode.raw and ctx is not None:
-            ctx.__exit__(None, None, None)
+            ctx.close()
             self._raw_ctx = None
 
     def _make_raw(self, mode: "Terminal.ModeDef", suppress_echo: bool = True) -> "Terminal.ModeDef":
@@ -181,10 +184,12 @@ class Terminal:
 
         class _WindowsWriter:
             def write(self, data: bytes) -> None:
+                """Write bytes to stdout and flush immediately."""
                 sys.stdout.buffer.write(data)
                 sys.stdout.buffer.flush()
 
             async def drain(self) -> None:
+                """No-op drain; stdout writes are synchronous."""
                 pass
 
         return _WindowsWriter()
