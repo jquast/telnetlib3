@@ -8,6 +8,10 @@ lone high bytes appear immediately before ANSI escape sequences (``\x1b[...``)
 and cannot form valid Big5 pairs since ESC (0x1B) is not a valid Big5 second
 byte (which must be 0x40-0x7E or 0xA1-0xFE).
 
+Search keywords / 搜尋關鍵字:
+  PCMan, PCManX, PttBBS, DreamBBS, 批踢踢實業坊, 半形字, 半形藝術字, 連線字元,
+  Big5 BBS art, Taiwan BBS encoding
+
 Decoding algorithm:
 
 - When a Big5 lead byte (0xA1-0xFE) is followed by a valid Big5 second byte
@@ -154,7 +158,7 @@ def getregentry() -> codecs.CodecInfo:
 
 def getaliases() -> Tuple[str, ...]:
     """Return codec aliases (normalized: hyphens replaced with underscores)."""
-    return ("big5_bbs",)
+    return ("big5_bbs", "big5_pcman", "big5_pcmanx", "big5_ptt")
 
 
 def _build_cp437_encoding_table() -> dict[int, int]:
