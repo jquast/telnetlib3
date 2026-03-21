@@ -504,6 +504,7 @@ class TelnetServer(server_base.BaseServer):
                 "LINES",
                 "COLORTERM",
                 "EDITOR",
+                "IPADDRESS",
                 # Request any other VAR/USERVAR the client wants to send
                 VAR,
                 USERVAR,
