@@ -402,7 +402,7 @@ def _build_telnet_rows(term: "blessed.Terminal", data: Dict[str, Any]) -> List[T
             pairs.append(("SLC", ", ".join(parts)))
 
     env_vars = []
-    for key in ("USER", "HOME", "SHELL"):
+    for key in ("USER", "HOME", "SHELL", "IPADDRESS"):
         if proto_data.get(key) == "True":
             env_vars.append(key)
     if env_vars:

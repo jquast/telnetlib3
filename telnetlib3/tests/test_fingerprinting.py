@@ -1031,6 +1031,7 @@ def test_fingerprinting_server_on_request_environ():
     assert "HOME" in env
     assert "SHELL" in env
     assert "USER" in env
+    assert "IPADDRESS" in env
 
 
 def test_fingerprint_server_shell_has_no_protocol_factory():

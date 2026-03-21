@@ -162,6 +162,7 @@ __all__ = (
 ENVIRON_EXTENDED: list[str] = [
     "HOME",
     "SHELL",
+    "IPADDRESS",
     "SSH_CLIENT",
     "SSH_TTY",
     "HOSTNAME",
@@ -625,7 +626,7 @@ def _create_protocol_fingerprint(
     protocol = _get_protocol(writer)
     extra_dict = getattr(protocol, "_extra", {}) if protocol else {}
 
-    for key in ("HOME", "USER", "SHELL"):
+    for key in ("HOME", "USER", "SHELL", "IPADDRESS"):
         if key in extra_dict:
             fingerprint[key] = "True" if extra_dict[key] else "None"
 
@@ -796,7 +797,7 @@ def _create_session_fingerprint(writer: Union[TelnetWriter, TelnetWriterUnicode]
     if term := (writer.get_extra_info("TERM") or writer.get_extra_info("term")):
         identity["TERM"] = term
 
-    for key in ("USER", "HOME", "SHELL", "LANG", "charset"):
+    for key in ("USER", "HOME", "SHELL", "LANG", "IPADDRESS", "charset"):
         if (value := writer.get_extra_info(key)) is not None and value:
             identity[key] = value
 
