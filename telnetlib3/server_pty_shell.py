@@ -14,6 +14,7 @@ import time
 import codecs
 import struct
 import asyncio
+import shlex
 import logging
 from typing import Any, Dict, List, Tuple, Union, Callable, Optional, Awaitable, cast
 
@@ -142,8 +143,10 @@ class PTYSession:
             if exec_err_data:
                 self._handle_exec_error(exec_err_data)
 
+            cmd_str = shlex.join([self.program] + self.args)
             logger.debug(
-                "forked PTY: program=%s pid=%d fd=%d", self.program, self.child_pid, self.master_fd
+                "forked PTY: pid=%d fd=%d cmd=%s",
+                self.child_pid, self.master_fd, cmd_str,
             )
             self._setup_parent()
             pid, status = os.waitpid(self.child_pid, os.WNOHANG)

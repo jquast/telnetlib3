@@ -62,6 +62,14 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
         tmp_path = tmp.name
 
+    # Pass only the environment variables relevant to terminal detection.
+    # This prevents the server's own environment from leaking into probes.
+    _PASSTHROUGH_KEYS = (
+        "PATH", "TERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION",
+        "COLUMNS", "LINES", "COLORTERM", "LANG", "LC_ALL", "LC_CTYPE",
+    )
+    env = {k: os.environ[k] for k in _PASSTHROUGH_KEYS if k in os.environ}
+
     try:
         try:
             result = subprocess.run(
@@ -79,6 +87,7 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
                 ],
                 timeout=20,
                 check=False,
+                env=env,
             )
         except subprocess.TimeoutExpired:
             logger.warning("ucs-detect timed out (client unresponsive to probes)")
@@ -99,6 +108,48 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
 
         parsed: Dict[str, Any] = terminal_data
         return parsed
+
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+def _run_screen_scrape() -> Optional[Dict[str, Any]]:
+    """Run screen-scrape if available and return captured screen contents.
+
+    Must be called as the very first probe so that the screen contents are
+    captured before any other output corrupts them.
+    """
+    screen_scrape = shutil.which("screen-scrape")
+    if not screen_scrape:
+        return None
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    try:
+        try:
+            result = subprocess.run(
+                [screen_scrape, "--save-json", tmp_path],
+                timeout=30,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning("screen-scrape timed out")
+            return None
+
+        if result.returncode != 0:
+            logger.warning("screen-scrape exited with code %d", result.returncode)
+            return None
+
+        if not os.path.exists(tmp_path):
+            logger.warning("screen-scrape did not create output file")
+            return None
+
+        with open(tmp_path, encoding="utf-8") as f:
+            scrape_data: Dict[str, Any] = json.load(f)
+
+        return scrape_data
 
     finally:
         if os.path.exists(tmp_path):
@@ -414,6 +465,121 @@ def _build_telnet_rows(term: "blessed.Terminal", data: Dict[str, Any]) -> List[T
     return pairs
 
 
+#: Credential / secret env vars -- immediate red flag if leaked over telnet.
+_CRITICAL_ENV_VARS = frozenset({
+    # AWS credentials
+    "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+    # SSH network topology -- reveals internal IPs / jump-host identity
+    "SSH_REMOTE_HOST", "SSH_REMOTE_IP",
+    # API keys / tokens
+    "GITHUB_TOKEN", "GH_TOKEN", "GITLAB_TOKEN", "GL_TOKEN",
+    "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+    "STRIPE_SECRET_KEY", "SENDGRID_API_KEY", "HEROKU_API_KEY",
+    "NPM_TOKEN", "SLACK_TOKEN", "TWILIO_AUTH_TOKEN",
+    # Database credentials
+    "DATABASE_URL", "PGPASSWORD", "MYSQL_PWD", "REDIS_URL",
+    # Azure / GCP
+    "AZURE_CLIENT_SECRET", "GOOGLE_APPLICATION_CREDENTIALS",
+    # Generic secret patterns
+    "SECRET_KEY", "API_KEY", "PRIVATE_KEY", "JWT_SECRET",
+    # Docker credentials
+    "DOCKER_PASSWORD",
+})
+
+#: Vars that are useful for a telnet session -- everything else is oversharing.
+_USEFUL_ENV_VARS = frozenset({
+    "TERM", "TERM_PROGRAM", "COLUMNS", "LINES",
+    "COLORTERM", "LANG", "LC_ALL", "LC_CTYPE",
+    "DISPLAY", "USER", "LOGNAME",
+    "EDITOR", "VISUAL", "IPADDRESS",
+})
+
+
+def _osc8(url: str, text: str) -> str:
+    """Format an OSC 8 terminal hyperlink."""
+    return f"\x1b]8;;{url}\x1b\\{text}\x1b]8;;\x1b\\"
+
+
+_CVE_2005_0488_URL = "https://nvd.nist.gov/vuln/detail/CVE-2005-0488"
+_CVE_2005_1205_URL = "https://nvd.nist.gov/vuln/detail/CVE-2005-1205"
+_DECRQCRA_REF_URL = "https://dgl.cx/2023/09/ansi-terminal-security"
+
+
+def _build_vulnerabilities_rows(
+    term: "blessed.Terminal", data: Dict[str, Any]
+) -> List[Tuple[str, str]]:
+    """Build (key, value) tuples for the vulnerabilities table."""
+    pairs: List[Tuple[str, str]] = []
+
+    # DECRQCRA screen scraping -- no CVE assigned, reference Leadbeater 2023
+    scrape = data.get("screen-scrape")
+    ref = _osc8(_DECRQCRA_REF_URL, "No CVE (Leadbeater 2023)")
+    if scrape:
+        has_content = bool(scrape.get("screen_0") or scrape.get("screen_1"))
+        if has_content:
+            pairs.append((
+                "DECRQCRA",
+                term.bold_firebrick1("Vulnerable to screen scraping"),
+            ))
+            pairs.append(("", ref))
+        else:
+            pairs.append((
+                "DECRQCRA",
+                term.darkorange("Supported (no content captured)"),
+            ))
+            pairs.append(("", ref))
+    else:
+        pairs.append((
+            "DECRQCRA",
+            term.forestgreen("Not supported or not tested"),
+        ))
+
+    # NEW_ENVIRON oversharing -- two tiers
+    telnet_probe = data.get("telnet-probe", {})
+    session_data = telnet_probe.get("session_data", {})
+    extra = session_data.get("extra", {})
+    # Only consider uppercase keys -- lowercase keys (charset, cols, rows,
+    # tspeed, xdisploc, timeout) are internal extra_info metadata, not
+    # NEW_ENVIRON variables.
+    env_keys = [k for k in extra if k == k.upper() and extra[k]]
+    critical = sorted(k for k in env_keys if k in _CRITICAL_ENV_VARS)
+    overshared = sorted(
+        k for k in env_keys
+        if k not in _CRITICAL_ENV_VARS and k not in _USEFUL_ENV_VARS
+    )
+    if critical:
+        pairs.append((
+            "NEW_ENVIRON",
+            term.bold_firebrick1("LEAKED: " + ", ".join(critical)),
+        ))
+    if overshared:
+        pairs.append((
+            "NEW_ENVIRON",
+            term.darkorange("Oversharing: " + ", ".join(overshared)),
+        ))
+    if critical or overshared:
+        pairs.append((
+            "",
+            _osc8(_CVE_2005_0488_URL, "CVE-2005-0488") + ", "
+            + _osc8(_CVE_2005_1205_URL, "CVE-2005-1205"),
+        ))
+    if not critical and not overshared:
+        probe = telnet_probe.get("session_data", {}).get("probe", {})
+        ne_status = probe.get("NEW_ENVIRON", {}).get("status") if probe else None
+        if ne_status == "WILL":
+            pairs.append((
+                "NEW_ENVIRON",
+                term.forestgreen("Supported (no sensitive vars leaked)"),
+            ))
+        else:
+            pairs.append((
+                "NEW_ENVIRON",
+                term.dim("Not negotiated"),
+            ))
+
+    return pairs
+
+
 def _make_terminal(**kwargs: Any) -> "blessed.Terminal":
     """Create a blessed Terminal, falling back to ``ansi`` on setupterm failure."""
     from blessed import Terminal
@@ -544,7 +710,10 @@ def _display_compact_summary(
         tbl.align["Attribute"] = "r"
         tbl.align["Value"] = "l"
         tbl.header = False
-        tbl.max_table_width = max(40, (term.width or 80) - 1)
+        width = max(40, (term.width or 80) - 1)
+        tbl.max_table_width = width
+        tbl.min_width["Attribute"] = 14
+        tbl.max_width["Value"] = width - 24
         for key, value in pairs:
             tbl.add_row([key or "", value])
         return str(tbl)
@@ -558,6 +727,10 @@ def _display_compact_summary(
     telnet_rows = _build_telnet_rows(term, data)
     if telnet_rows:
         table_strings.append(make_table("Telnet", telnet_rows))
+
+    vuln_rows = _build_vulnerabilities_rows(term, data)
+    if vuln_rows:
+        table_strings.append(make_table("Vulnerabilities", vuln_rows))
 
     if not table_strings:
         return False
@@ -1234,7 +1407,14 @@ def _client_requires_ga(data: Dict[str, Any]) -> bool:
 
 
 def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
-    """Process client fingerprint: run ucs-detect if available, update file."""
+    """Process client fingerprint: run screen-scrape and ucs-detect if available."""
+    # screen-scrape MUST run first to capture screen contents before any
+    # other probe output corrupts the visible terminal state.
+    scrape_data = _run_screen_scrape()
+    if scrape_data:
+        data["screen-scrape"] = scrape_data
+        _atomic_json_write(filepath, data)
+
     if _client_requires_ga(data):
         logger.info("skipping ucs-detect: client requires GA (MUD client)")
         terminal_data = None

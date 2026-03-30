@@ -500,6 +500,7 @@ class TelnetServer(server_base.BaseServer):
                 "DISPLAY",
                 "LANG",
                 "TERM",
+                "TERM_PROGRAM",
                 "COLUMNS",
                 "LINES",
                 "COLORTERM",
