@@ -1261,7 +1261,7 @@ async def _build_checksum_lookup(
         _writer.write(s)
         await _writer.drain()
 
-        results = await _blast_collect(reader, len(batch))
+        results = await _blast_collect(reader, len(batch), timeout=5.0)
         _writer.write(f"\x1b[{cal_row};1H\x1b[2K")
         await _writer.drain()
 
@@ -1285,6 +1285,7 @@ async def _blast_scrape(
     rows: int,
     cols: int,
     lookup: dict[int, str],
+    timeout: float = 10.0,
 ) -> str:
     """Scrape entire screen contents using DECRQCRA."""
     _writer = cast(TelnetWriterUnicode, writer)
@@ -1298,7 +1299,7 @@ async def _blast_scrape(
     _writer.write("".join(queries))
     await _writer.drain()
 
-    results = await _blast_collect(reader, rows * cols, timeout=5.0)
+    results = await _blast_collect(reader, rows * cols, timeout=timeout)
 
     lines = []
     for row in range(1, rows + 1):
@@ -1369,11 +1370,15 @@ async def scrape_screen(
     await _writer.drain()
 
     if not probe_ok:
+        logger.info("scrape_screen: DECRQCRA probe failed")
         return None
 
     lookup = await _build_checksum_lookup(reader, writer, cal_row, usable_cols)
     if not lookup:
+        logger.info("scrape_screen: lookup table build failed")
         return None
+
+    logger.info("scrape_screen: lookup table built, %d entries", len(lookup))
 
     # verify round-trip
     _writer.write(f"\x1b[{cal_row};1HZ")
@@ -1391,14 +1396,22 @@ async def scrape_screen(
     await _writer.drain()
 
     if lookup.get(verify_results.get(1)) != "Z":
+        logger.info("scrape_screen: verify failed, got %r for Z",
+                     verify_results.get(1))
         return None
 
-    normal = await _blast_scrape(reader, writer, rows, cols, lookup)
+    # Scale timeout by screen size — ~5ms per cell is generous for
+    # high-latency links, with a 10s floor.
+    scrape_timeout = max(10.0, rows * cols * 0.005)
+
+    normal = await _blast_scrape(reader, writer, rows, cols, lookup,
+                                 timeout=scrape_timeout)
     normal_clean = _UNKNOWN_CKSUM_RE.sub(" ", normal)
 
     _writer.write(_ALT_SCREEN_ON)
     await _writer.drain()
-    alt = await _blast_scrape(reader, writer, rows, cols, lookup)
+    alt = await _blast_scrape(reader, writer, rows, cols, lookup,
+                              timeout=scrape_timeout)
     _writer.write(_ALT_SCREEN_OFF)
     await _writer.drain()
     alt_clean = _UNKNOWN_CKSUM_RE.sub(" ", alt)
