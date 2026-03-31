@@ -1155,7 +1155,7 @@ async def probe_cve_vulnerabilities(
 async def probe_decrqcra(
     reader: Union[TelnetReader, TelnetReaderUnicode],
     writer: Union[TelnetWriter, TelnetWriterUnicode],
-    timeout: float = 2.0,
+    timeout: float = 5.0,
 ) -> Optional[dict[str, Any]]:
     """
     Probe DECRQCRA (checksum rectangular area) screen-scrape support.
@@ -1175,6 +1175,7 @@ async def probe_decrqcra(
 
     cpr_match, _ = await _read_until_cpr(reader, timeout=timeout)
     if not cpr_match:
+        logger.info("probe_decrqcra: CPR timeout")
         return {"decrqcra": False}
 
     row = int(cpr_match.group(1))
@@ -1201,6 +1202,8 @@ async def probe_decrqcra(
     cksum_a = checksums.get(1)
     cksum_b = checksums.get(2)
     supported = cksum_a is not None and cksum_b is not None and cksum_a != cksum_b
+    logger.info("probe_decrqcra: row=%d, cksum_a=%s, cksum_b=%s, supported=%s",
+                row, cksum_a, cksum_b, supported)
     return {"decrqcra": supported}
 
 
