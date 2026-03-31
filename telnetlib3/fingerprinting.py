@@ -14,6 +14,7 @@ from __future__ import annotations
 
 # std imports
 import os
+import re
 import sys
 import json
 import time
@@ -104,10 +105,8 @@ class ProbeResult(TypedDict, total=False):
     already_negotiated: bool
 
 
-# Data directory for saving fingerprint data - None when unset (no saves)
-DATA_DIR: Optional[str] = (
-    os.environ["TELNETLIB3_DATA_DIR"] if os.environ.get("TELNETLIB3_DATA_DIR") else None
-)
+# Data directory for saving fingerprint data
+DATA_DIR: Optional[str] = os.environ.get("TELNETLIB3_DATA_DIR", "data")
 
 # Maximum files per protocol-fingerprint folder
 FINGERPRINT_MAX_FILES = int(os.environ.get("TELNETLIB3_FINGERPRINT_MAX_FILES", "1000"))
@@ -1070,6 +1069,141 @@ def _is_maybe_ms_telnet(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> boo
     return True
 
 
+# -- CVE probes ported from https://github.com/dgl/vt-houdini --
+#
+# Each test sends a sequence containing a unique marker and checks whether
+# the terminal echoes the marker back, indicating a vulnerability.
+
+_CVE_PROBES = [
+    ("CVE-2003-0063", "\x1b]0;cve20030063\a\x1b[21t", "cve20030063"),
+    ("CVE-2008-2383", "\x1bP$q;cve20082383\x1b\\", "cve20082383"),
+    ("CVE-2019-0542", "\x1bP+qfoo;\ncve20190542;aa\n\x1b\\", "cve20190542"),
+    ("CVE-2021-33477", "\x1bG", "\n"),
+    ("CVE-2022-45063", "\x1b]50;cve202245063\a\x1b]50;?\a", "cve202245063"),
+    ("CVE-2022-46387", "\x1b]0;\rcve202246387\r\a\x1b[21t", "cve202246387"),
+    ("CVE-2022-45872", "\x1bP$q;cve202245872\n\x1b\\\n\x1bP$qm\x1b\\", "cve202245872"),
+]
+
+_CPR_RE = re.compile(rb"\x1b\[(\d+);(\d+)R")
+_DECRQCRA = "\x1b[{pid};1;{r};{c};{r};{c}*y"
+_DECCKSR_RE = re.compile(rb"\x1bP(\d+)!~([0-9A-Fa-f]{4})\x1b\\")
+
+
+async def _read_until_cpr(
+    reader: Union[TelnetReader, TelnetReaderUnicode], timeout: float = 1.0
+) -> tuple[Optional[re.Match[bytes]], bytes]:
+    """
+    Read from reader until a CPR response arrives or timeout.
+
+    :returns: (cpr_match, all_data_as_bytes) — match is None on timeout.
+    """
+    buf = b""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while True:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            break
+        try:
+            data = await asyncio.wait_for(reader.read(256), timeout=remaining)
+        except (asyncio.TimeoutError, ConnectionError):
+            break
+        if not data:
+            break
+        if isinstance(data, str):
+            data = data.encode("latin-1")
+        buf += data
+        match = _CPR_RE.search(buf)
+        if match:
+            return match, buf
+    return None, buf
+
+
+async def probe_cve_vulnerabilities(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    timeout: float = 1.0,
+) -> dict[str, Any]:
+    """
+    Probe for known terminal escape sequence vulnerabilities.
+
+    Ported from vt-houdini.  Each test sends a crafted sequence with a unique marker followed by a
+    CPR boundary fence (DSR ``\\x1b[6n``). If the marker appears in the response data before the CPR
+    reply, the terminal is vulnerable.
+
+    :returns: dict mapping CVE id to echoed data (str) or False.
+    """
+    _writer = cast(TelnetWriterUnicode, writer)
+    results: dict[str, Any] = {}
+
+    for cve_id, sequence, marker in _CVE_PROBES:
+        _writer.write(sequence + "\x1b[6n")
+        await _writer.drain()
+
+        cpr_match, buf = await _read_until_cpr(reader, timeout=timeout)
+        if cpr_match:
+            buf = buf[: cpr_match.start()] + buf[cpr_match.end() :]
+
+        marker_bytes = marker.encode("latin-1")
+        if marker_bytes in buf:
+            results[cve_id] = buf.decode("latin-1", errors="replace").replace("\x1b", "\\e")
+        else:
+            results[cve_id] = False
+
+    return results
+
+
+async def probe_decrqcra(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    timeout: float = 2.0,
+) -> Optional[dict[str, Any]]:
+    """
+    Probe DECRQCRA (checksum rectangular area) screen-scrape support.
+
+    Discovers cursor row via CPR, writes ``A`` at column 1, then sprays
+    two DECRQCRA queries for the populated cell and an adjacent blank.
+    If both checksums arrive and differ, the terminal supports
+    screen-scraping via DECRQCRA.
+
+    :returns: dict with ``decrqcra`` bool, or None if CPR unsupported.
+    """
+    _writer = cast(TelnetWriterUnicode, writer)
+
+    # step 1: discover current row via CPR
+    _writer.write("\x1b[6n")
+    await _writer.drain()
+
+    cpr_match, _ = await _read_until_cpr(reader, timeout=timeout)
+    if not cpr_match:
+        return {"decrqcra": False}
+
+    row = int(cpr_match.group(1))
+
+    # step 2: write 'A' at col 1, spray two DECRQCRA queries, erase, CPR fence
+    query = (
+        f"\x1b[{row};1HA"
+        + _DECRQCRA.format(pid=1, r=row, c=1)
+        + _DECRQCRA.format(pid=2, r=row, c=2)
+        + f"\x1b[{row};1H\x1b[2K"
+        + "\x1b[6n"
+    )
+    _writer.write(query)
+    await _writer.drain()
+
+    cpr_match, buf = await _read_until_cpr(reader, timeout=timeout)
+    if cpr_match:
+        buf = buf[: cpr_match.start()] + buf[cpr_match.end() :]
+
+    checksums: dict[int, int] = {}
+    for m in _DECCKSR_RE.finditer(buf):
+        checksums[int(m.group(1))] = int(m.group(2), 16)
+
+    cksum_a = checksums.get(1)
+    cksum_b = checksums.get(2)
+    supported = cksum_a is not None and cksum_b is not None and cksum_a != cksum_b
+    return {"decrqcra": supported}
+
+
 async def fingerprinting_server_shell(
     reader: Union[TelnetReader, TelnetReaderUnicode],
     writer: Union[TelnetWriter, TelnetWriterUnicode],
@@ -1106,6 +1240,19 @@ async def fingerprinting_server_shell(
         writer.iac(DONT, LINEMODE)
         await writer.drain()
         await asyncio.sleep(0.1)
+
+    # Run CVE and DECRQCRA probes directly over the telnet connection,
+    # before launching the PTY subprocess for ucs-detect.
+    if filepath is not None:
+        cve_results = await probe_cve_vulnerabilities(reader, writer)
+        decrqcra_result = await probe_decrqcra(reader, writer)
+
+        with open(filepath, encoding="utf-8") as f:
+            data = json.load(f)
+        data["cve_results"] = cve_results
+        if decrqcra_result:
+            data["screen-scrape"] = {"decrqcra": decrqcra_result.get("decrqcra", False)}
+        _atomic_json_write(filepath, data)
 
     if filepath is not None:
         post_script = FINGERPRINT_POST_SCRIPT or "telnetlib3.fingerprinting_display"
@@ -1150,26 +1297,20 @@ def fingerprint_server_main() -> None:
     and :func:`fingerprinting_server_shell` as the default shell.
 
     Accepts ``--data-dir`` to set the fingerprint data directory.
-    Falls back to the ``TELNETLIB3_DATA_DIR`` environment variable.
+    Falls back to the ``TELNETLIB3_DATA_DIR`` environment variable,
+    then to ``data/`` in the current directory.
     """
     # local import is required to prevent circular imports
     from .server import _config, run_server, parse_server_args  # noqa: PLC0415
 
     global DATA_DIR
-    # Extract --data-dir before parse_server_args() sees argv.
-    pre = argparse.ArgumentParser(add_help=False)
-    pre.add_argument(
-        "--data-dir",
-        default=None,
-        help="directory for fingerprint data" " (default: $TELNETLIB3_DATA_DIR)",
-    )
-    pre_args, remaining = pre.parse_known_args()
-    sys.argv[1:] = remaining
 
-    if pre_args.data_dir is not None:
-        DATA_DIR = pre_args.data_dir
+    def _add_data_dir_arg(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("--data-dir", default=DATA_DIR, help="directory for fingerprint data")
 
-    args = parse_server_args()
+    args = parse_server_args(extra_args_fn=_add_data_dir_arg)
+    DATA_DIR = args.pop("data_dir")
+
     if args["shell"] is _config.shell:
         args["shell"] = fingerprinting_server_shell
     args["protocol_factory"] = FingerprintingServer

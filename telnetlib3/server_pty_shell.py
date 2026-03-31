@@ -11,10 +11,10 @@ from __future__ import annotations
 import os
 import sys
 import time
+import shlex
 import codecs
 import struct
 import asyncio
-import shlex
 import logging
 from typing import Any, Dict, List, Tuple, Union, Callable, Optional, Awaitable, cast
 
@@ -144,10 +144,7 @@ class PTYSession:
                 self._handle_exec_error(exec_err_data)
 
             cmd_str = shlex.join([self.program] + self.args)
-            logger.debug(
-                "forked PTY: pid=%d fd=%d cmd=%s",
-                self.child_pid, self.master_fd, cmd_str,
-            )
+            logger.debug("forked PTY: pid=%d fd=%d cmd=%s", self.child_pid, self.master_fd, cmd_str)
             self._setup_parent()
             pid, status = os.waitpid(self.child_pid, os.WNOHANG)
             if pid:

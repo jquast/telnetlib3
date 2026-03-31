@@ -1161,8 +1161,16 @@ async def _sigterm_handler(server: Server, _log: logging.Logger) -> None:
     server.close()
 
 
-def parse_server_args() -> Dict[str, Any]:
-    """Parse command-line arguments for telnet server."""
+def parse_server_args(
+    extra_args_fn: Optional[Callable[[argparse.ArgumentParser], None]] = None,
+) -> Dict[str, Any]:
+    """
+    Parse command-line arguments for telnet server.
+
+    :param extra_args_fn: Optional callback to add extra arguments to the parser
+        before parsing.  Used by ``telnetlib3-fingerprint-server`` to inject
+        ``--data-dir``.
+    """
     # Extract arguments after '--' for PTY program before argparse sees them
     argv = sys.argv[1:]
     pty_args = []
@@ -1271,6 +1279,8 @@ def parse_server_args() -> Dict[str, Any]:
         default=False,
         help="accept both TLS and plain telnet on the same port (requires --ssl-certfile)",
     )
+    if extra_args_fn is not None:
+        extra_args_fn(parser)
     result = vars(parser.parse_args(argv))
     result["pty_args"] = pty_args if PTY_SUPPORT else None
     # --pty-raw is a hidden no-op (raw is now the default);

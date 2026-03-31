@@ -65,8 +65,16 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
     # Pass only the environment variables relevant to terminal detection.
     # This prevents the server's own environment from leaking into probes.
     _PASSTHROUGH_KEYS = (
-        "PATH", "TERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION",
-        "COLUMNS", "LINES", "COLORTERM", "LANG", "LC_ALL", "LC_CTYPE",
+        "PATH",
+        "TERM",
+        "TERM_PROGRAM",
+        "TERM_PROGRAM_VERSION",
+        "COLUMNS",
+        "LINES",
+        "COLORTERM",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
     )
     env = {k: os.environ[k] for k in _PASSTHROUGH_KEYS if k in os.environ}
 
@@ -115,10 +123,11 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
 
 
 def _run_screen_scrape() -> Optional[Dict[str, Any]]:
-    """Run screen-scrape if available and return captured screen contents.
+    """
+    Run screen-scrape if available and return captured screen contents.
 
-    Must be called as the very first probe so that the screen contents are
-    captured before any other output corrupts them.
+    Must be called as the very first probe so that the screen contents are captured before any other
+    output corrupts them.
     """
     screen_scrape = shutil.which("screen-scrape")
     if not screen_scrape:
@@ -130,9 +139,7 @@ def _run_screen_scrape() -> Optional[Dict[str, Any]]:
     try:
         try:
             result = subprocess.run(
-                [screen_scrape, "--save-json", tmp_path],
-                timeout=30,
-                check=False,
+                [screen_scrape, "--save-json", tmp_path], timeout=30, check=False
             )
         except subprocess.TimeoutExpired:
             logger.warning("screen-scrape timed out")
@@ -466,33 +473,65 @@ def _build_telnet_rows(term: "blessed.Terminal", data: Dict[str, Any]) -> List[T
 
 
 #: Credential / secret env vars -- immediate red flag if leaked over telnet.
-_CRITICAL_ENV_VARS = frozenset({
-    # AWS credentials
-    "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
-    # SSH network topology -- reveals internal IPs / jump-host identity
-    "SSH_REMOTE_HOST", "SSH_REMOTE_IP",
-    # API keys / tokens
-    "GITHUB_TOKEN", "GH_TOKEN", "GITLAB_TOKEN", "GL_TOKEN",
-    "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
-    "STRIPE_SECRET_KEY", "SENDGRID_API_KEY", "HEROKU_API_KEY",
-    "NPM_TOKEN", "SLACK_TOKEN", "TWILIO_AUTH_TOKEN",
-    # Database credentials
-    "DATABASE_URL", "PGPASSWORD", "MYSQL_PWD", "REDIS_URL",
-    # Azure / GCP
-    "AZURE_CLIENT_SECRET", "GOOGLE_APPLICATION_CREDENTIALS",
-    # Generic secret patterns
-    "SECRET_KEY", "API_KEY", "PRIVATE_KEY", "JWT_SECRET",
-    # Docker credentials
-    "DOCKER_PASSWORD",
-})
+_CRITICAL_ENV_VARS = frozenset(
+    {
+        # AWS credentials
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        # SSH network topology -- reveals internal IPs / jump-host identity
+        "SSH_REMOTE_HOST",
+        "SSH_REMOTE_IP",
+        # API keys / tokens
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "GITLAB_TOKEN",
+        "GL_TOKEN",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "STRIPE_SECRET_KEY",
+        "SENDGRID_API_KEY",
+        "HEROKU_API_KEY",
+        "NPM_TOKEN",
+        "SLACK_TOKEN",
+        "TWILIO_AUTH_TOKEN",
+        # Database credentials
+        "DATABASE_URL",
+        "PGPASSWORD",
+        "MYSQL_PWD",
+        "REDIS_URL",
+        # Azure / GCP
+        "AZURE_CLIENT_SECRET",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        # Generic secret patterns
+        "SECRET_KEY",
+        "API_KEY",
+        "PRIVATE_KEY",
+        "JWT_SECRET",
+        # Docker credentials
+        "DOCKER_PASSWORD",
+    }
+)
 
 #: Vars that are useful for a telnet session -- everything else is oversharing.
-_USEFUL_ENV_VARS = frozenset({
-    "TERM", "TERM_PROGRAM", "COLUMNS", "LINES",
-    "COLORTERM", "LANG", "LC_ALL", "LC_CTYPE",
-    "DISPLAY", "USER", "LOGNAME",
-    "EDITOR", "VISUAL", "IPADDRESS",
-})
+_USEFUL_ENV_VARS = frozenset(
+    {
+        "TERM",
+        "TERM_PROGRAM",
+        "COLUMNS",
+        "LINES",
+        "COLORTERM",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "DISPLAY",
+        "USER",
+        "LOGNAME",
+        "EDITOR",
+        "VISUAL",
+        "IPADDRESS",
+    }
+)
 
 
 def _osc8(url: str, text: str) -> str:
@@ -508,31 +547,26 @@ _DECRQCRA_REF_URL = "https://dgl.cx/2023/09/ansi-terminal-security"
 def _build_vulnerabilities_rows(
     term: "blessed.Terminal", data: Dict[str, Any]
 ) -> List[Tuple[str, str]]:
-    """Build (key, value) tuples for the vulnerabilities table."""
+    """
+    Build (key, value) tuples for the vulnerabilities table.
+
+    Only vulnerabilities that are actually detected are shown. CVE identifiers are on the left,
+    descriptions with the affected protocol/sequence in parentheses on the right.
+    """
     pairs: List[Tuple[str, str]] = []
 
     # DECRQCRA screen scraping -- no CVE assigned, reference Leadbeater 2023
     scrape = data.get("screen-scrape")
-    ref = _osc8(_DECRQCRA_REF_URL, "No CVE (Leadbeater 2023)")
     if scrape:
-        has_content = bool(scrape.get("screen_0") or scrape.get("screen_1"))
-        if has_content:
-            pairs.append((
-                "DECRQCRA",
-                term.bold_firebrick1("Vulnerable to screen scraping"),
-            ))
-            pairs.append(("", ref))
-        else:
-            pairs.append((
-                "DECRQCRA",
-                term.darkorange("Supported (no content captured)"),
-            ))
-            pairs.append(("", ref))
-    else:
-        pairs.append((
-            "DECRQCRA",
-            term.forestgreen("Not supported or not tested"),
-        ))
+        ref = _osc8(_DECRQCRA_REF_URL, "Leadbeater 2023")
+        # New format: top-level screen-scrape.decrqcra bool from fingerprint server
+        if scrape.get("decrqcra"):
+            pairs.append((ref, term.darkorange("Supported (DECRQCRA screen scraping)")))
+        # Legacy format: screen-scrape subprocess with captured content
+        elif scrape.get("screen_0") or scrape.get("screen_1"):
+            pairs.append((ref, term.bold_firebrick1("Vulnerable to screen scraping (DECRQCRA)")))
+        elif "decrqcra" not in scrape:
+            pairs.append((ref, term.darkorange("Supported, no content captured (DECRQCRA)")))
 
     # NEW_ENVIRON oversharing -- two tiers
     telnet_probe = data.get("telnet-probe", {})
@@ -544,38 +578,39 @@ def _build_vulnerabilities_rows(
     env_keys = [k for k in extra if k == k.upper() and extra[k]]
     critical = sorted(k for k in env_keys if k in _CRITICAL_ENV_VARS)
     overshared = sorted(
-        k for k in env_keys
-        if k not in _CRITICAL_ENV_VARS and k not in _USEFUL_ENV_VARS
+        k for k in env_keys if k not in _CRITICAL_ENV_VARS and k not in _USEFUL_ENV_VARS
+    )
+    cve_refs = (
+        _osc8(_CVE_2005_0488_URL, "CVE-2005-0488")
+        + ", "
+        + _osc8(_CVE_2005_1205_URL, "CVE-2005-1205")
     )
     if critical:
-        pairs.append((
-            "NEW_ENVIRON",
-            term.bold_firebrick1("LEAKED: " + ", ".join(critical)),
-        ))
+        pairs.append(
+            (cve_refs, term.bold_firebrick1("LEAKED: " + ", ".join(critical) + " (NEW_ENVIRON)"))
+        )
     if overshared:
-        pairs.append((
-            "NEW_ENVIRON",
-            term.darkorange("Oversharing: " + ", ".join(overshared)),
-        ))
-    if critical or overshared:
-        pairs.append((
-            "",
-            _osc8(_CVE_2005_0488_URL, "CVE-2005-0488") + ", "
-            + _osc8(_CVE_2005_1205_URL, "CVE-2005-1205"),
-        ))
-    if not critical and not overshared:
-        probe = telnet_probe.get("session_data", {}).get("probe", {})
-        ne_status = probe.get("NEW_ENVIRON", {}).get("status") if probe else None
-        if ne_status == "WILL":
-            pairs.append((
-                "NEW_ENVIRON",
-                term.forestgreen("Supported (no sensitive vars leaked)"),
-            ))
-        else:
-            pairs.append((
-                "NEW_ENVIRON",
-                term.dim("Not negotiated"),
-            ))
+        pairs.append(
+            (
+                cve_refs if not critical else "",
+                term.darkorange("Oversharing: " + ", ".join(overshared) + " (NEW_ENVIRON)"),
+            )
+        )
+
+    # CVE probes from vt-houdini — check top-level (fingerprint server)
+    # then fall back to nested path (legacy ucs-detect)
+    cve_results = data.get("cve_results")
+    if not cve_results:
+        terminal_probe = data.get("terminal-probe", {})
+        cve_results = (
+            terminal_probe.get("session_data", {})
+            .get("terminal_results", {})
+            .get("cve_results", {})
+        )
+    for cve_id, result in sorted(cve_results.items()):
+        if result and result is not False:
+            escaped = result if isinstance(result, str) else repr(result)
+            pairs.append((cve_id, term.bold_firebrick1("Vulnerable: " + escaped)))
 
     return pairs
 
@@ -730,7 +765,11 @@ def _display_compact_summary(
 
     vuln_rows = _build_vulnerabilities_rows(term, data)
     if vuln_rows:
-        table_strings.append(make_table("Vulnerabilities", vuln_rows))
+        vuln_count = sum(1 for k, v in vuln_rows if k and "ulnerable" in v)
+        vuln_title = "Vulnerabilities"
+        if vuln_count:
+            vuln_title += f" ({vuln_count})"
+        table_strings.append(make_table(vuln_title, vuln_rows))
 
     if not table_strings:
         return False
@@ -1150,6 +1189,10 @@ def _show_detail(term: "blessed.Terminal", data: Dict[str, Any], section: str) -
     if section == "terminal":
         terminal_probe = data.get("terminal-probe", {})
         detail = _filter_terminal_detail(terminal_probe.get("session_data"))
+        if detail:
+            scrape = data.get("screen-scrape")
+            if scrape:
+                detail["screen_scrape"] = scrape
         title = "Terminal Probe Results"
     else:
         detail = _filter_telnet_detail(data.get("telnet-probe"))
@@ -1408,12 +1451,14 @@ def _client_requires_ga(data: Dict[str, Any]) -> bool:
 
 def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
     """Process client fingerprint: run screen-scrape and ucs-detect if available."""
-    # screen-scrape MUST run first to capture screen contents before any
-    # other probe output corrupts the visible terminal state.
-    scrape_data = _run_screen_scrape()
-    if scrape_data:
-        data["screen-scrape"] = scrape_data
-        _atomic_json_write(filepath, data)
+    # DECRQCRA screen-scrape is now handled directly by the fingerprint
+    # server (probe_decrqcra) before the PTY subprocess is launched.
+    # Only run the legacy subprocess if the server didn't already probe.
+    if "screen-scrape" not in data:
+        scrape_data = _run_screen_scrape()
+        if scrape_data:
+            data["screen-scrape"] = scrape_data
+            _atomic_json_write(filepath, data)
 
     if _client_requires_ga(data):
         logger.info("skipping ucs-detect: client requires GA (MUD client)")

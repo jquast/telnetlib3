@@ -397,8 +397,9 @@ def test_save_server_fingerprint_data_dir_none(monkeypatch):
     assert _save() is None
 
 
-def test_count_server_fingerprint_folders(tmp_path):
+def test_count_server_fingerprint_folders(tmp_path, monkeypatch):
     assert fps._count_fingerprint_folders(data_dir=str(tmp_path), side="server") == 0
+    monkeypatch.setattr(fps, "DATA_DIR", None)
     assert fps._count_fingerprint_folders(data_dir=None, side="server") == 0
     server_dir = tmp_path / "server"
     server_dir.mkdir()
@@ -533,7 +534,8 @@ def test_collect_option_states_with_environ_send():
     assert states["environ_requested"][0]["name"] == "USER"
 
 
-def test_save_fingerprint_name_no_data_dir():
+def test_save_fingerprint_name_no_data_dir(monkeypatch):
+    monkeypatch.setattr(fps, "DATA_DIR", None)
     with pytest.raises(ValueError):
         fps._save_fingerprint_name("abcd1234abcd1234", "test", None)
 

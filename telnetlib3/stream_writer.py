@@ -270,6 +270,11 @@ class TelnetWriter:
         #: for fingerprinting.  ``None`` if no SEND was received.
         self.environ_send_raw: Optional[bytes] = None
 
+        #: Remaining batches of environ keys to request (populated by
+        #: :meth:`request_environ` when the key list exceeds the SB
+        #: buffer limit of some telnet clients).
+        self._environ_batches: list = []
+
         #: Decoded MSSP variables received via subnegotiation.
         #: ``None`` until a ``SB MSSP`` payload is received and decoded.
         self.mssp_data: Optional[dict[str, str | list[str]]] = None
@@ -1190,11 +1195,18 @@ class TelnetWriter:
         self.pending_option[SB + CHARSET] = True
         return True
 
+    #: Maximum SB payload size for NEW_ENVIRON requests.  GNU inetutils
+    #: telnet has a 256-byte ``subbuffer`` that silently drops overflow,
+    #: so we batch variable requests to stay within this limit.
+    _ENVIRON_SB_MAX = 240
+
     def request_environ(self) -> bool:
         """
         Request sub-negotiation NEW_ENVIRON, :rfc:`1572`.
 
-        Returns True if request is valid for telnet state, and was sent.
+        Returns True if request is valid for telnet state, and was sent. When the request list
+        exceeds the subnegotiation buffer limit of many telnet clients (256 bytes for GNU
+        inetutils), the request is automatically split into multiple SB frames.
         """
         if not self.remote_option.enabled(NEW_ENVIRON):
             self.log.debug("cannot send SB NEW_ENVIRON SEND IS without receipt of WILL NEW_ENVIRON")
@@ -1212,14 +1224,52 @@ class TelnetWriter:
             self.log.debug("cannot send SB NEW_ENVIRON SEND IS, request pending.")
             return False
 
-        response: collections.deque[bytes] = collections.deque()
-        response.extend([IAC, SB, NEW_ENVIRON, SEND])
+        batches = self._batch_environ_keys(request_list)
+        self._environ_batches = batches[1:]
+        self._send_environ_batch(batches[0])
+        return True
+
+    def _batch_environ_keys(self, request_list: list) -> list:
+        """
+        Split environment variable request list into size-limited batches.
+
+        Each batch stays under :attr:`_ENVIRON_SB_MAX` bytes of SB payload
+        (excluding IAC SB/SE framing) to avoid overflow in clients with
+        small subnegotiation buffers.
+        """
+        # SB payload overhead: NEW_ENVIRON(1) + SEND(1)
+        overhead = 2
+        batches: list = []
+        current_batch: list = []
+        current_size = overhead
 
         for env_key in request_list:
             if env_key in (VAR, USERVAR):
-                # VAR followed by IAC,SE indicates "send all the variables",
-                # whereas USERVAR indicates "send all the user variables".
-                # In today's era, there is little distinction between them.
+                entry_size = 1
+            else:
+                encoded = _escape_environ(env_key.encode(self.environ_encoding, "replace"))
+                entry_size = 1 + len(encoded)  # VAR + key
+
+            if current_batch and current_size + entry_size > self._ENVIRON_SB_MAX:
+                batches.append(current_batch)
+                current_batch = []
+                current_size = overhead
+
+            current_batch.append(env_key)
+            current_size += entry_size
+
+        if current_batch:
+            batches.append(current_batch)
+
+        return batches
+
+    def _send_environ_batch(self, batch: list) -> None:
+        """Send a single NEW_ENVIRON SEND subnegotiation for *batch*."""
+        response: collections.deque[bytes] = collections.deque()
+        response.extend([IAC, SB, NEW_ENVIRON, SEND])
+
+        for env_key in batch:
+            if env_key in (VAR, USERVAR):
                 response.append(env_key)
             else:
                 response.extend([VAR])
@@ -1228,7 +1278,6 @@ class TelnetWriter:
         self.log.debug("request_environ: %r", b"".join(response))
         self.pending_option[SB + NEW_ENVIRON] = True
         self.send_iac(b"".join(response))
-        return True
 
     def request_xdisploc(self) -> bool:
         """
@@ -2409,6 +2458,10 @@ class TelnetWriter:
                 self.log.warning("%s IS already recv; expected INFO.", name_command(cmd))
             if env:
                 self._ext_callback[cmd](env)
+            # send next batch of environ requests, if any
+            remaining = getattr(self, "_environ_batches", None)
+            if remaining:
+                self._send_environ_batch(remaining.pop(0))
         elif opt == SEND:
             # client-side, we do _not_ honor the 'send all VAR' or 'send all
             # USERVAR' requests -- it is a small bit of a security issue.

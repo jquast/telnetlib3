@@ -751,7 +751,7 @@ def test_count_protocol_folder_files(tmp_path):
     assert fps._count_protocol_folder_files(str(tmp_path)) == 2
 
 
-def test_count_fingerprint_folders(tmp_path):
+def test_count_fingerprint_folders(tmp_path, monkeypatch):
     assert fps._count_fingerprint_folders(data_dir=str(tmp_path)) == 0
     client_dir = tmp_path / "client"
     client_dir.mkdir()
@@ -759,6 +759,7 @@ def test_count_fingerprint_folders(tmp_path):
     (client_dir / "hash2").mkdir()
     (client_dir / "not_a_dir.txt").write_text("")
     assert fps._count_fingerprint_folders(data_dir=str(tmp_path)) == 2
+    monkeypatch.setattr(fps, "DATA_DIR", None)
     assert fps._count_fingerprint_folders(data_dir=None) == 0
 
 
@@ -784,7 +785,7 @@ def test_create_session_fingerprint():
     assert fps._create_session_fingerprint(MockWriter(extra={"term": "vt100"}))["TERM"] == "vt100"
 
 
-def test_load_fingerprint_names(tmp_path):
+def test_load_fingerprint_names(tmp_path, monkeypatch):
     names_file = tmp_path / "fingerprint_names.json"
     names_file.write_text(json.dumps({"abc123": "Ghostty", "def456": "iTerm2"}))
     assert fps._load_fingerprint_names(data_dir=str(tmp_path)) == {
@@ -792,6 +793,7 @@ def test_load_fingerprint_names(tmp_path):
         "def456": "iTerm2",
     }
     assert fps._load_fingerprint_names(data_dir=str(tmp_path / "nope")) == {}
+    monkeypatch.setattr(fps, "DATA_DIR", None)
     assert fps._load_fingerprint_names(data_dir=None) == {}
 
 
@@ -1055,38 +1057,24 @@ def test_fingerprint_server_main_data_dir_flag(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["prog", "--data-dir", data_dir, "127.0.0.1", "9999"])
     monkeypatch.setattr("telnetlib3.fingerprinting.asyncio.run", _noop_asyncio_run)
 
-    captured: dict = {}
-    from telnetlib3.server import parse_server_args
-
-    original_parse = parse_server_args
-
-    def patched_parse() -> dict:
-        result = original_parse()
-        captured.update(result)
-        return result
-
-    monkeypatch.setattr("telnetlib3.server.parse_server_args", patched_parse)
-
     old_data_dir = fps.DATA_DIR
     try:
         fps.fingerprint_server_main()
         assert fps.DATA_DIR == data_dir
-        assert captured["host"] == "127.0.0.1"
-        assert captured["port"] == 9999
     finally:
         fps.DATA_DIR = old_data_dir
 
 
-def test_fingerprint_server_main_env_fallback(monkeypatch):
-    """DATA_DIR unchanged when --data-dir is not provided."""
+def test_fingerprint_server_main_default_data_dir(monkeypatch):
+    """DATA_DIR defaults to 'data' when --data-dir is not provided."""
     monkeypatch.setattr(sys, "argv", ["prog"])
     monkeypatch.setattr("telnetlib3.fingerprinting.asyncio.run", _noop_asyncio_run)
 
     old_data_dir = fps.DATA_DIR
     try:
-        fps.DATA_DIR = "/original"
+        fps.DATA_DIR = "data"
         fps.fingerprint_server_main()
-        assert fps.DATA_DIR == "/original"
+        assert fps.DATA_DIR == "data"
     finally:
         fps.DATA_DIR = old_data_dir
 
