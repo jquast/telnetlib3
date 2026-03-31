@@ -1029,13 +1029,49 @@ def _nearest_match_lines(
 
 
 def _repl_prompt(term: "blessed.Terminal") -> None:
-    """Write the REPL prompt with hotkey legend."""
+    """Write the REPL prompt with command legend."""
     bk = _bracket_key
     legend = (
         f"{bk(term, 't')}erminal or te{bk(term, 'l')}net details, "  # codespell:ignore te
-        f"{bk(term, 's')}ummarize or {bk(term, 'u')}pdate database: "
+        f"{bk(term, 's')}ummarize or {bk(term, 'u')}pdate database, "
+        f"{bk(term, 'q')}uit: "
     )
     echo(f"\r{term.clear_eos}{term.normal}{legend}")
+
+
+def _read_line(term: "blessed.Terminal") -> str:
+    """Read a line of input using term.inkey(), with basic editing."""
+    buf: List[str] = []
+    while True:
+        key = term.inkey(timeout=None)
+        if key.name in ("KEY_ENTER",) or str(key) in ("\r", "\n"):
+            echo("\n")
+            return "".join(buf)
+        if key.name == "KEY_ESCAPE":
+            echo("\n")
+            return "q"
+        if str(key) == "\x0c":
+            return "\x0c"
+        if key.name in ("KEY_BACKSPACE", "KEY_DELETE") or str(key) in ("\x7f", "\x08"):
+            if buf:
+                buf.pop()
+                echo("\b \b")
+            continue
+        ch = str(key)
+        if len(ch) == 1 and ch.isprintable():
+            buf.append(ch)
+            echo(ch)
+
+
+def _send_decrqss_probe() -> None:
+    """Send a DECRQSS query with injected command payload.
+
+    CVE-2008-2383 / CVE-2022-45872: vulnerable terminals echo unsupported
+    DECRQSS query parameters verbatim back to the input stream, enabling
+    arbitrary command injection.
+    """
+    sys.stdout.write("\x1bP$qsudo command injected\r\x1b\\")
+    sys.stdout.flush()
 
 
 def _paginate(term: "blessed.Terminal", text: str, **_kw: Any) -> None:
@@ -1328,36 +1364,39 @@ def _fingerprint_repl(
 
     while True:
         _repl_prompt(term)
-        with term.cbreak():
-            while term.inkey(timeout=0):
-                pass  # drain pending input (e.g. \r\n after keypress)
-            key = term.inkey(timeout=None)
+        while term.inkey(timeout=0):
+            pass
+        _send_decrqss_probe()
+        cmd = _read_line(term).strip().lower()
 
-        key_str = key.name or str(key)
-        if key_str in _commands:
-            echo(str(key) + "\n")
-            logger.info("%s: repl %s", ip, _commands[key_str])
-        elif key_str not in ("KEY_ENTER", "\r", "\n"):
-            logger.info("%s: repl unknown key %r", ip, key_str)
+        if "sudo command injected" in cmd:
+            echo(term.bold_red("How does it feel to live so dangerously?") + "\n")
+            logger.info("%s: repl DECRQSS injection received", ip)
+            continue
 
-        if key == "q" or key.name == "KEY_ESCAPE" or not key:
+        if cmd in _commands:
+            logger.info("%s: repl %s", ip, _commands[cmd])
+        elif cmd:
+            logger.info("%s: repl unknown command %r", ip, cmd)
+
+        if cmd == "q":
             logger.info("%s: repl logoff", ip)
             echo(f"\n{term.normal}")
             break
-        if key == "t":
+        elif cmd == "t":
             _show_detail(term, data, "terminal")
-        elif key == "l":
+        elif cmd == "l":
             _show_detail(term, data, "telnet")
-        elif key == "s":
+        elif cmd == "s":
             if db_cache is None:
                 db_cache = _build_database_entries(names)
             _show_database(term, data, db_cache)
-        elif key == "u" and filepath is not None:
+        elif cmd == "u" and filepath is not None:
             _names = names if names is not None else {}
             _prompt_fingerprint_identification(term, data, filepath, _names)
             names = _load_fingerprint_names()
             seen_counts = _build_seen_counts(data, names, term)
-        elif key == "\x0c":
+        elif cmd == "\x0c":
             echo(term.normal + term.clear)
             _display_compact_summary(data, term)
             if seen_counts:
