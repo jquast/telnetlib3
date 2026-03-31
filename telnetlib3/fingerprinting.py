@@ -1204,6 +1204,220 @@ async def probe_decrqcra(
     return {"decrqcra": supported}
 
 
+_UNKNOWN_CKSUM_RE = re.compile(r"\?0x[0-9A-Fa-f]{4}")
+_ALT_SCREEN_ON = "\x1b[?47h"
+_ALT_SCREEN_OFF = "\x1b[?47l"
+_XTCHECKSUM = "\x1b[3#y"
+_PRINTABLE = range(32, 127)
+
+
+async def _blast_collect(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    expected: int,
+    timeout: float = 2.0,
+) -> dict[int, int]:
+    """Collect DECRQCRA checksum responses, returning {pid: checksum}."""
+    results: dict[int, int] = {}
+    buf = b""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while len(results) < expected:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            break
+        try:
+            data = await asyncio.wait_for(reader.read(65536), timeout=remaining)
+        except (asyncio.TimeoutError, ConnectionError):
+            break
+        if not data:
+            break
+        if isinstance(data, str):
+            data = data.encode("latin-1")
+        buf += data
+        for m in _DECCKSR_RE.finditer(buf):
+            results[int(m.group(1))] = int(m.group(2), 16)
+        last_st = buf.rfind(b"\x1b\\")
+        if last_st >= 0:
+            buf = buf[last_st + 2:]
+    return results
+
+
+async def _build_checksum_lookup(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    cal_row: int,
+    usable_cols: int,
+) -> dict[int, str]:
+    """Build checksum-to-character lookup by calibrating printable ASCII."""
+    _writer = cast(TelnetWriterUnicode, writer)
+    table: dict[int, str] = {}
+    offset = 0
+    printable = list(_PRINTABLE)
+
+    while offset < len(printable):
+        batch = printable[offset:offset + usable_cols]
+        s = f"\x1b[{cal_row};1H" + "".join(chr(c) for c in batch)
+        for i, code in enumerate(batch):
+            s += _DECRQCRA.format(pid=code, r=cal_row, c=i + 1)
+        _writer.write(s)
+        await _writer.drain()
+
+        results = await _blast_collect(reader, len(batch))
+        _writer.write(f"\x1b[{cal_row};1H\x1b[2K")
+        await _writer.drain()
+
+        if len(results) < len(batch):
+            return {}
+
+        for code in batch:
+            cksum = results.get(code)
+            if cksum is None:
+                return {}
+            table[cksum] = chr(code)
+
+        offset += usable_cols
+
+    return table
+
+
+async def _blast_scrape(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    rows: int,
+    cols: int,
+    lookup: dict[int, str],
+) -> str:
+    """Scrape entire screen contents using DECRQCRA."""
+    _writer = cast(TelnetWriterUnicode, writer)
+    space_cksum = next((k for k, v in lookup.items() if v == " "), None)
+
+    queries = []
+    for row in range(1, rows + 1):
+        for col in range(1, cols + 1):
+            pid = (row - 1) * cols + (col - 1)
+            queries.append(_DECRQCRA.format(pid=pid, r=row, c=col))
+    _writer.write("".join(queries))
+    await _writer.drain()
+
+    results = await _blast_collect(reader, rows * cols, timeout=5.0)
+
+    lines = []
+    for row in range(1, rows + 1):
+        chars = []
+        for col in range(1, cols + 1):
+            pid = (row - 1) * cols + (col - 1)
+            cksum = results.get(pid)
+            if cksum is None or cksum == 0 or cksum == space_cksum:
+                chars.append(" ")
+            elif cksum in lookup:
+                chars.append(lookup[cksum])
+            else:
+                chars.append(f"?0x{cksum:04X}")
+        lines.append("".join(chars).rstrip())
+    return "\n".join(lines).strip()
+
+
+async def scrape_screen(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    rows: int,
+    cols: int,
+) -> Optional[dict[str, Any]]:
+    """
+    Scrape screen contents via DECRQCRA before any output is sent.
+
+    :returns: dict with screen_0 (and optionally screen_1) or None.
+    """
+    _writer = cast(TelnetWriterUnicode, writer)
+    usable_cols = cols - 1
+
+    # discover current cursor row via CPR
+    _writer.write("\x1b[6n")
+    await _writer.drain()
+    cpr_match, _ = await _read_until_cpr(reader, timeout=2.0)
+    cal_row = int(cpr_match.group(1)) if cpr_match else rows
+
+    # set XTerm-compatible checksum mode
+    _writer.write(_XTCHECKSUM)
+    await _writer.drain()
+    # drain any response
+    await asyncio.sleep(0.1)
+    while True:
+        try:
+            data = await asyncio.wait_for(reader.read(256), timeout=0.1)
+            if not data:
+                break
+        except (asyncio.TimeoutError, ConnectionError):
+            break
+
+    # probe DECRQCRA support
+    _writer.write(f"\x1b[{cal_row};1HA")
+    _writer.write(_DECRQCRA.format(pid=9999, r=cal_row, c=1))
+    _writer.write("\x1b[6n")
+    await _writer.drain()
+
+    cpr_match, buf = await _read_until_cpr(reader, timeout=2.0)
+    if cpr_match:
+        buf = buf[:cpr_match.start()] + buf[cpr_match.end():]
+
+    probe_ok = False
+    for m in _DECCKSR_RE.finditer(buf):
+        if int(m.group(1)) == 9999:
+            probe_ok = True
+            break
+
+    _writer.write(f"\x1b[{cal_row};1H\x1b[2K")
+    await _writer.drain()
+
+    if not probe_ok:
+        return None
+
+    lookup = await _build_checksum_lookup(reader, writer, cal_row, usable_cols)
+    if not lookup:
+        return None
+
+    # verify round-trip
+    _writer.write(f"\x1b[{cal_row};1HZ")
+    _writer.write(_DECRQCRA.format(pid=1, r=cal_row, c=1))
+    _writer.write("\x1b[6n")
+    await _writer.drain()
+
+    cpr_match, buf = await _read_until_cpr(reader, timeout=1.0)
+    if cpr_match:
+        buf = buf[:cpr_match.start()] + buf[cpr_match.end():]
+    verify_results: dict[int, int] = {}
+    for m in _DECCKSR_RE.finditer(buf):
+        verify_results[int(m.group(1))] = int(m.group(2), 16)
+    _writer.write(f"\x1b[{cal_row};1H\x1b[2K")
+    await _writer.drain()
+
+    if lookup.get(verify_results.get(1)) != "Z":
+        return None
+
+    normal = await _blast_scrape(reader, writer, rows, cols, lookup)
+    normal_clean = _UNKNOWN_CKSUM_RE.sub(" ", normal)
+
+    _writer.write(_ALT_SCREEN_ON)
+    await _writer.drain()
+    alt = await _blast_scrape(reader, writer, rows, cols, lookup)
+    _writer.write(_ALT_SCREEN_OFF)
+    await _writer.drain()
+    alt_clean = _UNKNOWN_CKSUM_RE.sub(" ", alt)
+
+    result: dict[str, Any] = {
+        "decrqcra": True,
+        "screen_0": normal_clean,
+        "screen_0_with_unknown_checksums": normal,
+        "rows": rows,
+        "cols": cols,
+    }
+
+    if normal_clean != alt_clean:
+        result["screen_1"] = alt_clean
+        result["screen_1_with_unknown_checksums"] = alt
+
+    return result
+
+
 async def fingerprinting_server_shell(
     reader: Union[TelnetReader, TelnetReaderUnicode],
     writer: Union[TelnetWriter, TelnetWriterUnicode],
@@ -1247,10 +1461,18 @@ async def fingerprinting_server_shell(
         cve_results = await probe_cve_vulnerabilities(reader, writer)
         decrqcra_result = await probe_decrqcra(reader, writer)
 
+        scrape_result: Optional[dict[str, Any]] = None
+        if decrqcra_result and decrqcra_result.get("decrqcra"):
+            rows = writer.get_extra_info("rows") or 25
+            cols = writer.get_extra_info("cols") or 80
+            scrape_result = await scrape_screen(reader, writer, rows, cols)
+
         with open(filepath, encoding="utf-8") as f:
             data = json.load(f)
         data["cve_results"] = cve_results
-        if decrqcra_result:
+        if scrape_result:
+            data["screen-scrape"] = scrape_result
+        elif decrqcra_result:
             data["screen-scrape"] = {"decrqcra": decrqcra_result.get("decrqcra", False)}
         _atomic_json_write(filepath, data)
 

