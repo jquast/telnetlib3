@@ -1107,14 +1107,15 @@ async def _read_until_cpr(
         if remaining <= 0:
             break
         try:
-            data = await asyncio.wait_for(reader.read(256), timeout=remaining)
+            raw = await asyncio.wait_for(reader.read(256), timeout=remaining)
         except (asyncio.TimeoutError, ConnectionError):
             break
-        if not data:
+        if not raw:
             break
-        if isinstance(data, str):
-            data = data.encode("latin-1")
-        buf += data
+        if isinstance(raw, str):
+            buf += raw.encode("latin-1")
+        else:
+            buf += cast(bytes, raw)
         match = _CPR_RE.search(buf)
         if match:
             return match, buf
@@ -1126,11 +1127,11 @@ async def probe_cve_vulnerabilities(
     writer: Union[TelnetWriter, TelnetWriterUnicode],
     timeout: float = 1.0,
 ) -> dict[str, Any]:
-    """
+    r"""
     Probe for known terminal escape sequence vulnerabilities.
 
     Ported from vt-houdini.  Each test sends a crafted sequence with a unique marker followed by a
-    CPR boundary fence (DSR ``\\x1b[6n``). If the marker appears in the response data before the CPR
+    CPR boundary fence (DSR ``\x1b[6n``). If the marker appears in the response data before the CPR
     reply, the terminal is vulnerable.
 
     :returns: dict mapping CVE id to echoed data (str) or False.
@@ -1208,7 +1209,7 @@ async def probe_sts(
     writer: Union[TelnetWriter, TelnetWriterUnicode],
     timeout: float = 1.0,
 ) -> Optional[dict[str, Any]]:
-    """
+    r"""
     Probe STS (Set Transmit State) screen content exfiltration.
 
     ECMA-48 STS (``ESC S``) causes the terminal to transmit the contents of
@@ -1221,7 +1222,7 @@ async def probe_sts(
     Currently known to be supported by SyncTERM/CTerm.  The response is
     framed as ``SOS CTerm:STS:<N>: <content> ST``.
 
-    Uses a CPR fence (DSR ``\\x1b[6n``) so unsupported terminals return
+    Uses a CPR fence (DSR ``\x1b[6n``) so unsupported terminals return
     quickly instead of waiting for the full timeout.
 
     :returns: dict with ``sts`` bool and ``content`` if successful.
@@ -1285,14 +1286,15 @@ async def scrape_screen_sts(
         if remaining <= 0:
             break
         try:
-            data = await asyncio.wait_for(reader.read(4096), timeout=remaining)
+            raw = await asyncio.wait_for(reader.read(4096), timeout=remaining)
         except (asyncio.TimeoutError, ConnectionError):
             break
-        if not data:
+        if not raw:
             break
-        if isinstance(data, str):
-            data = data.encode("latin-1")
-        buf += data
+        if isinstance(raw, str):
+            buf += raw.encode("latin-1")
+        else:
+            buf += cast(bytes, raw)
         if b"\x1b\\" in buf:
             break
 
@@ -1394,14 +1396,15 @@ async def _blast_collect(
         if remaining <= 0:
             break
         try:
-            data = await asyncio.wait_for(reader.read(65536), timeout=remaining)
+            raw = await asyncio.wait_for(reader.read(65536), timeout=remaining)
         except (asyncio.TimeoutError, ConnectionError):
             break
-        if not data:
+        if not raw:
             break
-        if isinstance(data, str):
-            data = data.encode("latin-1")
-        buf += data
+        if isinstance(raw, str):
+            buf += raw.encode("latin-1")
+        else:
+            buf += cast(bytes, raw)
         for m in _DECCKSR_RE.finditer(buf):
             results[int(m.group(1))] = int(m.group(2), 16)
         last_st = buf.rfind(b"\x1b\\")
@@ -1564,7 +1567,8 @@ async def scrape_screen(
     _writer.write(f"\x1b[{cal_row};1H\x1b[2K")
     await _writer.drain()
 
-    if lookup.get(verify_results.get(1)) != "Z":
+    verify_cksum = verify_results.get(1)
+    if verify_cksum is None or lookup.get(verify_cksum) != "Z":
         logger.info("scrape_screen: verify failed, got %r for Z", verify_results.get(1))
         return None
 

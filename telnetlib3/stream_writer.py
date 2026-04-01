@@ -7,7 +7,7 @@ import struct
 import asyncio
 import logging
 import collections
-from typing import TYPE_CHECKING, Any, Dict, Callable, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Dict, Union, Callable, Optional, Sequence
 
 if TYPE_CHECKING:  # pragma: no cover
     from .stream_reader import TelnetReader
@@ -273,7 +273,7 @@ class TelnetWriter:
         #: Remaining batches of environ keys to request (populated by
         #: :meth:`request_environ` when the key list exceeds the SB
         #: buffer limit of some telnet clients).
-        self._environ_batches: list = []
+        self._environ_batches: list[list[Union[str, bytes]]] = []
 
         #: Decoded MSSP variables received via subnegotiation.
         #: ``None`` until a ``SB MSSP`` payload is received and decoded.
@@ -1229,7 +1229,9 @@ class TelnetWriter:
         self._send_environ_batch(batches[0])
         return True
 
-    def _batch_environ_keys(self, request_list: list) -> list:
+    def _batch_environ_keys(
+        self, request_list: list[Union[str, bytes]]
+    ) -> list[list[Union[str, bytes]]]:
         """
         Split environment variable request list into size-limited batches.
 
@@ -1239,8 +1241,8 @@ class TelnetWriter:
         """
         # SB payload overhead: NEW_ENVIRON(1) + SEND(1)
         overhead = 2
-        batches: list = []
-        current_batch: list = []
+        batches: list[list[Union[str, bytes]]] = []
+        current_batch: list[Union[str, bytes]] = []
         current_size = overhead
 
         for env_key in request_list:
@@ -1263,13 +1265,13 @@ class TelnetWriter:
 
         return batches
 
-    def _send_environ_batch(self, batch: list) -> None:
+    def _send_environ_batch(self, batch: list[Union[str, bytes]]) -> None:
         """Send a single NEW_ENVIRON SEND subnegotiation for *batch*."""
         response: collections.deque[bytes] = collections.deque()
         response.extend([IAC, SB, NEW_ENVIRON, SEND])
 
         for env_key in batch:
-            if env_key in (VAR, USERVAR):
+            if isinstance(env_key, bytes):
                 response.append(env_key)
             else:
                 response.extend([VAR])

