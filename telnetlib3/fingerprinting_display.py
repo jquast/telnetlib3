@@ -28,15 +28,15 @@ if TYPE_CHECKING:
 
 # third-party (optional)
 try:
-    from tv_detect.attacks import ATTACKS as _TV_ATTACKS, SEVERITY_COLOR
+    from tv_detect.attacks import ATTACKS as _TV_ATTACKS
+    from tv_detect.attacks import SEVERITY_COLOR
     from tv_detect.attacks import DECRQSS_INJECT_MARKER as _DECRQSS_INJECT_MARKER
-    from tv_detect.execute import (
-        prompt_keys as _tv_prompt_keys,
-        execute_attack as _tv_execute_attack,
-        get_attacks_for_software as _tv_get_attacks,
-        get_vulnerability_rows as _tv_vuln_rows,
-        try_decrqss_injection,
-    )
+    from tv_detect.execute import prompt_keys as _tv_prompt_keys
+    from tv_detect.execute import execute_attack as _tv_execute_attack
+    from tv_detect.execute import try_decrqss_injection
+    from tv_detect.execute import get_vulnerability_rows as _tv_vuln_rows
+    from tv_detect.execute import get_attacks_for_software as _tv_get_attacks
+
     _HAS_TV_DETECT = True
 except ImportError:
     _HAS_TV_DETECT = False
@@ -560,7 +560,8 @@ _DECRQCRA_REF_URL = "https://dgl.cx/2023/09/ansi-terminal-security"
 
 
 def _extract_software_name(data: Dict[str, Any]) -> str:
-    """Extract terminal software name from fingerprint data.
+    """
+    Extract terminal software name from fingerprint data.
 
     Checks XTVERSION ``software_name`` first, then falls back to
     the TTYPE / TERM environment variable from the telnet probe.
@@ -626,13 +627,18 @@ def _build_vulnerabilities_rows(
     )
     if critical:
         high.append(
-            (cve_refs, f"{_high('[HIGH]')} {_high('LEAKED: ' + ', '.join(critical) + ' (NEW_ENVIRON)')}")
+            (
+                cve_refs,
+                f"{_high('[HIGH]')} {_high('LEAKED: ' + ', '.join(critical) + ' (NEW_ENVIRON)')}",
+            )
         )
     if overshared:
-        low.append((
-            cve_refs if not critical else "",
-            f"{_low('[LOW]')} {_low('Oversharing: ' + ', '.join(overshared) + ' (NEW_ENVIRON)')}",
-        ))
+        low.append(
+            (
+                cve_refs if not critical else "",
+                f"{_low('[LOW]')} {_low('Oversharing: ' + ', '.join(overshared) + ' (NEW_ENVIRON)')}",
+            )
+        )
 
     # CVE probes from vt-houdini
     cve_results = data.get("cve_results")
@@ -664,7 +670,11 @@ def _build_vulnerabilities_rows(
     if not decrqcra_probe and scrape:
         decrqcra_probe = scrape
     if decrqcra_probe:
-        ref = _osc8(_DECRQCRA_REF_URL, "Leadbeater 2023") if not (sts_probe and sts_probe.get("sts")) else ""
+        ref = (
+            _osc8(_DECRQCRA_REF_URL, "Leadbeater 2023")
+            if not (sts_probe and sts_probe.get("sts"))
+            else ""
+        )
         if decrqcra_probe.get("decrqcra"):
             if scrape and (scrape.get("screen_0") or scrape.get("screen_1")):
                 low.append((ref, f"{_low('[LOW]')} {_low('Screen scraping (DECRQCRA)')}"))
@@ -1089,10 +1099,7 @@ def _nearest_match_lines(
     return result_lines
 
 
-def _repl_prompt(
-    term: "blessed.Terminal",
-    software_name: str = "",
-) -> None:
+def _repl_prompt(term: "blessed.Terminal", software_name: str = "") -> None:
     """Write the REPL prompt with command legend."""
     bk = _bracket_key
     lines = [
@@ -1285,16 +1292,12 @@ def _filter_telnet_detail(detail: Optional[Dict[str, Any]]) -> Optional[Dict[str
     return result
 
 
+def _vuln_menu(term: "blessed.Terminal", software_name: str = "") -> Optional[str]:
+    """
+    Show vulnerability attack menu, using tv-detect.
 
-
-def _vuln_menu(
-    term: "blessed.Terminal",
-    software_name: str = "",
-) -> Optional[str]:
-    """Show vulnerability attack menu, using tv-detect.
-
-    When the terminal is a known target, show only matching attacks.
-    When unknown, show all attacks so the user can try any of them.
+    When the terminal is a known target, show only matching attacks. When unknown, show all attacks
+    so the user can try any of them.
     """
     if not _HAS_TV_DETECT:
         return None
@@ -1319,8 +1322,7 @@ def _vuln_menu(
     return None
 
 
-def _execute_crash(term: "blessed.Terminal", key: str,
-                   software_name: str = "") -> None:
+def _execute_crash(term: "blessed.Terminal", key: str, software_name: str = "") -> None:
     """Execute a vulnerability attack by key, delegating to tv-detect."""
     if not _HAS_TV_DETECT:
         return
@@ -1503,6 +1505,7 @@ def _fingerprint_repl(
                 )
                 logger.info("%s: DECRQSS injection demonstrated", ip)
                 import select
+
                 while select.select([sys.stdin.fileno()], [], [], 0.2)[0]:
                     os.read(sys.stdin.fileno(), 4096)
                 while term.inkey(timeout=0):

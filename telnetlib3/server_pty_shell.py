@@ -381,7 +381,14 @@ class PTYSession:
                 if telnet_task in done:
                     telnet_data = telnet_task.result()
                     if telnet_data:
-                        logger.debug("telnet->pty: %r", telnet_data[:200] if isinstance(telnet_data, (bytes, str)) else telnet_data)
+                        logger.debug(
+                            "telnet->pty: %r",
+                            (
+                                telnet_data[:200]
+                                if isinstance(telnet_data, (bytes, str))
+                                else telnet_data
+                            ),
+                        )
                         self._write_to_pty(telnet_data)
                     else:
                         self._closing = True

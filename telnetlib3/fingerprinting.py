@@ -1182,16 +1182,16 @@ async def probe_injection(
     # Save cursor, write marker at a known position, send DECRQSS with
     # marker embedded, erase the line, restore cursor, CPR fence.
     _writer.write(
-        "\x1b[s"                          # save cursor
-        f"\x1bP$q;{marker}\x1b\\"        # DECRQSS with marker payload
-        "\x1b[u"                          # restore cursor
-        "\x1b[6n"                         # CPR fence
+        "\x1b[s"  # save cursor
+        f"\x1bP$q;{marker}\x1b\\"  # DECRQSS with marker payload
+        "\x1b[u"  # restore cursor
+        "\x1b[6n"  # CPR fence
     )
     await _writer.drain()
 
     cpr_match, buf = await _read_until_cpr(reader, timeout=timeout)
     if cpr_match:
-        buf = buf[:cpr_match.start()] + buf[cpr_match.end():]
+        buf = buf[: cpr_match.start()] + buf[cpr_match.end() :]
 
     marker_bytes = marker.encode("latin-1")
     if marker_bytes in buf:
@@ -1234,34 +1234,27 @@ async def probe_sts(
     # Save cursor, SSA at (1,1), cursor to bottom-right, STS, restore
     # cursor, CPR fence.  Nothing is written to the screen.
     _writer.write(
-        "\x1b[s"                    # save cursor
-        "\x1b[1;1H"                # cursor to (1,1)
-        "\x1bF"                     # ESC F = SSA (Start of Selected Area)
-        f"\x1b[{rows};{cols}H"     # cursor to bottom-right
-        "\x1bS"                     # ESC S = STS (Set Transmit State)
-        "\x1b[u"                    # restore cursor
-        "\x1b[6n"                   # CPR fence
+        "\x1b[s"  # save cursor
+        "\x1b[1;1H"  # cursor to (1,1)
+        "\x1bF"  # ESC F = SSA (Start of Selected Area)
+        f"\x1b[{rows};{cols}H"  # cursor to bottom-right
+        "\x1bS"  # ESC S = STS (Set Transmit State)
+        "\x1b[u"  # restore cursor
+        "\x1b[6n"  # CPR fence
     )
     await _writer.drain()
 
     # SOS response (if any) arrives before the CPR
     cpr_match, buf = await _read_until_cpr(reader, timeout=timeout)
     if cpr_match:
-        buf = buf[:cpr_match.start()] + buf[cpr_match.end():]
+        buf = buf[: cpr_match.start()] + buf[cpr_match.end() :]
 
     match = _STS_SOS_RE.search(buf)
     if match:
         mode = match.group(1).decode("ascii", errors="replace")
         content = match.group(2)
-        logger.debug(
-            "probe_sts: STS supported, mode=%s, %d bytes",
-            mode, len(content),
-        )
-        return {
-            "sts": True,
-            "mode": int(mode),
-            "content_length": len(content),
-        }
+        logger.debug("probe_sts: STS supported, mode=%s, %d bytes", mode, len(content))
+        return {"sts": True, "mode": int(mode), "content_length": len(content)}
 
     logger.debug("probe_sts: no STS response (%d bytes received)", len(buf))
     return {"sts": False}
@@ -1282,12 +1275,7 @@ async def scrape_screen_sts(
     _writer = cast(TelnetWriterUnicode, writer)
 
     # SSA at (1,1), cursor to (rows,cols), STS
-    _writer.write(
-        "\x1b[1;1H"
-        "\x1bF"
-        f"\x1b[{rows};{cols}H"
-        "\x1bS"
-    )
+    _writer.write("\x1b[1;1H" "\x1bF" f"\x1b[{rows};{cols}H" "\x1bS")
     await _writer.drain()
 
     buf = b""
@@ -1324,12 +1312,7 @@ async def scrape_screen_sts(
         else:
             screen_rows.append("")
 
-    return {
-        "method": "sts",
-        "rows": rows,
-        "cols": cols,
-        "normal": screen_rows,
-    }
+    return {"method": "sts", "rows": rows, "cols": cols, "normal": screen_rows}
 
 
 async def probe_decrqcra(
@@ -1382,8 +1365,13 @@ async def probe_decrqcra(
     cksum_a = checksums.get(1)
     cksum_b = checksums.get(2)
     supported = cksum_a is not None and cksum_b is not None and cksum_a != cksum_b
-    logger.debug("probe_decrqcra: row=%d, cksum_a=%s, cksum_b=%s, supported=%s",
-                row, cksum_a, cksum_b, supported)
+    logger.debug(
+        "probe_decrqcra: row=%d, cksum_a=%s, cksum_b=%s, supported=%s",
+        row,
+        cksum_a,
+        cksum_b,
+        supported,
+    )
     return {"decrqcra": supported}
 
 
@@ -1395,9 +1383,7 @@ _PRINTABLE = range(32, 127)
 
 
 async def _blast_collect(
-    reader: Union[TelnetReader, TelnetReaderUnicode],
-    expected: int,
-    timeout: float = 2.0,
+    reader: Union[TelnetReader, TelnetReaderUnicode], expected: int, timeout: float = 2.0
 ) -> dict[int, int]:
     """Collect DECRQCRA checksum responses, returning {pid: checksum}."""
     results: dict[int, int] = {}
@@ -1420,7 +1406,7 @@ async def _blast_collect(
             results[int(m.group(1))] = int(m.group(2), 16)
         last_st = buf.rfind(b"\x1b\\")
         if last_st >= 0:
-            buf = buf[last_st + 2:]
+            buf = buf[last_st + 2 :]
     return results
 
 
@@ -1437,7 +1423,7 @@ async def _build_checksum_lookup(
     printable = list(_PRINTABLE)
 
     while offset < len(printable):
-        batch = printable[offset:offset + usable_cols]
+        batch = printable[offset : offset + usable_cols]
         s = f"\x1b[{cal_row};1H" + "".join(chr(c) for c in batch)
         for i, code in enumerate(batch):
             s += _DECRQCRA.format(pid=code, r=cal_row, c=i + 1)
@@ -1541,7 +1527,7 @@ async def scrape_screen(
 
     cpr_match, buf = await _read_until_cpr(reader, timeout=2.0)
     if cpr_match:
-        buf = buf[:cpr_match.start()] + buf[cpr_match.end():]
+        buf = buf[: cpr_match.start()] + buf[cpr_match.end() :]
 
     probe_ok = False
     for m in _DECCKSR_RE.finditer(buf):
@@ -1571,7 +1557,7 @@ async def scrape_screen(
 
     cpr_match, buf = await _read_until_cpr(reader, timeout=1.0)
     if cpr_match:
-        buf = buf[:cpr_match.start()] + buf[cpr_match.end():]
+        buf = buf[: cpr_match.start()] + buf[cpr_match.end() :]
     verify_results: dict[int, int] = {}
     for m in _DECCKSR_RE.finditer(buf):
         verify_results[int(m.group(1))] = int(m.group(2), 16)
@@ -1579,22 +1565,19 @@ async def scrape_screen(
     await _writer.drain()
 
     if lookup.get(verify_results.get(1)) != "Z":
-        logger.info("scrape_screen: verify failed, got %r for Z",
-                     verify_results.get(1))
+        logger.info("scrape_screen: verify failed, got %r for Z", verify_results.get(1))
         return None
 
     # Scale timeout by screen size — ~5ms per cell is generous for
     # high-latency links, with a 10s floor.
     scrape_timeout = max(10.0, rows * cols * 0.005)
 
-    normal = await _blast_scrape(reader, writer, rows, cols, lookup,
-                                 timeout=scrape_timeout)
+    normal = await _blast_scrape(reader, writer, rows, cols, lookup, timeout=scrape_timeout)
     normal_clean = _UNKNOWN_CKSUM_RE.sub(" ", normal)
 
     _writer.write(_ALT_SCREEN_ON)
     await _writer.drain()
-    alt = await _blast_scrape(reader, writer, rows, cols, lookup,
-                              timeout=scrape_timeout)
+    alt = await _blast_scrape(reader, writer, rows, cols, lookup, timeout=scrape_timeout)
     _writer.write(_ALT_SCREEN_OFF)
     await _writer.drain()
     alt_clean = _UNKNOWN_CKSUM_RE.sub(" ", alt)
