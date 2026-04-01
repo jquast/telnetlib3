@@ -95,18 +95,18 @@ from .accessories import encoding_from_lang
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
-# third-party (optional) — probe definitions from tv-detect
+# third-party (optional) — vulnerability probes from tv-detect
 try:
     from tv_detect.probes import (
-        CVE_PROBES as _CVE_PROBES,
         CPR_RE as _CPR_RE,
+        CPR_FENCE as _CPR_FENCE,
         DECCKSR_RE as _DECCKSR_RE,
         STS_SOS_RE as _STS_SOS_RE,
         DECRQCRA_TEMPLATE as _DECRQCRA,
-        CPR_FENCE as _CPR_FENCE,
-        build_injection_probe as _build_injection_probe,
-        build_sts_probe as _build_sts_probe,
-        build_decrqcra_probe as _build_decrqcra_probe,
+        probe_cve_vulnerabilities as _tv_probe_cves,
+        probe_injection as _tv_probe_injection,
+        probe_sts as _tv_probe_sts,
+        probe_decrqcra as _tv_probe_decrqcra,
     )
     _HAS_TV_DETECT = True
 except ImportError:
@@ -169,7 +169,6 @@ __all__ = (
     "fingerprinting_post_script",
     "get_client_fingerprint",
     "probe_client_capabilities",
-    "probe_sts",
     "scrape_screen_sts",
 )
 
@@ -1089,16 +1088,6 @@ def _is_maybe_ms_telnet(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> boo
 
 
 if not _HAS_TV_DETECT:
-    _CVE_PROBES = [
-        ("CVE-2003-0063", "\x1b]0;cve20030063\a\x1b[21t", "cve20030063"),
-        ("CVE-2008-2383", "\x1bP$q;cve20082383\x1b\\", "cve20082383"),
-        ("CVE-2019-0542", "\x1bP+qfoo;\ncve20190542;aa\n\x1b\\", "cve20190542"),
-        ("CVE-2021-33477", "\x1bG", "\n"),
-        ("CVE-2022-45063", "\x1b]50;cve202245063\a\x1b]50;?\a", "cve202245063"),
-        ("CVE-2022-46387", "\x1b]0;\rcve202246387\r\a\x1b[21t", "cve202246387"),
-        ("CVE-2022-45872",
-         "\x1bP$q;cve202245872\n\x1b\\\n\x1bP$qm\x1b\\", "cve202245872"),
-    ]
     _CPR_RE = re.compile(rb"\x1b\[(\d+);(\d+)R")
     _DECRQCRA = "\x1b[{pid};1;{r};{c};{r};{c}*y"
     _DECCKSR_RE = re.compile(rb"\x1bP(\d+)!~([0-9A-Fa-f]{4})\x1b\\")
@@ -1109,11 +1098,7 @@ if not _HAS_TV_DETECT:
 async def _read_until_cpr(
     reader: Union[TelnetReader, TelnetReaderUnicode], timeout: float = 1.0
 ) -> tuple[Optional[re.Match[bytes]], bytes]:
-    """
-    Read from reader until a CPR response arrives or timeout.
-
-    :returns: (cpr_match, all_data_as_bytes) — match is None on timeout.
-    """
+    """Read from reader until a CPR response arrives or timeout."""
     buf = b""
     deadline = asyncio.get_running_loop().time() + timeout
     while True:
@@ -1136,147 +1121,21 @@ async def _read_until_cpr(
     return None, buf
 
 
-async def probe_cve_vulnerabilities(
+def _make_send_recv(
     reader: Union[TelnetReader, TelnetReaderUnicode],
     writer: Union[TelnetWriter, TelnetWriterUnicode],
-    timeout: float = 1.0,
-) -> dict[str, Any]:
-    r"""
-    Probe for known terminal escape sequence vulnerabilities.
-
-    Ported from vt-houdini.  Each test sends a crafted sequence with a unique marker followed by a
-    CPR boundary fence (DSR ``\x1b[6n``). If the marker appears in the response data before the CPR
-    reply, the terminal is vulnerable.
-
-    :returns: dict mapping CVE id to echoed data (str) or False.
-    """
+) -> Any:
+    """Create a send_recv callback for tv-detect probes."""
     _writer = cast(TelnetWriterUnicode, writer)
-    results: dict[str, Any] = {}
 
-    for cve_id, sequence, marker in _CVE_PROBES:
-        _writer.write(sequence + _CPR_FENCE)
+    async def send_recv(
+        sequence: str, timeout: float
+    ) -> tuple[Optional[re.Match[bytes]], bytes]:
+        _writer.write(sequence)
         await _writer.drain()
+        return await _read_until_cpr(reader, timeout)
 
-        cpr_match, buf = await _read_until_cpr(reader, timeout=timeout)
-        if cpr_match:
-            buf = buf[: cpr_match.start()] + buf[cpr_match.end() :]
-
-        marker_bytes = marker.encode("latin-1")
-        if marker_bytes in buf:
-            results[cve_id] = buf.decode("latin-1", errors="replace").replace("\x1b", "\\e")
-        else:
-            results[cve_id] = False
-
-    return results
-
-
-async def probe_injection(
-    reader: Union[TelnetReader, TelnetReaderUnicode],
-    writer: Union[TelnetWriter, TelnetWriterUnicode],
-    timeout: float = 2.0,
-) -> dict[str, Any]:
-    """
-    Probe for DECRQSS response injection.
-
-    Sends a DECRQSS query containing a unique marker. Vulnerable terminals
-    echo the marker back in the DCS response, allowing an attacker to inject
-    arbitrary data into the terminal's response stream. The injected data
-    is then interpreted as keyboard input by the application reading from
-    the terminal.
-
-    This is the root cause of CVE-2008-2383 and CVE-2022-45872. The probe
-    writes a marker, triggers the injection, erases the marker, and checks
-    if the terminal echoed it back.
-
-    :returns: dict with ``injectable`` bool and echoed ``content`` if vulnerable.
-    """
-    _writer = cast(TelnetWriterUnicode, writer)
-
-    marker = "INJECT_9x7k"
-
-    if _HAS_TV_DETECT:
-        sequence = _build_injection_probe(marker) + _CPR_FENCE
-    else:
-        sequence = (
-            "\x1b[s"
-            f"\x1bP$q;{marker}\x1b\\"
-            "\x1b[u"
-            "\x1b[6n"
-        )
-    _writer.write(sequence)
-    await _writer.drain()
-
-    cpr_match, buf = await _read_until_cpr(reader, timeout=timeout)
-    if cpr_match:
-        buf = buf[: cpr_match.start()] + buf[cpr_match.end() :]
-
-    marker_bytes = marker.encode("latin-1")
-    if marker_bytes in buf:
-        content = buf.decode("latin-1", errors="replace").replace("\x1b", "\\e")
-        logger.debug("probe_injection: marker found in response: %s", content[:120])
-        return {"injectable": True, "content": content}
-
-    logger.debug("probe_injection: marker not echoed (%d bytes)", len(buf))
-    return {"injectable": False}
-
-
-async def probe_sts(
-    reader: Union[TelnetReader, TelnetReaderUnicode],
-    writer: Union[TelnetWriter, TelnetWriterUnicode],
-    timeout: float = 1.0,
-) -> Optional[dict[str, Any]]:
-    r"""
-    Probe STS (Set Transmit State) screen content exfiltration.
-
-    ECMA-48 STS (``ESC S``) causes the terminal to transmit the contents of
-    the selected area back to the server.  The selected area is defined by
-    SSA (``ESC F``) at the start and the cursor position at the time of STS.
-
-    Unlike DECRQCRA (which returns a checksum), STS returns the **actual
-    screen content** — a full screen-scraping attack.
-
-    Currently known to be supported by SyncTERM/CTerm.  The response is
-    framed as ``SOS CTerm:STS:<N>: <content> ST``.
-
-    Uses a CPR fence (DSR ``\x1b[6n``) so unsupported terminals return
-    quickly instead of waiting for the full timeout.
-
-    :returns: dict with ``sts`` bool and ``content`` if successful.
-    """
-    _writer = cast(TelnetWriterUnicode, writer)
-
-    rows = writer.get_extra_info("rows") or 25
-    cols = writer.get_extra_info("cols") or 80
-
-    if _HAS_TV_DETECT:
-        sequence = _build_sts_probe(rows, cols) + _CPR_FENCE
-    else:
-        sequence = (
-            "\x1b[s"
-            "\x1b[1;1H"
-            "\x1bF"
-            f"\x1b[{rows};{cols}H"
-            "\x1bS"
-            "\x1b[u"
-            "\x1b[6n"
-        )
-    _writer.write(sequence)
-    await _writer.drain()
-
-    # SOS response (if any) arrives before the CPR
-    cpr_match, buf = await _read_until_cpr(reader, timeout=timeout)
-    if cpr_match:
-        buf = buf[: cpr_match.start()] + buf[cpr_match.end() :]
-
-    match = _STS_SOS_RE.search(buf)
-    if match:
-        mode = match.group(1).decode("ascii", errors="replace")
-        content = match.group(2)
-        logger.debug("probe_sts: STS supported, mode=%s, %d bytes", mode, len(content))
-        return {"sts": True, "mode": int(mode), "content_length": len(content)}
-
-    logger.debug("probe_sts: no STS response (%d bytes received)", len(buf))
-    return {"sts": False}
+    return send_recv
 
 
 async def scrape_screen_sts(
@@ -1333,69 +1192,6 @@ async def scrape_screen_sts(
             screen_rows.append("")
 
     return {"method": "sts", "rows": rows, "cols": cols, "normal": screen_rows}
-
-
-async def probe_decrqcra(
-    reader: Union[TelnetReader, TelnetReaderUnicode],
-    writer: Union[TelnetWriter, TelnetWriterUnicode],
-    timeout: float = 5.0,
-) -> Optional[dict[str, Any]]:
-    """
-    Probe DECRQCRA (checksum rectangular area) screen-scrape support.
-
-    Discovers cursor row via CPR, writes ``A`` at column 1, then sprays
-    two DECRQCRA queries for the populated cell and an adjacent blank.
-    If both checksums arrive and differ, the terminal supports
-    screen-scraping via DECRQCRA.
-
-    :returns: dict with ``decrqcra`` bool, or None if CPR unsupported.
-    """
-    _writer = cast(TelnetWriterUnicode, writer)
-
-    # step 1: discover current row via CPR
-    _writer.write(_CPR_FENCE)
-    await _writer.drain()
-
-    cpr_match, _ = await _read_until_cpr(reader, timeout=timeout)
-    if not cpr_match:
-        logger.debug("probe_decrqcra: CPR timeout")
-        return {"decrqcra": False}
-
-    row = int(cpr_match.group(1))
-
-    # step 2: write 'A' at col 1, spray two DECRQCRA queries, erase, CPR fence
-    if _HAS_TV_DETECT:
-        query = _build_decrqcra_probe(row) + _CPR_FENCE
-    else:
-        query = (
-            f"\x1b[{row};1HA"
-            + _DECRQCRA.format(pid=1, r=row, c=1)
-            + _DECRQCRA.format(pid=2, r=row, c=2)
-            + f"\x1b[{row};1H\x1b[2K"
-            + "\x1b[6n"
-        )
-    _writer.write(query)
-    await _writer.drain()
-
-    cpr_match, buf = await _read_until_cpr(reader, timeout=timeout)
-    if cpr_match:
-        buf = buf[: cpr_match.start()] + buf[cpr_match.end() :]
-
-    checksums: dict[int, int] = {}
-    for m in _DECCKSR_RE.finditer(buf):
-        checksums[int(m.group(1))] = int(m.group(2), 16)
-
-    cksum_a = checksums.get(1)
-    cksum_b = checksums.get(2)
-    supported = cksum_a is not None and cksum_b is not None and cksum_a != cksum_b
-    logger.debug(
-        "probe_decrqcra: row=%d, cksum_a=%s, cksum_b=%s, supported=%s",
-        row,
-        cksum_a,
-        cksum_b,
-        supported,
-    )
-    return {"decrqcra": supported}
 
 
 _UNKNOWN_CKSUM_RE = re.compile(r"\?0x[0-9A-Fa-f]{4}")
@@ -1662,23 +1458,24 @@ async def fingerprinting_server_shell(
     # Run CVE, injection, STS, and DECRQCRA probes directly over the telnet
     # connection, before launching the PTY subprocess for ucs-detect.
     if filepath is not None:
-        cve_results = await probe_cve_vulnerabilities(reader, writer)
+        send_recv = _make_send_recv(reader, writer)
+        cve_results = await _tv_probe_cves(send_recv)
 
         # Injection probe — DECRQSS response echo-back
-        injection_result = await probe_injection(reader, writer)
+        injection_result = await _tv_probe_injection(send_recv)
 
         # STS probe — faster than DECRQCRA, returns actual content (SyncTERM)
-        sts_result = await probe_sts(reader, writer)
-
-        scrape_result: Optional[dict[str, Any]] = None
         rows = writer.get_extra_info("rows") or 25
         cols = writer.get_extra_info("cols") or 80
+        sts_result = await _tv_probe_sts(send_recv, rows=rows, cols=cols)
+
+        scrape_result: Optional[dict[str, Any]] = None
 
         if sts_result and sts_result.get("sts"):
             scrape_result = await scrape_screen_sts(reader, writer, rows, cols)
 
         # Always probe DECRQCRA too, for tracking/reporting
-        decrqcra_result = await probe_decrqcra(reader, writer)
+        decrqcra_result = await _tv_probe_decrqcra(send_recv)
         if not scrape_result and decrqcra_result and decrqcra_result.get("decrqcra"):
             scrape_result = await scrape_screen(reader, writer, rows, cols)
 
