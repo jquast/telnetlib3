@@ -95,6 +95,23 @@ from .accessories import encoding_from_lang
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
+# third-party (optional) — probe definitions from tv-detect
+try:
+    from tv_detect.probes import (
+        CVE_PROBES as _CVE_PROBES,
+        CPR_RE as _CPR_RE,
+        DECCKSR_RE as _DECCKSR_RE,
+        STS_SOS_RE as _STS_SOS_RE,
+        DECRQCRA_TEMPLATE as _DECRQCRA,
+        CPR_FENCE as _CPR_FENCE,
+        build_injection_probe as _build_injection_probe,
+        build_sts_probe as _build_sts_probe,
+        build_decrqcra_probe as _build_decrqcra_probe,
+    )
+    _HAS_TV_DETECT = True
+except ImportError:
+    _HAS_TV_DETECT = False
+
 
 class ProbeResult(TypedDict, total=False):
     """Result of probing a single telnet option."""
@@ -1071,25 +1088,22 @@ def _is_maybe_ms_telnet(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> boo
     return True
 
 
-# -- CVE probes ported from https://github.com/dgl/vt-houdini --
-#
-# Each test sends a sequence containing a unique marker and checks whether
-# the terminal echoes the marker back, indicating a vulnerability.
-
-_CVE_PROBES = [
-    ("CVE-2003-0063", "\x1b]0;cve20030063\a\x1b[21t", "cve20030063"),
-    ("CVE-2008-2383", "\x1bP$q;cve20082383\x1b\\", "cve20082383"),
-    ("CVE-2019-0542", "\x1bP+qfoo;\ncve20190542;aa\n\x1b\\", "cve20190542"),
-    ("CVE-2021-33477", "\x1bG", "\n"),
-    ("CVE-2022-45063", "\x1b]50;cve202245063\a\x1b]50;?\a", "cve202245063"),
-    ("CVE-2022-46387", "\x1b]0;\rcve202246387\r\a\x1b[21t", "cve202246387"),
-    ("CVE-2022-45872", "\x1bP$q;cve202245872\n\x1b\\\n\x1bP$qm\x1b\\", "cve202245872"),
-]
-
-_CPR_RE = re.compile(rb"\x1b\[(\d+);(\d+)R")
-_DECRQCRA = "\x1b[{pid};1;{r};{c};{r};{c}*y"
-_DECCKSR_RE = re.compile(rb"\x1bP(\d+)!~([0-9A-Fa-f]{4})\x1b\\")
-_STS_SOS_RE = re.compile(rb"\x1bXCTerm:STS:(\d+):(.*?)\x1b\\", re.DOTALL)
+if not _HAS_TV_DETECT:
+    _CVE_PROBES = [
+        ("CVE-2003-0063", "\x1b]0;cve20030063\a\x1b[21t", "cve20030063"),
+        ("CVE-2008-2383", "\x1bP$q;cve20082383\x1b\\", "cve20082383"),
+        ("CVE-2019-0542", "\x1bP+qfoo;\ncve20190542;aa\n\x1b\\", "cve20190542"),
+        ("CVE-2021-33477", "\x1bG", "\n"),
+        ("CVE-2022-45063", "\x1b]50;cve202245063\a\x1b]50;?\a", "cve202245063"),
+        ("CVE-2022-46387", "\x1b]0;\rcve202246387\r\a\x1b[21t", "cve202246387"),
+        ("CVE-2022-45872",
+         "\x1bP$q;cve202245872\n\x1b\\\n\x1bP$qm\x1b\\", "cve202245872"),
+    ]
+    _CPR_RE = re.compile(rb"\x1b\[(\d+);(\d+)R")
+    _DECRQCRA = "\x1b[{pid};1;{r};{c};{r};{c}*y"
+    _DECCKSR_RE = re.compile(rb"\x1bP(\d+)!~([0-9A-Fa-f]{4})\x1b\\")
+    _STS_SOS_RE = re.compile(rb"\x1bXCTerm:STS:(\d+):(.*?)\x1b\\", re.DOTALL)
+    _CPR_FENCE = "\x1b[6n"
 
 
 async def _read_until_cpr(
@@ -1140,7 +1154,7 @@ async def probe_cve_vulnerabilities(
     results: dict[str, Any] = {}
 
     for cve_id, sequence, marker in _CVE_PROBES:
-        _writer.write(sequence + "\x1b[6n")
+        _writer.write(sequence + _CPR_FENCE)
         await _writer.drain()
 
         cpr_match, buf = await _read_until_cpr(reader, timeout=timeout)
@@ -1180,14 +1194,16 @@ async def probe_injection(
 
     marker = "INJECT_9x7k"
 
-    # Save cursor, write marker at a known position, send DECRQSS with
-    # marker embedded, erase the line, restore cursor, CPR fence.
-    _writer.write(
-        "\x1b[s"  # save cursor
-        f"\x1bP$q;{marker}\x1b\\"  # DECRQSS with marker payload
-        "\x1b[u"  # restore cursor
-        "\x1b[6n"  # CPR fence
-    )
+    if _HAS_TV_DETECT:
+        sequence = _build_injection_probe(marker) + _CPR_FENCE
+    else:
+        sequence = (
+            "\x1b[s"
+            f"\x1bP$q;{marker}\x1b\\"
+            "\x1b[u"
+            "\x1b[6n"
+        )
+    _writer.write(sequence)
     await _writer.drain()
 
     cpr_match, buf = await _read_until_cpr(reader, timeout=timeout)
@@ -1232,17 +1248,19 @@ async def probe_sts(
     rows = writer.get_extra_info("rows") or 25
     cols = writer.get_extra_info("cols") or 80
 
-    # Save cursor, SSA at (1,1), cursor to bottom-right, STS, restore
-    # cursor, CPR fence.  Nothing is written to the screen.
-    _writer.write(
-        "\x1b[s"  # save cursor
-        "\x1b[1;1H"  # cursor to (1,1)
-        "\x1bF"  # ESC F = SSA (Start of Selected Area)
-        f"\x1b[{rows};{cols}H"  # cursor to bottom-right
-        "\x1bS"  # ESC S = STS (Set Transmit State)
-        "\x1b[u"  # restore cursor
-        "\x1b[6n"  # CPR fence
-    )
+    if _HAS_TV_DETECT:
+        sequence = _build_sts_probe(rows, cols) + _CPR_FENCE
+    else:
+        sequence = (
+            "\x1b[s"
+            "\x1b[1;1H"
+            "\x1bF"
+            f"\x1b[{rows};{cols}H"
+            "\x1bS"
+            "\x1b[u"
+            "\x1b[6n"
+        )
+    _writer.write(sequence)
     await _writer.drain()
 
     # SOS response (if any) arrives before the CPR
@@ -1335,7 +1353,7 @@ async def probe_decrqcra(
     _writer = cast(TelnetWriterUnicode, writer)
 
     # step 1: discover current row via CPR
-    _writer.write("\x1b[6n")
+    _writer.write(_CPR_FENCE)
     await _writer.drain()
 
     cpr_match, _ = await _read_until_cpr(reader, timeout=timeout)
@@ -1346,13 +1364,16 @@ async def probe_decrqcra(
     row = int(cpr_match.group(1))
 
     # step 2: write 'A' at col 1, spray two DECRQCRA queries, erase, CPR fence
-    query = (
-        f"\x1b[{row};1HA"
-        + _DECRQCRA.format(pid=1, r=row, c=1)
-        + _DECRQCRA.format(pid=2, r=row, c=2)
-        + f"\x1b[{row};1H\x1b[2K"
-        + "\x1b[6n"
-    )
+    if _HAS_TV_DETECT:
+        query = _build_decrqcra_probe(row) + _CPR_FENCE
+    else:
+        query = (
+            f"\x1b[{row};1HA"
+            + _DECRQCRA.format(pid=1, r=row, c=1)
+            + _DECRQCRA.format(pid=2, r=row, c=2)
+            + f"\x1b[{row};1H\x1b[2K"
+            + "\x1b[6n"
+        )
     _writer.write(query)
     await _writer.drain()
 

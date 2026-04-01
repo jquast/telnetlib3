@@ -2461,9 +2461,8 @@ class TelnetWriter:
             if env:
                 self._ext_callback[cmd](env)
             # send next batch of environ requests, if any
-            remaining = getattr(self, "_environ_batches", None)
-            if remaining:
-                self._send_environ_batch(remaining.pop(0))
+            if self._environ_batches:
+                self._send_environ_batch(self._environ_batches.pop(0))
         elif opt == SEND:
             # client-side, we do _not_ honor the 'send all VAR' or 'send all
             # USERVAR' requests -- it is a small bit of a security issue.

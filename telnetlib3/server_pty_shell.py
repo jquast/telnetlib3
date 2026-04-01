@@ -381,7 +381,8 @@ class PTYSession:
                 if telnet_task in done:
                     telnet_data = telnet_task.result()
                     if telnet_data:
-                        logger.debug(
+                        logger.log(
+                            5,
                             "telnet->pty: %r",
                             (
                                 telnet_data[:200]
@@ -488,7 +489,7 @@ class PTYSession:
     def _flush_remaining(self) -> None:
         """Flush remaining buffer after EAGAIN (partial lines, prompts, etc.)."""
         if self._output_buffer and not self._in_sync_update:
-            logger.debug("flush_remaining: %r", self._output_buffer[:200])
+            logger.log(5, "flush_remaining: %r", self._output_buffer[:200])
             self._flush_output(self._output_buffer)
             self._output_buffer = b""
         self._schedule_ga()
