@@ -125,7 +125,7 @@ def hexdump(data: bytes, prefix: str = "") -> str:
 
 
 _DEFAULT_LOGFMT = " ".join(
-    ("%(asctime)s", "%(levelname)s", "%(filename)s:%(lineno)d", "%(message)s")
+    ("%(levelname)s", "%(filename)s:%(lineno)d", "%(message)s")
 )
 
 

@@ -98,11 +98,15 @@ from .stream_writer import TelnetWriter, TelnetWriterUnicode
 # third-party (optional) — vulnerability probes from tv-detect
 try:
     from tv_detect.probes import (
+        CVE_PROBES as _CVE_PROBES,
         CPR_RE as _CPR_RE,
         CPR_FENCE as _CPR_FENCE,
         DECCKSR_RE as _DECCKSR_RE,
         STS_SOS_RE as _STS_SOS_RE,
         DECRQCRA_TEMPLATE as _DECRQCRA,
+        build_injection_probe as _build_injection_probe,
+        build_sts_probe as _build_sts_probe,
+        build_decrqcra_probe as _build_decrqcra_probe,
         probe_cve_vulnerabilities as _tv_probe_cves,
         probe_injection as _tv_probe_injection,
         probe_sts as _tv_probe_sts,
@@ -300,6 +304,26 @@ class FingerprintingServer(FingerprintingTelnetServer, TelnetServer):
     Used as the default ``protocol_factory`` by
     :func:`fingerprint_server_main` / ``telnetlib3-fingerprint-server`` CLI.
     """
+
+    def connection_lost(self, exc: Optional[Exception]) -> None:
+        """Log connection close/loss with detected terminal label."""
+        term_label = getattr(self.writer, '_tv_term_label', None) if self.writer else None
+        suffix = f" {term_label}" if term_label else ""
+        if not self._closing:
+            if exc is None:
+                logger.info("Connection closed for %s%s", self, suffix)
+            else:
+                logger.info("Connection lost for %s: %s%s", self, exc, suffix)
+            self._closing = True
+            if exc is None:
+                self.reader.feed_eof()
+            else:
+                self.reader.set_exception(exc)
+            for task in self._tasks:
+                try:
+                    task.cancel()
+                except Exception:
+                    pass
 
 
 # Timeout for probe_client_capabilities in _run_probe (seconds)
@@ -822,7 +846,7 @@ def _save_fingerprint_to_dir(
                 FINGERPRINT_MAX_FILES,
             )
             return None
-        logger.info("connection for %s fingerprint %s", side, protocol_hash)
+        logger.debug("connection for %s fingerprint %s", side, protocol_hash)
 
     filepath = os.path.join(target_dir, f"{session_hash}.json")
 
@@ -1138,6 +1162,60 @@ def _make_send_recv(
     return send_recv
 
 
+async def _shielded_probe(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    writer: Union[TelnetWriter, TelnetWriterUnicode],
+    number: int,
+    name: str,
+    description: str,
+    sequence: str,
+    timeout: float = 1.0,
+) -> tuple[Optional[re.Match[bytes]], bytes]:
+    """Run a probe with shielded display: heading, description, and CPR cloaking.
+
+    Writes a heading with ``=`` underline, description, and ``payload:`` label,
+    then records the cursor position via CPR, sends the probe sequence, and
+    restores the cursor to overwrite any visible payload output with ``ok``.
+
+    :param reader: Telnet reader for CPR responses.
+    :param writer: Telnet writer for display and probe output.
+    :param number: Display number for this probe.
+    :param name: Short probe name (used as heading).
+    :param description: One-line description shown below the heading.
+    :param sequence: Raw escape sequence payload (CPR fence appended automatically).
+    :param timeout: Seconds to wait for probe CPR response.
+    :returns: ``(cpr_match, buf)`` — same as :func:`_read_until_cpr`.
+    """
+    _writer = cast(TelnetWriterUnicode, writer)
+
+    heading = f"{number}. {name}"
+    underline = "=" * len(heading)
+    _writer.write(f"{heading}\r\n{underline}\r\n\r\n{description}\r\npayload: ")
+    await _writer.drain()
+
+    # Record cursor position via CPR.
+    _writer.write("\x1b[6n")
+    await _writer.drain()
+    pos_match, _ = await _read_until_cpr(reader, 1.0)
+    saved_row = saved_col = None
+    if pos_match:
+        saved_row = int(pos_match.group(1))
+        saved_col = int(pos_match.group(2))
+
+    # Send probe payload + CPR fence.
+    _writer.write(sequence + _CPR_FENCE)
+    await _writer.drain()
+    cpr_match, buf = await _read_until_cpr(reader, timeout)
+
+    # Restore cursor position, overwrite with "ok", clear to end of line.
+    if saved_row is not None:
+        _writer.write(f"\x1b[{saved_row};{saved_col}H")
+    _writer.write("ok\x1b[K\r\n")
+    await _writer.drain()
+
+    return cpr_match, buf
+
+
 async def scrape_screen_sts(
     reader: Union[TelnetReader, TelnetReaderUnicode],
     writer: Union[TelnetWriter, TelnetWriterUnicode],
@@ -1434,6 +1512,23 @@ async def fingerprinting_server_shell(
     """
     from .server_pty_shell import pty_shell
 
+    async def _handle_telnet_attack(
+        _writer: TelnetWriterUnicode,
+        attack_key: str,
+    ) -> None:
+        """Execute a telnet-layer attack by key."""
+        if not _HAS_TV_DETECT:
+            return
+        from .attacks import ATTACKS
+        attack = ATTACKS.get(attack_key)
+        if not attack:
+            return
+        handler = attack.get("handler")
+        if handler == "telnet_new_environ_user":
+            logger.info("executing telnet-layer attack: NEW_ENVIRON USER")
+            _writer._send_environ_batch(["USER"])
+            await _writer.drain()
+
     writer = cast(TelnetWriterUnicode, writer)
     probe_results, probe_time = await _run_probe(writer, verbose=False)
 
@@ -1447,6 +1542,9 @@ async def fingerprinting_server_shell(
     session_fp = _build_session_fingerprint(writer, probe_results, probe_time)
     filepath = _save_fingerprint_data(writer, probe_results, probe_time, session_fp)
 
+    # Store TTYPE for connection_lost logging
+    writer._tv_term_label = repr((writer.get_extra_info("TERM") or "unknown").lower())
+
     # Disable LINEMODE if it was negotiated - stay in kludge mode (SGA+ECHO)
     # for PTY shell. LINEMODE causes echo loops with GNU telnet when running
     # ucs-detect (client's LIT_ECHO + PTY echo = feedback loop).
@@ -1455,56 +1553,124 @@ async def fingerprinting_server_shell(
         await writer.drain()
         await asyncio.sleep(0.1)
 
-    # Run CVE, injection, STS, and DECRQCRA probes directly over the telnet
-    # connection, before launching the PTY subprocess for ucs-detect.
-    if filepath is not None:
-        send_recv = _make_send_recv(reader, writer)
-        cve_results = await _tv_probe_cves(send_recv)
+    client_has_sga = writer.remote_option.get(SGA, False)
 
-        # Injection probe — DECRQSS response echo-back
-        injection_result = await _tv_probe_injection(send_recv)
+    # Detect MUD clients early to skip escape-sequence probes
+    _MUD_OPTIONS = {AARDWOLF, GMCP, MSDP, MXP, MSSP, ATCP}
+    is_mud_client = any(writer.remote_option.get(opt, False)
+                        for opt in _MUD_OPTIONS)
+    if not is_mud_client:
+        for n in range(1, 10):
+            ttype_n = (writer.get_extra_info(f"ttype{n}") or "").upper()
+            if not ttype_n:
+                break
+            if ttype_n.startswith("MTTS "):
+                is_mud_client = True
+                break
 
-        # STS probe — faster than DECRQCRA, returns actual content (SyncTERM)
-        rows = writer.get_extra_info("rows") or 25
-        cols = writer.get_extra_info("cols") or 80
-        sts_result = await _tv_probe_sts(send_recv, rows=rows, cols=cols)
+    try:
+        if filepath is not None and _HAS_TV_DETECT and not is_mud_client:
+            # Run CVE, injection, STS, and DECRQCRA probes over the telnet
+            # connection before launching the PTY subprocess.
+            _writer = cast(TelnetWriterUnicode, writer)
+            send_recv = _make_send_recv(reader, writer)
+            logger.debug("probe: CVE vulnerabilities")
+            cve_results = await _tv_probe_cves(send_recv)
+            logger.debug("probe: CVE done, %d results", len(cve_results))
 
-        scrape_result: Optional[dict[str, Any]] = None
+            logger.debug("probe: injection (DECRQSS)")
+            injection_result = await _tv_probe_injection(send_recv)
+            logger.debug("probe: injection done, result=%s",
+                         injection_result.get("injectable") if injection_result else None)
 
-        if sts_result and sts_result.get("sts"):
-            scrape_result = await scrape_screen_sts(reader, writer, rows, cols)
+            rows = writer.get_extra_info("rows") or 25
+            cols = writer.get_extra_info("cols") or 80
+            logger.debug("probe: STS screen scrape")
+            sts_result = await _tv_probe_sts(send_recv, rows=rows, cols=cols)
+            logger.debug("probe: STS done, result=%s",
+                         sts_result.get("sts") if sts_result else None)
 
-        # Always probe DECRQCRA too, for tracking/reporting
-        decrqcra_result = await _tv_probe_decrqcra(send_recv)
-        if not scrape_result and decrqcra_result and decrqcra_result.get("decrqcra"):
-            scrape_result = await scrape_screen(reader, writer, rows, cols)
+            scrape_result: Optional[dict[str, Any]] = None
 
-        with open(filepath, encoding="utf-8") as f:
-            data = json.load(f)
-        data["cve_results"] = cve_results
-        if injection_result:
-            data["injection_probe"] = injection_result
-        if sts_result:
-            data["sts_probe"] = sts_result
-        if decrqcra_result:
-            data["decrqcra_probe"] = decrqcra_result
-        if scrape_result:
-            data["screen-scrape"] = scrape_result
-        elif decrqcra_result:
-            data["screen-scrape"] = {"decrqcra": decrqcra_result.get("decrqcra", False)}
-        _atomic_json_write(filepath, data)
+            if sts_result and sts_result.get("sts"):
+                logger.debug("probe: STS screen scrape content")
+                try:
+                    scrape_result = await asyncio.wait_for(
+                        scrape_screen_sts(reader, writer, rows, cols), timeout=2.0)
+                except asyncio.TimeoutError:
+                    logger.info("probe: STS screen scrape timed out")
+                    scrape_result = None
 
-    if filepath is not None:
-        post_script = FINGERPRINT_POST_SCRIPT or "telnetlib3.fingerprinting_display"
-        await pty_shell(
-            reader,
-            writer,
-            sys.executable,
-            ["-W", "ignore::RuntimeWarning:runpy", "-m", post_script, str(filepath)],
-            raw_mode=True,
-        )
-    else:
-        writer.close()
+            logger.debug("probe: DECRQCRA")
+            decrqcra_result = await _tv_probe_decrqcra(send_recv)
+            logger.debug("probe: DECRQCRA done, result=%s",
+                         decrqcra_result.get("decrqcra") if decrqcra_result else None)
+            if not scrape_result and decrqcra_result and decrqcra_result.get("decrqcra"):
+                logger.debug("probe: DECRQCRA screen scrape")
+                try:
+                    scrape_result = await asyncio.wait_for(
+                        scrape_screen(reader, writer, rows, cols), timeout=2.0)
+                except asyncio.TimeoutError:
+                    logger.info("probe: DECRQCRA screen scrape timed out")
+                    scrape_result = None
+
+            with open(filepath, encoding="utf-8") as f:
+                data = json.load(f)
+            data["cve_results"] = cve_results
+            if injection_result:
+                data["injection_probe"] = injection_result
+            if sts_result:
+                data["sts_probe"] = sts_result
+            if decrqcra_result:
+                data["decrqcra_probe"] = decrqcra_result
+            if scrape_result:
+                data["screen-scrape"] = scrape_result
+            elif decrqcra_result:
+                data["screen-scrape"] = {"decrqcra": decrqcra_result.get("decrqcra", False)}
+            _atomic_json_write(filepath, data)
+
+
+        if filepath is not None:
+            # Switch to latin-1 for PTY shell — lossless byte passthrough
+            # required for binary protocols like ZMODEM.  Done after probing
+            # so that ucs-detect and other Unicode probes use UTF-8.
+            if (writer.get_extra_info("TERM") or "").lower() == "syncterm":
+                writer.fn_encoding = lambda **kw: "latin-1"
+                writer.encoding_errors = "replace"
+                if hasattr(reader, "fn_encoding"):
+                    reader.fn_encoding = lambda **kw: "latin-1"
+
+            # Force peer IP into env for PTY subprocess logging
+            peername = writer.get_extra_info("peername")
+            if peername:
+                writer._protocol._extra["IPADDRESS"] = peername[0]
+
+            if client_has_sga and not is_mud_client:
+                os.environ["TV_DETECT_TERMINAL"] = "1"
+            else:
+                os.environ.pop("TV_DETECT_TERMINAL", None)
+
+            post_script = FINGERPRINT_POST_SCRIPT or "telnetlib3.fingerprinting_display"
+            exit_code = await pty_shell(
+                reader,
+                writer,
+                sys.executable,
+                ["-W", "ignore::RuntimeWarning:runpy", "-m",
+                 post_script, str(filepath)],
+                raw_mode=True,
+            )
+
+            # Exit code 100+ signals a telnet-layer attack request
+            if exit_code is not None and exit_code >= 100:
+                attack_key = str(exit_code - 100)
+                await _handle_telnet_attack(writer, attack_key)
+
+            writer.close()
+        else:
+            writer.close()
+    except (ConnectionResetError, FileNotFoundError, BrokenPipeError,
+            UnicodeDecodeError, OSError):
+        pass
 
 
 def fingerprinting_post_script(filepath: str) -> None:
@@ -1545,11 +1711,22 @@ def fingerprint_server_main() -> None:
 
     global DATA_DIR
 
-    def _add_data_dir_arg(parser: argparse.ArgumentParser) -> None:
+    def _add_extra_args(parser: argparse.ArgumentParser) -> None:
         parser.add_argument("--data-dir", default=DATA_DIR, help="directory for fingerprint data")
+        parser.add_argument(
+            "--passkey",
+            default="",
+            help="passkey for tv-detect vulnerability access (KEY=VALUE format)",
+        )
 
-    args = parse_server_args(extra_args_fn=_add_data_dir_arg)
+    args = parse_server_args(extra_args_fn=_add_extra_args)
     DATA_DIR = args.pop("data_dir")
+    os.environ["TELNETLIB3_DATA_DIR"] = DATA_DIR
+
+    passkey = args.pop("passkey", "") or os.environ.get("TV_DETECT_PASSKEY", "")
+    if passkey:
+        from . import fingerprinting_display  # noqa: PLC0415
+        fingerprinting_display._tv_passkey = passkey
 
     if args["shell"] is _config.shell:
         args["shell"] = fingerprinting_server_shell
