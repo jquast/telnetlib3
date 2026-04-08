@@ -69,6 +69,7 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
 
         # MCCP2: server→client decompression
         self._mccp2_decompressor: Optional[zlib._Decompress] = None
+        self._mccp2_wbits_fallback: bool = False
         # MCCP3: client→server compression
         self._mccp3_compressor: Optional[zlib._Compress] = None
         self._mccp3_orig_write: Any = None
@@ -102,6 +103,7 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
 
         # Clean up MCCP compressors/decompressors
         self._mccp2_decompressor = None
+        self._mccp2_wbits_fallback = False
         self._mccp3_compressor = None
         self._mccp3_orig_write = None
 
@@ -360,9 +362,28 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
             try:
                 data = self._mccp2_decompressor.decompress(data)
             except zlib.error:
-                self.log.warning("MCCP2 decompression error, disabling")
-                self._mccp2_end()
-                return False
+                if not self._mccp2_wbits_fallback:
+                    self.log.debug(
+                        "MCCP2 auto-detect failed, retrying raw deflate"
+                    )
+                    self._mccp2_wbits_fallback = True
+                    self._mccp2_decompressor = zlib.decompressobj(
+                        wbits=-zlib.MAX_WBITS
+                    )
+                    try:
+                        data = self._mccp2_decompressor.decompress(data)
+                    except zlib.error:
+                        self.log.warning(
+                            "MCCP2 decompression error, disabling"
+                        )
+                        self._mccp2_end()
+                        return False
+                else:
+                    self.log.warning(
+                        "MCCP2 decompression error, disabling"
+                    )
+                    self._mccp2_end()
+                    return False
             if self._mccp2_decompressor.eof:
                 unused = self._mccp2_decompressor.unused_data
                 self._mccp2_end()
@@ -444,7 +465,10 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
 
     def _mccp2_start(self) -> None:
         """Start MCCP2 decompression of server→client data."""
-        self._mccp2_decompressor = zlib.decompressobj()
+        self._mccp2_decompressor = zlib.decompressobj(
+            wbits=zlib.MAX_WBITS | 32
+        )
+        self._mccp2_wbits_fallback = False
         self.log.debug("MCCP2 decompression started (server→client)")
 
     def _mccp2_end(self) -> None:

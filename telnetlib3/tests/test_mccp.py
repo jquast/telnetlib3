@@ -681,3 +681,101 @@ class TestMCCP2Integration:
             server.close()
 
         assert client_msg in "".join(server_received)
+
+
+def _make_compressed_raw_deflate(
+    plaintext: bytes, finish: bool = False
+) -> bytes:
+    compressor = zlib.compressobj(
+        zlib.Z_BEST_COMPRESSION,
+        zlib.DEFLATED,
+        -zlib.MAX_WBITS,
+        zlib.DEF_MEM_LEVEL,
+        zlib.Z_DEFAULT_STRATEGY,
+    )
+    data = compressor.compress(plaintext)
+    data += compressor.flush(
+        zlib.Z_FINISH if finish else zlib.Z_SYNC_FLUSH
+    )
+    return data
+
+
+def _make_compressed_gzip(
+    plaintext: bytes, finish: bool = False
+) -> bytes:
+    compressor = zlib.compressobj(
+        zlib.Z_BEST_COMPRESSION,
+        zlib.DEFLATED,
+        zlib.MAX_WBITS | 16,
+        zlib.DEF_MEM_LEVEL,
+        zlib.Z_DEFAULT_STRATEGY,
+    )
+    data = compressor.compress(plaintext)
+    data += compressor.flush(
+        zlib.Z_FINISH if finish else zlib.Z_SYNC_FLUSH
+    )
+    return data
+
+
+@pytest.mark.asyncio
+class TestMCCP2WbitsFallback:
+    async def test_raw_deflate_fallback(self):
+        client, received = _make_client_with_capture()
+        plaintext = b"raw deflate compressed data from MUD"
+        compressed = _make_compressed_raw_deflate(plaintext)
+        client._process_chunk(_BOUNDARY_SB)
+        client._process_chunk(compressed)
+        joined = b"".join(received)
+        assert joined == plaintext
+        assert client._mccp2_decompressor is not None
+        assert client._mccp2_wbits_fallback is True
+
+    async def test_gzip_format_autodetected(self):
+        client, received = _make_client_with_capture()
+        plaintext = b"gzip compressed data from MUD"
+        compressed = _make_compressed_gzip(plaintext)
+        client._process_chunk(_BOUNDARY_SB)
+        client._process_chunk(compressed)
+        joined = b"".join(received)
+        assert joined == plaintext
+        assert client._mccp2_decompressor is not None
+        assert client._mccp2_wbits_fallback is False
+
+    async def test_standard_zlib_still_works(self):
+        client, received = _make_client_with_capture()
+        plaintext = b"standard zlib compressed data"
+        compressed = _make_compressed(plaintext)
+        client._process_chunk(_BOUNDARY_SB)
+        client._process_chunk(compressed)
+        joined = b"".join(received)
+        assert joined == plaintext
+        assert client._mccp2_decompressor is not None
+        assert client._mccp2_wbits_fallback is False
+
+    async def test_truly_corrupt_disables_after_fallback(self):
+        client, received = _make_client_with_capture()
+        client._process_chunk(_BOUNDARY_SB)
+        client._process_chunk(b"\x00\x01\x02\x03\xff\xfe\xfd")
+        assert client._mccp2_decompressor is None
+        assert not received
+
+    async def test_raw_deflate_multi_chunk(self):
+        client, received = _make_client_with_capture()
+        plaintext = b"multi chunk raw deflate test data " * 5
+        compressed = _make_compressed_raw_deflate(plaintext)
+        client._process_chunk(_BOUNDARY_SB)
+        mid = len(compressed) // 2
+        client._process_chunk(compressed[:mid])
+        client._process_chunk(compressed[mid:])
+        joined = b"".join(received)
+        assert joined == plaintext
+
+    async def test_raw_deflate_mid_chunk(self):
+        client, received = _make_client_with_capture()
+        plaintext = b"mid-chunk raw deflate"
+        compressed = _make_compressed_raw_deflate(plaintext)
+        full = _BOUNDARY_SB + compressed
+        client._process_chunk(full)
+        joined = b"".join(received)
+        assert joined == plaintext
+        assert client._mccp2_wbits_fallback is True
