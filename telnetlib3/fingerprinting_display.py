@@ -143,11 +143,11 @@ def _styled_input(term: "blessed.Terminal", prompt: str) -> str:
     """
     Read a line using term.inkey() with a white-on-blue 16-char input field.
 
-    Handles arrow keys, backspace, and other CSI sequences gracefully
-    instead of leaking raw escape bytes into the input.
+    Handles arrow keys, backspace, and other CSI sequences gracefully instead of leaking raw escape
+    bytes into the input.
 
-    For MUD/line-mode clients (no raw mode), falls back to simple
-    line-based input without cursor repositioning.
+    For MUD/line-mode clients (no raw mode), falls back to simple line-based input without cursor
+    repositioning.
 
     :param term: blessed Terminal instance.
     :param prompt: Prompt text displayed before the input field.
@@ -1068,8 +1068,8 @@ def _fingerprint_similarity(a: Dict[str, Any], b: Dict[str, Any]) -> float:
     """
     Compute field-by-field similarity score between two fingerprint dicts.
 
-    Skips keys that reflect user/environment state rather than client
-    identity (env var presence, charset normalization, etc).
+    Skips keys that reflect user/environment state rather than client identity (env var presence,
+    charset normalization, etc).
 
     :returns: Similarity as a float 0.0-1.0.
     """

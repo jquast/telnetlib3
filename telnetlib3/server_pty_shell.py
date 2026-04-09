@@ -19,7 +19,7 @@ import logging
 from typing import Any, Dict, List, Tuple, Union, Callable, Optional, Awaitable, cast
 
 # local
-from .telopt import ECHO, NAWS, SGA, WONT
+from .telopt import SGA, ECHO, NAWS, WONT
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 

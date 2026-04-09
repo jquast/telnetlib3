@@ -1064,16 +1064,14 @@ async def _read_banner_until_quiet(
             chunk = await asyncio.wait_for(reader.read(max_bytes), timeout=remaining)
             if not chunk:
                 break
-            has_ansi_probe = (
-                writer is not None
-                and (
-                    _DSR_RE.search(chunk)
-                    or _DA_RE.search(chunk)
-                    or _DSR_STATUS_RE.search(chunk)
-                    or _ENQ in chunk
-                )
+            has_ansi_probe = writer is not None and (
+                _DSR_RE.search(chunk)
+                or _DA_RE.search(chunk)
+                or _DSR_STATUS_RE.search(chunk)
+                or _ENQ in chunk
             )
             if has_ansi_probe:
+                assert writer is not None
                 _respond_to_ansi_probes(chunk, writer, cursor)
                 await writer.drain()
             elif cursor is not None:
@@ -1108,9 +1106,7 @@ async def _read_banner_until_quiet(
                         writer._esc_inline = True  # type: ignore[attr-defined]
                 if not menu_responded:
                     encoding_explicit = getattr(writer, "_encoding_explicit", False)
-                    menu_match = (
-                        None if encoding_explicit else _MENU_UTF8_RE.search(stripped_accum)
-                    )
+                    menu_match = None if encoding_explicit else _MENU_UTF8_RE.search(stripped_accum)
                     if menu_match:
                         response = menu_match.group(1) + b"\r\n"
                         writer.write(_reencode_prompt(response, writer.environ_encoding))
@@ -1131,8 +1127,7 @@ async def _read_banner_until_quiet(
                         await writer.drain()
                         menu_responded = True
                         log.debug(
-                            "inline codepage prompt, accepting default "
-                            "(explicit encoding: %s)",
+                            "inline codepage prompt, accepting default " "(explicit encoding: %s)",
                             writer.environ_encoding,
                         )
                         writer._menu_inline = True  # type: ignore[attr-defined]

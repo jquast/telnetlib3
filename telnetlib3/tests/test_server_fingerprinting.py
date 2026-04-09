@@ -1432,8 +1432,7 @@ async def test_fingerprinting_shell_codepage_explicit_skips_utf8(tmp_path):
     """With explicit encoding, charset menu sends return instead of UTF-8."""
     writer = MockWriter(will_options=[fps.SGA])
     reader = InteractiveMockReader(
-        [b"Select codepage:\r\n(1) UTF-8\r\n(2) CP437\r\n", b"Welcome!\r\nLogin: "],
-        writer,
+        [b"Select codepage:\r\n(1) UTF-8\r\n(2) CP437\r\n", b"Welcome!\r\nLogin: "], writer
     )
     await _run_fp(reader, writer, tmp_path, environ_encoding="cp437")
     assert b"1\r\n" not in writer._writes

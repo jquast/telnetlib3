@@ -97,17 +97,15 @@ from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
 # third-party (optional) — vulnerability probes from tv-detect
 try:
-    from tv_detect.probes import (
-        CPR_RE as _CPR_RE,
-        CPR_FENCE as _CPR_FENCE,
-        DECCKSR_RE as _DECCKSR_RE,
-        STS_SOS_RE as _STS_SOS_RE,
-        DECRQCRA_TEMPLATE as _DECRQCRA,
-        probe_cve_vulnerabilities as _tv_probe_cves,
-        probe_injection as _tv_probe_injection,
-        probe_sts as _tv_probe_sts,
-        probe_decrqcra as _tv_probe_decrqcra,
-    )
+    from tv_detect.probes import CPR_RE as _CPR_RE
+    from tv_detect.probes import CPR_FENCE as _CPR_FENCE
+    from tv_detect.probes import DECCKSR_RE as _DECCKSR_RE
+    from tv_detect.probes import STS_SOS_RE as _STS_SOS_RE
+    from tv_detect.probes import DECRQCRA_TEMPLATE as _DECRQCRA
+    from tv_detect.probes import probe_sts as _tv_probe_sts
+    from tv_detect.probes import probe_decrqcra as _tv_probe_decrqcra
+    from tv_detect.probes import probe_injection as _tv_probe_injection
+    from tv_detect.probes import probe_cve_vulnerabilities as _tv_probe_cves
 
     _HAS_TV_DETECT = True
 except ImportError:
