@@ -28,15 +28,15 @@ if TYPE_CHECKING:
 
 # third-party (optional)
 try:
+    from tv_detect.attacks import PASSKEY as _TV_PASSKEY
     from tv_detect.attacks import SEVERITY_COLOR
     from tv_detect.attacks import DECRQSS_INJECT_MARKER as _DECRQSS_INJECT_MARKER
     from tv_detect.execute import prompt_keys as _tv_prompt_keys
     from tv_detect.execute import execute_attack as _tv_execute_attack
+    from tv_detect.execute import verify_passkey as _tv_verify_passkey
     from tv_detect.execute import try_decrqss_injection
     from tv_detect.execute import get_vulnerability_rows as _tv_vuln_rows
     from tv_detect.execute import get_attacks_for_software as _tv_get_attacks
-    from tv_detect.attacks import PASSKEY as _TV_PASSKEY
-    from tv_detect.execute import verify_passkey as _tv_verify_passkey
 
     _HAS_TV_DETECT = True
 except ImportError:
@@ -48,9 +48,9 @@ except ImportError:
 _tv_passkey: str = ""
 
 # local
-from ._paths import _atomic_json_write
-from .accessories import PATIENCE_MESSAGES
-from .fingerprinting import (
+from ._paths import _atomic_json_write  # noqa: E402
+from .accessories import PATIENCE_MESSAGES  # noqa: E402
+from .fingerprinting import (  # noqa: E402
     DATA_DIR,
     _UNKNOWN_TERMINAL_HASH,
     AMBIGUOUS_WIDTH_UNKNOWN,
@@ -82,6 +82,7 @@ def _log_identification(data: Dict[str, Any], names: Dict[str, str]) -> None:
     # Telnet fingerprint: user-provided name or nearest match
     telnet_probe = data.get("telnet-probe", {})
     telnet_hash = telnet_probe.get("fingerprint", "")
+    telnet_label: Optional[str]
     if telnet_hash in names:
         telnet_label = repr(names[telnet_hash])
     else:
@@ -92,6 +93,7 @@ def _log_identification(data: Dict[str, Any], names: Dict[str, str]) -> None:
     # Terminal fingerprint: user-provided name or nearest match
     terminal_probe = data.get("terminal-probe", {})
     terminal_hash = terminal_probe.get("fingerprint", "")
+    terminal_label: Optional[str]
     if terminal_hash and terminal_hash in names:
         terminal_label = repr(names[terminal_hash])
     elif terminal_hash:
@@ -109,20 +111,19 @@ def _log_identification(data: Dict[str, Any], names: Dict[str, str]) -> None:
     if terminal_label:
         parts.append(terminal_label)
 
-    _syslog_info(f"Identified {ip} {' / '.join(parts)}" if parts
-                 else f"Identified {ip} (unknown)")
+    _syslog_info(f"Identified {ip} {' / '.join(parts)}" if parts else f"Identified {ip} (unknown)")
 
 
 def _syslog_info(msg: str) -> None:
     """Write an INFO-level message to syslog with tv-detect-telnet ident."""
     import syslog
     import inspect
+
     frame = inspect.currentframe()
     caller = frame.f_back if frame else None
     lineno = caller.f_lineno if caller else 0
     syslog.openlog("tv-detect-telnet", syslog.LOG_PID)
-    syslog.syslog(syslog.LOG_INFO,
-                  f"INFO fingerprinting_display.py:{lineno} {msg}")
+    syslog.syslog(syslog.LOG_INFO, f"INFO fingerprinting_display.py:{lineno} {msg}")
 
 
 def _flush_input(term: "blessed.Terminal") -> None:
@@ -139,7 +140,8 @@ def _flush_input(term: "blessed.Terminal") -> None:
 
 
 def _styled_input(term: "blessed.Terminal", prompt: str) -> str:
-    """Read a line using term.inkey() with a white-on-blue 16-char input field.
+    """
+    Read a line using term.inkey() with a white-on-blue 16-char input field.
 
     Handles arrow keys, backspace, and other CSI sequences gracefully
     instead of leaking raw escape bytes into the input.
@@ -290,7 +292,9 @@ def _run_screen_scrape() -> Optional[Dict[str, Any]]:
     try:
         try:
             result = subprocess.run(
-                [screen_scrape, "--save-json", tmp_path], timeout=30, check=False,
+                [screen_scrape, "--save-json", tmp_path],
+                timeout=30,
+                check=False,
                 stderr=subprocess.DEVNULL,
             )
         except subprocess.TimeoutExpired:
@@ -736,7 +740,8 @@ def _extract_software_name(data: Dict[str, Any]) -> str:
 
 
 def _extract_passkey(data: Dict[str, Any]) -> str:
-    """Extract passkey from client NEW-ENVIRON data.
+    """
+    Extract passkey from client NEW-ENVIRON data.
 
     Checks the env var from the telnet session's extra info
     against the tv-detect passkey format.
@@ -750,7 +755,7 @@ def _extract_passkey(data: Dict[str, Any]) -> str:
     envvar, _, expected = _TV_PASSKEY.partition("=")
     value = extra.get(envvar, "")
     if value == expected:
-        return _TV_PASSKEY
+        return str(_TV_PASSKEY)
     return ""
 
 
@@ -1070,10 +1075,16 @@ def _fingerprint_similarity(a: Dict[str, Any], b: Dict[str, Any]) -> float:
     """
     _skip = {
         "probed-protocol",
-        "HOME", "SHELL", "USER", "IPADDRESS", "LOGNAME",
-        "charset", "encoding",
+        "HOME",
+        "SHELL",
+        "USER",
+        "IPADDRESS",
+        "LOGNAME",
+        "charset",
+        "encoding",
         "TERM",
-        "rejected-do", "rejected-will",
+        "rejected-do",
+        "rejected-will",
     }
     all_keys = (set(a) | set(b)) - _skip
     if not all_keys:
@@ -1234,7 +1245,7 @@ def _build_seen_counts(
         if "?" in name:
             # Color the '?' red, rest green
             return name.replace("?", term.bold_red("?"))
-        return term.forestgreen(name)
+        return str(term.forestgreen(name))
 
     telnet_display = _color_name(telnet_name) if telnet_name else telnet_name
     terminal_display = _color_name(terminal_name) if terminal_name else None
@@ -1265,6 +1276,7 @@ def _build_seen_counts(
             prev = sessions[-2].get("connected", "")
             if prev:
                 from datetime import datetime, timezone
+
                 try:
                     prev_dt = datetime.fromisoformat(prev)
                     delta = datetime.now(timezone.utc) - prev_dt
@@ -1286,8 +1298,7 @@ def _build_seen_counts(
     else:
         who = ""
     terminal_suffix = (
-        f" and {terminal_display}" if terminal_display
-        and terminal_name != telnet_name else ""
+        f" and {terminal_display}" if terminal_display and terminal_name != telnet_name else ""
     )
     lines.append("")
     lines.append(f"Welcome{who}! Detected {telnet_display}{terminal_suffix}.")
@@ -1563,6 +1574,7 @@ def _vuln_menu(term: "blessed.Terminal", software_name: str = "") -> Optional[st
         echo(f"\r\n{term.bold('No attacks available for this terminal.')}\r\n")
         return None
     from tv_detect.attacks import VULN_WARNING, PRICING_MESSAGE
+
     echo(f"\r\n{term.bold_gold1(VULN_WARNING)}\r\n\r\n")
     authorized = _tv_verify_passkey(_tv_passkey)
     max_sev = max(len(v["severity"]) for v in available.values())
@@ -1576,8 +1588,10 @@ def _vuln_menu(term: "blessed.Terminal", software_name: str = "") -> Optional[st
         target = attack.get("target", "")
         target_str = f" ({target})" if target else ""
         if attack.get("passkey_limited") and not authorized:
-            echo(f"  ({term.bold(id_str)}) {sev_str}"
-                 f" {term.bold_gold1(PRICING_MESSAGE)}{target_str}\r\n")
+            echo(
+                f"  ({term.bold(id_str)}) {sev_str}"
+                f" {term.bold_gold1(PRICING_MESSAGE)}{target_str}\r\n"
+            )
         else:
             echo(f"  ({term.bold(id_str)}) {sev_str} {attack['name']}{target_str}\r\n")
     echo("\r\n: ")
@@ -1587,8 +1601,9 @@ def _vuln_menu(term: "blessed.Terminal", software_name: str = "") -> Optional[st
     return None
 
 
-def _execute_crash(term: "blessed.Terminal", key: str, software_name: str = "",
-                   ip: str = "unknown") -> None:
+def _execute_crash(
+    term: "blessed.Terminal", key: str, software_name: str = "", ip: str = "unknown"
+) -> None:
     """Execute a vulnerability attack by key, delegating to tv-detect."""
     if not _HAS_TV_DETECT:
         return
@@ -1814,7 +1829,7 @@ def _fingerprint_repl(
 
         # Accept passkey entry: "passkey=USER=jEffREYtAblES"
         if _HAS_TV_DETECT and raw_input.lower().startswith("passkey="):
-            candidate = raw_input[len("passkey="):]
+            candidate = raw_input[len("passkey=") :]
             if _tv_verify_passkey(candidate):
                 _tv_passkey = candidate
                 logger.info("%s: passkey accepted", ip)
@@ -1953,7 +1968,8 @@ def _client_lacks_sga(data: Dict[str, Any]) -> bool:
 
 
 def _probe_terminal(filepath: str, data: Dict[str, Any]) -> Optional[str]:
-    """Run ucs-detect and screen-scrape, update the fingerprint file.
+    """
+    Run ucs-detect and screen-scrape, update the fingerprint file.
 
     :returns: Updated filepath (may change if terminal hash moves it).
     """
@@ -2082,6 +2098,7 @@ def fingerprinting_post_script(filepath: str) -> None:
 def main() -> None:
     """CLI entry point for fingerprinting display post-processing."""
     import signal
+
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     signal.signal(signal.SIGQUIT, signal.SIG_IGN)
     signal.signal(signal.SIGTSTP, signal.SIG_IGN)

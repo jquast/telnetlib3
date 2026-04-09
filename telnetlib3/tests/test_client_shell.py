@@ -698,6 +698,7 @@ async def test_setup_winch_registers_handler() -> None:
     term = _make_term(writer)
     term._istty = True
     term._resize_pending = __import__("threading").Event()
+    term._remove_winch = False
     term.setup_winch()
     assert term._remove_winch is True
     term.cleanup_winch()
@@ -713,6 +714,7 @@ async def test_winch_handler_sets_resize_pending() -> None:
     term = _make_term(writer)
     term._istty = True
     term._resize_pending = __import__("threading").Event()
+    term._remove_winch = False
 
     term.setup_winch()
     assert term._remove_winch is True

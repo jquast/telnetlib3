@@ -98,20 +98,17 @@ from .stream_writer import TelnetWriter, TelnetWriterUnicode
 # third-party (optional) — vulnerability probes from tv-detect
 try:
     from tv_detect.probes import (
-        CVE_PROBES as _CVE_PROBES,
         CPR_RE as _CPR_RE,
         CPR_FENCE as _CPR_FENCE,
         DECCKSR_RE as _DECCKSR_RE,
         STS_SOS_RE as _STS_SOS_RE,
         DECRQCRA_TEMPLATE as _DECRQCRA,
-        build_injection_probe as _build_injection_probe,
-        build_sts_probe as _build_sts_probe,
-        build_decrqcra_probe as _build_decrqcra_probe,
         probe_cve_vulnerabilities as _tv_probe_cves,
         probe_injection as _tv_probe_injection,
         probe_sts as _tv_probe_sts,
         probe_decrqcra as _tv_probe_decrqcra,
     )
+
     _HAS_TV_DETECT = True
 except ImportError:
     _HAS_TV_DETECT = False
@@ -307,14 +304,14 @@ class FingerprintingServer(FingerprintingTelnetServer, TelnetServer):
 
     def connection_lost(self, exc: Optional[Exception]) -> None:
         """Log connection close/loss with detected terminal label."""
-        term_label = getattr(self.writer, '_tv_term_label', None) if self.writer else None
+        term_label = getattr(self.writer, "_tv_term_label", None) if self.writer else None
         suffix = f" {term_label}" if term_label else ""
         if not self._closing:
             if exc is None:
                 logger.info("Connection closed for %s%s", self, suffix)
             else:
                 logger.info("Connection lost for %s: %s%s", self, exc, suffix)
-            self._closing = True
+            self._closing = True  # pylint: disable=attribute-defined-outside-init
             if exc is None:
                 self.reader.feed_eof()
             else:
@@ -1112,11 +1109,11 @@ def _is_maybe_ms_telnet(writer: Union[TelnetWriter, TelnetWriterUnicode]) -> boo
 
 
 if not _HAS_TV_DETECT:
-    _CPR_RE = re.compile(rb"\x1b\[(\d+);(\d+)R")
-    _DECRQCRA = "\x1b[{pid};1;{r};{c};{r};{c}*y"
-    _DECCKSR_RE = re.compile(rb"\x1bP(\d+)!~([0-9A-Fa-f]{4})\x1b\\")
-    _STS_SOS_RE = re.compile(rb"\x1bXCTerm:STS:(\d+):(.*?)\x1b\\", re.DOTALL)
-    _CPR_FENCE = "\x1b[6n"
+    _CPR_RE = re.compile(rb"\x1b\[(\d+);(\d+)R")  # noqa: F811
+    _DECRQCRA = "\x1b[{pid};1;{r};{c};{r};{c}*y"  # noqa: F811
+    _DECCKSR_RE = re.compile(rb"\x1bP(\d+)!~([0-9A-Fa-f]{4})\x1b\\")  # noqa: F811
+    _STS_SOS_RE = re.compile(rb"\x1bXCTerm:STS:(\d+):(.*?)\x1b\\", re.DOTALL)  # noqa: F811
+    _CPR_FENCE = "\x1b[6n"  # noqa: F811
 
 
 async def _read_until_cpr(
@@ -1152,9 +1149,7 @@ def _make_send_recv(
     """Create a send_recv callback for tv-detect probes."""
     _writer = cast(TelnetWriterUnicode, writer)
 
-    async def send_recv(
-        sequence: str, timeout: float
-    ) -> tuple[Optional[re.Match[bytes]], bytes]:
+    async def send_recv(sequence: str, timeout: float) -> tuple[Optional[re.Match[bytes]], bytes]:
         _writer.write(sequence)
         await _writer.drain()
         return await _read_until_cpr(reader, timeout)
@@ -1171,7 +1166,8 @@ async def _shielded_probe(
     sequence: str,
     timeout: float = 1.0,
 ) -> tuple[Optional[re.Match[bytes]], bytes]:
-    """Run a probe with shielded display: heading, description, and CPR cloaking.
+    """
+    Run a probe with shielded display: heading, description, and CPR cloaking.
 
     Writes a heading with ``=`` underline, description, and ``payload:`` label,
     then records the cursor position via CPR, sends the probe sequence, and
@@ -1512,14 +1508,12 @@ async def fingerprinting_server_shell(
     """
     from .server_pty_shell import pty_shell
 
-    async def _handle_telnet_attack(
-        _writer: TelnetWriterUnicode,
-        attack_key: str,
-    ) -> None:
+    async def _handle_telnet_attack(_writer: TelnetWriterUnicode, attack_key: str) -> None:
         """Execute a telnet-layer attack by key."""
         if not _HAS_TV_DETECT:
             return
         from .attacks import ATTACKS
+
         attack = ATTACKS.get(attack_key)
         if not attack:
             return
@@ -1543,7 +1537,9 @@ async def fingerprinting_server_shell(
     filepath = _save_fingerprint_data(writer, probe_results, probe_time, session_fp)
 
     # Store TTYPE for connection_lost logging
-    writer._tv_term_label = repr((writer.get_extra_info("TERM") or "unknown").lower())
+    writer._tv_term_label = repr(  # type: ignore[attr-defined]
+        (writer.get_extra_info("TERM") or "unknown").lower()
+    )
 
     # Disable LINEMODE if it was negotiated - stay in kludge mode (SGA+ECHO)
     # for PTY shell. LINEMODE causes echo loops with GNU telnet when running
@@ -1557,8 +1553,7 @@ async def fingerprinting_server_shell(
 
     # Detect MUD clients early to skip escape-sequence probes
     _MUD_OPTIONS = {AARDWOLF, GMCP, MSDP, MXP, MSSP, ATCP}
-    is_mud_client = any(writer.remote_option.get(opt, False)
-                        for opt in _MUD_OPTIONS)
+    is_mud_client = any(writer.remote_option.get(opt, False) for opt in _MUD_OPTIONS)
     if not is_mud_client:
         for n in range(1, 10):
             ttype_n = (writer.get_extra_info(f"ttype{n}") or "").upper()
@@ -1572,7 +1567,6 @@ async def fingerprinting_server_shell(
         if filepath is not None and _HAS_TV_DETECT and not is_mud_client:
             # Run CVE, injection, STS, and DECRQCRA probes over the telnet
             # connection before launching the PTY subprocess.
-            _writer = cast(TelnetWriterUnicode, writer)
             send_recv = _make_send_recv(reader, writer)
             logger.debug("probe: CVE vulnerabilities")
             cve_results = await _tv_probe_cves(send_recv)
@@ -1580,15 +1574,18 @@ async def fingerprinting_server_shell(
 
             logger.debug("probe: injection (DECRQSS)")
             injection_result = await _tv_probe_injection(send_recv)
-            logger.debug("probe: injection done, result=%s",
-                         injection_result.get("injectable") if injection_result else None)
+            logger.debug(
+                "probe: injection done, result=%s",
+                injection_result.get("injectable") if injection_result else None,
+            )
 
             rows = writer.get_extra_info("rows") or 25
             cols = writer.get_extra_info("cols") or 80
             logger.debug("probe: STS screen scrape")
             sts_result = await _tv_probe_sts(send_recv, rows=rows, cols=cols)
-            logger.debug("probe: STS done, result=%s",
-                         sts_result.get("sts") if sts_result else None)
+            logger.debug(
+                "probe: STS done, result=%s", sts_result.get("sts") if sts_result else None
+            )
 
             scrape_result: Optional[dict[str, Any]] = None
 
@@ -1596,20 +1593,24 @@ async def fingerprinting_server_shell(
                 logger.debug("probe: STS screen scrape content")
                 try:
                     scrape_result = await asyncio.wait_for(
-                        scrape_screen_sts(reader, writer, rows, cols), timeout=2.0)
+                        scrape_screen_sts(reader, writer, rows, cols), timeout=2.0
+                    )
                 except asyncio.TimeoutError:
                     logger.info("probe: STS screen scrape timed out")
                     scrape_result = None
 
             logger.debug("probe: DECRQCRA")
             decrqcra_result = await _tv_probe_decrqcra(send_recv)
-            logger.debug("probe: DECRQCRA done, result=%s",
-                         decrqcra_result.get("decrqcra") if decrqcra_result else None)
+            logger.debug(
+                "probe: DECRQCRA done, result=%s",
+                decrqcra_result.get("decrqcra") if decrqcra_result else None,
+            )
             if not scrape_result and decrqcra_result and decrqcra_result.get("decrqcra"):
                 logger.debug("probe: DECRQCRA screen scrape")
                 try:
                     scrape_result = await asyncio.wait_for(
-                        scrape_screen(reader, writer, rows, cols), timeout=2.0)
+                        scrape_screen(reader, writer, rows, cols), timeout=2.0
+                    )
                 except asyncio.TimeoutError:
                     logger.info("probe: DECRQCRA screen scrape timed out")
                     scrape_result = None
@@ -1628,7 +1629,6 @@ async def fingerprinting_server_shell(
             elif decrqcra_result:
                 data["screen-scrape"] = {"decrqcra": decrqcra_result.get("decrqcra", False)}
             _atomic_json_write(filepath, data)
-
 
         if filepath is not None:
             # Switch to latin-1 for PTY shell — lossless byte passthrough
@@ -1655,8 +1655,7 @@ async def fingerprinting_server_shell(
                 reader,
                 writer,
                 sys.executable,
-                ["-W", "ignore::RuntimeWarning:runpy", "-m",
-                 post_script, str(filepath)],
+                ["-W", "ignore::RuntimeWarning:runpy", "-m", post_script, str(filepath)],
                 raw_mode=True,
             )
 
@@ -1668,8 +1667,7 @@ async def fingerprinting_server_shell(
             writer.close()
         else:
             writer.close()
-    except (ConnectionResetError, FileNotFoundError, BrokenPipeError,
-            UnicodeDecodeError, OSError):
+    except (ConnectionResetError, FileNotFoundError, BrokenPipeError, UnicodeDecodeError, OSError):
         pass
 
 
@@ -1726,6 +1724,7 @@ def fingerprint_server_main() -> None:
     passkey = args.pop("passkey", "") or os.environ.get("TV_DETECT_PASSKEY", "")
     if passkey:
         from . import fingerprinting_display  # noqa: PLC0415
+
         fingerprinting_display._tv_passkey = passkey
 
     if args["shell"] is _config.shell:

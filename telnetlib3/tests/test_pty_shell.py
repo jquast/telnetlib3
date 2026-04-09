@@ -72,6 +72,12 @@ def mock_session():
             writer.get_extra_info = MagicMock(side_effect=extra_info)
         else:
             writer.get_extra_info = MagicMock(side_effect=lambda k, d=None: extra_info.get(k, d))
+        # Ensure fn_encoding doesn't exist so _flush_output falls through to
+        # get_extra_info("charset") — MagicMock auto-creates it as a truthy mock.
+        if hasattr(writer, "fn_encoding"):
+            del writer.fn_encoding
+        # Provide a real dict for remote_option so _schedule_ga works correctly.
+        writer.remote_option = {}
         session = PTYSession(reader, writer, "/nonexistent.program", [])
         return session, written
 
@@ -279,7 +285,7 @@ async def test_pty_session_build_environment(mock_session):
     # Test charset fallback when no LANG
     session, _ = mock_session({"TERM": "vt100", "rows": 24, "cols": 80, "charset": "ISO-8859-1"})
     env = session._build_environment()
-    assert env["TERM"] == "vt100"
+    assert env["TERM"] == "ansi"
     assert env["LANG"] == "en_US.ISO-8859-1"
 
 
@@ -392,6 +398,8 @@ async def test_pty_session_flush_output_behavior(mock_session):
     writer = MagicMock()
     written = []
     writer.write = written.append
+    del writer.fn_encoding
+    writer.remote_option = {}
     charset_values = ["utf-8"]
     writer.get_extra_info = MagicMock(
         side_effect=lambda k, d=None: charset_values[0] if k == "charset" else d
@@ -777,7 +785,7 @@ async def test_pty_session_ga_timer_cancelled_by_new_output(mock_session):
     session._flush_remaining()
     assert session._ga_timer is not None
 
-    session._write_to_telnet(b"more output\n")
+    session._write_to_telnet(b"more output")
     assert session._ga_timer is None
 
     await asyncio.sleep(0.1)

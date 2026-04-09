@@ -363,25 +363,17 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
                 data = self._mccp2_decompressor.decompress(data)
             except zlib.error:
                 if not self._mccp2_wbits_fallback:
-                    self.log.debug(
-                        "MCCP2 auto-detect failed, retrying raw deflate"
-                    )
+                    self.log.debug("MCCP2 auto-detect failed, retrying raw deflate")
                     self._mccp2_wbits_fallback = True
-                    self._mccp2_decompressor = zlib.decompressobj(
-                        wbits=-zlib.MAX_WBITS
-                    )
+                    self._mccp2_decompressor = zlib.decompressobj(wbits=-zlib.MAX_WBITS)
                     try:
                         data = self._mccp2_decompressor.decompress(data)
                     except zlib.error:
-                        self.log.warning(
-                            "MCCP2 decompression error, disabling"
-                        )
+                        self.log.warning("MCCP2 decompression error, disabling")
                         self._mccp2_end()
                         return False
                 else:
-                    self.log.warning(
-                        "MCCP2 decompression error, disabling"
-                    )
+                    self.log.warning("MCCP2 decompression error, disabling")
                     self._mccp2_end()
                     return False
             if self._mccp2_decompressor.eof:
@@ -465,9 +457,7 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
 
     def _mccp2_start(self) -> None:
         """Start MCCP2 decompression of server→client data."""
-        self._mccp2_decompressor = zlib.decompressobj(
-            wbits=zlib.MAX_WBITS | 32
-        )
+        self._mccp2_decompressor = zlib.decompressobj(wbits=zlib.MAX_WBITS | 32)
         self._mccp2_wbits_fallback = False
         self.log.debug("MCCP2 decompression started (server→client)")
 

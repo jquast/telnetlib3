@@ -124,9 +124,7 @@ def hexdump(data: bytes, prefix: str = "") -> str:
     return "\n".join(lines)
 
 
-_DEFAULT_LOGFMT = " ".join(
-    ("%(levelname)s", "%(filename)s:%(lineno)d", "%(message)s")
-)
+_DEFAULT_LOGFMT = " ".join(("%(levelname)s", "%(filename)s:%(lineno)d", "%(message)s"))
 
 
 def make_logger(

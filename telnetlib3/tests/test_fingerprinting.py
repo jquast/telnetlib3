@@ -238,7 +238,7 @@ def test_prompt_stores_suggestions(tmp_path, monkeypatch, capsys):
     filepath.write_text(json.dumps(data))
 
     inputs = iter(["Ghostty", "GNU Telnet"])
-    monkeypatch.setattr(fpd, "_cooked_input", lambda prompt: next(inputs))
+    monkeypatch.setattr(fpd, "_styled_input", lambda term, prompt: next(inputs))
     fpd._prompt_fingerprint_identification(MockTerm(), data, str(filepath), {})
     assert data["suggestions"]["terminal-emulator"] == "Ghostty"
     assert data["suggestions"]["telnet-client"] == "GNU Telnet"
@@ -259,7 +259,7 @@ def test_prompt_stores_revision(tmp_path, monkeypatch, capsys):
     filepath.write_text(json.dumps(data))
 
     inputs = iter(["Ghostty2", "inetutils-2.5"])
-    monkeypatch.setattr(fpd, "_cooked_input", lambda prompt: next(inputs))
+    monkeypatch.setattr(fpd, "_styled_input", lambda term, prompt: next(inputs))
     names = {"aaa": "GNU Telnet", "bbbb": "Ghostty"}
     fpd._prompt_fingerprint_identification(MockTerm(), data, str(filepath), names)
     assert data["suggestions"]["terminal-emulator-revision"] == "Ghostty2"
@@ -517,15 +517,15 @@ def test_setup_term_environ_no_ttype_cycle(monkeypatch):
         ({}, True),
     ],
 )
-def test_client_requires_ga(probe, expected):
+def test_client_lacks_sga(probe, expected):
     data = {"telnet-probe": {"session_data": {"probe": probe}}}
-    assert fpd._client_requires_ga(data) is expected
+    assert fpd._client_lacks_sga(data) is expected
 
 
 @requires_unix
-def test_client_requires_ga_missing_keys():
-    assert fpd._client_requires_ga({}) is True
-    assert fpd._client_requires_ga({"telnet-probe": {}}) is True
+def test_client_lacks_sga_missing_keys():
+    assert fpd._client_lacks_sga({}) is True
+    assert fpd._client_lacks_sga({"telnet-probe": {}}) is True
 
 
 @requires_unix

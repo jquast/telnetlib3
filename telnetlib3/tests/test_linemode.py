@@ -215,7 +215,7 @@ def test_linemode_buffer_ec_el_ew():
     echo, data = buf.feed("\x15")
     assert echo == "\b \b" * 2
     assert data is None
-    assert buf._buf == []
+    assert not buf._buf
     # EW (^W = 0x17) -- add a word first
     for c in "hello world":
         buf.feed(c)
@@ -239,7 +239,7 @@ def test_linemode_buffer_forwardmask_flush():
     buf.feed("b")
     echo, data = buf.feed("\x01")
     assert data == b"ab\x01"
-    assert buf._buf == []
+    assert not buf._buf
 
 
 def test_linemode_buffer_trapsig():
@@ -265,7 +265,7 @@ def test_linemode_buffer_ec_empty_buf():
     echo, data = buf.feed("\x7f")
     assert echo == ""
     assert data is None
-    assert buf._buf == []
+    assert not buf._buf
 
 
 def test_linemode_buffer_cr_sends_line():
@@ -279,7 +279,7 @@ def test_linemode_buffer_cr_sends_line():
     echo, data = buf.feed("\r")
     assert echo == "\r"
     assert data == b"hello\r"
-    assert buf._buf == []
+    assert not buf._buf
 
 
 def test_linemode_buffer_lf_sends_line():
@@ -293,7 +293,7 @@ def test_linemode_buffer_lf_sends_line():
     echo, data = buf.feed("\n")
     assert echo == "\n"
     assert data == b"hi\n"
-    assert buf._buf == []
+    assert not buf._buf
 
 
 def test_linemode_buffer_trapsig_regular_char_buffered():
@@ -409,7 +409,7 @@ def test_linemode_buffer_ew_skips_trailing_spaces():
     echo, data = buf.feed("\x17")
     assert echo == "\b \b" * 6
     assert data is None
-    assert buf._buf == []
+    assert not buf._buf
 
 
 if sys.platform != "win32":

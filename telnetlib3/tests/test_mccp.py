@@ -683,9 +683,7 @@ class TestMCCP2Integration:
         assert client_msg in "".join(server_received)
 
 
-def _make_compressed_raw_deflate(
-    plaintext: bytes, finish: bool = False
-) -> bytes:
+def _make_compressed_raw_deflate(plaintext: bytes, finish: bool = False) -> bytes:
     compressor = zlib.compressobj(
         zlib.Z_BEST_COMPRESSION,
         zlib.DEFLATED,
@@ -694,15 +692,11 @@ def _make_compressed_raw_deflate(
         zlib.Z_DEFAULT_STRATEGY,
     )
     data = compressor.compress(plaintext)
-    data += compressor.flush(
-        zlib.Z_FINISH if finish else zlib.Z_SYNC_FLUSH
-    )
+    data += compressor.flush(zlib.Z_FINISH if finish else zlib.Z_SYNC_FLUSH)
     return data
 
 
-def _make_compressed_gzip(
-    plaintext: bytes, finish: bool = False
-) -> bytes:
+def _make_compressed_gzip(plaintext: bytes, finish: bool = False) -> bytes:
     compressor = zlib.compressobj(
         zlib.Z_BEST_COMPRESSION,
         zlib.DEFLATED,
@@ -711,9 +705,7 @@ def _make_compressed_gzip(
         zlib.Z_DEFAULT_STRATEGY,
     )
     data = compressor.compress(plaintext)
-    data += compressor.flush(
-        zlib.Z_FINISH if finish else zlib.Z_SYNC_FLUSH
-    )
+    data += compressor.flush(zlib.Z_FINISH if finish else zlib.Z_SYNC_FLUSH)
     return data
 
 

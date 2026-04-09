@@ -98,6 +98,7 @@ class PTYSession:
         self._naws_pending: Optional[Tuple[int, int]] = None
         self._naws_timer: Optional[asyncio.TimerHandle] = None
         self._ga_timer: Optional[asyncio.TimerHandle] = None
+        self.exit_code: Optional[int] = None
 
     def start(self) -> None:
         """
@@ -199,8 +200,7 @@ class PTYSession:
             if charset:
                 env["LANG"] = f"en_US.{charset}"
 
-        for key in ("DISPLAY", "USER", "COLORTERM", "HOME", "SHELL", "LOGNAME",
-                    "IPADDRESS"):
+        for key in ("DISPLAY", "USER", "COLORTERM", "HOME", "SHELL", "LOGNAME", "IPADDRESS"):
             val = self.writer.get_extra_info(key)
             if val:
                 env[key] = val
@@ -423,7 +423,7 @@ class PTYSession:
         if self.master_fd is None:
             return
         if isinstance(data, str):
-            if hasattr(self.writer, 'fn_encoding'):
+            if hasattr(self.writer, "fn_encoding"):
                 charset = self.writer.fn_encoding(incoming=True)
             else:
                 charset = self.writer.get_extra_info("charset") or "utf-8"
@@ -482,7 +482,7 @@ class PTYSession:
         """Send data to telnet client using incremental decoder."""
         if not data:
             return
-        if hasattr(self.writer, 'fn_encoding'):
+        if hasattr(self.writer, "fn_encoding"):
             charset = self.writer.fn_encoding(outgoing=True)
         else:
             charset = self.writer.get_extra_info("charset") or "utf-8"
@@ -511,6 +511,8 @@ class PTYSession:
         if self._ga_timer is not None:
             self._ga_timer.cancel()
             self._ga_timer = None
+        if self.raw_mode:
+            return
         if self.writer.remote_option.get(SGA, False):
             return
         if getattr(self.writer.protocol, "never_send_ga", False):
@@ -626,7 +628,7 @@ async def pty_shell(
     args: Optional[List[str]] = None,
     preexec_fn: Optional[Callable[[], None]] = None,
     raw_mode: bool = False,
-) -> None:
+) -> Optional[int]:
     """
     PTY shell callback for telnet server.
 
@@ -637,6 +639,7 @@ async def pty_shell(
     :param preexec_fn: Optional callable to run in child before exec.
     :param raw_mode: If True, disable PTY echo and canonical mode. Use for programs that handle
         their own terminal I/O (e.g., blessed, curses, ucs-detect).
+    :returns: Child process exit code, or ``None`` if unknown.
     """
     _platform_check()
 
@@ -658,6 +661,7 @@ async def pty_shell(
         await session.run()
     finally:
         session.cleanup()
+        writer.close()
     return session.exit_code
 
 
