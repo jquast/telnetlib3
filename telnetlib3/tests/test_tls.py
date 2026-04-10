@@ -91,12 +91,16 @@ _start_tls_timeout = pytest.mark.timeout(5 if sys.version_info < (3, 11) else 15
             id="tls-only",
         ),
         pytest.param(
-            {"ssl": "server_ssl_ctx", "tls_auto": True},
+            {"ssl": "server_ssl_ctx", "tls_auto": 0.15},
             {"ssl": "client_ssl_ctx", "server_hostname": "localhost"},
             id="tls-auto-tls-client",
             marks=[_start_tls_xfail, _start_tls_timeout],
         ),
-        pytest.param({"ssl": "server_ssl_ctx", "tls_auto": True}, {}, id="tls-auto-plain-client"),
+        pytest.param(
+            {"ssl": "server_ssl_ctx", "tls_auto": 0.15, "connect_maxwait": 0.35},
+            {},
+            id="tls-auto-plain-client",
+        ),
     ],
 )
 async def test_ping_pong(
@@ -130,7 +134,7 @@ async def test_tls_auto_both_clients(bind_host, unused_tcp_port, server_ssl_ctx,
         await writer.drain()
 
     async with create_server(
-        host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx, tls_auto=True
+        host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx, tls_auto=1.0
     ):
         async with open_connection(
             bind_host,
@@ -147,6 +151,33 @@ async def test_tls_auto_both_clients(bind_host, unused_tcp_port, server_ssl_ctx,
             writer.write("raw")
             await writer.drain()
             await asyncio.wait_for(_plain_ok, 2.0)
+
+
+async def test_tls_auto_silent_plain_client(bind_host, unused_tcp_port, server_ssl_ctx):
+    """A plain TCP client that sends nothing is handed off after the detect timeout."""
+
+    async def shell(reader, writer):
+        pass
+
+    detect_timeout = 0.15
+    async with create_server(
+        host=bind_host,
+        port=unused_tcp_port,
+        shell=shell,
+        ssl=server_ssl_ctx,
+        tls_auto=detect_timeout,
+        connect_maxwait=0.35,
+    ):
+        reader, writer = await asyncio.open_connection(host=bind_host, port=unused_tcp_port)
+        try:
+            stime = _time.monotonic()
+            data = await asyncio.wait_for(reader.read(1024), 3.0)
+            elapsed = _time.monotonic() - stime
+            assert data.startswith(b"\xff")
+            assert detect_timeout * 0.8 <= elapsed <= detect_timeout * 4
+        finally:
+            writer.close()
+            await writer.wait_closed()
 
 
 @pytest.mark.parametrize(
@@ -240,7 +271,10 @@ async def test_tls_fingerprint_end_to_end(
 
 
 async def test_tls_auto_requires_ssl_context():
-    """tls_auto=True without ssl raises ValueError."""
+    """tls_auto without ssl raises ValueError."""
+    with pytest.raises(ValueError, match="tls_auto.*requires"):
+        async with create_server(host="localhost", port=0, tls_auto=1.0):
+            pass
     with pytest.raises(ValueError, match="tls_auto.*requires"):
         async with create_server(host="localhost", port=0, tls_auto=True):
             pass
@@ -271,10 +305,7 @@ def _override_argv(argv):
 
 @pytest.mark.parametrize(
     "extra_argv, expect_key, expect_val",
-    [
-        pytest.param([], "ssl", None, id="no-ssl"),
-        pytest.param([], "tls_auto", False, id="no-tls-auto"),
-    ],
+    [pytest.param([], "ssl", None, id="no-ssl"), pytest.param([], "tls_auto", 0, id="no-tls-auto")],
 )
 async def test_server_cli_defaults(extra_argv, expect_key, expect_val):
     """Server arg parser defaults for SSL/TLS options."""
@@ -309,14 +340,29 @@ async def test_tls_auto_cli_args(tmp_path, ca):
             cert_pem,
             "--ssl-keyfile",
             key_pem,
+            "localhost",
+            "6023",
             "--tls-auto",
+        ]
+    ):
+        result = parse_server_args()
+    assert result["tls_auto"] == 0.5
+    assert isinstance(result["ssl"], ssl.SSLContext)
+
+    with _override_argv(
+        [
+            "prog",
+            "--ssl-certfile",
+            cert_pem,
+            "--ssl-keyfile",
+            key_pem,
+            "--tls-auto=0.5",
             "localhost",
             "6023",
         ]
     ):
         result = parse_server_args()
-    assert result["tls_auto"] is True
-    assert isinstance(result["ssl"], ssl.SSLContext)
+    assert result["tls_auto"] == 0.5
 
 
 @pytest.mark.parametrize(

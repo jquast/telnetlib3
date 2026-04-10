@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+import shlex
 import codecs
 import struct
 import asyncio
@@ -18,7 +19,7 @@ import logging
 from typing import Any, Dict, List, Tuple, Union, Callable, Optional, Awaitable, cast
 
 # local
-from .telopt import ECHO, NAWS, WONT
+from .telopt import SGA, ECHO, NAWS, WONT
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
 
@@ -31,7 +32,7 @@ _TERMINATE_DELAY = 0.1
 _NAWS_DEBOUNCE = 0.2
 
 # Idle delay before sending IAC GA (seconds)
-_GA_IDLE = 0.5
+_GA_IDLE = 0.1
 
 # Polling interval for _wait_for_terminal_info (seconds)
 _TERMINAL_INFO_POLL = 0.05
@@ -97,6 +98,7 @@ class PTYSession:
         self._naws_pending: Optional[Tuple[int, int]] = None
         self._naws_timer: Optional[asyncio.TimerHandle] = None
         self._ga_timer: Optional[asyncio.TimerHandle] = None
+        self.exit_code: Optional[int] = None
 
     def start(self) -> None:
         """
@@ -142,9 +144,8 @@ class PTYSession:
             if exec_err_data:
                 self._handle_exec_error(exec_err_data)
 
-            logger.debug(
-                "forked PTY: program=%s pid=%d fd=%d", self.program, self.child_pid, self.master_fd
-            )
+            cmd_str = shlex.join([self.program] + self.args)
+            logger.debug("forked PTY: pid=%d fd=%d cmd=%s", self.child_pid, self.master_fd, cmd_str)
             self._setup_parent()
             pid, status = os.waitpid(self.child_pid, os.WNOHANG)
             if pid:
@@ -176,8 +177,12 @@ class PTYSession:
 
         term = self.writer.get_extra_info("TERM", "xterm")
         if term:
-            # Terminfo entries are lowercase; telnet TTYPE may send uppercase
-            env["TERM"] = term.lower()
+            term_lower = term.lower()
+            # vt100/vt52/vtnt terminfo entries have padding delays ($<2>)
+            # that render as visible garbage. Force 'ansi' which has none.
+            if term_lower in ("vt100", "vtnt", "vt52"):
+                term_lower = "ansi"
+            env["TERM"] = term_lower
 
         rows = self.writer.get_extra_info("rows")
         cols = self.writer.get_extra_info("cols")
@@ -195,7 +200,7 @@ class PTYSession:
             if charset:
                 env["LANG"] = f"en_US.{charset}"
 
-        for key in ("DISPLAY", "USER", "COLORTERM", "HOME", "SHELL", "LOGNAME"):
+        for key in ("DISPLAY", "USER", "COLORTERM", "HOME", "SHELL", "LOGNAME", "IPADDRESS"):
             val = self.writer.get_extra_info(key)
             if val:
                 env[key] = val
@@ -381,6 +386,15 @@ class PTYSession:
                 if telnet_task in done:
                     telnet_data = telnet_task.result()
                     if telnet_data:
+                        logger.log(
+                            5,
+                            "telnet->pty: %r",
+                            (
+                                telnet_data[:200]
+                                if isinstance(telnet_data, (bytes, str))
+                                else telnet_data
+                            ),
+                        )
                         self._write_to_pty(telnet_data)
                     else:
                         self._closing = True
@@ -409,7 +423,10 @@ class PTYSession:
         if self.master_fd is None:
             return
         if isinstance(data, str):
-            charset = self.writer.get_extra_info("charset") or "utf-8"
+            if hasattr(self.writer, "fn_encoding"):
+                charset = self.writer.fn_encoding(incoming=True)
+            else:
+                charset = self.writer.get_extra_info("charset") or "utf-8"
             data = data.encode(charset, errors="replace")
         data = data.replace(b"\x7f", b"\x08")
         try:
@@ -465,7 +482,10 @@ class PTYSession:
         """Send data to telnet client using incremental decoder."""
         if not data:
             return
-        charset = self.writer.get_extra_info("charset") or "utf-8"
+        if hasattr(self.writer, "fn_encoding"):
+            charset = self.writer.fn_encoding(outgoing=True)
+        else:
+            charset = self.writer.get_extra_info("charset") or "utf-8"
 
         # Get or create incremental decoder, recreating if charset changed
         if self._decoder is None or self._decoder_charset != charset:
@@ -476,10 +496,12 @@ class PTYSession:
         text = self._decoder.decode(data, final)
         if text:
             cast(TelnetWriterUnicode, self.writer).write(text)
+            self._schedule_ga()
 
     def _flush_remaining(self) -> None:
         """Flush remaining buffer after EAGAIN (partial lines, prompts, etc.)."""
         if self._output_buffer and not self._in_sync_update:
+            logger.log(5, "flush_remaining: %r", self._output_buffer[:200])
             self._flush_output(self._output_buffer)
             self._output_buffer = b""
         self._schedule_ga()
@@ -490,6 +512,8 @@ class PTYSession:
             self._ga_timer.cancel()
             self._ga_timer = None
         if self.raw_mode:
+            return
+        if self.writer.remote_option.get(SGA, False):
             return
         if getattr(self.writer.protocol, "never_send_ga", False):
             return
@@ -565,10 +589,13 @@ class PTYSession:
                 pass
             self.master_fd = None
 
+        self.exit_code = None
         if self.child_pid is not None:
             self._terminate(force=True)
             try:
-                os.waitpid(self.child_pid, os.WNOHANG)
+                _, status = os.waitpid(self.child_pid, os.WNOHANG)
+                if os.WIFEXITED(status):
+                    self.exit_code = os.WEXITSTATUS(status)
             except ChildProcessError:
                 pass
             self.child_pid = None
@@ -601,7 +628,7 @@ async def pty_shell(
     args: Optional[List[str]] = None,
     preexec_fn: Optional[Callable[[], None]] = None,
     raw_mode: bool = False,
-) -> None:
+) -> Optional[int]:
     """
     PTY shell callback for telnet server.
 
@@ -612,6 +639,7 @@ async def pty_shell(
     :param preexec_fn: Optional callable to run in child before exec.
     :param raw_mode: If True, disable PTY echo and canonical mode. Use for programs that handle
         their own terminal I/O (e.g., blessed, curses, ucs-detect).
+    :returns: Child process exit code, or ``None`` if unknown.
     """
     _platform_check()
 
@@ -633,8 +661,8 @@ async def pty_shell(
         await session.run()
     finally:
         session.cleanup()
-        if not writer.is_closing():
-            writer.close()
+        writer.close()
+    return session.exit_code
 
 
 def make_pty_shell(

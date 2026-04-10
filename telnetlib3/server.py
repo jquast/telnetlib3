@@ -181,8 +181,22 @@ class TelnetServer(server_base.BaseServer):
         ]:
             self.writer.set_ext_offer_callback(tel_opt, callback_fn)
 
+    _tls_checked = False
+
     def data_received(self, data: bytes) -> None:
         """Process received data and reset timeout timer."""
+        if not self._tls_checked:
+            self._tls_checked = True
+            if data and data[0] == 0x16:
+                peername = self._transport.get_extra_info("peername", ("-", 0))
+                logger.warning(
+                    "TLS ClientHello from %s:%s but server has no SSL"
+                    " context -- closing connection",
+                    peername[0],
+                    peername[1],
+                )
+                self._transport.close()
+                return
         self.set_timeout()
         super().data_received(data)
         # MCCP2: start compression once client confirms DO MCCP2
@@ -500,6 +514,7 @@ class TelnetServer(server_base.BaseServer):
                 "DISPLAY",
                 "LANG",
                 "TERM",
+                "TERM_PROGRAM",
                 "COLUMNS",
                 "LINES",
                 "COLORTERM",
@@ -725,50 +740,92 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
     """
     Protocol wrapper that auto-detects TLS vs plain telnet connections.
 
-    Peeks at the first byte of incoming data using ``MSG_PEEK`` on the raw
-    socket.  A TLS ClientHello always begins with record-type byte ``0x16``
-    (22), while telnet IAC is ``0xFF`` and printable ASCII is ``0x20..0x7E``.
+    Reading is paused on connect, then a non-blocking ``MSG_PEEK`` on a
+    duplicated socket checks the first byte without consuming it.  A TLS
+    ClientHello always begins with ``0x16`` (22); anything else (telnet IAC
+    ``0xFF``, printable ASCII, etc.) is plain telnet.
 
-    When TLS is detected, the transport is upgraded via
-    :meth:`loop.start_tls` before handing off to the real telnet protocol.
-    Plain connections are handed off directly.
+    Plain telnet clients typically wait for the server to speak first, so a
+    timeout (*detect_timeout* seconds) assumes plain telnet when no data
+    arrives promptly.  TLS clients always send ClientHello immediately.
+
+    When TLS is detected, :meth:`loop.start_tls` upgrades the transport.
+    Plain connections resume reading and hand off directly.
     """
 
+    _PEEK_RETRY_SECS = 0.01
+
     def __init__(
-        self, ssl_context: ssl_module.SSLContext, real_factory: Callable[[], asyncio.Protocol]
+        self,
+        ssl_context: ssl_module.SSLContext,
+        real_factory: Callable[[], asyncio.Protocol],
+        detect_timeout: float = 0.5,
     ) -> None:
         self._ssl_context = ssl_context
+        self._detect_timeout_secs = detect_timeout
         self._real_factory = real_factory
         self._transport: Optional[asyncio.Transport] = None
+        self._detect_timer: Optional[asyncio.TimerHandle] = None
+        self._decided = False
+        self._buffered: bytes = b""
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
-        """Pause reading and schedule a peek to detect TLS."""
+        """Pause reading and begin non-blocking peek loop."""
         self._transport = transport  # type: ignore[assignment]
         transport.pause_reading()  # type: ignore[attr-defined]
-        asyncio.get_event_loop().call_soon(self._detect_tls)
+        loop = asyncio.get_event_loop()
+        self._detect_timer = loop.call_later(self._detect_timeout_secs, self._on_detect_timeout)
+        loop.call_soon(self._try_peek)
 
-    def _detect_tls(self) -> None:
-        """Peek at the first byte without consuming it."""
+    def _cancel_timer(self) -> None:
+        """Cancel the pending detect timeout."""
+        if self._detect_timer is not None:
+            self._detect_timer.cancel()
+            self._detect_timer = None
+
+    def _try_peek(self) -> None:
+        """Non-blocking peek at the first byte via a duplicated socket."""
+        if self._decided:
+            return
+        if self._transport is None:
+            logger.debug("tls-auto: no transport in _try_peek (client disconnected?)")
+            return
         tsock = self._transport.get_extra_info("socket")
         if tsock is None:
-            self._handoff_plain()
+            logger.debug("tls-auto: no socket in _try_peek (client disconnected?)")
             return
-        # asyncio's TransportSocket doesn't expose recv(); dup the fd to peek.
-        peek_sock = socket.fromfd(tsock.fileno(), socket.AF_INET, socket.SOCK_STREAM)
+        peek_sock = socket.fromfd(tsock.fileno(), tsock.family, socket.SOCK_STREAM)
+        peek_sock.setblocking(False)
         try:
             data = peek_sock.recv(1, socket.MSG_PEEK)
-        except OSError:
-            asyncio.get_event_loop().call_soon(self._detect_tls)
+        except BlockingIOError:
+            asyncio.get_event_loop().call_later(self._PEEK_RETRY_SECS, self._try_peek)
             return
+        except OSError:
+            data = b""
         finally:
             peek_sock.close()
+
+        self._decided = True
+        self._cancel_timer()
         if not data:
             self._transport.close()
             return
         if data[0] == 0x16:
+            logger.debug("tls-auto: TLS ClientHello detected")
             asyncio.ensure_future(self._upgrade_to_tls())
         else:
+            logger.debug("tls-auto: non-TLS byte 0x%02x, plain telnet", data[0])
             self._handoff_plain()
+
+    def _on_detect_timeout(self) -> None:
+        """No data arrived -- assume plain telnet."""
+        self._detect_timer = None
+        if self._decided:
+            return
+        self._decided = True
+        logger.debug("tls-auto: no data in %.1fs, assuming plain telnet", self._detect_timeout_secs)
+        self._handoff_plain()
 
     async def _upgrade_to_tls(self) -> None:
         """
@@ -799,19 +856,28 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
         protocol.connection_made(ssl_transport)
 
     def _handoff_plain(self) -> None:
-        """Hand off to the real protocol as a plain telnet connection."""
+        """
+        Hand off to the real protocol as a plain telnet connection.
+
+        Any data delivered to this protocol while paused (a race on some Python versions) is
+        replayed into the real protocol.
+        """
         assert self._transport is not None
         protocol = self._real_factory()
         self._transport.set_protocol(protocol)
         protocol.connection_made(self._transport)
+        if self._buffered:
+            protocol.data_received(self._buffered)
         self._transport.resume_reading()
 
-    def data_received(self, data: bytes) -> None:  # pragma: no cover
-        """Not expected -- reading is paused during detection."""
+    def data_received(self, data: bytes) -> None:
+        """Buffer data that arrives during detection (race on some Pythons)."""
+        self._buffered += data
 
     def connection_lost(self, exc: Optional[Exception]) -> None:
         """Connection dropped before detection completed."""
-        _ = exc
+        self._decided = True
+        self._cancel_timer()
 
 
 class LinemodeServer(TelnetServer):
@@ -953,6 +1019,7 @@ class StatusLogger:
                     "rx": getattr(client, "rx_bytes", 0),
                     "tx": getattr(client, "tx_bytes", 0),
                     "idle": int(getattr(client, "idle", 0)),
+                    "tls": client.get_extra_info("ssl_object") is not None,
                 }
             )
         client_data.sort(key=lambda x: (x["ip"], x["port"]))
@@ -968,10 +1035,12 @@ class StatusLogger:
         """Format status for logging."""
         if status["count"] == 0:
             return "0 clients connected"
-        client_info = ", ".join(
-            f"{c['ip']}:{c['port']} (rx={c['rx']}, tx={c['tx']}, idle={c['idle']})"
-            for c in status["clients"]
-        )
+
+        def _fmt_client(c: Dict[str, Any]) -> str:
+            tls = " tls" if c["tls"] else ""
+            return f"{c['ip']}:{c['port']} (rx={c['rx']}, tx={c['tx']}, idle={c['idle']}{tls})"
+
+        client_info = ", ".join(_fmt_client(c) for c in status["clients"])
         return f"{status['count']} client(s): {client_info}"
 
     async def _run(self) -> None:
@@ -1012,7 +1081,7 @@ async def create_server(
     rows: int = 25,
     timeout: int = 300,
     ssl: Optional[ssl_module.SSLContext] = None,
-    tls_auto: bool = False,
+    tls_auto: Union[bool, float] = False,
 ) -> Server:
     """
     Create a TCP Telnet server.
@@ -1082,18 +1151,25 @@ async def create_server(
         (TELNETS, :rfc:`855` over TLS).  When provided, the server performs a
         TLS handshake before any telnet data is exchanged.  ``None`` (default)
         creates a plain TCP server.
-    :param tls_auto: When ``True`` and *ssl* is provided, the server accepts
-        both TLS and plain telnet clients on the same port.  The first byte of
-        each connection is inspected: a TLS ClientHello (``0x16``) triggers a
-        TLS handshake, anything else is treated as plain telnet.  Requires
-        *ssl* to be an :class:`ssl.SSLContext`.
+    :param tls_auto: When truthy and *ssl* is provided, the server accepts
+        both TLS and plain telnet clients on the same port.  A ``float``
+        value sets the number of seconds to wait for a TLS ClientHello
+        (``0x16``) before assuming a plain telnet connection; ``True`` uses
+        a default of 0.5 seconds.  TLS clients send ClientHello immediately;
+        plain telnet clients typically wait for the server to speak first,
+        so the timeout distinguishes the two.  ``False`` or ``0`` (default)
+        disables auto-detection.  Requires *ssl* to be an
+        :class:`ssl.SSLContext`.
 
     :return: A :class:`Server` instance that wraps the asyncio.Server
         and provides access to connected client protocols via
         :meth:`Server.wait_for_client` and :attr:`Server.clients`.
     """
     if tls_auto and ssl is None:
-        raise ValueError("tls_auto=True requires an ssl SSLContext")
+        raise ValueError("tls_auto requires an ssl SSLContext")
+    # normalize True → 0.5
+    if tls_auto is True:
+        tls_auto = 0.5
 
     protocol_factory = protocol_factory or TelnetServer
 
@@ -1137,7 +1213,7 @@ async def create_server(
         assert ssl is not None
 
         def factory() -> asyncio.Protocol:
-            return _TLSAutoDetectProtocol(ssl, _make_telnet_protocol)
+            return _TLSAutoDetectProtocol(ssl, _make_telnet_protocol, tls_auto)
 
         telnet_server._server = await asyncio.get_running_loop().create_server(factory, host, port)
     else:
@@ -1160,8 +1236,16 @@ async def _sigterm_handler(server: Server, _log: logging.Logger) -> None:
     server.close()
 
 
-def parse_server_args() -> Dict[str, Any]:
-    """Parse command-line arguments for telnet server."""
+def parse_server_args(
+    extra_args_fn: Optional[Callable[[argparse.ArgumentParser], None]] = None,
+) -> Dict[str, Any]:
+    """
+    Parse command-line arguments for telnet server.
+
+    :param extra_args_fn: Optional callback to add extra arguments to the parser
+        before parsing.  Used by ``telnetlib3-fingerprint-server`` to inject
+        ``--data-dir``.
+    """
     # Extract arguments after '--' for PTY program before argparse sees them
     argv = sys.argv[1:]
     pty_args = []
@@ -1266,10 +1350,17 @@ def parse_server_args() -> Dict[str, Any]:
     parser.add_argument("--timeout", default=_config.timeout, help="idle disconnect (0 disables)")
     parser.add_argument(
         "--tls-auto",
-        action="store_true",
-        default=False,
-        help="accept both TLS and plain telnet on the same port (requires --ssl-certfile)",
+        type=float,
+        nargs="?",
+        const=0.5,
+        default=0,
+        metavar="SECONDS",
+        help="accept both TLS and plain telnet on the same port;"
+        " value is seconds to wait for TLS ClientHello before"
+        " assuming plain telnet (default: 0.5, requires --ssl-certfile)",
     )
+    if extra_args_fn is not None:
+        extra_args_fn(parser)
     result = vars(parser.parse_args(argv))
     result["pty_args"] = pty_args if PTY_SUPPORT else None
     # --pty-raw is a hidden no-op (raw is now the default);
@@ -1323,7 +1414,7 @@ async def run_server(
     compression: Optional[bool] = None,
     protocol_factory: Optional[Type[asyncio.Protocol]] = None,
     ssl: Optional[ssl_module.SSLContext] = None,
-    tls_auto: bool = False,
+    tls_auto: Union[bool, float] = False,
 ) -> None:
     """
     Program entry point for server daemon.

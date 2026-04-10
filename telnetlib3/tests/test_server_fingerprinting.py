@@ -397,8 +397,9 @@ def test_save_server_fingerprint_data_dir_none(monkeypatch):
     assert _save() is None
 
 
-def test_count_server_fingerprint_folders(tmp_path):
+def test_count_server_fingerprint_folders(tmp_path, monkeypatch):
     assert fps._count_fingerprint_folders(data_dir=str(tmp_path), side="server") == 0
+    monkeypatch.setattr(fps, "DATA_DIR", None)
     assert fps._count_fingerprint_folders(data_dir=None, side="server") == 0
     server_dir = tmp_path / "server"
     server_dir.mkdir()
@@ -533,7 +534,8 @@ def test_collect_option_states_with_environ_send():
     assert states["environ_requested"][0]["name"] == "USER"
 
 
-def test_save_fingerprint_name_no_data_dir():
+def test_save_fingerprint_name_no_data_dir(monkeypatch):
+    monkeypatch.setattr(fps, "DATA_DIR", None)
     with pytest.raises(ValueError):
         fps._save_fingerprint_name("abcd1234abcd1234", "test", None)
 
@@ -1028,6 +1030,63 @@ async def test_fingerprinting_settle_dsr_response(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_read_banner_da_response():
+    """DA (Device Attributes) request gets VT100+AVO response."""
+    reader = MockReader([b"\x1b[cWelcome\r\n"])
+    writer = MockWriter()
+    await sfp._read_banner_until_quiet(reader, quiet_time=0.01, max_wait=0.05, writer=writer)
+    assert b"\x1b[?1;2c" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_read_banner_da_with_param():
+    """DA request ESC[0c also gets a response."""
+    reader = MockReader([b"\x1b[0cWelcome\r\n"])
+    writer = MockWriter()
+    await sfp._read_banner_until_quiet(reader, quiet_time=0.01, max_wait=0.05, writer=writer)
+    assert b"\x1b[?1;2c" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_read_banner_dsr_status_response():
+    """DSR device-status request ESC[5n gets terminal-OK response."""
+    reader = MockReader([b"\x1b[5nWelcome\r\n"])
+    writer = MockWriter()
+    await sfp._read_banner_until_quiet(reader, quiet_time=0.01, max_wait=0.05, writer=writer)
+    assert b"\x1b[0n" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_read_banner_enq_response():
+    """ENQ byte gets a CR answerback."""
+    reader = MockReader([b"\x05Welcome\r\n"])
+    writer = MockWriter()
+    await sfp._read_banner_until_quiet(reader, quiet_time=0.01, max_wait=0.05, writer=writer)
+    assert b"\r" in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_read_banner_combined_ansi_probes():
+    """Multiple ANSI probes in one chunk all get responses."""
+    reader = MockReader([b"\x1b[c\x1b[5n\x1b[6nHello"])
+    writer = MockWriter()
+    await sfp._read_banner_until_quiet(reader, quiet_time=0.01, max_wait=0.05, writer=writer)
+    assert b"\x1b[?1;2c" in writer._writes
+    assert b"\x1b[0n" in writer._writes
+    cpr_count = sum(1 for w in writer._writes if b"R" in w and b"\x1b[" in w and b"?" not in w)
+    assert cpr_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_da_response(tmp_path):
+    """Full session responds to DA in the banner."""
+    reader = MockReader([b"\x1b[cWelcome to BBS\r\n"])
+    writer = MockWriter(will_options=[fps.SGA])
+    await _run_fp(reader, writer, tmp_path)
+    assert b"\x1b[?1;2c" in writer._writes
+
+
+@pytest.mark.asyncio
 async def test_fingerprinting_shell_ansi_ellipsis_menu(tmp_path):
     """Worldgroup/MajorBBS ellipsis-menu selects first numbered option."""
     writer = MockWriter(will_options=[fps.SGA, fps.ECHO])
@@ -1320,10 +1379,61 @@ async def test_read_banner_syncterm_font_explicit_encoding():
 
 @pytest.mark.asyncio
 async def test_read_banner_utf8_menu_explicit_encoding():
-    """UTF-8 menu does not switch encoding when explicit."""
+    """UTF-8 menu is not selected when encoding is explicit."""
     reader = MockReader([b"(1) UTF-8\r\n(2) CP437\r\n"])
     writer = MockWriter()
     writer._encoding_explicit = True
     writer.environ_encoding = "cp437"
     await sfp._read_banner_until_quiet(reader, quiet_time=0.01, max_wait=0.05, writer=writer)
+    assert writer.environ_encoding == "cp437"
+    assert b"1\r\n" not in writer._writes
+
+
+@pytest.mark.asyncio
+async def test_read_banner_codepage_prompt_explicit_encoding():
+    """Codepage selection prompt sends return when encoding is explicit."""
+    reader = MockReader([b"Select Terminal Codepage:\r\n"])
+    writer = MockWriter()
+    writer._encoding_explicit = True
+    writer.environ_encoding = "cp437"
+    await sfp._read_banner_until_quiet(reader, quiet_time=0.01, max_wait=0.05, writer=writer)
+    assert b"\r\n" in writer._writes
+    assert writer._menu_inline is True
+    assert writer.environ_encoding == "cp437"
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        b"Select Terminal Codepage",
+        b"Select your codepage",
+        b"Choose character set",
+        b"Choose your charset",
+        b"Select encoding",
+        b"Pick your character set",
+    ],
+)
+def test_detect_codepage_prompt(prompt):
+    result = sfp._detect_yn_prompt(prompt + b":\r\n")
+    assert result.response == b"\r\n"
+    assert result.encoding == "codepage"
+
+
+def test_detect_codepage_prompt_after_utf8_menu():
+    """UTF-8 menu match takes priority over generic codepage prompt."""
+    banner = b"Select Terminal Codepage:\r\n(1) UTF-8\r\n(2) CP437\r\n"
+    result = sfp._detect_yn_prompt(banner)
+    assert result.response == b"1\r\n"
+    assert result.encoding == "utf-8"
+
+
+@pytest.mark.asyncio
+async def test_fingerprinting_shell_codepage_explicit_skips_utf8(tmp_path):
+    """With explicit encoding, charset menu sends return instead of UTF-8."""
+    writer = MockWriter(will_options=[fps.SGA])
+    reader = InteractiveMockReader(
+        [b"Select codepage:\r\n(1) UTF-8\r\n(2) CP437\r\n", b"Welcome!\r\nLogin: "], writer
+    )
+    await _run_fp(reader, writer, tmp_path, environ_encoding="cp437")
+    assert b"1\r\n" not in writer._writes
     assert writer.environ_encoding == "cp437"

@@ -238,7 +238,7 @@ def test_prompt_stores_suggestions(tmp_path, monkeypatch, capsys):
     filepath.write_text(json.dumps(data))
 
     inputs = iter(["Ghostty", "GNU Telnet"])
-    monkeypatch.setattr(fpd, "_cooked_input", lambda prompt: next(inputs))
+    monkeypatch.setattr(fpd, "_styled_input", lambda term, prompt: next(inputs))
     fpd._prompt_fingerprint_identification(MockTerm(), data, str(filepath), {})
     assert data["suggestions"]["terminal-emulator"] == "Ghostty"
     assert data["suggestions"]["telnet-client"] == "GNU Telnet"
@@ -259,7 +259,7 @@ def test_prompt_stores_revision(tmp_path, monkeypatch, capsys):
     filepath.write_text(json.dumps(data))
 
     inputs = iter(["Ghostty2", "inetutils-2.5"])
-    monkeypatch.setattr(fpd, "_cooked_input", lambda prompt: next(inputs))
+    monkeypatch.setattr(fpd, "_styled_input", lambda term, prompt: next(inputs))
     names = {"aaa": "GNU Telnet", "bbbb": "Ghostty"}
     fpd._prompt_fingerprint_identification(MockTerm(), data, str(filepath), names)
     assert data["suggestions"]["terminal-emulator-revision"] == "Ghostty2"
@@ -517,15 +517,15 @@ def test_setup_term_environ_no_ttype_cycle(monkeypatch):
         ({}, True),
     ],
 )
-def test_client_requires_ga(probe, expected):
+def test_client_lacks_sga(probe, expected):
     data = {"telnet-probe": {"session_data": {"probe": probe}}}
-    assert fpd._client_requires_ga(data) is expected
+    assert fpd._client_lacks_sga(data) is expected
 
 
 @requires_unix
-def test_client_requires_ga_missing_keys():
-    assert fpd._client_requires_ga({}) is True
-    assert fpd._client_requires_ga({"telnet-probe": {}}) is True
+def test_client_lacks_sga_missing_keys():
+    assert fpd._client_lacks_sga({}) is True
+    assert fpd._client_lacks_sga({"telnet-probe": {}}) is True
 
 
 @requires_unix
@@ -751,7 +751,7 @@ def test_count_protocol_folder_files(tmp_path):
     assert fps._count_protocol_folder_files(str(tmp_path)) == 2
 
 
-def test_count_fingerprint_folders(tmp_path):
+def test_count_fingerprint_folders(tmp_path, monkeypatch):
     assert fps._count_fingerprint_folders(data_dir=str(tmp_path)) == 0
     client_dir = tmp_path / "client"
     client_dir.mkdir()
@@ -759,6 +759,7 @@ def test_count_fingerprint_folders(tmp_path):
     (client_dir / "hash2").mkdir()
     (client_dir / "not_a_dir.txt").write_text("")
     assert fps._count_fingerprint_folders(data_dir=str(tmp_path)) == 2
+    monkeypatch.setattr(fps, "DATA_DIR", None)
     assert fps._count_fingerprint_folders(data_dir=None) == 0
 
 
@@ -784,7 +785,7 @@ def test_create_session_fingerprint():
     assert fps._create_session_fingerprint(MockWriter(extra={"term": "vt100"}))["TERM"] == "vt100"
 
 
-def test_load_fingerprint_names(tmp_path):
+def test_load_fingerprint_names(tmp_path, monkeypatch):
     names_file = tmp_path / "fingerprint_names.json"
     names_file.write_text(json.dumps({"abc123": "Ghostty", "def456": "iTerm2"}))
     assert fps._load_fingerprint_names(data_dir=str(tmp_path)) == {
@@ -792,6 +793,7 @@ def test_load_fingerprint_names(tmp_path):
         "def456": "iTerm2",
     }
     assert fps._load_fingerprint_names(data_dir=str(tmp_path / "nope")) == {}
+    monkeypatch.setattr(fps, "DATA_DIR", None)
     assert fps._load_fingerprint_names(data_dir=None) == {}
 
 
@@ -919,6 +921,334 @@ async def test_server_shell_syncterm(monkeypatch):
     )
     await fps.fingerprinting_server_shell(MockReader([]), writer)
     assert "\x1b[0;40 D" in "".join(writer.written) and writer._closing
+
+
+class _ErrorReader:
+    async def read(self, n):
+        raise ConnectionError("gone")
+
+
+@pytest.mark.parametrize(
+    "reader_data,expect_match",
+    [
+        pytest.param([b"\x1b[5;10R"], True, id="bytes_match"),
+        pytest.param(["\x1b[3;7R"], True, id="str_match"),
+        pytest.param([], False, id="timeout"),
+        pytest.param([""], False, id="empty"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_read_until_cpr(reader_data, expect_match):
+    match, buf = await fps._read_until_cpr(MockReader(reader_data), timeout=0.05)
+    assert (match is not None) == expect_match
+
+
+@pytest.mark.asyncio
+async def test_read_until_cpr_connection_error():
+    match, _ = await fps._read_until_cpr(_ErrorReader(), timeout=0.05)
+    assert match is None
+
+
+@pytest.mark.asyncio
+async def test_make_send_recv():
+    reader = MockReader([b"\x1b[1;1R"])
+    writer = MockWriter()
+    send_recv = fps._make_send_recv(reader, writer)
+    match, _ = await send_recv("test\x1b[6n", timeout=0.05)
+    assert match is not None and "test\x1b[6n" in writer.written
+
+
+@pytest.mark.parametrize(
+    "pos_data,expect_cursor_restore",
+    [
+        pytest.param(b"\x1b[10;5R", True, id="with_position"),
+        pytest.param("", False, id="no_position"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_shielded_probe(pos_data, expect_cursor_restore):
+    reader = MockReader([pos_data, b"\x1b[1;1R"])
+    writer = MockWriter()
+    await fps._shielded_probe(
+        reader, writer, number=1, name="Test", description="desc", sequence="payload", timeout=0.05
+    )
+    written = "".join(writer.written)
+    assert "1. Test" in written and "ok" in written
+    assert ("\x1b[10;5H" in written) == expect_cursor_restore
+
+
+@pytest.mark.parametrize(
+    "reader_data,expected_count,expected_result",
+    [
+        pytest.param(
+            [b"\x1bP1!~00AB\x1b\\\x1bP2!~0FFF\x1b\\"], 2, {1: 0x00AB, 2: 0x0FFF}, id="two_responses"
+        ),
+        pytest.param([], 5, {}, id="timeout"),
+        pytest.param([b"\x1bP1!~0042\x1b\\"], 3, {1: 0x0042}, id="partial"),
+        pytest.param(["\x1bP1!~00FF\x1b\\"], 1, {1: 0x00FF}, id="str_input"),
+        pytest.param([""], 1, {}, id="empty"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_blast_collect(reader_data, expected_count, expected_result):
+    results = await fps._blast_collect(MockReader(reader_data), expected_count, timeout=0.05)
+    assert results == expected_result
+
+
+@pytest.mark.asyncio
+async def test_blast_collect_connection_error():
+    assert await fps._blast_collect(_ErrorReader(), expected=1, timeout=0.05) == {}
+
+
+def _deccksr_responses(codes):
+    return b"".join(f"\x1bP{c}!~{c:04X}\x1b\\".encode() for c in codes)
+
+
+_ALL_PRINTABLE = list(range(32, 127))
+
+
+@pytest.mark.asyncio
+async def test_build_checksum_lookup():
+    reader = MockReader([_deccksr_responses(_ALL_PRINTABLE)])
+    table = await fps._build_checksum_lookup(reader, MockWriter(), cal_row=1, usable_cols=200)
+    assert len(table) == 95 and table[0x0020] == " " and table[0x0041] == "A"
+
+
+@pytest.mark.parametrize(
+    "codes,usable_cols",
+    [
+        pytest.param(_ALL_PRINTABLE[:1], 200, id="incomplete"),
+        pytest.param([c for c in _ALL_PRINTABLE if c != 65], 200, id="missing_A"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_build_checksum_lookup_fails(codes, usable_cols):
+    reader = MockReader([_deccksr_responses(codes)])
+    table = await fps._build_checksum_lookup(
+        reader, MockWriter(), cal_row=1, usable_cols=usable_cols
+    )
+    assert table == {}
+
+
+@pytest.mark.asyncio
+async def test_build_checksum_lookup_batched():
+    batch_size = 10
+    entries = []
+    for offset in range(0, len(_ALL_PRINTABLE), batch_size):
+        entries.append(_deccksr_responses(_ALL_PRINTABLE[offset : offset + batch_size]))
+    reader = MockReader(entries)
+    table = await fps._build_checksum_lookup(
+        reader, MockWriter(), cal_row=1, usable_cols=batch_size
+    )
+    assert len(table) == 95
+
+
+@pytest.mark.asyncio
+async def test_blast_scrape():
+    lookup = {0x0041: "A", 0x0020: " "}
+    resp = b"\x1bP0!~0041\x1b\\\x1bP1!~0020\x1b\\"
+    result = await fps._blast_scrape(MockReader([resp]), MockWriter(), 1, 2, lookup, timeout=0.5)
+    assert result.startswith("A")
+
+
+@pytest.mark.asyncio
+async def test_blast_scrape_unknown_checksum():
+    lookup = {0x0041: "A", 0x0020: " "}
+    resp = b"\x1bP0!~0041\x1b\\\x1bP1!~BEEF\x1b\\"
+    result = await fps._blast_scrape(MockReader([resp]), MockWriter(), 1, 2, lookup, timeout=0.5)
+    assert "A" in result and "?0x" in result
+
+
+@pytest.mark.parametrize(
+    "reader_data,rows,cols,expect_result",
+    [
+        pytest.param([b"\x1bXCTerm:STS:10:Hello     World     \x1b\\"], 2, 10, True, id="success"),
+        pytest.param(["\x1bXCTerm:STS:10:Hello     \x1b\\"], 1, 10, True, id="str_input"),
+        pytest.param([], 2, 10, False, id="timeout"),
+        pytest.param([""], 1, 10, False, id="empty"),
+        pytest.param([b"\x1bXCTerm:STS:10:AB\x1b\\"], 3, 10, True, id="short_content"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_scrape_screen_sts(reader_data, rows, cols, expect_result):
+    result = await fps.scrape_screen_sts(MockReader(reader_data), MockWriter(), rows, cols, 0.05)
+    if expect_result:
+        assert result is not None and result["method"] == "sts"
+    else:
+        assert result is None
+
+
+def _scrape_reader(responses):
+    """MockReader for scrape_screen: inserts "" for drain loop after first CPR."""
+    return MockReader([responses[0], ""] + list(responses[1:]))
+
+
+_CAL_RESP = _deccksr_responses(_ALL_PRINTABLE)
+_CPR = b"\x1b[5;1R"
+_PROBE_OK = b"\x1bP9999!~0041\x1b\\" + _CPR
+_Z_VERIFY = f"\x1bP1!~{ord('Z'):04X}\x1b\\".encode() + _CPR
+
+
+@pytest.mark.parametrize(
+    "responses,rows,cols",
+    [
+        pytest.param([_CPR, _CPR], 5, 96, id="no_decrqcra"),
+        pytest.param(["", ""], 5, 96, id="no_initial_cpr"),
+        pytest.param([_CPR, _PROBE_OK], 5, 96, id="lookup_fails"),
+        pytest.param(
+            [_CPR, _PROBE_OK, _CAL_RESP, b"\x1bP1!~FFFF\x1b\\" + _CPR], 5, 96, id="verify_fails"
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_scrape_screen_fails(responses, rows, cols):
+    result = await fps.scrape_screen(_scrape_reader(responses), MockWriter(), rows, cols)
+    assert result is None
+
+
+@pytest.mark.parametrize(
+    "alt_same", [pytest.param(True, id="alt_same"), pytest.param(False, id="alt_differs")]
+)
+@pytest.mark.asyncio
+async def test_scrape_screen_success(alt_same):
+    rows, cols = 1, 96
+    normal_resp = _deccksr_responses(range(rows * cols))
+    alt_resp = normal_resp if alt_same else b"\x1bP0!~ABCD\x1b\\" * (rows * cols)
+    reader = _scrape_reader([_CPR, _PROBE_OK, _CAL_RESP, _Z_VERIFY, normal_resp, alt_resp])
+    result = await fps.scrape_screen(reader, MockWriter(), rows, cols)
+    assert result is not None and result["decrqcra"] is True
+    assert ("screen_1" in result) != alt_same
+
+
+class _MockFPServer:
+    def __init__(self, exc=None, tasks=None, closing=False, term_label=None):
+        self._closing = closing
+        self.writer = MockWriter()
+        if term_label:
+            self.writer._tv_term_label = term_label
+        self._tasks = tasks or []
+        self._exc_set = None
+        self._eof_called = False
+
+        server_ref = self
+
+        class reader:
+            @staticmethod
+            def feed_eof():
+                server_ref._eof_called = True
+
+            @staticmethod
+            def set_exception(exc):
+                server_ref._exc_set = exc
+
+        self.reader = reader
+
+
+@pytest.mark.parametrize(
+    "exc,closing,n_tasks,cancel_raises",
+    [
+        pytest.param(None, False, 0, False, id="clean_close"),
+        pytest.param(ConnectionError("x"), False, 0, False, id="with_exc"),
+        pytest.param(None, False, 2, False, id="cancels_tasks"),
+        pytest.param(None, True, 0, False, id="already_closing"),
+        pytest.param(None, False, 1, True, id="cancel_raises"),
+    ],
+)
+def test_connection_lost(exc, closing, n_tasks, cancel_raises):
+    class MockTask:
+        cancelled = False
+
+        def cancel(self):
+            self.cancelled = True
+            if cancel_raises:
+                raise RuntimeError("cancel failed")
+
+    tasks = [MockTask() for _ in range(n_tasks)]
+    server = _MockFPServer(tasks=tasks, closing=closing, term_label="xterm")
+    fps.FingerprintingServer.connection_lost(server, exc)
+    assert server._closing is True
+    if not closing:
+        if exc is None:
+            assert server._eof_called
+        else:
+            assert server._exc_set is exc
+        assert all(t.cancelled for t in tasks)
+
+
+async def _fake_pty(reader, writer, exe, args, raw_mode=False):
+    return 0
+
+
+@requires_unix
+@pytest.mark.asyncio
+async def test_server_shell_with_linemode(monkeypatch):
+    monkeypatch.setattr(fps.asyncio, "sleep", _noop)
+    monkeypatch.setattr(fps, "DATA_DIR", None)
+    writer = MockWriter(
+        extra={"peername": ("127.0.0.1", 12345), "TERM": "xterm"},
+        will_options=[fps.BINARY, fps.LINEMODE],
+    )
+    writer.remote_option[fps.LINEMODE] = True
+    await fps.fingerprinting_server_shell(MockReader([]), writer)
+    assert writer._closing
+    assert any(cmd == fps.DONT and opt == fps.LINEMODE for cmd, opt in writer._iac_calls)
+
+
+@requires_unix
+@pytest.mark.parametrize(
+    "term,extra_opts,exit_code,expect_encoding",
+    [
+        pytest.param("xterm", {}, 0, None, id="normal"),
+        pytest.param("mudlet", {"GMCP": True}, 0, None, id="mud_client"),
+        pytest.param("xterm", {"ttype1": "MTTS 137"}, 0, None, id="mtts_mud"),
+        pytest.param("xterm", {}, 100, None, id="attack_exit_code"),
+        pytest.param("syncterm", {}, 0, "latin-1", id="syncterm_encoding"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_server_shell_with_data_dir(
+    monkeypatch, tmp_path, term, extra_opts, exit_code, expect_encoding
+):
+    monkeypatch.setattr(fps.asyncio, "sleep", _noop)
+    monkeypatch.setattr(fps, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(fps, "_HAS_TV_DETECT", False)
+
+    extra = {"peername": ("127.0.0.1", 12345), "TERM": term}
+    extra.update({k: v for k, v in extra_opts.items() if not isinstance(v, bool)})
+    will_opts = [fps.BINARY, fps.SGA]
+    will_opts.extend(getattr(fps, k) for k, v in extra_opts.items() if isinstance(v, bool) and v)
+    writer = MockWriter(extra=extra, will_options=will_opts)
+    for k, v in extra_opts.items():
+        if isinstance(v, bool):
+            writer.remote_option[getattr(fps, k)] = v
+
+    async def pty_with_exit(reader, writer, exe, args, raw_mode=False):
+        return exit_code
+
+    monkeypatch.setattr(server_pty_shell, "pty_shell", pty_with_exit)
+    await fps.fingerprinting_server_shell(MockReader([]), writer)
+    assert writer._closing
+    if expect_encoding:
+        assert writer.fn_encoding() == expect_encoding
+
+
+@requires_unix
+@pytest.mark.asyncio
+async def test_server_shell_connection_reset(monkeypatch, tmp_path):
+    monkeypatch.setattr(fps.asyncio, "sleep", _noop)
+    monkeypatch.setattr(fps, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(fps, "_HAS_TV_DETECT", False)
+
+    writer = MockWriter(
+        extra={"peername": ("127.0.0.1", 12345), "TERM": "xterm"},
+        will_options=[fps.BINARY, fps.SGA],
+    )
+
+    async def error_pty_shell(reader, writer, exe, args, raw_mode=False):
+        raise ConnectionResetError("gone")
+
+    monkeypatch.setattr(server_pty_shell, "pty_shell", error_pty_shell)
+    await fps.fingerprinting_server_shell(MockReader([]), writer)
 
 
 @requires_unix
@@ -1055,38 +1385,24 @@ def test_fingerprint_server_main_data_dir_flag(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["prog", "--data-dir", data_dir, "127.0.0.1", "9999"])
     monkeypatch.setattr("telnetlib3.fingerprinting.asyncio.run", _noop_asyncio_run)
 
-    captured: dict = {}
-    from telnetlib3.server import parse_server_args
-
-    original_parse = parse_server_args
-
-    def patched_parse() -> dict:
-        result = original_parse()
-        captured.update(result)
-        return result
-
-    monkeypatch.setattr("telnetlib3.server.parse_server_args", patched_parse)
-
     old_data_dir = fps.DATA_DIR
     try:
         fps.fingerprint_server_main()
         assert fps.DATA_DIR == data_dir
-        assert captured["host"] == "127.0.0.1"
-        assert captured["port"] == 9999
     finally:
         fps.DATA_DIR = old_data_dir
 
 
-def test_fingerprint_server_main_env_fallback(monkeypatch):
-    """DATA_DIR unchanged when --data-dir is not provided."""
+def test_fingerprint_server_main_default_data_dir(monkeypatch):
+    """DATA_DIR defaults to 'data' when --data-dir is not provided."""
     monkeypatch.setattr(sys, "argv", ["prog"])
     monkeypatch.setattr("telnetlib3.fingerprinting.asyncio.run", _noop_asyncio_run)
 
     old_data_dir = fps.DATA_DIR
     try:
-        fps.DATA_DIR = "/original"
+        fps.DATA_DIR = "data"
         fps.fingerprint_server_main()
-        assert fps.DATA_DIR == "/original"
+        assert fps.DATA_DIR == "data"
     finally:
         fps.DATA_DIR = old_data_dir
 

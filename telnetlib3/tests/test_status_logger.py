@@ -94,7 +94,9 @@ async def test_status_logger_format_status():
 
     status_one = {
         "count": 1,
-        "clients": [{"ip": "127.0.0.1", "port": 12345, "rx": 100, "tx": 200, "idle": 5}],
+        "clients": [
+            {"ip": "127.0.0.1", "port": 12345, "rx": 100, "tx": 200, "idle": 5, "tls": False}
+        ],
     }
     formatted = status_logger._format_status(status_one)
     assert "1 client(s)" in formatted
@@ -102,6 +104,14 @@ async def test_status_logger_format_status():
     assert "rx=100" in formatted
     assert "tx=200" in formatted
     assert "idle=5" in formatted
+    assert "tls" not in formatted
+
+    status_tls = {
+        "count": 1,
+        "clients": [{"ip": "10.0.0.1", "port": 9999, "rx": 50, "tx": 80, "idle": 0, "tls": True}],
+    }
+    formatted_tls = status_logger._format_status(status_tls)
+    assert " tls" in formatted_tls
 
 
 async def test_status_logger_start_stop(bind_host, unused_tcp_port):

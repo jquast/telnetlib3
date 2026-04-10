@@ -127,7 +127,9 @@ def _resolve_dns(host, timeout=5):
 
 
 def _format_banner(banner_data):
-    """Return (clean_text, raw_display) from a banner dict."""
+    """Return (clean_text, raw_display) from a banner dict or string."""
+    if isinstance(banner_data, str):
+        return banner_data, ""
     text = banner_data.get("text", "")
     raw_hex = banner_data.get("raw_hex", "")
     if _HAS_WCWIDTH and text:

@@ -1,5 +1,16 @@
 History
 =======
+4.0.2 (unreleased)
+  * bugfix: MCCP2 decompression failed on MUD servers using raw deflate or gzip-wrapped compression,
+    producing garbled banners.  The client now auto-detects zlib/gzip format and falls back to raw
+    deflate when needed.
+  * bugfix: ``NEW_ENVIRON SEND`` requests that exceed the 256-byte subnegotiation buffer of some
+    telnet clients (e.g. GNU inetutils) are now automatically split into multiple SB frames.
+  * bugfix: ``telnetlib3-server`` argument ``--tls-auto`` deadlocked with plain telnet clients.
+    Detection now uses a non-blocking with a configurable timeout.
+  * enhancement: ``telnetlib3-fingerprint-server`` integrates with the optional ``tv-detect``
+    package for terminal vulnerability probing.
+
 4.0.1
   * new: ``--encoding=big5bbs``, BBS 半形字 (half-width characters) encoding, matching PCMan/PttBBS
     terminal clients, popular with Taiwanese BBS culture.

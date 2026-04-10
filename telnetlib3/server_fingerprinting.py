@@ -134,6 +134,15 @@ _DEL_BACKSPACE_RE = re.compile(
     rb"(?:\s+key)?\s*[:\.]?"
 )
 
+# Match codepage / character-set selection prompts, e.g.
+# "Select Terminal Codepage", "Choose your character set", "Select charset".
+# When the encoding is already known (--encoding flag), pressing return
+# accepts the server default instead of picking from the menu.
+_CODEPAGE_RE = re.compile(
+    rb"(?i)(?:select|choose|pick)\s+(?:your\s+)?(?:terminal\s+)?"
+    rb"(?:code\s*page|char(?:acter)?\s*set|charset|encoding)"
+)
+
 # Match "More: (Y)es, (N)o, (C)ontinuous?" pagination prompts.
 # Answer "C" (Continuous) to disable pagination and collect the full banner.
 _MORE_PROMPT_RE = re.compile(rb"(?i)more[:\s]*\(?[yY]\)?.*\(?[cC]\)?\s*(?:ontinuous|ont)")
@@ -142,6 +151,28 @@ _MORE_PROMPT_RE = re.compile(rb"(?i)more[:\s]*\(?[yY]\)?.*\(?[cC]\)?\s*(?:ontinu
 # Servers send this to detect ANSI-capable terminals; we reply with a
 # Cursor Position Report (CPR) so the server sees us as ANSI-capable.
 _DSR_RE = re.compile(rb"\x1b\[6n")
+
+# Match DA (Device Attributes) request: ESC [ c  or  ESC [ 0 c.
+# BBS servers (Synchronet, Mystic, etc.) send this to detect ANSI-capable
+# terminals.  We reply as a VT100 with Advanced Video Option:
+# ESC [ ? 1 ; 2 c
+_DA_RE = re.compile(rb"\x1b\[0?c")
+
+# VT100 + AVO DA response.  This is what xterm and most modern terminals
+# send and is universally accepted by BBS software as "ANSI capable".
+_DA_RESPONSE = b"\x1b[?1;2c"
+
+# Match DSR device-status request: ESC [ 5 n.
+# Some BBS servers send this as a terminal liveness / capability check.
+# The expected reply is ESC [ 0 n ("terminal OK").
+_DSR_STATUS_RE = re.compile(rb"\x1b\[5n")
+
+# Terminal-OK response to ESC [ 5 n.
+_DSR_STATUS_OK = b"\x1b[0n"
+
+# ENQ (0x05) -- some servers send this expecting an answerback.
+# We respond with a single empty line (just CR) to acknowledge.
+_ENQ = 0x05
 
 # Match SyncTERM/CTerm font selection: CSI Ps1 ; Ps2 SP D
 # Reference: https://syncterm.bbsdev.net/cterm.html
@@ -377,6 +408,8 @@ def _detect_yn_prompt(banner: bytes) -> _PromptResult:
         return _PromptResult(ansi_match.group(1) + b"\r\n")
     if _GB_BIG5_RE.search(stripped):
         return _PromptResult(b"big5\r\n", encoding="big5")
+    if _CODEPAGE_RE.search(stripped):
+        return _PromptResult(b"\r\n", encoding="codepage")
     if _BACKSPACE_KEY_RE.search(stripped):
         return _PromptResult(b"\x08")
     if _DEL_BACKSPACE_RE.search(stripped):
@@ -510,6 +543,10 @@ async def _fingerprint_session(
         if prompt_result.encoding and getattr(writer, "_menu_inline", False):
             writer._menu_inline = False  # type: ignore[attr-defined]
             detected = None
+        # When encoding is explicitly set (e.g. --encoding=cp437), do not
+        # select a charset from the menu -- press return to accept default.
+        if prompt_result.encoding and getattr(writer, "_encoding_explicit", False):
+            detected = b"\r\n"
         prompt_response = _reencode_prompt(
             detected if detected is not None else b"\r\n", writer.environ_encoding
         )
@@ -518,7 +555,7 @@ async def _fingerprint_session(
         # When the server presents a charset menu and we select an
         # encoding (e.g. UTF-8 or Big5), switch the session encoding
         # so that subsequent banner data is decoded correctly.
-        if prompt_result.encoding:
+        if prompt_result.encoding and not getattr(writer, "_encoding_explicit", False):
             writer.environ_encoding = prompt_result.encoding
             cursor.encoding = prompt_result.encoding
             protocol = writer.protocol
@@ -933,14 +970,35 @@ async def _read_banner(
     return data
 
 
-def _respond_to_dsr(chunk: bytes, writer: TelnetWriter, cursor: _VirtualCursor | None) -> None:
+def _respond_to_ansi_probes(
+    chunk: bytes, writer: TelnetWriter, cursor: _VirtualCursor | None
+) -> None:
     """
-    Send CPR response(s) for each DSR found in *chunk*.
+    Respond to ANSI detection probes found in *chunk*.
+
+    Handles DSR (``ESC[6n``), DA (``ESC[c`` / ``ESC[0c``),
+    DSR status (``ESC[5n``), and ENQ (0x05).
 
     When *cursor* is provided, text between DSR sequences advances the
     virtual cursor column so each CPR reflects the correct position.
     Without a cursor, a static ``ESC [ 1 ; 1 R`` is sent for every DSR.
     """
+    # DA (Device Attributes) -- respond as VT100 + AVO.
+    for _ in _DA_RE.finditer(chunk):
+        writer.write(_DA_RESPONSE)
+        log.debug("DA request -> %r", _DA_RESPONSE)
+
+    # DSR device status -- respond "terminal OK".
+    for _ in _DSR_STATUS_RE.finditer(chunk):
+        writer.write(_DSR_STATUS_OK)
+        log.debug("DSR status request -> %r", _DSR_STATUS_OK)
+
+    # ENQ answerback.
+    if _ENQ in chunk:
+        writer.write(b"\r")
+        log.debug("ENQ -> CR")
+
+    # DSR cursor position (ESC[6n) -- position-aware when cursor tracked.
     if cursor is None:
         for _ in _DSR_RE.finditer(chunk):
             writer.write(b"\x1b[1;1R")
@@ -1006,8 +1064,15 @@ async def _read_banner_until_quiet(
             chunk = await asyncio.wait_for(reader.read(max_bytes), timeout=remaining)
             if not chunk:
                 break
-            if writer is not None and _DSR_RE.search(chunk):
-                _respond_to_dsr(chunk, writer, cursor)
+            has_ansi_probe = writer is not None and (
+                _DSR_RE.search(chunk)
+                or _DA_RE.search(chunk)
+                or _DSR_STATUS_RE.search(chunk)
+                or _ENQ in chunk
+            )
+            if has_ansi_probe:
+                assert writer is not None
+                _respond_to_ansi_probes(chunk, writer, cursor)
                 await writer.drain()
             elif cursor is not None:
                 cursor.advance(chunk)
@@ -1040,20 +1105,31 @@ async def _read_banner_until_quiet(
                         esc_responded = True
                         writer._esc_inline = True  # type: ignore[attr-defined]
                 if not menu_responded:
-                    menu_match = _MENU_UTF8_RE.search(stripped_accum)
+                    encoding_explicit = getattr(writer, "_encoding_explicit", False)
+                    menu_match = None if encoding_explicit else _MENU_UTF8_RE.search(stripped_accum)
                     if menu_match:
                         response = menu_match.group(1) + b"\r\n"
                         writer.write(_reencode_prompt(response, writer.environ_encoding))
                         await writer.drain()
                         menu_responded = True
                         log.debug("inline UTF-8 menu response: %r", response)
-                        if not getattr(writer, "_encoding_explicit", False):
-                            writer.environ_encoding = "utf-8"
-                            if cursor is not None:
-                                cursor.encoding = "utf-8"
+                        writer.environ_encoding = "utf-8"
+                        if cursor is not None:
+                            cursor.encoding = "utf-8"
                         protocol = writer.protocol
                         if protocol is not None:
                             protocol.force_binary = True
+                        writer._menu_inline = True  # type: ignore[attr-defined]
+                    elif not encoding_explicit:
+                        pass
+                    elif _CODEPAGE_RE.search(stripped_accum):
+                        writer.write(_reencode_prompt(b"\r\n", writer.environ_encoding))
+                        await writer.drain()
+                        menu_responded = True
+                        log.debug(
+                            "inline codepage prompt, accepting default (explicit encoding: %s)",
+                            writer.environ_encoding,
+                        )
                         writer._menu_inline = True  # type: ignore[attr-defined]
             chunks.append(chunk)
         except (asyncio.TimeoutError, EOFError):

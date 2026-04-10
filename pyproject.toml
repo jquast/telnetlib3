@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "telnetlib3"
-version = "4.0.1"  # Keep in sync with telnetlib3/accessories.py::get_version !
+version = "4.0.2"  # Keep in sync with telnetlib3/accessories.py::get_version !
 description = " Python Telnet server and client CLI and Protocol library"
 readme = "README.rst"
 license = "ISC"
@@ -55,7 +55,7 @@ docs = [
     "sphinx-autodoc-typehints",
 ]
 extras = [
-    "prettytable",
+    "prettytable>=3.17,<4",
     "ucs-detect>=2,<3",
 ]
 
