@@ -171,6 +171,7 @@ class BaseServer(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
         )
 
         logger.info("Connection from %s", self)
+        self._log_tls_info(logger)
 
         self._waiter_connected.add_done_callback(self.begin_shell)
         asyncio.get_event_loop().call_soon(self.begin_negotiation)

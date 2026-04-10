@@ -459,3 +459,41 @@ async def test_data_received_no_iac_batch():
     data = b"plain text no iac"
     server.data_received(data)
     assert bytes(server.reader._buffer).endswith(data)
+
+
+@pytest.mark.parametrize(
+    "ssl_obj,expect_log",
+    [
+        pytest.param(None, False, id="no_tls"),
+        pytest.param(
+            type(
+                "SSL",
+                (),
+                {"version": lambda self: "TLSv1.3", "cipher": lambda self: ("AES", "TLSv1.3", 256)},
+            )(),
+            True,
+            id="tls_with_cipher",
+        ),
+        pytest.param(
+            type("SSL", (), {"version": lambda self: None, "cipher": lambda self: None})(),
+            True,
+            id="tls_no_cipher",
+        ),
+    ],
+)
+def test_log_tls_info(ssl_obj, expect_log, caplog):
+    from telnetlib3._base import TelnetProtocolBase
+
+    proto = TelnetProtocolBase.__new__(TelnetProtocolBase)
+    proto._extra = {}
+    proto._transport = MagicMock()
+    proto._transport.get_extra_info = lambda name, default=None: (
+        ssl_obj if name == "ssl_object" else default
+    )
+    log = logging.getLogger("test_tls_info")
+    with caplog.at_level(logging.DEBUG, logger="test_tls_info"):
+        proto._log_tls_info(log)
+    tls_msgs = [r for r in caplog.records if "TLS handshake" in r.message]
+    assert bool(tls_msgs) == expect_log
+    if ssl_obj and ssl_obj.cipher():
+        assert "AES" in tls_msgs[0].message

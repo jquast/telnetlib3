@@ -8,6 +8,8 @@ History
     telnet clients (e.g. GNU inetutils) are now automatically split into multiple SB frames.
   * bugfix: ``telnetlib3-server`` argument ``--tls-auto`` deadlocked with plain telnet clients.
     Detection now uses a non-blocking with a configurable timeout.
+  * enhancement: ``writer.get_extra_info("ssl_object")`` is available in shell callbacks to detect
+    TLS-secured connections and query the negotiated protocol version and cipher.
   * enhancement: ``telnetlib3-fingerprint-server`` integrates with the optional ``tv-detect``
     package for terminal vulnerability probing.
 

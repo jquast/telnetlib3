@@ -725,3 +725,32 @@ def test_cli_run_fingerprint_client_ssl(
     ca.cert_pem.write_to_path(ca_pem)
     extra_argv = extra_argv_factory(ca_pem)
     _pty_run_fingerprint(bind_host, unused_tcp_port, extra_argv, server_ssl_ctx)
+
+
+@_start_tls_xfail
+@_start_tls_timeout
+async def test_tls_handshake_logged(
+    bind_host, unused_tcp_port, server_ssl_ctx, client_ssl_ctx, caplog
+):
+    """Successful TLS handshake logs version and cipher at debug level."""
+    shell, waiter = _echo_shell("hi", "ok")
+    import logging
+
+    with caplog.at_level(logging.DEBUG):
+        async with create_server(
+            host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx
+        ):
+            async with open_connection(
+                bind_host,
+                unused_tcp_port,
+                ssl=client_ssl_ctx,
+                server_hostname="localhost",
+                **_FAST_CLIENT,
+            ) as (reader, writer):
+                writer.write("hi")
+                await writer.drain()
+                await asyncio.wait_for(waiter, 2.0)
+
+    tls_logs = [r for r in caplog.records if "TLS handshake" in r.message]
+    assert len(tls_logs) >= 1
+    assert any("TLSv1" in r.message for r in tls_logs)

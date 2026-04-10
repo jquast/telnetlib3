@@ -125,3 +125,15 @@ class TelnetProtocolBase:
         if self._transport:
             default = self._transport.get_extra_info(name, default)
         return self._extra.get(name, default)
+
+    def _log_tls_info(self, logger: logging.Logger) -> None:
+        """Log TLS connection details at debug level, if TLS is active."""
+        ssl_obj = self.get_extra_info("ssl_object")
+        if ssl_obj is None:
+            return
+        version = getattr(ssl_obj, "version", lambda: None)() or "TLS"
+        cipher_info = getattr(ssl_obj, "cipher", lambda: None)()
+        if cipher_info:
+            logger.debug("TLS handshake: %s cipher=%s", version, cipher_info[0])
+        else:
+            logger.debug("TLS handshake: %s", version)

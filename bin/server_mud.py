@@ -763,7 +763,12 @@ async def shell(reader: Any, writer: Any) -> None:
     writer.iac(WILL, MSSP)
     writer.set_ext_callback(GMCP, lambda pkg, data: on_gmcp(writer, pkg, data))
     writer.set_ext_callback(MSDP, lambda variables: on_msdp(writer, variables))
-    writer.write("Welcome to the Mini-MUD!\r\n")
+    ssl_obj = writer.get_extra_info("ssl_object")
+    if ssl_obj is not None:
+        version = ssl_obj.version() or "TLS"
+        writer.write(f"Welcome to the Mini-MUD! ({version} Secured)\r\n")
+    else:
+        writer.write("Welcome to the Mini-MUD!\r\n")
 
     env = writer.get_extra_info("USER") or writer.get_extra_info("LOGNAME") or ""
     if env:

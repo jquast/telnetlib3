@@ -853,6 +853,9 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
                 self._transport.close()
             return
         assert ssl_transport is not None
+        logger.debug(
+            "tls-auto: TLS handshake succeeded for %s", self._transport.get_extra_info("peername")
+        )
         protocol.connection_made(ssl_transport)
 
     def _handoff_plain(self) -> None:
