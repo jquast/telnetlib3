@@ -287,7 +287,7 @@ def test_setup_winch_not_istty_skips() -> None:
 async def test_setup_winch_starts_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     import os
 
-    monkeypatch.setattr(os, "get_terminal_size", lambda: os.terminal_size((80, 24)))
+    monkeypatch.setattr(os, "get_terminal_size", lambda *_: os.terminal_size((80, 24)))
     term = _make_term(_make_writer(), istty=True)
     term.setup_winch()
     assert term._resize_thread is not None
@@ -299,7 +299,7 @@ async def test_setup_winch_starts_thread(monkeypatch: pytest.MonkeyPatch) -> Non
 async def test_cleanup_winch_stops_thread(monkeypatch: pytest.MonkeyPatch) -> None:
     import os
 
-    monkeypatch.setattr(os, "get_terminal_size", lambda: os.terminal_size((80, 24)))
+    monkeypatch.setattr(os, "get_terminal_size", lambda *_: os.terminal_size((80, 24)))
     term = _make_term(_make_writer(), istty=True)
     term.setup_winch()
     assert term._resize_thread is not None
