@@ -55,7 +55,7 @@ docs = [
     "sphinx-autodoc-typehints",
 ]
 extras = [
-    "prettytable>3.17.0",
+    "prettytable>=3.17,<4",
     "ucs-detect>=2,<3",
 ]
 
