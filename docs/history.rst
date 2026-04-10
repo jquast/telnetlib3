@@ -1,6 +1,6 @@
 History
 =======
-4.0.2 (unreleased)
+4.0.2
   * bugfix: MCCP2 decompression failed on MUD servers using raw deflate or gzip-wrapped compression,
     producing garbled banners.  The client now auto-detects zlib/gzip format and falls back to raw
     deflate when needed.
