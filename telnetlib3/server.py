@@ -856,10 +856,11 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
         protocol.connection_made(ssl_transport)
 
     def _handoff_plain(self) -> None:
-        """Hand off to the real protocol as a plain telnet connection.
+        """
+        Hand off to the real protocol as a plain telnet connection.
 
-        Any data delivered to this protocol while paused (a race on
-        some Python versions) is replayed into the real protocol.
+        Any data delivered to this protocol while paused (a race on some Python versions) is
+        replayed into the real protocol.
         """
         assert self._transport is not None
         protocol = self._real_factory()
