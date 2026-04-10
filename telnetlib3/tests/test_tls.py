@@ -337,7 +337,7 @@ async def test_tls_auto_cli_args(tmp_path, ca):
         ]
     ):
         result = parse_server_args()
-    assert result["tls_auto"] == 1.0
+    assert result["tls_auto"] == 0.5
     assert isinstance(result["ssl"], ssl.SSLContext)
 
     with _override_argv(

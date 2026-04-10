@@ -758,7 +758,7 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
         self,
         ssl_context: ssl_module.SSLContext,
         real_factory: Callable[[], asyncio.Protocol],
-        detect_timeout: float = 1.0,
+        detect_timeout: float = 0.5,
     ) -> None:
         self._ssl_context = ssl_context
         self._detect_timeout_secs = detect_timeout
@@ -1150,7 +1150,7 @@ async def create_server(
         both TLS and plain telnet clients on the same port.  A ``float``
         value sets the number of seconds to wait for a TLS ClientHello
         (``0x16``) before assuming a plain telnet connection; ``True`` uses
-        a default of 1.0 second.  TLS clients send ClientHello immediately;
+        a default of 0.5 seconds.  TLS clients send ClientHello immediately;
         plain telnet clients typically wait for the server to speak first,
         so the timeout distinguishes the two.  ``False`` or ``0`` (default)
         disables auto-detection.  Requires *ssl* to be an
@@ -1162,9 +1162,9 @@ async def create_server(
     """
     if tls_auto and ssl is None:
         raise ValueError("tls_auto requires an ssl SSLContext")
-    # normalize True → 1.0
+    # normalize True → 0.5
     if tls_auto is True:
-        tls_auto = 1.0
+        tls_auto = 0.5
 
     protocol_factory = protocol_factory or TelnetServer
 
@@ -1347,12 +1347,12 @@ def parse_server_args(
         "--tls-auto",
         type=float,
         nargs="?",
-        const=1.0,
+        const=0.5,
         default=0,
         metavar="SECONDS",
         help="accept both TLS and plain telnet on the same port;"
         " value is seconds to wait for TLS ClientHello before"
-        " assuming plain telnet (default: 1.0, requires --ssl-certfile)",
+        " assuming plain telnet (default: 0.5, requires --ssl-certfile)",
     )
     if extra_args_fn is not None:
         extra_args_fn(parser)

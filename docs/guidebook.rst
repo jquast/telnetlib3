@@ -373,9 +373,8 @@ For production, use certificates from Let's Encrypt or another trusted CA.
 
 Add ``--tls-auto`` to accept both TLS and plain telnet clients on the same
 port.  The server peeks at the first byte of each connection: a TLS
-ClientHello (``0x16``) upgrades to TLS; any other byte (such as telnet IAC
-``0xFF``) is treated as plain telnet.  An optional timeout (default 1.0
-second) handles clients that send nothing on connect::
+ClientHello (``0x16``) upgrades to TLS; any other byte is processed as plain telnet.  An optional
+timeout::
 
     telnetlib3-server --ssl-certfile cert.pem --ssl-keyfile key.pem \
         --tls-auto --line-mode --shell bin.server_mud.shell 0.0.0.0 6023
@@ -384,25 +383,13 @@ second) handles clients that send nothing on connect::
     telnetlib3-server --ssl-certfile cert.pem --ssl-keyfile key.pem \
         --tls-auto=2.0 0.0.0.0 6023
 
-In practice, the timeout is rarely reached: TLS clients send ClientHello
-immediately on connect, and telnet clients respond to the server's IAC
-negotiation within milliseconds.  The timeout only applies to raw TCP
-clients that connect but send nothing (e.g. a bare ``telnet`` command
-before any negotiation).  A value of 1.0 second is safe for virtually all
-networks.
+TLS clients send ClientHello immediately on connect, so they should be detected
+quickly under the default timeout of 500ms, though very slow networks might suggest to increase the
+default timeout value by specifying time in seconds as float, eg. ``--tls-auto=2.0``.
 
-This lets standard ``telnet`` clients and TLS-capable clients connect to the
-same port without separate listeners.  Programmatically, pass the timeout in
-seconds as the ``tls_auto`` parameter (``True`` uses the default 1.0s)::
-
-    server = await telnetlib3.create_server(
-        host="0.0.0.0", port=6023, shell=shell, ssl=ctx, tls_auto=True
-    )
-
-    # or with a custom timeout
-    server = await telnetlib3.create_server(
-        host="0.0.0.0", port=6023, shell=shell, ssl=ctx, tls_auto=2.0
-    )
+RFC-compliant telnet clients wait for the server to send the first bytes, so they will appear to
+stall during this timeout unless they initiate telnet negotiation or any client input (other than
+Ctrl+V!) is received.
 
 **Client-side**
 

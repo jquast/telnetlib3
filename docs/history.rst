@@ -6,10 +6,8 @@ History
     deflate when needed.
   * bugfix: ``NEW_ENVIRON SEND`` requests that exceed the 256-byte subnegotiation buffer of some
     telnet clients (e.g. GNU inetutils) are now automatically split into multiple SB frames.
-  * bugfix: ``--tls-auto`` deadlocked with plain telnet clients.  Detection now uses a non-blocking
-    with a configurable timeout.
-  * changed: telnetlib3-server argument ``--tls-auto`` accepts optional float argument, seconds
-    to wait for a TLS ClientHello before assuming plain telnet.
+  * bugfix: ``telnetlib3-server`` argument ``--tls-auto`` deadlocked with plain telnet clients.
+    Detection now uses a non-blocking with a configurable timeout.
   * enhancement: ``telnetlib3-fingerprint-server`` integrates with the optional ``tv-detect``
     package for terminal vulnerability probing.
 
