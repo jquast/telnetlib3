@@ -337,8 +337,25 @@ and received on the wire::
 
     telnetlib3-client --loglevel=trace --logfile=debug.log bbs.example.com
 
+server_binary.py
+~~~~~~~~~~~~~~~~
+
+https://github.com/jquast/telnetlib3/blob/master/bin/server_binary.py
+
+A shell callback that echoes client input as hex bytes.
+Demonstrates using ``encoding=False`` on :func:`~telnetlib3.server.create_server`
+for raw byte I/O.
+
+.. literalinclude:: ../bin/server_binary.py
+   :language: python
+   :lines: 22-32
+
+Run with::
+
+    telnetlib3-server --encoding=false --shell=bin.server_binary.shell
+
 TLS / SSL
-~~~~~~~~~
+---------
 
 Telnet over TLS (TELNETS, IANA port 992) secures the connection using
 standard TLS encryption.  The TLS handshake is handled at the transport
@@ -369,7 +386,8 @@ Or programmatically::
 
 For production, use certificates from Let's Encrypt or another trusted CA.
 
-**Mixed TLS / plain telnet (auto-detect)**
+Mixed TLS / plain telnet (auto-detect)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Add ``--tls-auto`` to accept both TLS and plain telnet clients on the same
 port.  The server peeks at the first byte of each connection: a TLS
@@ -448,23 +466,6 @@ Run with::
 
     telnetlib3-server --ssl-certfile cert.pem --ssl-keyfile key.pem \
         --shell=bin.server_tls.shell
-
-server_binary.py
-~~~~~~~~~~~~~~~~
-
-https://github.com/jquast/telnetlib3/blob/master/bin/server_binary.py
-
-A shell callback that echoes client input as hex bytes.
-Demonstrates using ``encoding=False`` on :func:`~telnetlib3.server.create_server`
-for raw byte I/O.
-
-.. literalinclude:: ../bin/server_binary.py
-   :language: python
-   :lines: 22-32
-
-Run with::
-
-    telnetlib3-server --encoding=false --shell=bin.server_binary.shell
 
 Blocking Interface
 ==================
