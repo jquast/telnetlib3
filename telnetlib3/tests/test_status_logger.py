@@ -108,9 +108,7 @@ async def test_status_logger_format_status():
 
     status_tls = {
         "count": 1,
-        "clients": [
-            {"ip": "10.0.0.1", "port": 9999, "rx": 50, "tx": 80, "idle": 0, "tls": True}
-        ],
+        "clients": [{"ip": "10.0.0.1", "port": 9999, "rx": 50, "tx": 80, "idle": 0, "tls": True}],
     }
     formatted_tls = status_logger._format_status(status_tls)
     assert " tls" in formatted_tls

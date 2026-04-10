@@ -96,7 +96,11 @@ _start_tls_timeout = pytest.mark.timeout(5 if sys.version_info < (3, 11) else 15
             id="tls-auto-tls-client",
             marks=[_start_tls_xfail, _start_tls_timeout],
         ),
-        pytest.param({"ssl": "server_ssl_ctx", "tls_auto": 0.15}, {}, id="tls-auto-plain-client"),
+        pytest.param(
+            {"ssl": "server_ssl_ctx", "tls_auto": 0.15, "connect_maxwait": 0.5},
+            {},
+            id="tls-auto-plain-client",
+        ),
     ],
 )
 async def test_ping_pong(
@@ -156,8 +160,12 @@ async def test_tls_auto_silent_plain_client(bind_host, unused_tcp_port, server_s
         pass
 
     async with create_server(
-        host=bind_host, port=unused_tcp_port, shell=shell, ssl=server_ssl_ctx,
-        tls_auto=0.15, connect_maxwait=0.5,
+        host=bind_host,
+        port=unused_tcp_port,
+        shell=shell,
+        ssl=server_ssl_ctx,
+        tls_auto=0.15,
+        connect_maxwait=0.5,
     ):
         reader, writer = await asyncio.open_connection(host=bind_host, port=unused_tcp_port)
         try:
@@ -293,10 +301,7 @@ def _override_argv(argv):
 
 @pytest.mark.parametrize(
     "extra_argv, expect_key, expect_val",
-    [
-        pytest.param([], "ssl", None, id="no-ssl"),
-        pytest.param([], "tls_auto", 0, id="no-tls-auto"),
-    ],
+    [pytest.param([], "ssl", None, id="no-ssl"), pytest.param([], "tls_auto", 0, id="no-tls-auto")],
 )
 async def test_server_cli_defaults(extra_argv, expect_key, expect_val):
     """Server arg parser defaults for SSL/TLS options."""

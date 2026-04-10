@@ -1127,7 +1127,7 @@ async def _read_banner_until_quiet(
                         await writer.drain()
                         menu_responded = True
                         log.debug(
-                            "inline codepage prompt, accepting default " "(explicit encoding: %s)",
+                            "inline codepage prompt, accepting default (explicit encoding: %s)",
                             writer.environ_encoding,
                         )
                         writer._menu_inline = True  # type: ignore[attr-defined]

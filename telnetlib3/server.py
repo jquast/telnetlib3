@@ -192,7 +192,8 @@ class TelnetServer(server_base.BaseServer):
                 logger.warning(
                     "TLS ClientHello from %s:%s but server has no SSL"
                     " context -- closing connection",
-                    peername[0], peername[1],
+                    peername[0],
+                    peername[1],
                 )
                 self._transport.close()
                 return
@@ -772,9 +773,7 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
         self._transport = transport  # type: ignore[assignment]
         transport.pause_reading()  # type: ignore[attr-defined]
         loop = asyncio.get_event_loop()
-        self._detect_timer = loop.call_later(
-            self._detect_timeout_secs, self._on_detect_timeout
-        )
+        self._detect_timer = loop.call_later(self._detect_timeout_secs, self._on_detect_timeout)
         loop.call_soon(self._try_peek)
 
     def _cancel_timer(self) -> None:
@@ -799,9 +798,7 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
         try:
             data = peek_sock.recv(1, socket.MSG_PEEK)
         except BlockingIOError:
-            asyncio.get_event_loop().call_later(
-                self._PEEK_RETRY_SECS, self._try_peek
-            )
+            asyncio.get_event_loop().call_later(self._PEEK_RETRY_SECS, self._try_peek)
             return
         except OSError:
             data = b""
@@ -817,8 +814,7 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
             logger.debug("tls-auto: TLS ClientHello detected")
             asyncio.ensure_future(self._upgrade_to_tls())
         else:
-            logger.debug("tls-auto: non-TLS byte 0x%02x, plain telnet",
-                         data[0])
+            logger.debug("tls-auto: non-TLS byte 0x%02x, plain telnet", data[0])
             self._handoff_plain()
 
     def _on_detect_timeout(self) -> None:
@@ -827,8 +823,7 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
         if self._decided:
             return
         self._decided = True
-        logger.debug("tls-auto: no data in %.1fs, assuming plain telnet",
-                      self._detect_timeout_secs)
+        logger.debug("tls-auto: no data in %.1fs, assuming plain telnet", self._detect_timeout_secs)
         self._handoff_plain()
 
     async def _upgrade_to_tls(self) -> None:
@@ -1031,6 +1026,7 @@ class StatusLogger:
         """Format status for logging."""
         if status["count"] == 0:
             return "0 clients connected"
+
         def _fmt_client(c: Dict[str, Any]) -> str:
             tls = " tls" if c["tls"] else ""
             return f"{c['ip']}:{c['port']} (rx={c['rx']}, tx={c['tx']}, idle={c['idle']}{tls})"

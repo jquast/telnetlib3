@@ -222,9 +222,7 @@ async def test_check_encoding_binary_incoming_request():
 @pytest.mark.asyncio
 async def test_tls_autodetect_empty_peek():
     """TLS auto-detect closes transport on empty peek."""
-    proto = _TLSAutoDetectProtocol(
-        ssl_module.SSLContext(ssl_module.PROTOCOL_TLS_SERVER), MagicMock
-    )
+    proto = _TLSAutoDetectProtocol(ssl_module.SSLContext(ssl_module.PROTOCOL_TLS_SERVER), MagicMock)
     transport = MagicMock()
     mock_sock = MagicMock()
     transport.get_extra_info = MagicMock(
