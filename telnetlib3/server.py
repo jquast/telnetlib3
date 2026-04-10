@@ -767,6 +767,7 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
         self._transport: Optional[asyncio.Transport] = None
         self._detect_timer: Optional[asyncio.TimerHandle] = None
         self._decided = False
+        self._buffered: bytes = b""
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
         """Pause reading and begin non-blocking peek loop."""
@@ -855,15 +856,22 @@ class _TLSAutoDetectProtocol(asyncio.Protocol):
         protocol.connection_made(ssl_transport)
 
     def _handoff_plain(self) -> None:
-        """Hand off to the real protocol as a plain telnet connection."""
+        """Hand off to the real protocol as a plain telnet connection.
+
+        Any data delivered to this protocol while paused (a race on
+        some Python versions) is replayed into the real protocol.
+        """
         assert self._transport is not None
         protocol = self._real_factory()
         self._transport.set_protocol(protocol)
         protocol.connection_made(self._transport)
+        if self._buffered:
+            protocol.data_received(self._buffered)
         self._transport.resume_reading()
 
-    def data_received(self, data: bytes) -> None:  # pragma: no cover
-        """Not expected -- reading is paused during detection."""
+    def data_received(self, data: bytes) -> None:
+        """Buffer data that arrives during detection (race on some Pythons)."""
+        self._buffered += data
 
     def connection_lost(self, exc: Optional[Exception]) -> None:
         """Connection dropped before detection completed."""
