@@ -97,7 +97,7 @@ _start_tls_timeout = pytest.mark.timeout(5 if sys.version_info < (3, 11) else 15
             marks=[_start_tls_xfail, _start_tls_timeout],
         ),
         pytest.param(
-            {"ssl": "server_ssl_ctx", "tls_auto": 0.15, "connect_maxwait": 0.5},
+            {"ssl": "server_ssl_ctx", "tls_auto": 0.15, "connect_maxwait": 0.35},
             {},
             id="tls-auto-plain-client",
         ),
@@ -159,18 +159,22 @@ async def test_tls_auto_silent_plain_client(bind_host, unused_tcp_port, server_s
     async def shell(reader, writer):
         pass
 
+    detect_timeout = 0.15
     async with create_server(
         host=bind_host,
         port=unused_tcp_port,
         shell=shell,
         ssl=server_ssl_ctx,
-        tls_auto=0.15,
-        connect_maxwait=0.5,
+        tls_auto=detect_timeout,
+        connect_maxwait=0.35,
     ):
         reader, writer = await asyncio.open_connection(host=bind_host, port=unused_tcp_port)
         try:
+            stime = _time.monotonic()
             data = await asyncio.wait_for(reader.read(1024), 3.0)
+            elapsed = _time.monotonic() - stime
             assert data.startswith(b"\xff")
+            assert detect_timeout * 0.8 <= elapsed <= detect_timeout * 4
         finally:
             writer.close()
             await writer.wait_closed()
