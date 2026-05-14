@@ -7,7 +7,7 @@ import sys
 # 3rd party
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "bin"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "bin"))
 # 3rd party
 import server_mud as mud
 

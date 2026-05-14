@@ -26,7 +26,7 @@ def init_subproc_coverage(run_note=None):
     except ImportError:
         return None
 
-    coveragerc = os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, "tox.ini")
+    coveragerc = os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, os.pardir, "tox.ini")
     cov = coverage.Coverage(config_file=coveragerc)
     cov.start()
     return cov

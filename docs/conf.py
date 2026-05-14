@@ -19,7 +19,7 @@ github_project_url = "https://github.com/jquast/telnetlib3"
 
 # this path insert is needed for readthedocs.org (only)
 sys.path.insert(
-    0, os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
+    0, os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "src"))
 )
 
 suppress_warnings = ["image.nonlocal_uri", "ref.class"]

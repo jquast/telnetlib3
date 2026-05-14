@@ -73,7 +73,7 @@ Issues = "https://github.com/jquast/telnetlib3/issues"
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "/telnetlib3/**",
+    "/src/**",
     "/docs/**",
     "/README.rst",
     "/CONTRIBUTING.rst",
@@ -85,7 +85,7 @@ include = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["telnetlib3"]
+packages = ["src/telnetlib3"]
 
 [tool.pylint.main]
 load-plugins = [
