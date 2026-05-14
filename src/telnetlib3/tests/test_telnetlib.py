@@ -3,8 +3,11 @@
 # std imports
 import io
 import re
+import sys
 import socket
 import selectors
+import sysconfig
+import telnetlib as telnetlib_  # pylint: disable=deprecated-module
 import threading
 import contextlib
 
@@ -445,3 +448,10 @@ def test_expect(_mock_selector):
     telnet = make_telnet(want)
     _, _, data = telnet.expect([b"match"])
     assert data == b"".join(want[:-1])
+
+
+def test_drop_in_support():
+    """Ensure `import telnetlib` works in Python 3.13+."""
+    telnetlib_in_stdlib = sys.version_info < (3, 13)
+    telnetlib_is_stdlib = telnetlib_.__file__.startswith(sysconfig.get_path("stdlib"))
+    assert telnetlib_is_stdlib == telnetlib_in_stdlib

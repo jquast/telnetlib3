@@ -85,7 +85,7 @@ include = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/telnetlib3"]
+packages = ["src/telnetlib.py", "src/telnetlib3"]
 
 [tool.pylint.main]
 load-plugins = [
