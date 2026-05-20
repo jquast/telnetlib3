@@ -241,8 +241,8 @@ async def telnet_client_shell(
     """
     Windows telnet client shell using blessed/jinxed Terminal.
 
-    Requires ``blessed>=1.20`` (installed automatically on Windows via the
-    ``blessed; platform_system == 'Windows'`` dependency in pyproject.toml).
+    Requires blessed, installed automatically on Windows via the
+    ``blessed; platform_system == 'Windows'`` directive in pyproject.toml.
     """
     with Terminal(telnet_writer=telnet_writer) as tty_shell:
         await _telnet_client_shell_impl(telnet_reader, telnet_writer, tty_shell)
