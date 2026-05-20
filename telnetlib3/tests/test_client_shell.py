@@ -1001,7 +1001,7 @@ async def test_linemode_edit_via_telsh(bind_host: str, unused_tcp_port: int) -> 
         cmd = _client_cmd(bind_host, unused_tcp_port)
 
         def _interact(master_fd: int, proc: "subprocess.Popen[bytes]") -> bytes:
-            # Wait for the telsh prompt — LINEMODE negotiation has completed by then
+            # Wait for the telsh prompt, LINEMODE negotiation has completed by then
             buf = _pty_read(master_fd, marker=b"tel:sh>", timeout=12.0)
             # EC test: type "helo" + 0x7F (EC = delete-char) + "lo" + CR
             # LinemodeBuffer: "helo" → EC deletes 'o' → "hel" + "lo" → "hello", CR sends it

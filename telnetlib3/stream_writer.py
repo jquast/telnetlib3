@@ -2789,7 +2789,7 @@ class TelnetWriter:
         Callback handles IAC-SB-LINEMODE-SLC-<buf>.
 
         Processes SLC command function triplets found in ``buf`` and replies
-        with any changes.  An empty reply is never sent — that would trigger
+        with any changes.  An empty reply is never sent, that would trigger
         an infinite echo loop between client and server.
         """
         if len(buf) % 3 != 0:

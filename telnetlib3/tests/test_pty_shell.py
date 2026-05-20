@@ -73,7 +73,7 @@ def mock_session():
         else:
             writer.get_extra_info = MagicMock(side_effect=lambda k, d=None: extra_info.get(k, d))
         # Ensure fn_encoding doesn't exist so _flush_output falls through to
-        # get_extra_info("charset") — MagicMock auto-creates it as a truthy mock.
+        # get_extra_info("charset"), MagicMock auto-creates it as a truthy mock.
         if hasattr(writer, "fn_encoding"):
             del writer.fn_encoding
         # Provide a real dict for remote_option so _schedule_ga works correctly.

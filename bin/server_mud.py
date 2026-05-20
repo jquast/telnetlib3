@@ -510,8 +510,6 @@ class Commands:
             return True
         return await method(argument)
 
-    # -- commands -------------------------------------------------------
-
     async def do_help(self, argument: str) -> bool:
         """Show available commands."""
         if argument:
@@ -678,8 +676,6 @@ class Commands:
         self.writer.write("Farewell, adventurer!\r\n")
         broadcast_room(self.writer, self.player.room, f"{self.player.name} has left.")
         return False
-
-    # -- helpers --------------------------------------------------------
 
     async def _move(self, direction: str) -> bool:
         """Move player in *direction*."""

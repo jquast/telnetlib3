@@ -84,7 +84,7 @@ History
     server and client protocol code.
   * new: ``_atomic_json_write()`` and ``_BytesSafeEncoder`` helpers in
     ``_paths`` module for fingerprinting subsystem.
-  * enhancement: Microsoft Telnet (``telnet.exe``) compatibility refined — server
+  * enhancement: Microsoft Telnet (``telnet.exe``) compatibility refined, server
     now sends ``DO NEW_ENVIRON`` but excludes ``USER`` variable instead of
     skipping the option entirely, :ghissue:`24`.
   * enhancement: comprehensive pylint and mypy cleanup across the codebase.
@@ -108,7 +108,7 @@ History
     MSSP, MSP, MXP, ZMP, AARDWOLF, ATCP) by default.  Use ``--always-do`` or
     ``--always-will`` to opt in.
   * bugfix: log output "staircase text" in raw terminal mode.
-  * bugfix: graceful EOF handling — connection close no longer prints a traceback.
+  * bugfix: graceful EOF handling, connection close no longer prints a traceback.
 
 2.5.0
   * change: ``telnetlib3-client`` now defaults to raw terminal mode (no line
@@ -159,7 +159,7 @@ History
     art) as surrogates instead of replacing them with U+FFFD.
 
 2.4.0
-  * new: ``telnetlib3.color_filter`` module — translates 16-color ANSI SGR
+  * new: ``telnetlib3.color_filter`` module, translates 16-color ANSI SGR
     codes to 24-bit RGB from hardware palettes (EGA, CGA, VGA, xterm).
     Enabled by default.  New client CLI options: ``--colormatch``,
     ``--color-brightness``, ``--color-contrast``, ``--background-color``,
@@ -181,11 +181,11 @@ History
   * enhancement: ``telnetlib3-fingerprint`` now always probes extended MUD
     options (MSP, MXP, ZMP, AARDWOLF, ATCP) during server scans and captures
     ZMP, ATCP, Aardwolf, MXP, and COM-PORT data in session output.
-  * enhancement: ``telnetlib3-fingerprint`` smart prompt detection —
+  * enhancement: ``telnetlib3-fingerprint`` smart prompt detectionm
     auto-answers yes/no, color, UTF-8 menu, ``who``, and ``help`` prompts.
   * enhancement: ``--banner-max-bytes`` option for ``telnetlib3-fingerprint``;
     default raised from 1024 to 65536.
-  * new: ATASCII (Atari 8-bit) codec — ``--encoding=atascii`` for connecting
+  * new: ATASCII (Atari 8-bit) codec, ``--encoding=atascii`` for connecting
     to Atari BBS systems.  Maps all 256 byte values to Unicode including
     graphics characters, card suits, and the inverse-video range (0x80--0xFF).
     ATASCII EOL (0x9B) maps to newline.  Aliases: ``atari8bit``, ``atari_8bit``.
@@ -233,7 +233,7 @@ History
   * enhancement: reversed ``WILL``/``DO`` for directional options (e.g. ``WILL
     NAWS`` from server, ``DO TTYPE`` from client) now gracefully refused with
     ``DONT``/``WONT`` instead of raising :exc:`ValueError`.
-  * enhancement: ``NEW_ENVIRON SEND`` and response logging improved —
+  * enhancement: ``NEW_ENVIRON SEND`` and response logging improved,
     ``SEND (all)`` / ``env send: (empty)`` instead of raw byte dumps.
   * enhancement: ``telnetlib3-fingerprint`` now probes MSDP and MSSP options
     and captures MSSP server status data in session output.
