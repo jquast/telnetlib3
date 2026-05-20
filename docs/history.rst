@@ -4,8 +4,8 @@ History
   * bugfix: long-running servers leaked memory through :class:`~telnetlib3.server.Server`
     ``_protocols`` list and ``_new_client`` asyncio.Queue. Both are now bounded
     and regularly pruned.
-  * enhancement: ``telnetlib3.telnet`` now overlays std library module space, ``import telnetlib``
-    :ghissue:`139`.
+  * enhancement: ``telnetlib3.telnetlib`` now overlays std library module space, ``import
+    telnetlib`` :ghissue:`139`.
   * enhancement: ``telnetlib3-fingerprint-server`` and ``telnetlib3-fingerprint`` client now also
     detect "telnet loops" and "wrong direction" errors in opposing IAC parser.
   * removed: ``telnetlib3-fingerprint-server`` no longer integrates with the (never released)
