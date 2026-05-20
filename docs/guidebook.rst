@@ -811,12 +811,10 @@ Legacy telnetlib Compatibility
 
 Python's ``telnetlib`` was removed in Python 3.13 (`PEP 594
 <https://peps.python.org/pep-0594/>`_). telnetlib3 includes a verbatim copy from Python 3.12 with its original test
-suite::
+suite and a drop-in shim so that ``import telnetlib`` continues to work::
 
-    # OLD:
+    # Both of these work:
     from telnetlib import Telnet
-
-    # NEW:
     from telnetlib3.telnetlib import Telnet
 
 The legacy module has limited negotiation support and is maintained for
