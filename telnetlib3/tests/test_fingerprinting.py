@@ -1006,9 +1006,7 @@ async def test_server_shell_with_linemode(monkeypatch):
     ],
 )
 @pytest.mark.asyncio
-async def test_server_shell_with_data_dir(
-    monkeypatch, tmp_path, term, extra_opts, expect_encoding
-):
+async def test_server_shell_with_data_dir(monkeypatch, tmp_path, term, extra_opts, expect_encoding):
     monkeypatch.setattr(fps.asyncio, "sleep", _noop)
     monkeypatch.setattr(fps, "DATA_DIR", str(tmp_path))
 

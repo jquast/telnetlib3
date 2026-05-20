@@ -920,7 +920,8 @@ class LinemodeServer(TelnetServer):
 
 
 def _enqueue_client(server: "Server", protocol: server_base.BaseServer) -> None:
-    """Push a completed protocol onto the server's client queue.
+    """
+    Push a completed protocol onto the server's client queue.
 
     Discards the oldest entry when the bounded queue is full so that
     long-running servers (which may never call

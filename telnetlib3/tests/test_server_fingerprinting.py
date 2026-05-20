@@ -55,6 +55,13 @@ class MockWriter:
         self.protocol = _MockProtocol()
         self._closing = False
         self._menu_inline: bool = False
+        self.rejected_will: set[bytes] = set()
+        self.rejected_do: set[bytes] = set()
+        self.directional_refusals: set[bytes] = set()
+        self._server = True
+        self._encoding_explicit: bool = False
+        self._esc_inline: bool = False
+        self.pending_option = MockOption()
 
     def get_extra_info(self, key, default=None):
         return self._extra.get(key, default)
@@ -67,6 +74,9 @@ class MockWriter:
             self.remote_option[opt] = False
 
     def write(self, data):
+        self._writes.append(data)
+
+    def _write(self, data, escape_iac=False):
         self._writes.append(data)
 
     async def drain(self):

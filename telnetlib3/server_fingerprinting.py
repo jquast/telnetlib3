@@ -33,10 +33,13 @@ from wcwidth.escape_sequences import ZERO_WIDTH_PATTERN as _ZERO_WIDTH_STR_PATTE
 from . import fingerprinting as _fps
 from ._paths import _atomic_json_write
 from .telopt import (
-    ECHO,
+    DO,
+    IAC,
     VAR,
+    ECHO,
     MSSP,
     NAWS,
+    WILL,
     LFLOW,
     TTYPE,
     VALUE,
@@ -49,8 +52,6 @@ from .telopt import (
 )
 from .stream_reader import TelnetReader
 from .stream_writer import TelnetWriter
-from .telopt import IAC, DO, WILL, WONT, DONT, SE, SB
-
 from .fingerprinting import (
     EXTENDED_OPTIONS,
     ALL_PROBE_OPTIONS,
@@ -600,14 +601,14 @@ async def _fingerprint_session(
     if writer.is_closing():
         probe_results: dict[str, Any] = {}
         probe_time = 0.0
+        wrong_dir_results: dict[str, str] = {}
+        looped_options: list[str] = []
     else:
         probe_time = time.time()
         probe_results = await probe_server_capabilities(
             writer, scan_type=scan_type, timeout=_PROBE_TIMEOUT
         )
-        wrong_dir_results = await probe_server_wrong_direction(
-            writer, timeout=_PROBE_TIMEOUT
-        )
+        wrong_dir_results = await probe_server_wrong_direction(writer, timeout=_PROBE_TIMEOUT)
         looped_options = await probe_server_loop_detection(
             writer, probe_results, timeout=_PROBE_TIMEOUT
         )
@@ -640,7 +641,13 @@ async def _fingerprint_session(
     }
 
     # 7. Compute fingerprint once for save/name/display
-    protocol_fp = _create_server_protocol_fingerprint(writer, probe_results, scan_type=scan_type, wrong_dir_results=wrong_dir_results, looped_options=looped_options)
+    protocol_fp = _create_server_protocol_fingerprint(
+        writer,
+        probe_results,
+        scan_type=scan_type,
+        wrong_dir_results=wrong_dir_results,
+        looped_options=looped_options,
+    )
     protocol_hash = _hash_fingerprint(protocol_fp)
 
     # 8. Save
@@ -679,9 +686,9 @@ async def _fingerprint_session(
     # 10. Close
     writer.close()
 
+
 async def probe_server_wrong_direction(
-    writer: TelnetWriter,
-    timeout: float = 0.5,
+    writer: TelnetWriter, timeout: float = _PROBE_TIMEOUT
 ) -> dict[str, str]:
     """
     Probe a server with wrong-direction requests to detect role-unaware implementations.
@@ -713,9 +720,7 @@ async def probe_server_wrong_direction(
         while loop.time() < deadline:
             all_done = all(
                 writer.remote_option.get(opt) is not None for opt in _WRONG_DIRECTION_DO
-            ) and all(
-                writer.local_option.get(opt) is not None for opt in _WRONG_DIRECTION_WILL
-            )
+            ) and all(writer.local_option.get(opt) is not None for opt in _WRONG_DIRECTION_WILL)
             if all_done:
                 break
             await asyncio.sleep(0.05)
@@ -738,10 +743,10 @@ async def probe_server_wrong_direction(
         writer._server = saved_server
 
     return results
+
+
 async def probe_server_loop_detection(
-    writer: TelnetWriter,
-    probe_results: dict[str, _fps.ProbeResult],
-    timeout: float = 0.3,
+    writer: TelnetWriter, probe_results: dict[str, _fps.ProbeResult], timeout: float = 0.3
 ) -> list[str]:
     """
     Detect servers that would re-negotiate already-agreed options (telnet loop).
@@ -758,7 +763,7 @@ async def probe_server_loop_detection(
     """
     looped: set[str] = set()
 
-    for label, opt_dict, probe_cmd, reply_cmd in (
+    for _label, opt_dict, probe_cmd, _reply_cmd in (
         ("remote", writer.remote_option, DO, WILL),
         ("local", writer.local_option, WILL, DO),
     ):
@@ -772,7 +777,7 @@ async def probe_server_loop_detection(
         saved: dict[bytes, bool | None] = {}
         for opt in agreed:
             saved[opt] = opt_dict.get(opt)
-            opt_dict[opt] = None
+            opt_dict[opt] = None  # type: ignore[assignment]
             writer.pending_option.pop(probe_cmd + opt, None)
 
         try:
@@ -782,9 +787,7 @@ async def probe_server_loop_detection(
             loop = asyncio.get_running_loop()
             deadline = loop.time() + timeout
             while loop.time() < deadline:
-                all_settled = all(
-                    opt_dict.get(opt) is not None for opt in agreed
-                )
+                all_settled = all(opt_dict.get(opt) is not None for opt in agreed)
                 if all_settled:
                     break
                 await asyncio.sleep(0.05)
@@ -795,16 +798,17 @@ async def probe_server_loop_detection(
 
         finally:
             for opt, value in saved.items():
-                opt_dict[opt] = value
+                opt_dict[opt] = value  # type: ignore[assignment]
             for opt in agreed:
                 writer.pending_option.pop(probe_cmd + opt, None)
 
     return sorted(looped)
 
+
 async def probe_server_capabilities(
     writer: TelnetWriter,
     options: list[tuple[bytes, str, str]] | None = None,
-    timeout: float = 0.5,
+    timeout: float = _PROBE_TIMEOUT,
     scan_type: str = "quick",
 ) -> dict[str, _fps.ProbeResult]:
     """
@@ -906,7 +910,9 @@ def _collect_server_option_states(writer: TelnetWriter) -> dict[str, dict[str, A
     result: dict[str, Any] = {
         "server_offered": server_offered,
         "server_requested": server_requested,
-        "directional_refusals": sorted(_opt_byte_to_name(opt) for opt in writer.directional_refusals),
+        "directional_refusals": sorted(
+            _opt_byte_to_name(opt) for opt in writer.directional_refusals
+        ),
     }
 
     if writer.environ_send_raw is not None:
@@ -916,7 +922,9 @@ def _collect_server_option_states(writer: TelnetWriter) -> dict[str, dict[str, A
 
 
 def _create_server_protocol_fingerprint(
-    writer: TelnetWriter, probe_results: dict[str, _fps.ProbeResult], scan_type: str = "quick",
+    writer: TelnetWriter,
+    probe_results: dict[str, _fps.ProbeResult],
+    scan_type: str = "quick",
     wrong_dir_results: dict[str, str] | None = None,
     looped_options: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -938,8 +946,7 @@ def _create_server_protocol_fingerprint(
     )
 
     wrong_dir_offered = sorted(
-        name for name, status in (wrong_dir_results or {}).items()
-        if status == "wrong-accept"
+        name for name, status in (wrong_dir_results or {}).items() if status == "wrong-accept"
     )
 
     return {
@@ -949,7 +956,9 @@ def _create_server_protocol_fingerprint(
         "requested-options": requested,
         "refused-options": refused,
         "wrong-direction-offered": wrong_dir_offered,
-        "directional-refusals": sorted(_opt_byte_to_name(opt) for opt in writer.directional_refusals),
+        "directional-refusals": sorted(
+            _opt_byte_to_name(opt) for opt in writer.directional_refusals
+        ),
         "looped-negotiation": looped_options or [],
     }
 
