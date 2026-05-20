@@ -1,5 +1,14 @@
 History
 =======
+4.0.3
+  * bugfix: long-running servers leaked memory through :class:`~telnetlib3.server.Server`
+    ``_protocols`` list and ``_new_client`` asyncio.Queue. Both are now bounded
+    and regularly pruned.
+  * enhancement: ``telnetlib3.telnet`` now overlays std library module space, ``import telnetlib``
+    :ghissue:`139`.
+  * removed: ``telnetlib3-fingerprint-server`` no longer integrates with the (never released)
+    ``tv-detect`` package for terminal vulnerability probing.
+
 4.0.2
   * bugfix: MCCP2 decompression failed on MUD servers using raw deflate or gzip-wrapped compression,
     producing garbled banners.  The client now auto-detects zlib/gzip format and falls back to raw

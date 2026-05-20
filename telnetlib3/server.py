@@ -919,6 +919,23 @@ class LinemodeServer(TelnetServer):
         self._echo_negotiated = True
 
 
+def _enqueue_client(server: "Server", protocol: server_base.BaseServer) -> None:
+    """Push a completed protocol onto the server's client queue.
+
+    Discards the oldest entry when the bounded queue is full so that
+    long-running servers (which may never call
+    :meth:`Server.wait_for_client`) do not accumulate unbounded memory.
+    """
+    try:
+        server._new_client.put_nowait(protocol)
+    except asyncio.QueueFull:
+        try:
+            server._new_client.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+        server._new_client.put_nowait(protocol)
+
+
 class Server:
     """
     Telnet server that tracks connected clients.
@@ -931,7 +948,10 @@ class Server:
         """Initialize wrapper around asyncio.Server."""
         self._server: Optional[asyncio.Server] = server
         self._protocols: List[server_base.BaseServer] = []
-        self._new_client: asyncio.Queue[server_base.BaseServer] = asyncio.Queue()
+        # Bounded queue prevents unbounded memory growth on long-running
+        # servers where wait_for_client() is never called.  The capacity
+        # (1000) is far beyond any realistic wait_for_client() drain rate.
+        self._new_client: asyncio.Queue[server_base.BaseServer] = asyncio.Queue(maxsize=1000)
 
     def close(self) -> None:
         """Close the server, stop accepting new connections, and close all clients."""
@@ -985,12 +1005,13 @@ class Server:
 
     def _register_protocol(self, protocol: asyncio.Protocol) -> None:
         """Register a new protocol instance (called by factory)."""
+        # Prune dead protocols to prevent unbounded memory growth on
+        # long-running servers handling many short-lived connections.
+        self._protocols = [p for p in self._protocols if not getattr(p, "_closing", False)]
         self._protocols.append(protocol)  # type: ignore[arg-type]
-        # Only register callbacks if protocol has the required waiters
-        # (custom protocols like plain asyncio.Protocol won't have these)
         if hasattr(protocol, "_waiter_connected"):
             protocol._waiter_connected.add_done_callback(
-                lambda f, p=protocol: self._new_client.put_nowait(p) if not f.cancelled() else None
+                lambda f, p=protocol: _enqueue_client(self, p) if not f.cancelled() else None
             )
 
 
