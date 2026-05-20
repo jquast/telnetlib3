@@ -1192,16 +1192,12 @@ async def fingerprinting_server_shell(
 
     # Detect telnet option re-negotiation loops (clients that would WILL/WONT
     # options they have already settled).
-    looped = await probe_client_loop_detection(
-        writer, probe_results, timeout=_PROBE_TIMEOUT
-    )
+    looped = await probe_client_loop_detection(writer, probe_results, timeout=_PROBE_TIMEOUT)
     if looped:
         logger.debug("probe: %d looped options: %s", len(looped), looped)
     else:
         logger.debug("probe: no looped options detected")
-    filepath = _save_fingerprint_data(
-        writer, probe_results, probe_time, session_fp, looped=looped
-    )
+    filepath = _save_fingerprint_data(writer, probe_results, probe_time, session_fp, looped=looped)
 
     # Disable LINEMODE if it was negotiated - stay in kludge mode (SGA+ECHO)
     # for PTY shell. LINEMODE causes echo loops with GNU telnet when running
