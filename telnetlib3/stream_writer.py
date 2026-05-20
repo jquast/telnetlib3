@@ -773,7 +773,7 @@ class TelnetWriter:
 
         elif self.cmd_received:
             # parse 3rd and final byte of IAC DO, DONT, WILL, WONT.
-            cmd, opt = self.cmd_received, byte  # type: ignore[assignment]
+            cmd, opt = self.cmd_received, byte
             self.log.debug("recv IAC %s %s", name_command(cmd), name_option(opt))
             try:
                 if cmd == DO:

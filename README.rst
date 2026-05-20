@@ -35,6 +35,8 @@ for Python 3.9 and newer.
 This library supports both modern asyncio_ *and* legacy `Blocking API`_.
 
 The python telnetlib.py_ module removed by Python 3.13 is also re-distributed as-is, as a backport.
+In Python 3.13+, ``pip install telnetlib3`` provides a drop-in ``import telnetlib`` shim, so
+existing code using the legacy standard telnet client API continues to work without modification.
 
 See the `Guidebook`_ for examples and the `API documentation`_.
 
@@ -163,27 +165,6 @@ Blocking API
 
 A Synchronous interface, modeled after telnetlib.py_ (client) and miniboa_ (server), with various
 enhancements in protocol negotiation is also provided.  See `sync API documentation`_ for more.
-
-Legacy telnetlib
-----------------
-
-This library contains an *unadulterated copy* of Python 3.12's telnetlib.py_,
-from the standard library before it was removed in Python 3.13.
-
-To migrate code, change import statements:
-
-.. code-block:: python
-
-    # OLD imports:
-    import telnetlib
-
-    # NEW imports:
-    import telnetlib3
-
-``telnetlib3`` did not provide server support, while this library also provides
-both client and server support through a similar Blocking API interface.
-
-See `sync API documentation`_ for details.
 
 Quick Example
 =============

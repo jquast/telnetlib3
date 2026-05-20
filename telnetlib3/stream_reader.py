@@ -480,14 +480,12 @@ class TelnetReader:
         And therefore, a line does not yield for a stream containing a
         CR if it is not succeeded by NUL or LF.
 
-        ================= =====================
-        Given stream      readline() yields
-        ================= =====================
-        ``--\r\x00---``   ``--\r``, ``---`` *...*
-        ``--\r\n---``     ``--\r\n``, ``---`` *...*
-        ``--\n---``       ``--\n``, ``---`` *...*
-        ``--\r---``       ``--\r``, ``---`` *...*
-        ================= =====================
+        Given a stream containing the following sequences, ``readline()`` yields:
+
+        * ``\\r\\x00`` -- yields at ``\\r``
+        * ``\\r\\n`` -- yields at ``\\r\\n``
+        * ``\\n`` -- yields at ``\\n``
+        * ``\\r`` -- yields at ``\\r``
 
         If EOF is received before the termination of a line, the method will
         yield the partially read string.
