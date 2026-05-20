@@ -1,9 +1,5 @@
 """Test telnetlib shim and telnetlib3.telnetlib submodule imports."""
 
-# std imports
-import sys
-import sysconfig
-
 # 3rd party
 import pytest
 
@@ -54,10 +50,11 @@ def test_from_telnetlib3_import():
     assert callable(Telnet)
 
 
-def test_drop_in_support():
-    """``import telnetlib`` uses stdlib when available, shim otherwise."""
+def test_import_telnetlib_is_vendored_copy():
+    """``import telnetlib`` provides the vendored copy, not stdlib."""
     import telnetlib as telnetlib_
 
-    telnetlib_in_stdlib = sys.version_info < (3, 13)
-    telnetlib_is_stdlib = telnetlib_.__file__.startswith(sysconfig.get_path("stdlib"))
-    assert telnetlib_is_stdlib == telnetlib_in_stdlib
+    import telnetlib3.telnetlib
+
+    assert telnetlib_.IAC == telnetlib3.telnetlib.IAC
+    assert telnetlib_.Telnet is telnetlib3.telnetlib.Telnet
