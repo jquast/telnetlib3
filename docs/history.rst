@@ -6,6 +6,8 @@ History
     and regularly pruned.
   * enhancement: ``telnetlib3.telnet`` now overlays std library module space, ``import telnetlib``
     :ghissue:`139`.
+  * enhancement: ``telnetlib3-fingerprint-server`` and ``telnetlib3-fingerprint`` client now also
+    detect "telnet loops" and "wrong direction" errors in opposing IAC parser.
   * removed: ``telnetlib3-fingerprint-server`` no longer integrates with the (never released)
     ``tv-detect`` package for terminal vulnerability probing.
 
