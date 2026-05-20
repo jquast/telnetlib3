@@ -324,6 +324,11 @@ class TelnetWriter:
         #: Whether MCCP3 compression is currently active (client→server).
         self.mccp3_active: bool = False
 
+        #: Set True during loop-detection probing so that the "assuming
+        #: NAWS-enabled" fallback in :meth:`_handle_sb_naws` does not
+        #: produce false-positive re-negotiation signals.
+        self._in_loop_detection: bool = False
+
         #: Sub-negotiation buffer
         self._sb_buffer: collections.deque[bytes] = collections.deque()
 
@@ -2518,10 +2523,17 @@ class TelnetWriter:
         """Fire callback for IAC-SB-NAWS-<cols_rows[4]>-SE (:rfc:`1073`)."""
         buf.popleft()
         if not self.remote_option.enabled(NAWS):
-            self.log.info(
-                "received IAC SB NAWS without receipt of IAC WILL NAWS -- assuming NAWS-enabled"
-            )
-            self.remote_option[NAWS] = True
+            if self._in_loop_detection:
+                self.log.debug(
+                    "received IAC SB NAWS without WILL NAWS during loop detection;"
+                    " not assuming NAWS-enabled"
+                )
+            else:
+                self.log.info(
+                    "received IAC SB NAWS without receipt of IAC WILL NAWS"
+                    " -- assuming NAWS-enabled"
+                )
+                self.remote_option[NAWS] = True
         # note a similar formula:
         #
         #    cols, rows = ((256 * buf[0]) + buf[1],

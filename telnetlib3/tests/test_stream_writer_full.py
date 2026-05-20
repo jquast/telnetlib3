@@ -1458,6 +1458,16 @@ def test_send_naws_and_handle_naws():
     assert seen["sz"] == (200, 100)
 
 
+def test_handle_sb_naws_defers_during_loop_detection():
+    """SB NAWS during loop detection does not set remote_option to avoid false positives."""
+    ws, _, _ = new_writer(server=True)
+    ws._in_loop_detection = True
+    payload = struct.pack("!HH", 100, 200)
+    buf = collections.deque([NAWS, payload[0:1], payload[1:2], payload[2:3], payload[3:4]])
+    ws._handle_sb_naws(buf)
+    assert not ws.remote_option.enabled(NAWS)
+
+
 def test_handle_sb_lflow_toggles():
     ws, _, _ = new_writer(server=True)
     ws.local_option[LFLOW] = True
@@ -1697,3 +1707,19 @@ def test_receive_status_mixed_do_will_and_sb(caplog):
     assert any("agreed" in msg.lower() for msg in caplog.messages)
     assert any("NAWS 132x43" in msg for msg in caplog.messages)
     assert any("disagree" in msg.lower() for msg in caplog.messages)
+
+
+def test_handle_do_server_directional_refusal():
+    """Server end refuses DO for client-only options, tracked in directional_refusals."""
+    w, t, _ = new_writer(server=True)
+    w.handle_do(TTYPE)
+    assert t.writes[-1] == IAC + WONT + TTYPE
+    assert TTYPE in w.directional_refusals
+
+
+def test_handle_will_client_directional_refusal():
+    """Client end refuses WILL for server-only options, tracked in directional_refusals."""
+    w, t, _ = new_writer(server=False, client=True)
+    w.handle_will(TTYPE)
+    assert t.writes[-1] == IAC + DONT + TTYPE
+    assert TTYPE in w.directional_refusals

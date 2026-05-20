@@ -1271,3 +1271,41 @@ def test_fingerprinting_post_script_delegates():
     with patch("telnetlib3.fingerprinting_display.fingerprinting_post_script") as mock_fps:
         fps.fingerprinting_post_script("/tmp/test.json")
         mock_fps.assert_called_once_with("/tmp/test.json")
+
+
+@pytest.mark.asyncio
+async def test_probe_client_loop_detection_no_loop():
+    """Empty result when client does not re-negotiate already-agreed options."""
+    w = _probe_writer()
+    w.remote_option[fps.BINARY] = True
+    w.remote_option[fps.SGA] = True
+    probe_results = {}
+    result = await fps.probe_client_loop_detection(w, probe_results, timeout=0.01)
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_probe_client_loop_detection_loops():
+    """Option names returned when client re-negotiates after redundant DO/WILL."""
+    w = _probe_writer()
+    w.remote_option[fps.BINARY] = True
+    # Override iac to simulate a loop-prone client that re-WILLs
+    orig_iac = w.iac
+
+    def _looping_iac(cmd, opt):
+        orig_iac(cmd, opt)
+        w.remote_option._values[opt] = True
+
+    w.iac = _looping_iac
+    probe_results = {}
+    result = await fps.probe_client_loop_detection(w, probe_results, timeout=0.01)
+    assert "BINARY" in result
+
+
+@pytest.mark.asyncio
+async def test_probe_client_loop_detection_no_agreed():
+    """Empty result when no options are agreed."""
+    w = _probe_writer()
+    probe_results = {}
+    result = await fps.probe_client_loop_detection(w, probe_results, timeout=0.01)
+    assert result == []

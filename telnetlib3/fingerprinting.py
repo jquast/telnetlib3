@@ -427,6 +427,7 @@ async def probe_client_loop_detection(
             writer.pending_option.pop(probe_cmd + opt, None)
 
         try:
+            writer._in_loop_detection = True
             for opt in agreed:
                 writer.iac(probe_cmd, opt)
 
@@ -443,6 +444,7 @@ async def probe_client_loop_detection(
                     looped.add(_opt_byte_to_name(opt))
 
         finally:
+            writer._in_loop_detection = False
             for opt, value in saved.items():
                 opt_dict[opt] = value  # type: ignore[assignment]
             for opt in agreed:

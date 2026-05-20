@@ -16,7 +16,6 @@ import logging
 import termios
 import tempfile
 import textwrap
-import warnings
 import functools
 import contextlib
 import subprocess
@@ -624,18 +623,10 @@ def _extract_software_name(data: Dict[str, Any]) -> str:
 
 
 def _make_terminal(**kwargs: Any) -> "blessed.Terminal":
-    """Create a blessed Terminal, falling back to ``ansi`` on setupterm failure."""
+    """Create a blessed Terminal."""
     from blessed import Terminal
 
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        term = Terminal(**kwargs)
-    if any("setupterm" in str(w.message) for w in caught):
-        kwargs["kind"] = "ansi"
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            term = Terminal(**kwargs)
-    return term
+    return Terminal(**kwargs)
 
 
 @contextlib.contextmanager
@@ -1575,7 +1566,9 @@ def _probe_terminal(filepath: str, data: Dict[str, Any]) -> Optional[str]:
 
     :returns: Updated filepath (may change if terminal hash moves it).
     """
-    term = _make_terminal()
+    from blessed._capabilities import TermcapResponse
+
+    term = _make_terminal(_xtgettcap_data=TermcapResponse(supported=False))
     flushed = term.flushinp()
     if flushed and flushed.strip():
         _syslog_info(f"pre-probe flushed {len(flushed)} bytes: {repr(flushed)}")
@@ -1639,7 +1632,12 @@ def _process_client_fingerprint(filepath: str, data: Dict[str, Any]) -> None:
         print(json.dumps(data, indent=2, sort_keys=True))
         return
 
-    term = _make_terminal()
+    kwargs: Dict[str, Any] = {}
+    if os.environ.get("TELNETLIB3_INTERACTIVE_TERMINAL") != "1":
+        from blessed._capabilities import TermcapResponse
+
+        kwargs["_xtgettcap_data"] = TermcapResponse(supported=False)
+    term = _make_terminal(**kwargs)
     names = _load_fingerprint_names()
     seen_counts = _build_seen_counts(data, names, term)
 
