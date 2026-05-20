@@ -140,9 +140,6 @@ supported, widely used by MUD servers to reduce bandwidth::
     # connect to a MUD that offers MCCP compression
     telnetlib3-client dunemud.net 6789
 
-    # or with TLS (compression auto-disabled over TLS, CRIME/BREACH mitigation)
-    telnetlib3-client --ssl dunemud.net 6788
-
     # actively request compression from a server
     telnetlib3-client --compression dunemud.net 6789
 
@@ -152,11 +149,9 @@ supported, widely used by MUD servers to reduce bandwidth::
     # host a MUD server that advertises MCCP2/MCCP3
     telnetlib3-server --compression --shell=my_mud.shell
 
-By default (without ``--compression`` or ``--no-compression``), the client
-passively accepts compression when offered by the server, and the server does
-not advertise compression. Compression is automatically disabled over TLS
-connections to avoid CRIME/BREACH attacks.
-
+By default (without ``--compression`` or ``--no-compression``), the telnetlib3-client passively
+accepts compression when offered by the server, and the telnetlib3-server does not advertise
+compression. Compression is automatically disabled over TLS connections.
 
 Asyncio Protocol
 ----------------

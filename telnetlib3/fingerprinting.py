@@ -168,6 +168,7 @@ __all__ = (
     "fingerprinting_post_script",
     "get_client_fingerprint",
     "probe_client_capabilities",
+    "probe_client_loop_detection",
     "scrape_screen_sts",
 )
 
@@ -407,6 +408,70 @@ _ALL_KNOWN_OPTIONS = ALL_PROBE_OPTIONS + EXTENDED_OPTIONS
 # Build mapping from hex string (e.g., "0x03") to option name (e.g., "SGA")
 _OPT_BYTE_TO_NAME = {f"0x{opt[0]:02x}": name for opt, name, _ in _ALL_KNOWN_OPTIONS}
 
+async def probe_client_loop_detection(
+    writer: TelnetWriter,
+    probe_results: dict[str, ProbeResult],
+    timeout: float = 0.3,
+) -> list[str]:
+    """
+    Detect clients that would re-negotiate already-agreed options (telnet loop).
+
+    Saves the negotiation state for options the client already agreed to,
+    clears the cache, re-sends IAC DO / IAC WILL for those options, and
+    checks whether the client replies again.  A well-behaved client ignores
+    redundant requests in the YES state; a loop-prone client replies again.
+
+    Checks both directions: re-DO'ing options the client already WILL'd,
+    and re-WILL'ing options the client already DO'd.
+
+    :returns: Sorted list of option names that would loop.
+    """
+    from .telopt import DO, WILL
+
+    looped: set[str] = set()
+
+    for label, opt_dict, probe_cmd in (
+        ("remote", writer.remote_option, DO),
+        ("local", writer.local_option, WILL),
+    ):
+        agreed: dict[bytes, bool] = {}
+        for opt, enabled in opt_dict.items():
+            if enabled:
+                agreed[opt] = True
+        if not agreed:
+            continue
+
+        saved: dict[bytes, bool | None] = {}
+        for opt in agreed:
+            saved[opt] = opt_dict.get(opt)
+            opt_dict[opt] = None
+            writer.pending_option.pop(probe_cmd + opt, None)
+
+        try:
+            for opt in agreed:
+                writer.iac(probe_cmd, opt)
+
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + timeout
+            while loop.time() < deadline:
+                all_settled = all(
+                    opt_dict.get(opt) is not None for opt in agreed
+                )
+                if all_settled:
+                    break
+                await asyncio.sleep(0.05)
+
+            for opt in agreed:
+                if opt_dict.get(opt) is not None:
+                    looped.add(_opt_byte_to_name(opt))
+
+        finally:
+            for opt, value in saved.items():
+                opt_dict[opt] = value
+            for opt in agreed:
+                writer.pending_option.pop(probe_cmd + opt, None)
+
+    return sorted(looped)
 
 async def probe_client_capabilities(
     writer: Union[TelnetWriter, TelnetWriterUnicode],
@@ -538,6 +603,8 @@ async def _run_probe(
     start_time = time.time()
     results = await probe_client_capabilities(writer, options=probe_options, timeout=_PROBE_TIMEOUT)
 
+    looped = await probe_client_loop_detection(writer, results, timeout=_PROBE_TIMEOUT)
+
     if _is_maybe_mud(writer) and EXTENDED_OPTIONS:
         ext_results = await probe_client_capabilities(
             writer, options=EXTENDED_OPTIONS, timeout=_PROBE_TIMEOUT
@@ -586,6 +653,10 @@ def _collect_rejected_options(
         result["will"] = sorted(_opt_byte_to_name(opt) for opt in writer.rejected_will)
     if getattr(writer, "rejected_do", None):
         result["do"] = sorted(_opt_byte_to_name(opt) for opt in writer.rejected_do)
+    if getattr(writer, "directional_refusals", None):
+        result["directional"] = sorted(
+            _opt_byte_to_name(opt) for opt in writer.directional_refusals
+        )
     return result
 
 
@@ -756,6 +827,10 @@ def _create_protocol_fingerprint(
         fingerprint["rejected-will"] = rejected["will"]
     if rejected.get("do"):
         fingerprint["rejected-do"] = rejected["do"]
+    if rejected.get("directional"):
+        fingerprint["directional-refusals"] = rejected["directional"]
+    if looped_options:
+        fingerprint["looped-negotiation"] = looped_options
 
     linemode_probed = any(
         name == "LINEMODE" and info["status"] == "WILL" for name, info in probe_results.items()
@@ -1032,7 +1107,7 @@ def _save_fingerprint_data(
     if session_fp is None:
         session_fp = _build_session_fingerprint(writer, probe_results, probe_time)
 
-    protocol_fp = _create_protocol_fingerprint(writer, probe_results)
+    protocol_fp = _create_protocol_fingerprint(writer, probe_results, looped_options=looped)
     telnet_hash = _hash_fingerprint(protocol_fp)
 
     session_identity = _create_session_fingerprint(writer)

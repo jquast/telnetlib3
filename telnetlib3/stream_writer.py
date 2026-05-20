@@ -266,6 +266,10 @@ class TelnetWriter:
         #: that were rejected with WONT (unsupported options).
         self.rejected_do: set[bytes] = set()
 
+        #: Set of option byte(s) refused due to directional mismatch
+        #: (e.g. WILL NAWS on client end, DO TTYPE on server end).
+        self.directional_refusals: set[bytes] = set()
+
         #: Raw bytes of the last NEW_ENVIRON SEND payload, captured
         #: for fingerprinting.  ``None`` if no SEND was received.
         self.environ_send_raw: Optional[bytes] = None
@@ -1909,6 +1913,7 @@ class TelnetWriter:
         ):
             self.log.debug("recv DO %s on server end, refusing.", name_command(opt))
             self.iac(WONT, opt)
+            self.directional_refusals.add(opt)
         elif self.client and opt in (LOGOUT,):
             raise ValueError(f"cannot recv DO {name_command(opt)} on client end (ignored).")
         elif opt == TM:
@@ -2075,6 +2080,7 @@ class TelnetWriter:
             if opt in (NAWS, LINEMODE, SNDLOC) and self.client:
                 self.log.debug("recv WILL %s on client end, refusing.", name_command(opt))
                 self.iac(DONT, opt)
+                self.directional_refusals.add(opt)
                 return
             # Client declines MUD protocols unless explicitly opted in.
             if self.client and opt in _MUD_PROTOCOL_OPTIONS:
@@ -2138,6 +2144,7 @@ class TelnetWriter:
             if not self.server and opt not in (CHARSET,):
                 self.log.debug("recv WILL %s on client end, refusing.", name_command(opt))
                 self.iac(DONT, opt)
+                self.directional_refusals.add(opt)
                 return
 
             # First, we need to acknowledge WILL with DO for all options
