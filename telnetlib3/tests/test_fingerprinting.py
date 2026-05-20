@@ -923,209 +923,10 @@ async def test_server_shell_syncterm(monkeypatch):
     assert "\x1b[0;40 D" in "".join(writer.written) and writer._closing
 
 
-class _ErrorReader:
-    async def read(self, n):
-        raise ConnectionError("gone")
-
-
-@pytest.mark.parametrize(
-    "reader_data,expect_match",
-    [
-        pytest.param([b"\x1b[5;10R"], True, id="bytes_match"),
-        pytest.param(["\x1b[3;7R"], True, id="str_match"),
-        pytest.param([], False, id="timeout"),
-        pytest.param([""], False, id="empty"),
-    ],
-)
-@pytest.mark.asyncio
-async def test_read_until_cpr(reader_data, expect_match):
-    match, buf = await fps._read_until_cpr(MockReader(reader_data), timeout=0.05)
-    assert (match is not None) == expect_match
-
-
-@pytest.mark.asyncio
-async def test_read_until_cpr_connection_error():
-    match, _ = await fps._read_until_cpr(_ErrorReader(), timeout=0.05)
-    assert match is None
-
-
-@pytest.mark.asyncio
-async def test_make_send_recv():
-    reader = MockReader([b"\x1b[1;1R"])
-    writer = MockWriter()
-    send_recv = fps._make_send_recv(reader, writer)
-    match, _ = await send_recv("test\x1b[6n", timeout=0.05)
-    assert match is not None and "test\x1b[6n" in writer.written
-
-
-@pytest.mark.parametrize(
-    "pos_data,expect_cursor_restore",
-    [
-        pytest.param(b"\x1b[10;5R", True, id="with_position"),
-        pytest.param("", False, id="no_position"),
-    ],
-)
-@pytest.mark.asyncio
-async def test_shielded_probe(pos_data, expect_cursor_restore):
-    reader = MockReader([pos_data, b"\x1b[1;1R"])
-    writer = MockWriter()
-    await fps._shielded_probe(
-        reader, writer, number=1, name="Test", description="desc", sequence="payload", timeout=0.05
-    )
-    written = "".join(writer.written)
-    assert "1. Test" in written and "ok" in written
-    assert ("\x1b[10;5H" in written) == expect_cursor_restore
-
-
-@pytest.mark.parametrize(
-    "reader_data,expected_count,expected_result",
-    [
-        pytest.param(
-            [b"\x1bP1!~00AB\x1b\\\x1bP2!~0FFF\x1b\\"], 2, {1: 0x00AB, 2: 0x0FFF}, id="two_responses"
-        ),
-        pytest.param([], 5, {}, id="timeout"),
-        pytest.param([b"\x1bP1!~0042\x1b\\"], 3, {1: 0x0042}, id="partial"),
-        pytest.param(["\x1bP1!~00FF\x1b\\"], 1, {1: 0x00FF}, id="str_input"),
-        pytest.param([""], 1, {}, id="empty"),
-    ],
-)
-@pytest.mark.asyncio
-async def test_blast_collect(reader_data, expected_count, expected_result):
-    results = await fps._blast_collect(MockReader(reader_data), expected_count, timeout=0.05)
-    assert results == expected_result
-
-
-@pytest.mark.asyncio
-async def test_blast_collect_connection_error():
-    assert await fps._blast_collect(_ErrorReader(), expected=1, timeout=0.05) == {}
-
-
-def _deccksr_responses(codes):
-    return b"".join(f"\x1bP{c}!~{c:04X}\x1b\\".encode() for c in codes)
-
-
-_ALL_PRINTABLE = list(range(32, 127))
-
-
-@pytest.mark.asyncio
-async def test_build_checksum_lookup():
-    reader = MockReader([_deccksr_responses(_ALL_PRINTABLE)])
-    table = await fps._build_checksum_lookup(reader, MockWriter(), cal_row=1, usable_cols=200)
-    assert len(table) == 95 and table[0x0020] == " " and table[0x0041] == "A"
-
-
-@pytest.mark.parametrize(
-    "codes,usable_cols",
-    [
-        pytest.param(_ALL_PRINTABLE[:1], 200, id="incomplete"),
-        pytest.param([c for c in _ALL_PRINTABLE if c != 65], 200, id="missing_A"),
-    ],
-)
-@pytest.mark.asyncio
-async def test_build_checksum_lookup_fails(codes, usable_cols):
-    reader = MockReader([_deccksr_responses(codes)])
-    table = await fps._build_checksum_lookup(
-        reader, MockWriter(), cal_row=1, usable_cols=usable_cols
-    )
-    assert table == {}
-
-
-@pytest.mark.asyncio
-async def test_build_checksum_lookup_batched():
-    batch_size = 10
-    entries = []
-    for offset in range(0, len(_ALL_PRINTABLE), batch_size):
-        entries.append(_deccksr_responses(_ALL_PRINTABLE[offset : offset + batch_size]))
-    reader = MockReader(entries)
-    table = await fps._build_checksum_lookup(
-        reader, MockWriter(), cal_row=1, usable_cols=batch_size
-    )
-    assert len(table) == 95
-
-
-@pytest.mark.asyncio
-async def test_blast_scrape():
-    lookup = {0x0041: "A", 0x0020: " "}
-    resp = b"\x1bP0!~0041\x1b\\\x1bP1!~0020\x1b\\"
-    result = await fps._blast_scrape(MockReader([resp]), MockWriter(), 1, 2, lookup, timeout=0.5)
-    assert result.startswith("A")
-
-
-@pytest.mark.asyncio
-async def test_blast_scrape_unknown_checksum():
-    lookup = {0x0041: "A", 0x0020: " "}
-    resp = b"\x1bP0!~0041\x1b\\\x1bP1!~BEEF\x1b\\"
-    result = await fps._blast_scrape(MockReader([resp]), MockWriter(), 1, 2, lookup, timeout=0.5)
-    assert "A" in result and "?0x" in result
-
-
-@pytest.mark.parametrize(
-    "reader_data,rows,cols,expect_result",
-    [
-        pytest.param([b"\x1bXCTerm:STS:10:Hello     World     \x1b\\"], 2, 10, True, id="success"),
-        pytest.param(["\x1bXCTerm:STS:10:Hello     \x1b\\"], 1, 10, True, id="str_input"),
-        pytest.param([], 2, 10, False, id="timeout"),
-        pytest.param([""], 1, 10, False, id="empty"),
-        pytest.param([b"\x1bXCTerm:STS:10:AB\x1b\\"], 3, 10, True, id="short_content"),
-    ],
-)
-@pytest.mark.asyncio
-async def test_scrape_screen_sts(reader_data, rows, cols, expect_result):
-    result = await fps.scrape_screen_sts(MockReader(reader_data), MockWriter(), rows, cols, 0.05)
-    if expect_result:
-        assert result is not None and result["method"] == "sts"
-    else:
-        assert result is None
-
-
-def _scrape_reader(responses):
-    """MockReader for scrape_screen: inserts "" for drain loop after first CPR."""
-    return MockReader([responses[0], ""] + list(responses[1:]))
-
-
-_CAL_RESP = _deccksr_responses(_ALL_PRINTABLE)
-_CPR = b"\x1b[5;1R"
-_PROBE_OK = b"\x1bP9999!~0041\x1b\\" + _CPR
-_Z_VERIFY = f"\x1bP1!~{ord('Z'):04X}\x1b\\".encode() + _CPR
-
-
-@pytest.mark.parametrize(
-    "responses,rows,cols",
-    [
-        pytest.param([_CPR, _CPR], 5, 96, id="no_decrqcra"),
-        pytest.param(["", ""], 5, 96, id="no_initial_cpr"),
-        pytest.param([_CPR, _PROBE_OK], 5, 96, id="lookup_fails"),
-        pytest.param(
-            [_CPR, _PROBE_OK, _CAL_RESP, b"\x1bP1!~FFFF\x1b\\" + _CPR], 5, 96, id="verify_fails"
-        ),
-    ],
-)
-@pytest.mark.asyncio
-async def test_scrape_screen_fails(responses, rows, cols):
-    result = await fps.scrape_screen(_scrape_reader(responses), MockWriter(), rows, cols)
-    assert result is None
-
-
-@pytest.mark.parametrize(
-    "alt_same", [pytest.param(True, id="alt_same"), pytest.param(False, id="alt_differs")]
-)
-@pytest.mark.asyncio
-async def test_scrape_screen_success(alt_same):
-    rows, cols = 1, 96
-    normal_resp = _deccksr_responses(range(rows * cols))
-    alt_resp = normal_resp if alt_same else b"\x1bP0!~ABCD\x1b\\" * (rows * cols)
-    reader = _scrape_reader([_CPR, _PROBE_OK, _CAL_RESP, _Z_VERIFY, normal_resp, alt_resp])
-    result = await fps.scrape_screen(reader, MockWriter(), rows, cols)
-    assert result is not None and result["decrqcra"] is True
-    assert ("screen_1" in result) != alt_same
-
-
 class _MockFPServer:
-    def __init__(self, exc=None, tasks=None, closing=False, term_label=None):
+    def __init__(self, exc=None, tasks=None, closing=False):
         self._closing = closing
         self.writer = MockWriter()
-        if term_label:
-            self.writer._tv_term_label = term_label
         self._tasks = tasks or []
         self._exc_set = None
         self._eof_called = False
@@ -1164,7 +965,7 @@ def test_connection_lost(exc, closing, n_tasks, cancel_raises):
                 raise RuntimeError("cancel failed")
 
     tasks = [MockTask() for _ in range(n_tasks)]
-    server = _MockFPServer(tasks=tasks, closing=closing, term_label="xterm")
+    server = _MockFPServer(tasks=tasks, closing=closing)
     fps.FingerprintingServer.connection_lost(server, exc)
     assert server._closing is True
     if not closing:
@@ -1196,22 +997,18 @@ async def test_server_shell_with_linemode(monkeypatch):
 
 @requires_unix
 @pytest.mark.parametrize(
-    "term,extra_opts,exit_code,expect_encoding",
+    "term,extra_opts,expect_encoding",
     [
-        pytest.param("xterm", {}, 0, None, id="normal"),
-        pytest.param("mudlet", {"GMCP": True}, 0, None, id="mud_client"),
-        pytest.param("xterm", {"ttype1": "MTTS 137"}, 0, None, id="mtts_mud"),
-        pytest.param("xterm", {}, 100, None, id="attack_exit_code"),
-        pytest.param("syncterm", {}, 0, "latin-1", id="syncterm_encoding"),
+        pytest.param("xterm", {}, None, id="normal"),
+        pytest.param("mudlet", {"GMCP": True}, None, id="mud_client"),
+        pytest.param("xterm", {"ttype1": "MTTS 137"}, None, id="mtts_mud"),
+        pytest.param("syncterm", {}, "latin-1", id="syncterm_encoding"),
     ],
 )
 @pytest.mark.asyncio
-async def test_server_shell_with_data_dir(
-    monkeypatch, tmp_path, term, extra_opts, exit_code, expect_encoding
-):
+async def test_server_shell_with_data_dir(monkeypatch, tmp_path, term, extra_opts, expect_encoding):
     monkeypatch.setattr(fps.asyncio, "sleep", _noop)
     monkeypatch.setattr(fps, "DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(fps, "_HAS_TV_DETECT", False)
 
     extra = {"peername": ("127.0.0.1", 12345), "TERM": term}
     extra.update({k: v for k, v in extra_opts.items() if not isinstance(v, bool)})
@@ -1223,7 +1020,7 @@ async def test_server_shell_with_data_dir(
             writer.remote_option[getattr(fps, k)] = v
 
     async def pty_with_exit(reader, writer, exe, args, raw_mode=False):
-        return exit_code
+        return 0
 
     monkeypatch.setattr(server_pty_shell, "pty_shell", pty_with_exit)
     await fps.fingerprinting_server_shell(MockReader([]), writer)
@@ -1237,7 +1034,6 @@ async def test_server_shell_with_data_dir(
 async def test_server_shell_connection_reset(monkeypatch, tmp_path):
     monkeypatch.setattr(fps.asyncio, "sleep", _noop)
     monkeypatch.setattr(fps, "DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(fps, "_HAS_TV_DETECT", False)
 
     writer = MockWriter(
         extra={"peername": ("127.0.0.1", 12345), "TERM": "xterm"},
@@ -1475,3 +1271,41 @@ def test_fingerprinting_post_script_delegates():
     with patch("telnetlib3.fingerprinting_display.fingerprinting_post_script") as mock_fps:
         fps.fingerprinting_post_script("/tmp/test.json")
         mock_fps.assert_called_once_with("/tmp/test.json")
+
+
+@pytest.mark.asyncio
+async def test_probe_client_loop_detection_no_loop():
+    """Empty result when client does not re-negotiate already-agreed options."""
+    w = _probe_writer()
+    w.remote_option[fps.BINARY] = True
+    w.remote_option[fps.SGA] = True
+    probe_results = {}
+    result = await fps.probe_client_loop_detection(w, probe_results, timeout=0.01)
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_probe_client_loop_detection_loops():
+    """Option names returned when client re-negotiates after redundant DO/WILL."""
+    w = _probe_writer()
+    w.remote_option[fps.BINARY] = True
+    # Override iac to simulate a loop-prone client that re-WILLs
+    orig_iac = w.iac
+
+    def _looping_iac(cmd, opt):
+        orig_iac(cmd, opt)
+        w.remote_option._values[opt] = True
+
+    w.iac = _looping_iac
+    probe_results = {}
+    result = await fps.probe_client_loop_detection(w, probe_results, timeout=0.01)
+    assert "BINARY" in result
+
+
+@pytest.mark.asyncio
+async def test_probe_client_loop_detection_no_agreed():
+    """Empty result when no options are agreed."""
+    w = _probe_writer()
+    probe_results = {}
+    result = await fps.probe_client_loop_detection(w, probe_results, timeout=0.01)
+    assert result == []

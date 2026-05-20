@@ -113,3 +113,45 @@ async def test_create_server_line_mode_default_false(bind_host, unused_tcp_port)
             writer.write(IAC + WONT + TTYPE)
             client = await asyncio.wait_for(server.wait_for_client(), 0.5)
             assert client.line_mode is False
+
+
+async def test_enqueue_client_queue_full():
+    """_enqueue_client discards oldest entry when bounded queue is full."""
+    from telnetlib3.server import Server, _enqueue_client
+    from telnetlib3.server_base import BaseServer
+
+    class _TestProto(BaseServer):
+        def connection_made(self, transport):
+            pass
+
+    server = Server(None)
+    server._new_client = asyncio.Queue(maxsize=1)
+
+    p1 = _TestProto(shell=lambda _: None, _waiter_connected=asyncio.Future())
+    p1._waiter_connected.set_result(None)
+    _enqueue_client(server, p1)
+    assert server._new_client.qsize() == 1
+
+    p2 = _TestProto(shell=lambda _: None, _waiter_connected=asyncio.Future())
+    p2._waiter_connected.set_result(None)
+    _enqueue_client(server, p2)
+    assert server._new_client.qsize() == 1
+
+
+async def test_register_protocol_prunes_dead():
+    """_register_protocol removes closed protocols before appending."""
+    from telnetlib3.server import Server
+
+    class _FakeProto:
+        _closing = True
+        _waiter_connected = None
+
+    class _LiveProto:
+        _closing = False
+        _waiter_connected = asyncio.Future()
+
+    server = Server(None)
+    server._protocols = [_FakeProto()]
+    server._register_protocol(_LiveProto())
+    assert len(server._protocols) == 1
+    assert isinstance(server._protocols[0], _LiveProto)

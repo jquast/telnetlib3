@@ -359,7 +359,7 @@ TLS / SSL
 
 Telnet over TLS (TELNETS, IANA port 992) secures the connection using
 standard TLS encryption.  The TLS handshake is handled at the transport
-layer — the telnet protocol sees plaintext exactly as it would over plain
+layer, the telnet protocol sees plaintext exactly as it would over plain
 TCP.  This is *not* STARTTLS (upgrade-in-place); the connection is
 encrypted from the start.
 
@@ -426,10 +426,10 @@ Or programmatically with full control::
     import ssl
     import telnetlib3
 
-    # CA-signed server — just pass ssl=True
+    # CA-signed server, just pass ssl=True
     reader, writer = await telnetlib3.open_connection("dunemud.net", 6788, ssl=True)
 
-    # Self-signed — load the server's cert explicitly
+    # Self-signed, load the server's cert explicitly
     ctx = ssl.create_default_context(cafile="cert.pem")
     reader, writer = await telnetlib3.open_connection("localhost", 6023, ssl=ctx)
 
@@ -447,7 +447,7 @@ certificates)::
 .. warning::
 
    ``--ssl-no-verify`` is **insecure**.  The connection is encrypted, but the
-   server's identity is not verified — a man-in-the-middle could intercept
+   server's identity is not verified, a man-in-the-middle could intercept
    traffic.  Only use this for testing or when you trust the network path.
 
 server_tls.py

@@ -55,6 +55,13 @@ class MockWriter:
         self.protocol = _MockProtocol()
         self._closing = False
         self._menu_inline: bool = False
+        self.rejected_will: set[bytes] = set()
+        self.rejected_do: set[bytes] = set()
+        self.directional_refusals: set[bytes] = set()
+        self._server = True
+        self._encoding_explicit: bool = False
+        self._esc_inline: bool = False
+        self.pending_option = MockOption()
 
     def get_extra_info(self, key, default=None):
         return self._extra.get(key, default)
@@ -67,6 +74,9 @@ class MockWriter:
             self.remote_option[opt] = False
 
     def write(self, data):
+        self._writes.append(data)
+
+    def _write(self, data, escape_iac=False):
         self._writes.append(data)
 
     async def drain(self):
@@ -1437,3 +1447,65 @@ async def test_fingerprinting_shell_codepage_explicit_skips_utf8(tmp_path):
     await _run_fp(reader, writer, tmp_path, environ_encoding="cp437")
     assert b"1\r\n" not in writer._writes
     assert writer.environ_encoding == "cp437"
+
+
+@pytest.mark.asyncio
+async def test_probe_server_wrong_direction_correct_refuse():
+    """Server correctly refuses wrong-direction DO/WILL with WONT/DONT."""
+    writer = MockWriter()
+    writer.remote_option[fps.NAWS] = False
+    writer.remote_option[fps.TTYPE] = False
+    writer.local_option[fps.ECHO] = False
+    results = await sfp.probe_server_wrong_direction(writer, timeout=0.01)
+    assert results["NAWS"] == "correct-refuse"
+    assert results["TTYPE"] == "correct-refuse"
+    assert results["ECHO"] == "correct-refuse"
+
+
+@pytest.mark.asyncio
+async def test_probe_server_wrong_direction_wrong_accept():
+    """Server accepts wrong-direction DO/WILL (role-unaware)."""
+    writer = MockWriter()
+    writer.remote_option[fps.NAWS] = True
+    writer.remote_option[fps.TTYPE] = True
+    writer.local_option[fps.ECHO] = True
+    results = await sfp.probe_server_wrong_direction(writer, timeout=0.01)
+    assert results["NAWS"] == "wrong-accept"
+    assert results["TTYPE"] == "wrong-accept"
+    assert results["ECHO"] == "wrong-accept"
+
+
+@pytest.mark.asyncio
+async def test_probe_server_loop_detection_no_loop():
+    """Empty result when server does not re-negotiate already-agreed options."""
+    writer = MockWriter()
+    writer.remote_option[fps.BINARY] = True
+    probe_results = {}
+    result = await sfp.probe_server_loop_detection(writer, probe_results, timeout=0.01)
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_probe_server_loop_detection_loops():
+    """Option names returned when server re-negotiates after redundant DO/WILL."""
+    writer = MockWriter()
+    writer.remote_option[fps.BINARY] = True
+    orig_iac = writer.iac
+
+    def _looping_iac(cmd, opt):
+        orig_iac(cmd, opt)
+        writer.remote_option[opt] = True
+
+    writer.iac = _looping_iac
+    probe_results = {}
+    result = await sfp.probe_server_loop_detection(writer, probe_results, timeout=0.01)
+    assert "BINARY" in result
+
+
+@pytest.mark.asyncio
+async def test_probe_server_loop_detection_no_agreed():
+    """Empty result when no options are agreed."""
+    writer = MockWriter()
+    probe_results = {}
+    result = await sfp.probe_server_loop_detection(writer, probe_results, timeout=0.01)
+    assert result == []

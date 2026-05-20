@@ -14,6 +14,7 @@ RFCs Implemented
 * :rfc:`859`, "Telnet Status Option", May 1983.
 * :rfc:`860`, "Telnet Timing mark Option", May 1983.
 * :rfc:`885`, "Telnet End of Record Option", Dec 1983.
+* :rfc:`930`, "Telnet Terminal Type Option", Jan 1984.
 * :rfc:`1073`, "Telnet Window Size Option", Oct 1988.
 * :rfc:`1079`, "Telnet Terminal Speed Option", Dec 1988.
 * :rfc:`1091`, "Telnet Terminal-Type Option", Feb 1989.
@@ -59,8 +60,8 @@ RFCs Not Implemented
 * :rfc:`1041`, "Telnet 3270 Regime Option", Jan 1988
 * :rfc:`1043`, "Telnet Data Entry Terminal Option", Feb 1988
 * :rfc:`1097`, "Telnet Subliminal-Message Option", Apr 1989
-* :rfc:`1143`, "The Q Method of Implementing .. Option Negotiation", Feb 1990
-  Approximately only Rules 1, 2, and 3, but not 4, 5, and 6.
+* :rfc:`1143`, "The Q Method of Implementing .. Option Negotiation", Feb 1990, Approximately only
+  Rules 1, 2, and 3 are implemented, but not 4, 5, and 6.
 * :rfc:`1205`, "5250 Telnet Interface", Feb 1991
 * :rfc:`1411`, "Telnet Authentication: Kerberos_ Version 4", Jan 1993
 * :rfc:`1412`, "Telnet Authentication: SPX"

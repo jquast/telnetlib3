@@ -45,7 +45,7 @@ classifiers = [
 requires-python = ">=3.9"
 dependencies = [
     "wcwidth>=0.6.0",
-    "blessed>=1.33; platform_system == 'Windows'",
+    "blessed>=1.41; platform_system == 'Windows'",
 ]
 
 [project.optional-dependencies]
@@ -55,6 +55,7 @@ docs = [
     "sphinx-autodoc-typehints",
 ]
 extras = [
+    "blessed>=1.41",
     "prettytable>=3.17,<4",
     "ucs-detect>=2,<3",
 ]

@@ -455,7 +455,7 @@ class TestMCCP2ServerEnd:
         server._mccp2_start()
         compressed_write = transport.write
 
-        # End compression — restores transport.write
+        # End compression, restores transport.write
         server._mccp2_end()
 
         # The closure should fallback to orig_write when compressor is None

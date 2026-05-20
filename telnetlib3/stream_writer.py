@@ -266,6 +266,10 @@ class TelnetWriter:
         #: that were rejected with WONT (unsupported options).
         self.rejected_do: set[bytes] = set()
 
+        #: Set of option byte(s) refused due to directional mismatch
+        #: (e.g. WILL NAWS on client end, DO TTYPE on server end).
+        self.directional_refusals: set[bytes] = set()
+
         #: Raw bytes of the last NEW_ENVIRON SEND payload, captured
         #: for fingerprinting.  ``None`` if no SEND was received.
         self.environ_send_raw: Optional[bytes] = None
@@ -319,6 +323,11 @@ class TelnetWriter:
 
         #: Whether MCCP3 compression is currently active (client→server).
         self.mccp3_active: bool = False
+
+        #: Set True during loop-detection probing so that the "assuming
+        #: NAWS-enabled" fallback in :meth:`_handle_sb_naws` does not
+        #: produce false-positive re-negotiation signals.
+        self._in_loop_detection: bool = False
 
         #: Sub-negotiation buffer
         self._sb_buffer: collections.deque[bytes] = collections.deque()
@@ -1909,6 +1918,7 @@ class TelnetWriter:
         ):
             self.log.debug("recv DO %s on server end, refusing.", name_command(opt))
             self.iac(WONT, opt)
+            self.directional_refusals.add(opt)
         elif self.client and opt in (LOGOUT,):
             raise ValueError(f"cannot recv DO {name_command(opt)} on client end (ignored).")
         elif opt == TM:
@@ -2075,6 +2085,7 @@ class TelnetWriter:
             if opt in (NAWS, LINEMODE, SNDLOC) and self.client:
                 self.log.debug("recv WILL %s on client end, refusing.", name_command(opt))
                 self.iac(DONT, opt)
+                self.directional_refusals.add(opt)
                 return
             # Client declines MUD protocols unless explicitly opted in.
             if self.client and opt in _MUD_PROTOCOL_OPTIONS:
@@ -2138,6 +2149,7 @@ class TelnetWriter:
             if not self.server and opt not in (CHARSET,):
                 self.log.debug("recv WILL %s on client end, refusing.", name_command(opt))
                 self.iac(DONT, opt)
+                self.directional_refusals.add(opt)
                 return
 
             # First, we need to acknowledge WILL with DO for all options
@@ -2511,10 +2523,17 @@ class TelnetWriter:
         """Fire callback for IAC-SB-NAWS-<cols_rows[4]>-SE (:rfc:`1073`)."""
         buf.popleft()
         if not self.remote_option.enabled(NAWS):
-            self.log.info(
-                "received IAC SB NAWS without receipt of IAC WILL NAWS -- assuming NAWS-enabled"
-            )
-            self.remote_option[NAWS] = True
+            if self._in_loop_detection:
+                self.log.debug(
+                    "received IAC SB NAWS without WILL NAWS during loop detection;"
+                    " not assuming NAWS-enabled"
+                )
+            else:
+                self.log.info(
+                    "received IAC SB NAWS without receipt of IAC WILL NAWS"
+                    " -- assuming NAWS-enabled"
+                )
+                self.remote_option[NAWS] = True
         # note a similar formula:
         #
         #    cols, rows = ((256 * buf[0]) + buf[1],
@@ -2782,7 +2801,7 @@ class TelnetWriter:
         Callback handles IAC-SB-LINEMODE-SLC-<buf>.
 
         Processes SLC command function triplets found in ``buf`` and replies
-        with any changes.  An empty reply is never sent — that would trigger
+        with any changes.  An empty reply is never sent, that would trigger
         an infinite echo loop between client and server.
         """
         if len(buf) % 3 != 0:
