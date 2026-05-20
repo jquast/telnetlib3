@@ -87,6 +87,9 @@ include = [
 [tool.hatch.build.targets.wheel]
 packages = ["telnetlib3"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"telnetlib.py" = "telnetlib.py"
+
 [tool.pylint.main]
 load-plugins = [
     "pylint.extensions.check_elif",
@@ -182,7 +185,7 @@ reports = false
 msg-template = "{path}:{line}: [{msg_id}({symbol}), {obj}] {msg}"
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.14"
 strict = true
 disallow_subclassing_any = false
 ignore_missing_imports = true
@@ -193,7 +196,7 @@ module = ["telnetlib3.tests.*"]
 ignore_errors = true
 
 [[tool.mypy.overrides]]
-module = ["telnetlib3.telnetlib"]
+module = ["telnetlib3.telnetlib", "telnetlib"]
 ignore_errors = true
 
 [tool.black]
