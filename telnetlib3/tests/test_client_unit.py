@@ -277,6 +277,8 @@ async def test_guard_shells_busy_shell():
     from telnetlib3.guard_shells import busy_shell
 
     class MockWriter:
+        is_binary_writer = False
+
         def __init__(self):
             self.output = []
             self._extra = {"peername": ("127.0.0.1", 12345)}
@@ -307,6 +309,8 @@ async def test_guard_shells_robot_check_timeout():
     from telnetlib3.guard_shells import robot_check
 
     class MockWriter:
+        is_binary_writer = False
+
         def __init__(self):
             self.output = []
             self._extra = {"peername": ("127.0.0.1", 12345)}

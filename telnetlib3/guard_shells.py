@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 import asyncio
 import logging
-from typing import Tuple, Union, Optional, Generator, cast
+from typing import Tuple, Union, Optional, Generator
 from contextlib import contextmanager
 
 # local
@@ -64,6 +64,14 @@ def _latin1_reading(
         reader._decoder = None
 
 
+def _writer_write(writer: Union[TelnetWriter, TelnetWriterUnicode], data: str) -> None:
+    """Write string data to writer in the appropriate type (str or bytes)."""
+    if writer.is_binary_writer:
+        writer.write(data.encode("latin-1"))
+    else:
+        writer.write(data)  # type: ignore[arg-type]
+
+
 class ConnectionCounter:
     """Simple shared counter for limiting concurrent connections."""
 
@@ -100,12 +108,13 @@ class ConnectionCounter:
 
 async def _read_line_inner(reader: Union[TelnetReader, TelnetReaderUnicode], max_len: int) -> str:
     """Inner loop for _read_line, separated for wait_for compatibility."""
-    _reader = cast(TelnetReaderUnicode, reader)
     buf = ""
     while len(buf) < max_len:
-        char = await _reader.read(1)
+        char = await reader.read(1)
         if not char:
             break
+        if isinstance(char, bytes):
+            char = char.decode("latin-1")
         if char in ("\r", "\n"):
             break
         buf += char
@@ -166,8 +175,7 @@ async def _get_cursor_position(
     :returns: (row, col) tuple or (None, None) on timeout/failure.
     """
     # Send Device Status Report request
-    _writer = cast(TelnetWriterUnicode, writer)
-    _writer.write("\x1b[6n")
+    _writer_write(writer, "\x1b[6n")
     await writer.drain()
 
     # Read response: ESC [ row ; col R
@@ -189,21 +197,20 @@ async def _measure_width(
 
     :returns: Width in columns, or None on failure.
     """
-    _writer = cast(TelnetWriterUnicode, writer)
     _, x1 = await _get_cursor_position(reader, writer, timeout)
     if x1 is None:
         return None
 
-    _writer.write(text)
-    await _writer.drain()
+    _writer_write(writer, text)
+    await writer.drain()
 
     _, x2 = await _get_cursor_position(reader, writer, timeout)
     if x2 is None:
         return None
 
     # Clear the test character
-    _writer.write(f"\x1b[{x1}G" + " " * (x2 - x1) + f"\x1b[{x1}G")
-    await _writer.drain()
+    _writer_write(writer, f"\x1b[{x1}G" + " " * (x2 - x1) + f"\x1b[{x1}G")
+    await writer.drain()
 
     return x2 - x1
 
@@ -230,10 +237,9 @@ async def _ask_question(
     timeout: float = 10.0,
 ) -> Optional[str]:
     """Ask a question, echoing input and repeating prompt on blank input."""
-    _writer = cast(TelnetWriterUnicode, writer)
     while True:
-        _writer.write(prompt)
-        await _writer.drain()
+        _writer_write(writer, prompt)
+        await writer.drain()
 
         line = await _readline_with_echo(reader, writer, timeout)
         if line is None:
@@ -242,7 +248,7 @@ async def _ask_question(
         if line.strip():
             return line
         # Blank input - repeat prompt
-        _writer.write("\r\n")
+        _writer_write(writer, "\r\n")
 
 
 async def robot_shell(
@@ -254,7 +260,6 @@ async def robot_shell(
 
     Asks philosophical questions, logs responses, and disconnects.
     """
-    writer = cast(TelnetWriterUnicode, writer)
     peername = writer.get_extra_info("peername")
     logger.info("robot_shell: connection from %s", peername)
 
@@ -275,7 +280,7 @@ async def robot_shell(
                 return
             answers.append(line2)
 
-            writer.write("\r\n")
+            _writer_write(writer, "\r\n")
             await writer.drain()
         finally:
             if answers:
@@ -291,10 +296,9 @@ async def busy_shell(
 
     Displays busy message, logs any input, and disconnects.
     """
-    writer = cast(TelnetWriterUnicode, writer)
     logger.info("busy_shell: connection from %s (limit reached)", writer.get_extra_info("peername"))
 
-    writer.write("Machine is busy, do not touch! ")
+    _writer_write(writer, "Machine is busy, do not touch! ")
     await writer.drain()
 
     with _latin1_reading(reader):
@@ -302,12 +306,12 @@ async def busy_shell(
         if line1 is not None:
             logger.info("busy_shell: input1=%r", line1)
 
-        writer.write("\r\nYou hear a distant explosion... ")
+        _writer_write(writer, "\r\nYou hear a distant explosion... ")
         await writer.drain()
 
         line2 = await _read_line(reader, timeout=30.0)
         if line2 is not None:
             logger.info("busy_shell: input2=%r", line2)
 
-    writer.write("\r\n")
+    _writer_write(writer, "\r\n")
     await writer.drain()

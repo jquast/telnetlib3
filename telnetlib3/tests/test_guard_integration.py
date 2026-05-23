@@ -97,6 +97,8 @@ async def test_guarded_shell_pattern_busy_shell():
     shell_done = asyncio.Event()
 
     class MockWriter:
+        is_binary_writer = False
+
         def __init__(self):
             self._closing = False
 
@@ -116,6 +118,8 @@ async def test_guarded_shell_pattern_busy_shell():
             return ("127.0.0.1", 12345) if key == "peername" else default
 
     class MockReader:
+        is_binary_reader = False
+
         def __init__(self):
             self._data = list("response\r")
             self._idx = 0
@@ -169,6 +173,8 @@ async def test_guarded_shell_pattern_robot_check():
     robot_shell_calls = []
 
     class MockWriter:
+        is_binary_writer = False
+
         def __init__(self):
             self._closing = False
 
@@ -188,6 +194,8 @@ async def test_guarded_shell_pattern_robot_check():
             return ("127.0.0.1", 12345) if key == "peername" else default
 
     class MockReader:
+        is_binary_reader = False
+
         def __init__(self):
             self._data = list("response\r")
             self._idx = 0
@@ -249,6 +257,8 @@ async def test_full_guarded_shell_flow():
     robot_calls = []
 
     class MockWriter:
+        is_binary_writer = False
+
         def __init__(self):
             self._closing = False
             self.output = []
@@ -272,6 +282,8 @@ async def test_full_guarded_shell_flow():
             return ("127.0.0.1", 12345) if key == "peername" else default
 
     class MockReader:
+        is_binary_reader = False
+
         def __init__(self, responses=None):
             self._data = responses or list("response\r")
             self._idx = 0
@@ -446,3 +458,99 @@ async def test_fingerprint_scanner_defeats_robot_check(unused_tcp_port):
 
     assert measured_width, "server shell never ran"
     assert measured_width[0] == 1, f"expected width=1, got {measured_width[0]}"
+
+
+async def test_robot_check_encoding_false_binary_writer():
+    """robot_check works with encoding=False (binary TelnetReader/TelnetWriter)."""
+    from telnetlib3.guard_shells import robot_check as do_robot_check
+
+    class MockBinaryWriter:
+        is_binary_writer = True
+
+        def __init__(self):
+            self._closing = False
+            self.written = []
+
+        def write(self, data):
+            assert isinstance(data, bytes), f"expected bytes, got {type(data)}"
+            self.written.append(data)
+
+        async def drain(self):
+            pass
+
+        def is_closing(self):
+            return self._closing
+
+        def close(self):
+            self._closing = True
+
+        def get_extra_info(self, key, default=None):
+            return ("127.0.0.1", 12345) if key == "peername" else default
+
+    class MockBinaryReader:
+        def __init__(self):
+            self._chunks = [b"\x1b[1;1R", b"\x1b[1;2R"]
+            self._idx = 0
+            self._pos = 0
+
+        async def read(self, n):
+            while self._idx < len(self._chunks):
+                chunk = self._chunks[self._idx]
+                if self._pos < len(chunk):
+                    result = chunk[self._pos : self._pos + n]
+                    self._pos += n
+                    return result
+                self._idx += 1
+                self._pos = 0
+            return b""
+
+    reader = MockBinaryReader()
+    writer = MockBinaryWriter()
+    result = await do_robot_check(reader, writer, timeout=2.0)
+    assert result is True, f"robot_check should pass, got {result}"
+
+
+@pytest.mark.asyncio
+async def test_encoding_false_with_robot_check_passes(unused_tcp_port):
+    """Server with encoding=False + robot_check passes a CPR-capable client."""
+    import functools
+
+    import telnetlib3
+    from telnetlib3.guard_shells import robot_check as do_robot_check
+    from telnetlib3.guard_shells import robot_shell
+    from telnetlib3.tests.accessories import create_server
+
+    check_results = []
+
+    async def shell(reader, writer):
+        passed = await do_robot_check(reader, writer, timeout=5.0)
+        check_results.append(passed)
+        if passed:
+            writer.write("PASS\r\n")
+        else:
+            await robot_shell(reader, writer)
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    async with create_server(
+        host="127.0.0.1", port=unused_tcp_port, shell=shell, encoding=False, connect_maxwait=0.5
+    ):
+        import telnetlib3
+        from telnetlib3 import server_fingerprinting as sfp
+
+        client_shell = functools.partial(
+            sfp.fingerprinting_client_shell,
+            host="127.0.0.1",
+            port=unused_tcp_port,
+            silent=True,
+            banner_quiet_time=1.0,
+            banner_max_wait=5.0,
+        )
+        reader, writer = await telnetlib3.open_connection(
+            host="127.0.0.1", port=unused_tcp_port, encoding=False, shell=client_shell
+        )
+        await asyncio.wait_for(writer.protocol.waiter_closed, timeout=10.0)
+
+    assert check_results, "server shell never ran"
+    assert check_results[0] is True, f"robot_check should pass, got {check_results[0]}"

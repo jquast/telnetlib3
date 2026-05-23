@@ -15,6 +15,8 @@ from telnetlib3._session_context import TelnetSessionContext
 
 
 class DummyWriter:
+    is_binary_writer = False
+
     def __init__(self, slctab=None):
         self.echos = []
         self.slctab = slctab or slc_mod.generate_slctab()
@@ -41,6 +43,8 @@ def _run_readline(sequence, max_visible_width=0):
 
 
 class MockReader:
+    is_binary_reader = False
+
     def __init__(self, data):
         self._data = list(data)
         self._idx = 0
@@ -54,6 +58,8 @@ class MockReader:
 
 
 class SlowReader:
+    is_binary_reader = False
+
     async def read(self, n):
         await asyncio.sleep(1.0)
         return ""
@@ -65,6 +71,8 @@ class _MockProtocol:
 
 
 class MockWriter:
+    is_binary_writer = False
+
     def __init__(self, protocol=None):
         self.written = []
         self._closing = False
@@ -700,3 +708,372 @@ async def test_filter_ansi_esc_then_eof():
     reader = MockReader(["\x1b", ""])
     result = await ss.filter_ansi(reader, MockWriter())
     assert not result
+
+
+class MockBinaryReader:
+    is_binary_reader = True
+
+    def __init__(self, data):
+        self._data = [d.encode("latin-1") if isinstance(d, str) else d for d in data]
+        self._idx = 0
+
+    async def read(self, n):
+        if self._idx >= len(self._data):
+            return b""
+        result = self._data[self._idx]
+        self._idx += 1
+        return result
+
+
+class MockBinaryWriter:
+    is_binary_writer = True
+
+    def __init__(self):
+        self.written = []
+
+    def write(self, data):
+        assert isinstance(data, bytes), f"expected bytes, got {type(data)}"
+        self.written.append(data)
+
+    def echo(self, data):
+        assert isinstance(data, bytes), f"expected bytes, got {type(data)}"
+        self.written.append(data)
+
+    async def drain(self):
+        pass
+
+    def is_closing(self):
+        return False
+
+
+@pytest.mark.parametrize(
+    "input_chars,expected",
+    [
+        pytest.param([b"\x1b", b"[", b"A", b"x"], "x", id="csi_bytes"),
+        pytest.param([b"\x1b", b"!", b"x"], "!", id="esc_non_sequence_bytes"),
+        pytest.param([b"a"], "a", id="normal_char_bytes"),
+        pytest.param([b""], "", id="eof_bytes"),
+        pytest.param([b"\x1b", b"O", b"P", b"x"], "x", id="ss3_f1_bytes"),
+        pytest.param([b"\x1b", b"(", b"B", b"z"], "z", id="charset_bytes"),
+        pytest.param([b"\x1b", b"[", b"1", b";", b"2", b"H", b"z"], "z", id="csi_params_bytes"),
+        pytest.param([b"\x1b", b"[", b""], "", id="csi_no_final_bytes"),
+        pytest.param(
+            [b"\x1b", b"]", b"0", b";", b"t", b"\x07", b"x"], "x", id="osc_sequence_bytes"
+        ),
+        pytest.param([b"\x1b", b"D", b"w"], "w", id="fe_sequence_bytes"),
+        pytest.param([b"\x1b", b"X", b"v"], "v", id="fe_sos_sequence_bytes"),
+        pytest.param([b"\x1b", b"P", b"q", b"\x1b", b"\\", b"y"], "y", id="dcs_sequence_bytes"),
+        pytest.param([b"\x1b", b"[", b"1", b"m", b"z"], "z", id="match_mid_buffer_bytes"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_filter_ansi_binary_reader(input_chars, expected):
+    result = await ss.filter_ansi(MockBinaryReader(input_chars), MockBinaryWriter())
+    assert result == expected
+
+
+@pytest.mark.parametrize(
+    "input_chars,expected",
+    [
+        pytest.param([b"h", b"e", b"l", b"l", b"o", b"\r"], "hello", id="basic_bytes"),
+        pytest.param([b"h", b"x", b"\x7f", b"i", b"\r"], "hi", id="backspace_bytes"),
+        pytest.param([b"\n", b"\x00", b"a", b"\r"], "a", id="skip_lf_nul_bytes"),
+        pytest.param([b""], None, id="eof_bytes"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_readline_async_binary_reader(input_chars, expected):
+    result = await ss.readline_async(MockBinaryReader(input_chars), MockBinaryWriter())
+    assert result == expected
+
+
+def test_readline_binary_writer():
+    """Readline (sync) with binary writer writes bytes for echo."""
+    writer = MockBinaryWriter()
+    gen = ss.readline(None, writer, max_visible_width=0)
+    gen.send(None)
+    for ch in "hello\r":
+        out = gen.send(ch)
+        if out is not None:
+            assert out == "hello"
+    assert len(writer.written) > 0
+
+
+def test_readline_binary_writer_no_echo():
+    """Readline (sync) with binary writer: terminators produce no echo."""
+    writer = MockBinaryWriter()
+    gen = ss.readline(None, writer)
+    gen.send(None)
+    out = gen.send("\r")
+    assert out == ""
+    assert writer.written == []
+
+
+def test_write_binary_writer():
+    writer = MockBinaryWriter()
+    ss._write(writer, "hello")
+    assert writer.written == [b"hello"]
+
+
+def test_echo_non_binary_writer():
+    writer = MockWriter()
+    ss._echo(writer, "test")
+    assert writer.written == ["test"]
+
+
+def test_echo_binary_writer():
+    writer = MockBinaryWriter()
+    ss._echo(writer, "test")
+    assert writer.written == [b"test"]
+
+
+class MockWriterClosing(MockWriter):
+    def __init__(self, closing=False):
+        super().__init__()
+        self._closing = closing
+
+
+class MockWriterFull(MockWriter):
+    def __init__(self):
+        super().__init__()
+        self.local_option = types.SimpleNamespace(enabled=lambda opt: False)
+        self.remote_option = types.SimpleNamespace(enabled=lambda opt: False)
+        self.outbinary = False
+        self.inbinary = False
+        self.xon_any = False
+        self.lflow = True
+        self.linemode = types.SimpleNamespace(
+            edit=False, trapsig=False, soft_tab=False, lit_echo=False, ack=False
+        )
+        self._iac_calls = []
+        self._send_lineflow_calls = []
+        self._request_linemode_calls = []
+
+    def iac(self, cmd, opt):
+        self._iac_calls.append((cmd, opt))
+
+    def send_lineflow_mode(self):
+        self._send_lineflow_calls.append(True)
+
+    def request_linemode_change(self, edit=None, trapsig=None):
+        self._request_linemode_calls.append({"edit": edit, "trapsig": trapsig})
+
+
+def test_do_toggle_no_option():
+    writer = MockWriterFull()
+    result = ss.do_toggle(writer, None)
+    for opt in (
+        "echo",
+        "goahead",
+        "outbinary",
+        "inbinary",
+        "binary",
+        "xon-any",
+        "lflow",
+        "linemode",
+    ):
+        assert opt in result
+
+
+@pytest.mark.parametrize(
+    "option,expected_substrs,iac_count,lineflow_count",
+    [
+        pytest.param("echo", ["echo"], 1, 0, id="echo"),
+        pytest.param("goahead", ["go-ahead"], 1, 0, id="goahead"),
+        pytest.param("outbinary", ["outbinary"], 1, 0, id="outbinary"),
+        pytest.param("inbinary", ["inbinary"], 1, 0, id="inbinary"),
+        pytest.param("binary", ["outbinary", "inbinary"], 2, 0, id="binary"),
+        pytest.param("xon-any", ["xon-any"], 0, 1, id="xon-any"),
+        pytest.param("lflow", ["lineflow"], 0, 1, id="lflow"),
+        pytest.param("linemode", ["linemode"], 1, 0, id="linemode"),
+    ],
+)
+def test_do_toggle_option(option, expected_substrs, iac_count, lineflow_count):
+    writer = MockWriterFull()
+    result = ss.do_toggle(writer, option)
+    for s in expected_substrs:
+        assert s in result.lower()
+    assert len(writer._iac_calls) == iac_count
+    assert len(writer._send_lineflow_calls) == lineflow_count
+
+
+@pytest.mark.parametrize(
+    "option,linemode_active,expected_substr",
+    [
+        pytest.param("linemode-edit", False, "linemode not active", id="edit_inactive"),
+        pytest.param("linemode-edit", True, "linemode-edit dis", id="edit_active"),
+        pytest.param("linemode-trapsig", False, "linemode not active", id="trapsig_inactive"),
+        pytest.param("linemode-trapsig", True, "linemode-trapsig dis", id="trapsig_active"),
+    ],
+)
+def test_do_toggle_linemode_sub(option, linemode_active, expected_substr):
+    writer = MockWriterFull()
+    writer.remote_option = types.SimpleNamespace(enabled=lambda opt: linemode_active)
+    if linemode_active:
+        attr = "edit" if "edit" in option else "trapsig"
+        base = {"edit": False, "trapsig": False, "soft_tab": False, "lit_echo": False, "ack": False}
+        base[attr] = True
+        writer.linemode = types.SimpleNamespace(**base)
+    result = ss.do_toggle(writer, option)
+    assert expected_substr in result.lower()
+
+
+def test_do_toggle_unknown_option():
+    writer = MockWriterFull()
+    result = ss.do_toggle(writer, "nonexistent")
+    assert "not an option" in result
+
+
+def test_do_toggle_all():
+    writer = MockWriterFull()
+    result = ss.do_toggle(writer, "all")
+    for s in ("echo", "go-ahead", "outbinary", "inbinary", "xon-any", "lineflow"):
+        assert s in result.lower()
+    assert len(writer._iac_calls) >= 4
+
+
+@pytest.mark.asyncio
+async def test_telnet_server_shell_already_closing():
+    writer = MockWriterClosing(closing=True)
+    reader = MockReader([])
+    await ss.telnet_server_shell(reader, writer)
+    written = "".join(writer.written)
+    assert "Ready" in written
+
+
+@pytest.mark.asyncio
+async def test_telnet_server_shell_eof():
+    writer = MockWriter()
+    reader = MockReader([""])
+    await ss.telnet_server_shell(reader, writer)
+    written = "".join(writer.written)
+    assert "Ready" in written
+
+
+@pytest.mark.asyncio
+async def test_telnet_server_shell_unknown_command():
+    writer = MockWriter()
+    reader = MockReader(list("bogus\r") + list("quit\r"))
+    await ss.telnet_server_shell(reader, writer)
+    written = "".join(writer.written)
+    assert "no such command" in written
+
+
+@pytest.mark.asyncio
+async def test_telnet_server_shell_dump_with_close():
+    writer = MockWriter()
+    reader = MockReader(list("dump 0 0 drain close\r"))
+    await ss.telnet_server_shell(reader, writer)
+    written = "".join(writer.written)
+    assert "kb_limit=0" in written
+    assert "do_close=True" in written
+    assert "quit" not in written
+
+
+class MockBinaryWriterShell(MockBinaryWriter):
+    def __init__(self, protocol=None):
+        super().__init__()
+        self._closing = False
+        self._extra = {"peername": ("127.0.0.1", 12345)}
+        self.protocol = protocol or _MockProtocol()
+        self.ga_calls = []
+
+    def get_extra_info(self, key, default=None):
+        return self._extra.get(key, default)
+
+    def is_closing(self):
+        return self._closing
+
+    def close(self):
+        self._closing = True
+
+    def send_ga(self):
+        self.ga_calls.append(True)
+        return True
+
+
+@pytest.mark.asyncio
+async def test_telnet_server_shell_binary_writer():
+    reader = MockBinaryReader([b"quit\r"])
+    writer = MockBinaryWriterShell()
+    await ss.telnet_server_shell(reader, writer)
+    assert len(writer.written) > 0
+    assert all(isinstance(w, bytes) for w in writer.written)
+
+
+@pytest.mark.asyncio
+async def test_readline_async_binary_writer_no_echo():
+    writer = MockBinaryWriter()
+    reader = MockBinaryReader([b"\r"])
+    result = await ss.readline_async(reader, writer)
+    assert result == ""
+    assert writer.written == []
+
+
+def test_readline_binary_writer_echo_backspace():
+    writer = MockBinaryWriter()
+    gen = ss.readline(None, writer)
+    gen.send(None)
+    for ch in "a\x7fb\r":
+        gen.send(ch)
+    assert len(writer.written) > 0
+    assert all(isinstance(w, bytes) for w in writer.written)
+
+
+@pytest.mark.parametrize(
+    "input_data,max_len,expected",
+    [
+        pytest.param([b"h", b"i", b"\r"], 100, "hi", id="cr_terminated"),
+        pytest.param([b"a", b"b"], 100, "ab", id="eof_no_terminator"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_read_line_inner_bytes(input_data, max_len, expected):
+    assert await gs._read_line_inner(MockBinaryReader(input_data), max_len) == expected
+
+
+@pytest.mark.parametrize(
+    "command,expected_substr,setup",
+    [
+        pytest.param("writer", "MockWriter", None, id="writer"),
+        pytest.param("reader", "MockReader", None, id="reader"),
+        pytest.param(
+            "slc",
+            "Special Line Characters",
+            lambda w: setattr(w, "slctab", slc_mod.generate_slctab()),
+            id="slc",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_telnet_server_shell_cmd(command, expected_substr, setup):
+    writer = MockWriter()
+    if setup:
+        setup(writer)
+    reader = MockReader(list(f"{command}\r"))
+    await ss.telnet_server_shell(reader, writer)
+    assert expected_substr in "".join(writer.written)
+
+
+@pytest.mark.asyncio
+async def test_filter_ansi_binary_long_sequence():
+    reader = MockBinaryReader([b"\x1b", b"["] + [b"0"] * 254 + [b"x"])
+    result = await ss.filter_ansi(reader, MockBinaryWriter())
+    assert result == "x"
+
+
+@pytest.mark.asyncio
+async def test_busy_shell_second_timeout(monkeypatch):
+    call_count = [0]
+
+    async def mock_read_line(reader, timeout, max_len=gs._MAX_INPUT):
+        call_count[0] += 1
+        return "hello" if call_count[0] == 1 else None
+
+    monkeypatch.setattr(gs, "_read_line", mock_read_line)
+    writer = MockWriter()
+    await gs.busy_shell(MockReader([]), writer)
+    written = "".join(writer.written)
+    assert "Machine is busy" in written
+    assert "distant explosion" in written
+    assert call_count[0] == 2
