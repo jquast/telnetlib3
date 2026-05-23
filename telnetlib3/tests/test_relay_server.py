@@ -9,6 +9,8 @@ from telnetlib3.relay_server import relay_shell
 
 
 class FakeWriter:
+    is_binary_writer = False
+
     def __init__(self):
         self.buffer = []
         self.closed = False
