@@ -15,6 +15,8 @@ from telnetlib3._session_context import TelnetSessionContext
 
 
 class DummyWriter:
+    is_binary_writer = False
+
     def __init__(self, slctab=None):
         self.echos = []
         self.slctab = slctab or slc_mod.generate_slctab()
@@ -41,6 +43,8 @@ def _run_readline(sequence, max_visible_width=0):
 
 
 class MockReader:
+    is_binary_reader = False
+
     def __init__(self, data):
         self._data = list(data)
         self._idx = 0
@@ -54,6 +58,8 @@ class MockReader:
 
 
 class SlowReader:
+    is_binary_reader = False
+
     async def read(self, n):
         await asyncio.sleep(1.0)
         return ""
@@ -65,6 +71,8 @@ class _MockProtocol:
 
 
 class MockWriter:
+    is_binary_writer = False
+
     def __init__(self, protocol=None):
         self.written = []
         self._closing = False
@@ -700,3 +708,83 @@ async def test_filter_ansi_esc_then_eof():
     reader = MockReader(["\x1b", ""])
     result = await ss.filter_ansi(reader, MockWriter())
     assert not result
+
+
+class MockBinaryReader:
+    is_binary_reader = True
+
+    def __init__(self, data):
+        self._data = [d.encode("latin-1") if isinstance(d, str) else d for d in data]
+        self._idx = 0
+
+    async def read(self, n):
+        if self._idx >= len(self._data):
+            return b""
+        result = self._data[self._idx]
+        self._idx += 1
+        return result
+
+
+class MockBinaryWriter:
+    is_binary_writer = True
+
+    def __init__(self):
+        self.written = []
+
+    def write(self, data):
+        assert isinstance(data, bytes), f"expected bytes, got {type(data)}"
+        self.written.append(data)
+
+    def echo(self, data):
+        assert isinstance(data, bytes), f"expected bytes, got {type(data)}"
+        self.written.append(data)
+
+    async def drain(self):
+        pass
+
+    def is_closing(self):
+        return False
+
+
+@pytest.mark.parametrize(
+    "input_chars,expected",
+    [
+        pytest.param([b"\x1b", b"[", b"A", b"x"], "x", id="csi_bytes"),
+        pytest.param([b"\x1b", b"!", b"x"], "!", id="esc_non_sequence_bytes"),
+        pytest.param([b"a"], "a", id="normal_char_bytes"),
+        pytest.param([b""], "", id="eof_bytes"),
+        pytest.param([b"\x1b", b"O", b"P", b"x"], "x", id="ss3_f1_bytes"),
+        pytest.param([b"\x1b", b"(", b"B", b"z"], "z", id="charset_bytes"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_filter_ansi_binary_reader(input_chars, expected):
+    result = await ss.filter_ansi(MockBinaryReader(input_chars), MockBinaryWriter())
+    assert result == expected
+
+
+@pytest.mark.parametrize(
+    "input_chars,expected",
+    [
+        pytest.param([b"h", b"e", b"l", b"l", b"o", b"\r"], "hello", id="basic_bytes"),
+        pytest.param([b"h", b"x", b"\x7f", b"i", b"\r"], "hi", id="backspace_bytes"),
+        pytest.param([b"\n", b"\x00", b"a", b"\r"], "a", id="skip_lf_nul_bytes"),
+        pytest.param([b""], None, id="eof_bytes"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_readline_async_binary_reader(input_chars, expected):
+    result = await ss.readline_async(MockBinaryReader(input_chars), MockBinaryWriter())
+    assert result == expected
+
+
+def test_readline_binary_writer():
+    """Readline (sync) with binary writer writes bytes for echo."""
+    writer = MockBinaryWriter()
+    gen = ss.readline(None, writer, max_visible_width=0)
+    gen.send(None)
+    for ch in "hello\r":
+        out = gen.send(ch)
+        if out is not None:
+            assert out == "hello"
+    assert len(writer.written) > 0

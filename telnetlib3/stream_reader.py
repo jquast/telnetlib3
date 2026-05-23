@@ -24,6 +24,9 @@ class TelnetReader:
     A copy of :class:`asyncio.StreamReader` with telnet-aware readline().
     """
 
+    #: Whether this reader returns raw bytes (True) or unicode strings (False).
+    is_binary_reader: bool = True
+
     _source_traceback = None
 
     def __init__(self, limit: int = _DEFAULT_LIMIT) -> None:
@@ -551,6 +554,9 @@ class TelnetReaderUnicode(TelnetReader):
     Extends TelnetReader to provide automatic decoding of bytes to unicode strings using a
     configurable encoding determined by callback function.
     """
+
+    #: Unicode readers return strings, not raw bytes.
+    is_binary_reader: bool = False
 
     #: Late-binding instance of :class:`codecs.IncrementalDecoder`, some
     #: bytes may be lost if the protocol's encoding is changed after

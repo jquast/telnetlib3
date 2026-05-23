@@ -5,7 +5,7 @@ from __future__ import annotations
 # std imports
 import types
 import asyncio
-from typing import Union, Optional, Generator, cast
+from typing import Any, Union, Optional, Coroutine, Generator
 
 # 3rd party
 from wcwidth import wcswidth as _wcswidth
@@ -34,36 +34,69 @@ _SEQ_STARTERS = frozenset("[])P_^(")
 _SS3 = "O"
 
 
-async def filter_ansi(reader: TelnetReaderUnicode, _writer: TelnetWriterUnicode) -> str:
+def _write(writer: Union[TelnetWriter, TelnetWriterUnicode], data: str) -> None:
+    """Write string data to writer in the appropriate type (str or bytes)."""
+    if writer.is_binary_writer:
+        writer.write(data.encode("latin-1"))
+    else:
+        writer.write(data)  # type: ignore[arg-type]
+
+
+def _echo(writer: Union[TelnetWriter, TelnetWriterUnicode], data: str) -> None:
+    """Echo string data to writer in the appropriate type (str or bytes)."""
+    if writer.is_binary_writer:
+        writer.echo(data.encode("latin-1"))
+    else:
+        writer.echo(data)  # type: ignore[arg-type]
+
+
+async def filter_ansi(
+    reader: Union[TelnetReader, TelnetReaderUnicode],
+    _writer: Union[TelnetWriter, TelnetWriterUnicode],
+) -> str:
     """
     Read and return the next non-ANSI-escape character from reader.
 
     When wcwidth is available, handles CSI, OSC, DCS, APC, PM, charset designation, Fe, Fp, and SS3
     sequences. Otherwise falls back to CSI and SS3 only.
     """
-    while True:
-        char = await reader.read(1)
-        if not char:
+    binary = reader.is_binary_reader
+
+    def _rch() -> "Coroutine[Any, Any, Union[str, bytes]]":
+        """Read one character."""
+        return reader.read(1)
+
+    async def _next() -> str:
+        ch = await _rch()
+        if not ch:
             return ""
+        return ch.decode("latin-1") if binary else ch  # type: ignore[return-value]
+
+    char = await _next()
+
+    while True:
         if char != ESC:
             return char
 
-        next_char = await reader.read(1)
+        next_char = await _next()
         if not next_char:
             return ""
 
-        # SS3: ESC O + one final byte (F1-F4, keypad, app-mode arrows).
-        # Handled before wcwidth's ZERO_WIDTH_PATTERN which would match
-        # ESC O as a 2-byte Fe sequence, missing the third byte.
         if next_char == _SS3:
-            await reader.read(1)
+            # SS3: ESC O + one final byte (F1-F4, keypad, app-mode arrows).
+            # Handled before wcwidth's ZERO_WIDTH_PATTERN which would match
+            # ESC O as a 2-byte Fe sequence, missing the third byte.
+            await _rch()  # consume SS3 final byte
+            char = await _next()
+            if not char:
+                return ""
             continue
 
         buf = ESC + next_char
         if next_char in _SEQ_STARTERS:
             # Multi-byte: CSI, OSC, DCS, APC, PM, or charset
             while len(buf) < 256:
-                seq_char = await reader.read(1)
+                seq_char = await _next()
                 if not seq_char:
                     break
                 buf += seq_char
@@ -80,6 +113,10 @@ async def filter_ansi(reader: TelnetReaderUnicode, _writer: TelnetWriterUnicode)
             match = _ZERO_WIDTH_PATTERN.match(buf)
             if not match:
                 return next_char
+
+        char = await _next()
+        if not char:
+            return ""
 
 
 def _backspace_grapheme(command: str) -> tuple[str, str]:
@@ -157,56 +194,53 @@ async def telnet_server_shell(
     This shell provides a very simple REPL, allowing introspection and state toggling of the
     connected client session.
     """
-    _reader = cast(TelnetReaderUnicode, reader)
-    writer = cast(TelnetWriterUnicode, writer)
-
     ssl_obj = writer.get_extra_info("ssl_object")
     if ssl_obj is not None:
         version = ssl_obj.version() or "TLS"
-        writer.write(f"Ready (secure: {version})." + CR + LF)
+        _write(writer, f"Ready (secure: {version})." + CR + LF)
     else:
-        writer.write("Ready." + CR + LF)
+        _write(writer, "Ready." + CR + LF)
 
     command = None
     while not writer.is_closing():
         if command:
-            writer.write(CR + LF)
-        writer.write("tel:sh> ")
+            _write(writer, CR + LF)
+        _write(writer, "tel:sh> ")
         if not getattr(writer.protocol, "never_send_ga", False):
             writer.send_ga()
         await writer.drain()
 
-        command = await readline_async(_reader, writer)
+        command = await readline_async(reader, writer)
         if command is None:
             return
-        writer.write(CR + LF)
+        _write(writer, CR + LF)
 
         if command == "quit":
             # server hangs up on client
-            writer.write("Goodbye." + CR + LF)
+            _write(writer, "Goodbye." + CR + LF)
             break
         if command == "help":
-            writer.write("quit, writer, slc, linemode, toggle [option|all], reader, proto, dump")
+            _write(writer, "quit, writer, slc, linemode, toggle [option|all], reader, proto, dump")
         elif command == "writer":
             # show 'writer' status
-            writer.write(repr(writer))
+            _write(writer, repr(writer))
         elif command == "reader":
             # show 'reader' status
-            writer.write(repr(reader))
+            _write(writer, repr(reader))
         elif command == "proto":
             # show 'proto' details of writer
-            writer.write(repr(writer.protocol))
+            _write(writer, repr(writer.protocol))
         elif command == "version":
-            writer.write(accessories.get_version())
+            _write(writer, accessories.get_version())
         elif command == "slc":
             # show 'slc' support and data tables
-            writer.write(get_slcdata(writer))
+            _write(writer, get_slcdata(writer))
         elif command == "linemode":
-            writer.write(get_linemode(writer))
+            _write(writer, get_linemode(writer))
         elif command.startswith("toggle"):
             # toggle specified options
             option = command[len("toggle ") :] or None
-            writer.write(do_toggle(writer, option))
+            _write(writer, do_toggle(writer, option))
         elif command.startswith("dump"):
             # dump [kb] [ms_delay] [drain|nodrain] [close|noclose]
             #
@@ -232,22 +266,22 @@ async def telnet_server_shell(
             except IndexError:
                 do_close = False
             msg = f"kb_limit={kb_limit}, delay={delay}," f" drain={drain}, do_close={do_close}:\r\n"
-            writer.write(msg)
+            _write(writer, msg)
             for lineout in character_dump(kb_limit):
                 if writer.is_closing():
                     break
-                writer.write(lineout)
+                _write(writer, lineout)
                 if drain:
                     await writer.drain()
                 if delay:
                     await asyncio.sleep(delay)
 
             if not writer.is_closing():
-                writer.write(f"\r\n{kb_limit} OK")
+                _write(writer, f"\r\n{kb_limit} OK")
             if do_close:
                 break
         elif command:
-            writer.write("no such command.")
+            _write(writer, "no such command.")
     writer.close()
 
 
@@ -275,13 +309,15 @@ def readline(
     Uses ``_LineEditor`` for grapheme-aware backspace and max_visible_width
     support.
     """
-    _writer = cast(TelnetWriterUnicode, writer)
     editor = _LineEditor(max_visible_width=max_visible_width)
     inp = yield None
     while True:
         echo, cmd = editor.feed(inp)
         if echo:
-            _writer.echo(echo)
+            if writer.is_binary_writer:
+                writer.echo(echo.encode("latin-1"))
+            else:
+                writer.echo(echo)  # type: ignore[arg-type]
         inp = yield cmd
 
 
@@ -296,11 +332,9 @@ async def readline_async(
     Uses ``filter_ansi()`` to strip escape sequences and
     ``_LineEditor`` for grapheme-aware backspace and max_visible_width support.
     """
-    _reader = cast(TelnetReaderUnicode, reader)
-    _writer = cast(TelnetWriterUnicode, writer)
     editor = _LineEditor(max_visible_width=max_visible_width)
     while True:
-        next_char = await filter_ansi(_reader, _writer)
+        next_char = await filter_ansi(reader, writer)
         if not next_char:
             return None
         # Skip leading LF/NUL on empty buffer -- accounts for
@@ -309,7 +343,10 @@ async def readline_async(
             continue
         echo, cmd = editor.feed(next_char)
         if echo:
-            _writer.echo(echo)
+            if writer.is_binary_writer:
+                writer.echo(echo.encode("latin-1"))
+            else:
+                writer.echo(echo)  # type: ignore[arg-type]
         if cmd is not None:
             return cmd
 

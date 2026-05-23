@@ -350,6 +350,22 @@ def test_parse_server_args_ascii_no_force_binary():
     assert result["force_binary"] is False
 
 
+@pytest.mark.parametrize(
+    "arg,expected_encoding,expected_force_binary",
+    [
+        pytest.param("false", False, True, id="false_lowercase"),
+        pytest.param("False", False, True, id="False_capitalized"),
+        pytest.param("FALSE", False, True, id="FALSE_uppercase"),
+    ],
+)
+def test_parse_server_args_encoding_false(arg, expected_encoding, expected_force_binary):
+    """parse_server_args converts --encoding=false/False to boolean False."""
+    with patch("sys.argv", ["test", "--encoding", arg]):
+        result = parse_server_args()
+    assert result["encoding"] is expected_encoding
+    assert result["force_binary"] is expected_force_binary
+
+
 @pytest.mark.asyncio
 async def test_run_server_guarded_shell_wrapping():
     """run_server wraps shell with robot_check and pty_fork_limit guards."""

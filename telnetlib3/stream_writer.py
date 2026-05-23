@@ -116,6 +116,9 @@ class TelnetWriter:
     A copy of :class:`asyncio.StreamWriter` with IAC interpretation.
     """
 
+    #: Whether this writer expects raw bytes (True) or unicode strings (False).
+    is_binary_writer: bool = True
+
     #: Total bytes sent to :meth:`~.feed_byte`
     byte_count = 0
 
@@ -3282,6 +3285,9 @@ class TelnetWriterUnicode(TelnetWriter):
     The encoding may be conditionally negotiated by CHARSET, :rfc:`2066`, or
     discovered by ``LANG`` environment variables by NEW_ENVIRON, :rfc:`1572`.
     """
+
+    #: Unicode writers receive strings, not raw bytes.
+    is_binary_writer: bool = False
 
     def __init__(
         self,

@@ -1,5 +1,10 @@
 History
 =======
+4.0.4
+  * bugfix: servers using ``robot_check=True`` with ``encoding=False`` raised ``TypeError: buf
+    expected bytes, got <class 'str'>``. ``telnetlib3-server`` now also accepts ``--encoding=False``
+    CLI argument. ``latin1`` encoding is used the default server shell and robot check.
+
 4.0.3
   * bugfix: long-running servers leaked memory through :class:`~telnetlib3.server.Server`
     ``_protocols`` list and ``_new_client`` asyncio.Queue. Both are now bounded

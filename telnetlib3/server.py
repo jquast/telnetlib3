@@ -913,7 +913,7 @@ class LinemodeServer(TelnetServer):
         self.writer.iac(DO, LINEMODE)
 
     def _negotiate_echo(self) -> None:
-        """Skip ``WILL ECHO`` — LINEMODE EDIT client handles local echo."""
+        """Skip ``WILL ECHO``: LINEMODE EDIT client handles local echo."""
         if self._echo_negotiated:
             return
         self._echo_negotiated = True
@@ -1297,7 +1297,12 @@ def parse_server_args(
         default=_config.connect_maxwait,
         help="timeout for pending negotiation",
     )
-    parser.add_argument("--encoding", default=_config.encoding, help="encoding name")
+    parser.add_argument(
+        "--encoding",
+        default=_config.encoding,
+        type=lambda val: False if val.lower() == "false" else val,
+        help="encoding name, or 'false'/'False' to disable unicode",
+    )
     parser.add_argument(
         "--force-binary",
         action="store_true",
@@ -1398,9 +1403,12 @@ def parse_server_args(
         result["pty_raw"] = False
 
     # Auto-enable force_binary for any non-ASCII encoding that uses high-bit bytes.
-    enc_key = result["encoding"].lower().replace("-", "_")
-    if enc_key not in ("us_ascii", "ascii"):
+    if result["encoding"] is False:
         result["force_binary"] = True
+    else:
+        enc_key = result["encoding"].lower().replace("-", "_")
+        if enc_key not in ("us_ascii", "ascii"):
+            result["force_binary"] = True
 
     # Build SSLContext from --ssl-certfile / --ssl-keyfile
     ssl_certfile = result.pop("ssl_certfile", None)
