@@ -760,8 +760,7 @@ async def test_raw_event_loop_reactivates_repl() -> None:
     term = _make_term(writer)
     term.check_auto_mode = lambda switched_to_raw, last_will_echo: None
 
-    stdout = mock.Mock()
-    stdout.write = mock.Mock()
+    stdout = mock.Mock(spec=["write"])
 
     close_calls: list[str] = []
 
@@ -823,6 +822,7 @@ async def test_raw_event_loop_typescript_recording() -> None:
 
     stdout = mock.Mock()
     stdout.write = mock.Mock()
+    stdout.drain = mock.AsyncMock()
 
     state = _RawLoopState(
         switched_to_raw=True, last_will_echo=False, local_echo=False, linesep="\r\n"
@@ -839,6 +839,7 @@ async def test_raw_event_loop_typescript_recording() -> None:
         want_repl=lambda: False,
     )
     assert "hello world" in ts_buf.getvalue()
+    stdout.drain.assert_called_once()
 
 
 @pytest.mark.asyncio
