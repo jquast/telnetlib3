@@ -1,5 +1,8 @@
 History
 =======
+4.0.5
+  * enhancement: ``telnetlib3-client`` client shell now drains stdout.
+
 4.0.4
   * bugfix: servers using ``robot_check=True`` with ``encoding=False`` raised ``TypeError: buf
     expected bytes, got <class 'str'>``. ``telnetlib3-server`` now also accepts ``--encoding=False``

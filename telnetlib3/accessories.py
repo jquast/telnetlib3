@@ -42,7 +42,7 @@ PATIENCE_MESSAGES = [
 
 def get_version() -> str:
     """Return the current version of telnetlib3."""
-    return "4.0.4"  # keep in sync with pyproject.toml !
+    return "4.0.5"  # keep in sync with pyproject.toml !
 
 
 def encoding_from_lang(lang: str) -> Optional[str]:
