@@ -26,14 +26,14 @@ __all__ = ("TelnetClient", "TelnetTerminalClient", "open_connection")
 #: Sub-modules are listed explicitly because not all servers treat
 #: top-level subscriptions as wildcards.
 _DEFAULT_GMCP_MODULES = [
-    "Char 1",
-    "Char.Vitals 1",
-    "Char.Items 1",
-    "Room 1",
-    "Room.Info 1",
-    "Comm 1",
-    "Comm.Channel 1",
-    "Group 1",
+    "char 1",
+    "char.vitals 1",
+    "char.items 1",
+    "room 1",
+    "room.info 1",
+    "comm 1",
+    "comm.channel 1",
+    "group 1",
 ]
 
 
@@ -197,8 +197,9 @@ class TelnetClient(client_base.BaseClient):
         from telnetlib3.accessories import get_version
 
         self.writer.send_gmcp("Core.Hello", {"client": "telnetlib3", "version": get_version()})
-        self.writer.send_gmcp("Core.Supports.Set", self._gmcp_modules)
-        self.log.info("GMCP handshake: Core.Hello + Core.Supports.Set %s", self._gmcp_modules)
+        wire_modules = [m.lower() for m in self._gmcp_modules]
+        self.writer.send_gmcp("Core.Supports.Set", wire_modules)
+        self.log.info("GMCP handshake: Core.Hello + Core.Supports.Set %s", wire_modules)
 
     def on_gmcp(self, package: str, data: Any) -> None:
         """Store incoming GMCP data on ``writer.ctx``, merging dict updates."""

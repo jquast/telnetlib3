@@ -2,6 +2,7 @@
 import sys
 import types
 import asyncio
+from unittest import mock
 
 # 3rd party
 import pytest
@@ -514,6 +515,52 @@ async def test_on_gmcp_merges_dicts_on_writer_ctx():
     client.on_gmcp("Char.Vitals", {"hp": 100, "maxhp": 100})
     client.on_gmcp("Char.Vitals", {"hp": 63})
     assert client.writer.ctx.gmcp_data["Char.Vitals"] == {"hp": 63, "maxhp": 100}
+
+
+def test_default_gmcp_modules_are_lowercase():
+    for spec in cl._DEFAULT_GMCP_MODULES:
+        module_part = spec.rsplit(" ", 1)[0]
+        assert module_part == module_part.lower()
+
+
+@pytest.mark.asyncio
+async def test_send_gmcp_hello_lowercases_default_modules():
+    client = _make_client()
+    calls: list[tuple[str, object]] = []
+    mock_writer = mock.Mock()
+    mock_writer.send_gmcp.side_effect = lambda pkg, data: calls.append((pkg, data))
+    client.writer = mock_writer
+    client._send_gmcp_hello()
+    assert client._gmcp_hello_sent is True
+    assert len(calls) == 2
+    pkg_name, supports_set = calls[1]
+    assert pkg_name == "Core.Supports.Set"
+    for spec in supports_set:
+        assert spec == spec.lower()
+
+
+@pytest.mark.asyncio
+async def test_send_gmcp_hello_lowercases_consumer_modules():
+    client = _make_client(gmcp_modules=["Room.Info 1", "Char 1"])
+    calls: list[tuple[str, object]] = []
+    mock_writer = mock.Mock()
+    mock_writer.send_gmcp.side_effect = lambda pkg, data: calls.append((pkg, data))
+    client.writer = mock_writer
+    client._send_gmcp_hello()
+    _, supports_set = calls[1]
+    assert "room.info 1" in supports_set
+    assert "char 1" in supports_set
+
+
+@pytest.mark.asyncio
+async def test_send_gmcp_hello_idempotent():
+    client = _make_client()
+    mock_writer = mock.Mock()
+    client.writer = mock_writer
+    client._send_gmcp_hello()
+    call_count = mock_writer.send_gmcp.call_count
+    client._send_gmcp_hello()
+    assert mock_writer.send_gmcp.call_count == call_count
 
 
 def test_fingerprint_main_oserror(monkeypatch):
