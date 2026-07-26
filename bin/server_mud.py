@@ -23,7 +23,7 @@ import unicodedata
 from typing import Any
 
 # local
-from telnetlib3.telopt import GMCP, MSDP, MSSP, WILL
+from telnetlib3.telopt import GMCP, MSDP, MSSP, WILL, ZMP
 from telnetlib3.server_shell import readline2
 
 log = logging.getLogger("mud")
@@ -272,6 +272,11 @@ def on_gmcp(writer: Any, package: str, data: Any) -> None:
     if not player or not player.debug_mode:
         return
     writer.write(f"[DEBUG GMCP] {package}: {json.dumps(data)}\r\n")
+
+
+def on_zmp(command: str, *args: str) -> None:
+    """Handle incoming ZMP from a client."""
+    log.debug("ZMP: %s %r", command, args)
 
 
 def get_msdp_var(player: Player, var: str) -> dict[str, Any] | None:
@@ -757,8 +762,10 @@ async def shell(reader: Any, writer: Any) -> None:
     writer.iac(WILL, GMCP)
     writer.iac(WILL, MSDP)
     writer.iac(WILL, MSSP)
+    writer.iac(WILL, ZMP)
     writer.set_ext_callback(GMCP, lambda pkg, data: on_gmcp(writer, pkg, data))
     writer.set_ext_callback(MSDP, lambda variables: on_msdp(writer, variables))
+    writer.set_ext_callback(ZMP, on_zmp)
     ssl_obj = writer.get_extra_info("ssl_object")
     if ssl_obj is not None:
         version = ssl_obj.version() or "TLS"

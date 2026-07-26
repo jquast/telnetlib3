@@ -5,6 +5,7 @@ import pytest
 
 # local
 from telnetlib3.mud import (
+    zmp_encode,
     zmp_decode,
     atcp_decode,
     gmcp_decode,
@@ -348,3 +349,28 @@ def test_mssp_decode_skips_garbage_bytes():
     buf = b"\x42" + MSSP_VAR + b"NAME" + MSSP_VAL + b"TestMUD"
     result = mssp_decode(buf)
     assert result == {"NAME": "TestMUD"}
+
+
+def test_zmp_encode_decode_roundtrip():
+    encoded = zmp_encode("zmp.ident", "telnetlib3", "1.0")
+    assert encoded == b"zmp.ident\x00telnetlib3\x001.0\x00"
+    decoded = zmp_decode(encoded)
+    assert decoded == ["zmp.ident", "telnetlib3", "1.0"]
+
+
+def test_zmp_encode_no_args():
+    encoded = zmp_encode("zmp.ping")
+    assert encoded == b"zmp.ping\x00"
+    assert zmp_decode(encoded) == ["zmp.ping"]
+
+
+def test_zmp_encode_multiple_args():
+    encoded = zmp_encode("zmp.check", "char.vitals")
+    assert encoded == b"zmp.check\x00char.vitals\x00"
+    assert zmp_decode(encoded) == ["zmp.check", "char.vitals"]
+
+
+def test_zmp_decode_latin1_fallback():
+    buf = b"echo\x00caf\xe9\x00"
+    result = zmp_decode(buf)
+    assert result == ["echo", "caf\xe9"]

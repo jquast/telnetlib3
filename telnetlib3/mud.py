@@ -40,6 +40,7 @@ __all__ = (
     "mssp_encode",
     "mssp_decode",
     "MsdpParser",
+    "zmp_encode",
     "zmp_decode",
     "atcp_decode",
     "aardwolf_decode",
@@ -274,6 +275,24 @@ def mssp_decode(buf: bytes, encoding: str = "utf-8") -> dict[str, str | list[str
             idx += 1
 
     return result
+
+
+def zmp_encode(command: str, *args: str) -> bytes:
+    """
+    Encode a ZMP message.
+
+    :param command: ZMP command name (e.g., ``"zmp.ident"``).
+    :param args: Zero or more argument strings.
+    :returns: NUL-delimited payload bytes suitable for ZMP subnegotiation.
+
+    Example::
+
+        >>> zmp_encode("zmp.ident", "telnetlib3", "1.0")
+        b'zmp.ident\\x00telnetlib3\\x001.0\\x00'
+    """
+    parts = [command.encode("utf-8")]
+    parts.extend(a.encode("utf-8") for a in args)
+    return b"\x00".join(parts) + b"\x00"
 
 
 def zmp_decode(buf: bytes, encoding: str = "utf-8") -> list[str]:

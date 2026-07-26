@@ -16,6 +16,7 @@ if TYPE_CHECKING:  # pragma: no cover
 from . import slc
 from .mud import (
     zmp_decode,
+    zmp_encode,
     atcp_decode,
     gmcp_decode,
     gmcp_encode,
@@ -1084,6 +1085,20 @@ class TelnetWriter:
         self.log.debug("send IAC SB GMCP %s IAC SE", package)
         self.send_iac(IAC + SB + GMCP + payload + IAC + SE)
 
+    def send_zmp(self, command: str, *args: str) -> None:
+        """
+        Transmit a ZMP message via subnegotiation.
+
+        :param command: ZMP command name (e.g., ``"zmp.ident"``).
+        :param args: Zero or more argument strings.
+        """
+        if not (self.local_option.enabled(ZMP) or self.remote_option.enabled(ZMP)):
+            self.log.debug("cannot send ZMP without negotiation")
+            return
+        payload = self._escape_iac(zmp_encode(command, *args))
+        self.log.debug("send IAC SB ZMP %s IAC SE", command)
+        self.send_iac(IAC + SB + ZMP + payload + IAC + SE)
+
     def send_msdp(self, variables: dict[str, Any]) -> None:
         """
         Transmit MSDP variables via subnegotiation.
@@ -1817,10 +1832,10 @@ class TelnetWriter:
         self.log.debug("MXP: %r", data)
         self.mxp_data.append(data)
 
-    def handle_zmp(self, parts: list[str]) -> None:
-        """Receive decoded ZMP message as list of ``[command, arg, ...]``."""
-        self.log.debug("ZMP: %r", parts)
-        self.zmp_data.append(parts)
+    def handle_zmp(self, command: str, *args: str) -> None:
+        """Receive decoded ZMP message as ``command`` and ``*args``."""
+        self.log.debug("ZMP: %s %r", command, args)
+        self.zmp_data.append([command, *args])
 
     def handle_aardwolf(self, data: dict[str, Any]) -> None:
         """Receive decoded Aardwolf message as dict."""
@@ -3199,7 +3214,10 @@ class TelnetWriter:
         payload = b"".join(buf)
         encoding = self.environ_encoding or "utf-8"
         parts = zmp_decode(payload, encoding=encoding)
-        self._ext_callback[ZMP](parts)
+        if parts:
+            self._ext_callback[ZMP](*parts)
+        else:
+            self.zmp_data.append([])
 
     def _handle_sb_aardwolf(self, buf: collections.deque[bytes]) -> None:
         """

@@ -193,6 +193,20 @@ def test_send_gmcp_not_negotiated():
     assert len(t.writes) == 0
 
 
+def test_send_zmp():
+    w, t, p = new_writer(server=True)
+    w.local_option[ZMP] = True
+    w.send_zmp("zmp.ident", "MudName", "1.0")
+    expected = IAC + SB + ZMP + b"zmp.ident\x00MudName\x001.0\x00" + IAC + SE
+    assert expected in t.writes
+
+
+def test_send_zmp_not_negotiated():
+    w, t, p = new_writer(server=True)
+    w.send_zmp("zmp.ident", "MudName", "1.0")
+    assert len(t.writes) == 0
+
+
 def test_send_msdp():
     w, t, p = new_writer(server=True)
     w.local_option[MSDP] = True

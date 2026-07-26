@@ -73,6 +73,7 @@ class TelnetClient(client_base.BaseClient):
         waiter_closed: Optional[asyncio.Future[None]] = None,
         _waiter_connected: Optional[asyncio.Future[None]] = None,
         gmcp_modules: Optional[List[str]] = None,
+        zmp_check_handler: Optional[Callable[[str], bool]] = None,
     ) -> None:
         """Initialize TelnetClient with terminal parameters."""
         self._compression = compression
@@ -89,6 +90,8 @@ class TelnetClient(client_base.BaseClient):
         )
         self._gmcp_modules = gmcp_modules or list(_DEFAULT_GMCP_MODULES)
         self._gmcp_hello_sent = False
+        self._zmp_check_handler = zmp_check_handler  # None means refuse all
+        self._zmp_ident_sent = False
         self._send_environ = set(send_environ or self.DEFAULT_SEND_ENVIRON)
         self._extra.update(
             {
@@ -170,6 +173,7 @@ class TelnetClient(client_base.BaseClient):
         self.writer.handle_will = enhanced_handle_will  # type: ignore[method-assign]
 
         self._setup_gmcp()
+        self._setup_zmp()
 
     def _setup_gmcp(self) -> None:
         """Wire GMCP callback and WILL-detection for Core.Hello handshake."""
@@ -208,6 +212,54 @@ class TelnetClient(client_base.BaseClient):
         else:
             gmcp[package] = data
         self.log.debug("GMCP: %s %r", package, data)
+
+    def _setup_zmp(self) -> None:
+        """Wire ZMP callback and WILL-detection for zmp.ident handshake."""
+        from telnetlib3.telopt import ZMP
+
+        self.writer.passive_do.add(ZMP)
+        self.writer.set_ext_callback(ZMP, self.on_zmp)
+
+        original_handle_will_zmp = self.writer.handle_will
+
+        def _detect_zmp_will(opt):
+            original_handle_will_zmp(opt)
+            if opt == ZMP and self.writer.remote_option.enabled(ZMP):
+                self._send_zmp_ident()
+
+        self.writer.handle_will = _detect_zmp_will  # type: ignore[method-assign]
+
+    def _send_zmp_ident(self) -> None:
+        """Send ``zmp.ident`` after ZMP negotiation."""
+        if self._zmp_ident_sent:
+            return
+        self._zmp_ident_sent = True
+        from telnetlib3.accessories import get_version
+
+        self.writer.send_zmp("zmp.ident", "telnetlib3", get_version())
+        self.log.info("ZMP handshake: zmp.ident telnetlib3 %s", get_version())
+
+    def _zmp_check(self, cmd: str) -> bool:
+        """Return True if the client supports the given ZMP command."""
+        if self._zmp_check_handler is not None:
+            return self._zmp_check_handler(cmd)
+        return False
+
+    def on_zmp(self, command: str, *args: str) -> None:
+        """
+        Receive and dispatch a ZMP message.
+
+        Auto-responds to ``zmp.check`` by consulting :meth:`_zmp_check`.
+        Stores all incoming messages in ``writer.zmp_data``.
+        """
+        self.log.debug("ZMP: %s %r", command, args)
+        self.writer.zmp_data.append([command, *args])
+        if command == "zmp.check" and args:
+            cmd = args[0]
+            if self._zmp_check(cmd):
+                self.writer.send_zmp("zmp.support", cmd)
+            else:
+                self.writer.send_zmp("zmp.no-support", cmd)
 
     def send_ttype(self) -> str:
         """Callback for responding to TTYPE requests."""

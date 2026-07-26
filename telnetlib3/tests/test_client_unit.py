@@ -516,6 +516,56 @@ async def test_on_gmcp_merges_dicts_on_writer_ctx():
     assert client.writer.ctx.gmcp_data["Char.Vitals"] == {"hp": 63, "maxhp": 100}
 
 
+@pytest.mark.asyncio
+async def test_on_zmp_stores_on_writer_zmp_data():
+    client, _ = _make_connected_client()
+    client.on_zmp("char.vitals", "hp", "100")
+    assert client.writer.zmp_data == [["char.vitals", "hp", "100"]]
+
+
+@pytest.mark.asyncio
+async def test_on_zmp_check_support():
+    client, transport = _make_connected_client(zmp_check_handler=lambda cmd: True)
+    from telnetlib3.telopt import ZMP
+    client.writer.remote_option[ZMP] = True
+    client._zmp_ident_sent = True
+    client.on_zmp("zmp.check", "char.vitals")
+    assert client.writer.zmp_data == [["zmp.check", "char.vitals"]]
+    sent = bytes(transport.data)
+    assert b"zmp.support\x00char.vitals\x00" in sent
+
+
+@pytest.mark.asyncio
+async def test_on_zmp_check_no_support():
+    client, transport = _make_connected_client(zmp_check_handler=lambda cmd: False)
+    from telnetlib3.telopt import ZMP
+    client.writer.remote_option[ZMP] = True
+    client._zmp_ident_sent = True
+    client.on_zmp("zmp.check", "char.vitals")
+    sent = bytes(transport.data)
+    assert b"zmp.no-support\x00char.vitals\x00" in sent
+
+
+@pytest.mark.asyncio
+async def test_on_zmp_check_default_refuses():
+    client, transport = _make_connected_client()
+    from telnetlib3.telopt import ZMP
+    client.writer.remote_option[ZMP] = True
+    client._zmp_ident_sent = True
+    client.on_zmp("zmp.check", "char.vitals")
+    sent = bytes(transport.data)
+    assert b"zmp.no-support\x00char.vitals\x00" in sent
+
+
+@pytest.mark.asyncio
+async def test_zmp_ident_sent_on_will_zmp():
+    client, transport = _make_connected_client(zmp_check_handler=lambda cmd: True)
+    from telnetlib3.telopt import ZMP
+    client.writer.handle_will(ZMP)
+    sent = bytes(transport.data)
+    assert b"zmp.ident\x00telnetlib3\x00" in sent
+
+
 def test_fingerprint_main_oserror(monkeypatch):
     async def _bad_fp():
         raise OSError("connection refused")
