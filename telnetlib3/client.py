@@ -218,8 +218,8 @@ class TelnetClient(client_base.BaseClient):
 
         modules = [m.lower() for m in self._gmcp_modules]
         self.writer.send_gmcp("Core.Hello", {"client": "telnetlib3", "version": get_version()})
-        wire_modules = [m.lower() for m in self._gmcp_modules]
-        self.log.info("GMCP handshake: Core.Hello + Core.Supports.Set %s", wire_modules)
+        self.writer.send_gmcp("Core.Supports.Set", modules)
+        self.log.info("GMCP handshake: Core.Hello + Core.Supports.Set %s", modules)
 
     def send_zmp_ident(self) -> None:
         """Send ``zmp.ident`` after ZMP negotiation."""
@@ -742,7 +742,7 @@ async def run_client() -> None:
                 client.writer.always_dont = always_dont
             from .telopt import GMCP as _GMCP
 
-            client.writer.passive_do = {_GMCP}
+            client.writer.passive_do.add(_GMCP)
             client.writer.environ_encoding = environ_encoding
             client.writer._encoding_explicit = encoding_explicit
 

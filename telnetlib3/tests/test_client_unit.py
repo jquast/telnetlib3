@@ -578,7 +578,7 @@ async def test_send_gmcp_hello_lowercases_default_modules():
     mock_writer = mock.Mock()
     mock_writer.send_gmcp.side_effect = lambda pkg, data: calls.append((pkg, data))
     client.writer = mock_writer
-    client._send_gmcp_hello()
+    client.send_gmcp_hello()
     assert client._gmcp_hello_sent is True
     assert len(calls) == 2
     pkg_name, supports_set = calls[1]
@@ -594,7 +594,7 @@ async def test_send_gmcp_hello_lowercases_consumer_modules():
     mock_writer = mock.Mock()
     mock_writer.send_gmcp.side_effect = lambda pkg, data: calls.append((pkg, data))
     client.writer = mock_writer
-    client._send_gmcp_hello()
+    client.send_gmcp_hello()
     _, supports_set = calls[1]
     assert "room.info 1" in supports_set
     assert "char 1" in supports_set
@@ -605,9 +605,9 @@ async def test_send_gmcp_hello_idempotent():
     client = _make_client()
     mock_writer = mock.Mock()
     client.writer = mock_writer
-    client._send_gmcp_hello()
+    client.send_gmcp_hello()
     call_count = mock_writer.send_gmcp.call_count
-    client._send_gmcp_hello()
+    client.send_gmcp_hello()
     assert mock_writer.send_gmcp.call_count == call_count
 
 

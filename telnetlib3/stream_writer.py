@@ -1798,7 +1798,7 @@ class TelnetWriter:
         Receive GMCP message with ``package`` name and ``data``.
 
         :param package: GMCP package name (e.g., ``"Char.Vitals"``).
-        :param data: Decoded JSON value -- may be any JSON type
+        :param data: Decoded JSON value, can be any JSON type
             (``str``, ``int``, ``float``, ``bool``, ``None``,
             ``list``, or ``dict``).
         """
