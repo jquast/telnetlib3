@@ -23,7 +23,7 @@ import unicodedata
 from typing import Any
 
 # local
-from telnetlib3.telopt import GMCP, MSDP, MSSP, WILL, ZMP
+from telnetlib3.telopt import ZMP, GMCP, MSDP, MSSP, WILL
 from telnetlib3.server_shell import readline2
 
 log = logging.getLogger("mud")

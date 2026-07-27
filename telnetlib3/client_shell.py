@@ -579,7 +579,7 @@ async def _raw_event_loop(
                 if raw_mode is None and want_repl():
                     state.reactivate_repl = True
             stdout.write(out.encode())
-            if hasattr(stdout, 'drain'):
+            if hasattr(stdout, "drain"):
                 await stdout.drain()
             _ts_file = telnet_writer.ctx.typescript_file
             if _ts_file is not None:

@@ -1,5 +1,8 @@
 History
 =======
+4.1.0
+  * enhancement: GMCP handler PI made public, and support added for ZMP (Zenith Mud Protocol).
+
 4.0.5
   * enhancement: ``telnetlib3-client`` client shell now drains stdout.
 

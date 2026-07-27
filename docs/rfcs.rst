@@ -77,6 +77,8 @@ Dungeon) servers and clients.
 * `GMCP`_ (Generic MUD Communication Protocol, option 201). JSON-based
   bidirectional messaging for game data such as room info, character vitals,
   and client metadata.
+* `ZMP`_ (Zenith Mud Protocol). unstructured key-value data, like GMCP, may
+  also contain room info, character vitals.
 * `MSDP`_ (MUD Server Data Protocol, option 69). Structured key-value protocol
   for game variables with support for nested tables and arrays.
 * `MSSP`_ (MUD Server Status Protocol, option 70). Server metadata protocol
@@ -93,6 +95,7 @@ Dungeon) servers and clients.
 .. _MSSP: https://tintin.mudhalla.net/protocols/mssp/
 .. _MCCP2: https://tintin.mudhalla.net/protocols/mccp/
 .. _MCCP3: https://tintin.mudhalla.net/protocols/mccp/
+.. _ZMP: https://discworld.starturtle.net/external/protocols/zmp.html
 
 MUDs Not Implemented
 --------------------

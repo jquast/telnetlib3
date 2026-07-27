@@ -527,6 +527,7 @@ async def test_on_zmp_stores_on_writer_zmp_data():
 async def test_on_zmp_check_support():
     client, transport = _make_connected_client(zmp_check_handler=lambda cmd: True)
     from telnetlib3.telopt import ZMP
+
     client.writer.remote_option[ZMP] = True
     client._zmp_ident_sent = True
     client.on_zmp("zmp.check", "char.vitals")
@@ -539,6 +540,7 @@ async def test_on_zmp_check_support():
 async def test_on_zmp_check_no_support():
     client, transport = _make_connected_client(zmp_check_handler=lambda cmd: False)
     from telnetlib3.telopt import ZMP
+
     client.writer.remote_option[ZMP] = True
     client._zmp_ident_sent = True
     client.on_zmp("zmp.check", "char.vitals")
@@ -550,6 +552,7 @@ async def test_on_zmp_check_no_support():
 async def test_on_zmp_check_default_refuses():
     client, transport = _make_connected_client()
     from telnetlib3.telopt import ZMP
+
     client.writer.remote_option[ZMP] = True
     client._zmp_ident_sent = True
     client.on_zmp("zmp.check", "char.vitals")
@@ -561,6 +564,7 @@ async def test_on_zmp_check_default_refuses():
 async def test_zmp_ident_sent_on_will_zmp():
     client, transport = _make_connected_client(zmp_check_handler=lambda cmd: True)
     from telnetlib3.telopt import ZMP
+
     client.writer.handle_will(ZMP)
     sent = bytes(transport.data)
     assert b"zmp.ident\x00telnetlib3\x00" in sent

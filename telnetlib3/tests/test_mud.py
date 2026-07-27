@@ -5,8 +5,8 @@ import pytest
 
 # local
 from telnetlib3.mud import (
-    zmp_encode,
     zmp_decode,
+    zmp_encode,
     atcp_decode,
     gmcp_decode,
     gmcp_encode,
