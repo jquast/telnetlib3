@@ -54,9 +54,9 @@ class TelnetSessionContext:
         self.typescript_file = typescript_file
         self.gmcp_data: dict[str, Any] = gmcp_data if gmcp_data is not None else {}
         self.zmp_data: dict[str, list[str]] = {}
-        # XXX TODO: move also  ``atcp_data`` and ``aardwolf_data`` here ??
-        #     can't we also just:
-        #     - add @property of zmp_data and others, to access self.ctx.[..]
-        #     - with docstring "Deprecated, use ctx.zmp_data"
-        #     - and hide/ignore this property from API documentation
- 
+        # MUD protocol data moved from TelnetWriter to ctx for consistency
+        self.mssp_data: Optional[dict[str, str | list[str]]] = None
+        self.atcp_data: list[tuple[str, str]] = []
+        self.aardwolf_data: list[dict[str, Any]] = []
+        self.mxp_data: list[bytes] = []
+        self.comport_data: Optional[dict[str, Any]] = None

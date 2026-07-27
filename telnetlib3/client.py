@@ -12,7 +12,7 @@ import struct
 import asyncio
 import argparse
 import functools
-from typing import Any, Dict, List, Tuple, Union, Callable, Optional, Sequence
+from typing import Any, Dict, List, Tuple, Union, Callable, Optional, Sequence, Collection
 
 # local
 from telnetlib3 import accessories, client_base
@@ -74,6 +74,7 @@ class TelnetClient(client_base.BaseClient):
         _waiter_connected: Optional[asyncio.Future[None]] = None,
         gmcp_modules: Optional[List[str]] = None,
         zmp_check_handler: Optional[Callable[[str], bool]] = None,
+        zmp_supported_commands: Optional[Collection[str]] = None,
     ) -> None:
         """Initialize TelnetClient with terminal parameters."""
         self._compression = compression
@@ -92,6 +93,9 @@ class TelnetClient(client_base.BaseClient):
         self._gmcp_hello_sent = False
         self._zmp_check_handler = zmp_check_handler  # None means refuse all
         self._zmp_ident_sent = False
+        self._zmp_supported_commands = (
+            set(zmp_supported_commands) if zmp_supported_commands else set()
+        )
         self._send_environ = set(send_environ or self.DEFAULT_SEND_ENVIRON)
         self._extra.update(
             {
@@ -147,51 +151,38 @@ class TelnetClient(client_base.BaseClient):
         ):
             self.writer.set_ext_offer_callback(opt, offer_func)
 
-        # Override the default handle_will method to detect when both sides support CHARSET
-        # Store the original only on first connection to prevent chain growth on reconnect.
-        if not hasattr(self.writer, "_original_handle_will"):
-            self.writer._original_handle_will = self.writer.handle_will
-        else:
-            self.writer.handle_will = (  # type: ignore[method-assign]
-                self.writer._original_handle_will
-            )
-        original_handle_will = self.writer.handle_will
-        writer = self.writer
-
-        def enhanced_handle_will(opt: bytes) -> None:
-            original_handle_will(opt)
-
-            # If this was a WILL CHARSET from the server, and we also have WILL CHARSET enabled,
-            # log that both sides support CHARSET. The server should initiate the actual REQUEST.
-            if (
-                opt == CHARSET
-                and writer.remote_option.enabled(CHARSET)
-                and writer.local_option.enabled(CHARSET)
-            ):
-                self.log.debug("Both sides support CHARSET, ready for server to initiate REQUEST")
-
-        self.writer.handle_will = enhanced_handle_will  # type: ignore[method-assign]
+        self.writer.add_will_callback(CHARSET, self.on_will_charset)
 
         self.setup_gmcp()
         self.setup_zmp()
+
+    def on_will_charset(self, opt: bytes) -> None:
+        """Log when both sides support CHARSET after WILL negotiation."""
+        from telnetlib3.telopt import CHARSET
+
+        if (
+            self.writer.remote_option.enabled(CHARSET)
+            and self.writer.local_option.enabled(CHARSET)
+        ):
+            self.log.debug("Both sides support CHARSET, ready for server to initiate REQUEST")
 
     def setup_gmcp(self) -> None:
         """Wire GMCP callback and WILL-detection for Core.Hello handshake."""
         from telnetlib3.telopt import GMCP
 
+        self.writer.passive_do.add(GMCP)
         self.writer.set_ext_callback(GMCP, self.on_gmcp)
+        self.writer.add_will_callback(GMCP, self.on_will_gmcp)
 
-        # Capture current handle_will (already includes CHARSET wrapper).
-        # On reconnect, _original_handle_will was already restored in connection_made,
-        # so this always wraps exactly once.
-        original_handle_will_gmcp = self.writer.handle_will
+    def on_will_gmcp(self, opt: bytes) -> None:
+        """Send Core.Hello after GMCP negotiation."""
+        from telnetlib3.telopt import GMCP
 
-        def _detect_gmcp_will(opt: bytes) -> None:
-            original_handle_will_gmcp(opt)
-            if opt == GMCP and self.writer.remote_option.enabled(GMCP):
-                self.send_gmcp_hello()
-
-        self.writer.handle_will = _detect_gmcp_will  # type: ignore[method-assign]
+        enabled = self.writer.remote_option.enabled(GMCP)
+        hello_sent = self._gmcp_hello_sent
+        self.log.debug("on_will_gmcp: remote_enabled=%s _gmcp_hello_sent=%s", enabled, hello_sent)
+        if enabled:
+            self.send_gmcp_hello()
 
     def setup_zmp(self) -> None:
         """Wire ZMP callback and WILL-detection for zmp.ident handshake."""
@@ -199,15 +190,14 @@ class TelnetClient(client_base.BaseClient):
 
         self.writer.passive_do.add(ZMP)
         self.writer.set_ext_callback(ZMP, self.on_zmp)
+        self.writer.add_will_callback(ZMP, self.on_will_zmp)
 
-        original_handle_will_zmp = self.writer.handle_will
+    def on_will_zmp(self, opt: bytes) -> None:
+        """Send zmp.ident after ZMP negotiation."""
+        from telnetlib3.telopt import ZMP
 
-        def _detect_zmp_will(opt) -> None:
-            original_handle_will_zmp(opt)
-            if opt == ZMP and self.writer.remote_option.enabled(ZMP):
-                self.send_zmp_ident()
-
-        self.writer.handle_will = _detect_zmp_will  # type: ignore[method-assign]
+        if self.writer.remote_option.enabled(ZMP):
+            self.send_zmp_ident()
 
     def send_gmcp_hello(self) -> None:
         """Send ``Core.Hello`` and ``Core.Supports.Set`` after GMCP negotiation."""
@@ -230,6 +220,8 @@ class TelnetClient(client_base.BaseClient):
 
         self.writer.send_zmp("zmp.ident", "telnetlib3", get_version())
         self.log.info("ZMP handshake: zmp.ident telnetlib3 %s", get_version())
+        for cmd in sorted(self._zmp_supported_commands):
+            self.writer.send_zmp("zmp.support", cmd)
 
     def on_gmcp(self, package: str, data: Any) -> None:
         """Store incoming GMCP data on ``writer.ctx``, merging dict updates."""
@@ -244,24 +236,34 @@ class TelnetClient(client_base.BaseClient):
         """
         Receive and dispatch a ZMP message.
 
-        Auto-responds to ``zmp.check`` by consulting :meth:`zmp_check`.
+        Auto-responds to ``zmp.check`` and ``zmp.send-support``.
         Stores latest value for each command in ``writer.ctx.zmp_data``.
         """
         self.log.debug("ZMP: %s %r", command, args)
         self.writer.ctx.zmp_data[command] = list(args)
         if command == "zmp.check" and args:
             cmd = args[0]
-            if self.zmp_check(cmd):
-                self.writer.send_zmp("zmp.support", cmd)
-            else:
-                self.writer.send_zmp("zmp.no-support", cmd)
+            self._respond_zmp_support(cmd)
+        elif command == "zmp.send-support":
+            if args:
+                for cmd in args:
+                    self._respond_zmp_support(cmd)
+            elif not self._zmp_ident_sent:
+                for cmd in sorted(self._zmp_supported_commands):
+                    self._respond_zmp_support(cmd)
+
+    def _respond_zmp_support(self, cmd: str) -> None:
+        """Send ``zmp.support`` or ``zmp.no-support`` for *cmd*."""
+        if self.zmp_check(cmd):
+            self.writer.send_zmp("zmp.support", cmd)
+        else:
+            self.writer.send_zmp("zmp.no-support", cmd)
 
     def zmp_check(self, cmd: str) -> bool:
         """Return True if the client supports the given ZMP command."""
         if self._zmp_check_handler is not None:
             return self._zmp_check_handler(cmd)
         return False
-
 
     def send_ttype(self) -> str:
         """Callback for responding to TTYPE requests."""

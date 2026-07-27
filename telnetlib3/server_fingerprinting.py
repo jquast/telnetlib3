@@ -513,6 +513,13 @@ async def _fingerprint_session(
     start_time = time.time()
     cursor = _VirtualCursor(encoding=writer.environ_encoding)
 
+    # Accept all MUD protocol WILL requests so we can collect
+    # subnegotiation data (ATCP, AARDWOLF, MXP, MSP, etc.).
+    from telnetlib3.telopt import ATCP, AARDWOLF, MSP, MXP, MSDP, MSSP
+
+    for opt in (ATCP, AARDWOLF, MSP, MXP, MSDP, MSSP):
+        writer.passive_do.add(opt)
+
     # 1. Let straggler negotiation settle -- read (and respond to DSR)
     #    instead of sleeping blind so early DSR requests get a CPR reply.
     settle_data = await _read_banner_until_quiet(
@@ -629,8 +636,8 @@ async def _fingerprint_session(
             "dsr_replies": cursor.dsr_replies,
         }
     )
-    if writer.mssp_data is not None:
-        session_data["mssp"] = writer.mssp_data
+    if writer.ctx.mssp_data is not None:
+        session_data["mssp"] = writer.ctx.mssp_data
     session_data.update(_collect_mud_data(writer))
 
     session_entry: dict[str, Any] = {
@@ -966,18 +973,20 @@ def _create_server_protocol_fingerprint(
 
 
 def _collect_mud_data(writer: TelnetWriter) -> dict[str, Any]:
-    """Collect MUD protocol data from *writer* into a dict."""
+    """Collect MUD protocol data from *writer.ctx* into a dict."""
     result: dict[str, Any] = {}
     if writer.ctx.zmp_data:
         result["zmp"] = writer.ctx.zmp_data
-    if writer.atcp_data:
-        result["atcp"] = [{"package": pkg, "value": val} for pkg, val in writer.atcp_data]
-    if writer.aardwolf_data:
-        result["aardwolf"] = writer.aardwolf_data
-    if writer.mxp_data:
-        result["mxp"] = [d.hex() if d else "activated" for d in writer.mxp_data]
-    if writer.comport_data:
-        result["comport"] = writer.comport_data
+    if writer.ctx.atcp_data:
+        result["atcp"] = [
+            {"package": pkg, "value": val} for pkg, val in writer.ctx.atcp_data
+        ]
+    if writer.ctx.aardwolf_data:
+        result["aardwolf"] = writer.ctx.aardwolf_data
+    if writer.ctx.mxp_data:
+        result["mxp"] = [d.hex() if d else "activated" for d in writer.ctx.mxp_data]
+    if writer.ctx.comport_data:
+        result["comport"] = writer.ctx.comport_data
     return result
 
 
@@ -1099,10 +1108,10 @@ def _format_banner(data: bytes, encoding: str = "utf-8") -> str:
 
 async def _await_mssp_data(writer: TelnetWriter, deadline: float) -> None:
     """Wait for MSSP data until *deadline* if server acknowledged MSSP."""
-    if not writer.remote_option.enabled(MSSP) or writer.mssp_data is not None:
+    if not writer.remote_option.enabled(MSSP) or writer.ctx.mssp_data is not None:
         return
     remaining = deadline - time.time()
-    while remaining > 0 and writer.mssp_data is None:
+    while remaining > 0 and writer.ctx.mssp_data is None:
         await asyncio.sleep(min(0.05, remaining))
         remaining = deadline - time.time()
 

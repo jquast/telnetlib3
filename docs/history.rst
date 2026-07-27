@@ -5,6 +5,23 @@ History
   * changed: function signature :meth:`~telnetlib3.stream_writer.TelnetWriter.handle_zmp`
   * enhancement: GMCP handler PI made public, improved support for ZMP (Zenith Mud Protocol),
     of handle_zmp
+  * new: :meth:`~telnetlib3.stream_writer.TelnetWriter.add_will_callback` and
+    :meth:`~telnetlib3.stream_writer.TelnetWriter.remove_will_callback` methods
+    for registering per-option callbacks invoked after :meth:`handle_will`
+    completes standard negotiation.  Replaces the previous closure-wrapping
+    pattern in :class:`~telnetlib3.client.TelnetClient` for GMCP, ZMP, and
+    CHARSET will-detection.
+  * removed: ``_original_handle_will`` attribute on
+    :class:`~telnetlib3.stream_writer.TelnetWriter` (implementation detail).
+  * changed: MUD protocol subnegotiation data (``mssp_data``, ``atcp_data``,
+    ``aardwolf_data``, ``mxp_data``, ``comport_data``) moved from
+    :class:`~telnetlib3.stream_writer.TelnetWriter` to
+    :class:`~telnetlib3._session_context.TelnetSessionContext` (accessible as
+    ``writer.ctx.mssp_data``, etc.).  Deprecated properties on the writer
+    delegate to ``ctx`` for backward compatibility.
+  * enhancement: ``telnetlib3-fingerprint`` now accepts all MUD protocol
+    offers (ATCP, AARDWOLF, MSP, MXP, MSDP, MSSP) to collect subnegotiation
+    data during scans, not just GMCP and ZMP.
 
 4.0.6
   * bugfix: default GMCP modules requested are now in lowercase instead of titlecase

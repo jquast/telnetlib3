@@ -2,6 +2,7 @@
 import sys
 import types
 import asyncio
+import logging
 from unittest import mock
 
 # 3rd party
@@ -572,6 +573,23 @@ async def test_zmp_ident_sent_on_will_zmp():
 
 
 @pytest.mark.asyncio
+async def test_zmp_send_support_responds_all():
+    """zmp.send-support with no args responds with all supported commands."""
+    client, transport = _make_connected_client(
+        zmp_check_handler=lambda cmd: True, zmp_supported_commands={"char.vitals", "room.info"}
+    )
+    from telnetlib3.telopt import ZMP
+
+    client.writer.remote_option[ZMP] = True
+    # Ident not yet sent -- send-support should trigger a full response.
+    client._zmp_ident_sent = False
+    client.on_zmp("zmp.send-support")
+    sent = bytes(transport.data)
+    assert b"zmp.support\x00char.vitals\x00" in sent
+    assert b"zmp.support\x00room.info\x00" in sent
+
+
+@pytest.mark.asyncio
 async def test_send_gmcp_hello_lowercases_default_modules():
     client = _make_client()
     calls: list[tuple[str, object]] = []
@@ -619,3 +637,65 @@ def test_fingerprint_main_oserror(monkeypatch):
     with pytest.raises(SystemExit) as exc_info:
         cl.fingerprint_main()
     assert exc_info.value.code == 1
+
+
+@pytest.mark.asyncio
+async def test_on_will_gmcp_sends_hello():
+    client, transport = _make_connected_client()
+    from telnetlib3.telopt import GMCP
+
+    client.writer.remote_option[GMCP] = True
+    client.on_will_gmcp(GMCP)
+    sent = bytes(transport.data)
+    assert b"Core.Hello" in sent
+
+
+@pytest.mark.asyncio
+async def test_on_will_gmcp_noop_when_not_enabled():
+    client, transport = _make_connected_client()
+    from telnetlib3.telopt import GMCP
+
+    client.on_will_gmcp(GMCP)
+    sent = bytes(transport.data)
+    assert b"Core.Hello" not in sent
+
+
+@pytest.mark.asyncio
+async def test_on_will_zmp_sends_ident():
+    client, transport = _make_connected_client(zmp_check_handler=lambda cmd: True)
+    from telnetlib3.telopt import ZMP
+
+    client.writer.remote_option[ZMP] = True
+    client.on_will_zmp(ZMP)
+    sent = bytes(transport.data)
+    assert b"zmp.ident\x00telnetlib3\x00" in sent
+
+
+@pytest.mark.asyncio
+async def test_on_will_charset_logs_when_both_sides_enabled(caplog):
+    client, _ = _make_connected_client()
+    from telnetlib3.telopt import CHARSET
+
+    client.writer.remote_option[CHARSET] = True
+    client.writer.local_option[CHARSET] = True
+    with caplog.at_level(logging.DEBUG):
+        client.on_will_charset(CHARSET)
+    assert "Both sides support CHARSET" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_setup_gmcp_registers_will_callback():
+    client, _ = _make_connected_client()
+    from telnetlib3.telopt import GMCP
+
+    on_will_gmcp = client.on_will_gmcp
+    assert on_will_gmcp in client.writer.will_callbacks.get(GMCP, [])
+
+
+@pytest.mark.asyncio
+async def test_setup_zmp_registers_will_callback():
+    client, _ = _make_connected_client()
+    from telnetlib3.telopt import ZMP
+
+    on_will_zmp = client.on_will_zmp
+    assert on_will_zmp in client.writer.will_callbacks.get(ZMP, [])

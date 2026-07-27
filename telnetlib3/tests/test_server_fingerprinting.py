@@ -9,8 +9,8 @@ import pytest
 
 # local
 from telnetlib3 import fingerprinting as fps
-from telnetlib3 import server_fingerprinting as sfp
 from telnetlib3 import _session_context
+from telnetlib3 import server_fingerprinting as sfp
 from telnetlib3.telopt import VAR, USERVAR
 
 
@@ -47,11 +47,7 @@ class MockWriter:
         self.local_option = MockOption()
         self.environ_encoding = "ascii"
         self.environ_send_raw = None
-        self.mssp_data = None
-        self.atcp_data: list[tuple[str, str]] = []
-        self.aardwolf_data: list[dict[str, object]] = []
-        self.mxp_data: list[bytes] = []
-        self.comport_data: dict[str, object] | None = None
+        self.passive_do: set[bytes] = set()
         self.ctx = _session_context.TelnetSessionContext()
         self.protocol = _MockProtocol()
         self._closing = False
@@ -88,6 +84,46 @@ class MockWriter:
 
     def close(self):
         self._closing = True
+
+    @property
+    def mssp_data(self):
+        return self.ctx.mssp_data
+
+    @mssp_data.setter
+    def mssp_data(self, value):
+        self.ctx.mssp_data = value
+
+    @property
+    def atcp_data(self):
+        return self.ctx.atcp_data
+
+    @atcp_data.setter
+    def atcp_data(self, value):
+        self.ctx.atcp_data = value
+
+    @property
+    def aardwolf_data(self):
+        return self.ctx.aardwolf_data
+
+    @aardwolf_data.setter
+    def aardwolf_data(self, value):
+        self.ctx.aardwolf_data = value
+
+    @property
+    def mxp_data(self):
+        return self.ctx.mxp_data
+
+    @mxp_data.setter
+    def mxp_data(self, value):
+        self.ctx.mxp_data = value
+
+    @property
+    def comport_data(self):
+        return self.ctx.comport_data
+
+    @comport_data.setter
+    def comport_data(self, value):
+        self.ctx.comport_data = value
 
 
 class MockReader:

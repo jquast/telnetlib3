@@ -1723,3 +1723,60 @@ def test_handle_will_client_directional_refusal():
     w.handle_will(TTYPE)
     assert t.writes[-1] == IAC + DONT + TTYPE
     assert TTYPE in w.directional_refusals
+
+
+def test_add_will_callback_fires_on_matching_opt():
+    w, t, _ = new_writer(server=True)
+    called: list[bytes] = []
+    w.add_will_callback(GMCP, lambda opt: called.append(opt))
+    w.handle_will(GMCP)
+    assert called == [GMCP]
+
+
+def test_add_will_callback_does_not_fire_on_nonmatching_opt():
+    w, t, _ = new_writer(server=False, client=True)
+    called: list[bytes] = []
+    w.add_will_callback(GMCP, lambda opt: called.append(opt))
+    w.handle_will(NAWS)
+    assert called == []
+
+
+def test_add_will_callback_multiple_for_same_opt():
+    w, t, _ = new_writer(server=True)
+    called: list[int] = []
+    w.add_will_callback(GMCP, lambda opt: called.append(1))
+    w.add_will_callback(GMCP, lambda opt: called.append(2))
+    w.handle_will(GMCP)
+    assert called == [1, 2]
+
+
+def test_remove_will_callback():
+    w, t, _ = new_writer(server=True)
+    called: list[bytes] = []
+
+    def _cb(opt: bytes) -> None:
+        called.append(opt)
+
+    w.add_will_callback(GMCP, _cb)
+    w.remove_will_callback(GMCP, _cb)
+    w.handle_will(GMCP)
+    assert called == []
+
+
+def test_remove_will_callback_raises_if_not_registered():
+    w, t, _ = new_writer(server=True)
+
+    def _cb(opt: bytes) -> None:
+        pass
+
+    with pytest.raises(ValueError):
+        w.remove_will_callback(GMCP, _cb)
+
+
+def test_close_clears_will_callbacks():
+    w, t, _ = new_writer(server=True)
+    called: list[bytes] = []
+    w.add_will_callback(GMCP, lambda opt: called.append(opt))
+    w.close()
+    assert w.will_callbacks == {}
+    assert not called
