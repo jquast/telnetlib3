@@ -2,7 +2,9 @@ History
 =======
 
 4.1.0
-  * enhancement: GMCP handler PI made public, and support added for ZMP (Zenith Mud Protocol).
+  * changed: function signature :meth:`~telnetlib3.stream_writer.TelnetWriter.handle_zmp`
+  * enhancement: GMCP handler PI made public, improved support for ZMP (Zenith Mud Protocol),
+    of handle_zmp
 
 4.0.6
   * bugfix: default GMCP modules requested are now in lowercase instead of titlecase
