@@ -287,10 +287,6 @@ class TelnetWriter:
         #: ``None`` until a ``SB MSSP`` payload is received and decoded.
         self.mssp_data: Optional[dict[str, str | list[str]]] = None
 
-        #: Accumulated ZMP messages (list of [command, arg, ...] lists).
-        #: Empty until ``SB ZMP`` payloads are received and decoded.
-        self.zmp_data: list[list[str]] = []
-
         #: Accumulated ATCP messages (list of (package, value) tuples).
         #: Empty until ``SB ATCP`` payloads are received and decoded.
         self.atcp_data: list[tuple[str, str]] = []
@@ -1835,7 +1831,7 @@ class TelnetWriter:
     def handle_zmp(self, command: str, *args: str) -> None:
         """Receive decoded ZMP message as ``command`` and ``*args``."""
         self.log.debug("ZMP: %s %r", command, args)
-        self.zmp_data.append([command, *args])
+        self.ctx.zmp_data[command] = list(args)
 
     def handle_aardwolf(self, data: dict[str, Any]) -> None:
         """Receive decoded Aardwolf message as dict."""
@@ -3216,8 +3212,6 @@ class TelnetWriter:
         parts = zmp_decode(payload, encoding=encoding)
         if parts:
             self._ext_callback[ZMP](*parts)
-        else:
-            self.zmp_data.append([])
 
     def _handle_sb_aardwolf(self, buf: collections.deque[bytes]) -> None:
         """

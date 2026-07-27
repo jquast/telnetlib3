@@ -10,6 +10,7 @@ import pytest
 # local
 from telnetlib3 import fingerprinting as fps
 from telnetlib3 import server_fingerprinting as sfp
+from telnetlib3 import _session_context
 from telnetlib3.telopt import VAR, USERVAR
 
 
@@ -47,11 +48,11 @@ class MockWriter:
         self.environ_encoding = "ascii"
         self.environ_send_raw = None
         self.mssp_data = None
-        self.zmp_data: list[list[str]] = []
         self.atcp_data: list[tuple[str, str]] = []
         self.aardwolf_data: list[dict[str, object]] = []
         self.mxp_data: list[bytes] = []
         self.comport_data: dict[str, object] | None = None
+        self.ctx = _session_context.TelnetSessionContext()
         self.protocol = _MockProtocol()
         self._closing = False
         self._menu_inline: bool = False
@@ -1300,7 +1301,7 @@ async def test_banner_loop_no_prompt_detected(tmp_path):
 async def test_session_data_mud_protocol_fields(tmp_path):
     """Session data includes MUD protocol fields when present."""
     writer = MockWriter(will_options=[fps.SGA])
-    writer.zmp_data = [["check", "telnetlib3"]]
+    writer.ctx.zmp_data = {"check": ["telnetlib3"]}
     writer.atcp_data = [("Auth.Request", "ON")]
     writer.aardwolf_data = [{"type": "stats"}]
     writer.mxp_data = [None, b"\x01\x02"]
@@ -1311,7 +1312,7 @@ async def test_session_data_mud_protocol_fields(tmp_path):
     with open(save_path, encoding="utf-8") as f:
         data = json.load(f)
     session = data["server-probe"]["session_data"]
-    assert session["zmp"] == [["check", "telnetlib3"]]
+    assert session["zmp"] == {"check": ["telnetlib3"]}
     assert session["atcp"] == [{"package": "Auth.Request", "value": "ON"}]
     assert session["aardwolf"] == [{"type": "stats"}]
     assert session["mxp"] == ["activated", "0102"]

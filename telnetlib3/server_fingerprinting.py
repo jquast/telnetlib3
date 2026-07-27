@@ -968,8 +968,8 @@ def _create_server_protocol_fingerprint(
 def _collect_mud_data(writer: TelnetWriter) -> dict[str, Any]:
     """Collect MUD protocol data from *writer* into a dict."""
     result: dict[str, Any] = {}
-    if writer.zmp_data:
-        result["zmp"] = writer.zmp_data
+    if writer.ctx.zmp_data:
+        result["zmp"] = writer.ctx.zmp_data
     if writer.atcp_data:
         result["atcp"] = [{"package": pkg, "value": val} for pkg, val in writer.atcp_data]
     if writer.aardwolf_data:

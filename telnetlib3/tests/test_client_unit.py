@@ -517,10 +517,10 @@ async def test_on_gmcp_merges_dicts_on_writer_ctx():
 
 
 @pytest.mark.asyncio
-async def test_on_zmp_stores_on_writer_zmp_data():
+async def test_on_zmp_stores_on_ctx_zmp_data():
     client, _ = _make_connected_client()
     client.on_zmp("char.vitals", "hp", "100")
-    assert client.writer.zmp_data == [["char.vitals", "hp", "100"]]
+    assert client.writer.ctx.zmp_data == {"char.vitals": ["hp", "100"]}
 
 
 @pytest.mark.asyncio
@@ -531,7 +531,7 @@ async def test_on_zmp_check_support():
     client.writer.remote_option[ZMP] = True
     client._zmp_ident_sent = True
     client.on_zmp("zmp.check", "char.vitals")
-    assert client.writer.zmp_data == [["zmp.check", "char.vitals"]]
+    assert client.writer.ctx.zmp_data == {"zmp.check": ["char.vitals"]}
     sent = bytes(transport.data)
     assert b"zmp.support\x00char.vitals\x00" in sent
 

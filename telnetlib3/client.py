@@ -241,13 +241,14 @@ class TelnetClient(client_base.BaseClient):
         self.log.debug("GMCP: %s %r", package, data)
 
     def on_zmp(self, command: str, *args: str) -> None:
-        """Store incoming ZMP data on ``writer.zmp_data``.
+        """
+        Receive and dispatch a ZMP message.
 
         Auto-responds to ``zmp.check`` by consulting :meth:`zmp_check`.
-        Stores all incoming messages in ``writer.zmp_data``. # XXX XXX
+        Stores latest value for each command in ``writer.ctx.zmp_data``.
         """
         self.log.debug("ZMP: %s %r", command, args)
-        self.writer.zmp_data.append([command, *args])
+        self.writer.ctx.zmp_data[command] = list(args)
         if command == "zmp.check" and args:
             cmd = args[0]
             if self.zmp_check(cmd):
