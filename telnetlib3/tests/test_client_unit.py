@@ -2,6 +2,7 @@
 import sys
 import types
 import asyncio
+from unittest import mock
 
 # 3rd party
 import pytest
@@ -568,6 +569,46 @@ async def test_zmp_ident_sent_on_will_zmp():
     client.writer.handle_will(ZMP)
     sent = bytes(transport.data)
     assert b"zmp.ident\x00telnetlib3\x00" in sent
+
+
+@pytest.mark.asyncio
+async def test_send_gmcp_hello_lowercases_default_modules():
+    client = _make_client()
+    calls: list[tuple[str, object]] = []
+    mock_writer = mock.Mock()
+    mock_writer.send_gmcp.side_effect = lambda pkg, data: calls.append((pkg, data))
+    client.writer = mock_writer
+    client._send_gmcp_hello()
+    assert client._gmcp_hello_sent is True
+    assert len(calls) == 2
+    pkg_name, supports_set = calls[1]
+    assert pkg_name == "Core.Supports.Set"
+    for spec in supports_set:
+        assert spec == spec.lower()
+
+
+@pytest.mark.asyncio
+async def test_send_gmcp_hello_lowercases_consumer_modules():
+    client = _make_client(gmcp_modules=["Room.Info 1", "Char 1"])
+    calls: list[tuple[str, object]] = []
+    mock_writer = mock.Mock()
+    mock_writer.send_gmcp.side_effect = lambda pkg, data: calls.append((pkg, data))
+    client.writer = mock_writer
+    client._send_gmcp_hello()
+    _, supports_set = calls[1]
+    assert "room.info 1" in supports_set
+    assert "char 1" in supports_set
+
+
+@pytest.mark.asyncio
+async def test_send_gmcp_hello_idempotent():
+    client = _make_client()
+    mock_writer = mock.Mock()
+    client.writer = mock_writer
+    client._send_gmcp_hello()
+    call_count = mock_writer.send_gmcp.call_count
+    client._send_gmcp_hello()
+    assert mock_writer.send_gmcp.call_count == call_count
 
 
 def test_fingerprint_main_oserror(monkeypatch):
