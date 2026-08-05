@@ -188,14 +188,25 @@ class BaseServer(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
                 loop = asyncio.get_event_loop()
                 loop.create_task(coro)
 
+    def _trace_recv(self, data: bytes, decompressed: bool = False) -> None:
+        """
+        Log received bytes at TRACE level.
+
+        :param data: Bytes received from the transport.
+        :param decompressed: True when *data* is the MCCP3-decompressed telnet
+            stream; the raw compressed bytes are not logged.
+        """
+        if not data or not logger.isEnabledFor(TRACE):
+            return
+        label = " (decompressed)" if decompressed else ""
+        logger.log(TRACE, "recv %d bytes%s\n%s", len(data), label, hexdump(data, prefix="<<  "))
+
     def data_received(self, data: bytes) -> None:
         """
         Process bytes received by transport.
 
         Feeds raw bytes through the writer's IAC interpreter, forwarding in-band data to the reader.
         """
-        if logger.isEnabledFor(TRACE):
-            logger.log(TRACE, "recv %d bytes\n%s", len(data), hexdump(data, prefix="<<  "))
         self._last_received = datetime.datetime.now()
         self._rx_bytes += len(data)
 
@@ -207,12 +218,15 @@ class BaseServer(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
                 logger.warning("MCCP3 decompression error, disabling")
                 self._mccp3_end()
                 return
+            self._trace_recv(data, decompressed=True)
             if self._mccp3_decompressor.eof:
                 unused = self._mccp3_decompressor.unused_data
                 self._mccp3_end()
                 if unused:
                     self.data_received(unused)
                     return
+        else:
+            self._trace_recv(data)
 
         if self.writer.slc_simulated:
             slc_vals = {defn.val[0] for defn in self.writer.slctab.values() if defn.val != theNULL}

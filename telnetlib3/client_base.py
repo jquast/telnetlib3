@@ -226,8 +226,6 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
         Buffer incoming data and schedule async processing to keep the event loop responsive. Apply
         read-side backpressure using transport.pause_reading()/resume_reading().
         """
-        if self.log.isEnabledFor(TRACE):
-            self.log.log(TRACE, "recv %d bytes\n%s", len(data), hexdump(data, prefix="<<  "))
         self._last_received = datetime.datetime.now()
 
         # Detect SyncTERM font switching sequences and auto-switch encoding.
@@ -354,6 +352,19 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
 
     # private methods
 
+    def _trace_recv(self, data: bytes, decompressed: bool = False) -> None:
+        """
+        Log received bytes at TRACE level.
+
+        :param data: Bytes received from the transport.
+        :param decompressed: True when *data* is the MCCP2-decompressed telnet
+            stream; the raw compressed bytes are not logged.
+        """
+        if not data or not self.log.isEnabledFor(TRACE):
+            return
+        label = " (decompressed)" if decompressed else ""
+        self.log.log(TRACE, "recv %d bytes%s\n%s", len(data), label, hexdump(data, prefix="<<  "))
+
     def _process_chunk(self, data: bytes) -> bool:
         """Process a chunk of received bytes; return True if any IAC/SB cmd observed."""
         self._last_received = datetime.datetime.now()
@@ -380,14 +391,15 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
             if self._mccp2_decompressor.eof:
                 unused = self._mccp2_decompressor.unused_data
                 self._mccp2_end()
-                cmd = self._process_chunk_inner(data)
+                cmd = self._process_chunk_inner(data, decompressed=True)
                 if unused:
                     cmd = self._process_chunk(unused) or cmd
                 return cmd
+            return self._process_chunk_inner(data, decompressed=True)
 
         return self._process_chunk_inner(data)
 
-    def _process_chunk_inner(self, data: bytes) -> bool:
+    def _process_chunk_inner(self, data: bytes, decompressed: bool = False) -> bool:
         """Inner chunk processing with IAC interpretation and mid-chunk MCCP2 detection."""
         try:
             mode = self.writer.mode
@@ -408,9 +420,17 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
         if self.writer._compressed_remainder is not None:
             remainder = self.writer._compressed_remainder
             self.writer._compressed_remainder = None
+            if not decompressed:
+                # The chunk activating MCCP2 mixes plain telnet and compressed
+                # bytes; trace only the plain prefix here, the compressed
+                # remainder is traced after decompression by the recursive
+                # _process_chunk() call.
+                self._trace_recv(data[: len(data) - len(remainder)])
             self._mccp2_start()
             if remainder:
                 cmd_received = self._process_chunk(remainder) or cmd_received
+        else:
+            self._trace_recv(data, decompressed=decompressed)
 
         # MCCP3: start compressor when writer signals activation
         if self.writer.mccp3_active and self._mccp3_compressor is None:

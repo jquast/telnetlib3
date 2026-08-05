@@ -771,3 +771,70 @@ class TestMCCP2WbitsFallback:
         joined = b"".join(received)
         assert joined == plaintext
         assert client._mccp2_wbits_fallback is True
+
+
+@pytest.mark.asyncio
+class TestMCCPTraceLogging:
+    def _recv_messages(self, caplog):
+        return [r.getMessage() for r in caplog.records if r.getMessage().startswith("recv ")]
+
+    async def test_client_trace_shows_decompressed_not_compressed(self, caplog):
+        """TRACE recv logging shows the decompressed telnet stream, never zlib bytes."""
+        from telnetlib3.accessories import TRACE
+
+        client, received = _make_client_with_capture()
+        plaintext = b'room.info {"visibility":0} '
+        compressor = zlib.compressobj(
+            zlib.Z_BEST_COMPRESSION, zlib.DEFLATED, 12, 5, zlib.Z_DEFAULT_STRATEGY
+        )
+        first = compressor.compress(plaintext) + compressor.flush(zlib.Z_SYNC_FLUSH)
+        second = compressor.compress(b"more plaintext") + compressor.flush(zlib.Z_SYNC_FLUSH)
+
+        old_level = client.log.level
+        client.log.setLevel(TRACE)
+        try:
+            with caplog.at_level(TRACE):
+                client._process_chunk(_BOUNDARY_SB + first)
+                client._process_chunk(second)
+        finally:
+            client.log.setLevel(old_level)
+
+        assert b"".join(received) == plaintext + b"more plaintext"
+        messages = self._recv_messages(caplog)
+        assert messages
+        # The chunk activating MCCP2 dumps only its plain IAC SB prefix raw.
+        assert any(m.startswith("recv 5 bytes") for m in messages)
+        decompressed = [m for m in messages if "(decompressed)" in m]
+        assert decompressed
+        assert any('room.info {"visi' in m for m in decompressed)
+        # The zlib bytes never appear in any dump.
+        compressed_hex = first[:16].hex(" ")
+        assert all(compressed_hex not in m for m in messages)
+
+    async def test_server_trace_shows_decompressed_not_compressed(self, caplog):
+        """Server TRACE recv logging shows decompressed client→server data."""
+        from telnetlib3.accessories import TRACE
+        from telnetlib3 import server_base as server_base_module
+        from telnetlib3.server_base import BaseServer
+
+        server = BaseServer(encoding=False, connect_maxwait=0.1)
+        transport = MockTransport()
+        server.connection_made(transport)
+        server._mccp3_decompressor = zlib.decompressobj()
+
+        plaintext = b"hello from compressed client"
+        compressed = _make_compressed(plaintext)
+        old_level = server_base_module.logger.level
+        server_base_module.logger.setLevel(TRACE)
+        try:
+            with caplog.at_level(TRACE):
+                server.data_received(compressed)
+        finally:
+            server_base_module.logger.setLevel(old_level)
+
+        messages = self._recv_messages(caplog)
+        assert messages
+        assert any(
+            "(decompressed)" in m and "hello from compr" in m for m in messages
+        )
+        assert all(compressed[:16].hex(" ") not in m for m in messages)
