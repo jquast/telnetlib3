@@ -77,8 +77,9 @@ Dungeon) servers and clients.
 * `GMCP`_ (Generic MUD Communication Protocol, option 201). JSON-based
   bidirectional messaging for game data such as room info, character vitals,
   and client metadata.
-* `ZMP`_ (Zenith Mud Protocol). unstructured key-value data, like GMCP, may
-  also contain room info, character vitals.
+* `ZMP`_ (Zenith Mud Protocol, option 93). Bidirectional messaging of
+  NUL-delimited string lists (a command plus arguments), carrying data such
+  as room info and character vitals.
 * `MSDP`_ (MUD Server Data Protocol, option 69). Structured key-value protocol
   for game variables with support for nested tables and arrays.
 * `MSSP`_ (MUD Server Status Protocol, option 70). Server metadata protocol
@@ -101,8 +102,8 @@ MUDs Not Implemented
 --------------------
 
 Constants are also defined for the following MUD options, though their handlers
-are not implemented: MCCP (85, legacy compression), MXP (91, markup), ZMP
-(93, messaging), MSP (90, sound), and ATCP (200, Achaea-specific).
+are not implemented: MCCP (85, legacy compression), MXP (91, markup), MSP (90,
+sound), and ATCP (200, Achaea-specific).
 
 Additional Resources
 --------------------
