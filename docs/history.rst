@@ -1,7 +1,7 @@
 History
 =======
 
-4.1.0
+5.0.0
   * bugfix: ``IAC SB IAC SE`` (sub-negotiation with no option byte) should not raise ``IndexError``
   * new: :meth:`~telnetlib3.stream_writer.TelnetWriter.add_will_callback` and
     :meth:`~telnetlib3.stream_writer.TelnetWriter.remove_will_callback` for per-option
