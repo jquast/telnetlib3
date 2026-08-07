@@ -515,7 +515,7 @@ async def _fingerprint_session(
 
     # Accept all MUD protocol WILL requests so we can collect
     # subnegotiation data (ATCP, AARDWOLF, MXP, MSP, etc.).
-    from telnetlib3.telopt import ATCP, AARDWOLF, MSP, MXP, MSDP, MSSP
+    from telnetlib3.telopt import MSP, MXP, ATCP, MSDP, MSSP, AARDWOLF
 
     for opt in (ATCP, AARDWOLF, MSP, MXP, MSDP, MSSP):
         writer.passive_do.add(opt)
@@ -978,9 +978,7 @@ def _collect_mud_data(writer: TelnetWriter) -> dict[str, Any]:
     if writer.ctx.zmp_data:
         result["zmp"] = writer.ctx.zmp_data
     if writer.ctx.atcp_data:
-        result["atcp"] = [
-            {"package": pkg, "value": val} for pkg, val in writer.ctx.atcp_data
-        ]
+        result["atcp"] = [{"package": pkg, "value": val} for pkg, val in writer.ctx.atcp_data]
     if writer.ctx.aardwolf_data:
         result["aardwolf"] = writer.ctx.aardwolf_data
     if writer.ctx.mxp_data:

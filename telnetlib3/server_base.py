@@ -193,8 +193,8 @@ class BaseServer(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
         Log received bytes at TRACE level.
 
         :param data: Bytes received from the transport.
-        :param decompressed: True when *data* is the MCCP3-decompressed telnet
-            stream; the raw compressed bytes are not logged.
+        :param decompressed: True when *data* is the MCCP3-decompressed telnet stream; the raw
+            compressed bytes are not logged.
         """
         if not data or not logger.isEnabledFor(TRACE):
             return

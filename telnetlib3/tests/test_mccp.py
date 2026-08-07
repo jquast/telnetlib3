@@ -813,8 +813,8 @@ class TestMCCPTraceLogging:
 
     async def test_server_trace_shows_decompressed_not_compressed(self, caplog):
         """Server TRACE recv logging shows decompressed client→server data."""
-        from telnetlib3.accessories import TRACE
         from telnetlib3 import server_base as server_base_module
+        from telnetlib3.accessories import TRACE
         from telnetlib3.server_base import BaseServer
 
         server = BaseServer(encoding=False, connect_maxwait=0.1)
@@ -834,7 +834,5 @@ class TestMCCPTraceLogging:
 
         messages = self._recv_messages(caplog)
         assert messages
-        assert any(
-            "(decompressed)" in m and "hello from compr" in m for m in messages
-        )
+        assert any("(decompressed)" in m and "hello from compr" in m for m in messages)
         assert all(compressed[:16].hex(" ") not in m for m in messages)

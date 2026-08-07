@@ -160,10 +160,7 @@ class TelnetClient(client_base.BaseClient):
         """Log when both sides support CHARSET after WILL negotiation."""
         from telnetlib3.telopt import CHARSET
 
-        if (
-            self.writer.remote_option.enabled(CHARSET)
-            and self.writer.local_option.enabled(CHARSET)
-        ):
+        if self.writer.remote_option.enabled(CHARSET) and self.writer.local_option.enabled(CHARSET):
             self.log.debug("Both sides support CHARSET, ready for server to initiate REQUEST")
 
     def setup_gmcp(self) -> None:
