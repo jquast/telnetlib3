@@ -278,7 +278,7 @@ def mssp_decode(buf: bytes, encoding: str = "utf-8") -> dict[str, str | list[str
 
 
 def zmp_encode(command: str, *args: str) -> bytes:
-    """
+    r"""
     Encode a ZMP message.
 
     :param command: ZMP command name (e.g., ``"zmp.ident"``).
