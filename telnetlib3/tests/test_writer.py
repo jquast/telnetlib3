@@ -151,6 +151,47 @@ def test_sb_interrupted():
     assert writer.feed_byte(SE) is True
 
 
+def test_sb_empty_subnegotiation():
+    """IAC SB IAC SE (no option byte) is discarded without raising."""
+    writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
+
+    given = IAC + SB + IAC + SE + b"ok"
+    for val in given:
+        writer.feed_byte(bytes([val]))
+
+    assert b"".join(writer._sb_buffer) == b""
+    assert writer.iac_received is False
+    assert writer.cmd_received is False
+    assert writer._sb_overflow is False
+
+
+def test_sb_overflow_discarded():
+    """SB payload exceeding the size bound is discarded, staying in sync."""
+    from telnetlib3.stream_writer import _MAX_SUBNEGOTIATION
+
+    writer = telnetlib3.TelnetWriter(transport=None, protocol=None, server=True)
+    writer.feed_byte(IAC)
+    writer.feed_byte(SB)
+    writer.feed_byte(b"g")
+    writer._sb_buffer.extend([b"\x00"] * (_MAX_SUBNEGOTIATION - 1))
+
+    # one more byte crosses the bound: buffered data is discarded
+    writer.feed_byte(b"\x00")
+    assert writer._sb_overflow is True
+    assert b"".join(writer._sb_buffer) == b""
+
+    # bytes (including escaped IAC) are dropped while overflowing
+    writer.feed_byte(b"\x00")
+    writer.feed_byte(IAC)
+    writer.feed_byte(IAC)
+
+    # terminating SE ends the discard; stream stays in sync
+    writer.feed_byte(IAC)
+    writer.feed_byte(SE)
+    assert writer._sb_overflow is False
+    assert writer.feed_byte(b"z") is True
+
+
 async def test_iac_do_twice_replies_once(bind_host, unused_tcp_port):
     """WILL/WONT replied only once for repeated DO."""
 

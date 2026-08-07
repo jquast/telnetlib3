@@ -109,6 +109,11 @@ _EMPTY_SB_OK = frozenset({MXP, MSP, ZMP, AARDWOLF, ATCP, MCCP2_COMPRESS, MCCP3_C
 #: MUD protocol options that a plain telnet client should decline by default.
 _MUD_PROTOCOL_OPTIONS = frozenset({GMCP, MSDP, MSSP, MSP, MXP, ZMP, AARDWOLF, ATCP})
 
+#: Maximum number of bytes buffered between ``IAC SB`` and ``IAC SE``.
+#: A sub-negotiation exceeding this bound is discarded and subsequent
+#: bytes are dropped until the terminating ``IAC SE``.
+_MAX_SUBNEGOTIATION = 1 << 20
+
 
 class TelnetWriter:
     """
@@ -316,6 +321,10 @@ class TelnetWriter:
 
         #: Sub-negotiation buffer
         self._sb_buffer: collections.deque[bytes] = collections.deque()
+
+        #: True when a sub-negotiation exceeded :data:`_MAX_SUBNEGOTIATION`;
+        #: remaining bytes are dropped until the terminating ``IAC SE``.
+        self._sb_overflow = False
 
         #: SLC buffer
         self._slc_buffer: collections.deque[bytes] = collections.deque()
@@ -760,8 +769,11 @@ class TelnetWriter:
         if byte == IAC:
             self.iac_received = not self.iac_received
             if not self.iac_received and self.cmd_received == SB:
-                # SB buffer receives escaped IAC values
-                self._sb_buffer.append(IAC)
+                if self._sb_overflow or len(self._sb_buffer) >= _MAX_SUBNEGOTIATION:
+                    self._sb_overflow = True
+                else:
+                    # SB buffer receives escaped IAC values
+                    self._sb_buffer.append(IAC)
 
         elif self.iac_received and not self.cmd_received:
             # parse 2nd byte of IAC
@@ -793,6 +805,15 @@ class TelnetWriter:
                     name_command(cmd),
                 )
                 self._sb_buffer.clear()
+            elif not self._sb_buffer:
+                if self._sb_overflow:
+                    self.log.warning(
+                        "sub-negotiation SB exceeds %d bytes, discarded", _MAX_SUBNEGOTIATION
+                    )
+                else:
+                    self.log.warning(
+                        "sub-negotiation SB with no option byte (IAC SB IAC SE), discarded"
+                    )
             else:
                 # sub-negotiation end (SE), fire handle_subnegotiation
                 self.log.debug(
@@ -804,12 +825,24 @@ class TelnetWriter:
                     self._sb_buffer.clear()
                     self.iac_received = False
             self.iac_received = False
+            self._sb_overflow = False
 
         elif self.cmd_received == SB:
             # continue buffering of sub-negotiation command.
             if not self._sb_buffer:
                 self.log.debug("begin sub-negotiation SB %s", name_command(byte))
-            self._sb_buffer.append(byte)
+            if self._sb_overflow or len(self._sb_buffer) >= _MAX_SUBNEGOTIATION:
+                if not self._sb_overflow:
+                    sb_opt = name_command(self._sb_buffer[0]) if self._sb_buffer else "?"
+                    self.log.warning(
+                        "sub-negotiation SB %s exceeds %d bytes, discarding until IAC SE",
+                        sb_opt,
+                        _MAX_SUBNEGOTIATION,
+                    )
+                self._sb_buffer.clear()
+                self._sb_overflow = True
+            else:
+                self._sb_buffer.append(byte)
 
         elif self.cmd_received:
             # parse 3rd and final byte of IAC DO, DONT, WILL, WONT.
@@ -2045,7 +2078,10 @@ class TelnetWriter:
                     if not self.local_option.enabled(opt):
                         self.iac(WILL, opt)
                     return True
-                self.log.debug("DO %s: MUD protocol, declining on client.", name_command(opt))
+                self.log.debug(
+                    "DO %s: MUD protocol, declining on client (enable with always_will).",
+                    name_command(opt),
+                )
                 if not self.local_option.enabled(opt):
                     self.iac(WONT, opt)
                 return False
@@ -2177,6 +2213,11 @@ class TelnetWriter:
                     for callback in self.will_callbacks.get(opt, ()):
                         callback(opt)
                     return
+                self.log.debug(
+                    "WILL %s: MUD protocol, declining on client "
+                    "(enable with always_do or passive_do).",
+                    name_command(opt),
+                )
                 self.iac(DONT, opt)
                 return
             # Reject MCCP when compression is disabled or TLS is active

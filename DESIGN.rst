@@ -1,29 +1,15 @@
 Project Status
 ==============
 
-Retired by author, looking for new owner :) or some help!
+This project is basically complete. At this time we're mostly working on the "telix" dependency,
+which provides a full application to BBS and MUDs and their protocols and features, which sometimes
+discovers fixes or feature gaps in telnetlib3.
+
+Below are various notes, sometimes trimmed from code, or README.rst, some of it is important but
+some of it just needs review and deletion, it is not all very accurate.
 
 Design
 ======
-
-reduce
-------
-
-outer telnetlib3-server and telnetlib3-client and examples should connect
-as exit(main(\*\*parse_args(sys.argv))), the _transform_args() function is
-rather shoe-horned, main() should declare keywords.
-
-**this is completed for server, copy to client**
-
-
-BaseTelnetProtocol
-------------------
-
-base_client.py and base_server.py actually share the same ABC
-base_protocol.py, they are almost mirror images of one another,
-which is pretty great, actually, so they can be reduced to
-BaseTelnetProtocol.
-
 
 On Linemode
 -----------
@@ -43,14 +29,21 @@ interface designed.
     comprehensive are our tests, and how well is our SLC working?
   - IAC-SB-LINEMODE-DO-FORWARDMASK is unhandled, raises NotImplementedError
 
+This project is the only known Server-side implementation of *Special Linemode
+Character* (SLC) negotiation and *Remote line editing* (`rfc-1184`_), other than
+BSD telnet, which was used as a guide for the bulk of this python implementation.
+
+Remote line editing is a comprehensive approach to providing responsive,
+low-latency output of characters received over slow network links, allowing
+incomplete lines to be buffered, while still providing remote editing
+facilities, such as backspace, kill line, etc.
+
+The Server and Client agree on a series of Special Linemode Character (SLC)
+function values, to agree on the keyboard characters used for Backspace,
+Interrupt Process (``^C``), Repaint (``^R``), Erase Word (``^W``), etc.
+
 TelnetWriter and TelnetServer
 -----------------------------
-
-feed_byte called by telnet server should be a coroutine
-receiving data by send. It should yield out-of-bound values, None otherwise?
-'is_oob', or 'slc_received', etc.?  We're still considering ... the state still
-requires tracking, but this would turn multiple function calls into a .send()
-into generator, better for state loops or bandwidth, maybe?
 
 handle_xon resumes writing in a way that is not obvious -- we should
 be using the true 'pause_writing' and 'resume_writing' methods of our
@@ -60,6 +53,7 @@ availabilities.
 
 On STATUS rfc
 -------------
+
 We've seen everything negotiate fine, but what exactly are we expected to do
 when the distant end's concept of our negotiation STATUS disagrees with our
 own? Match theirs, should we re-negotiate or re-affirm misunderstood values?
@@ -81,96 +75,13 @@ SLC flush
 - SLC flushin/flushout attributes are not honored.  Not entirely sure
   how to handle these two values with asyncio yet.
 
-
-
-telsh
-=====
-
-In addition to remote line editing as described below, a pure-python shell,
-*telsh* is provided to allow toggling of server options and session parameters.
-In this way, it provides a suitable interface for testing telnet client
-capabilities.
-
-It is only in the interest of this project to provide enough shell-like
-capabilities to demonstrate remote line editing and an extensible environment
-for session introspection. An example of this is assigning a new value to
-CHARSET, toggling in and outbinary, thereby enabling UTF8 input/output, etc.
-
 UTF8
 ====
-
-CHARSET (`rfc-2066`_) specifies a codepage, not an encoding. At the time, this
-was more or less limited to specifying the codepage used to display bytes of the
-range 127 through 255.  Unimplemented in BSD client, and generally found
-implemented only in recent MUD client (Atlantis_) and servers. Most common
-values are: ASCII, UTF8, BIG5, and LATIN1.
-
-The default preferred encoding for clients that negotiate BINARY but not
-CHARSET, such as the BSD client, is defined by the TelnetServer keyword
-argument ``default_encoding`` ('UTF8' by default).
-
-The example shell *telsh* allows changing encoding on the fly by setting the
-'CHARSET' session environment value at the *telsh* command prompt by issuing
-command::
-
-    set CHARSET=UTF8
-
-Setting binary for only a single direction ('outbinary' or 'inbinary') is
-supported. Client support of one does not immediately toggle the other, it
-must be negotiated both ways for full UTF8 input and output.
 
 Some clients (`TinTin++`_) incorrectly negotiation either directions (WILL,
 DO/WONT, DONT) as a single option, causing only one reply for a request of
 either 'outbinary' or 'inbinary' for which it always declines, only once, for
 either request (Even when configured for UTF8).
-
-CP437
-=====
-
-Additionally, a contrib.cp437 module is included (authored by tehmaze_) which
-translates output meant to be translated by DOS Emulating programs to their
-comparable UTF-8 font. This is used by argument *--cp437* of the telnet-client_
-program.
-
-Some bulletin-board systems will send extended ascii characters (such as those
-used by 
-
-Telnet
-======
-
-The Telnet protocol is over 40 years old and still in use today. Telnet predates
-TCP, and was used over a wide array of transports, especially on academic and
-military systems. Nearly all computer networking that interacted with human
-interfaces was done using the Telnet protocol prior to the mass-adoption of
-the World Wide Web in the mid 1990's, when SSH became more commonplace.
-
-Naturally, Telnet as a code project inevitably must handle a wide variety of
-connecting clients and hosts, due to limitations of their networking Transport
-, Terminals, their drivers, and host operating systems.
-
-This implementation aims to implement only those capabilities "found in the
-wild", and includes, or does not include, mechanisms that are suitable only
-for legacy or vendor-implemented options. It even makes one of its own: the
-encoding' used in binary mode is the value replied by the CHARSET negotiation
-(`rfc-2066`_).
-
-
-
-Remote LineMode
----------------
-
-This project is the only known Server-side implementation of *Special Linemode
-Character* (SLC) negotiation and *Remote line editing* (`rfc-1184`_), other than
-BSD telnet, which was used as a guide for the bulk of this python implementation.
-
-Remote line editing is a comprehensive approach to providing responsive,
-low-latency output of characters received over slow network links, allowing
-incomplete lines to be buffered, while still providing remote editing
-facilities, such as backspace, kill line, etc.
-
-The Server and Client agree on a series of Special Linemode Character (SLC)
-function values, to agree on the keyboard characters used for Backspace,
-Interrupt Process (``^C``), Repaint (``^R``), Erase Word (``^W``), etc.
 
 Kludge Mode
 -----------
@@ -458,8 +369,8 @@ TODO
 - xon/xoff is unimplemented, see
   telnetlib3.stream_writer.TelnetWriter.handle_xon and handle_xoff.
 
-- After long-running (~2mo) job of telnetlib3 server on public IP, we ran
-  out of memory ! write test verifying garbage collects!
+- SLC flushin/flushout attributes are not honored.  Not entirely sure
+  how to handle these two values with asyncio yet.
 
 - TelnetReader has no need for declaring server/client=True, it behaves the
   same either way.
@@ -474,17 +385,6 @@ TODO
   would return a line BEGINNING with either LF or NUL when the previous line
   ended with CR, we simply discard that byte.
  
-- base_client.py and base_server.py actually share the same ABC
-  base_protocol.py, they are almost mirror images of one another,
-  which is pretty great, actually.  just reduce.
-
-- ValueError is used for many places where, the error is indicating that
-  a negotiation state that was attempted by the remote end is invalid,
-  for example: "received IAC SB LFLOW without first receiving IAC DO LFLOW."
-
-- SLC flushin/flushout attributes are not honored.  Not entirely sure
-  how to handle these two values with asyncio yet.
-
 - LINEMODE compliance needs a lot of work.
   - possibly, we remove LINEMODE support entirely. I only know of one client,
     BSD telnet, that is capable of negotiating -- this is the C code from which
@@ -495,7 +395,6 @@ TODO
     comprehensive are our tests, and how well is our SLC working?
   - IAC-SB-LINEMODE-DO-FORWARDMASK is unhandled, raises NotImplementedError
 
-    
 - _receive_status(self, buf) response to STATUS does not *honor* given state
    values. only a non-compliant distant end would cause such a condition. so
    it is decided to leave it as "conflict report only, no action always"

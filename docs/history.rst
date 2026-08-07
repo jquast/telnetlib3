@@ -2,13 +2,12 @@ History
 =======
 
 4.1.0
+  * bugfix: ``IAC SB IAC SE`` (sub-negotiation with no option byte) should not raise ``IndexError``
   * new: :meth:`~telnetlib3.stream_writer.TelnetWriter.add_will_callback` and
     :meth:`~telnetlib3.stream_writer.TelnetWriter.remove_will_callback` for per-option
     callbacks invoked after :meth:`handle_will` negotiation.  Replaces the previous
     closure-wrapping pattern in :class:`~telnetlib3.client.TelnetClient` for GMCP, ZMP,
     and CHARSET will-detection.
-  * enhancement: ``telnetlib3-fingerprint`` now accepts all MUD protocol offers (ATCP,
-    AARDWOLF, MSP, MXP, MSDP, MSSP) to collect subnegotiation data.
   * changed: :meth:`~telnetlib3.stream_writer.TelnetWriter.handle_zmp` now receives
     ``command, *args`` instead of one ``parts`` list; ``zmp_data`` moved to
     ``writer.ctx`` and is now a dict keyed by command (was a list of messages).  New
@@ -19,10 +18,18 @@ History
     :class:`~telnetlib3._session_context.TelnetSessionContext` (``writer.ctx.mssp_data``,
     etc.).  Deprecated writer properties delegate to ``ctx``; ``writer.zmp_data`` is
     removed without deprecation.
+  * changed: client-side MUD protocol declines (GMCP, MSDP, MSSP, MSP, MXP, ZMP,
+    AARDWOLF, ATCP) remain the default; the decline log messages now name the enable
+    mechanism (``always_will`` / ``always_do`` / ``passive_do``) used by downstream
+    clients such as telix to accept them.  Note that MXP's negotiation direction is
+    server-sends-``DO`` (the LPMud family convention, e.g. Discworld), so a client
+    accepting MXP replies ``WILL`` to ``IAC DO MXP``.
+  * enhancement: ``telnetlib3-fingerprint`` now accepts all MUD protocol offers (ATCP,
+    AARDWOLF, MSP, MXP, MSDP, MSSP) to collect subnegotiation data.
+  * enhancement: sub-negotiation payloads are bounded to 1,000KB.
   * enhancement: ``--loglevel=trace`` receive dumps show the decompressed telnet
     stream (MCCP2, MCCP3) instead of raw compressed bytes.
-  * removed: ``_original_handle_will`` attribute on :class:`~telnetlib3.stream_writer.TelnetWriter`
-    (implementation detail).
+
 
 4.0.6
   * bugfix: default GMCP modules requested are now in lowercase instead of titlecase
