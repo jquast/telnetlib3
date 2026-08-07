@@ -17,7 +17,7 @@ History
     that MXP's negotiation direction is server-sends-``DO`` (the LPMud family convention, e.g.
     Discworld), so a client accepting MXP replies ``WILL`` to ``IAC DO MXP``.
     :meth:`~telnetlib3.stream_writer.TelnetWriter.remove_will_callback` for per-option callbacks
-    invoked after :meth:`~telnetlib3.stream_writer.handle_will` negotiation.  Replaces the previous
+    invoked after :meth:`~telnetlib3.TelnetWriter.handle_will` negotiation.  Replaces the previous
     closure-wrapping pattern in :class:`~telnetlib3.client.TelnetClient` for GMCP, ZMP, and CHARSET
     will-detection.
   * enhancement: ``telnetlib3-fingerprint`` now accepts all MUD protocol offers (ATCP, AARDWOLF,
