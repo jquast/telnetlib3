@@ -1,4 +1,6 @@
 # std imports
+import io
+import os
 import sys
 import types
 import asyncio
@@ -224,7 +226,7 @@ def test_transform_args_typescript():
 
 @pytest.mark.asyncio
 async def test_open_connection_default_factory(bind_host, unused_tcp_port, monkeypatch):
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(cl.accessories, "is_a_tty", lambda: False)
 
     async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5):
         reader, writer = await cl.open_connection(
@@ -235,10 +237,9 @@ async def test_open_connection_default_factory(bind_host, unused_tcp_port, monke
         writer.close()
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="TTY factory not used on win32")
 @pytest.mark.asyncio
 async def test_open_connection_tty_factory(bind_host, unused_tcp_port, monkeypatch):
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(cl.accessories, "is_a_tty", lambda: True)
 
     async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5):
         reader, writer = await cl.open_connection(
@@ -246,6 +247,76 @@ async def test_open_connection_tty_factory(bind_host, unused_tcp_port, monkeypat
         )
         assert isinstance(writer.protocol, cl.TelnetTerminalClient)
         writer.close()
+
+
+@pytest.mark.asyncio
+async def test_open_connection_without_stdin(bind_host, unused_tcp_port, monkeypatch):
+    """Processes without a console, sys.stdin is None, such as pythonw.exe."""
+    monkeypatch.setattr(sys, "stdin", None)
+
+    async with create_server(host=bind_host, port=unused_tcp_port, connect_maxwait=0.5):
+        reader, writer = await cl.open_connection(
+            host=bind_host, port=unused_tcp_port, connect_maxwait=0.1, encoding=False
+        )
+        assert isinstance(writer.protocol, cl.TelnetClient)
+        assert not isinstance(writer.protocol, cl.TelnetTerminalClient)
+        writer.close()
+
+
+def test_is_a_tty_without_stdin(monkeypatch):
+    monkeypatch.setattr(sys, "stdin", None)
+    assert accessories.is_a_tty() is False
+
+
+def test_is_a_tty_stdin_without_isatty(monkeypatch):
+    monkeypatch.setattr(sys, "stdin", object())
+    assert accessories.is_a_tty() is False
+
+
+def test_is_a_tty_stdin_not_a_tty(monkeypatch):
+    monkeypatch.setattr(sys, "stdin", io.StringIO())
+    assert accessories.is_a_tty() is False
+
+
+def test_is_a_tty_stdin_detached(monkeypatch):
+    class _Detached:
+        def isatty(self):
+            return True
+
+        def fileno(self):
+            raise ValueError("underlying buffer has been detached")
+
+    monkeypatch.setattr(sys, "stdin", _Detached())
+    assert accessories.is_a_tty() is False
+
+
+def test_is_a_tty_stdin_unsupported_fileno(monkeypatch):
+    class _NoFileno:
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(sys, "stdin", _NoFileno())
+    assert accessories.is_a_tty() is False
+
+
+def test_is_a_tty_stdin_is_a_tty(monkeypatch):
+    class _Tty:
+        def isatty(self):
+            return True
+
+        def fileno(self):
+            # a file descriptor that os.isatty() agrees is a terminal
+            return _Tty.fd
+
+    pty = pytest.importorskip("pty")
+    master_fd, slave_fd = pty.openpty()
+    _Tty.fd = slave_fd
+    try:
+        monkeypatch.setattr(sys, "stdin", _Tty())
+        assert accessories.is_a_tty() is True
+    finally:
+        os.close(slave_fd)
+        os.close(master_fd)
 
 
 def test_detect_syncterm_font_sets_force_binary():

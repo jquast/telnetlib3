@@ -577,7 +577,9 @@ async def open_connection(
     :param port: Remote Internet host TCP port.
     :param client_factory: Client connection class factory.  When ``None``,
         :class:`TelnetTerminalClient` is used when *stdin* is attached to a
-        terminal, :class:`TelnetClient` otherwise.
+        terminal, :class:`TelnetClient` otherwise.  Processes without a
+        console, such as those launched by ``pythonw.exe`` on Windows, where
+        ``sys.stdin`` is ``None``, always receive :class:`TelnetClient`.
     :param family: Same meaning as
         :meth:`asyncio.loop.create_connection`.
     :param flags: Same meaning as
@@ -643,7 +645,7 @@ async def open_connection(
     """
     if client_factory is None:
         client_factory = TelnetClient
-        if sys.stdin.isatty():
+        if accessories.is_a_tty():
             client_factory = TelnetTerminalClient
 
     def connection_factory() -> client_base.BaseClient:
@@ -724,7 +726,7 @@ async def run_client() -> None:
     def _client_factory(**kwargs: Any) -> client_base.BaseClient:
         client: TelnetClient
         kwargs["gmcp_modules"] = gmcp_modules
-        if sys.stdin.isatty():
+        if accessories.is_a_tty():
             client = TelnetTerminalClient(**kwargs)
         else:
             client = TelnetClient(**kwargs)

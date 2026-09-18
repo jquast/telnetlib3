@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 # std imports
+import os
+import sys
 import shlex
 import asyncio
 import logging
@@ -26,6 +28,7 @@ __all__ = (
     "repr_mapping",
     "function_lookup",
     "make_reader_task",
+    "is_a_tty",
 )
 
 PATIENCE_MESSAGES = [
@@ -42,7 +45,7 @@ PATIENCE_MESSAGES = [
 
 def get_version() -> str:
     """Return the current version of telnetlib3."""
-    return "5.0.0"  # keep in sync with pyproject.toml !
+    return "5.0.1"  # keep in sync with pyproject.toml !
 
 
 def encoding_from_lang(lang: str) -> Optional[str]:
@@ -172,3 +175,32 @@ def make_reader_task(
 ) -> "asyncio.Task[Any]":
     """Return asyncio task wrapping coroutine of reader.read(size)."""
     return asyncio.ensure_future(reader.read(size))
+
+
+def is_a_tty() -> bool:
+    """
+    Whether an interactive terminal is available on standard input.
+
+    This is a more conservative test than ``sys.stdin.isatty()``: the standard
+    streams may be ``None`` (running under ``pythonw.exe`` on Windows, or any
+    process launched without a console), replaced by an object without a
+    working :meth:`~io.IOBase.isatty` or :meth:`~io.IOBase.fileno` (test
+    harnesses, GUI frameworks), or detached.  A real file descriptor is
+    required, because terminal features such as window size and raw mode are
+    performed against ``sys.stdin.fileno()``.
+
+    :returns: ``True`` only when stdin is a terminal backed by a file
+        descriptor.
+    """
+    stdin = sys.stdin
+    if stdin is None:
+        return False
+    try:
+        if not stdin.isatty():
+            return False
+        return os.isatty(stdin.fileno())
+    except (AttributeError, ValueError, OSError):
+        # AttributeError: stream without isatty/fileno,
+        # ValueError: closed or detached stream,
+        # OSError: fileno() unsupported by the underlying object.
+        return False

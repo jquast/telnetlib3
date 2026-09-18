@@ -1,6 +1,11 @@
 History
 =======
 
+5.0.1
+  * bugfix: :func:`~telnetlib3.client.open_connection` raised ``AttributeError: 'NoneType' object
+    has no attribute 'isatty'`` in processes without a console, like ``pythonw.exe`` on Windows.
+
+
 5.0.0
   * changed: :meth:`~telnetlib3.stream_writer.TelnetWriter.handle_zmp` now receives ``command,
     *args`` instead of one ``parts`` list; ``zmp_data`` moved to ``writer.ctx`` and is now a dict
