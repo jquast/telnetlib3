@@ -425,3 +425,70 @@ async def test_telnet_reader_readuntil_pattern_cancelled_error(bind_host, unused
             client_reader.set_exception(asyncio.CancelledError())
             with pytest.raises(asyncio.CancelledError):
                 await client_reader.readuntil_pattern(pattern)
+
+
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-16", "iso2022_jp"])
+async def test_unicode_read_preserves_decoder_state(encoding):
+    """A size probe must not decode still-buffered bytes twice."""
+    reader = telnetlib3.TelnetReaderUnicode(fn_encoding=lambda **_: encoding)
+    given = "abc€" if encoding != "iso2022_jp" else "abc日本語"
+    encoded = given.encode(encoding)
+    reader.feed_data(encoded[:-1])
+    assert await reader.read(1) == "a"
+    assert await reader.read(1) == "b"
+    reader.feed_data(encoded[-1:])
+    reader.feed_eof()
+    assert await reader.read() == given[2:]
+    assert await reader.read() == ""
+
+
+@pytest.mark.parametrize("method", ["read", "readexactly"])
+async def test_unicode_read_waits_for_split_character(method):
+    """A partial multibyte character must not look like end of stream."""
+    reader = telnetlib3.TelnetReaderUnicode(fn_encoding=lambda **_: "utf-8")
+    reader.feed_data(b"\xe2")
+    task = asyncio.create_task(getattr(reader, method)(1))
+    asyncio.get_running_loop().call_soon(reader.feed_data, b"\x82\xac")
+    assert await asyncio.wait_for(task, 1) == "€"
+
+
+@pytest.mark.parametrize("errors, expected", [("replace", "�"), ("ignore", "")])
+async def test_unicode_read_flushes_incomplete_character_at_eof(errors, expected):
+    """EOF finalizes any bytes already retained by the incremental decoder."""
+    reader = telnetlib3.TelnetReaderUnicode(fn_encoding=lambda **_: "utf-8", encoding_errors=errors)
+    reader.feed_data(b"\xe2")
+    reader.feed_eof()
+    assert await reader.read() == expected
+    assert await reader.read() == ""
+
+
+async def test_unicode_read_strict_incomplete_character_at_eof():
+    """Strict decoding continues to report an incomplete character at EOF."""
+    reader = telnetlib3.TelnetReaderUnicode(
+        fn_encoding=lambda **_: "utf-8", encoding_errors="strict"
+    )
+    reader.feed_data(b"\xe2")
+    reader.feed_eof()
+    with pytest.raises(UnicodeDecodeError):
+        await reader.read()
+
+
+async def test_unicode_read_split_character_over_connection(bind_host, unused_tcp_port):
+    """Read-size probes preserve UTF-8 across separate Telnet network writes."""
+
+    async def shell(reader, writer):
+        writer.write(b"abc\xe2")
+        await writer.drain()
+        assert await reader.readexactly(1) == b"!"
+        writer.write(b"\x82\xac")
+        writer.close()
+
+    async with create_server(host=bind_host, port=unused_tcp_port, shell=shell, encoding=False):
+        async with open_connection(host=bind_host, port=unused_tcp_port, encoding="utf-8") as (
+            client_reader,
+            client_writer,
+        ):
+            assert await asyncio.wait_for(client_reader.read(1), 1) == "a"
+            client_writer.write("!")
+            await client_writer.drain()
+            assert await asyncio.wait_for(client_reader.read(), 1) == "bc€"

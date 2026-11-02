@@ -585,7 +585,7 @@ class TelnetReaderUnicode(TelnetReader):
 
     def decode(self, buf: bytes, final: bool = False) -> str:
         """Decode bytes ``buf`` using preferred encoding."""
-        if buf == b"":
+        if buf == b"" and (not final or self._decoder is None):
             return ""  # EOF
 
         encoding = self.fn_encoding(incoming=True)
@@ -635,20 +635,33 @@ class TelnetReaderUnicode(TelnetReader):
                 blocks.append(block)
             return "".join(blocks)
 
-        if not self._buffer and not self._eof:
-            await self._wait_for_data("read")
+        while True:
+            if not self._buffer and not self._eof:
+                await self._wait_for_data("read")
 
-        buf = self.decode(bytes(self._buffer))
-        if n < 0 or len(buf) <= n:
-            u_data = buf
-            self._buffer.clear()
-        else:
-            u_data = ""
-            while n > len(u_data):
-                u_data += self.decode(bytes([self._buffer.pop(0)]))
+            decoder = self._decoder
+            decoder_state = decoder.getstate() if decoder is not None else None
+            buf = self.decode(bytes(self._buffer))
+            if len(buf) <= n:
+                u_data = buf
+                self._buffer.clear()
+            else:
+                # The probe decoded bytes that remain buffered. Restore the
+                # decoder before consuming only the requested characters.
+                if self._decoder is decoder and decoder_state is not None:
+                    self._decoder.setstate(decoder_state)
+                else:
+                    self._decoder.reset()
+                u_data = ""
+                while n > len(u_data):
+                    u_data += self.decode(bytes([self._buffer.pop(0)]))
 
-        self._maybe_resume_transport()
-        return u_data
+            self._maybe_resume_transport()
+            if u_data:
+                return u_data
+            if self._eof:
+                return self.decode(b"", final=True)
+            # A multibyte prefix is not EOF: wait for the rest of the character.
 
     async def readexactly(self, n: int) -> str:  # type: ignore[override]
         """
