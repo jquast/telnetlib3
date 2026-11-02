@@ -636,6 +636,8 @@ class TelnetReaderUnicode(TelnetReader):
             return "".join(blocks)
 
         while True:
+            if self._exception is not None:
+                raise self._exception
             if not self._buffer and not self._eof:
                 await self._wait_for_data("read")
 

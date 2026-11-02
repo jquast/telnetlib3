@@ -492,3 +492,29 @@ async def test_unicode_read_split_character_over_connection(bind_host, unused_tc
             client_writer.write("!")
             await client_writer.drain()
             assert await asyncio.wait_for(client_reader.read(), 1) == "bc€"
+
+
+async def test_unicode_read_partial_character_then_connection_error():
+    """A reset immediately after a partial character must wake the read caller."""
+    reader = telnetlib3.TelnetReaderUnicode(fn_encoding=lambda **_: "utf-8")
+    task = asyncio.create_task(reader.read(1))
+    await asyncio.sleep(0)
+    assert reader._waiter is not None
+    reader.feed_data(b"\xe2")
+    reader.set_exception(ConnectionResetError("connection reset"))
+    with pytest.raises(ConnectionResetError, match="connection reset"):
+        await asyncio.wait_for(task, 1)
+
+
+async def test_unicode_read_cancelled_partial_character():
+    """Cancellation leaves the partial decoder state usable by the next reader."""
+    reader = telnetlib3.TelnetReaderUnicode(fn_encoding=lambda **_: "utf-8")
+    reader.feed_data(b"\xe2")
+    task = asyncio.create_task(reader.read(1))
+    await asyncio.sleep(0)
+    assert not task.done()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    asyncio.get_running_loop().call_soon(reader.feed_data, b"\x82\xac")
+    assert await asyncio.wait_for(reader.read(1), 1) == "€"
