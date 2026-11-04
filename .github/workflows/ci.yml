@@ -59,13 +59,18 @@ jobs:
           - ubuntu-latest
           - windows-latest
         python-version:
-          - "3.9"
           - "3.10"
           - "3.11"
           - "3.12"
           - "3.13"
 
         include:
+          # ubuntu-latest (26.04) has no prebuilt Python 3.9
+          - os: ubuntu-24.04
+            python-version: "3.9"
+          - os: windows-latest
+            python-version: "3.9"
+
           # Python 3.14 pre-release (Linux + Windows)
           - os: ubuntu-latest
             python-version: "3.14"
