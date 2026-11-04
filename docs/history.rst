@@ -1,6 +1,15 @@
 History
 =======
 
+5.0.2
+  * bugfix: :meth:`~telnetlib3.stream_reader.TelnetReaderUnicode.read`,
+    :meth:`~telnetlib3.stream_reader.TelnetReaderUnicode.readline`, and
+    :meth:`~telnetlib3.stream_reader.TelnetReaderUnicode.readexactly` returned incorrect text when
+    a multibyte sequence ended on a packet boundary, and dropped text retained by the incremental
+    decoder at end of stream.  ``readline()`` now finalizes a truncated character with the line it
+    belongs to, ``read(n)`` no longer returns more than *n* characters, and
+    ``encoding_errors="strict"`` raises :exc:`UnicodeDecodeError` at EOF.
+
 5.0.1
   * bugfix: :func:`~telnetlib3.client.open_connection` raised ``AttributeError: 'NoneType' object
     has no attribute 'isatty'`` in processes without a console, like ``pythonw.exe`` on Windows.

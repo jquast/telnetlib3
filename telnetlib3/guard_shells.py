@@ -110,7 +110,11 @@ async def _read_line_inner(reader: Union[TelnetReader, TelnetReaderUnicode], max
     """Inner loop for _read_line, separated for wait_for compatibility."""
     buf = ""
     while len(buf) < max_len:
-        char = await reader.read(1)
+        try:
+            char = await reader.read(1)
+        except UnicodeDecodeError:
+            # An incomplete character at end of stream is end of input, as with EOF.
+            break
         if not char:
             break
         if isinstance(char, bytes):
