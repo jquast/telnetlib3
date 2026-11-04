@@ -593,7 +593,7 @@ class TelnetReaderUnicode(TelnetReader):
         Decode bytes ``buf`` using preferred encoding.
 
         :param final: When True, bytes retained by the incremental decoder are decoded as the end
-            of the stream, applying :attr:`encoding_errors` to an incomplete character.
+            of the stream, applying ``encoding_errors`` to an incomplete character.
         """
         if buf == b"" and (not final or self._decoder is None):
             return ""  # EOF
@@ -634,9 +634,9 @@ class TelnetReaderUnicode(TelnetReader):
 
         See ancestor method, :func:`~TelnetReader.readline` for details. When the returned bytes
         are the last of the stream, an incomplete character retained by the incremental decoder is
-        finalized, applying :attr:`encoding_errors`.
+        finalized, applying ``encoding_errors``.
 
-        :raises UnicodeDecodeError: if :attr:`encoding_errors` is ``"strict"`` and the stream
+        :raises UnicodeDecodeError: if ``encoding_errors`` is ``"strict"`` and the stream
             ends with an incomplete character.
         """
         if self._pending:
@@ -652,7 +652,7 @@ class TelnetReaderUnicode(TelnetReader):
 
         If the EOF was received and no characters remain, return an empty string. Bytes retained
         by the incremental decoder are finalized at end of stream, applying
-        :attr:`encoding_errors` to an incomplete character: ``"strict"`` raises
+        ``encoding_errors`` to an incomplete character: ``"strict"`` raises
         :exc:`UnicodeDecodeError`.
 
         :param n: If *n* is not provided, or set to -1, read until EOF and return all characters as
@@ -721,7 +721,7 @@ class TelnetReaderUnicode(TelnetReader):
             reached before *n* can be read. The
             :attr:`asyncio.IncompleteReadError.partial` attribute of the
             exception contains the partial read characters.
-        :raises UnicodeDecodeError: if :attr:`encoding_errors` is ``"strict"`` and the stream
+        :raises UnicodeDecodeError: if ``encoding_errors`` is ``"strict"`` and the stream
             ends with an incomplete character.
         """
         if self._exception is not None:
