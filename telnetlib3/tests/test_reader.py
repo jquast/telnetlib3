@@ -452,25 +452,40 @@ async def test_unicode_read_waits_for_split_character(method):
     assert await asyncio.wait_for(task, 1) == "€"
 
 
-@pytest.mark.parametrize("errors, expected", [("replace", "�"), ("ignore", "")])
-async def test_unicode_read_flushes_incomplete_character_at_eof(errors, expected):
-    """EOF finalizes any bytes already retained by the incremental decoder."""
+@pytest.mark.parametrize(
+    "method, args, data, errors, expected",
+    [
+        ("read", (), b"ab\xe2", "replace", "ab�"),
+        ("read", (), b"ab\xe2", "ignore", "ab"),
+        ("read", (), b"ab\xe2", "strict", UnicodeDecodeError),
+        ("readline", (), b"ab\xe2", "replace", "ab�"),
+        ("readline", (), b"ab\xe2", "ignore", "ab"),
+        ("readline", (), b"ab\xe2", "strict", UnicodeDecodeError),
+        ("readexactly", (3,), b"ab\xe2", "replace", "ab�"),
+        ("readexactly", (3,), b"ab\xe2", "ignore", asyncio.IncompleteReadError),
+        ("readexactly", (1,), b"\xe2", "strict", UnicodeDecodeError),
+        ("read", (), b"", "replace", ""),
+    ],
+)
+async def test_unicode_finalizes_trailing_character(method, args, data, errors, expected):
+    """The character that ends the stream is decoded once by the configured error policy."""
     reader = telnetlib3.TelnetReaderUnicode(fn_encoding=lambda **_: "utf-8", encoding_errors=errors)
-    reader.feed_data(b"\xe2")
+    reader.feed_data(data)
     reader.feed_eof()
-    assert await reader.read() == expected
+    if not isinstance(expected, str):
+        with pytest.raises(expected):
+            await getattr(reader, method)(*args)
+        return
+    assert await getattr(reader, method)(*args) == expected
     assert await reader.read() == ""
 
 
-async def test_unicode_read_strict_incomplete_character_at_eof():
-    """Strict decoding continues to report an incomplete character at EOF."""
-    reader = telnetlib3.TelnetReaderUnicode(
-        fn_encoding=lambda **_: "utf-8", encoding_errors="strict"
-    )
-    reader.feed_data(b"\xe2")
+async def test_unicode_readline_finalizes_only_last_line():
+    """Only the last of the buffered lines is decoded as end of stream."""
+    reader = telnetlib3.TelnetReaderUnicode(fn_encoding=lambda **_: "utf-8")
+    reader.feed_data(b"one\ntwo\xe2")
     reader.feed_eof()
-    with pytest.raises(UnicodeDecodeError):
-        await reader.read()
+    assert [await reader.readline() for _ in range(3)] == ["one\n", "two�", ""]
 
 
 async def test_unicode_read_split_character_over_connection(bind_host, unused_tcp_port):
@@ -518,3 +533,18 @@ async def test_unicode_read_cancelled_partial_character():
         await task
     asyncio.get_running_loop().call_soon(reader.feed_data, b"\x82\xac")
     assert await asyncio.wait_for(reader.read(1), 1) == "€"
+
+
+@pytest.mark.parametrize("method, args", [("read", (1,)), ("readline", ())])
+async def test_unicode_read_holds_back_finalized_characters(method, args):
+    """A sized read holds back characters decoded past the request."""
+    reader = telnetlib3.TelnetReaderUnicode(
+        fn_encoding=lambda **_: "utf-8", encoding_errors="surrogateescape"
+    )
+    reader.feed_data(b"a\xe2\x82")
+    reader.feed_eof()
+    assert await reader.read(1) == "a"
+    assert await reader.read(1) == "\udce2"
+    assert not reader.at_eof()
+    assert await getattr(reader, method)(*args) == "\udc82"
+    assert reader.at_eof()

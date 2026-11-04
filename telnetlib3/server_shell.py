@@ -67,7 +67,11 @@ async def filter_ansi(
         return reader.read(1)
 
     async def _next() -> str:
-        ch = await _rch()
+        try:
+            ch = await _rch()
+        except UnicodeDecodeError:
+            # An incomplete character at end of stream is end of input, as with EOF.
+            return ""
         if not ch:
             return ""
         return ch.decode("latin-1") if binary else ch  # type: ignore[return-value]

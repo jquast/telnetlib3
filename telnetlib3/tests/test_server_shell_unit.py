@@ -43,6 +43,8 @@ def _run_readline(sequence, max_visible_width=0):
 
 
 class MockReader:
+    """Reader of one character per call; a ``None`` entry raises UnicodeDecodeError."""
+
     is_binary_reader = False
 
     def __init__(self, data):
@@ -54,6 +56,8 @@ class MockReader:
             return ""
         result = self._data[self._idx]
         self._idx += 1
+        if result is None:
+            raise UnicodeDecodeError("utf-8", b"\xe2", 0, 1, "unexpected end of data")
         return result
 
 
@@ -223,6 +227,11 @@ def test_connection_counter_release():
 @pytest.mark.asyncio
 async def test_read_line_inner(input_data, max_len, expected):
     assert await gs._read_line_inner(MockReader(list(input_data)), max_len) == expected
+
+
+@pytest.mark.asyncio
+async def test_read_line_inner_truncated_character_at_eof():
+    assert await gs._read_line_inner(MockReader(["h", "i", None]), 100) == "hi"
 
 
 @pytest.mark.asyncio
@@ -708,6 +717,19 @@ async def test_filter_ansi_esc_then_eof():
     reader = MockReader(["\x1b", ""])
     result = await ss.filter_ansi(reader, MockWriter())
     assert not result
+
+
+@pytest.mark.parametrize(
+    "input_chars,expected",
+    [
+        pytest.param(["a", None], "a", id="after_character"),
+        pytest.param([None], "", id="immediately"),
+        pytest.param(["\x1b", None], "", id="esc_then_eof"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_filter_ansi_truncated_character_at_eof(input_chars, expected):
+    assert await ss.filter_ansi(MockReader(input_chars), MockWriter()) == expected
 
 
 class MockBinaryReader:

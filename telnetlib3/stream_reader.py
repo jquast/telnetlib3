@@ -564,6 +564,11 @@ class TelnetReaderUnicode(TelnetReader):
     #: practice, however.
     _decoder = None
 
+    #: Characters finalized from bytes retained by :attr:`_decoder` at end of
+    #: stream, held back when :meth:`read` requested fewer.  Only ever set once
+    #: :attr:`_buffer` is empty, so these are always the last of the stream.
+    _pending = ""
+
     def __init__(
         self,
         fn_encoding: Callable[..., str],
@@ -584,7 +589,12 @@ class TelnetReaderUnicode(TelnetReader):
         self.encoding_errors = encoding_errors
 
     def decode(self, buf: bytes, final: bool = False) -> str:
-        """Decode bytes ``buf`` using preferred encoding."""
+        """
+        Decode bytes ``buf`` using preferred encoding.
+
+        :param final: When True, bytes retained by the incremental decoder are decoded as the end
+            of the stream, applying :attr:`encoding_errors` to an incomplete character.
+        """
         if buf == b"" and (not final or self._decoder is None):
             return ""  # EOF
 
@@ -597,20 +607,53 @@ class TelnetReaderUnicode(TelnetReader):
 
         return self._decoder.decode(buf, final)
 
+    def _finalize_decoder(self, n: int = -1) -> str:
+        """
+        Decode and return bytes retained by the incremental decoder at end of stream.
+
+        Characters decoded beyond *n* are held in :attr:`_pending` for the next read, so that
+        :meth:`read` never returns more characters than requested.
+        """
+        if self._decoder is None:
+            return ""
+
+        u_data = self.decode(b"", final=True)
+        if n < 0 or len(u_data) <= n:
+            return u_data
+
+        self._pending = u_data[n:]
+        return u_data[:n]
+
+    def at_eof(self) -> bool:
+        """Return True if the buffer is empty, nothing is pending, and 'feed_eof' was called."""
+        return self._eof and not self._buffer and not self._pending
+
     async def readline(self) -> str:  # type: ignore[override]
         """
         Read one line.
 
-        See ancestor method, :func:`~TelnetReader.readline` for details.
+        See ancestor method, :func:`~TelnetReader.readline` for details. When the returned bytes
+        are the last of the stream, an incomplete character retained by the incremental decoder is
+        finalized, applying :attr:`encoding_errors`.
+
+        :raises UnicodeDecodeError: if :attr:`encoding_errors` is ``"strict"`` and the stream
+            ends with an incomplete character.
         """
+        if self._pending:
+            line, self._pending = self._pending, ""
+            return line
+
         buf = await super().readline()
-        return self.decode(buf)
+        return self.decode(buf, final=self._eof and not self._buffer)
 
     async def read(self, n: int = -1) -> str:  # type: ignore[override]
         """
-        Read up to *n* bytes.
+        Read up to *n* characters.
 
-        If the EOF was received and the internal buffer is empty, return an empty string.
+        If the EOF was received and no characters remain, return an empty string. Bytes retained
+        by the incremental decoder are finalized at end of stream, applying
+        :attr:`encoding_errors` to an incomplete character: ``"strict"`` raises
+        :exc:`UnicodeDecodeError`.
 
         :param n: If *n* is not provided, or set to -1, read until EOF and return all characters as
             one large string.
@@ -620,6 +663,11 @@ class TelnetReaderUnicode(TelnetReader):
 
         if not n:
             return ""
+
+        if self._pending and n > 0:
+            u_data = self._pending[:n]
+            self._pending = self._pending[n:]
+            return u_data
 
         if n < 0:
             # This used to just loop creating a new waiter hoping to
@@ -662,8 +710,8 @@ class TelnetReaderUnicode(TelnetReader):
             if u_data:
                 return u_data
             if self._eof:
-                return self.decode(b"", final=True)
-            # A multibyte prefix is not EOF: wait for the rest of the character.
+                return self._finalize_decoder(n)
+            # A partial character is not EOF: wait for the rest of the character.
 
     async def readexactly(self, n: int) -> str:  # type: ignore[override]
         """
@@ -673,6 +721,8 @@ class TelnetReaderUnicode(TelnetReader):
             reached before *n* can be read. The
             :attr:`asyncio.IncompleteReadError.partial` attribute of the
             exception contains the partial read characters.
+        :raises UnicodeDecodeError: if :attr:`encoding_errors` is ``"strict"`` and the stream
+            ends with an incomplete character.
         """
         if self._exception is not None:
             raise self._exception
