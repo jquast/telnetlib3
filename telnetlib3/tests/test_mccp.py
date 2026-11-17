@@ -384,6 +384,17 @@ class TestMCCPDecompressionError:
         assert client.writer.is_closing()
         assert not received
 
+    async def test_client_corrupt_mccp2_raw_deflate_closes(self):
+        """Corrupt raw-deflate data closes the client."""
+        client, received = _make_client_with_capture()
+        client._process_chunk(_BOUNDARY_SB)
+        client._mccp2_wbits_fallback = True
+        client._mccp2_decompressor = zlib.decompressobj(wbits=-zlib.MAX_WBITS)
+        client._process_chunk(b"\x00\x01\x02\x03\xff\xfe\xfd")
+        assert client._mccp2_decompressor is None
+        assert client.writer.is_closing()
+        assert not received
+
     async def test_server_corrupt_mccp3_drops_data(self):
         """Corrupt MCCP3 data is discarded, not fed to IAC parser."""
         from telnetlib3.server_base import BaseServer
@@ -1013,6 +1024,18 @@ class TestMCCPConformance:
         assert received == b"A" * 40 + b"TRAILING"
         assert server._mccp3_pending == b""
         assert server._mccp3_decompressor is None
+
+    async def test_server_mccp3_drain_while_closing_clears_pending(self):
+        """Draining after close clears pending MCCP3 input."""
+        from telnetlib3.server_base import BaseServer
+
+        server = BaseServer(encoding=False, connect_maxwait=0.1)
+        transport = MockTransport()
+        server.connection_made(transport)
+        server._closing = True
+        server._mccp3_pending = b"data"
+        server._mccp3_drain()
+        assert server._mccp3_pending == b""
 
     async def test_server_mccp3_duplicate_sb_inside_stream(self):
         """A duplicate SB inside the compressed stream keeps the remainder plaintext."""

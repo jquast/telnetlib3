@@ -192,6 +192,15 @@ def test_msdp_nesting_limit() -> None:
         msdp_decode(deeper + MSDP_TABLE_CLOSE * 101)
 
 
+def test_msdp_array_nesting_limit() -> None:
+    """MSDP array nesting above the limit raises ValueError."""
+    allowed = (MSDP_VAR + b"k" + MSDP_VAL + MSDP_ARRAY_OPEN) * 100
+    msdp_decode(allowed + MSDP_ARRAY_CLOSE * 100)
+    deeper = (MSDP_VAR + b"k" + MSDP_VAL + MSDP_ARRAY_OPEN) * 101
+    with pytest.raises(ValueError):
+        msdp_decode(deeper + MSDP_ARRAY_CLOSE * 101)
+
+
 def test_gmcp_nesting_limit() -> None:
     """GMCP nesting above the limit raises ValueError."""
     gmcp_decode(b"pkg " + b"[" * 100 + b"]" * 100)
@@ -204,6 +213,24 @@ def test_gmcp_depth_ignores_string_brackets() -> None:
     package, data = gmcp_decode(b'pkg {"x": "' + b"[" * 200 + b'"}')
     assert package == "pkg"
     assert data == {"x": "[" * 200}
+
+
+def test_gmcp_depth_handles_escapes() -> None:
+    """Escaped quotes and backslashes do not affect depth counting."""
+    package, data = gmcp_decode(rb'pkg {"x": "a\\b\"[[[ "}')
+    assert package == "pkg"
+    assert data == {"x": 'a\\b"[[[ '}
+
+
+def test_gmcp_decode_recursion_error(monkeypatch) -> None:
+    """RecursionError from json.loads becomes ValueError."""
+
+    def raise_recursion(text):
+        raise RecursionError
+
+    monkeypatch.setattr("telnetlib3.mud.json.loads", raise_recursion)
+    with pytest.raises(ValueError):
+        gmcp_decode(b"pkg {}")
 
 
 def test_mssp_single_value() -> None:
