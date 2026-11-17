@@ -46,6 +46,8 @@ __all__ = (
     "aardwolf_decode",
 )
 
+_MAX_MUD_DEPTH = 100
+
 
 def _decode_best_effort(buf: bytes, encoding: str = "utf-8") -> str:
     """
@@ -59,6 +61,28 @@ def _decode_best_effort(buf: bytes, encoding: str = "utf-8") -> str:
         return buf.decode(encoding)
     except (UnicodeDecodeError, LookupError):
         return buf.decode("latin-1")
+
+
+def _json_max_depth(text: str) -> int:
+    """Return maximum JSON array or object nesting depth in *text*."""
+    depth = max_depth = 0
+    in_string = escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "[{":
+            depth += 1
+            max_depth = max(max_depth, depth)
+        elif char in "]}":
+            depth -= 1
+    return max_depth
 
 
 def gmcp_encode(package: str, data: Any = None) -> bytes:
@@ -91,10 +115,14 @@ def gmcp_decode(buf: bytes, encoding: str = "utf-8") -> tuple[str, Any]:
     text = _decode_best_effort(parts[1], encoding).strip()
     if not text:
         return (package, None)
+    if _json_max_depth(text) > _MAX_MUD_DEPTH:
+        raise ValueError(f"GMCP JSON nesting exceeds {_MAX_MUD_DEPTH}")
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
         raise ValueError(f"Invalid JSON in GMCP payload: {exc}") from exc
+    except RecursionError as exc:
+        raise ValueError("GMCP JSON nested too deeply") from exc
     return (package, data)
 
 
@@ -156,7 +184,9 @@ class MsdpParser:
             self.idx += 1
         return _decode_best_effort(self.buf[start : self.idx], self.encoding)
 
-    def _parse_table(self) -> dict[str, Any]:
+    def _parse_table(self, depth: int = 0) -> dict[str, Any]:
+        if depth > _MAX_MUD_DEPTH:
+            raise ValueError(f"MSDP nesting exceeds {_MAX_MUD_DEPTH}")
         table: dict[str, Any] = {}
         while self.idx < len(self.buf) and self.buf[self.idx : self.idx + 1] != MSDP_TABLE_CLOSE:
             if self.buf[self.idx : self.idx + 1] == MSDP_VAR:
@@ -164,31 +194,38 @@ class MsdpParser:
                 key = self._read_key()
                 if self.idx < len(self.buf) and self.buf[self.idx : self.idx + 1] == MSDP_VAL:
                     self.idx += 1
-                table[key] = self.parse_value()
+                table[key] = self.parse_value(depth)
+            else:
+                self.idx += 1
         if self.idx < len(self.buf):
             self.idx += 1
         return table
 
-    def _parse_array(self) -> list[Any]:
+    def _parse_array(self, depth: int = 0) -> list[Any]:
+        if depth > _MAX_MUD_DEPTH:
+            raise ValueError(f"MSDP nesting exceeds {_MAX_MUD_DEPTH}")
         array: list[Any] = []
         while self.idx < len(self.buf) and self.buf[self.idx : self.idx + 1] != MSDP_ARRAY_CLOSE:
             if self.buf[self.idx : self.idx + 1] == MSDP_VAL:
                 self.idx += 1
-            array.append(self.parse_value())
+            start = self.idx
+            array.append(self.parse_value(depth))
+            if self.idx == start and self.buf[self.idx : self.idx + 1] != MSDP_ARRAY_CLOSE:
+                self.idx += 1
         if self.idx < len(self.buf):
             self.idx += 1
         return array
 
-    def parse_value(self) -> Any:
+    def parse_value(self, depth: int = 0) -> Any:
         """Parse a single MSDP value at current position."""
         if self.idx >= len(self.buf):
             return ""
         marker = self.buf[self.idx : self.idx + 1]
         self.idx += 1
         if marker == MSDP_TABLE_OPEN:
-            return self._parse_table()
+            return self._parse_table(depth + 1)
         if marker == MSDP_ARRAY_OPEN:
-            return self._parse_array()
+            return self._parse_array(depth + 1)
         self.idx -= 1
         return self._read_string()
 

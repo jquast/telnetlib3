@@ -199,6 +199,9 @@ class TelnetServer(server_base.BaseServer):
                 return
         self.set_timeout()
         super().data_received(data)
+
+    def _process_received(self, data: bytes) -> None:
+        super()._process_received(data)
         # MCCP2: start compression once client confirms DO MCCP2
         if (
             self._mccp2_enabled
@@ -207,6 +210,11 @@ class TelnetServer(server_base.BaseServer):
             and self.writer.local_option.enabled(MCCP2_COMPRESS)
         ):
             self._mccp2_start()
+        if (
+            self._mccp2_compressor is not None
+            and self.writer.local_option.get(MCCP2_COMPRESS) is False
+        ):
+            self._mccp2_end()
 
     def _mccp2_start(self) -> None:
         """Send SB MCCP2 SE and start compressing server→client output."""
