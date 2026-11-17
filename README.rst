@@ -220,30 +220,49 @@ More examples are available in the `Guidebook`_ and the `bin/`_ directory of the
 Features
 --------
 
-The following RFC specifications are implemented:
+Matching specifications:
 
-* `rfc-727`_, "Telnet Logout Option," Apr 1977.
-* `rfc-779`_, "Telnet Send-Location Option", Apr 1981.
-* `rfc-854`_, "Telnet Protocol Specification", May 1983.
-* `rfc-855`_, "Telnet Option Specifications", May 1983.
-* `rfc-856`_, "Telnet Binary Transmission", May 1983.
-* `rfc-857`_, "Telnet Echo Option", May 1983.
-* `rfc-858`_, "Telnet Suppress Go Ahead Option", May 1983.
-* `rfc-859`_, "Telnet Status Option", May 1983.
-* `rfc-860`_, "Telnet Timing Mark Option", May 1983.
-* `rfc-885`_, "Telnet End of Record Option", Dec 1983.
-* `rfc-930`_, "Telnet Terminal Type Option", Jan 1984.
-* `rfc-1073`_, "Telnet Window Size Option", Oct 1988.
-* `rfc-1079`_, "Telnet Terminal Speed Option", Dec 1988.
-* `rfc-1091`_, "Telnet Terminal-Type Option", Feb 1989.
-* `rfc-1096`_, "Telnet X Display Location Option", Mar 1989.
-* `rfc-1123`_, "Requirements for Internet Hosts", Oct 1989.
-* `rfc-1184`_, "Telnet Linemode Option (extended options)", Oct 1990.
-* `rfc-1372`_, "Telnet Remote Flow Control Option", Oct 1992.
-* `rfc-1408`_, "Telnet Environment Option", Jan 1993.
-* `rfc-1571`_, "Telnet Environment Option Interoperability Issues", Jan 1994.
-* `rfc-1572`_, "Telnet Environment Option", Jan 1994.
-* `rfc-2066`_, "Telnet Charset Option", Jan 1997.
+* Telnet protocol: Network Virtual Terminal data, IAC command escaping, and
+  option negotiation with pending and refused states (`rfc-854`_,
+  `rfc-855`_).
+* Commands: NOP, AYT, BRK, IP, AO, EC, EL, ABORT, EOF, SUSP, DM, and GA
+  (`rfc-854`_, `rfc-858`_).
+* 8-bit binary transmission (`rfc-856`_) and End of Record (`rfc-885`_).
+* Echo (`rfc-857`_) and Suppress Go-Ahead (`rfc-858`_).
+* Status (`rfc-859`_), Timing Mark (`rfc-860`_), and Logout (`rfc-727`_).
+* Terminal type (`rfc-930`_, `rfc-1091`_), terminal speed (`rfc-1079`_),
+  window size (`rfc-1073`_), X display location (`rfc-1096`_), and client
+  location (`rfc-779`_).
+* Environment negotiation (`rfc-1408`_, `rfc-1571`_, `rfc-1572`_) including
+  automatic encoding detection from ``LANG``.
+* Character set negotiation (`rfc-2066`_) with bidirectional code page lists.
+* Linemode (`rfc-1184`_) with local editing, special line characters (SLC),
+  and forwardmask.
+* Remote flow control (`rfc-1372`_).
+* MUD standards: GMCP_ JSON packages (option 201), MSDP_ structured tables
+  and arrays (69), MSSP_ server metadata (70), ZMP_ NUL-delimited messages
+  (93), and MCCP2_/MCCP3_ zlib compression (86/87).
+* Public MUD codec helpers in ``telnetlib3.mud`` for GMCP, MSDP, MSSP, ZMP,
+* MCCP format auto-detection for zlib, gzip, and raw deflate streams.
+
+See Specifications_ for the complete list of RFCs and MUD standards.
+
+Features somewhat unique to this library:
+
+* Client and server fingerprinting: ``telnetlib3-fingerprint`` and ``telnetlib3-fingerprint-server``
+  probe core, legacy, and MUD telnet options, capture the TTYPE cycle, environment, SLC table, and
+  banner, and save a deterministic JSON fingerprint, detection of telnet loops and wrong-direction
+  negotiation.
+* Legacy BBS codecs: ATASCII, PETSCII, ``big5bbs``, and Atari ST, including encoding-native keyboard
+  and end-of-line translation for ATASCII and PETSCII.
+* TLS (TELNETS) in both client and server, including ``--tls-auto`` to accept TLS and plain telnet
+  on the same port by detecting the TLS ClientHello.
+* PTY hosting with ``--pty-exec`` on POSIX systems: run any CLI or TUI program per connection,
+  forwarding NAWS and TTYPE and switching between raw and cooked line mode.
+* Guard shells: ``--robot-check`` identifies a real terminal emulator by requesting a cursor
+  position report, ``--pty-fork-limit`` queues excess connections with a busy shell, and
+  ``ConnectionCounter`` enforces limits.
+  ATCP, and AARDWOLF.
 
 .. _rfc-727: https://www.rfc-editor.org/rfc/rfc727.txt
 .. _rfc-779: https://www.rfc-editor.org/rfc/rfc779.txt
@@ -260,13 +279,19 @@ The following RFC specifications are implemented:
 .. _rfc-1079: https://www.rfc-editor.org/rfc/rfc1079.txt
 .. _rfc-1091: https://www.rfc-editor.org/rfc/rfc1091.txt
 .. _rfc-1096: https://www.rfc-editor.org/rfc/rfc1096.txt
-.. _rfc-1123: https://www.rfc-editor.org/rfc/rfc1123.txt
 .. _rfc-1184: https://www.rfc-editor.org/rfc/rfc1184.txt
 .. _rfc-1372: https://www.rfc-editor.org/rfc/rfc1372.txt
 .. _rfc-1408: https://www.rfc-editor.org/rfc/rfc1408.txt
 .. _rfc-1571: https://www.rfc-editor.org/rfc/rfc1571.txt
 .. _rfc-1572: https://www.rfc-editor.org/rfc/rfc1572.txt
 .. _rfc-2066: https://www.rfc-editor.org/rfc/rfc2066.txt
+.. _GMCP: https://www.gammon.com.au/gmcp
+.. _MSDP: https://tintin.mudhalla.net/protocols/msdp/
+.. _MSSP: https://tintin.mudhalla.net/protocols/mssp/
+.. _MCCP2: https://tintin.mudhalla.net/protocols/mccp/
+.. _MCCP3: https://tintin.mudhalla.net/protocols/mccp/
+.. _ZMP: https://discworld.starturtle.net/external/protocols/zmp.html
+.. _Specifications: https://telnetlib3.readthedocs.io/en/latest/rfcs.html
 .. _`bin/`: https://github.com/jquast/telnetlib3/tree/master/bin
 .. _telnetlib.py: https://docs.python.org/3.12/library/telnetlib.html
 .. _Asyncio Interface: https://telnetlib3.readthedocs.io/en/latest/guidebook.html#asyncio-interface

@@ -45,6 +45,12 @@ class TestMCCP2Negotiation:
         assert result is True
         assert IAC + WILL + MCCP2_COMPRESS in t.writes
 
+    def test_handle_do_mccp2_server_no_duplicate_will(self):
+        w, t, _p = new_writer(server=True)
+        w.iac(WILL, MCCP2_COMPRESS)
+        assert w.handle_do(MCCP2_COMPRESS) is True
+        assert t.writes.count(IAC + WILL + MCCP2_COMPRESS) == 1
+
 
 class TestMCCP3Negotiation:
     def test_handle_will_mccp3_client(self):
@@ -59,6 +65,23 @@ class TestMCCP3Negotiation:
         w.handle_will(MCCP3_COMPRESS)
         assert IAC + DO + MCCP3_COMPRESS in t.writes
         assert w.remote_option.get(MCCP3_COMPRESS) is True
+
+    def test_handle_do_mccp3_server(self):
+        w, t, _p = new_writer(server=True)
+        assert w.handle_do(MCCP3_COMPRESS) is True
+        assert IAC + WILL + MCCP3_COMPRESS in t.writes
+
+    def test_handle_do_mccp3_server_no_duplicate_will(self):
+        w, t, _p = new_writer(server=True)
+        w.iac(WILL, MCCP3_COMPRESS)
+        assert w.handle_do(MCCP3_COMPRESS) is True
+        assert t.writes.count(IAC + WILL + MCCP3_COMPRESS) == 1
+
+    def test_handle_will_mccp3_client_single_sb(self):
+        w, t, _p = new_writer(server=False, client=True)
+        w.handle_will(MCCP3_COMPRESS)
+        w.handle_will(MCCP3_COMPRESS)
+        assert t.writes.count(IAC + SB + MCCP3_COMPRESS + IAC + SE) == 1
 
 
 class TestMCCPCompressionRejection:
@@ -358,6 +381,18 @@ class TestMCCPDecompressionError:
 
         # Decompressor should be disabled, corrupt data not fed to reader
         assert client._mccp2_decompressor is None
+        assert client.writer.is_closing()
+        assert not received
+
+    async def test_client_corrupt_mccp2_raw_deflate_closes(self):
+        """Corrupt raw-deflate data closes the client."""
+        client, received = _make_client_with_capture()
+        client._process_chunk(_BOUNDARY_SB)
+        client._mccp2_wbits_fallback = True
+        client._mccp2_decompressor = zlib.decompressobj(wbits=-zlib.MAX_WBITS)
+        client._process_chunk(b"\x00\x01\x02\x03\xff\xfe\xfd")
+        assert client._mccp2_decompressor is None
+        assert client.writer.is_closing()
         assert not received
 
     async def test_server_corrupt_mccp3_drops_data(self):
@@ -379,6 +414,7 @@ class TestMCCPDecompressionError:
         server.data_received(b"\x00\x01\x02\x03\xff\xfe\xfd")
 
         assert server._mccp3_decompressor is None
+        assert transport.is_closing()
         assert not received
 
 
@@ -836,3 +872,240 @@ class TestMCCPTraceLogging:
         assert messages
         assert any("(decompressed)" in m and "hello from compr" in m for m in messages)
         assert all(compressed[:16].hex(" ") not in m for m in messages)
+
+
+@pytest.mark.asyncio
+class TestMCCPExpansion:
+    async def test_client_mccp2_expansion_delivers(self, monkeypatch):
+        """Client delivers a chunk that expands past one decompression call."""
+        from telnetlib3 import client_base
+
+        monkeypatch.setattr(client_base, "_MCCP_DECOMPRESS_CHUNK", 1024)
+        client, received = _make_client_with_capture()
+        client._process_chunk(_BOUNDARY_SB)
+        client._process_chunk(_make_compressed(b"A" * 4096))
+        while client._rx_queue:
+            client._process_chunk(client._rx_queue.popleft())
+        assert b"".join(received) == b"A" * 4096
+        assert not client._rx_queue
+
+    async def test_server_mccp3_expansion_delivers(self, monkeypatch):
+        """Server delivers a chunk that expands past one decompression call."""
+        from telnetlib3 import server_base
+        from telnetlib3.server_base import BaseServer
+
+        monkeypatch.setattr(server_base, "_MCCP_DECOMPRESS_CHUNK", 1024)
+        server = BaseServer(encoding=False, connect_maxwait=0.1)
+        transport = MockTransport()
+        server.connection_made(transport)
+        received = bytearray()
+        orig_feed = server.reader.feed_data
+        server.reader.feed_data = lambda d: (received.extend(d), orig_feed(d))
+        server._mccp3_decompressor = zlib.decompressobj()
+        server.data_received(_make_compressed(b"A" * 4096))
+        for _ in range(16):
+            await asyncio.sleep(0)
+        assert received == b"A" * 4096
+
+    async def test_server_mccp3_expansion_pauses_reading(self, monkeypatch):
+        """Server pauses transport while expanded data exceeds the reader limit."""
+        from telnetlib3 import server_base
+        from telnetlib3.server_base import BaseServer
+
+        monkeypatch.setattr(server_base, "_MCCP_DECOMPRESS_CHUNK", 64 * 1024)
+
+        class PauseTransport(MockTransport):
+            def __init__(self):
+                super().__init__()
+                self.paused = False
+
+            def pause_reading(self):
+                self.paused = True
+
+            def resume_reading(self):
+                self.paused = False
+
+        server = BaseServer(encoding=False, connect_maxwait=0.1)
+        transport = PauseTransport()
+        server.connection_made(transport)
+        server._mccp3_decompressor = zlib.decompressobj()
+        server.data_received(_make_compressed(b"A" * (512 * 1024)))
+        for _ in range(32):
+            await asyncio.sleep(0)
+        assert transport.paused
+
+
+@pytest.mark.asyncio
+class TestMCCPTeardown:
+    async def test_server_dont_mccp2_ends_compression(self):
+        """DONT MCCP2 stops server output compression."""
+        from telnetlib3.server import TelnetServer
+
+        server = TelnetServer(encoding=False, connect_maxwait=0.1, compression=True)
+        transport = MockTransport()
+        server.connection_made(transport)
+        server._mccp2_start()
+        server.data_received(IAC + DONT + MCCP2_COMPRESS)
+        assert server._mccp2_compressor is None
+        assert server.writer.mccp2_active is False
+
+    async def test_client_wont_mccp2_ends_decompression(self):
+        """WONT MCCP2 stops client decompression and resumes plaintext."""
+        client, received = _make_client_with_capture()
+        client._process_chunk(IAC + WILL + MCCP2_COMPRESS)
+        client._process_chunk(IAC + SB + MCCP2_COMPRESS + IAC + SE)
+        assert client._mccp2_decompressor is not None
+        client._process_chunk(IAC + WONT + MCCP2_COMPRESS)
+        assert client._mccp2_decompressor is None
+        client._process_chunk(b"plain")
+        assert b"".join(received) == b"plain"
+
+    async def test_client_wont_mccp3_ends_compression(self):
+        """WONT MCCP3 stops client output compression."""
+        from telnetlib3.client_base import BaseClient
+
+        client = BaseClient(encoding=False, connect_minwait=0, connect_maxwait=0.1)
+        transport = MockTransport()
+        client.connection_made(transport)
+        client.writer.handle_will(MCCP3_COMPRESS)
+        client._mccp3_start()
+        assert client._mccp3_compressor is not None
+        client._process_chunk(IAC + WONT + MCCP3_COMPRESS)
+        assert client._mccp3_compressor is None
+        assert client.writer.mccp3_active is False
+        assert transport.write == client._mccp3_orig_write
+
+
+@pytest.mark.asyncio
+class TestMCCPConformance:
+    async def test_server_mccp3_sb_and_payload_same_chunk(self):
+        """MCCP3 payload following the SB in one chunk is decompressed."""
+        from telnetlib3.server import TelnetServer
+
+        server = TelnetServer(encoding=False, connect_maxwait=0.1, compression=True)
+        transport = MockTransport()
+        server.connection_made(transport)
+        server.writer.handle_will(MCCP3_COMPRESS)
+        received = bytearray()
+        orig_feed = server.reader.feed_data
+        server.reader.feed_data = lambda d: (received.extend(d), orig_feed(d))
+        server.data_received(IAC + SB + MCCP3_COMPRESS + IAC + SE + zlib.compress(b"hello"))
+        assert received == b"hello"
+
+    async def test_client_mccp2_z_finish_trailing_plaintext_bounded(self, monkeypatch):
+        """Client delivers Z_FINISH and trailing plaintext with a small output limit."""
+        from telnetlib3 import client_base
+
+        monkeypatch.setattr(client_base, "_MCCP_DECOMPRESS_CHUNK", 16)
+        client, received = _make_client_with_capture()
+        client._process_chunk(_BOUNDARY_SB)
+        client._process_chunk(_make_compressed(b"A" * 40, finish=True) + b"TRAILING")
+        while client._rx_queue:
+            client._process_chunk(client._rx_queue.popleft())
+        assert b"".join(received) == b"A" * 40 + b"TRAILING"
+        assert not client._rx_queue
+
+    async def test_server_mccp3_z_finish_trailing_plaintext_bounded(self, monkeypatch):
+        """Server delivers Z_FINISH and trailing plaintext and clears pending."""
+        from telnetlib3 import server_base
+        from telnetlib3.server_base import BaseServer
+
+        monkeypatch.setattr(server_base, "_MCCP_DECOMPRESS_CHUNK", 16)
+        server = BaseServer(encoding=False, connect_maxwait=0.1)
+        transport = MockTransport()
+        server.connection_made(transport)
+        received = bytearray()
+        orig_feed = server.reader.feed_data
+        server.reader.feed_data = lambda d: (received.extend(d), orig_feed(d))
+        server._mccp3_decompressor = zlib.decompressobj()
+        server.data_received(_make_compressed(b"A" * 40, finish=True) + b"TRAILING")
+        for _ in range(20):
+            await asyncio.sleep(0)
+        assert received == b"A" * 40 + b"TRAILING"
+        assert server._mccp3_pending == b""
+        assert server._mccp3_decompressor is None
+
+    async def test_server_mccp3_drain_while_closing_clears_pending(self):
+        """Draining after close clears pending MCCP3 input."""
+        from telnetlib3.server_base import BaseServer
+
+        server = BaseServer(encoding=False, connect_maxwait=0.1)
+        transport = MockTransport()
+        server.connection_made(transport)
+        server._closing = True
+        server._mccp3_pending = b"data"
+        server._mccp3_drain()
+        assert server._mccp3_pending == b""
+
+    async def test_server_mccp3_duplicate_sb_inside_stream(self):
+        """A duplicate SB inside the compressed stream keeps the remainder plaintext."""
+        from telnetlib3.server_base import BaseServer
+
+        server = BaseServer(encoding=False, connect_maxwait=0.1)
+        transport = MockTransport()
+        server.connection_made(transport)
+        received = bytearray()
+        orig_feed = server.reader.feed_data
+        server.reader.feed_data = lambda d: (received.extend(d), orig_feed(d))
+        server._mccp3_decompressor = zlib.decompressobj()
+        server.data_received(_make_compressed(IAC + SB + MCCP3_COMPRESS + IAC + SE + b"tail"))
+        for _ in range(4):
+            await asyncio.sleep(0)
+        assert received == b"tail"
+
+    async def test_server_mccp3_renegotiates_after_z_finish(self, monkeypatch):
+        """Server starts a clean MCCP3 stream after a previous Z_FINISH."""
+        from telnetlib3 import server_base
+        from telnetlib3.server_base import BaseServer
+
+        monkeypatch.setattr(server_base, "_MCCP_DECOMPRESS_CHUNK", 16)
+        server = BaseServer(encoding=False, connect_maxwait=0.1)
+        transport = MockTransport()
+        server.connection_made(transport)
+        received = bytearray()
+        orig_feed = server.reader.feed_data
+        server.reader.feed_data = lambda d: (received.extend(d), orig_feed(d))
+        server._mccp3_decompressor = zlib.decompressobj()
+        server.data_received(_make_compressed(b"A" * 40, finish=True) + b"TRAILING")
+        for _ in range(20):
+            await asyncio.sleep(0)
+        server._mccp3_decompressor = zlib.decompressobj()
+        server.data_received(_make_compressed(b"ok", finish=True))
+        for _ in range(4):
+            await asyncio.sleep(0)
+        assert received == b"A" * 40 + b"TRAILING" + b"ok"
+
+    async def test_server_deferred_dont_mccp2_ends_compression(self, monkeypatch):
+        """A DONT MCCP2 inside a deferred MCCP3 piece ends compression."""
+        from telnetlib3 import server_base
+        from telnetlib3.server import TelnetServer
+
+        monkeypatch.setattr(server_base, "_MCCP_DECOMPRESS_CHUNK", 64)
+        server = TelnetServer(encoding=False, connect_maxwait=0.1, compression=True)
+        transport = MockTransport()
+        server.connection_made(transport)
+        server._mccp2_start()
+        server._mccp3_decompressor = zlib.decompressobj()
+        payload = _make_compressed(b"A" * 1000 + IAC + DONT + MCCP2_COMPRESS, finish=True)
+        server.data_received(payload)
+        for _ in range(64):
+            await asyncio.sleep(0)
+        assert server._mccp2_compressor is None
+        assert server.writer.mccp2_active is False
+
+    async def test_server_deferred_do_mccp2_starts_compression(self, monkeypatch):
+        """A DO MCCP2 inside a deferred MCCP3 piece starts compression."""
+        from telnetlib3 import server_base
+        from telnetlib3.server import TelnetServer
+
+        monkeypatch.setattr(server_base, "_MCCP_DECOMPRESS_CHUNK", 64)
+        server = TelnetServer(encoding=False, connect_maxwait=0.1, compression=True)
+        transport = MockTransport()
+        server.connection_made(transport)
+        server._mccp3_decompressor = zlib.decompressobj()
+        payload = _make_compressed(b"A" * 1000 + IAC + DO + MCCP2_COMPRESS, finish=True)
+        server.data_received(payload)
+        for _ in range(64):
+            await asyncio.sleep(0)
+        assert server._mccp2_compressor is not None
+        assert server.writer.mccp2_active is True

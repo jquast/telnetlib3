@@ -12,9 +12,9 @@ import collections
 from typing import Any, Union, Optional, cast
 
 # local
-from ._base import TelnetProtocolBase, _log_exception, _process_data_chunk
+from ._base import _MCCP_DECOMPRESS_CHUNK, TelnetProtocolBase, _log_exception, _process_data_chunk
 from ._types import ShellCallback
-from .telopt import DO, WILL, theNULL, name_commands
+from .telopt import DO, WILL, MCCP2_COMPRESS, MCCP3_COMPRESS, theNULL, name_commands
 from .accessories import TRACE, hexdump
 from .stream_reader import TelnetReader, TelnetReaderUnicode
 from .stream_writer import TelnetWriter, TelnetWriterUnicode
@@ -78,6 +78,7 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
         self._rx_queue: collections.deque[bytes] = collections.deque()
         self._rx_bytes = 0
         self._rx_task: Optional[asyncio.Task[Any]] = None
+        self._mccp2_tail_requeued = False
         self._reading_paused = False
         # Apply backpressure to transport when our queue grows too large
         self._read_high = 512 * 1024  # pause_reading() above this many buffered bytes
@@ -177,9 +178,8 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
         # Attach transport so TelnetReader can apply pause_reading/resume_reading
         try:
             self.reader.set_transport(_transport)
-        except Exception:
-            # Reader may not support transport coupling; ignore.
-            pass
+        except Exception:  # custom readers may not support transport coupling
+            self.log.debug("reader has no set_transport")
 
         self.writer = writer_factory(
             transport=_transport, protocol=self, reader=self.reader, client=True, **writer_kwds
@@ -372,21 +372,23 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
         # MCCP2: decompress server→client data when active
         if self._mccp2_decompressor is not None:
             try:
-                data = self._mccp2_decompressor.decompress(data)
+                data = self._mccp2_decompressor.decompress(data, _MCCP_DECOMPRESS_CHUNK)
             except zlib.error:
                 if not self._mccp2_wbits_fallback:
                     self.log.debug("MCCP2 auto-detect failed, retrying raw deflate")
                     self._mccp2_wbits_fallback = True
                     self._mccp2_decompressor = zlib.decompressobj(wbits=-zlib.MAX_WBITS)
                     try:
-                        data = self._mccp2_decompressor.decompress(data)
+                        data = self._mccp2_decompressor.decompress(data, _MCCP_DECOMPRESS_CHUNK)
                     except zlib.error:
-                        self.log.warning("MCCP2 decompression error, disabling")
+                        self.log.warning("MCCP2 decompression error, closing")
                         self._mccp2_end()
+                        self.writer.close()
                         return False
                 else:
-                    self.log.warning("MCCP2 decompression error, disabling")
+                    self.log.warning("MCCP2 decompression error, closing")
                     self._mccp2_end()
+                    self.writer.close()
                     return False
             if self._mccp2_decompressor.eof:
                 unused = self._mccp2_decompressor.unused_data
@@ -395,6 +397,12 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
                 if unused:
                     cmd = self._process_chunk(unused) or cmd
                 return cmd
+            tail = self._mccp2_decompressor.unconsumed_tail
+            if tail:
+                self._rx_queue.appendleft(bytes(tail))
+                self._rx_bytes += len(tail)
+                self._mccp2_tail_requeued = True
+                return self._process_chunk_inner(data, decompressed=True)
             return self._process_chunk_inner(data, decompressed=True)
 
         return self._process_chunk_inner(data)
@@ -432,8 +440,18 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
         else:
             self._trace_recv(data, decompressed=decompressed)
 
+        if (
+            self._mccp2_decompressor is not None
+            and self.writer.remote_option.get(MCCP2_COMPRESS) is False
+        ):
+            self._mccp2_end()
+
         # MCCP3: start compressor when writer signals activation
-        if self.writer.mccp3_active and self._mccp3_compressor is None:
+        if self.writer.remote_option.get(MCCP3_COMPRESS) is False and (
+            self._mccp3_compressor is not None or self.writer.mccp3_active
+        ):
+            self._mccp3_end()
+        elif self.writer.mccp3_active and self._mccp3_compressor is None:
             self._mccp3_start()
 
         return cmd_received
@@ -456,6 +474,10 @@ class BaseClient(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
                 cmd = self._process_chunk(chunk)
                 any_cmd = any_cmd or cmd
                 processed += len(chunk)
+
+                if self._mccp2_tail_requeued:
+                    self._mccp2_tail_requeued = False
+                    await asyncio.sleep(0)
 
                 # Resume reading when we've drained below low watermark
                 if self._reading_paused and self._rx_bytes <= self._read_low:

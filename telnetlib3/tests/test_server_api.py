@@ -155,3 +155,23 @@ async def test_register_protocol_prunes_dead():
     server._register_protocol(_LiveProto())
     assert len(server._protocols) == 1
     assert isinstance(server._protocols[0], _LiveProto)
+
+
+async def test_server_connection_made_reader_without_transport_support():
+    """A custom reader without transport coupling is tolerated."""
+    from telnetlib3.server_base import BaseServer
+    from telnetlib3.tests.accessories import MockTransport
+
+    class BadReader:
+        def set_transport(self, transport):
+            raise RuntimeError("no transport support")
+
+        def exception(self):
+            return None
+
+    server = BaseServer(
+        encoding=False, connect_maxwait=0.1, reader_factory=lambda **kw: BadReader()
+    )
+    transport = MockTransport()
+    server.connection_made(transport)
+    assert isinstance(server.reader, BadReader)

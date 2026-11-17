@@ -23,6 +23,10 @@ from telnetlib3.telopt import (
     WILL,
     WONT,
     AARDWOLF,
+    MSDP_VAL,
+    MSDP_VAR,
+    MSDP_TABLE_OPEN,
+    MSDP_TABLE_CLOSE,
 )
 from telnetlib3.stream_writer import TelnetWriter
 from telnetlib3.tests.accessories import MockProtocol, MockTransport
@@ -445,3 +449,27 @@ def test_sb_aardwolf_empty_payload():
     buf = collections.deque([bytes([AARDWOLF[0]])])
     w.handle_subnegotiation(buf)
     assert w.aardwolf_data[0]["channel"] == "unknown"
+
+
+def test_sb_msdp_invalid_dropped(caplog):
+    w, _t, _p = new_writer(server=True)
+    received = []
+    w.set_ext_callback(MSDP, received.append)
+    w.pending_option[SB + MSDP] = True
+    payload = (MSDP_VAR + b"k" + MSDP_VAL + MSDP_TABLE_OPEN) * 101 + MSDP_TABLE_CLOSE * 101
+    buf = collections.deque([bytes([MSDP[0]])] + [bytes([b]) for b in payload])
+    w.handle_subnegotiation(buf)
+    assert received == []
+    assert "MSDP" in caplog.text
+
+
+def test_sb_gmcp_invalid_dropped(caplog):
+    w, _t, _p = new_writer(server=True)
+    received = []
+    w.set_ext_callback(GMCP, lambda *args: received.append(args))
+    w.pending_option[SB + GMCP] = True
+    payload = b"pkg {bad}"
+    buf = collections.deque([bytes([GMCP[0]])] + [bytes([b]) for b in payload])
+    w.handle_subnegotiation(buf)
+    assert received == []
+    assert "GMCP" in caplog.text

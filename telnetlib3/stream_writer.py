@@ -308,6 +308,14 @@ class TelnetWriter:
         #: consumed and cleared by the caller.
         self._compressed_remainder: Optional[bytes] = None
 
+        #: One-shot flag: set True by ``_handle_sb_mccp3()`` on the server when
+        #: ``IAC SB MCCP3 IAC SE`` is received.  Consumed by
+        #: ``_process_data_chunk()`` to detect mid-chunk compression start.
+        self._mccp3_activated: bool = False
+
+        #: Compressed remainder bytes after MCCP3 activation mid-chunk.
+        self._mccp3_remainder: Optional[bytes] = None
+
         #: Whether MCCP2 compression is currently active (server→client).
         self.mccp2_active: bool = False
 
@@ -2063,6 +2071,7 @@ class TelnetWriter:
             NAWS,
             STATUS,
             MCCP2_COMPRESS,
+            MCCP3_COMPRESS,
             GMCP,
             MSDP,
             MSSP,
@@ -2093,7 +2102,10 @@ class TelnetWriter:
                     return False
 
             # first time we've agreed, respond accordingly.
-            if not self.local_option.enabled(opt):
+            offered = self.pending_option.enabled(WILL + opt)
+            if not self.local_option.enabled(opt) and not (
+                offered and opt in (MCCP2_COMPRESS, MCCP3_COMPRESS)
+            ):
                 self.iac(WILL, opt)
 
             # and respond with status for some,
@@ -2237,7 +2249,7 @@ class TelnetWriter:
                     self.send_linemode(self.default_linemode)
             if opt == COM_PORT_OPTION and self.client:
                 self.request_comport_signature()
-            if opt == MCCP3_COMPRESS and self.client:
+            if opt == MCCP3_COMPRESS and self.client and not self.mccp3_active:
                 # MCCP3: client sends SB 87 SE to signal compression start;
                 # all bytes after SE are compressed by client.
                 self.send_iac(IAC + SB + MCCP3_COMPRESS + IAC + SE)
@@ -3266,7 +3278,11 @@ class TelnetWriter:
         buf.popleft()
         payload = b"".join(buf)
         encoding = self.environ_encoding or "utf-8"
-        package, data = gmcp_decode(payload, encoding=encoding)
+        try:
+            package, data = gmcp_decode(payload, encoding=encoding)
+        except ValueError as exc:
+            self.log.warning("GMCP discarded: %s", exc)
+            return
         self._ext_callback[GMCP](package, data)
 
     def _handle_sb_msdp(self, buf: collections.deque[bytes]) -> None:
@@ -3278,7 +3294,11 @@ class TelnetWriter:
         buf.popleft()
         payload = b"".join(buf)
         encoding = self.environ_encoding or "utf-8"
-        variables = msdp_decode(payload, encoding=encoding)
+        try:
+            variables = msdp_decode(payload, encoding=encoding)
+        except ValueError as exc:
+            self.log.warning("MSDP discarded: %s", exc)
+            return
         self._ext_callback[MSDP](variables)
 
     def _handle_sb_mssp(self, buf: collections.deque[bytes]) -> None:
@@ -3372,6 +3392,8 @@ class TelnetWriter:
         """
         buf.popleft()
         self.mccp3_active = True
+        if not self.client:
+            self._mccp3_activated = True
         self.log.debug("MCCP3: server received SB, client→server compression active")
 
     def handle_mccp2(self, activated: bool) -> None:

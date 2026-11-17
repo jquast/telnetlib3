@@ -10,7 +10,7 @@ import datetime
 from typing import Any, Union, Optional
 
 # local
-from ._base import TelnetProtocolBase, _log_exception, _process_data_chunk
+from ._base import _MCCP_DECOMPRESS_CHUNK, TelnetProtocolBase, _log_exception, _process_data_chunk
 from ._types import ShellCallback
 from .telopt import theNULL
 from .accessories import TRACE, hexdump
@@ -71,6 +71,8 @@ class BaseServer(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
         #: maximum duration for :meth:`check_negotiation`.
         self.connect_maxwait = connect_maxwait
         self._limit = limit
+        self._mccp3_pending = b""
+        self._mccp3_drain_scheduled = False
 
     def timeout_connection(self) -> None:
         """Close the connection due to timeout."""
@@ -165,6 +167,10 @@ class BaseServer(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
             reader_kwds["limit"] = self._limit
 
         self.reader = reader_factory(**reader_kwds)
+        try:
+            self.reader.set_transport(transport)
+        except Exception:  # custom readers may not support transport coupling
+            logger.debug("reader has no set_transport")
 
         self.writer = writer_factory(
             transport=transport, protocol=self, reader=self.reader, server=True, **writer_kwds
@@ -210,24 +216,53 @@ class BaseServer(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
         self._last_received = datetime.datetime.now()
         self._rx_bytes += len(data)
 
-        # MCCP3: decompress client→server data when active
         if self._mccp3_decompressor is not None:
-            try:
-                data = self._mccp3_decompressor.decompress(data)
-            except zlib.error:
-                logger.warning("MCCP3 decompression error, disabling")
-                self._mccp3_end()
-                return
-            self._trace_recv(data, decompressed=True)
-            if self._mccp3_decompressor.eof:
-                unused = self._mccp3_decompressor.unused_data
-                self._mccp3_end()
-                if unused:
-                    self.data_received(unused)
-                    return
-        else:
-            self._trace_recv(data)
+            self._mccp3_pending += data
+            self._mccp3_drain()
+            return
 
+        self._trace_recv(data)
+        self._process_received(data)
+
+    def _mccp3_drain(self) -> None:
+        """Decompress one bounded piece of pending MCCP3 input."""
+        if self._closing:
+            self._mccp3_pending = b""
+            return
+        if self._mccp3_decompressor is None or not self._mccp3_pending:
+            return
+        data = self._mccp3_pending
+        self._mccp3_pending = b""
+        try:
+            decoded = self._mccp3_decompressor.decompress(data, _MCCP_DECOMPRESS_CHUNK)
+        except zlib.error:
+            logger.warning("MCCP3 decompression error, closing")
+            self._mccp3_end()
+            self.writer.close()
+            return
+        unused = b""
+        if self._mccp3_decompressor.eof:
+            unused = self._mccp3_decompressor.unused_data
+            self._mccp3_end()
+        else:
+            tail = self._mccp3_decompressor.unconsumed_tail
+            if tail:
+                self._mccp3_pending = bytes(tail)
+        self._trace_recv(decoded, decompressed=True)
+        self._process_received(decoded)
+        if unused:
+            self._trace_recv(unused)
+            self._process_received(unused)
+            return
+        if self._mccp3_pending and not self._mccp3_drain_scheduled:
+            self._mccp3_drain_scheduled = True
+            asyncio.get_event_loop().call_soon(self._mccp3_drain_scheduled_cb)
+
+    def _mccp3_drain_scheduled_cb(self) -> None:
+        self._mccp3_drain_scheduled = False
+        self._mccp3_drain()
+
+    def _process_received(self, data: bytes) -> None:
         if self.writer.slc_simulated:
             slc_vals = {defn.val[0] for defn in self.writer.slctab.values() if defn.val != theNULL}
             slc_special: frozenset[int] | None = frozenset({255} | slc_vals)
@@ -237,6 +272,17 @@ class BaseServer(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
         cmd_received = _process_data_chunk(
             data, self.writer, self.reader, slc_special, logger.warning
         )
+
+        remainder = self.writer._mccp3_remainder
+        if remainder is not None:
+            self.writer._mccp3_remainder = None
+            if self._mccp3_decompressor is None:
+                self._mccp3_start()
+                self._mccp3_pending += remainder
+                self._mccp3_drain()
+            else:
+                self._process_received(remainder)
+            return
 
         # Check if MCCP3 SB was just received (client→server compression start)
         if self.writer.mccp3_active and self._mccp3_decompressor is None:
@@ -364,6 +410,7 @@ class BaseServer(TelnetProtocolBase, asyncio.streams.FlowControlMixin, asyncio.P
     def _mccp3_end(self) -> None:
         """Stop MCCP3 decompression."""
         self._mccp3_decompressor = None
+        self._mccp3_pending = b""
         self.writer.mccp3_active = False
         logger.debug("MCCP3 decompression ended (client→server)")
 

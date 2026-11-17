@@ -13,6 +13,9 @@ from typing import Any, Type, Callable, Optional
 # Pre-allocated single-byte cache to avoid per-byte bytes() allocations
 _ONE_BYTE = [bytes([i]) for i in range(256)]
 
+# Maximum output bytes per zlib decompress call.
+_MCCP_DECOMPRESS_CHUNK = 1 << 20
+
 
 def _log_exception(
     log_fn: Callable[..., Any],
@@ -91,6 +94,12 @@ def _process_data_chunk(
             writer._mccp2_activated = False
             writer.mccp2_active = True
             writer._compressed_remainder = data[i:] if i < n else b""
+            return True
+
+        if writer._mccp3_activated:
+            writer._mccp3_activated = False
+            writer.mccp3_active = True
+            writer._mccp3_remainder = data[i:] if i < n else b""
             return True
 
     return cmd_received
