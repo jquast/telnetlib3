@@ -1,6 +1,10 @@
 History
 =======
 
+5.0.3
+  * bugfix: resource exhaustion by malicious packets in MSDP, MCCP2, and MCCP3 MUD protocols.
+  * bugfix: MCCP2 and MCCP3 stream and negotiation compliance.
+
 5.0.2
   * bugfix: :meth:`~telnetlib3.stream_reader.TelnetReaderUnicode.read`,
     :meth:`~telnetlib3.stream_reader.TelnetReaderUnicode.readline`, and
